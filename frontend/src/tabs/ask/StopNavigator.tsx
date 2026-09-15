@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { StopEvidence } from "./stopEvidence";
 
-export function StopNavigator({ points, start, size, onStart, onSize, onPick }: {
-  points: StopEvidence[]; start: number; size: number;
+export function StopNavigator({ points, start, size, low, high, onStart, onSize, onPick }: {
+  points: StopEvidence[]; start: number; size: number; low: number; high: number;
   onStart: (start: number) => void; onSize: (size: number) => void; onPick: (index: number) => void;
 }) {
   const { t } = useTranslation();
@@ -14,8 +14,6 @@ export function StopNavigator({ points, start, size, onStart, onSize, onPick }: 
     normalize(`${point.name} ${point.stopId ?? ""} ${point.sequence}`).includes(query));
   const total = points.length;
   const end = Math.min(total, start + size);
-  const low = Math.min(0, ...points.map((point) => point.minutes ?? 0));
-  const high = Math.max(1, ...points.map((point) => point.minutes ?? 0));
   return <div className="stop-navigator">
     <div className="stop-navigator-controls">
       <label>{t("ask.evidence.search")}
