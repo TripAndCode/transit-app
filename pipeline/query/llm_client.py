@@ -61,11 +61,9 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
         # the auto-router silently swaps the underlying model per request,
         # which would invalidate scripts/followup_eval.py's verification
         # (tied to a specific model, not the provider name) on every call.
-        # gemma-4-31b-it was probed directly against this app's own tool
-        # schema (correctly passed best_first=false for a "worst on-time
-        # rate" question) and answers in a few seconds. OpenRouter's free
-        # catalog rotates without notice (llama-3.3-70b was free, then
-        # wasn't) -- re-probe before re-pinning via OPENROUTER_MODEL; check
+        # OpenRouter's free catalog rotates without notice (llama-3.3-70b
+        # was free, then wasn't) -- re-verify before re-pinning via
+        # OPENROUTER_MODEL; check
         # openrouter.ai/models?fmt=cards&supported_parameters=tools for
         # other free (":free" suffix), tool-calling-capable options.
         "model": "google/gemma-4-31b-it:free",
@@ -174,6 +172,35 @@ def _recover_tool_call(exc: Exception) -> SimpleNamespace | None:
     return SimpleNamespace(content=None, tool_calls=[call])
 
 
+def _build_create_kwargs(
+    *,
+    model: str,
+    messages: list[dict],
+    temperature: float,
+    tools: list[dict] | None,
+    tool_choice: str,
+    response_format: dict | None,
+) -> dict[str, Any]:
+    """Build ``chat.completions.create`` kwargs, shared by the ladder and the
+    BYOK one-off path (:func:`pipeline.query.chat._completion_with_key`) so a
+    request-shape fix only ever needs to happen once.
+
+    ``tools``/``tool_choice`` are omitted together when there are no tools,
+    rather than sent as ``tools=None``/``tool_choice="none"``: OpenAI rejects
+    ``tool_choice`` outright when ``tools`` is absent ("tool_choice is only
+    allowed when tools are specified"). Groq/Gemini/OpenRouter tolerate the
+    ``None``/``"none"`` pair, but omitting both keys is the one shape every
+    OpenAI-compatible provider in the ladder accepts.
+    """
+    create_kwargs: dict[str, Any] = dict(model=model, messages=messages, temperature=temperature)
+    if tools:
+        create_kwargs["tools"] = tools
+        create_kwargs["tool_choice"] = tool_choice
+    if response_format is not None:
+        create_kwargs["response_format"] = response_format
+    return create_kwargs
+
+
 class LLMClient:
     """Tries each configured provider in order until one succeeds.
 
@@ -248,21 +275,14 @@ class LLMClient:
             client = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url, max_retries=0)
             for attempt in (1, 2):
                 try:
-                    create_kwargs: dict[str, Any] = dict(
+                    create_kwargs = _build_create_kwargs(
                         model=model_override or cfg.model,
                         messages=messages,
                         temperature=temperature,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        response_format=response_format,
                     )
-                    # OpenAI rejects `tool_choice` outright when `tools` is
-                    # absent/empty ("tool_choice is only allowed when tools
-                    # are specified") -- Groq/Gemini/OpenRouter tolerate the
-                    # pair, but omitting both keys together is the one shape
-                    # every OpenAI-compatible provider in this ladder accepts.
-                    if tools:
-                        create_kwargs["tools"] = tools
-                        create_kwargs["tool_choice"] = tool_choice
-                    if response_format is not None:
-                        create_kwargs["response_format"] = response_format
                     resp = client.chat.completions.create(**create_kwargs)
                     return resp.choices[0].message, None
                 except APITimeoutError:

@@ -45,7 +45,7 @@ from pipeline.query.intent import IntentSignature, canonicalize, derive_confiden
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _recover_tool_call, get_client
+from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, _recover_tool_call, get_client
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
@@ -223,19 +223,14 @@ def _completion_with_key(
     base_url = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
     model = os.environ.get(f"{upper}_MODEL", defaults["model"])
     one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0)
-    create_kwargs: dict[str, Any] = dict(
+    create_kwargs = _build_create_kwargs(
         model=model_override or model,
         messages=messages,
         temperature=temperature,
+        tools=tools,
+        tool_choice=tool_choice,
+        response_format=response_format,
     )
-    # Same OpenAI-compat quirk as LLMClient.chat_completions: omit both
-    # keys together when there are no tools, rather than tool_choice="none"
-    # with tools=None -- OpenAI rejects tool_choice when tools is absent.
-    if tools:
-        create_kwargs["tools"] = tools
-        create_kwargs["tool_choice"] = tool_choice
-    if response_format is not None:
-        create_kwargs["response_format"] = response_format
     resp = one_off.chat.completions.create(**create_kwargs)
     return resp.choices[0].message
 
