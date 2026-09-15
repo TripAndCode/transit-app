@@ -134,10 +134,10 @@ describe("CopilotPanel", () => {
     expect(container.querySelector(".copilot-panel")).toBeNull();
   });
 
-  it("shows the calm quota-exceeded banner instead of the generic error message", async () => {
+  it("shows the calm admin-approval-required banner instead of the generic error message", async () => {
     mockApiGet();
     vi.spyOn(client, "apiPost").mockRejectedValue(
-      new client.ApiError(429, JSON.stringify({ detail: "limit reached", code: "copilot_anon_quota_exceeded" })),
+      new client.ApiError(403, JSON.stringify({ detail: "llm_not_approved" })),
     );
     renderPanel("/agencies/1/overview");
     await waitFor(() => expect(screen.getByRole("status")).toBeTruthy(), { timeout: 2000 });

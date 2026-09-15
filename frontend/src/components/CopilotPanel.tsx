@@ -3,7 +3,7 @@ import { useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import { useCopilotEnabled, useCopilotInsight } from "../api/copilot";
-import { apiPost, isCopilotQuotaExceeded } from "../api/client";
+import { apiPost, isLlmNotApproved } from "../api/client";
 import { ErrorBanner } from "./ErrorBanner";
 import { useRangeContext } from "../api/rangeContext";
 import { useOverviewSummary } from "../api/hooks";
@@ -61,7 +61,7 @@ export function CopilotPanel() {
       <h2>{t("copilot.title")}</h2>
       {loading && <p>{t("copilot.loading")}</p>}
       {error != null &&
-        (isCopilotQuotaExceeded(error) ? <ErrorBanner error={error} /> : <p>{t("copilot.error")}</p>)}
+        (isLlmNotApproved(error) ? <ErrorBanner error={error} /> : <p>{t("copilot.error")}</p>)}
       {insight && (
         <div>
           <p>{insight.text}</p>

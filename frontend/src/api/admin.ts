@@ -8,6 +8,7 @@ type AdminUser = {
   avatar_url: string | null;
   role: "user" | "admin";
   suspended_at: string | null;
+  llm_approved: boolean;
   created_at: string;
 };
 
@@ -35,7 +36,7 @@ export function useAdminUsers(params: {
   });
 }
 
-async function patchUser(uid: number, body: { role?: string; suspended?: boolean }) {
+async function patchUser(uid: number, body: { role?: string; suspended?: boolean; llm_approved?: boolean }) {
   return apiPatch<AdminUser>(`/api/admin/users/${uid}`, body);
 }
 
@@ -47,8 +48,9 @@ async function deleteUser(uid: number) {
 export function usePatchUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ uid, body }: { uid: number; body: { role?: string; suspended?: boolean } }) =>
-      patchUser(uid, body),
+    mutationFn: (
+      { uid, body }: { uid: number; body: { role?: string; suspended?: boolean; llm_approved?: boolean } },
+    ) => patchUser(uid, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminUsers"] });
       // Prefix match — at most one detail query is ever mounted, so this is

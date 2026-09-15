@@ -52,7 +52,8 @@ class SessionMiddleware(BaseHTTPMiddleware):
             row = await pool.fetchrow(
                 """
                 SELECT s.sid, s.expires_at,
-                       u.user_id, u.email, u.name, u.avatar_url, u.role, u.suspended_at
+                       u.user_id, u.email, u.name, u.avatar_url, u.role, u.suspended_at,
+                       u.llm_approved
                 FROM sessions s
                 JOIN users u USING (user_id)
                 WHERE s.sid = $1
@@ -68,6 +69,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
                     avatar_url=row["avatar_url"],
                     role=row["role"],
                     suspended_at=row["suspended_at"],
+                    llm_approved=row["llm_approved"],
                 )
                 if _should_touch(sid):
                     await pool.execute("UPDATE sessions SET last_seen_at = now() WHERE sid = $1", sid)

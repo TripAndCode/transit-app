@@ -60,6 +60,7 @@ async def _authed_client(app, user_id: int):
         avatar_url=None,
         role="user",
         suspended_at=None,
+        llm_approved=True,
     )
     app.dependency_overrides[get_current_user] = lambda: fake_user
     try:
@@ -85,6 +86,7 @@ async def _authed_optional_client(app, user_id: int):
         avatar_url=None,
         role="user",
         suspended_at=None,
+        llm_approved=True,
     )
     app.dependency_overrides[get_current_user_optional] = lambda: fake_user
     try:
@@ -690,7 +692,7 @@ async def test_followup_authed_too_long_maps_to_400(conv_app, monkeypatch):
     monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
     app, agency, uid, pool = conv_app
 
-    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
+    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
         return None, "too_long"
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
@@ -764,7 +766,7 @@ async def test_followup_authed_llm_error_maps_to_502(conv_app, monkeypatch):
     monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
     app, agency, uid, pool = conv_app
 
-    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
+    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
         return None, "provider_unavailable"
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
@@ -803,7 +805,7 @@ async def test_followup_authed_success_appends_messages(conv_app, monkeypatch):
 
     captured = {}
 
-    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
+    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
         captured["context_tool"] = context_tool
         captured["context_args"] = context_args
         captured["context_result"] = context_result
@@ -855,102 +857,33 @@ async def test_followup_authed_success_appends_messages(conv_app, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_followup_anon_requires_inline_context_400(conv_app, monkeypatch):
+async def test_followup_anonymous_caller_rejected_before_any_other_check(conv_app, monkeypatch):
+    """There is no anon follow-up path anymore: an anonymous caller is
+    rejected as unapproved before the inline-context requirement, the daily
+    quota, or answer_followup are ever reached — regardless of payload
+    shape."""
+    import api.routers.conversations as conv_router
+
     monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
     app, agency, uid, _pool = conv_app
+
+    async def must_not_be_called(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
+        raise AssertionError("answer_followup must not be reached by an anonymous caller")
+
+    monkeypatch.setattr(conv_router._followup, "answer_followup", must_not_be_called)
+
     async with _authed_client(app, uid) as c:
         cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
         conv_id = cr.json()["conversation_id"]
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        # No context at all -- would have 400'd on the old anon path.
         r = await c.post(
             f"/api/{agency}/conversations/{conv_id}/followup",
             json={"question": "q"},
             headers=_CSRF,
         )
-    assert r.status_code == 400
-    assert "inline context" in r.json()["detail"]
-
-
-@pytest.mark.asyncio
-async def test_followup_anon_success_returns_synthetic_messages(conv_app, monkeypatch):
-    import api.routers.conversations as conv_router
-
-    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
-    app, agency, uid, _pool = conv_app
-
-    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
-        return "anon answer", None
-
-    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
-
-    async with _authed_client(app, uid) as c:
-        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
-        conv_id = cr.json()["conversation_id"]
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r = await c.post(
-            f"/api/{agency}/conversations/{conv_id}/followup",
-            json={
-                "question": "anon q",
-                "context_tool": "describe_data",
-                "context_args": {"kind": "stops"},
-                "context_result": {"ok": True},
-            },
-            headers=_CSRF,
-        )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["user"]["rendered_summary"] == "anon q"
-    assert body["assistant"]["rendered_summary"] == "anon answer"
-    assert body["user"]["message_id"] < 0  # synthetic, not persisted
-    # Anon path never persists — nothing was written to the DB for this conv.
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT 1 FROM ask_conversation_messages WHERE conversation_id = $1",
-            conv_id,
-        )
-    assert rows == []
-
-
-@pytest.mark.asyncio
-async def test_followup_anon_over_daily_limit_gets_429_with_code(conv_app, monkeypatch):
-    """The anon LLM-call daily quota (pipeline.query.chat's two call sites)
-    also applies to this endpoint's anon path — otherwise a caller could
-    establish free context via a zero-cost dispatch and then submit
-    unlimited follow-up questions here without ever touching the quota."""
-    import api.routers.conversations as conv_router
-    from api.middleware.ratelimit import reset_anon_quota_for_tests
-
-    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
-    monkeypatch.setenv("ASK_ANON_DAILY_LIMIT", "1")
-    monkeypatch.setenv("ASK_ANON_IP_DAILY_LIMIT", "100")
-    reset_anon_quota_for_tests()
-    app, agency, uid, _pool = conv_app
-
-    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale):
-        return "anon answer", None
-
-    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
-
-    async with _authed_client(app, uid) as c:
-        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
-        conv_id = cr.json()["conversation_id"]
-
-    payload = {
-        "question": "anon q",
-        "context_tool": "describe_data",
-        "context_args": {"kind": "stops"},
-        "context_result": {"ok": True},
-    }
-    try:
-        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            r1 = await c.post(f"/api/{agency}/conversations/{conv_id}/followup", json=payload, headers=_CSRF)
-            assert r1.status_code == 200, r1.text
-
-            r2 = await c.post(f"/api/{agency}/conversations/{conv_id}/followup", json=payload, headers=_CSRF)
-        assert r2.status_code == 429, f"expected 429, got {r2.status_code}: {r2.text[:200]}"
-        assert r2.json()["code"] == "ask_anon_quota_exceeded"
-    finally:
-        reset_anon_quota_for_tests()
+    assert r.status_code == 403
+    assert r.json()["detail"] == "llm_not_approved"
 
 
 @pytest.mark.asyncio

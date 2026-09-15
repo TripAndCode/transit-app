@@ -329,6 +329,7 @@ async def ask(
             anon_quota=anon_quota,
             panel_ctx=body.panel_ctx.model_dump() if body.panel_ctx else None,
             user_id=user.user_id if user is not None else None,
+            llm_approved=user.llm_approved if user is not None else False,
         )
         stage = "llm"
         tool_name = (payload.get("tool_call") or {}).get("name")
