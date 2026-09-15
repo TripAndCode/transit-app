@@ -836,7 +836,7 @@ async def test_followup_authed_success_appends_messages(conv_app, monkeypatch):
     body = r.json()
     assert body["user"]["rendered_summary"] == "what about X?"
     assert body["assistant"]["rendered_summary"] == "the answer"
-    assert body["assistant"]["args"] == {"context_message_id": msg["message_id"]}
+    assert body["assistant"]["args"] == {"context_message_id": msg["message_id"], "context_row_index": None}
     assert captured["context_tool"] == "describe_data"
     assert captured["context_args"] == {"kind": "stops"}
     assert captured["context_result"] == {"ok": True}

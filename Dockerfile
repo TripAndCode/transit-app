@@ -20,40 +20,16 @@ WORKDIR /app
 RUN pip install --no-cache-dir poetry==1.8.5
 
 COPY pyproject.toml poetry.lock ./
-# sentence-transformers' unpinned transitive `torch` dependency resolves to
-# PyPI's default Linux wheel, which pulls in the CUDA runtime as separate
-# nvidia-*/triton packages the embedder never uses here (see
-# pipeline/query/embeddings.py — CPU only) — most of the multi-GB bloat is in
-# those sibling packages, not in the torch wheel itself, so reinstalling only
-# torch from the CPU-only index leaves them orphaned; they must be removed
-# explicitly since pip never prunes packages a later install stops requiring.
-# This must stay in the same RUN as `poetry install` — a separate later layer
-# would still carry the already-committed GPU/CUDA packages' bytes even after
-# removing them, since Docker layers are additive.
-# Not done via pyproject.toml/poetry.lock: Poetry 1.8's per-platform `source`
-# selection for a single dependency doesn't reliably carry its marker into
-# the lock file, so local (non-Linux) installs failed outright — this stays
-# Linux/Docker-only instead, where no such cross-platform ambiguity exists.
-# --no-deps: poetry already installed correct, locked versions of torch's own
-# runtime deps (filelock, sympy, jinja2, ...); without it, --force-reinstall
-# re-resolves them from this separate CPU-only mirror instead, which drifts
-# independently of poetry.lock.
+# The `embeddings` group (sentence-transformers, and transitively torch,
+# transformers, scikit-learn, scipy) is optional and deliberately excluded
+# here by `--only main`: `pipeline.query.embeddings.Embedder`'s import is
+# already wrapped in try/except and every caller falls through to the
+# LLM-only path when it's unavailable (see that module's docstring — API
+# startup never aborts on embedding failure). That whole dependency subtree
+# is several GB and unused until a RAG index actually exists; carrying it in
+# the deploy image bought nothing but slower builds and a slower cold start.
 RUN poetry config virtualenvs.create false \
-    && poetry install --only main --no-root --no-interaction \
-    && pip install --no-cache-dir --force-reinstall --no-deps \
-        --index-url https://download.pytorch.org/whl/cpu \
-        "torch==$(python -c 'import torch; print(torch.__version__.split("+")[0])')" \
-    && pip freeze | grep -E '^(nvidia-|triton==)' | cut -d '=' -f1 | xargs -r pip uninstall -y
-
-# Bake the Ask-tab embedder into the image. Without this the container downloads
-# the model (~hundreds of MB) from HuggingFace on every cold start — a ~50s boot
-# delay before /health passes AND a runtime dependency on HF being reachable.
-# HF_HOME pins the cache path so the build-time download and the runtime load
-# resolve to the same place. Placed before `COPY . .` so editing app code
-# doesn't invalidate this heavy layer. Keep the id in sync with
-# pipeline/query/embeddings.py:_DEFAULT_MODEL.
-ENV HF_HOME=/opt/hf-cache
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small')"
+    && poetry install --only main --no-root --no-interaction
 
 COPY . .
 COPY --from=frontend /fe/dist /app/api/static

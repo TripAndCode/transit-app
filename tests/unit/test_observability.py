@@ -25,8 +25,8 @@ def test_request_id_filter_default_dash():
     )
     root = logging.getLogger()
     for f in root.handlers[0].filters:
-        f.filter(rec)
-    assert rec.request_id == "-"
+        f.filter(rec)  # type: ignore[union-attr]
+    assert rec.request_id == "-"  # type: ignore[attr-defined]
 
 
 def test_request_id_filter_reads_contextvar():
@@ -43,8 +43,8 @@ def test_request_id_filter_reads_contextvar():
             None,
         )
         for f in logging.getLogger().handlers[0].filters:
-            f.filter(rec)
-        assert rec.request_id == "ctx-test"
+            f.filter(rec)  # type: ignore[union-attr]
+        assert rec.request_id == "ctx-test"  # type: ignore[attr-defined]
     finally:
         REQUEST_ID_CTX.reset(token)
 

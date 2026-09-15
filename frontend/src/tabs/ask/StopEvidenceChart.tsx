@@ -118,7 +118,7 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
             </details>
         </aside>}
       </div>
-      {complete && points.length > 0 && <StopNavigator points={points} start={start} size={size}
+      {complete && points.length > 0 && <StopNavigator points={points} start={start} size={size} low={low} high={high}
         onStart={(next) => { setWindowStart(next); select(null); }}
         onSize={(next) => { setWindowSize(next); select(null); }}
         onPick={(index) => { setWindowSize(Math.min(8, points.length)); setWindowStart(Math.max(0, index - 3)); select(points[index]); }} />}

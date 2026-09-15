@@ -22,7 +22,9 @@ from pipeline.prediction_accuracy import (
 def test_scheduled_departure_at_combines_date_and_time_in_jst():
     dep = scheduled_departure_at(date(2026, 4, 1), time(9, 0, 0))
     assert dep == datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)  # 09:00 JST == 00:00 UTC
-    assert dep.utcoffset().total_seconds() == 9 * 3600
+    offset = dep.utcoffset()
+    assert offset is not None
+    assert offset.total_seconds() == 9 * 3600
 
 
 def test_scheduled_departure_at_accepts_raw_ch_string_form():

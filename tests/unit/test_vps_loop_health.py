@@ -6,6 +6,7 @@ import importlib.util
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "vps_loop_health.py"
@@ -16,7 +17,7 @@ sys.modules[SPEC.name] = health
 SPEC.loader.exec_module(health)
 
 
-def entry(text: str) -> health.StatusEntry:
+def entry(text: str) -> Any:
     """Parse a single raw entry block (as `split_status_log_entries` would yield it)."""
 
     return health.parse_entry(text)
