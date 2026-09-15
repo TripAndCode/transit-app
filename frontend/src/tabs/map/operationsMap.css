@@ -185,7 +185,8 @@
   .ops-heading { width: 100%; }
   .ops-freshness { margin-left: auto; }
   .ops-map__disclosure { right: 8px; bottom: 52px; left: 8px; top: auto; max-width: none; }
-  /* No longer offset to clear a top-left zoom control -- NavigationControl
-     moved to top-right (see MapTab.tsx), so top-left is legend-only now. */
-  .ops-map-legend { right: 8px; left: 8px; gap: 8px; overflow: hidden; }
+  /* Reserves the same right-side clearance NavigationControl needs (moved
+     to top-right, see MapTab.tsx) so the full-width legend bar doesn't
+     paint over the zoom buttons. */
+  .ops-map-legend { right: 48px; left: 8px; gap: 8px; overflow: hidden; }
 }
