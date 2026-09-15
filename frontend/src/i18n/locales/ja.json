@@ -651,7 +651,6 @@
       "bar_label": "{{name}}・順序{{sequence}}：{{minutes}}分、観測{{count}}件",
       "clear": "選択を解除",
       "minutes": "{{value}}分",
-      "metric": "平均出発遅延",
       "samples": "観測 {{count}}件",
       "unit": "単位：分・ゼロより下は早発",
       "caveat": "停留所順序で集計し、名称は代表便から取得しています。この集計だけでは遅延の原因は分かりません。",
