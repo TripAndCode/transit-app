@@ -78,7 +78,7 @@ def _allowed_providers() -> set[str] | None:
     documented historical default — Groq — is unchanged. Some models
     (notably Groq ``llama-3.3-70b``) have been shown to obey instructions
     injected into user text rather than the system prompt (see
-    ``pipeline/query/followup.py``, which defaults to Cerebras-only for
+    ``pipeline/query/followup.py``, which defaults to Groq-only for
     exactly this reason); unlike the follow-up path, restricting the
     primary Ask path by default would change cost/latency/answer-quality
     for the main feature, so operators opt in explicitly here instead.
@@ -226,10 +226,14 @@ def _completion_with_key(
     create_kwargs: dict[str, Any] = dict(
         model=model_override or model,
         messages=messages,
-        tools=tools,
-        tool_choice=tool_choice if tools else "none",
         temperature=temperature,
     )
+    # Same OpenAI-compat quirk as LLMClient.chat_completions: omit both
+    # keys together when there are no tools, rather than tool_choice="none"
+    # with tools=None -- OpenAI rejects tool_choice when tools is absent.
+    if tools:
+        create_kwargs["tools"] = tools
+        create_kwargs["tool_choice"] = tool_choice
     if response_format is not None:
         create_kwargs["response_format"] = response_format
     resp = one_off.chat.completions.create(**create_kwargs)
@@ -439,7 +443,7 @@ async def chat_with_tools(
     The ``model`` parameter is forwarded to the LLM adapter as a
     per-call override. When ``model=None`` (the default), the adapter
     uses each provider's own configured default (``{PROVIDER}_MODEL``
-    env var, e.g. ``CEREBRAS_MODEL`` / ``GROQ_MODEL``). Passing a
+    env var, e.g. ``GEMINI_MODEL`` / ``GROQ_MODEL``). Passing a
     vendor-specific model name (e.g. ``"llama-3.3-70b-versatile"``) only
     works if every provider in the fallback ladder accepts it.
     """

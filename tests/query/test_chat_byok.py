@@ -177,3 +177,18 @@ async def test_generate_proactive_insight_uses_byok_key(monkeypatch):
     assert used_key["provider"] == "groq"
     assert used_key["api_key"] == "gsk_user_key"
     assert result["text"]
+
+
+def test_completion_with_key_omits_tool_choice_when_no_tools():
+    """Same OpenAI-compat fix as LLMClient.chat_completions, on the BYOK
+    one-off path: no tools -> tools/tool_choice both absent, not
+    tools=None+tool_choice="none" (OpenAI rejects tool_choice without tools)."""
+    from unittest.mock import patch
+
+    fake_response = MagicMock(choices=[MagicMock(message=MagicMock(content="ok"))])
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.return_value = fake_response
+        chat._completion_with_key("groq", "gsk_user_key", messages=[{"role": "user", "content": "hi"}])
+    _, create_kwargs = mock_openai.return_value.chat.completions.create.call_args
+    assert "tools" not in create_kwargs
+    assert "tool_choice" not in create_kwargs

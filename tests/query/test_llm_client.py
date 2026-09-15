@@ -21,7 +21,7 @@ def _set_providers(monkeypatch, providers, **keys):
     for k, v in keys.items():
         monkeypatch.setenv(k, v)
     # Clear any env we don't want to leak
-    for unset in ("CEREBRAS_API_KEY", "GROQ_API_KEY", "OLLAMA_API_KEY"):
+    for unset in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
         if unset not in keys:
             monkeypatch.delenv(unset, raising=False)
 
@@ -37,15 +37,15 @@ def test_no_providers_returns_none(monkeypatch):
 
 def test_missing_api_key_provider_skipped(monkeypatch):
     """Provider listed but no API key set → drop from ladder."""
-    _set_providers(monkeypatch, providers="cerebras,groq", GROQ_API_KEY="real-groq")
+    _set_providers(monkeypatch, providers="gemini,groq", GROQ_API_KEY="real-groq")
     client = llm_client.LLMClient()
     names = [p.name for p in client.providers()]
-    assert names == ["groq"]  # cerebras dropped
+    assert names == ["groq"]  # gemini dropped
 
 
 def test_first_provider_success(monkeypatch):
-    """Cerebras returns a message → groq never called."""
-    _set_providers(monkeypatch, providers="cerebras,groq", CEREBRAS_API_KEY="c", GROQ_API_KEY="g")
+    """Gemini returns a message → groq never called."""
+    _set_providers(monkeypatch, providers="gemini,groq", GEMINI_API_KEY="c", GROQ_API_KEY="g")
     fake_message = MagicMock(name="message", content="ok")
     fake_response = MagicMock(choices=[MagicMock(message=fake_message)])
 
@@ -57,14 +57,30 @@ def test_first_provider_success(monkeypatch):
     assert kind is None
     assert mock_openai.call_count == 1
     _args, kwargs = mock_openai.call_args
-    assert kwargs.get("base_url") == "https://api.cerebras.ai/v1"
+    assert kwargs.get("base_url") == "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def test_no_tools_omits_tool_choice_key(monkeypatch):
+    """No tools → tools/tool_choice are absent, not tools=None+tool_choice="none".
+
+    OpenAI rejects tool_choice outright when tools isn't specified ("tool_choice
+    is only allowed when tools are specified") -- this is the JSON-mode
+    (ASK_INTENT_CACHE_ENABLED) request shape, which never passes tools."""
+    _set_providers(monkeypatch, providers="gemini", GEMINI_API_KEY="c")
+    fake_response = MagicMock(choices=[MagicMock(message=MagicMock(content="ok"))])
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.return_value = fake_response
+        llm_client.LLMClient().chat_completions(messages=[], response_format={"type": "json_object"})
+    _, create_kwargs = mock_openai.return_value.chat.completions.create.call_args
+    assert "tools" not in create_kwargs
+    assert "tool_choice" not in create_kwargs
 
 
 def test_first_provider_rate_limited_falls_back(monkeypatch):
-    """Cerebras 429 → groq used."""
+    """Gemini 429 → groq used."""
     from openai import RateLimitError
 
-    _set_providers(monkeypatch, providers="cerebras,groq", CEREBRAS_API_KEY="c", GROQ_API_KEY="g")
+    _set_providers(monkeypatch, providers="gemini,groq", GEMINI_API_KEY="c", GROQ_API_KEY="g")
     fake_message = MagicMock(content="ok")
     fake_response = MagicMock(choices=[MagicMock(message=fake_message)])
 
@@ -81,13 +97,13 @@ def test_first_provider_rate_limited_falls_back(monkeypatch):
         msg, kind = llm_client.LLMClient().chat_completions(messages=[])
     assert msg is fake_message
     assert kind is None
-    assert call_count["n"] == 2  # cerebras failed, groq succeeded
+    assert call_count["n"] == 2  # gemini failed, groq succeeded
 
 
 def test_all_providers_rate_limited_returns_none(monkeypatch):
     from openai import RateLimitError
 
-    _set_providers(monkeypatch, providers="cerebras,groq", CEREBRAS_API_KEY="c", GROQ_API_KEY="g")
+    _set_providers(monkeypatch, providers="gemini,groq", GEMINI_API_KEY="c", GROQ_API_KEY="g")
 
     def always_429(*a, **kw):
         raise RateLimitError(message="429", response=MagicMock(status_code=429), body=None)
@@ -99,18 +115,43 @@ def test_all_providers_rate_limited_returns_none(monkeypatch):
     assert kind == "rate_limit"
 
 
-def test_ollama_does_not_require_api_key(monkeypatch):
-    """Ollama provider should appear in the ladder even with no API key set."""
-    _set_providers(monkeypatch, providers="ollama")
-    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+def test_gemini_requires_api_key(monkeypatch):
+    """Gemini listed but no API key set → dropped from the ladder like any other provider."""
+    _set_providers(monkeypatch, providers="gemini")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     client = llm_client.LLMClient()
-    names = [p.name for p in client.providers()]
-    assert names == ["ollama"]
+    assert client.providers() == []
+
+
+def test_gemini_provider_defaults(monkeypatch):
+    """Gemini resolves its documented default base_url/model when unset."""
+    _set_providers(monkeypatch, providers="gemini", GEMINI_API_KEY="g")
+    client = llm_client.LLMClient()
+    cfg = client.providers()[0]
+    assert cfg.base_url == "https://generativelanguage.googleapis.com/v1beta/openai/"
+    assert cfg.model == "gemini-3.1-flash-lite"
+
+
+def test_openrouter_requires_api_key(monkeypatch):
+    """OpenRouter listed but no API key set → dropped from the ladder."""
+    _set_providers(monkeypatch, providers="openrouter")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    client = llm_client.LLMClient()
+    assert client.providers() == []
+
+
+def test_openrouter_provider_defaults(monkeypatch):
+    """OpenRouter resolves its documented default base_url/model when unset."""
+    _set_providers(monkeypatch, providers="openrouter", OPENROUTER_API_KEY="o")
+    client = llm_client.LLMClient()
+    cfg = client.providers()[0]
+    assert cfg.base_url == "https://openrouter.ai/api/v1"
+    assert cfg.model == "google/gemma-4-31b-it:free"
 
 
 def test_per_provider_base_url_override(monkeypatch):
     """Operator can override base_url via env."""
-    _set_providers(monkeypatch, providers="cerebras", CEREBRAS_API_KEY="c", CEREBRAS_BASE_URL="https://example.test/v1")
+    _set_providers(monkeypatch, providers="gemini", GEMINI_API_KEY="c", GEMINI_BASE_URL="https://example.test/v1")
     client = llm_client.LLMClient()
     assert client.providers()[0].base_url == "https://example.test/v1"
 
@@ -173,8 +214,8 @@ def test_recovery_short_circuits_failover(monkeypatch):
     """A tool_use_failed 400 on the first provider is recovered, not failed-over."""
     from openai import BadRequestError
 
-    monkeypatch.setenv("CHAT_PROVIDERS", "cerebras,groq")
-    monkeypatch.setenv("CEREBRAS_API_KEY", "c")
+    monkeypatch.setenv("CHAT_PROVIDERS", "gemini,groq")
+    monkeypatch.setenv("GEMINI_API_KEY", "c")
     monkeypatch.setenv("GROQ_API_KEY", "g")
     llm_client.reset_client_for_tests()
 
@@ -275,15 +316,6 @@ def test_last_error_kind_no_providers(monkeypatch):
     assert kind == "no_providers"
 
 
-def test_cerebras_default_model_is_gpt_oss(monkeypatch):
-    """No CEREBRAS_MODEL override → the account-available gpt-oss-120b."""
-    monkeypatch.delenv("CEREBRAS_MODEL", raising=False)
-    _set_providers(monkeypatch, providers="cerebras", CEREBRAS_API_KEY="c")
-    providers = llm_client.LLMClient().providers()
-    assert providers[0].name == "cerebras"
-    assert providers[0].model == "gpt-oss-120b"
-
-
 @pytest.mark.parametrize(
     "generation",
     [
@@ -330,7 +362,7 @@ def test_timeout_does_not_retry(monkeypatch):
 def test_openai_client_disables_sdk_retries(monkeypatch):
     """We own retry/fallback; the SDK's internal retry must be off — else a 429
     blocks ~60s before our ladder descent fires, making the fallback illusory."""
-    _set_providers(monkeypatch, providers="cerebras", CEREBRAS_API_KEY="c")
+    _set_providers(monkeypatch, providers="gemini", GEMINI_API_KEY="c")
     fake_response = MagicMock(choices=[MagicMock(message=MagicMock(content="ok"))])
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.return_value = fake_response
@@ -343,8 +375,8 @@ def test_rate_limit_preferred_over_later_connection(monkeypatch):
     """Earlier provider 429 + later provider connection-fail → surfaced kind is rate_limit."""
     from openai import APIConnectionError, RateLimitError
 
-    monkeypatch.setenv("CHAT_PROVIDERS", "cerebras,groq")
-    monkeypatch.setenv("CEREBRAS_API_KEY", "c")
+    monkeypatch.setenv("CHAT_PROVIDERS", "gemini,groq")
+    monkeypatch.setenv("GEMINI_API_KEY", "c")
     monkeypatch.setenv("GROQ_API_KEY", "g")
     llm_client.reset_client_for_tests()
 
@@ -352,7 +384,7 @@ def test_rate_limit_preferred_over_later_connection(monkeypatch):
 
     def side(*a, **k):
         calls["n"] += 1
-        if calls["n"] == 1:  # cerebras → 429
+        if calls["n"] == 1:  # gemini → 429
             raise RateLimitError(message="429", response=MagicMock(status_code=429), body=None)
         # groq → connection (retried then descends)
         raise APIConnectionError(request=httpx2.Request("POST", "http://test"))
@@ -366,18 +398,18 @@ def test_rate_limit_preferred_over_later_connection(monkeypatch):
 
 def test_allowed_providers_filters_ladder(monkeypatch):
     """allowed_providers restricts the ladder — an earlier but disallowed
-    provider (groq) is skipped in favour of the allowed one (cerebras)."""
-    _set_providers(monkeypatch, providers="groq,cerebras", CEREBRAS_API_KEY="c", GROQ_API_KEY="g")
+    provider (groq) is skipped in favour of the allowed one (gemini)."""
+    _set_providers(monkeypatch, providers="groq,gemini", GEMINI_API_KEY="c", GROQ_API_KEY="g")
     fake_message = MagicMock(content="ok")
     fake_response = MagicMock(choices=[MagicMock(message=fake_message)])
 
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.return_value = fake_response
-        msg, kind = llm_client.LLMClient().chat_completions(messages=[], allowed_providers={"cerebras"})
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[], allowed_providers={"gemini"})
     assert msg is fake_message and kind is None
     assert mock_openai.call_count == 1  # groq never constructed
     _args, kwargs = mock_openai.call_args
-    assert kwargs.get("base_url") == "https://api.cerebras.ai/v1"
+    assert kwargs.get("base_url") == "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 
 def test_allowed_providers_empty_intersection_degrades(monkeypatch):
@@ -385,16 +417,16 @@ def test_allowed_providers_empty_intersection_degrades(monkeypatch):
     network call — the caller degrades rather than using a disallowed one."""
     _set_providers(monkeypatch, providers="groq", GROQ_API_KEY="g")
     with patch("openai.OpenAI") as mock_openai:
-        msg, kind = llm_client.LLMClient().chat_completions(messages=[], allowed_providers={"cerebras"})
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[], allowed_providers={"gemini"})
     assert msg is None and kind == "no_providers"
     assert mock_openai.call_count == 0  # no provider was attempted
 
 
-def test_followup_allowed_providers_defaults_to_cerebras(monkeypatch):
+def test_followup_allowed_providers_defaults_to_groq(monkeypatch):
     """The follow-up restricts itself to an injection-resistant provider."""
     from pipeline.query import followup
 
     monkeypatch.delenv("ASK_FOLLOWUP_PROVIDERS", raising=False)
-    assert followup._allowed_providers() == {"cerebras"}
-    monkeypatch.setenv("ASK_FOLLOWUP_PROVIDERS", "cerebras, ollama")
-    assert followup._allowed_providers() == {"cerebras", "ollama"}
+    assert followup._allowed_providers() == {"groq"}
+    monkeypatch.setenv("ASK_FOLLOWUP_PROVIDERS", "groq, gemini")
+    assert followup._allowed_providers() == {"groq", "gemini"}
