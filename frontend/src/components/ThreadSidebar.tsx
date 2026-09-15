@@ -232,22 +232,27 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread, embed
           items.length === 0 ? null : (
             <section key={labelKey}>
               <div style={groupHeaderStyle}>{emoji}{t(labelKey)}</div>
-              {items.map((conv) => (
-                <ConvItem
-                  key={conv.conversation_id}
-                  conv={conv}
-                  isActive={conv.conversation_id === activeId}
-                  isRenaming={renamingId === conv.conversation_id}
-                  renameValue={renameValue}
-                  renameInputRef={renameInputRef}
-                  onRenameChange={setRenameValue}
-                  onRenameCommit={commitRename}
-                  onRenameBlur={commitRename}
-                  onSelect={() => { onSelect(conv.conversation_id); setMobileOpen(false); }}
-                  onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={[...(conv.filter_ctx.routes ?? []), filterSummary(conv.filter_ctx, t)].filter(Boolean).join(" ・ ")}
-                />
-              ))}
+              {items.map((conv) => {
+                const filterSummaryText = [...(conv.filter_ctx.routes ?? []), filterSummary(conv.filter_ctx, t)]
+                  .filter(Boolean)
+                  .join(" ・ "); // i18n-ignore: locale-neutral separator
+                return (
+                  <ConvItem
+                    key={conv.conversation_id}
+                    conv={conv}
+                    isActive={conv.conversation_id === activeId}
+                    isRenaming={renamingId === conv.conversation_id}
+                    renameValue={renameValue}
+                    renameInputRef={renameInputRef}
+                    onRenameChange={setRenameValue}
+                    onRenameCommit={commitRename}
+                    onRenameBlur={commitRename}
+                    onSelect={() => { onSelect(conv.conversation_id); setMobileOpen(false); }}
+                    onContextMenu={(e) => openMenu(e, conv.conversation_id)}
+                    filterSummaryText={filterSummaryText}
+                  />
+                );
+              })}
             </section>
           )
         )}
