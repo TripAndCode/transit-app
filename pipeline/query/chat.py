@@ -464,7 +464,11 @@ async def chat_with_tools(
     works if every provider in the fallback ladder accepts it.
     """
     client = _get_client()
-    user_key = await get_user_llm_key(conn, user_id) if user_id is not None else None
+    # Skip the lookup (a DB round-trip + Fernet decrypt) entirely when the
+    # caller isn't approved: _call_llm below rejects them unconditionally
+    # before user_key is ever read, so fetching it would be wasted work on
+    # every request from a not-yet-approved signed-in caller.
+    user_key = await get_user_llm_key(conn, user_id) if user_id is not None and llm_approved else None
 
     def _call_llm(**kwargs: Any) -> tuple[Any | None, str | None]:
         """Dispatch one completion call, normalized to ``(message, error_kind)``.
@@ -782,9 +786,9 @@ async def chat_with_tools(
         # A BYOK caller (user_key set) skips this: defense-in-depth, since
         # anon_quota is never constructed for a signed-in caller in the
         # first place (see the docstring's ``user_id`` section). An
-        # unapproved caller skips it too -- _call_llm rejects them
-        # unconditionally, so consuming their quota first would bill a
-        # request that was always going to fail.
+        # unapproved caller skips it too, regardless of BYOK/user_key state:
+        # _call_llm rejects them unconditionally, so consuming their quota
+        # first would bill a request that was always going to fail.
         if user_key is None and llm_approved:
             _consume_anon_quota_or_raise(anon_quota)
         msg, error_kind = await asyncio.to_thread(_sync)

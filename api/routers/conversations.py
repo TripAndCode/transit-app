@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, model_validator
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, RangeCtx, jst_today
-from api.security import csrf_guard
+from api.security import csrf_guard, require_llm_approved
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
@@ -467,9 +467,14 @@ async def followup_endpoint(
     csrf_guard(request)
 
     if not _followup.is_enabled():
+        # Short-circuit ahead of the approval gate: a disabled feature must
+        # not 403 an unapproved caller before reporting itself as off.
         raise HTTPException(status_code=503, detail="followup_disabled")
-    if user is None or not user.llm_approved:
-        raise HTTPException(status_code=403, detail="llm_not_approved")
+    # Called directly (not via Depends) on the already-resolved `user` so it
+    # runs after the kill-switch check above, not before it -- FastAPI
+    # resolves Depends() params before the endpoint body, which would
+    # reverse that precedence.
+    user = require_llm_approved(user)
 
     if body.context_message_id is None:
         raise HTTPException(

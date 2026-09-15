@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from api.deps import get_agency, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.security import csrf_guard
+from api.security import csrf_guard, require_llm_approved
 from pipeline.query.copilot import NoInsightAvailable, generate_proactive_insight, is_enabled
 from pipeline.query.user_llm_keys import get_user_llm_key
 
@@ -41,15 +41,16 @@ async def copilot_insight(
 ):
     csrf_guard(request)
     if not is_enabled():
-        # Short-circuit ahead of the quota check: a disabled feature must not
-        # spend the caller's daily budget, and the panel hides itself off the
+        # Short-circuit ahead of the approval gate and quota check: a
+        # disabled feature must not spend the caller's daily budget or 403
+        # an unapproved caller, and the panel hides itself off the
         # ``/copilot/enabled`` flag rather than relying on this response.
         raise HTTPException(status_code=503, detail="copilot_disabled")
-    # Same admin-approval gate as /ask and /followup. Anonymous callers
-    # (user is None) never have a users.llm_approved row, so this also
-    # removes the anonymous copilot-insight path entirely.
-    if user is None or not user.llm_approved:
-        raise HTTPException(status_code=403, detail="llm_not_approved")
+    # Called directly (not via Depends) on the already-resolved `user` so it
+    # runs after the kill-switch check above, not before it -- FastAPI
+    # resolves Depends() params before the endpoint body, which would
+    # reverse that precedence.
+    user = require_llm_approved(user)
 
     # Resolve the caller's BYOK key (if any) with a pool connection acquired
     # and released *before* the LLM call below — never held across it, which

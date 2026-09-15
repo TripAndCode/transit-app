@@ -30,9 +30,7 @@ from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.locale import LocaleMiddleware
 from api.middleware.ratelimit import (
     AnonAskQuotaExceeded,
-    AnonCopilotQuotaExceeded,
     ask_quota_exceeded_handler,
-    copilot_quota_exceeded_handler,
     limiter,
 )
 from api.middleware.request_log import RequestLogMiddleware
@@ -209,9 +207,6 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 # RateLimitExceeded response above and an opaque 500 — see
 # api/middleware/ratelimit.py's anon-quota section.
 app.add_exception_handler(AnonAskQuotaExceeded, ask_quota_exceeded_handler)  # type: ignore[arg-type]
-# Maps the anon-quota exception raised by POST /copilot/insight
-# (api/routers/copilot.py) to a localized 429, mirroring the Ask mapping above.
-app.add_exception_handler(AnonCopilotQuotaExceeded, copilot_quota_exceeded_handler)  # type: ignore[arg-type]
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. Order today (request-side, outermost first):
 #   StarletteSessionMiddleware  (Authlib needs request.session)

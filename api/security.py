@@ -95,6 +95,31 @@ def require_admin(request: Request) -> User:
     return user
 
 
+def require_llm_approved(user: User | None) -> User:
+    """403s unless ``user`` is a signed-in caller with ``users.llm_approved``
+    set. Anonymous callers (``user is None``) never have a row to check, so
+    they 403 here too -- there is no separate 401-then-403 distinction for
+    this gate, matching the single ``llm_not_approved`` contract every
+    LLM-only endpoint (``/followup``, ``/copilot/insight``) shares.
+
+    Takes an already-resolved ``user`` rather than ``Request`` (and isn't
+    itself wired up via ``Depends``) for two reasons: callers need to run
+    this *after* their own kill-switch check, which a ``Depends`` parameter
+    can't do (FastAPI resolves all of them before the endpoint body runs);
+    and tests inject a fake caller by overriding the ``get_current_user*``
+    dependency the endpoint still declares, which only takes effect if the
+    endpoint actually receives `user` through that dependency rather than
+    this function re-deriving it from ``request.state`` itself.
+
+    Endpoints that must let Stage 1/2 (rules/embedding) through for
+    anyone -- ``/ask`` -- check ``user.llm_approved`` themselves instead of
+    calling this, since they can't reject the whole request upfront.
+    """
+    if user is None or not user.llm_approved:
+        raise HTTPException(status_code=403, detail="llm_not_approved")
+    return user
+
+
 def _serialized_origin(value: str) -> str | None:
     """Reduce an Origin or Referer header value to its serialized origin
     form (``scheme://host[:port]``, lowercased), or None if it can't be

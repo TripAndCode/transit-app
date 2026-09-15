@@ -1,3 +1,4 @@
+DELETE FROM login_events WHERE kind = 'llm_approved_changed';
 ALTER TABLE login_events DROP CONSTRAINT IF EXISTS login_events_kind_check;
 ALTER TABLE login_events ADD CONSTRAINT login_events_kind_check CHECK (
     kind IN (
