@@ -619,6 +619,12 @@
   },
   "ask": {
     "evidence": {
+      "pattern_short": "Current-schedule stop order · select a stop to inspect",
+      "selected_detail": "Selected stop evidence",
+      "values": "Recorded identifiers",
+      "sequence": "Stop sequence",
+      "stop_id": "Stop ID",
+      "definition": "Definition and data coverage",
       "search": "Find a stop",
       "window_size": "View",
       "all_stops": "All stops",
@@ -645,7 +651,6 @@
       "bar_label": "{{name}}, sequence {{sequence}}: {{minutes}} minutes, {{count}} observations",
       "clear": "Clear selection",
       "minutes": "{{value}} min",
-      "metric": "Average departure delay",
       "samples": "{{count}} observations",
       "unit": "Minutes · bars below zero indicate early departures",
       "caveat": "Grouped by stop sequence; names are representative. These aggregates do not establish the cause of delay.",

@@ -619,6 +619,12 @@
   },
   "ask": {
     "evidence": {
+      "pattern_short": "現在の時刻表の停留所順・選んだ停留所の観測値を表示",
+      "selected_detail": "選択した停留所の観測値",
+      "values": "記録された識別情報",
+      "sequence": "停留所順序",
+      "stop_id": "停留所ID",
+      "definition": "集計定義・データの範囲",
       "search": "停留所を探す",
       "window_size": "表示",
       "all_stops": "全体を見る",
@@ -645,7 +651,6 @@
       "bar_label": "{{name}}・順序{{sequence}}：{{minutes}}分、観測{{count}}件",
       "clear": "選択を解除",
       "minutes": "{{value}}分",
-      "metric": "平均出発遅延",
       "samples": "観測 {{count}}件",
       "unit": "単位：分・ゼロより下は早発",
       "caveat": "停留所順序で集計し、名称は代表便から取得しています。この集計だけでは遅延の原因は分かりません。",
