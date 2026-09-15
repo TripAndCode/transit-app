@@ -223,9 +223,60 @@ export function HelpPage() {
     // bar would keep pointing at the previous locale's slug.
   }, [safeIndex, sections.length, content]);
 
+  // Up to 3 real sections (never the "Table of contents" entry itself, index
+  // 0 when tocAnchors.length > 0) as quick-jump category shortcuts -- picks
+  // from the manual's own real taxonomy rather than a hand-authored list
+  // that could drift from it.
+  const categorySections = sections
+    .map((section, i) => ({ section, i }))
+    .filter(({ i }) => !(tocAnchors.length > 0 && i === 0))
+    .slice(0, 3);
+
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 0 64px" }}>
       <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("help.title")}</h1>
+      {/* Visual-only for now -- not wired to real filtering yet (see design
+          spec's explicit deferral). */}
+      <input
+        type="search"
+        placeholder={t("help.search_placeholder")}
+        aria-label={t("help.search_placeholder")}
+        disabled
+        style={{
+          width: "100%",
+          padding: "11px 14px",
+          fontSize: 13,
+          border: "1px solid var(--card-border)",
+          borderRadius: "var(--card-radius)",
+          background: "var(--bg-soft)",
+          color: "var(--text-secondary)",
+          marginBottom: 18,
+        }}
+      />
+      {content != null && categorySections.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 24 }}>
+          {categorySections.map(({ section, i }) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={t("help.category_shortcut_label", { title: section.title })}
+              onClick={() => setExplicitIndex(i)}
+              style={{
+                textAlign: "left",
+                padding: 12,
+                border: "1px solid var(--card-border)",
+                borderRadius: "var(--card-radius)",
+                background: "var(--bg-soft)",
+                color: "var(--text-primary)",
+                fontSize: 12.5,
+                fontWeight: 600,
+              }}
+            >
+              {section.title}
+            </button>
+          ))}
+        </div>
+      )}
       {error != null && <ErrorBanner error={error} onRetry={() => void refetch()} />}
       {content == null && error == null && (
         <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
