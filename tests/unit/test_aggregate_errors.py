@@ -19,7 +19,7 @@ async def test_returns_503_with_machine_code():
     exc = asyncpg.exceptions.UndefinedTableError('relation "agg_route_hour_dow" does not exist')
     resp = await aggregate_not_ready_handler(_request("en"), exc)
     assert resp.status_code == 503
-    body = json.loads(resp.body)
+    body = json.loads(bytes(resp.body))
     assert body["code"] == AGGREGATE_NOT_READY_CODE
     assert body["detail"]  # non-empty, user-facing
     # the internal relation name must NOT leak to the client
@@ -29,14 +29,14 @@ async def test_returns_503_with_machine_code():
 @pytest.mark.asyncio
 async def test_localized_detail():
     exc = asyncpg.exceptions.UndefinedTableError('relation "agg_feed_health" does not exist')
-    en = json.loads((await aggregate_not_ready_handler(_request("en"), exc)).body)["detail"]
-    ja = json.loads((await aggregate_not_ready_handler(_request("ja"), exc)).body)["detail"]
+    en = json.loads(bytes((await aggregate_not_ready_handler(_request("en"), exc)).body))["detail"]
+    ja = json.loads(bytes((await aggregate_not_ready_handler(_request("ja"), exc)).body))["detail"]
     assert en != ja  # both provided, locale-specific
 
 
 @pytest.mark.asyncio
 async def test_unknown_locale_falls_back_to_ja():
     exc = asyncpg.exceptions.UndefinedTableError('relation "agg_x" does not exist')
-    body = json.loads((await aggregate_not_ready_handler(_request("fr"), exc)).body)
-    ja_body = json.loads((await aggregate_not_ready_handler(_request("ja"), exc)).body)
+    body = json.loads(bytes((await aggregate_not_ready_handler(_request("fr"), exc)).body))
+    ja_body = json.loads(bytes((await aggregate_not_ready_handler(_request("ja"), exc)).body))
     assert body["detail"] == ja_body["detail"]

@@ -32,6 +32,7 @@ import {
 } from "./map/useOperationsMapLayers";
 import { buildCurrentRouteSummaries } from "./map/currentRouteStatus";
 import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
+import { createSafeMap } from "./map/createSafeMap";
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
@@ -183,16 +184,17 @@ export function MapTab() {
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
-    let map: MLMap;
-    try { map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: getMapStyleOverride() ?? buildStyle(readMapStylePref(), initialLanguageRef.current),
-      center: [140.7474, 40.8246],
-      zoom: 11,
-    }); } catch {
-      const frame = requestAnimationFrame(() => setMapUnavailable(true));
-      return () => cancelAnimationFrame(frame);
-    }
+    const created = createSafeMap(
+      {
+        container: mapContainerRef.current,
+        style: getMapStyleOverride() ?? buildStyle(readMapStylePref(), initialLanguageRef.current),
+        center: [140.7474, 40.8246],
+        zoom: 11,
+      },
+      () => setMapUnavailable(true),
+    );
+    if (!created.map) return created.cleanup;
+    const map: MLMap = created.map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     const onEnter = () => { map.getCanvas().style.cursor = "pointer"; };
     const onLeave = () => { map.getCanvas().style.cursor = ""; };

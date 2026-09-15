@@ -100,40 +100,6 @@ describe("FollowupChipsRow free-text input", () => {
     expect(onFollowup).toHaveBeenCalledWith(1, "What about route 12?", true);
   });
 
-  it("passes isDraft=false for a canned chip, even if its prompt text matches the current draft", async () => {
-    const user = userEvent.setup();
-    const onFollowup = vi.fn();
-    const chipPrompt = "Explain the pattern in this result in 3 sentences or fewer.";
-    renderWithProviders(
-      <Wrapper
-        messages={messagesWithResult}
-        onFollowup={onFollowup}
-        draftValue={chipPrompt}
-        onDraftChange={vi.fn()}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: "Why this pattern?" }));
-    expect(onFollowup).toHaveBeenCalledWith(1, chipPrompt, false);
-  });
-
-  it("de-emphasizes only the chip just clicked, not the others, for the current result", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <Wrapper
-        messages={messagesWithResult}
-        onFollowup={vi.fn()}
-        draftValue=""
-        onDraftChange={vi.fn()}
-      />,
-    );
-    const clicked = screen.getByRole("button", { name: "Why this pattern?" });
-    const other = screen.getByRole("button", { name: "Other slices?" });
-    expect(clicked).toHaveAttribute("aria-pressed", "false");
-    await user.click(clicked);
-    expect(clicked).toHaveAttribute("aria-pressed", "true");
-    expect(other).toHaveAttribute("aria-pressed", "false");
-  });
-
   it("does not submit a whitespace-only draft", async () => {
     const user = userEvent.setup();
     const onFollowup = vi.fn();

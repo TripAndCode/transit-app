@@ -4,23 +4,33 @@ import hashlib
 import json
 from collections import defaultdict
 from dataclasses import replace
+from typing import Any
 
 from api.range import RangeCtx
 from pipeline.reports.filters import _dedup_cte_ch, _round2
 
 MAX_GROUPS = 20000
+# A single observed (trip_id, stop_sequence) group can pull in a whole trip's full
+# static timetable, so the schedule-row fetch needs its own, larger ceiling rather
+# than reusing MAX_GROUPS -- otherwise routes with long trips trip this bound long
+# before MAX_GROUPS itself is approached.
+MAX_SCHEDULE_ROWS = 200000
 MAX_STOPS = 2000
 COLUMNS = ["pattern_id", "pattern_name", "stop_sequence", "stop_id", "stop_name", "avg_min", "samples"]
+
+
+class PatternWindowTooLarge(ValueError):
+    pass
 
 
 def assemble_patterns(observations: list, scheduled: list) -> list:
     trips = defaultdict(list)
     for stop in scheduled:
         trips[stop["trip_id"]].append(stop)
-    stats = defaultdict(dict)
+    stats: dict[Any, dict[Any, tuple[float, int]]] = defaultdict(dict)
     for trip, seq, total, count in observations:
         stats[trip][seq] = (total, count)
-    patterns = {}
+    patterns: dict[str, dict[str, Any]] = {}
     for trip_id in sorted(trips):
         stops = sorted(trips[trip_id], key=lambda row: row["stop_sequence"])
         signature = [(row["stop_sequence"], row["stop_id"]) for row in stops]
@@ -54,7 +64,7 @@ def assemble_patterns(observations: list, scheduled: list) -> list:
     return rows
 
 
-async def query_stop_patterns(agency_id: int, ctx: RangeCtx, conn, ch, route: str) -> list:
+async def query_stop_patterns(agency_id: int, ctx: RangeCtx, conn, ch=None, *, route: str) -> list:
     if ch is None or (ctx.routes and route not in ctx.routes):
         return []
     cte, params = _dedup_cte_ch(replace(ctx, routes=(route,)))
@@ -69,7 +79,7 @@ async def query_stop_patterns(agency_id: int, ctx: RangeCtx, conn, ch, route: st
     if not observations:
         return []
     if len(observations) > MAX_GROUPS:
-        raise ValueError("pattern_window_too_large")
+        raise PatternWindowTooLarge
     scheduled = await conn.fetch(
         "SELECT st.trip_id, t.route_id, st.stop_sequence, st.stop_id, "
         "COALESCE(s.stop_name, st.stop_id) AS stop_name "
@@ -78,11 +88,13 @@ async def query_stop_patterns(agency_id: int, ctx: RangeCtx, conn, ch, route: st
         "LEFT JOIN static_stops s ON s.agency_id = st.agency_id AND s.stop_id = st.stop_id "
         "WHERE st.agency_id = $1 AND st.trip_id = ANY($2::text[]) "
         "ORDER BY st.trip_id, st.stop_sequence LIMIT $3",
-        agency_id, sorted({row[0] for row in observations}), MAX_GROUPS + 1,
+        agency_id,
+        sorted({row[0] for row in observations}),
+        MAX_SCHEDULE_ROWS + 1,
     )
-    if len(scheduled) > MAX_GROUPS:
-        raise ValueError("pattern_window_too_large")
+    if len(scheduled) > MAX_SCHEDULE_ROWS:
+        raise PatternWindowTooLarge
     rows = assemble_patterns(observations, scheduled)
     if len(rows) > MAX_STOPS:
-        raise ValueError("pattern_window_too_large")
+        raise PatternWindowTooLarge
     return rows

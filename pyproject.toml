@@ -16,7 +16,6 @@ pandas = ">=2.2"
 groq = ">=0.11"
 openai = ">=1.50"
 slowapi = ">=0.1"
-sentence-transformers = "^3.0"
 asyncpg = ">=0.29"
 fastapi = ">=0.111"
 uvicorn = {version = ">=0.29", extras = ["standard"]}
@@ -33,6 +32,19 @@ httpx = ">=0.27"
 ruff = ">=0.4"
 mypy = ">=1.14"
 playwright = "^1.60.0"
+
+# `pipeline.query.embeddings.Embedder` already tolerates this whole group being
+# absent — its import is wrapped in try/except and callers fall through to the
+# LLM-only path (see that module's docstring). Optional so the deploy image
+# doesn't have to carry torch/transformers/scikit-learn/scipy — several GB,
+# unused until a RAG index actually exists — just to boot. `make bootstrap`
+# installs it for local dev; the Dockerfile's `--only main` deliberately
+# doesn't.
+[tool.poetry.group.embeddings]
+optional = true
+
+[tool.poetry.group.embeddings.dependencies]
+sentence-transformers = "^3.0"
 
 [build-system]
 requires = ["poetry-core"]

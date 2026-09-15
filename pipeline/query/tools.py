@@ -40,7 +40,7 @@ from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
 from pipeline.query.stop_patterns import COLUMNS as PATTERN_COLUMNS
-from pipeline.query.stop_patterns import query_stop_patterns
+from pipeline.query.stop_patterns import PatternWindowTooLarge, query_stop_patterns
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
@@ -1060,21 +1060,25 @@ async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, loca
 
 
 async def _tool_route_stop_patterns(
-    args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None,
+    args: dict,
+    ctx: RangeCtx,
+    conn,
+    agency_id: int,
+    locale: str,
+    ch=None,
 ) -> ToolResult:
     route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
     if isinstance(route, ToolResult):
         return route
     try:
-        rows = await query_stop_patterns(agency_id, ctx, conn, ch, str(route))
-    except ValueError as exc:
-        if str(exc) != "pattern_window_too_large":
-            raise
+        rows = await query_stop_patterns(agency_id, ctx, conn, ch, route=str(route))
+    except PatternWindowTooLarge:
         return ToolResult(kind="empty", summary=_summary("stop_patterns_large", lang=locale))
     if not rows:
         return ToolResult(kind="empty", summary=_summary("stop_patterns_empty", lang=locale))
-    return ToolResult(kind="table", summary=_summary("stop_patterns", lang=locale, route=route),
-                      columns=PATTERN_COLUMNS, rows=rows)
+    return ToolResult(
+        kind="table", summary=_summary("stop_patterns", lang=locale, route=route), columns=PATTERN_COLUMNS, rows=rows
+    )
 
 
 async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:

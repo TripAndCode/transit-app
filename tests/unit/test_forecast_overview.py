@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from pipeline.reports.forecast import BANDS, _pooled, band_of, hourly_cells_to_dow_band, summarize_agency_overview
@@ -203,7 +205,7 @@ def test_routes_skip_null_avg_min_in_recent_daily():
     route_rows = [
         {"route_code": "A", "route_name": "Alpha", "avg_min": 5.0, "samples": 100},
     ]
-    recent_daily_rows = [
+    recent_daily_rows: list[dict[str, Any]] = [
         {"date": "2026-06-01", "route_code": "A", "avg_min": 2.0},
         {"date": "2026-06-02", "route_code": "A", "avg_min": None},
         {"date": "2026-06-03", "route_code": "A", "avg_min": 6.0},

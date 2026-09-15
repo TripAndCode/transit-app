@@ -10,6 +10,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -567,7 +568,7 @@ def make_facts(
     stale_branches: tuple[str, ...] | None = (),
     stale_unprotected_branches_truncated: bool | None = False,
     cached_document: dict | None = None,
-) -> "collector.GithubFacts":
+) -> Any:
     return collector.GithubFacts(
         now=now,
         prs=prs,

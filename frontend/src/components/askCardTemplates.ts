@@ -36,7 +36,7 @@ export type CardTemplate = {
 };
 
 /**
- * Builds the 5 parameterized question card templates for the Ask dashboard.
+ * Builds the parameterized question card templates for the Ask dashboard.
  * Each `buildSummary` closure receives `t` at call-site (from the card
  * component), so the template list itself is locale-independent — safe to
  * call directly on every render (see `QuestionDock.tsx`/`AskTab.tsx`);
