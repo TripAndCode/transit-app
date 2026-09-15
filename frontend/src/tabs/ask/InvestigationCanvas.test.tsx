@@ -43,8 +43,22 @@ describe("investigation canvas", () => {
     </InvestigationCanvas>);
     fireEvent.click(screen.getByText(/Investigation steps ·/));
     expect(screen.getByRole("button", { name: "2. Evening?" })).toHaveAttribute("aria-current", "step");
-    const log = screen.getByText("Full conversation").closest("details");
+    const log = screen.getByText("Full conversation").closest("details")!;
     expect(log).not.toHaveAttribute("open");
+    expect(screen.queryByText("First answer")).not.toBeInTheDocument();
+    const recorded = screen.getByText("View returned data and recorded arguments").closest("details")!;
+    expect(recorded).not.toHaveAttribute("open");
+    expect(screen.getAllByText("Second answer")).toHaveLength(1);
+    // jsdom toggles <details>.open on a summary click but doesn't dispatch the
+    // native "toggle" event a real browser would, so drive it directly here.
+    log.open = true;
+    fireEvent(log, new Event("toggle"));
+    expect(screen.getByText("First answer")).toBeInTheDocument();
+    recorded.open = true;
+    fireEvent(recorded, new Event("toggle"));
+    // 3: the always-rendered per-message list, plus the now-opened full-log
+    // and recorded-data details, which duplicate the same step's content.
+    expect(screen.getAllByText("Second answer")).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "1. Morning?" }));
     expect(screen.queryByRole("button", { name: "Follow up" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1. Morning?" })).toHaveAttribute("aria-current", "step");

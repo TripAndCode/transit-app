@@ -9,6 +9,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -324,7 +325,7 @@ def make_health_report(
     }
 
 
-def make_facts(*, health_report: dict, now: datetime = T0, **overrides) -> "collector.VpsFacts":
+def make_facts(*, health_report: dict, now: datetime = T0, **overrides) -> Any:
     defaults = dict(
         now=now,
         health_report=health_report,

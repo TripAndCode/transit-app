@@ -42,7 +42,7 @@ class _FakeResponse:
 
 def _http_error(url, code, location=None):
     headers = {"Location": location} if location else {}
-    return urllib.error.HTTPError(url, code, "redirect" if location else "error", headers, None)
+    return urllib.error.HTTPError(url, code, "redirect" if location else "error", headers, None)  # type: ignore[arg-type]
 
 
 def test_returns_body_for_simple_public_url(monkeypatch):
@@ -116,7 +116,7 @@ def test_build_opener_installs_no_redirect_handler():
     and would stay green even if _NoRedirect were dropped from
     _build_opener - so it needs its own direct assertion."""
     opener = url_guard._build_opener()
-    assert any(isinstance(h, url_guard._NoRedirect) for h in opener.handlers)
+    assert any(isinstance(h, url_guard._NoRedirect) for h in opener.handlers)  # type: ignore[attr-defined]
 
 
 def test_opener_ignores_environment_proxy_vars(monkeypatch):
@@ -130,8 +130,8 @@ def test_opener_ignores_environment_proxy_vars(monkeypatch):
     monkeypatch.setenv("http_proxy", "http://evil-proxy:1234")
     monkeypatch.setenv("https_proxy", "http://evil-proxy:1234")
     fresh = url_guard._build_opener()
-    assert not any(isinstance(h, urllib.request.ProxyHandler) for h in fresh.handle_open.get("http", []))
-    assert not any(isinstance(h, urllib.request.ProxyHandler) for h in fresh.handle_open.get("https", []))
+    assert not any(isinstance(h, urllib.request.ProxyHandler) for h in fresh.handle_open.get("http", []))  # type: ignore[attr-defined]
+    assert not any(isinstance(h, urllib.request.ProxyHandler) for h in fresh.handle_open.get("https", []))  # type: ignore[attr-defined]
 
 
 def test_preserves_request_headers_across_redirect(monkeypatch):

@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { RouteShapeStop } from "../../api/types";
 import { matchedPrevious } from "./stopSeries";
 import { delayColor } from "../../styles/tokens";
+import { ChartAxis } from "./ChartAxis";
 
 export function StopChart({ stops, previous, selected, onSelect }: {
   stops: RouteShapeStop[]; previous: RouteShapeStop[]; selected: number; onSelect: (sequence: number) => void;
@@ -15,11 +16,7 @@ export function StopChart({ stops, previous, selected, onSelect }: {
     return values.map((v, i) => v == null ? "" : `${i === 0 || values[i - 1] == null ? "M" : "L"}${x(i)},${y(v)}`).join(" ");
   }
   return <svg className="focus-chart" viewBox="0 0 780 335" role="group" aria-label={t("stopDelay")}>
-    {[0, 1, 2, 3, 4].map((tick) => {
-      const value = low + (high - low) * tick / 4;
-      return <g key={tick}><line x1={52} x2={752} y1={y(value)} y2={y(value)} stroke="var(--border-subtle)" strokeDasharray="2 4" />
-        <text x={42} y={y(value) + 4} textAnchor="end" fill="var(--text-secondary)" fontSize={12}>{value.toFixed(1)}</text></g>;
-    })}
+    <ChartAxis low={low} high={high} y={y} />
     <path d={path(stops.map((s) => matchedPrevious(s, previous)))} fill="none" stroke="var(--text-secondary)" strokeWidth={2} strokeDasharray="5 5" />
     <path d={path(stops.map((s) => s.avg_min))} fill="none" stroke="var(--accent)" strokeWidth={2.5} />
     {stops.map((s, i) => <g key={`${s.stop_sequence}-${s.stop_id}`}>
