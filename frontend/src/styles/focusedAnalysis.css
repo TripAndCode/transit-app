@@ -17,11 +17,9 @@
 .focus-actions .btn-ghost:disabled { color: var(--text-tertiary); border-color: var(--border-subtle); }
 .focus-split { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; }
 .focus-tab-panel { margin-bottom: 16px; }
-/* A real height, not squeezed to match whichever chart used to sit beside
-   it in the old fixed 55/45 split -- the route shape needs room to be
-   legible. */
-.focus-tab-panel--map { min-height: 320px; }
-.focus-tab-panel--map > * { min-height: 320px; }
+/* Kept mounted (not conditionally rendered) once first visited, so switching
+   tabs doesn't tear down and recreate the MapLibre WebGL context each time. */
+.focus-tab-panel--hidden { display: none; }
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
 .focus-aside strong { font-size: 30px; color: var(--color-danger); }
 .focus-chart { width: 100%; height: 300px; min-height: 230px; }

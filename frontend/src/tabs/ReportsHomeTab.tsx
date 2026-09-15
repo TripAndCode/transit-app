@@ -82,7 +82,10 @@ export function ReportsHomeTab() {
       <footer className="focus-report-footer">
         {shareNotice && <span role="status" className="focus-muted">{shareNotice}</span>}
         <div className="focus-actions">
-          <button className="btn-ghost" disabled={!rows.length && !days.length} onClick={() => downloadCsv(`report-${id}-${ctx.from}-${ctx.to}`, metadata)}>{t("csv")}</button>
+          <button className="btn-ghost" disabled={!rows.length && !days.length} onClick={() => downloadCsv(`report-${id}-${ctx.from}-${ctx.to}`, [
+            ...metadata, [], ["date", "mean_departure_delay_minutes", "observations"], ...days.map((d) => [d.date, d.avg_min, d.samples]),
+            [], ["route_code", "service_type", "mean_minutes", "median_minutes", "p90_minutes", "observations"], ...rows,
+          ])}>{t("csv")}</button>
           <button className="btn-ghost" onClick={() => void copyShareLink()}>{t("shareLink")}</button>
         </div>
       </footer>

@@ -7,7 +7,7 @@ import type { RouteShapeResponse, RouteShapeStop } from "../../api/types";
 import { whenStyleReady } from "../../tabs/map/styleReady";
 import { createSafeMap } from "../../tabs/map/createSafeMap";
 
-export function AnalysisMap({ data, selected }: { data: RouteShapeResponse; selected: RouteShapeStop | undefined }) {
+export function AnalysisMap({ data, selected, height = 210 }: { data: RouteShapeResponse; selected: RouteShapeStop | undefined; height?: number }) {
   const { t, i18n } = useTranslation("design");
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -69,5 +69,5 @@ export function AnalysisMap({ data, selected }: { data: RouteShapeResponse; sele
     // Re-fit only when the stop set itself changes (a new route/direction), not
     // when the user merely picks a different stop to inspect.
   }, [data]);
-  return <section aria-label={t("map")}><div ref={container} style={{ height: failed ? 0 : 210, borderRadius: 6 }} />{failed && <p className="focus-muted">{t("mapUnavailable")}</p>}</section>;
+  return <section aria-label={t("map")}><div ref={container} style={{ height: failed ? 0 : height, borderRadius: 6 }} />{failed && <p className="focus-muted">{t("mapUnavailable")}</p>}</section>;
 }
