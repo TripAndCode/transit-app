@@ -71,6 +71,7 @@ class User:
     avatar_url: str | None
     role: str
     suspended_at: datetime | None
+    llm_approved: bool
 
 
 def current_user(request: Request) -> User | None:

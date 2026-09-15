@@ -13,6 +13,7 @@ type Detail = {
   avatar_url: string | null;
   role: "user" | "admin";
   suspended_at: string | null;
+  llm_approved: boolean;
   created_at: string;
   identities: { provider: string; provider_sub: string; email_at_link: string | null; created_at: string }[];
   recent_events: {
@@ -77,6 +78,11 @@ export function AdminUserDetailPage() {
     patch.mutate({ uid: data!.user_id, body: { suspended: !data!.suspended_at } });
   }
 
+  function handleLlmApprovedToggle() {
+    del.reset();
+    patch.mutate({ uid: data!.user_id, body: { llm_approved: !data!.llm_approved } });
+  }
+
   function handleDelete() {
     if (!confirm(t("admin.users.confirm_delete", { email: data!.email }))) return;
     patch.reset();
@@ -100,6 +106,10 @@ export function AdminUserDetailPage() {
             <div>
               {t("admin.user_detail.status_label")}:{" "}
               {data.suspended_at ? t("admin.users.status.suspended") : t("admin.users.status.active")}
+            </div>
+            <div>
+              {t("admin.users.col.llm_approved")}:{" "}
+              {data.llm_approved ? t("admin.users.llm_approved.yes") : t("admin.users.llm_approved.no")}
             </div>
             <div>
               {t("admin.user_detail.created_label")}: {new Date(data.created_at).toLocaleString(i18n.language)}
@@ -154,6 +164,14 @@ export function AdminUserDetailPage() {
               <option value="admin">{t("account.role.admin")}</option>
             </select>
           </label>
+          <AdminButton
+            variant="secondary"
+            style={{ width: "100%", marginBottom: 8, justifyContent: "center" }}
+            disabled={isSelf || isMutating}
+            onClick={handleLlmApprovedToggle}
+          >
+            {data.llm_approved ? t("admin.users.action.revoke_llm") : t("admin.users.action.approve_llm")}
+          </AdminButton>
           <AdminButton
             variant="secondary"
             style={{ width: "100%", marginBottom: 8, justifyContent: "center" }}

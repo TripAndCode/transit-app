@@ -1221,11 +1221,16 @@
         "email": "Email",
         "name": "Name",
         "role": "Role",
-        "status": "Status"
+        "status": "Status",
+        "llm_approved": "AI access"
       },
       "status": {
         "suspended": "Suspended",
         "active": "Active"
+      },
+      "llm_approved": {
+        "yes": "Approved",
+        "no": "Not approved"
       },
       "filter": {
         "role_all": "All roles",
@@ -1234,7 +1239,9 @@
       "action": {
         "resume": "Resume",
         "suspend": "Suspend",
-        "delete": "Delete"
+        "delete": "Delete",
+        "approve_llm": "Approve AI access",
+        "revoke_llm": "Revoke AI access"
       },
       "confirm_delete": "Delete {{email}}? (anonymized, irreversible)",
       "confirm_promote": "Grant admin access to {{email}}?",

@@ -1221,11 +1221,16 @@
         "email": "メール",
         "name": "名前",
         "role": "ロール",
-        "status": "状態"
+        "status": "状態",
+        "llm_approved": "AI利用"
       },
       "status": {
         "suspended": "停止中",
         "active": "アクティブ"
+      },
+      "llm_approved": {
+        "yes": "承認済み",
+        "no": "未承認"
       },
       "filter": {
         "role_all": "全ロール",
@@ -1234,7 +1239,9 @@
       "action": {
         "resume": "再開",
         "suspend": "停止",
-        "delete": "削除"
+        "delete": "削除",
+        "approve_llm": "AI利用を承認",
+        "revoke_llm": "AI利用を取り消し"
       },
       "confirm_delete": "{{email}} を削除しますか？(匿名化、復元不可)",
       "confirm_promote": "{{email}} に管理者権限を付与しますか？",

@@ -38,6 +38,7 @@ class MeOut(BaseModel):
     name: str | None
     avatar_url: str | None
     role: str
+    llm_approved: bool
     identities: list[IdentityOut]
 
 
@@ -54,6 +55,7 @@ async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = 
         name=user.name,
         avatar_url=user.avatar_url,
         role=user.role,
+        llm_approved=user.llm_approved,
         identities=[IdentityOut(**dict(r)) for r in rows],
     )
 

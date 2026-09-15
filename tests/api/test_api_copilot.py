@@ -13,13 +13,14 @@ from tests.conftest import TEST_ORIGIN
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
-async def _seed_user_and_session(conn, *, role="user"):
+async def _seed_user_and_session(conn, *, role="user", llm_approved=False):
     uid = (
         await conn.fetchrow(
-            "INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING user_id",
+            "INSERT INTO users (email, name, role, llm_approved) VALUES ($1, $2, $3, $4) RETURNING user_id",
             f"u{datetime.now().timestamp()}@x",
             "Yo",
             role,
+            llm_approved,
         )
     )["user_id"]
     sid = f"sid-{uid:0>30}"
@@ -76,8 +77,9 @@ def _copilot_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_copilot_insight_returns_rendered_text(copilot_client, monkeypatch):
+async def test_copilot_insight_returns_rendered_text(copilot_client, aconn, monkeypatch):
     client, agency_id = copilot_client
+    sid, _uid = await _seed_user_and_session(aconn, llm_approved=True)
 
     async def fake_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
         return {"text": "Route 12 is delayed.", "cite": "Overview · 1 sample", "low_confidence": False}
@@ -87,6 +89,7 @@ async def test_copilot_insight_returns_rendered_text(copilot_client, monkeypatch
         f"/api/{agency_id}/copilot/insight",
         json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
         headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -101,7 +104,7 @@ async def test_copilot_insight_resolves_signed_in_users_byok_key(copilot_client,
     from pipeline.query.user_llm_keys import save_user_llm_key
 
     client, agency_id = copilot_client
-    sid, uid = await _seed_user_and_session(aconn)
+    sid, uid = await _seed_user_and_session(aconn, llm_approved=True)
     await save_user_llm_key(aconn, uid, "groq", "gsk_stored_key")
 
     captured = {}
@@ -124,8 +127,9 @@ async def test_copilot_insight_resolves_signed_in_users_byok_key(copilot_client,
 
 
 @pytest.mark.asyncio
-async def test_copilot_insight_rejects_empty_payload(copilot_client, monkeypatch):
+async def test_copilot_insight_rejects_empty_payload(copilot_client, aconn, monkeypatch):
     client, agency_id = copilot_client
+    sid, _uid = await _seed_user_and_session(aconn, llm_approved=True)
 
     async def fake_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
         from pipeline.query.copilot import NoInsightAvailable
@@ -137,6 +141,7 @@ async def test_copilot_insight_rejects_empty_payload(copilot_client, monkeypatch
         f"/api/{agency_id}/copilot/insight",
         json={"tab": "overview", "filters": {}, "view_payload": {}},
         headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
     )
     assert resp.status_code == 422
 
@@ -163,30 +168,50 @@ async def test_copilot_insight_rejects_cross_origin(copilot_client, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_copilot_insight_enforces_anon_quota(copilot_client, monkeypatch):
+async def test_copilot_insight_rejects_anonymous_caller(copilot_client, monkeypatch):
+    """Anonymous callers never have a users.llm_approved row -- the anon
+    copilot-insight path (and its dedicated daily quota) no longer exists."""
     client, agency_id = copilot_client
 
-    async def fake_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
-        return {"text": "x", "cite": "y", "low_confidence": False}
+    async def must_not_be_called(tab, filters, view_payload, *, locale="ja", user_key=None):
+        raise AssertionError("generate_proactive_insight must not be reached by an anonymous caller")
 
-    monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
-    monkeypatch.setenv("COPILOT_ANON_DAILY_LIMIT", "0")
-    from api.middleware.ratelimit import reset_anon_quota_for_tests
-
-    reset_anon_quota_for_tests()
+    monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", must_not_be_called)
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
         json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
         headers={"Origin": TEST_ORIGIN},
     )
-    assert resp.status_code == 429
-    assert resp.json()["code"] == "copilot_anon_quota_exceeded"
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "llm_not_approved"
 
 
 @pytest.mark.asyncio
-async def test_copilot_insight_threads_accept_language_locale(copilot_client, monkeypatch):
+async def test_copilot_insight_rejects_unapproved_signed_in_caller(copilot_client, aconn, monkeypatch):
+    """A signed-in caller whose users.llm_approved is still the default
+    (False) is rejected the same way an anonymous caller is."""
+    client, agency_id = copilot_client
+    sid, _uid = await _seed_user_and_session(aconn, llm_approved=False)
+
+    async def must_not_be_called(tab, filters, view_payload, *, locale="ja", user_key=None):
+        raise AssertionError("generate_proactive_insight must not be reached by an unapproved caller")
+
+    monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", must_not_be_called)
+    resp = await client.post(
+        f"/api/{agency_id}/copilot/insight",
+        json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "llm_not_approved"
+
+
+@pytest.mark.asyncio
+async def test_copilot_insight_threads_accept_language_locale(copilot_client, aconn, monkeypatch):
     """The resolved request locale reaches generate_proactive_insight."""
     client, agency_id = copilot_client
+    sid, _uid = await _seed_user_and_session(aconn, llm_approved=True)
     seen: list[str] = []
 
     async def fake_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
@@ -200,6 +225,7 @@ async def test_copilot_insight_threads_accept_language_locale(copilot_client, mo
             f"/api/{agency_id}/copilot/insight",
             json=body,
             headers={"Origin": TEST_ORIGIN, "Accept-Language": header},
+            cookies={"sid": sid},
         )
         assert resp.status_code == 200
         assert seen[-1] == expected
@@ -243,21 +269,12 @@ async def test_copilot_enabled_endpoint_reports_the_flag(copilot_client, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_disabled_copilot_does_not_consume_anon_quota(copilot_client, monkeypatch):
-    """A disabled feature must not bill the caller's daily budget."""
+async def test_disabled_copilot_short_circuits_before_the_approval_gate(copilot_client, monkeypatch):
+    """The kill switch fires before the llm_approved gate too -- a disabled
+    feature reports 503, never 403, regardless of who's asking."""
     client, agency_id = copilot_client
     monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "false")
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", _must_not_run)
-
-    consumed: list[str] = []
-
-    # Patched where it is looked up, not on the defining module: the router
-    # imported the name directly, so its own binding is what runs.
-    def _consume_quota(*a, **k):
-        consumed.append("hit")
-        return True
-
-    monkeypatch.setattr("api.routers.copilot.check_and_consume_anon_quota", _consume_quota)
 
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
@@ -265,4 +282,4 @@ async def test_disabled_copilot_does_not_consume_anon_quota(copilot_client, monk
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 503
-    assert consumed == []
+    assert resp.json()["detail"] == "copilot_disabled"
