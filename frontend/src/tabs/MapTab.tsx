@@ -424,7 +424,9 @@ export function MapTab() {
           )}
           <div className="ops-map-legend" aria-label={t("operations.map.legend_label")}>
             <LegendChip color="var(--accent-strong)" label={t("operations.map.legend_current")} />
+            <LegendChip color="#2bc5aa" label={t("operations.map.legend_trail")} />
             <LegendChip color="var(--delay-flag)" label={t("operations.map.legend_delay")} />
+            <LegendChip color="#2bc5aa" label={t("operations.map.legend_cluster")} />
           </div>
           <button type="button" className="ops-map-fit" onClick={fitAllTrips}>
             <Maximize2 size={14} />{t("operations.map.fit_all")}

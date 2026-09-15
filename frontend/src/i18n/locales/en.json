@@ -488,7 +488,9 @@
       "disclosure": "{{located}} of {{total}} trips shown at their latest GTFS-RT TripUpdate stop (observed {{when}}; static GTFS coordinates, not GPS positions)",
       "legend_label": "Map legend",
       "legend_current": "Latest report",
+      "legend_trail": "Report trail",
       "legend_delay": "Delayed",
+      "legend_cluster": "Number = overlapping trips",
       "fit_all": "Show all trips"
     },
     "trip_panel": {
