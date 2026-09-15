@@ -9,6 +9,8 @@
 .focused-overview .ops-map { min-height: 340px; height: 100%; }
 .focus-live-queue { min-height: 0; overflow: auto; padding: 0 0 0 20px; border-left: 1px solid var(--border-subtle); }
 .focus-live-queue h2 { margin: 8px 0 16px; font-size: 18px; }
+.focus-summary-strip { display: flex; gap: 8px; margin: 0 0 16px; }
+.focus-summary-strip .stat-tile { flex: 1; }
 .focus-trip { padding: 16px 0; border-bottom: 1px solid var(--border-soft); }
 .focus-trip button { display: flex; align-items: center; width: 100%; gap: 12px; border: 0; background: none; color: var(--text-primary); text-align: left; padding: 0; }
 .focus-trip small { display: block; margin: 7px 0; color: var(--text-secondary); }

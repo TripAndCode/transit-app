@@ -488,9 +488,7 @@
       "disclosure": "{{located}}/{{total}}便をGTFS-RT TripUpdateの最新報告停留所に表示（観測 {{when}}・静的GTFS座標・GPS位置ではありません）",
       "legend_label": "地図の凡例",
       "legend_current": "最新報告",
-      "legend_trail": "報告履歴",
       "legend_delay": "遅延",
-      "legend_cluster": "数字＝重複便",
       "fit_all": "全便を表示"
     },
     "trip_panel": {
