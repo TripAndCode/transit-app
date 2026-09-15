@@ -619,6 +619,14 @@
   },
   "ask": {
     "evidence": {
+      "search": "停留所を探す",
+      "window_size": "表示",
+      "all_stops": "全体を見る",
+      "stop_count": "{{count}}停留所",
+      "window": "表示中 {{start}}–{{end}} / 全{{total}}停留所",
+      "move_window": "表示する停留所区間を移動",
+      "no_match": "この経路に一致する停留所はありません",
+      "refine_search": "先頭10件を表示しています。検索条件を絞ってください。",
       "pattern": "観測された停車経路",
       "complete_title": "平均出発遅延・停留所順",
       "complete_scope": "選んだ観測経路の全停留所を現在の時刻表に照合して表示します。出発観測なしは遅延ゼロではありません。",

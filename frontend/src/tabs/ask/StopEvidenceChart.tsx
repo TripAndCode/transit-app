@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { StopEvidence, StopFocus } from "./stopEvidence";
+import { StopNavigator } from "./StopNavigator";
 import "./stopEvidence.css";
 
 export function StopEvidenceChart({ messageId, points, onFocus, complete = false }: {
@@ -11,6 +12,11 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
 }) {
   const { t } = useTranslation();
   const [sequence, setSequence] = useState<number | null>(null);
+  const [windowSize, setWindowSize] = useState(Math.min(8, points.length));
+  const [windowStart, setWindowStart] = useState(0);
+  const size = complete ? Math.min(windowSize, points.length) : points.length;
+  const start = complete ? Math.max(0, Math.min(windowStart, points.length - size)) : 0;
+  const visiblePoints = points.slice(start, start + size);
   const selected = points.find((point) => point.sequence === sequence);
   const low = Math.min(0, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
   const high = Math.max(1, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
@@ -26,10 +32,11 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
       <p className="investigation-caption">{t(complete ? "ask.evidence.complete_scope" : "ask.evidence.scope")}</p>
       <div className="stop-evidence-layout">
         <div className="stop-evidence-scroll">
-          <div className="stop-evidence-bars" role="group" aria-label={t("ask.evidence.select")}>
-            {points.map((point) => (
+          <div className={`stop-evidence-bars${size > 16 ? " stop-evidence-overview" : ""}`} role="group" aria-label={t("ask.evidence.select")}>
+            {visiblePoints.map((point) => (
               <button key={point.sequence} className="stop-evidence-column" type="button"
                 aria-pressed={selected?.sequence === point.sequence}
+                title={`${point.name} · #${point.sequence}`}
                 aria-label={t(point.minutes === null ? "ask.evidence.missing_label" : "ask.evidence.bar_label", { name: point.name, sequence: point.sequence, minutes: point.minutes, count: point.samples })}
                 onClick={() => select(point)}>
                 <span className="stop-evidence-plot">
@@ -61,6 +68,10 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
           <p className="investigation-caption">{t(complete ? "ask.evidence.pattern_caveat" : "ask.evidence.caveat")}</p>
         </aside>
       </div>
+      {complete && points.length > 0 && <StopNavigator points={points} start={start} size={size} low={low} high={high}
+        onStart={(next) => { setWindowStart(next); select(null); }}
+        onSize={(next) => { setWindowSize(next); select(null); }}
+        onPick={(index) => { setWindowSize(Math.min(8, points.length)); setWindowStart(Math.max(0, index - 3)); select(points[index]); }} />}
     </section>
   );
 }
