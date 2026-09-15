@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { Send } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { ConvMessage } from "../../api/types";
 import { ErrorBanner } from "../../components/ErrorBanner";
@@ -111,32 +112,10 @@ export function FollowupChipsRow({
           placeholder={t("ask.followup_placeholder")}
           maxLength={availableChars}
           aria-label={t("ask.followup_placeholder")}
-          style={{
-            flex: 1,
-            padding: "7px 12px",
-            fontSize: 13,
-            border: "1px solid var(--border-soft, #e4e4e7)",
-            borderRadius: 8,
-            background: "var(--bg-surface, white)",
-            color: "var(--text-primary, #1a1a1a)",
-          }}
+          className="ask-dock-input"
         />
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          style={{
-            padding: "7px 14px",
-            fontSize: 13,
-            background: canSubmit ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.06))",
-            color: canSubmit ? "white" : "var(--text-tertiary, #999)",
-            border: "1px solid",
-            borderColor: canSubmit ? "var(--accent, #5b6cad)" : "var(--border-soft, rgba(0,0,0,0.08))",
-            borderRadius: 8,
-            cursor: canSubmit ? "pointer" : "not-allowed",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {t("ask.followup_send")}
+        <button type="submit" disabled={!canSubmit} className="ask-dock-send" aria-label={t("ask.followup_send")}>
+          <Send size={15} aria-hidden="true" />
         </button>
       </form>
       {prefix.length + trimmed.length > maxChars && <p role="status">{t("ask.evidence.too_long")}</p>}

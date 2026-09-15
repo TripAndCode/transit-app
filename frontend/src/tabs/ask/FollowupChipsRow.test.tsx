@@ -46,13 +46,13 @@ describe("FollowupChipsRow free-text input", () => {
       focus={{ messageId: 22, sequence: 7, name: "Central" }} />);
     expect(onFollowup).not.toHaveBeenCalled();
     expect(screen.getByText(/Selected stop-sequence group: 7/)).toBeInTheDocument();
-    await userEvent.click(screen.getByText("Send"));
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(onFollowup).toHaveBeenCalledWith(22, "Explain the sample count\nSelected stop-sequence group: 7 (representative name: Central).", true);
   });
   it("does not fall back to another source when the selected row is unavailable", () => {
     renderWithProviders(<Wrapper messages={messagesWithResult} onFollowup={vi.fn()}
       draftValue="Explain" onDraftChange={vi.fn()} focus={{ messageId: 22, sequence: 7, name: "Central" }} />);
-    expect(screen.queryByText("Send")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
   it("counts the context prefix toward the server question limit", () => {
     const source = { ...messagesWithResult[0], tool: "segment_hotspots",
@@ -60,7 +60,7 @@ describe("FollowupChipsRow free-text input", () => {
         rows: [[7, "Central", 4.2, 128]], summary: null, series: null, pairs: null } } as ConvMessage;
     renderWithProviders(<Wrapper messages={[source]} onFollowup={vi.fn()} draftValue="Explain" onDraftChange={vi.fn()}
       maxChars={20} focus={{ messageId: 1, sequence: 7, name: "Central" }} />);
-    expect(screen.getByText("Send")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
   it("withholds the composer and chips for an unselected route_stop_patterns result", () => {
     const source = { ...messagesWithResult[0], tool: "route_stop_patterns",
@@ -100,7 +100,7 @@ describe("FollowupChipsRow free-text input", () => {
         onDraftChange={onDraftChange}
       />,
     );
-    expect(screen.getByText("Send")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     await user.type(screen.getByPlaceholderText("Ask about this result..."), "x");
     expect(onDraftChange).toHaveBeenCalled();
   });
@@ -116,7 +116,7 @@ describe("FollowupChipsRow free-text input", () => {
         onDraftChange={vi.fn()}
       />,
     );
-    await user.click(screen.getByText("Send"));
+    await user.click(screen.getByRole("button", { name: "Send" }));
     expect(onFollowup).toHaveBeenCalledWith(1, "What about route 12?", true);
   });
 
@@ -131,8 +131,8 @@ describe("FollowupChipsRow free-text input", () => {
         onDraftChange={vi.fn()}
       />,
     );
-    expect(screen.getByText("Send")).toBeDisabled();
-    await user.click(screen.getByText("Send"));
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Send" }));
     expect(onFollowup).not.toHaveBeenCalled();
   });
 
