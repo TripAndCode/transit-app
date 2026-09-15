@@ -331,13 +331,13 @@ export function AskTab() {
                   focus={focus}
                   compact
                   t={t}
-                  onFollowup={(ctxMsgId, question, isDraft) => {
+                  onFollowup={(ctxMsgId, question, isDraft, rowIndex) => {
                     if (!activeId) return;
                     // Only clear the draft if this submission *was* the draft --
                     // a canned chip prompt shouldn't wipe text the user is
                     // still composing.
                     followup.mutate(
-                      { conversationId: activeId, contextMessageId: ctxMsgId, question },
+                      { conversationId: activeId, contextMessageId: ctxMsgId, contextRowIndex: rowIndex, question },
                       { onSuccess: () => isDraft && setFollowupDraft("") },
                     );
                   }}

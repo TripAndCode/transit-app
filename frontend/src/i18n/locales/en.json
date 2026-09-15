@@ -619,6 +619,14 @@
   },
   "ask": {
     "evidence": {
+      "pattern": "Observed stop pattern",
+      "complete_title": "Average departure delay · stop order",
+      "complete_scope": "Complete stop list of the selected observed pattern, matched to the current schedule. Missing departures are not zero delay.",
+      "missing": "No departure observation",
+      "missing_label": "{{name}}, sequence {{sequence}}: no departure observation",
+      "pattern_caveat": "Current-schedule mapping, not a historical schedule revision. This chart does not establish delay causes.",
+      "pattern_focus": "Selected: {{name}} (sequence {{sequence}}).",
+      "select_to_ask": "Select a stop to ask about its stored observations.",
       "focus_context": "Selected stop-sequence group: {{sequence}} (representative name: {{name}}).",
       "ask_hint": "Continue investigating the selected evidence",
       "ai_notice": "AI runs only when you send. Answers use the stored result; no new data is fetched.",
@@ -870,6 +878,7 @@
       }
     },
     "card": {
+      "stop_patterns": { "title": "Explore all stops by pattern", "summary": "How are departure delays distributed across stops on {{route}}?" },
       "stop_hotspots": {
         "title": "Which stops have larger delays?",
         "summary": "Where are average departure delays largest on {{route}}?"
