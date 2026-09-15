@@ -40,7 +40,7 @@ from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
 from pipeline.query.stop_patterns import COLUMNS as PATTERN_COLUMNS
-from pipeline.query.stop_patterns import query_stop_patterns
+from pipeline.query.stop_patterns import PatternWindowTooLarge, query_stop_patterns
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
@@ -1066,10 +1066,8 @@ async def _tool_route_stop_patterns(
     if isinstance(route, ToolResult):
         return route
     try:
-        rows = await query_stop_patterns(agency_id, ctx, conn, ch, str(route))
-    except ValueError as exc:
-        if str(exc) != "pattern_window_too_large":
-            raise
+        rows = await query_stop_patterns(agency_id, ctx, conn, ch, route=str(route))
+    except PatternWindowTooLarge:
         return ToolResult(kind="empty", summary=_summary("stop_patterns_large", lang=locale))
     if not rows:
         return ToolResult(kind="empty", summary=_summary("stop_patterns_empty", lang=locale))
