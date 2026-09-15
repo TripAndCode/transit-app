@@ -6,7 +6,7 @@ import {
   apiErrorDetail,
   isAggregateNotReady,
   isAnonAskQuotaExceeded,
-  isCopilotQuotaExceeded,
+  isLlmNotApproved,
 } from "../api/client";
 
 type Props = {
@@ -86,10 +86,11 @@ export function ErrorBanner({ error, onRetry }: Props) {
     );
   }
 
-  // Anonymous Copilot daily-quota exhaustion (429) — same caller-scoped,
-  // resets-tomorrow condition as the Ask quota above, so it gets the same
-  // calm banner + sign-in nudge instead of a generic rate-limit message.
-  if (isCopilotQuotaExceeded(error)) {
+  // Admin-approval-required 403 (Copilot insight, Ask follow-up) — a standing
+  // condition until an admin flips users.llm_approved, not a service problem
+  // or something signing in again fixes, so this gets a calm explanation with
+  // no login link and no retry button.
+  if (isLlmNotApproved(error)) {
     return (
       <div
         role="status"
@@ -101,26 +102,9 @@ export function ErrorBanner({ error, onRetry }: Props) {
           borderRadius: "var(--radius)",
           margin: "0 0 16px",
           lineHeight: 1.5,
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
         }}
       >
-        <span style={{ flex: 1 }}>{t("errors.copilot_anon_quota_exceeded")}</span>
-        <Link
-          to="/login"
-          style={{
-            color: "inherit",
-            padding: "4px 12px",
-            background: "var(--surface-1)",
-            borderRadius: 4,
-            textDecoration: "none",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {t("common.login")}
-        </Link>
+        {t("errors.llm_not_approved")}
       </div>
     );
   }

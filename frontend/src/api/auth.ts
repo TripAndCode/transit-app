@@ -9,6 +9,7 @@ type Session = {
   name: string | null;
   avatar_url: string | null;
   role: "user" | "admin";
+  llm_approved: boolean;
   identities: Identity[];
 };
 
