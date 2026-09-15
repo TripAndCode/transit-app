@@ -1,4 +1,5 @@
 import type { ConvMessage } from "../../api/types";
+import { triggerBlobDownload } from "../../components/analysis/csv";
 import type { InvestigationStep } from "./investigationSteps";
 
 export function resultSnapshot(agencyId: number, step: InvestigationStep, exportedAt: string) {
@@ -33,14 +34,8 @@ export function resultTableCsv(agencyId: number, message: ConvMessage): unknown[
 
 export function downloadSnapshot(agencyId: number, step: InvestigationStep) {
   const json = resultSnapshot(agencyId, step, new Date().toISOString());
-  const url = URL.createObjectURL(new Blob([json], { type: "application/json;charset=utf-8" }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `ask-${agencyId}-${step.id}.json`;
-  document.body.append(anchor);
-  try { anchor.click(); }
-  finally {
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
+  triggerBlobDownload(
+    new Blob([json], { type: "application/json;charset=utf-8" }),
+    `ask-${agencyId}-${step.id}.json`,
+  );
 }

@@ -38,12 +38,12 @@ class _FakeRequest:
 async def test_get_ch_returns_a_stand_in_when_client_is_none_without_raising():
     """Merely resolving the dependency must not fail — a route that never
     ends up needing ClickHouse (e.g. the agg-table fast path) must still work."""
-    result = await get_ch(_FakeRequest(None))
+    result = await get_ch(_FakeRequest(None))  # type: ignore[arg-type]
     assert result is not None
 
 
 async def test_get_ch_stand_in_raises_503_only_when_actually_used():
-    result = await get_ch(_FakeRequest(None))
+    result = await get_ch(_FakeRequest(None))  # type: ignore[arg-type]
     with pytest.raises(HTTPException) as exc_info:
         await result.query("SELECT 1")
     assert exc_info.value.status_code == 503
@@ -51,5 +51,5 @@ async def test_get_ch_stand_in_raises_503_only_when_actually_used():
 
 async def test_get_ch_returns_client_when_present():
     sentinel = object()
-    result = await get_ch(_FakeRequest(sentinel))
+    result = await get_ch(_FakeRequest(sentinel))  # type: ignore[arg-type]
     assert result is sentinel

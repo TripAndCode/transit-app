@@ -5,6 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { buildStyle, getMapStyleOverride, readMapStylePref } from "../../styles/mapStyle";
 import type { RouteShapeResponse, RouteShapeStop } from "../../api/types";
 import { whenStyleReady } from "../../tabs/map/styleReady";
+import { createSafeMap } from "../../tabs/map/createSafeMap";
 
 export function AnalysisMap({ data, selected }: { data: RouteShapeResponse; selected: RouteShapeStop | undefined }) {
   const { t, i18n } = useTranslation("design");
@@ -16,13 +17,12 @@ export function AnalysisMap({ data, selected }: { data: RouteShapeResponse; sele
   const [styleEpoch, setStyleEpoch] = useState(0);
   useEffect(() => {
     if (!container.current) return;
-    let instance: maplibregl.Map;
-    try {
-      instance = new maplibregl.Map({ container: container.current, style: getMapStyleOverride() ?? buildStyle(readMapStylePref(), initialLanguageRef.current), center: [140.74, 40.82], zoom: 11 });
-    } catch {
-      const frame = requestAnimationFrame(() => setFailed(true));
-      return () => cancelAnimationFrame(frame);
-    }
+    const created = createSafeMap(
+      { container: container.current, style: getMapStyleOverride() ?? buildStyle(readMapStylePref(), initialLanguageRef.current), center: [140.74, 40.82], zoom: 11 },
+      () => setFailed(true),
+    );
+    if (!created.map) return created.cleanup;
+    const instance = created.map;
     map.current = instance;
     instance.addControl(new maplibregl.NavigationControl({ showCompass: false }));
     const observer = new ResizeObserver(() => instance.resize());

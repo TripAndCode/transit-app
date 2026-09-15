@@ -1,11 +1,12 @@
 from datetime import date
+from typing import Any
 
 from api.range import _TIME_BAND_RANGES, RangeCtx, build_agg_stop_filter, time_band_case_sql
 
 
-def _ctx(**over):
+def _ctx(**over: Any) -> RangeCtx:
     # RangeCtx uses from_date/to_date (date objects), dow, time_band, service, routes.
-    base = dict(
+    base: dict[str, Any] = dict(
         from_date=date(2026, 5, 13),
         to_date=date(2026, 6, 11),
         dow="all",

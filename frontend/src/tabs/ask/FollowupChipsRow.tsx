@@ -1,7 +1,6 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import type { TFunction } from "i18next";
 import type { ConvMessage } from "../../api/types";
-import { FOLLOWUP_CHIPS } from "../../components/askFollowupChips";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { stopEvidence, type StopFocus } from "./stopEvidence";
 
@@ -10,11 +9,15 @@ import { stopEvidence, type StopFocus } from "./stopEvidence";
 // MAX_QUESTION_CHARS) is authoritative and always wins once loaded.
 const FOLLOWUP_MAX_CHARS_FALLBACK = 500;
 
-/** Bottom-of-thread follow-up chips plus a free-text box. Grounds every
- *  follow-up (chip or typed) on the most recent assistant message that
- *  carries a tool result, so multi-turn follow-ups never compound
- *  LLM-generated answers. Hidden when the thread has no tool result to
- *  ground on. */
+/** Bottom-of-thread follow-up composer. Grounds a typed follow-up on an
+ *  explicit `focus` selection when one is given, otherwise on the most
+ *  recent assistant message that carries a tool result, so multi-turn
+ *  follow-ups never compound LLM-generated answers. Hidden entirely when
+ *  there is no message to ground on (no tool result, or a stale/unavailable
+ *  focus); replaced with a select-a-stop prompt, instead of hidden, when the
+ *  grounding message is an unselected `route_stop_patterns` result, since
+ *  answering against the full multi-pattern table would silently truncate
+ *  at the same 50-row preview limit this feature exists to avoid. */
 export function FollowupChipsRow({
   messages,
   t,
@@ -46,14 +49,6 @@ export function FollowupChipsRow({
   // hook order stays unconditional.
   const isComposingRef = useRef(false);
 
-  // Tracks the chip most recently clicked *for the currently-grounded
-  // message* so it can be visually de-emphasized instead of re-showing every
-  // chip with identical weight after it was just asked. Keyed on both the
-  // chip id and the grounding message id (not just the chip id) so a new
-  // tool result -- a fresh context to ask the same question type about --
-  // clears the de-emphasis automatically, with no reset effect needed.
-  const [lastClickedChip, setLastClickedChip] = useState<{ msgId: number; chipId: string } | null>(null);
-
   const lastResultMsgId = (() => {
     if (focus) {
       const source = messages.find((message) => message.message_id === focus.messageId);
@@ -72,8 +67,10 @@ export function FollowupChipsRow({
     return <p className="investigation-caption">{t("ask.evidence.select_to_ask")}</p>;
   }
 
-  // The <input maxLength> below already caps draftValue at maxChars, so
-  // trimmed can never exceed it -- only the lower bound needs checking here.
+  // The <input maxLength> below caps typed input at availableChars, but a
+  // focus toggling on after text was already entered can shrink
+  // availableChars below the current draft length, so canSubmit still
+  // re-checks the combined length against the server's maxChars directly.
   const trimmed = draftValue.trim();
   const prefix = focus ? t(focus.patternId ? "ask.evidence.pattern_focus" : "ask.evidence.focus_context", { sequence: focus.sequence, name: focus.name, stopId: focus.stopId, patternId: focus.patternId }) + "\n" : "";
   const availableChars = Math.max(0, maxChars - prefix.length);
@@ -92,56 +89,6 @@ export function FollowupChipsRow({
     <div className={compact ? "ask-context-composer" : undefined} style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
       {compact && <p className="investigation-caption">{t("ask.evidence.ask_hint")}</p>}
       {focus && <div className="ask-selection-context">{prefix.trimEnd()}</div>}
-      {!compact && !focus && (
-      <div
-        role="group"
-        aria-label={t("ask.followup_chips.panel_aria")}
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 6,
-        }}
-      >
-        {FOLLOWUP_CHIPS.map((chip) => {
-          const isLastClicked =
-            lastClickedChip?.msgId === lastResultMsgId && lastClickedChip?.chipId === chip.id;
-          return (
-            <button
-              key={chip.id}
-              type="button"
-              aria-pressed={isLastClicked}
-              onClick={() => {
-                setLastClickedChip({ msgId: lastResultMsgId, chipId: chip.id });
-                onFollowup(lastResultMsgId, t(chip.prompt_key), false);
-              }}
-              style={{
-                padding: "5px 12px",
-                fontSize: 12,
-                background: "var(--bg-soft, #f4f4f5)",
-                color: "var(--text-secondary, #52525b)",
-                border: "1px solid var(--border-soft, #e4e4e7)",
-                borderRadius: 999,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-                transition: "background 0.15s, opacity 0.15s",
-                // De-emphasize (not remove) the chip just asked about this
-                // result -- it's still available to ask again, but shouldn't
-                // read with the same weight as the untried options next to it.
-                opacity: isLastClicked ? 0.55 : 1,
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft-hover)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
-              }}
-            >
-              {t(chip.label_key)}
-            </button>
-          );
-        })}
-      </div>
-      )}
 
       <form
         onSubmit={(e) => {

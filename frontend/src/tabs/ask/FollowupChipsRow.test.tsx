@@ -62,6 +62,26 @@ describe("FollowupChipsRow free-text input", () => {
       maxChars={20} focus={{ messageId: 1, sequence: 7, name: "Central" }} />);
     expect(screen.getByText("Send")).toBeDisabled();
   });
+  it("withholds the composer and chips for an unselected route_stop_patterns result", () => {
+    const source = { ...messagesWithResult[0], tool: "route_stop_patterns",
+      result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples", "pattern_id", "pattern_name", "stop_id"],
+        rows: [[1, "Central", 4.2, 128, "p1", "Pattern 1", "s1"]], summary: null, series: null, pairs: null } } as ConvMessage;
+    renderWithProviders(<Wrapper messages={[source]} onFollowup={vi.fn()} draftValue="" onDraftChange={vi.fn()} />);
+    expect(screen.getByText("Select a stop to ask about its stored observations.")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Ask about this result...")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Why this pattern?" })).not.toBeInTheDocument();
+  });
+
+  it("shows the composer again once a row is selected on a route_stop_patterns result", () => {
+    const source = { ...messagesWithResult[0], message_id: 22, tool: "route_stop_patterns",
+      result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples", "pattern_id", "pattern_name", "stop_id"],
+        rows: [[1, "Central", 4.2, 128, "p1", "Pattern 1", "s1"]], summary: null, series: null, pairs: null } } as ConvMessage;
+    renderWithProviders(<Wrapper messages={[source]} onFollowup={vi.fn()} draftValue="" onDraftChange={vi.fn()}
+      focus={{ messageId: 22, sequence: 1, name: "Central", patternId: "p1", stopId: "s1", rowIndex: 0 }} />);
+    expect(screen.queryByText("Select a stop to ask about its stored observations.")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about this result...")).toBeInTheDocument();
+  });
+
   it("renders nothing when there is no tool result to ground on", () => {
     const { container } = renderWithProviders(
       <Wrapper messages={[]} onFollowup={vi.fn()} draftValue="" onDraftChange={vi.fn()} />,
@@ -98,40 +118,6 @@ describe("FollowupChipsRow free-text input", () => {
     );
     await user.click(screen.getByText("Send"));
     expect(onFollowup).toHaveBeenCalledWith(1, "What about route 12?", true);
-  });
-
-  it("passes isDraft=false for a canned chip, even if its prompt text matches the current draft", async () => {
-    const user = userEvent.setup();
-    const onFollowup = vi.fn();
-    const chipPrompt = "Explain the pattern in this result in 3 sentences or fewer.";
-    renderWithProviders(
-      <Wrapper
-        messages={messagesWithResult}
-        onFollowup={onFollowup}
-        draftValue={chipPrompt}
-        onDraftChange={vi.fn()}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: "Why this pattern?" }));
-    expect(onFollowup).toHaveBeenCalledWith(1, chipPrompt, false);
-  });
-
-  it("de-emphasizes only the chip just clicked, not the others, for the current result", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <Wrapper
-        messages={messagesWithResult}
-        onFollowup={vi.fn()}
-        draftValue=""
-        onDraftChange={vi.fn()}
-      />,
-    );
-    const clicked = screen.getByRole("button", { name: "Why this pattern?" });
-    const other = screen.getByRole("button", { name: "Other slices?" });
-    expect(clicked).toHaveAttribute("aria-pressed", "false");
-    await user.click(clicked);
-    expect(clicked).toHaveAttribute("aria-pressed", "true");
-    expect(other).toHaveAttribute("aria-pressed", "false");
   });
 
   it("does not submit a whitespace-only draft", async () => {

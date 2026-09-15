@@ -36,6 +36,7 @@ def test_percentile_single_bucket_interpolates_within_bounds():
     # All 10 samples in [0, 60): the q-quantile lands inside that bin.
     counts = _hist(*([30] * 10))
     p50 = percentile_from_hist(counts, 0.5)
+    assert p50 is not None
     assert 0 <= p50 <= 60
 
 
@@ -45,6 +46,7 @@ def test_percentile_split_distribution():
     p50 = percentile_from_hist(counts, 0.5)
     p90 = percentile_from_hist(counts, 0.9)
     assert p50 == 60.0  # rank 10 of 20 → top edge of first bin
+    assert p90 is not None
     assert 600 <= p90 < 660  # rank 18 → inside the second populated bin
 
 
@@ -53,6 +55,7 @@ def test_percentile_monotonic_in_q():
     p10 = percentile_from_hist(counts, 0.1)
     p50 = percentile_from_hist(counts, 0.5)
     p90 = percentile_from_hist(counts, 0.9)
+    assert p10 is not None and p50 is not None and p90 is not None
     assert p10 < p50 < p90
 
 
