@@ -29,12 +29,13 @@ export function RouteAnalysisTab() {
   const names = useRouteNames(id);
   const [selection, setSelection] = useState<{ route: string | null; sequence: number } | null>(null);
   const [notice, setNotice] = useState("");
+  const [activeTab, setActiveTab] = useState<"map" | "trend" | "byStop">("trend");
   const stops = query.data ? orderedStops(query.data) : [];
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? stops.find((s) => s.avg_min != null) ?? stops[0];
   return <div className="focus-page">
     <header className="focus-header"><h1>{t("investigate")}</h1><div className="focus-actions">
-      <button disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
+      <button className="btn-ghost" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
         ["agency_id", "route_code", "from", "to", "dow", "time_band", "service", "stop_sequence", "stop_id", "stop_name", "mean_departure_delay_minutes", "observations", "comparison_mean_minutes"],
         ...stops.map((s) => [id, route, ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, s.stop_sequence, s.stop_id, s.stop_name, s.avg_min, s.samples, matchedPrevious(s, prevStops)]),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
@@ -51,19 +52,32 @@ export function RouteAnalysisTab() {
         {compare && previous.error && <ErrorBanner error={previous.error} onRetry={() => void previous.refetch()} />}
         {compare && previous.isPending && <p className="focus-muted" role="status">{t("previous")} …</p>}
         {compare && !previous.isPending && !previous.error && !prevStops.length && <p>{t("compareUnavailable")}</p>}
+        <div className="focus-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={activeTab === "trend"} onClick={() => setActiveTab("trend")}>{t("tabTrend")}</button>
+          <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => setActiveTab("map")}>{t("tabMap")}</button>
+          <button type="button" role="tab" aria-selected={activeTab === "byStop"} onClick={() => setActiveTab("byStop")}>{t("tabByStop")}</button>
+        </div>
         <div className="focus-split">
-          <div><div className="focus-actions focus-muted"><span style={{ color: "var(--accent)" }}>● {t("selected")}</span>{compare && <span>┄ {t("previous")}</span>}<span>○ {t("missing")}</span></div><StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
-            <p className="focus-muted">{t("selected")} {ctx.from} – {ctx.to}{compare && ` · ${t("previous")} ${prevCtx.from} – ${prevCtx.to}`}</p>
+          <div>
+            {activeTab === "trend" && <div className="focus-tab-panel">
+              <div className="focus-actions focus-muted"><span style={{ color: "var(--accent)" }}>● {t("selected")}</span>{compare && <span>┄ {t("previous")}</span>}<span>○ {t("missing")}</span></div>
+              <StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
+              <p className="focus-muted">{t("selected")} {ctx.from} – {ctx.to}{compare && ` · ${t("previous")} ${prevCtx.from} – ${prevCtx.to}`}</p>
+            </div>}
+            {activeTab === "map" && <div className="focus-tab-panel focus-tab-panel--map">
+              <AnalysisMap data={query.data!} selected={selected} />
+            </div>}
+            {activeTab === "byStop" && <div className="focus-tab-panel">
+              <div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("stop")}</th><th>{t("mean")}</th><th>{t("samples")}</th></tr></thead><tbody>
+                {stops.map((s) => <tr key={s.stop_sequence}><td>{s.stop_name}</td><td>{s.avg_min ?? t("missing")}</td><td>{s.samples}</td></tr>)}
+              </tbody></table></div>
+            </div>}
+            <p className="focus-muted">{t("caveat")}</p>
           </div>
           <aside className="focus-aside"><label>{t("selectedStop")}<select style={{ width: "100%", margin: "12px 0" }} value={selected?.stop_sequence ?? ""} onChange={(e) => setSelection({ route, sequence: Number(e.target.value) })}>
             {stops.map((s) => <option key={s.stop_sequence} value={s.stop_sequence}>{s.stop_name}</option>)}
           </select></label><p><strong>{selected?.avg_min == null ? "—" : selected.avg_min.toFixed(1)}</strong> {t("minutes")}</p><p>{t("samples")} {selected?.samples ?? 0}</p></aside>
         </div>
-        <p className="focus-muted">{t("caveat")}</p>
-        <AnalysisMap data={query.data!} selected={selected} />
-        <details><summary>{t("details")}</summary><div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("stop")}</th><th>{t("mean")}</th><th>{t("samples")}</th></tr></thead><tbody>
-          {stops.map((s) => <tr key={s.stop_sequence}><td>{s.stop_name}</td><td>{s.avg_min ?? t("missing")}</td><td>{s.samples}</td></tr>)}
-        </tbody></table></div></details>
       </>}
     </AsyncSection>}
   </div>;

@@ -9,7 +9,19 @@
 .focus-filters select, .focus-filters input { max-width: 235px; min-height: 38px; padding: 6px 9px; }
 .focus-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .focus-actions button, .focus-actions a { padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 5px; background: var(--bg-surface); color: var(--text-primary); text-decoration: none; font-size: 13px; }
+/* Higher specificity than the generic rule above (two classes vs. one class
+   + one type) so .btn-ghost buttons inside .focus-actions (CSV/share
+   actions on the report and route-analysis pages) actually get the shared
+   accent styling instead of being silently overridden by it. */
+.focus-actions .btn-ghost { border-color: var(--card-border); color: var(--accent-strong); }
+.focus-actions .btn-ghost:disabled { color: var(--text-tertiary); border-color: var(--border-subtle); }
 .focus-split { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; }
+.focus-tab-panel { margin-bottom: 16px; }
+/* A real height, not squeezed to match whichever chart used to sit beside
+   it in the old fixed 55/45 split -- the route shape needs room to be
+   legible. */
+.focus-tab-panel--map { min-height: 320px; }
+.focus-tab-panel--map > * { min-height: 320px; }
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
 .focus-aside strong { font-size: 30px; color: var(--color-danger); }
 .focus-chart { width: 100%; height: 300px; min-height: 230px; }
@@ -19,8 +31,13 @@
 .focus-table th { font-weight: 500; color: var(--text-secondary); }
 .focus-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border-subtle); }
 .focus-tabs button { background: none; color: var(--text-primary); border: 0; padding: 12px 0; border-bottom: 3px solid transparent; }
-.focus-tabs button[aria-pressed="true"] { border-color: var(--accent); font-weight: 700; }
+.focus-tabs button[aria-pressed="true"], .focus-tabs button[aria-selected="true"] { border-color: var(--accent); font-weight: 700; }
 .focus-saved { list-style: none; padding: 0; }
 .focus-saved li { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; gap: 20px; border-bottom: 1px solid var(--border-soft); }
+/* Closing footer so the report page never ends flush against the last
+   line of body text -- adds real breathing room plus one more concrete
+   next action (CSV / share link) instead of trailing off after the
+   definitions accordion. */
+.focus-report-footer { margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; padding-bottom: 28px; }
 @media (max-width: 900px) { .focus-split { grid-template-columns: 1fr; } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
 @media print { body { background: white; } .app-shell { display: block !important; height: auto !important; } .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack { display: none !important; } main { overflow: visible !important; } .focus-page { color: black; } .focus-page svg { break-inside: avoid; } }
