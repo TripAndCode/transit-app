@@ -148,10 +148,11 @@
   --bg-soft-hover: #2a2f4a;
   --skeleton-a: #202642;
   --skeleton-b: #30385A;
-  /* Contrast-checked against --bg-surface (#141726, 6.12:1) and --bg-soft
-     (#202642, 5.1:1) -- both comfortably clear WCAG AA (4.5:1). */
+  /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
+     --bg-soft -- re-check contrast if this color or those tokens change. */
   --accent-strong: #7C96D9;
-  /* Contrast-checked against --bg-surface (6.72:1) and --bg-soft (5.6:1). */
+  /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
+     --bg-soft -- re-check contrast if this color or those tokens change. */
   --delay-flag: #E08A54;
   /* Border, not text -- reuses the existing dark --border-subtle value
      rather than introducing a third near-identical border hue. */
