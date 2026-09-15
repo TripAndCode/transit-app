@@ -42,6 +42,15 @@
      on light — not changing the light-mode value here, out of scope. */
   --color-warning: #C99A2E;
   --color-danger: #c0392b;
+  /* Deepened variant of --accent for primary buttons/active states -- more
+     confident at button weight than --accent reads on its own. */
+  --accent-strong: #3E5C9A;
+  /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
+     distinct from --delay-severe/--color-danger, which stay the map's own
+     per-point severity ramp; this is specifically for aggregate counts. */
+  --delay-flag: #C4501F;
+  --card-border: #E4E7EC;
+  --card-radius: 10px;
   /* Tooltip is intentionally theme-invariant (always a dark chip with white
      text, in both light and dark mode) — NOT derived from --text-primary,
      which flips light-to-dark and would otherwise break tooltip contrast. */
@@ -139,6 +148,14 @@
   --bg-soft-hover: #2a2f4a;
   --skeleton-a: #202642;
   --skeleton-b: #30385A;
+  /* Contrast-checked against --bg-surface (#141726, 6.12:1) and --bg-soft
+     (#202642, 5.1:1) -- both comfortably clear WCAG AA (4.5:1). */
+  --accent-strong: #7C96D9;
+  /* Contrast-checked against --bg-surface (6.72:1) and --bg-soft (5.6:1). */
+  --delay-flag: #E08A54;
+  /* Border, not text -- reuses the existing dark --border-subtle value
+     rather than introducing a third near-identical border hue. */
+  --card-border: var(--border-subtle);
 }
 
 /* Keep native date controls legible on both themes. Without an explicit

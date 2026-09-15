@@ -1,0 +1,22 @@
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  background: var(--bg-surface);
+  text-align: center;
+}
+.stat-tile__label {
+  font-size: 9.5px;
+  color: var(--text-secondary);
+}
+.stat-tile__value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+.stat-tile__value--flagged {
+  color: var(--delay-flag);
+}
