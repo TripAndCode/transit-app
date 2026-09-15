@@ -10,7 +10,8 @@ const LEADING_PATTERN_PREFIX = /^[0-9][0-9A-Za-z-]*\s+/;
 
 function baseRouteName(route: Route): string {
   const name = route.route_long_name || route.route_short_name || route.route_id;
-  return name.replace(LEADING_PATTERN_PREFIX, "");
+  const stripped = name.replace(LEADING_PATTERN_PREFIX, "");
+  return stripped || name;
 }
 
 export function routeGroups(routes: Route[]) {

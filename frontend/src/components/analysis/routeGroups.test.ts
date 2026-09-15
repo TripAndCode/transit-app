@@ -28,7 +28,7 @@ describe("routeGroups", () => {
     expect(groups.map(([name]) => name).sort()).toEqual(["五月が丘線", "共立ハイツ線"]);
   });
 
-  it("reproduces agency 13's real shape: 8 lines from 34 route_codes", () => {
+  it("reproduces agency 13's real shape: 8 of 11 route_codes collapse into the 共立ハイツ線 line", () => {
     const names = [
       ["1261605731", "11-51 大迫団地線"], ["1673796142", "11-19 共立ハイツ線"],
       ["1741626971", "11 フジハイツ・イトーピア線"], ["2165965154", "17-1 五月が丘・ジアウトレット広島線"],
@@ -51,5 +51,10 @@ describe("routeGroups", () => {
   it("skips routes without a route_code", () => {
     const routes: Route[] = [{ route_id: "x", route_code: null, route_long_name: "共立ハイツ線", route_short_name: null, trip_headsigns: [] }];
     expect(routeGroups(routes)).toHaveLength(0);
+  });
+
+  it("keeps a name that is entirely a pattern-number token instead of collapsing it to an empty group", () => {
+    const routes = [route("a", "14-5"), route("b", "17-1")];
+    expect(routeGroups(routes).map(([name]) => name).sort()).toEqual(["14-5", "17-1"]);
   });
 });
