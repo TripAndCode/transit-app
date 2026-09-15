@@ -597,12 +597,13 @@ export function useFollowup(agencyId: number, authed: boolean) {
     mutationFn: async (vars: {
       conversationId: string;
       contextMessageId: number;
+      contextRowIndex?: number;
       question: string;
     }) => {
       if (authed) {
         return apiPost<AppendMessageResult>(
           `/api/${agencyId}/conversations/${vars.conversationId}/followup`,
-          { question: vars.question, context_message_id: vars.contextMessageId },
+          { question: vars.question, context_message_id: vars.contextMessageId, context_row_index: vars.contextRowIndex },
         );
       }
       // Anon path: look up context message from localStorage
@@ -616,9 +617,11 @@ export function useFollowup(agencyId: number, authed: boolean) {
           context_tool: ctx.tool ?? null,
           context_args: ctx.args ?? null,
           context_result: ctx.result ?? null,
+          context_row_index: vars.contextRowIndex,
         },
       );
       // Persist synthetic messages to localStorage
+      resp.assistant.args = { ...resp.assistant.args, context_message_id: vars.contextMessageId };
       conversationsAnon.appendMessage(vars.conversationId, resp.user);
       conversationsAnon.appendMessage(vars.conversationId, resp.assistant);
       return resp;

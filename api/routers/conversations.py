@@ -29,6 +29,7 @@ from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str
+from pipeline.query.followup_context import select_context_row
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 from pipeline.query.tools import dispatch, render_tool_result
 
@@ -429,6 +430,7 @@ class FollowupBody(BaseModel):
     question: str = Field(...)
     # Authed path: reference an existing assistant message stored in DB
     context_message_id: int | None = None
+    context_row_index: int | None = Field(default=None, ge=0, strict=True)
     # Anon path: inline the prior result (frontend has it in localStorage)
     context_tool: str | None = None
     context_args: dict[str, Any] | None = None
@@ -480,6 +482,7 @@ async def followup_endpoint(
                 status_code=400,
                 detail="anon followup requires inline context (context_result)",
             )
+        selected_result = select_context_row(body.context_result, body.context_row_index)
 
         # Same daily LLM-call quota as chat_with_tools's two call sites
         # (pipeline.query.chat) — without this, an anonymous caller could
@@ -496,7 +499,7 @@ async def followup_endpoint(
             question=body.question,
             context_tool=body.context_tool,
             context_args=body.context_args,
-            context_result=body.context_result,
+            context_result=selected_result,
             locale=locale,
         )
         _raise_for_followup_error(err)
@@ -523,7 +526,7 @@ async def followup_endpoint(
                 "role": "assistant",
                 "chip_id": None,
                 "tool": None,
-                "args": {"context_message_id": body.context_message_id},
+                "args": {"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
                 "signature_hash": None,
                 "result": None,
                 "rendered_summary": answer,
@@ -556,7 +559,7 @@ async def followup_endpoint(
         question=body.question,
         context_tool=ctx_msg.get("tool"),
         context_args=ctx_msg.get("args"),
-        context_result=ctx_msg.get("result"),
+        context_result=select_context_row(ctx_msg.get("result"), body.context_row_index),
         locale=locale,
     )
     _raise_for_followup_error(err)
@@ -581,7 +584,7 @@ async def followup_endpoint(
             role="assistant",
             chip_id=None,
             tool=None,
-            args={"context_message_id": body.context_message_id},
+            args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
             signature_hash=None,
             result=None,
             rendered_summary=answer,
