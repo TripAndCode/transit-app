@@ -12,8 +12,12 @@ const FOLLOWUP_MAX_CHARS_FALLBACK = 500;
 /** Bottom-of-thread follow-up composer. Grounds a typed follow-up on an
  *  explicit `focus` selection when one is given, otherwise on the most
  *  recent assistant message that carries a tool result, so multi-turn
- *  follow-ups never compound LLM-generated answers. Hidden when there is
- *  no message to ground on (no tool result, or a stale/unavailable focus). */
+ *  follow-ups never compound LLM-generated answers. Hidden entirely when
+ *  there is no message to ground on (no tool result, or a stale/unavailable
+ *  focus); replaced with a select-a-stop prompt, instead of hidden, when the
+ *  grounding message is an unselected `route_stop_patterns` result, since
+ *  answering against the full multi-pattern table would silently truncate
+ *  at the same 50-row preview limit this feature exists to avoid. */
 export function FollowupChipsRow({
   messages,
   t,
