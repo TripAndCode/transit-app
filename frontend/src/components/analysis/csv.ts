@@ -7,13 +7,24 @@ export function csvText(rows: unknown[][]): string {
   }).join(",")).join("\r\n");
 }
 
-export function downloadCsv(name: string, rows: unknown[][]) {
-  const url = URL.createObjectURL(new Blob([csvText(rows)], { type: "text/csv;charset=utf-8" }));
+/** Creates a temporary object URL + anchor to trigger a client-side file download, then cleans both up. */
+export function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = name.replace(/[^\w.-]/g, "_") + ".csv";
+  anchor.download = filename;
   document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+export function downloadCsv(name: string, rows: unknown[][]) {
+  triggerBlobDownload(
+    new Blob([csvText(rows)], { type: "text/csv;charset=utf-8" }),
+    name.replace(/[^\w.-]/g, "_") + ".csv",
+  );
 }

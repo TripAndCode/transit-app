@@ -79,11 +79,10 @@ jobs:
       # This runner's root filesystem is small and shared with a lot of
       # preinstalled tooling this job never uses (Android SDK, .NET, GHC,
       # etc.) — reclaim it before anything else runs, including `poetry
-      # install` itself: the ML embedder dependency alone is large enough
-      # that installing it before this cleanup can exhaust the disk before
-      # the db/Dockerfile image build (the other big consumer, see below)
-      # ever starts. Hundreds of small Postgres data files written by the
-      # suite have also tipped this already-tight disk into intermittent
+      # install` itself: the db/Dockerfile image build (the big consumer,
+      # see below) can exhaust the disk before this cleanup if it runs
+      # first. Hundreds of small Postgres data files written by the suite
+      # have also tipped this already-tight disk into intermittent
       # `DiskFull` mid-run in the past.
       - name: Free disk space on the runner
         run: |

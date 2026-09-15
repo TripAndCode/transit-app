@@ -180,22 +180,22 @@ def test_copilot_anon_ip_daily_limit_reads_own_env_var(monkeypatch):
 async def test_copilot_quota_exceeded_handler_returns_429_with_machine_code():
     resp = await copilot_quota_exceeded_handler(_fake_request("en"), Exception())
     assert resp.status_code == 429
-    body = json.loads(resp.body)
+    body = json.loads(bytes(resp.body))
     assert body["code"] == COPILOT_ANON_QUOTA_EXCEEDED_CODE
     assert body["detail"]  # non-empty, user-facing
 
 
 @pytest.mark.asyncio
 async def test_copilot_quota_exceeded_handler_localized_detail():
-    en = json.loads((await copilot_quota_exceeded_handler(_fake_request("en"), Exception())).body)["detail"]
-    ja = json.loads((await copilot_quota_exceeded_handler(_fake_request("ja"), Exception())).body)["detail"]
+    en = json.loads(bytes((await copilot_quota_exceeded_handler(_fake_request("en"), Exception())).body))["detail"]
+    ja = json.loads(bytes((await copilot_quota_exceeded_handler(_fake_request("ja"), Exception())).body))["detail"]
     assert en != ja
 
 
 @pytest.mark.asyncio
 async def test_copilot_quota_exceeded_handler_unknown_locale_falls_back_to_ja():
-    body = json.loads((await copilot_quota_exceeded_handler(_fake_request("fr"), Exception())).body)
-    ja_body = json.loads((await copilot_quota_exceeded_handler(_fake_request("ja"), Exception())).body)
+    body = json.loads(bytes((await copilot_quota_exceeded_handler(_fake_request("fr"), Exception())).body))
+    ja_body = json.loads(bytes((await copilot_quota_exceeded_handler(_fake_request("ja"), Exception())).body))
     assert body["detail"] == ja_body["detail"]
 
 
@@ -215,7 +215,7 @@ class _FakeResponse:
 def test_get_or_issue_anon_session_mints_cookie_when_absent():
     request = _FakeRequest()
     response = _FakeResponse()
-    sid = get_or_issue_anon_session(request, response)
+    sid = get_or_issue_anon_session(request, response)  # type: ignore[arg-type]
     assert isinstance(sid, str) and sid
     assert len(response.set_cookie_calls) == 1
     _name, _value, kwargs = response.set_cookie_calls[0]
@@ -229,14 +229,14 @@ def test_get_or_issue_anon_session_reuses_valid_existing_cookie():
     # Issue once to get a realistic signed cookie value.
     first_request = _FakeRequest()
     first_response = _FakeResponse()
-    sid = get_or_issue_anon_session(first_request, first_response)
+    sid = get_or_issue_anon_session(first_request, first_response)  # type: ignore[arg-type]
     _name, signed_value, _kwargs = first_response.set_cookie_calls[0]
 
     # A second request presenting that same signed cookie must resolve to the
     # SAME session id, and must not re-issue a cookie.
     second_request = _FakeRequest(cookies={ASK_ANON_SESSION_COOKIE_NAME: signed_value})
     second_response = _FakeResponse()
-    sid2 = get_or_issue_anon_session(second_request, second_response)
+    sid2 = get_or_issue_anon_session(second_request, second_response)  # type: ignore[arg-type]
     assert sid2 == sid
     assert second_response.set_cookie_calls == []
     # Sanity: the raw cookie really does verify against the module's signer.
@@ -248,7 +248,7 @@ def test_get_or_issue_anon_session_falls_back_on_tampered_cookie():
 
     request = _FakeRequest(cookies={ASK_ANON_SESSION_COOKIE_NAME: "not-a-real-signed-token"})
     response = _FakeResponse()
-    sid = get_or_issue_anon_session(request, response)
+    sid = get_or_issue_anon_session(request, response)  # type: ignore[arg-type]
     assert isinstance(sid, str) and sid
     # Falls back sanely: mints and sets a fresh cookie instead of raising.
     assert len(response.set_cookie_calls) == 1
@@ -270,20 +270,20 @@ def _fake_request(locale="ja"):
 async def test_ask_quota_exceeded_handler_returns_429_with_machine_code():
     resp = await ask_quota_exceeded_handler(_fake_request("en"), Exception())
     assert resp.status_code == 429
-    body = json.loads(resp.body)
+    body = json.loads(bytes(resp.body))
     assert body["code"] == ASK_ANON_QUOTA_EXCEEDED_CODE
     assert body["detail"]  # non-empty, user-facing
 
 
 @pytest.mark.asyncio
 async def test_ask_quota_exceeded_handler_localized_detail():
-    en = json.loads((await ask_quota_exceeded_handler(_fake_request("en"), Exception())).body)["detail"]
-    ja = json.loads((await ask_quota_exceeded_handler(_fake_request("ja"), Exception())).body)["detail"]
+    en = json.loads(bytes((await ask_quota_exceeded_handler(_fake_request("en"), Exception())).body))["detail"]
+    ja = json.loads(bytes((await ask_quota_exceeded_handler(_fake_request("ja"), Exception())).body))["detail"]
     assert en != ja
 
 
 @pytest.mark.asyncio
 async def test_ask_quota_exceeded_handler_unknown_locale_falls_back_to_ja():
-    body = json.loads((await ask_quota_exceeded_handler(_fake_request("fr"), Exception())).body)
-    ja_body = json.loads((await ask_quota_exceeded_handler(_fake_request("ja"), Exception())).body)
+    body = json.loads(bytes((await ask_quota_exceeded_handler(_fake_request("fr"), Exception())).body))
+    ja_body = json.loads(bytes((await ask_quota_exceeded_handler(_fake_request("ja"), Exception())).body))
     assert body["detail"] == ja_body["detail"]

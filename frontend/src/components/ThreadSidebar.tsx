@@ -1,13 +1,10 @@
 import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
-import { MessageSquareText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
-import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
-import { Z_INDEX } from "../styles/zIndex";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -16,6 +13,13 @@ function isThisWeek(iso: string): boolean {
   const now = Date.now();
   const weekMs = 7 * 24 * 60 * 60 * 1000;
   return now - d < weekMs && d <= now;
+}
+
+function conversationScopeParts(
+  conv: Conversation,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string[] {
+  return [...(conv.filter_ctx.routes ?? []), filterSummary(conv.filter_ctx, t)];
 }
 
 function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -52,21 +56,18 @@ type MenuState = {
 // ─── main component ──────────────────────────────────────────────────────────
 
 type Props = {
-  embedded?: boolean;
   agencyId: number;
   activeId: string | null;
   onSelect: (conversationId: string | null) => void;
   onNewThread: () => void;
 };
 
-export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread, embedded = false }: Props) {
+export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Props) {
   const { t } = useTranslation();
-  const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const { data: conversations = [], isLoading } = useConversations(agencyId);
   const updateConv = useUpdateConversation(agencyId);
   const deleteConv = useDeleteConversation(agencyId);
 
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -130,10 +131,10 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread, embed
     }
   }
 
-  // Group conversations
+  // Filter by the search query, then group the surviving conversations
   const query = search.normalize("NFKC").trim().toLocaleLowerCase();
   const matching = conversations.filter((c) =>
-    [c.title, ...(c.filter_ctx.routes ?? []), filterSummary(c.filter_ctx, t)]
+    [c.title, ...conversationScopeParts(c, t)]
       .join(" ").normalize("NFKC").toLocaleLowerCase().includes(query),
   );
   const pinned = matching.filter((c) => c.pinned);
@@ -173,7 +174,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread, embed
       <div style={{ padding: "var(--space-3)" }}>
         <button
           type="button"
-          onClick={() => { onNewThread(); setMobileOpen(false); }}
+          onClick={onNewThread}
           style={{
             width: "100%",
             background: "var(--accent)",
@@ -232,27 +233,22 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread, embed
           items.length === 0 ? null : (
             <section key={labelKey}>
               <div style={groupHeaderStyle}>{emoji}{t(labelKey)}</div>
-              {items.map((conv) => {
-                const filterSummaryText = [...(conv.filter_ctx.routes ?? []), filterSummary(conv.filter_ctx, t)]
-                  .filter(Boolean)
-                  .join(" ・ "); // i18n-ignore: locale-neutral separator
-                return (
-                  <ConvItem
-                    key={conv.conversation_id}
-                    conv={conv}
-                    isActive={conv.conversation_id === activeId}
-                    isRenaming={renamingId === conv.conversation_id}
-                    renameValue={renameValue}
-                    renameInputRef={renameInputRef}
-                    onRenameChange={setRenameValue}
-                    onRenameCommit={commitRename}
-                    onRenameBlur={commitRename}
-                    onSelect={() => { onSelect(conv.conversation_id); setMobileOpen(false); }}
-                    onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                    filterSummaryText={filterSummaryText}
-                  />
-                );
-              })}
+              {items.map((conv) => (
+                <ConvItem
+                  key={conv.conversation_id}
+                  conv={conv}
+                  isActive={conv.conversation_id === activeId}
+                  isRenaming={renamingId === conv.conversation_id}
+                  renameValue={renameValue}
+                  renameInputRef={renameInputRef}
+                  onRenameChange={setRenameValue}
+                  onRenameCommit={commitRename}
+                  onRenameBlur={commitRename}
+                  onSelect={() => onSelect(conv.conversation_id)}
+                  onContextMenu={(e) => openMenu(e, conv.conversation_id)}
+                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(" ・ ")} // i18n-ignore: locale-neutral separator
+                />
+              ))}
             </section>
           )
         )}
@@ -291,145 +287,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread, embed
     </div>
   );
 
-  if (embedded) return <>{sidebarContent}{contextMenu}</>;
-
-  if (!isMobile) {
-    return (
-      <>
-        {/* Desktop sidebar */}
-        <aside
-          style={{
-            width: 240,
-            flexShrink: 0,
-            background: "var(--bg-surface)",
-            borderRight: "1px solid var(--border-soft)",
-            display: "flex",
-            flexDirection: "column",
-            height: "100%",
-            position: "relative",
-          }}
-        >
-          {sidebarContent}
-        </aside>
-
-        {contextMenu}
-      </>
-    );
-  }
-
-  return (
-    <>
-      {/* Mobile: a persistent in-flow trigger row, not a floating
-          position:fixed button. Sidebar.tsx's own mobile nav trigger
-          (its isMobile branch) is deliberately a slim, non-fixed rail so
-          it doesn't float on top of the sticky GuestPrompt/data-staleness/
-          feed-health banners; this trigger used to be position:fixed at a
-          hardcoded top/left, which landed it directly on top of that rail
-          on the Ask tab specifically (the one place both components render
-          together) -- two stacked, near-identical hamburger glyphs opening
-          two different drawers. Keeping this trigger in normal flow at the
-          top of the Ask tab's own content area, with a distinct labeled
-          icon (MessageSquareText, vs. Sidebar's unlabeled PanelLeft), makes
-          the two triggers sit side by side instead of overlapping, and
-          makes their different purposes (app navigation vs. conversation
-          history) obvious. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          height: 36,
-          flexShrink: 0,
-          padding: "0 var(--space-2)",
-          background: "var(--bg-surface)",
-          borderBottom: "1px solid var(--border-soft)",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          aria-label={t("ask.sidebar.open_threads")}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--text-secondary)",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 12,
-            fontWeight: 500,
-            padding: "4px 8px",
-            borderRadius: "var(--radius)",
-          }}
-        >
-          <MessageSquareText size={16} strokeWidth={1.5} aria-hidden="true" />
-          {t("ask.sidebar.open_threads")}
-        </button>
-      </div>
-
-      {/* Backdrop */}
-      {mobileOpen && (
-        <div
-          onClick={() => setMobileOpen(false)}
-          role="presentation"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.3)",
-            zIndex: Z_INDEX.drawerBackdrop,
-          }}
-        />
-      )}
-
-      {/* Drawer */}
-      <aside
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          bottom: 0,
-          width: 260,
-          zIndex: Z_INDEX.drawer,
-          transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
-          transition: "transform 200ms ease-out",
-          background: "var(--bg-surface)",
-          borderRight: "1px solid var(--border-soft)",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Close row */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            padding: "var(--space-2) var(--space-3)",
-            borderBottom: "1px solid var(--border-soft)",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setMobileOpen(false)}
-            style={{
-              background: "none",
-              border: "none",
-              fontSize: 20,
-              cursor: "pointer",
-              color: "var(--text-secondary)",
-              lineHeight: 1,
-              padding: 4,
-            }}
-            aria-label={t("common.close")}
-          >
-            ×
-          </button>
-        </div>
-        <div style={{ flex: 1, overflow: "hidden" }}>{sidebarContent}</div>
-      </aside>
-
-      {contextMenu}
-    </>
-  );
+  return <>{sidebarContent}{contextMenu}</>;
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────

@@ -16,7 +16,15 @@ def _reset_embedder():
 
 
 def test_embedder_unavailable_when_model_id_invalid(monkeypatch):
-    """Failure path: bad model id → available=False, no crash."""
+    """Failure path: available=False, no crash, embed() raises.
+
+    The cause differs by environment: with `sentence-transformers` installed
+    (local dev, `poetry install --with embeddings`), this exercises the HF
+    lookup failing on a bad model id; with it absent (CI's default install,
+    the deploy image), the earlier `ModuleNotFoundError` takes the same
+    except-and-degrade path instead. Both exercise the same public contract
+    this test actually pins.
+    """
     e = Embedder(model_id="nonexistent/this-model-does-not-exist")
     assert e.available is False
     with pytest.raises(RuntimeError):

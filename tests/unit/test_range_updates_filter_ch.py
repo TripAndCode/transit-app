@@ -13,6 +13,7 @@ bug class, guarded the same way, for a different SQL builder.
 
 import os
 from datetime import date, datetime, timezone
+from typing import Any
 
 import pytest
 
@@ -25,8 +26,8 @@ from api.range import (
 )
 
 
-def _ctx(**over):
-    base = dict(
+def _ctx(**over: Any) -> RangeCtx:
+    base: dict[str, Any] = dict(
         from_date=date(2026, 5, 13),
         to_date=date(2026, 6, 11),
         dow="all",
