@@ -1060,7 +1060,12 @@ async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, loca
 
 
 async def _tool_route_stop_patterns(
-    args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None,
+    args: dict,
+    ctx: RangeCtx,
+    conn,
+    agency_id: int,
+    locale: str,
+    ch=None,
 ) -> ToolResult:
     route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
     if isinstance(route, ToolResult):
@@ -1071,8 +1076,9 @@ async def _tool_route_stop_patterns(
         return ToolResult(kind="empty", summary=_summary("stop_patterns_large", lang=locale))
     if not rows:
         return ToolResult(kind="empty", summary=_summary("stop_patterns_empty", lang=locale))
-    return ToolResult(kind="table", summary=_summary("stop_patterns", lang=locale, route=route),
-                      columns=PATTERN_COLUMNS, rows=rows)
+    return ToolResult(
+        kind="table", summary=_summary("stop_patterns", lang=locale, route=route), columns=PATTERN_COLUMNS, rows=rows
+    )
 
 
 async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:

@@ -88,7 +88,9 @@ async def query_stop_patterns(agency_id: int, ctx: RangeCtx, conn, ch=None, *, r
         "LEFT JOIN static_stops s ON s.agency_id = st.agency_id AND s.stop_id = st.stop_id "
         "WHERE st.agency_id = $1 AND st.trip_id = ANY($2::text[]) "
         "ORDER BY st.trip_id, st.stop_sequence LIMIT $3",
-        agency_id, sorted({row[0] for row in observations}), MAX_SCHEDULE_ROWS + 1,
+        agency_id,
+        sorted({row[0] for row in observations}),
+        MAX_SCHEDULE_ROWS + 1,
     )
     if len(scheduled) > MAX_SCHEDULE_ROWS:
         raise PatternWindowTooLarge

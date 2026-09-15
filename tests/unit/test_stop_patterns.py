@@ -32,8 +32,14 @@ def test_complete_pattern_preserves_missing_and_weights_observations():
 
 
 def test_different_order_route_or_pattern_never_merges():
-    schedule = [stop("a", 1, "A"), stop("a", 2, "B"), stop("b", 1, "B"), stop("b", 2, "A"),
-                stop("c", 1, "A", "other"), stop("c", 2, "B", "other")]
+    schedule = [
+        stop("a", 1, "A"),
+        stop("a", 2, "B"),
+        stop("b", 1, "B"),
+        stop("b", 2, "A"),
+        stop("c", 1, "A", "other"),
+        stop("c", 2, "B", "other"),
+    ]
     rows = assemble_patterns([("a", 1, 60, 1), ("b", 1, 120, 1), ("c", 1, 180, 1)], schedule)
     assert len({r[0] for r in rows}) == 3
 
@@ -97,9 +103,7 @@ async def test_too_many_assembled_rows_raises():
     ch = SimpleNamespace(query=AsyncMock(return_value=SimpleNamespace(result_rows=observations)))
     # Distinct stop_ids per trip so each trip forms its own pattern instead of
     # merging into one -- pattern identity is the ordered (seq, stop_id) signature.
-    scheduled = [
-        stop(trip, seq, f"{trip}-{seq}") for trip in trips for seq in (1, 2, 3)
-    ]
+    scheduled = [stop(trip, seq, f"{trip}-{seq}") for trip in trips for seq in (1, 2, 3)]
     conn = SimpleNamespace(fetch=AsyncMock(return_value=scheduled))
     with pytest.raises(PatternWindowTooLarge):
         await query_stop_patterns(9, ctx, conn, ch, route="C10")
