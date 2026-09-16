@@ -1022,3 +1022,59 @@ async def test_ask_rejects_unknown_panel_ctx_tab(ask_client):
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_signed_in_unapproved_caller_never_reaches_llm(ask_client, monkeypatch):
+    """A signed-in caller whose ``users.llm_approved`` is False gets the same
+    honest degrade an anonymous caller does -- 200, no tool_call, provider
+    never called.
+
+    Covers the router's own ``llm_approved=user.llm_approved if user is not
+    None else False`` wiring, which no other test exercises: the anonymous
+    case takes the ``else False`` branch, and every other signed-in test
+    passes ``llm_approved=True``. Inverting or dropping that ternary would
+    silently let unapproved signed-in users reach the LLM, and only this
+    test would catch it. Exercises the REAL chat_with_tools with just the
+    provider faked, mirroring test_anonymous_caller_never_reaches_llm_or_quota.
+    """
+    from types import SimpleNamespace
+
+    from api.deps import get_current_user_optional
+    from api.main import app
+    from api.security import User
+    from pipeline.query import chat as chat_module
+
+    client, agency_id = ask_client
+    unapproved = User(
+        user_id=1, email="t@test", name="T", avatar_url=None, role="user", suspended_at=None, llm_approved=False
+    )
+    app.dependency_overrides[get_current_user_optional] = lambda: unapproved
+
+    calls = {"n": 0}
+
+    class _FakeClient:
+        def chat_completions(self, **kwargs):
+            calls["n"] += 1
+            func = SimpleNamespace(name="capabilities", arguments="{}")
+            call = SimpleNamespace(function=func, id="call_1", type="function")
+            return SimpleNamespace(content=None, tool_calls=[call]), None
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    try:
+        resp = await client.post(
+            f"/api/{agency_id}/ask",
+            json={"question": "何ができますか？"},
+            headers={"Origin": TEST_ORIGIN},
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user_optional, None)
+
+    assert resp.status_code == 200
+    assert resp.json()["tool_call"] is None
+    assert calls["n"] == 0, "the LLM provider must never be reached by an unapproved signed-in caller"

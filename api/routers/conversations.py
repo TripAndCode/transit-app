@@ -9,7 +9,7 @@ from typing import Any
 import asyncpg
 import clickhouse_connect
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
@@ -422,23 +422,13 @@ class FollowupBody(BaseModel):
     # actually fire for a real oversized question -- only for the mocked
     # unit test that calls `answer_followup` directly.
     question: str = Field(...)
-    # Authed path: reference an existing assistant message stored in DB
+    # Grounding context is always read from the referenced assistant message
+    # in the DB, never inlined by the client: this endpoint requires a
+    # signed-in, admin-approved caller, so the prior turn is always stored
+    # server-side. A missing reference is rejected in the handler rather than
+    # by a validator here, so the 400 carries the endpoint's own message.
     context_message_id: int | None = None
     context_row_index: int | None = Field(default=None, ge=0, strict=True)
-    # Anon path: inline the prior result (frontend has it in localStorage)
-    context_tool: str | None = None
-    context_args: dict[str, Any] | None = None
-    context_result: dict[str, Any] | None = None
-
-    @model_validator(mode="after")
-    def _validate_context(self) -> "FollowupBody":
-        has_db_ref = self.context_message_id is not None
-        has_inline = self.context_result is not None
-        if has_db_ref and has_inline:
-            raise ValueError("Provide either context_message_id or inline context, not both")
-        # Neither is valid but we let the endpoint decide based on auth — anon
-        # without inline context will 400 in the handler.
-        return self
 
 
 @router.post("/conversations/{conversation_id}/followup")

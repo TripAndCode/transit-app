@@ -92,8 +92,22 @@ function renderPanelWithAgencySwitch(initialPath: string) {
 
 /** The panel makes two GETs: the `/copilot/enabled` flag check and
  * `useOverviewSummary`. A blanket `mockResolvedValue` would answer the flag
- * check with an overview payload, so route by path instead. */
-function mockApiGet(opts: { enabled?: boolean } = {}) {
+ * check with an overview payload, so route by path instead.
+ *
+ * The session is stubbed separately (`apiGetOrNull`, which `useSession`
+ * uses) because the insight POST now also requires this caller's own
+ * `llm_approved`. It defaults to an approved session so each behavioral test
+ * exercises the path it is actually about; pass `llmApproved: false` to
+ * exercise the gate itself. */
+function mockApiGet(opts: { enabled?: boolean; llmApproved?: boolean } = {}) {
+  vi.spyOn(client, "apiGetOrNull").mockResolvedValue({
+    user_id: 1,
+    email: "t@test",
+    name: "T",
+    avatar_url: null,
+    role: "user",
+    llm_approved: opts.llmApproved ?? true,
+  } as never);
   return vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
     path.includes("/copilot/enabled")
       ? Promise.resolve({ enabled: opts.enabled ?? true })
@@ -112,6 +126,18 @@ describe("CopilotPanel", () => {
     // resource bundle resolving, matching the existing ErrorBanner.test.tsx
     // convention for un-pinned-locale assertions.
     expect(screen.getByText(/こちらで会話が続いています|already in the full conversation/i)).toBeTruthy();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("never fires the insight POST for a caller an admin hasn't approved", async () => {
+    // The insight fires from a pageview, not a user action, and the endpoint
+    // 403s an unapproved caller -- and `llm_approved` is false for every new
+    // account, so without this gate the default experience is one doomed
+    // request per Overview visit.
+    mockApiGet({ llmApproved: false });
+    const spy = vi.spyOn(client, "apiPost");
+    renderPanel("/agencies/1/overview");
+    await waitFor(() => expect(client.apiGet).toHaveBeenCalled());
     expect(spy).not.toHaveBeenCalled();
   });
 
