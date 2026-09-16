@@ -1,14 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  LayoutDashboard,
-  Map as MapIcon,
-  BarChart3,
-  GitCompare,
-  HelpCircle,
-  type LucideIcon,
-} from "lucide-react";
+import { HelpCircle, type LucideIcon } from "lucide-react";
 import { SidebarNavList } from "../../components/SidebarNavList";
+import { SIDEBAR_NAV_ITEMS } from "../../components/Sidebar";
 import { useManualExcerpt, type Locale, type TabManualKey } from "./manualExcerpt";
 
 type ExplorerItem = {
@@ -18,18 +12,28 @@ type ExplorerItem = {
   Icon: LucideIcon;
 };
 
-// Same tab set, labels, and icons as the real signed-in sidebar (see
-// components/Sidebar.tsx's ITEMS) -- this list exists so a prospective user
-// can preview the actual product, not a separate marketing taxonomy that
-// could drift from it. `previewKey` reuses each tab's existing one-line
-// `nav.*_subtitle` copy; Ask has no sidebar subtitle of its own (it renders
-// as a standalone CTA there, not a peer nav item), so it gets a dedicated
-// landing-only key instead.
+// A one-line preview blurb per real sidebar tab. The real Sidebar.tsx has no
+// subtitle of its own to reuse (its ITEMS carries only a labelKey), so this
+// explorer keeps its own short descriptive copy per tab instead.
+const PREVIEW_KEY_BY_TAB: Record<(typeof SIDEBAR_NAV_ITEMS)[number]["to"], string> = {
+  overview: "nav.overview_subtitle",
+  "route-analysis": "nav.analysis_subtitle",
+  reports: "landing.explorer.reports_preview",
+};
+
+// Same tab set, labels, and icons as the real signed-in sidebar --
+// `SIDEBAR_NAV_ITEMS` is imported directly from components/Sidebar.tsx
+// rather than duplicated, so this list exists to preview the actual
+// product and cannot silently drift from it. Ask has no sidebar subtitle
+// of its own (it renders as a standalone CTA there, not a peer nav item),
+// so it gets a dedicated landing-only key instead.
 const ITEMS: ExplorerItem[] = [
-  { key: "overview", labelKey: "nav.overview", previewKey: "nav.overview_subtitle", Icon: LayoutDashboard },
-  { key: "map", labelKey: "nav.map", previewKey: "nav.map_subtitle", Icon: MapIcon },
-  { key: "analysis", labelKey: "nav.analysis", previewKey: "nav.analysis_subtitle", Icon: BarChart3 },
-  { key: "network", labelKey: "nav.network", previewKey: "nav.network_subtitle", Icon: GitCompare },
+  ...SIDEBAR_NAV_ITEMS.map((item) => ({
+    key: item.to,
+    labelKey: item.labelKey,
+    previewKey: PREVIEW_KEY_BY_TAB[item.to],
+    Icon: item.Icon,
+  })),
   { key: "ask", labelKey: "nav.ask", previewKey: "landing.explorer.ask_preview", Icon: HelpCircle },
 ];
 

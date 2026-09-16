@@ -4,7 +4,8 @@ import pathlib
 
 import pytest
 
-from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_session_signing_key
+from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_llm_providers, _validate_session_signing_key
+from pipeline.query.llm_client import ProviderConfig
 
 
 def test_validate_cors_origins_rejects_wildcard_with_credentials():
@@ -55,6 +56,18 @@ def test_session_key_guard_ignores_dev_default_when_auth_disabled():
     """Anonymous-only mode never mints those cookies, so the dev default is
     harmless there — don't block local/anon boots."""
     _validate_session_signing_key(enabled=False, signing_key=_DEV_SIGNING_KEY)
+
+
+def test_validate_llm_providers_rejects_empty_ladder():
+    """Zero usable providers means the Ask tab has nothing to fall back to
+    at all — fail loud at startup instead of a silent 503 on every request."""
+    with pytest.raises(RuntimeError, match="No usable LLM provider configured"):
+        _validate_llm_providers([])
+
+
+def test_validate_llm_providers_allows_nonempty_ladder():
+    """At least one usable provider is the supported configuration — no error."""
+    _validate_llm_providers([ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")])
 
 
 def test_dockerfile_cmd_trusts_railway_proxy_headers():

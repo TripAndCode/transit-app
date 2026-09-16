@@ -21,16 +21,16 @@ async def user_id(aconn):
 
 
 async def test_save_then_get_roundtrips(aconn, user_id):
-    await save_user_llm_key(aconn, user_id, "groq", "gsk_test_abcd1234")
+    await save_user_llm_key(aconn, user_id, "gemini", "gsk_test_abcd1234")
     key = await get_user_llm_key(aconn, user_id)
     assert key is not None
-    assert key.provider == "groq"
+    assert key.provider == "gemini"
     assert key.raw_key == "gsk_test_abcd1234"
     assert key.key_suffix == "1234"
 
 
 async def test_save_upserts_on_conflict(aconn, user_id):
-    await save_user_llm_key(aconn, user_id, "groq", "gsk_first_0000")
+    await save_user_llm_key(aconn, user_id, "gemini", "gsk_first_0000")
     await save_user_llm_key(aconn, user_id, "openai", "sk_second_1111")
     key = await get_user_llm_key(aconn, user_id)
     assert key is not None
@@ -43,13 +43,13 @@ async def test_get_returns_none_when_no_key_stored(aconn, user_id):
 
 
 async def test_delete_removes_the_key(aconn, user_id):
-    await save_user_llm_key(aconn, user_id, "cerebras", "csk_test_2222")
+    await save_user_llm_key(aconn, user_id, "gemini", "csk_test_2222")
     await delete_user_llm_key(aconn, user_id)
     assert await get_user_llm_key(aconn, user_id) is None
 
 
 async def test_get_degrades_gracefully_on_undecryptable_key(aconn, user_id):
-    await save_user_llm_key(aconn, user_id, "groq", "gsk_test_abcd1234")
+    await save_user_llm_key(aconn, user_id, "gemini", "gsk_test_abcd1234")
     # Simulate a rotated encryption key / corrupted ciphertext: overwrite the
     # stored blob with bytes that can never decrypt under the current Fernet
     # key, and confirm the caller sees "no key configured" rather than a

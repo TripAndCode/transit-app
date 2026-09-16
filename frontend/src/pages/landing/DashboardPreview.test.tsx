@@ -48,7 +48,9 @@ function renderPreview() {
   );
 }
 
-const NAV_LABELS = ["Overview", "Operations", "Analysis", "Agencies"];
+// The real signed-in sidebar's three tabs (components/Sidebar.tsx's
+// SIDEBAR_NAV_ITEMS, shared with PreviewSidebar).
+const NAV_LABELS = ["Overview", "Route analysis", "Reports"];
 
 describe("DashboardPreview", () => {
   beforeEach(() => {
@@ -62,12 +64,12 @@ describe("DashboardPreview", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows only the real 4 sidebar tabs as peer nav items, with Ask and Help visually distinct", () => {
+  it("shows only the real 3 sidebar tabs as peer nav items, with Ask and Help visually distinct", () => {
     renderPreview();
     for (const label of NAV_LABELS) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
-    // Ask exists, but as the dashed-border CTA (not a 6th peer nav item) --
+    // Ask exists, but as the dashed-border CTA (not a 4th peer nav item) --
     // it's outside the <nav>, in the sidebar's footer area.
     const nav = screen.getByRole("navigation", { name: "See what's inside" });
     expect(within(nav).queryByRole("button", { name: /^Ask$/ })).toBeNull();
@@ -83,36 +85,37 @@ describe("DashboardPreview", () => {
   it("collapses and expands the sidebar via the real, shared transit.sidebarCollapsed preference", async () => {
     const user = userEvent.setup();
     renderPreview();
-    expect(screen.getByText("What's happening right now")).toBeTruthy();
+    // The real Sidebar.tsx's ITEMS carries only a labelKey, no subtitle --
+    // collapsing hides that label text entirely, leaving only the icon.
+    expect(screen.getByText("Overview")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
     expect(localStorage.getItem("transit.sidebarCollapsed")).toBe("1");
-    // Collapsed: subtitle text is no longer rendered, only the icon-only button remains.
-    expect(screen.queryByText("What's happening right now")).toBeNull();
+    expect(screen.queryByText("Overview")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
     expect(localStorage.getItem("transit.sidebarCollapsed")).toBe("0");
-    expect(screen.getByText("What's happening right now")).toBeTruthy();
+    expect(screen.getByText("Overview")).toBeTruthy();
   });
 
   it("swaps the main panel when a nav tab is selected", async () => {
     const user = userEvent.setup();
     renderPreview();
 
-    await user.click(screen.getByRole("button", { name: /^Analysis/ }));
+    await user.click(screen.getByRole("button", { name: /^Route analysis/ }));
     expect(screen.getByRole("button", { name: "Historical trend" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /^Agencies/ }));
+    await user.click(screen.getByRole("button", { name: /^Reports/ }));
     expect(screen.getByText("Avg delay (min)")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /^Operations/ }));
+    await user.click(screen.getByRole("button", { name: /^Overview/ }));
     expect(screen.getByText("On-time route")).toBeTruthy();
   });
 
-  it("renders the Operations map full-bleed with floating controls", async () => {
+  it("renders the Overview map full-bleed with floating controls", async () => {
     const user = userEvent.setup();
     renderPreview();
-    await user.click(screen.getByRole("button", { name: /^Operations/ }));
+    await user.click(screen.getByRole("button", { name: /^Overview/ }));
 
     expect(screen.getByText("On-time route")).toBeTruthy();
     expect(screen.getByText("Delayed route")).toBeTruthy();
@@ -129,9 +132,10 @@ describe("DashboardPreview", () => {
     expect(screen.getByRole("button", { name: "90th percentile" })).toBeTruthy();
   });
 
-  it("filters the Overview route list when a filter chip is clicked", async () => {
+  it("filters the Reports route ranking when a filter chip is clicked", async () => {
     const user = userEvent.setup();
     renderPreview();
+    await user.click(screen.getByRole("button", { name: /^Reports/ }));
     expect(screen.getByText("Route R1")).toBeTruthy();
     expect(screen.getByText("Route R7")).toBeTruthy();
 
@@ -140,10 +144,10 @@ describe("DashboardPreview", () => {
     expect(screen.getByText("Route R7")).toBeTruthy();
   });
 
-  it("swaps Analysis figures when the trend/hour toggle changes", async () => {
+  it("swaps Route analysis figures when the trend/hour toggle changes", async () => {
     const user = userEvent.setup();
     renderPreview();
-    await user.click(screen.getByRole("button", { name: /^Analysis/ }));
+    await user.click(screen.getByRole("button", { name: /^Route analysis/ }));
     expect(screen.getByText("Mon")).toBeTruthy();
     expect(screen.queryByText("18:00")).toBeNull();
 
@@ -152,13 +156,13 @@ describe("DashboardPreview", () => {
     expect(screen.getByText("18:00")).toBeTruthy();
   });
 
-  it("moves the YOU badge and the Overview stats when a different agency is selected in Agencies", async () => {
+  it("switches agencies via the sidebar's agency picker, and the Reports panel follows it", async () => {
     const user = userEvent.setup();
     renderPreview();
-    await user.click(screen.getByRole("button", { name: /^Agencies/ }));
-    await user.click(screen.getByRole("button", { name: /Harborline/ }));
+    await user.click(screen.getByRole("button", { name: /Riverside Transit/ }));
+    await user.click(screen.getByRole("option", { name: /Harborline/ }));
 
-    await user.click(screen.getByRole("button", { name: /^Overview/ }));
+    await user.click(screen.getByRole("button", { name: /^Reports/ }));
     expect(screen.getByText("Route H2")).toBeTruthy();
     expect(screen.queryByText("Route R1")).toBeNull();
   });
@@ -190,14 +194,9 @@ describe("DashboardPreview auto-advance", () => {
     vi.restoreAllMocks();
   });
 
-  it("cycles Overview -> Operations -> Analysis -> Agencies -> Overview when left untouched", () => {
+  it("cycles Overview -> Route analysis -> Reports -> Overview when left untouched", () => {
     mockMatchMedia(false);
     renderPreview();
-    expect(screen.getByText("Route R1")).toBeTruthy();
-
-    act(() => {
-      vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
-    });
     expect(screen.getByText("On-time route")).toBeTruthy();
 
     act(() => {
@@ -213,7 +212,7 @@ describe("DashboardPreview auto-advance", () => {
     act(() => {
       vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
     });
-    expect(screen.getByText("Route R1")).toBeTruthy();
+    expect(screen.getByText("On-time route")).toBeTruthy();
   });
 
   it("pauses while the pointer hovers the preview, and resumes once it leaves", () => {
@@ -225,13 +224,13 @@ describe("DashboardPreview auto-advance", () => {
     act(() => {
       vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS * 3);
     });
-    expect(screen.getByText("Route R1")).toBeTruthy();
+    expect(screen.getByText("On-time route")).toBeTruthy();
 
     fireEvent.mouseLeave(shell);
     act(() => {
       vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
     });
-    expect(screen.getByText("On-time route")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Historical trend" })).toBeTruthy();
   });
 
   it("pauses after a click interaction and resumes once the grace delay elapses", () => {
@@ -246,12 +245,12 @@ describe("DashboardPreview auto-advance", () => {
     });
     // Still Overview -- the tick right after the click falls inside the
     // resume-delay grace period, not just inside the auto-advance interval.
-    expect(screen.getByText("Route R1")).toBeTruthy();
+    expect(screen.getByText("On-time route")).toBeTruthy();
 
     act(() => {
       vi.advanceTimersByTime(AUTO_ADVANCE_RESUME_DELAY_MS);
     });
-    expect(screen.getByText("On-time route")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Historical trend" })).toBeTruthy();
   });
 
   it("pauses after a keyboard interaction the same way it does for a click", () => {
@@ -264,12 +263,12 @@ describe("DashboardPreview auto-advance", () => {
     act(() => {
       vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS);
     });
-    expect(screen.getByText("Route R1")).toBeTruthy();
+    expect(screen.getByText("On-time route")).toBeTruthy();
 
     act(() => {
       vi.advanceTimersByTime(AUTO_ADVANCE_RESUME_DELAY_MS);
     });
-    expect(screen.getByText("On-time route")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Historical trend" })).toBeTruthy();
   });
 
   it("never auto-advances when the visitor prefers reduced motion", () => {
@@ -279,7 +278,7 @@ describe("DashboardPreview auto-advance", () => {
     act(() => {
       vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS * 5);
     });
-    expect(screen.getByText("Route R1")).toBeTruthy();
+    expect(screen.getByText("On-time route")).toBeTruthy();
   });
 
   it("resumes the cycle from the top after the visitor opens the Ask CTA and leaves it idle", () => {
@@ -293,6 +292,6 @@ describe("DashboardPreview auto-advance", () => {
     act(() => {
       vi.advanceTimersByTime(AUTO_ADVANCE_INTERVAL_MS + AUTO_ADVANCE_RESUME_DELAY_MS);
     });
-    expect(screen.getByText("Route R1")).toBeTruthy();
+    expect(screen.getByText("On-time route")).toBeTruthy();
   });
 });

@@ -55,19 +55,19 @@ describe("AccountPage BYOK section", () => {
     );
     const putSpy = vi
       .spyOn(client, "apiPut")
-      .mockResolvedValue({ configured: true, provider: "groq", key_suffix: "ab12" });
+      .mockResolvedValue({ configured: true, provider: "gemini", key_suffix: "ab12" });
     renderPage();
     await userEvent.type(
       await screen.findByLabelText(/api key|apiキー/i),
-      "gsk_realsecretvalueab12",
+      "AQ.realsecretvalueab12",
     );
     await userEvent.click(screen.getByText(/^save$|^保存$/i));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     expect(await screen.findByText(/ab12/)).toBeTruthy();
-    expect(screen.queryByText("gsk_realsecretvalueab12")).toBeNull();
+    expect(screen.queryByText("AQ.realsecretvalueab12")).toBeNull();
   });
 
-  it("defaults the provider selector to the already-configured provider, not groq", async () => {
+  it("defaults the provider selector to the already-configured provider, not gemini", async () => {
     vi.spyOn(client, "apiGet").mockImplementation(async (path: string) =>
       path === "/api/me/llm-key" ? { configured: true, provider: "openai", key_suffix: "cd34" } : [],
     );

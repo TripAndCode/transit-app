@@ -8,8 +8,8 @@ or returns the model's free-form refusal text. Out-of-scope questions
 suggestions instead of failing.
 
 Provider selection lives in env (``CHAT_PROVIDERS``); this module is
-provider-agnostic. The historical default of Groq is preserved when
-``CHAT_PROVIDERS`` is unset.
+provider-agnostic. The default of Gemini is used when ``CHAT_PROVIDERS``
+is unset.
 
 Localisation
 ------------
@@ -45,7 +45,7 @@ from pipeline.query.intent import IntentSignature, canonicalize, derive_confiden
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _recover_tool_call, get_client
+from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, get_client
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
@@ -74,14 +74,16 @@ def _allowed_providers() -> set[str] | None:
     providers are tried, and an empty intersection with the configured
     ``CHAT_PROVIDERS`` ladder fails the request rather than falling back
     (see ``LLMClient.chat_completions``'s ``allowed_providers`` handling).
-    Unset by default (returns ``None``, i.e. no restriction) so the
-    documented historical default — Groq — is unchanged. Some models
-    (notably Groq ``llama-3.3-70b``) have been shown to obey instructions
-    injected into user text rather than the system prompt (see
-    ``pipeline/query/followup.py``, which defaults to Cerebras-only for
-    exactly this reason); unlike the follow-up path, restricting the
-    primary Ask path by default would change cost/latency/answer-quality
-    for the main feature, so operators opt in explicitly here instead.
+    Also applied to a BYOK caller's own stored provider (see ``_call_llm``),
+    not just the shared ladder — an operator's restriction must hold
+    regardless of whose API key answers the request. Unset by default
+    (returns ``None``, i.e. no restriction) — some models have been shown
+    to obey instructions injected into user text rather than the system
+    prompt (see ``pipeline/query/followup.py``, which restricts its own
+    allowed providers for exactly this reason); unlike the follow-up path,
+    restricting the primary Ask path by default would change cost/latency/
+    answer-quality for the main feature, so operators opt in explicitly
+    here instead.
     """
     raw = os.environ.get("ASK_CHAT_ALLOWED_PROVIDERS", "").strip()
     if not raw:
@@ -178,7 +180,7 @@ def _chat_str(template: str, locale: str, **vars) -> str:
 def _get_client():
     """Back-compat shim returning the provider-agnostic LLM client.
 
-    Older tests monkeypatch this symbol with a fake Groq-shaped client;
+    Older tests monkeypatch this symbol with a fake provider client;
     keep it around so ``monkeypatch.setattr(chat, "_get_client", ...)``
     still works while production code goes through ``llm_client``.
     """
@@ -213,8 +215,8 @@ def _completion_with_key(
     ``base_url``/``model`` honor the same per-provider env overrides
     (``{PROVIDER}_BASE_URL``/``{PROVIDER}_MODEL``) as the shared ladder's
     :func:`~pipeline.query.llm_client._load_provider` — an operator's
-    ``GROQ_MODEL`` override, say, must apply on the BYOK path too, not just
-    the shared client.
+    ``GEMINI_MODEL`` override, say, must apply on the BYOK path too, not
+    just the shared client.
     """
     import openai
 
@@ -223,15 +225,14 @@ def _completion_with_key(
     base_url = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
     model = os.environ.get(f"{upper}_MODEL", defaults["model"])
     one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0)
-    create_kwargs: dict[str, Any] = dict(
+    create_kwargs = _build_create_kwargs(
         model=model_override or model,
         messages=messages,
-        tools=tools,
-        tool_choice=tool_choice if tools else "none",
         temperature=temperature,
+        tools=tools,
+        tool_choice=tool_choice,
+        response_format=response_format,
     )
-    if response_format is not None:
-        create_kwargs["response_format"] = response_format
     resp = one_off.chat.completions.create(**create_kwargs)
     return resp.choices[0].message
 
@@ -439,9 +440,9 @@ async def chat_with_tools(
     The ``model`` parameter is forwarded to the LLM adapter as a
     per-call override. When ``model=None`` (the default), the adapter
     uses each provider's own configured default (``{PROVIDER}_MODEL``
-    env var, e.g. ``CEREBRAS_MODEL`` / ``GROQ_MODEL``). Passing a
-    vendor-specific model name (e.g. ``"llama-3.3-70b-versatile"``) only
-    works if every provider in the fallback ladder accepts it.
+    env var, e.g. ``GEMINI_MODEL`` / ``OPENAI_MODEL``). Passing a
+    vendor-specific model name only works if every provider in the
+    fallback ladder accepts it.
     """
     client = _get_client()
     user_key = await get_user_llm_key(conn, user_id) if user_id is not None else None
@@ -454,9 +455,22 @@ async def chat_with_tools(
         :class:`~pipeline.query.llm_client.LLMClient` ladder. Both of
         ``_sync``'s call sites go through here so they can't drift apart on
         how a BYOK caller is handled.
+
+        A BYOK caller's stored provider is still checked against
+        ``_allowed_providers()`` before use: an operator who restricts
+        ``ASK_CHAT_ALLOWED_PROVIDERS`` (e.g. to exclude a provider shown to
+        obey injected instructions) must not have that policy silently
+        bypassed just because the caller supplied their own key. Mirrors
+        the shared ladder's own "empty intersection degrades" behavior
+        (``"no_providers"``) rather than raising or falling back to the
+        shared ladder, so a disallowed BYOK provider fails the same
+        machine-readable way the caller already knows how to handle.
         """
         if user_key is None:
             return client.chat_completions(allowed_providers=_allowed_providers(), **kwargs)
+        allowed = _allowed_providers()
+        if allowed is not None and user_key.provider not in allowed:
+            return None, "no_providers"
         from openai import APIConnectionError, APITimeoutError, BadRequestError, RateLimitError
 
         try:
@@ -468,15 +482,7 @@ async def chat_with_tools(
             return None, "connection"
         except RateLimitError:
             return None, "rate_limit"
-        except BadRequestError as exc:
-            # Groq/llama models are documented to leak a failed tool call as a
-            # malformed string in a tool_use_failed 400 rather than raising
-            # cleanly (see _recover_tool_call's own docstring) — Groq is one
-            # of the allowed BYOK providers, so salvage it here exactly like
-            # the shared ladder does before giving up on this call.
-            recovered = _recover_tool_call(exc)
-            if recovered is not None:
-                return recovered, None
+        except BadRequestError:
             return None, "bad_request"
         except Exception:
             return None, "unexpected"

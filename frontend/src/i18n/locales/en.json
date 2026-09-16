@@ -1,16 +1,10 @@
 {
   "nav": {
-    "overview": "Overview",
     "overview_subtitle": "What's happening right now",
-    "map": "Operations",
-    "map_subtitle": "Current delays and reported stops",
     "ask": "Ask",
     "live": "Latest observations",
     "live_subtitle": "Stop-by-stop readings",
-    "analysis": "Analysis",
     "analysis_subtitle": "When and why delays happen",
-    "network": "Agencies",
-    "network_subtitle": "How you compare to others",
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
     "open_menu": "Open menu",
@@ -33,6 +27,7 @@
     },
     "explorer": {
       "heading": "See what's inside",
+      "reports_preview": "Delay trends, route rankings, and one-click CSV exports for any period.",
       "ask_preview": "Ask freely in natural language and get an answer right away.",
       "excerpt_unavailable": "Manual preview unavailable."
     },
@@ -683,7 +678,7 @@
     },
     "hint": {
       "title": "How to use & what it can do",
-      "body_1": "Ask freely in natural language. Groq function calls pick from 6 SQL tools (ranking, time-band comparison, trend aggregation, etc.) to build the answer.",
+      "body_1": "Ask freely in natural language. An AI function call picks from 6 SQL tools (ranking, time-band comparison, trend aggregation, etc.) to build the answer.",
       "body_2": "Examples: \"Today's worst 3 routes?\" \"Most-delayed stops during the morning peak?\" \"Compare last week and this week\"",
       "body_3_intro": "The current",
       "body_3_strong": "date / day / time-band filters",
