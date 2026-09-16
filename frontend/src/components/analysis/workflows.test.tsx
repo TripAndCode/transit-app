@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -8,7 +9,15 @@ import { readAnalyses, saveAnalysis } from "./savedAnalyses";
 import { downloadCsv } from "./csv";
 import { useReport } from "../../api/hooks";
 
-vi.mock("./AnalysisMap", () => ({ AnalysisMap: () => <div>Map</div> }));
+const mapMounts = vi.fn();
+const mapProps = vi.fn();
+vi.mock("./AnalysisMap", () => ({
+  AnalysisMap: (props: { height: number; visible: boolean }) => {
+    mapProps(props);
+    useEffect(() => { mapMounts(); }, []);
+    return <div>Map</div>;
+  },
+}));
 vi.mock("./csv", () => ({ downloadCsv: vi.fn() }));
 vi.mock("../../api/hooks", () => ({
   useRoutes: () => ({ data: [
@@ -52,4 +61,41 @@ it("saved analyses stay agency-scoped and open with their original filters", asy
   await userEvent.setup().click(screen.getByRole("button", { name: "Delete: Coast mornings" }));
   expect(readAnalyses()).toHaveLength(1);
   expect(readAnalyses()[0].agencyId).toBe(8);
+});
+
+it("footer CSV exports the report data, not just the filter-metadata prefix", async () => {
+  show("reports");
+  const user = userEvent.setup();
+  // Three "Download CSV" buttons exist: the trend section, the ranking
+  // section, and the closing footer. Only the footer button combines both
+  // datasets; the trend and ranking buttons above each export just their own
+  // dataset ("changing keito scopes both report queries and CSV to the
+  // selected code" covers those).
+  const footerCsv = screen.getAllByRole("button", { name: "Download CSV" }).at(-1)!;
+  await user.click(footerCsv);
+  const payload = vi.mocked(downloadCsv).mock.calls.at(-1)![1];
+  expect(payload.flat()).toContain("mean_departure_delay_minutes");
+  expect(payload.flat()).toContain("median_minutes");
+  expect(payload.length).toBe(8);
+});
+
+it("keeps the route map mounted across tab switches instead of recreating its WebGL context", async () => {
+  show("route-analysis");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("tab", { name: "Map" }));
+  expect(mapMounts).toHaveBeenCalledTimes(1);
+  expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+
+  await user.click(screen.getByRole("tab", { name: "Delay trend" }));
+  expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
+
+  await user.click(screen.getByRole("tab", { name: "Map" }));
+  expect(mapMounts).toHaveBeenCalledTimes(1);
+  expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+});
+
+it("gives the route map a real height rather than leaving it at the collapsed default", async () => {
+  show("route-analysis");
+  await userEvent.setup().click(screen.getByRole("tab", { name: "Map" }));
+  expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ height: 420 }));
 });
