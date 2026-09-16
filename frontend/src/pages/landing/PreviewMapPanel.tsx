@@ -16,11 +16,12 @@ function filterFor(styleVariant: StyleVariant, heatmapField: HeatmapField): stri
   return parts.length > 0 ? parts.join(" ") : "none";
 }
 
-/** Dashboard-preview Map tab: a full-bleed panel (matching the real
- *  `MapTab`'s `position:absolute; inset:0` container) with floating overlay
- *  controls -- a style switcher, a heatmap-field toggle, and a legend --
- *  instead of item 63's centered descriptive text + thumbnail. Every
- *  control here visibly changes the rendered scene; none is decorative. */
+/** Dashboard-preview Overview tab: a full-bleed panel (matching the real
+ *  `MapTab`'s `position:absolute; inset:0` container -- the real sidebar's
+ *  "Overview" nav item routes to `MapTab`) with floating overlay controls
+ *  -- a style switcher, a heatmap-field toggle, and a legend -- instead of
+ *  item 63's centered descriptive text + thumbnail. Every control here
+ *  visibly changes the rendered scene; none is decorative. */
 export function PreviewMapPanel() {
   const { t } = useTranslation();
   const [styleVariant, setStyleVariant] = useState<StyleVariant>("standard");
