@@ -55,6 +55,7 @@ from api.routers.overview import router as overview_router
 from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
 from api.security import cookie_secure
+from pipeline.query.llm_client import ProviderConfig
 
 _log = logging.getLogger(__name__)
 
@@ -128,6 +129,21 @@ def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> Non
         )
 
 
+def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
+    """Refuse to boot with zero usable LLM providers configured.
+
+    ``providers`` is the resolved ladder from
+    :func:`pipeline.query.llm_client._load_providers` — already filtered to
+    entries with a real API key. An empty ladder means the Ask tab has no
+    provider to fall back to at all.
+    """
+    if not providers:
+        raise RuntimeError(
+            "No usable LLM provider configured. Set at least one provider's "
+            "API key (e.g. GEMINI_API_KEY) — see .env.example."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
@@ -139,11 +155,7 @@ async def lifespan(app: FastAPI):
     """
     from pipeline.query.llm_client import _load_providers
 
-    if not _load_providers():
-        raise RuntimeError(
-            "No usable LLM provider configured. Set at least one provider's "
-            "API key (e.g. GEMINI_API_KEY) — see .env.example."
-        )
+    _validate_llm_providers(_load_providers())
     enabled, missing = auth_status()
     if not enabled and len(missing) != len(_AUTH_ENV):
         raise RuntimeError(
