@@ -932,10 +932,9 @@ async def test_followup_holds_no_pool_connection_across_the_llm_call(conv_app, m
 
 @pytest.mark.asyncio
 async def test_followup_anonymous_caller_rejected_before_any_other_check(conv_app, monkeypatch):
-    """There is no anon follow-up path anymore: an anonymous caller is
-    rejected as unapproved before the inline-context requirement, the daily
-    quota, or answer_followup are ever reached — regardless of payload
-    shape."""
+    """There is no anonymous follow-up path: an anonymous caller is rejected
+    as unapproved before either the inline-context requirement or
+    answer_followup is reached — regardless of payload shape."""
     import api.routers.conversations as conv_router
 
     monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")

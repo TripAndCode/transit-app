@@ -449,9 +449,9 @@ async def followup_endpoint(
 
     Auth: requires a signed-in, admin-approved caller (``users.llm_approved``).
     Anonymous callers never have a ``users.llm_approved`` row, so they're
-    rejected before touching the daily quota or the LLM — there is no anon
-    path anymore; ``context_message_id`` must point to a DB-stored assistant
-    message in one of the caller's own conversations.
+    rejected before the LLM is touched — there is no anonymous path here.
+    ``context_message_id`` must point to a DB-stored assistant message in one
+    of the caller's own conversations.
     """
     csrf_guard(request)
 
