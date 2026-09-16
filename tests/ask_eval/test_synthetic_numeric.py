@@ -23,8 +23,9 @@ started ``uvicorn`` process via ``EVAL_API_BASE``), this module boots
 ``tests/api/test_api_ask.py`` uses — wired to the throwaway test Postgres
 (``pg_conn``/``agency_id``) and ClickHouse (``ch_client``/``ch_async_client``)
 fixtures. ``chat_with_tools`` itself is NOT mocked: when ``RUN_LLM_EVAL=1``
-and ``GROQ_API_KEY`` are set, the question really is routed through Groq's
-live tool-use API exactly like production traffic, because the exact defect
+and a real LLM provider key (e.g. ``GEMINI_API_KEY``) are set, the question
+really is routed through a live tool-use API exactly like production
+traffic, because the exact defect
 this test guards against (the *model* inventing or misreading a number) is
 inside the thing a mock would otherwise paper over — see CLAUDE.md's "mock
 the ML embedder unless a test is explicitly slow" guidance; this test is the
@@ -81,7 +82,7 @@ from tests.fixtures.synthetic_gtfs import (
 
 # Applied per-function (NOT as a module-level `pytestmark`) to the live-LLM
 # test below only.
-_requires_groq_key = pytest.mark.requires_groq_key
+_requires_llm_key = pytest.mark.requires_llm_key
 _requires_llm_eval_flag = pytest.mark.skipif(
     os.environ.get("RUN_LLM_EVAL") != "1",
     reason="RUN_LLM_EVAL=1 not set",
@@ -154,7 +155,7 @@ async def _ask_about_pattern(
         await pool.close()
 
 
-@_requires_groq_key
+@_requires_llm_key
 @_requires_llm_eval_flag
 @pytest.mark.parametrize("pattern_fn", ALL_PATTERNS)
 async def test_answer_matches_synthetic_ground_truth(

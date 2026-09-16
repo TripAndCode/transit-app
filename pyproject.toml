@@ -13,7 +13,6 @@ packages = [
 python = ">=3.11,<4.0"
 psycopg2-binary = ">=2.9"
 pandas = ">=2.2"
-groq = ">=0.11"
 openai = ">=1.50"
 slowapi = ">=0.1"
 asyncpg = ">=0.29"
@@ -54,7 +53,7 @@ build-backend = "poetry.core.masonry.api"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
-    "requires_groq_key: tests that need a live GROQ_API_KEY and the dev API reachable (off by default)",
+    "requires_llm_key: tests that need a configured live LLM provider key and the dev API reachable (off by default)",
     "slow: Test downloads/loads ~120MB ML models; gated by RUN_SLOW=1",
 ]
 

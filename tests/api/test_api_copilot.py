@@ -102,7 +102,7 @@ async def test_copilot_insight_resolves_signed_in_users_byok_key(copilot_client,
 
     client, agency_id = copilot_client
     sid, uid = await _seed_user_and_session(aconn)
-    await save_user_llm_key(aconn, uid, "groq", "gsk_stored_key")
+    await save_user_llm_key(aconn, uid, "gemini", "gsk_stored_key")
 
     captured = {}
 
@@ -119,7 +119,7 @@ async def test_copilot_insight_resolves_signed_in_users_byok_key(copilot_client,
     )
     assert resp.status_code == 200
     assert captured["user_key"] is not None
-    assert captured["user_key"].provider == "groq"
+    assert captured["user_key"].provider == "gemini"
     assert captured["user_key"].raw_key == "gsk_stored_key"
 
 

@@ -235,8 +235,6 @@ export function HelpPage() {
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 0 64px" }}>
       <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("help.title")}</h1>
-      {/* Visual-only for now -- not wired to real filtering yet (see design
-          spec's explicit deferral). */}
       <input
         type="search"
         placeholder={t("help.search_placeholder")}

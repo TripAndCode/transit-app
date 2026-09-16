@@ -11,7 +11,6 @@ import {
   ChevronLeft,
   ChevronRight,
   PanelLeft,
-  type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
@@ -23,13 +22,20 @@ import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 
-type Item = { to: string; labelKey: string; Icon: LucideIcon };
-
-const ITEMS: Item[] = [
+/** The sidebar's real nav destinations -- exported so the landing page's
+ *  preview mockups (`pages/landing/PreviewSidebar.tsx`, `TabExplorer.tsx`,
+ *  `manualExcerpt.ts`'s `TabManualKey`) import this array instead of
+ *  maintaining their own copy, so the marketing preview's tab set/labels
+ *  cannot drift from the real, signed-in nav. */
+export const SIDEBAR_NAV_ITEMS = [
   { to: "overview", labelKey: "design:overview", Icon: LayoutDashboard },
   { to: "route-analysis", labelKey: "design:analysis", Icon: BarChart3 },
   { to: "reports", labelKey: "design:reports", Icon: FileText },
-];
+] as const;
+
+export type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
+
+const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
 
