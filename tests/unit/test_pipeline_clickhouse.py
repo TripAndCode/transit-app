@@ -18,16 +18,31 @@ def _ch_test_client():
     )
 
 
-@pytest.fixture
-def ch_client():
+pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+
+
+@pytest.fixture(scope="module")
+def _ch_schema() -> None:
+    """Create the `updates` table once for this module; the whole module is
+    skipped above when ClickHouse integration isn't enabled, so this never
+    runs in that case."""
     client = _ch_test_client()
-    client.command("DROP TABLE IF EXISTS updates")
-    apply_schema(client)
+    try:
+        client.command("DROP TABLE IF EXISTS updates")
+        apply_schema(client)
+    finally:
+        client.close()
+
+
+@pytest.fixture
+def ch_client(_ch_schema):
+    """Truncate (not drop+recreate) for per-test isolation — the schema
+    never changes mid-module, so only `_ch_schema` needs to pay MergeTree's
+    CREATE TABLE cost, once."""
+    client = _ch_test_client()
+    client.command("TRUNCATE TABLE IF EXISTS updates")
     yield client
     client.close()
-
-
-pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 
 
 def test_insert_updates_prepends_agency_id(ch_client):

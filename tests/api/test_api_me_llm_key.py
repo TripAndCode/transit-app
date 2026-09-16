@@ -38,7 +38,7 @@ async def _seed_user_and_session(conn, *, role="user"):
 async def me_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

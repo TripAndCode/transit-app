@@ -41,7 +41,7 @@ async def copilot_app(apply_schema):
     """
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await asyncpg.create_pool(DATABASE_URL)
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
