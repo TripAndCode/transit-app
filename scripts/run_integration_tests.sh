@@ -17,13 +17,13 @@
 # (`Bash(scripts/run_integration_tests.sh*)`) closes the gap for good.
 #
 # Usage: scripts/run_integration_tests.sh [--llm-eval] [--dashboard-e2e] <pytest args...>
-#   --llm-eval       sets RUN_LLM_EVAL=1. Needs a real GROQ_API_KEY already
+#   --llm-eval       sets RUN_LLM_EVAL=1. Needs a real GEMINI_API_KEY already
 #                    exported in the environment -- this script does NOT
 #                    fabricate one, since a fake key would make a live-LLM
 #                    test fail confusingly (a bad-auth error) instead of
-#                    clearly (the app's own "GROQ_API_KEY env var is
-#                    required" message).
-#   --dashboard-e2e  sets RUN_DASHBOARD_E2E_SCAN=1 and, only if GROQ_API_KEY
+#                    clearly (the app's own "no usable LLM provider
+#                    configured" message).
+#   --dashboard-e2e  sets RUN_DASHBOARD_E2E_SCAN=1 and, only if GEMINI_API_KEY
 #                    isn't already set, a placeholder value -- the dashboard
 #                    e2e test boots the full app (whose startup unconditionally
 #                    requires a key) but never reaches the Ask/LLM code path.
@@ -63,7 +63,7 @@ export CLICKHOUSE_DATABASE=transit_test
 
 pytest_args=()
 llm_eval=0
-had_real_groq_key="${GROQ_API_KEY:-}"
+had_real_gemini_key="${GEMINI_API_KEY:-}"
 for arg in "$@"; do
   case "$arg" in
     --llm-eval)
@@ -72,7 +72,7 @@ for arg in "$@"; do
       ;;
     --dashboard-e2e)
       export RUN_DASHBOARD_E2E_SCAN=1
-      export GROQ_API_KEY="${GROQ_API_KEY:-dummy-not-used-by-this-test}"
+      export GEMINI_API_KEY="${GEMINI_API_KEY:-dummy-not-used-by-this-test}"
       ;;
     *)
       pytest_args+=("$arg")
@@ -82,13 +82,13 @@ done
 
 # Fail fast with a clear message rather than letting the live-LLM call
 # itself fail confusingly ("no usable providers") mid-test. Checks
-# `had_real_groq_key` (captured before the loop), not the current
-# `GROQ_API_KEY` value directly -- --dashboard-e2e's dummy-key default runs
+# `had_real_gemini_key` (captured before the loop), not the current
+# `GEMINI_API_KEY` value directly -- --dashboard-e2e's dummy-key default runs
 # during the same loop, so combining both flags would otherwise make
-# GROQ_API_KEY look "set" by the time this check runs and silently defeat
+# GEMINI_API_KEY look "set" by the time this check runs and silently defeat
 # it, even though no real key was ever provided.
-if [ "$llm_eval" = "1" ] && [ -z "$had_real_groq_key" ]; then
-  echo "run_integration_tests.sh: --llm-eval requires a real GROQ_API_KEY" \
+if [ "$llm_eval" = "1" ] && [ -z "$had_real_gemini_key" ]; then
+  echo "run_integration_tests.sh: --llm-eval requires a real GEMINI_API_KEY" \
     "already exported in the environment (this script does not fabricate" \
     "one)." >&2
   exit 1

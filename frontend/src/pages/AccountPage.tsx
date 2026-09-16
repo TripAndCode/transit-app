@@ -32,7 +32,7 @@ function LlmKeySection() {
     queryFn: () => apiGet<LlmKeyStatus>("/api/me/llm-key"),
   });
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
-  const provider = providerOverride ?? status?.provider ?? "groq";
+  const provider = providerOverride ?? status?.provider ?? "gemini";
   const [apiKey, setApiKey] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -72,9 +72,8 @@ function LlmKeySection() {
           : t("account.llm_key.status_shared")}
       </p>
       <select value={provider} onChange={(e) => setProviderOverride(e.target.value)}>
-        <option value="groq">Groq</option>
+        <option value="gemini">Gemini</option>
         <option value="openai">OpenAI</option>
-        <option value="cerebras">Cerebras</option>
       </select>
       <label>
         {t("account.llm_key.input_label")}

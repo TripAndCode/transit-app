@@ -120,7 +120,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   and bake it (`make bake`) **inside the specific worktree being tested**
   (`api/static` is untracked/gitignored per-worktree, not shared via git),
   install Chromium (`poetry run playwright install --with-deps chromium`),
-  and set a dummy `GROQ_API_KEY` if the app's startup `lifespan` requires
+  and set a dummy `GEMINI_API_KEY` if the app's startup `lifespan` requires
   one but the test itself never reaches the Ask/LLM code path.
 - **Concurrency risk**: an interactive session fixing a worker's worktree
   can race with the autonomous loop's own next tick resuming the same

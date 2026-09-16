@@ -10,7 +10,7 @@ async def test_valid_key_returns_true():
     with patch("openai.AsyncOpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create = AsyncMock(return_value=object())
         mock_openai.return_value.close = AsyncMock()
-        assert await validate_provider_key("groq", "gsk_valid") is True
+        assert await validate_provider_key("gemini", "test-valid") is True
 
 
 @pytest.mark.asyncio
@@ -29,7 +29,7 @@ async def test_invalid_key_returns_false():
     with patch("openai.AsyncOpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create = AsyncMock(side_effect=_FakeAuthenticationError())
         mock_openai.return_value.close = AsyncMock()
-        assert await validate_provider_key("groq", "gsk_bad") is False
+        assert await validate_provider_key("gemini", "test-bad") is False
 
 
 @pytest.mark.asyncio
@@ -43,7 +43,7 @@ async def test_permission_denied_returns_false():
     with patch("openai.AsyncOpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create = AsyncMock(side_effect=_FakePermissionDeniedError())
         mock_openai.return_value.close = AsyncMock()
-        assert await validate_provider_key("groq", "gsk_revoked") is False
+        assert await validate_provider_key("gemini", "test-revoked") is False
 
 
 @pytest.mark.asyncio
@@ -58,7 +58,7 @@ async def test_connection_error_propagates_instead_of_reporting_valid():
         mock_openai.return_value.chat.completions.create = AsyncMock(side_effect=_FakeAPIConnectionError())
         mock_openai.return_value.close = AsyncMock()
         with pytest.raises(openai.APIConnectionError):
-            await validate_provider_key("groq", "gsk_valid")
+            await validate_provider_key("gemini", "test-valid")
 
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_other_api_error_returns_true():
     with patch("openai.AsyncOpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create = AsyncMock(side_effect=_FakeRateLimitError())
         mock_openai.return_value.close = AsyncMock()
-        assert await validate_provider_key("groq", "gsk_valid") is True
+        assert await validate_provider_key("gemini", "test-valid") is True
 
 
 @pytest.mark.asyncio

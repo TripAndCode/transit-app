@@ -28,7 +28,7 @@ def _ctx() -> RangeCtx:
     return RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 26))
 
 
-def _fake_user_key(provider: str = "groq", raw_key: str = "gsk_user_key", key_suffix: str = "9999"):
+def _fake_user_key(provider: str = "gemini", raw_key: str = "gemini_user_key", key_suffix: str = "9999"):
     return SimpleNamespace(provider=provider, raw_key=raw_key, key_suffix=key_suffix)
 
 
@@ -63,8 +63,8 @@ async def test_authenticated_user_with_byok_key_bypasses_shared_client(monkeypat
     monkeypatch.setattr(chat, "_get_client", lambda: _BoomClient())
 
     result = await chat.chat_with_tools("hi", _ctx(), conn=None, agency_id=1, locale="en", user_id=42)
-    assert used_key["provider"] == "groq"
-    assert used_key["api_key"] == "gsk_user_key"
+    assert used_key["provider"] == "gemini"
+    assert used_key["api_key"] == "gemini_user_key"
     assert result["success"] is True
     assert result["answer"] == "ok"
 
@@ -77,7 +77,7 @@ async def test_byok_provider_disallowed_by_operator_degrades_without_calling(mon
     silently bypassed just because the caller supplied their own key of the
     excluded provider."""
     monkeypatch.setenv("ASK_CHAT_ALLOWED_PROVIDERS", "openai")
-    monkeypatch.setattr(chat, "get_user_llm_key", AsyncMock(return_value=_fake_user_key(provider="groq")))
+    monkeypatch.setattr(chat, "get_user_llm_key", AsyncMock(return_value=_fake_user_key(provider="gemini")))
     monkeypatch.setattr(chat, "_completion_with_key", _must_not_be_called)
     monkeypatch.setattr(chat, "_get_client", lambda: _BoomClient())
 
@@ -89,8 +89,8 @@ async def test_byok_provider_disallowed_by_operator_degrades_without_calling(mon
 @pytest.mark.asyncio
 async def test_byok_provider_allowed_by_operator_allowlist_proceeds(monkeypatch):
     """A BYOK provider that IS in the operator's allowlist still works."""
-    monkeypatch.setenv("ASK_CHAT_ALLOWED_PROVIDERS", "groq, openai")
-    monkeypatch.setattr(chat, "get_user_llm_key", AsyncMock(return_value=_fake_user_key(provider="groq")))
+    monkeypatch.setenv("ASK_CHAT_ALLOWED_PROVIDERS", "gemini, openai")
+    monkeypatch.setattr(chat, "get_user_llm_key", AsyncMock(return_value=_fake_user_key(provider="gemini")))
     monkeypatch.setattr(chat, "_completion_with_key", lambda *a, **k: _fake_text_message("ok"))
     monkeypatch.setattr(chat, "_get_client", lambda: _BoomClient())
 
@@ -204,6 +204,21 @@ async def test_generate_proactive_insight_uses_byok_key(monkeypatch):
         locale="en",
         user_key=_fake_user_key(),
     )
-    assert used_key["provider"] == "groq"
-    assert used_key["api_key"] == "gsk_user_key"
+    assert used_key["provider"] == "gemini"
+    assert used_key["api_key"] == "gemini_user_key"
     assert result["text"]
+
+
+def test_completion_with_key_omits_tool_choice_when_no_tools():
+    """Same OpenAI-compat fix as LLMClient.chat_completions, on the BYOK
+    one-off path: no tools -> tools/tool_choice both absent, not
+    tools=None+tool_choice="none" (OpenAI rejects tool_choice without tools)."""
+    from unittest.mock import patch
+
+    fake_response = MagicMock(choices=[MagicMock(message=MagicMock(content="ok"))])
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.return_value = fake_response
+        chat._completion_with_key("gemini", "gemini_user_key", messages=[{"role": "user", "content": "hi"}])
+    _, create_kwargs = mock_openai.return_value.chat.completions.create.call_args
+    assert "tools" not in create_kwargs
+    assert "tool_choice" not in create_kwargs

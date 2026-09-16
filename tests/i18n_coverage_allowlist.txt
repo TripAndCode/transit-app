@@ -18,7 +18,6 @@ rgba
 # --- Product / brand proper nouns rendered by the SPA ---
 google
 github
-groq
 
 # --- Common UI tokens that are intentionally in English (e.g. the locale switcher) ---
 english

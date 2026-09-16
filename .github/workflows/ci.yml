@@ -155,7 +155,7 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
-          GROQ_API_KEY: test-key
+          GEMINI_API_KEY: test-key
           CLICKHOUSE_HOST: localhost
           CLICKHOUSE_PORT: 8124
           CLICKHOUSE_USER: transit

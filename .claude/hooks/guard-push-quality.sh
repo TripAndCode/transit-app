@@ -190,7 +190,7 @@ if [ "$RUN_BACKEND" -eq 1 ]; then
     # that blocks the push or lets it through is outside this script's
     # control -- the one outcome its fail-closed design cannot guarantee.
     # Raise that entry alongside any ceiling raised here.
-    if ! run_with_timeout 1200 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GROQ_API_KEY=test-key \
+    if ! run_with_timeout 1200 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GEMINI_API_KEY=test-key \
         poetry run pytest -x -q >>"$LOG" 2>&1; then
       FAIL=1
     fi
