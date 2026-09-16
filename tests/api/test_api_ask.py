@@ -14,7 +14,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 async def ask_app(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     # `ask()` now declares ch=Depends(get_ch) alongside conn (Task 8); every
     # test in this file mocks chat_with_tools/dispatch so the real client is
@@ -145,7 +145,7 @@ async def test_ask_router_rule_hit_skips_llm(ask_client, monkeypatch):
     # Seed at least one route so describe_data(kind=routes) has data.
     import asyncpg
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO static_routes (agency_id, route_id, route_short_name) "
@@ -633,7 +633,7 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
 
     import asyncpg
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT question, router_stage FROM ask_query_log WHERE agency_id=$1 ORDER BY id DESC LIMIT 1",
@@ -689,7 +689,7 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
 
     import asyncpg
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT numeric_guard_triggered FROM ask_query_log WHERE agency_id=$1 ORDER BY id DESC LIMIT 1",
@@ -856,7 +856,7 @@ async def test_stage1_rule_hit_never_touches_anon_quota(ask_client, monkeypatch)
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", must_not_be_called)
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO static_routes (agency_id, route_id, route_short_name) "

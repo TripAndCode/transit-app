@@ -29,7 +29,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 @pytest.fixture
 async def movers_pool(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     async with pool.acquire() as c:
         await c.execute("DELETE FROM agencies WHERE feed_url = 'http://dash-agg'")
         row = await c.fetchrow(

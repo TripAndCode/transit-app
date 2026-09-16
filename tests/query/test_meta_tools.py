@@ -19,7 +19,7 @@ async def _setup_jst(conn):
 
 @pytest.fixture
 async def conn_with_seed(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL, setup=_setup_jst)
+    pool = await asyncpg.create_pool(DATABASE_URL, setup=_setup_jst, min_size=1)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
@@ -430,7 +430,7 @@ async def test_describe_data_offset_negative_clamped(conn_with_observations):
 
 @pytest.mark.asyncio
 async def test_stops_pagination_stable_under_name_ties(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL, setup=_setup_jst)
+    pool = await asyncpg.create_pool(DATABASE_URL, setup=_setup_jst, min_size=1)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"

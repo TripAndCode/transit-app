@@ -32,7 +32,7 @@ async def _seed_admin_session(conn) -> str:
 async def ops_client(apply_schema, ch_async_client):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     # admin_ops() -> aggregate_freshness(conn, ch) now unconditionally queries
     # ClickHouse (Task 8); without a real client the call raises and

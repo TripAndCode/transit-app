@@ -15,7 +15,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 async def hmap_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
@@ -88,7 +88,7 @@ async def test_heatmap_p90_null_when_no_data(hmap_client):
 async def stop_profile_client(apply_schema, ch_client, ch_async_client):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     app.state.ch_client = ch_async_client
     row = await pool.fetchrow(
@@ -261,7 +261,7 @@ async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
     each row's ratio happens to equal the samples-weighted average."""
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     app.state.ch_client = ch_async_client
     row = await pool.fetchrow(

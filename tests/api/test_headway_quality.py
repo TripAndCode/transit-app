@@ -25,7 +25,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 async def headway_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) VALUES ($1, $2, 'static_join') "

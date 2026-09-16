@@ -56,7 +56,7 @@ def _set_oauth_env(monkeypatch):
 async def auth_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

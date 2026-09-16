@@ -255,7 +255,7 @@ async def test_build_mode_sentinel_undefined_table_error_propagates(monkeypatch)
 @pytest.fixture
 async def pool_with_agency(apply_schema):
     """Pool + agency_id + a route so describe_data + tool dispatch can run."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_intent_cache")
         row = await c.fetchrow(

@@ -17,7 +17,7 @@ JST = ZoneInfo("Asia/Tokyo")
 
 @pytest.fixture
 async def health_pool(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     async with pool.acquire() as c:
         await c.execute("TRUNCATE agencies, updates, agg_route_daily, agg_meta CASCADE")
     yield pool

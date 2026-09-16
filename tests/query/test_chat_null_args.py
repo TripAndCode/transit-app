@@ -60,7 +60,7 @@ def _ctx() -> RangeCtx:
 async def conn_with_minimal_seed(apply_schema):
     """Pool + agency_id with one route so capabilities/describe_data have
     something to dispatch against."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"

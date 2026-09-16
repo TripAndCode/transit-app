@@ -25,7 +25,7 @@ async def _trust_dwell_run(pool, *agency_ids):
 async def reports_app(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     # get_report() now declares ch=Depends(get_ch) alongside conn (Task 8,
     # compare_ranking's time_band-filtered live-fallback) — every report type

@@ -16,7 +16,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 async def cron_app(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     yield app
     await pool.close()

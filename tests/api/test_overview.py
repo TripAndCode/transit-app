@@ -1385,7 +1385,7 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     # mirror production setup exactly.
     from api.main import _init_connection
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], init=_init_connection)
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], init=_init_connection, min_size=1)
     try:
         pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool)
     finally:
@@ -1961,7 +1961,7 @@ async def test_slow_path_pool_and_sequential_agree(aconn, aagency_id, ch_client,
     ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24), time_band="morning")
     seq_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", ch=ch_async_client)
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], init=_init_connection)
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], init=_init_connection, min_size=1)
     try:
         pool_out = await compute_overview_summary(aagency_id, ctx, aconn, "ja", pool=pool, ch=ch_async_client)
     finally:

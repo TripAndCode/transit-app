@@ -15,7 +15,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 async def app_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
@@ -57,7 +57,7 @@ async def agencies_client(apply_schema):
     _orig = _agencies_mod.validate_feed_url
     _agencies_mod.validate_feed_url = lambda url: None
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     truncate_sql = (
         "TRUNCATE agencies, updates, static_stops, static_stop_times, "
@@ -86,7 +86,7 @@ async def agencies_client_real_validator(apply_schema):
     """Like agencies_client but does NOT mock validate_feed_url."""
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     truncate_sql = (
         "TRUNCATE agencies, updates, static_stops, static_stop_times, "

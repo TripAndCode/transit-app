@@ -25,7 +25,7 @@ async def net_pool(apply_schema):
     # In-process compute cache is keyed on (from_date, to_date) only, so two
     # tests sharing a date range would leak results — clear it per test.
     compute_network_summary.cache_clear()
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     async with pool.acquire() as c:
         await c.execute(_TRUNCATE_SQL)
         ins = "INSERT INTO agencies (agency_name, feed_url) VALUES ($1,$2) RETURNING agency_id"

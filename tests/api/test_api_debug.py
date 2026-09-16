@@ -41,7 +41,7 @@ async def debug_client(apply_schema, monkeypatch):
 
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -108,7 +108,7 @@ async def test_perf_default_is_closed(apply_schema, monkeypatch):
 
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     try:
         async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

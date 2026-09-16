@@ -22,7 +22,7 @@ async def conv_app(apply_schema):
     """Agency + a user; client authed as that user."""
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     # append_message_endpoint now declares ch=Depends(get_ch) alongside conn
     # (Task 8); tests in this file mock dispatch so the real client is never

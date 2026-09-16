@@ -42,7 +42,7 @@ def _fake_embedder(monkeypatch):
 
 @pytest.fixture
 async def conn_with_agency(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_intent_cache")
         await c.execute("DELETE FROM rag_chunks WHERE chunk_id LIKE 'cache_%'")

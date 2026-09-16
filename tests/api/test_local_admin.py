@@ -37,7 +37,7 @@ def _set_local_admin_env(monkeypatch):
 async def local_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         c.pool = pool  # type: ignore[attr-defined]  # exposed so tests can call seed_local_admin(c.pool) directly

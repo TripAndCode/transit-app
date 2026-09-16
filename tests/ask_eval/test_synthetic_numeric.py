@@ -135,7 +135,7 @@ async def _ask_about_pattern(
     pg_conn.commit()
     insert_pattern_updates(pattern, ch_client, agency_id)
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1)
     app.state.pool = pool
     app.state.ch_client = ch_async_client
     try:

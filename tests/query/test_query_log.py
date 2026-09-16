@@ -10,7 +10,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 @pytest.fixture
 async def conn_agency(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"

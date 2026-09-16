@@ -64,7 +64,7 @@ async def _purge(c, agency_ids):
 async def dash_app(apply_schema, ch_client):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     async with pool.acquire() as c:
         leftover = [
             r["agency_id"] for r in await c.fetch("SELECT agency_id FROM agencies WHERE feed_url = 'http://dash-t'")

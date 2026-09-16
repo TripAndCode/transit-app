@@ -20,7 +20,7 @@ async def ask_endpoints_app(apply_schema):
     """Agency + a small seed so the endpoints have something to work with."""
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     app.state.pool = pool
 
     async with pool.acquire() as c:

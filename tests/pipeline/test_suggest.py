@@ -18,7 +18,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 async def suggest_agency(apply_schema, ch_client):
     import asyncpg
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
         "Suggest Test Agency",
