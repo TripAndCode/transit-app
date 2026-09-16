@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import type { SidebarNavItem } from "../../components/Sidebar";
 
 const MANUAL_BASE = "/user-manual";
 
 export type Locale = "en" | "ja";
-export type TabManualKey = "overview" | "map" | "analysis" | "network" | "ask";
+export type TabManualKey = SidebarNavItem["to"] | "ask";
 
 // The user manual (public/user-manual/{en,ja}.md) numbers its top-level
 // sections 1-9 in the same order in both locales --
@@ -11,11 +12,18 @@ export type TabManualKey = "overview" | "map" | "analysis" | "network" | "ask";
 // heading counts between them. Matching by that stable number, rather than
 // locale-specific heading text, means this mapping doesn't need an
 // English *and* Japanese pattern per tab.
-const HEADING_NUMBER: Record<TabManualKey, number> = {
+//
+// The manual still documents the pre-restructure Overview/Map/Analysis/
+// Agencies taxonomy, not today's Overview/Route analysis/Reports sidebar --
+// "overview" and "route-analysis" point at the closest still-accurate
+// sections (3 and 5), but the manual has no Reports section yet, so
+// `reports` is `null` until one exists. `manualExcerptFor` treats `null`
+// the same as a heading number with no match: a graceful "unavailable"
+// excerpt, not a wrong one.
+const HEADING_NUMBER: Record<TabManualKey, number | null> = {
   overview: 3,
-  map: 4,
-  analysis: 5,
-  network: 6,
+  "route-analysis": 5,
+  reports: null,
   ask: 8,
 };
 
@@ -65,7 +73,9 @@ export function firstParagraph(sectionBody: string): string {
 }
 
 export function manualExcerptFor(markdown: string, tab: TabManualKey): string | null {
-  const section = extractSection(markdown, HEADING_NUMBER[tab]);
+  const headingNumber = HEADING_NUMBER[tab];
+  if (headingNumber == null) return null;
+  const section = extractSection(markdown, headingNumber);
   if (section == null) return null;
   const paragraph = firstParagraph(section);
   return paragraph === "" ? null : paragraph;

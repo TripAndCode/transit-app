@@ -35,7 +35,7 @@ _SECRET = "http://ch-internal.example:8123/?database=transit&param_x=leak SELECT
 
 
 def _fake_message(tool_name: str = "describe_data", arguments: str = '{"kind": "routes"}'):
-    """Minimal object shape mirroring the Groq/openai SDK's tool_calls response."""
+    """Minimal object shape mirroring the OpenAI-compatible SDK's tool_calls response."""
     func = SimpleNamespace(name=tool_name, arguments=arguments)
     call = SimpleNamespace(function=func, id="call_1", type="function")
     return SimpleNamespace(content=None, tool_calls=[call])

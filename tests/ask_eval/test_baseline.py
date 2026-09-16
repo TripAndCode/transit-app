@@ -2,7 +2,7 @@
 
 Replays ``golden_set.jsonl`` against the running API and scores
 tool-selection accuracy. Off by default — set ``RUN_LLM_EVAL=1`` plus a
-valid ``GROQ_API_KEY`` to run. Requires the dev API to be reachable at
+valid LLM provider key (e.g. ``GEMINI_API_KEY``) to run. Requires the dev API to be reachable at
 ``EVAL_API_BASE`` (default ``http://localhost:8000``) with at least one
 seeded agency (``EVAL_AGENCY_ID``, default ``1``).
 """
@@ -31,7 +31,7 @@ EVAL_AGENCY_ID = int(os.environ.get("EVAL_AGENCY_ID", "1"))
 SCORE_TARGET = float(os.environ.get("EVAL_SCORE_TARGET", "0.85"))
 
 pytestmark = [
-    pytest.mark.requires_groq_key,
+    pytest.mark.requires_llm_key,
     pytest.mark.skipif(
         os.environ.get("RUN_LLM_EVAL") != "1",
         reason="RUN_LLM_EVAL=1 not set",
@@ -109,7 +109,7 @@ def test_golden_set_aggregate_score():
         )
 
 
-@pytest.mark.requires_groq_key
+@pytest.mark.requires_llm_key
 @pytest.mark.skipif(os.environ.get("RUN_LLM_EVAL") != "1", reason="RUN_LLM_EVAL=1 not set")
 def test_followup_pagination_two_turns():
     """Turn 1 lists stops; turn 2 ('次の50件' with turn-1 in history) paginates."""
