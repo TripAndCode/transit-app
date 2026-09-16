@@ -35,6 +35,7 @@ export function CopilotPanel() {
   // outside <Outlet />) rather than remounting, so an early return above
   // this point would change the hook count between renders of the same
   // instance.
+
   // `llmApproved` belongs in this condition, not just in the render branches
   // below: the insight POST fires on its own from a pageview, with no user
   // action, and the endpoint 403s an unapproved caller. Since the flag
