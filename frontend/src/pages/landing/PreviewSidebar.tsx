@@ -9,9 +9,8 @@ export type PreviewTabKey = (typeof SIDEBAR_NAV_ITEMS)[number]["to"] | "ask";
 
 // Imported directly from the real signed-in sidebar (components/Sidebar.tsx)
 // rather than duplicated here -- same three tabs, in the same order, with
-// the same labelKey and icon, so this preview cannot silently drift from
-// the real nav the way the pre-restructure four-item copy of this list did.
-// Ask is deliberately excluded from this list (rendered as the
+// the same labelKey and icon, so this preview cannot drift from the real
+// nav. Ask is deliberately excluded from this list (rendered as the
 // dashed-border CTA below, matching Sidebar.tsx's own comment on why Ask
 // isn't a peer tab).
 const ITEMS = SIDEBAR_NAV_ITEMS;

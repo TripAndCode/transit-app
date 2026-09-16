@@ -49,8 +49,7 @@ function renderPreview() {
 }
 
 // The real signed-in sidebar's three tabs (components/Sidebar.tsx's
-// SIDEBAR_NAV_ITEMS, shared with PreviewSidebar) -- not the pre-restructure
-// four-item taxonomy this preview used to show.
+// SIDEBAR_NAV_ITEMS, shared with PreviewSidebar).
 const NAV_LABELS = ["Overview", "Route analysis", "Reports"];
 
 describe("DashboardPreview", () => {

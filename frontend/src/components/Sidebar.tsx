@@ -25,11 +25,8 @@ import { Z_INDEX } from "../styles/zIndex";
 /** The sidebar's real nav destinations -- exported so the landing page's
  *  preview mockups (`pages/landing/PreviewSidebar.tsx`, `TabExplorer.tsx`,
  *  `manualExcerpt.ts`'s `TabManualKey`) import this array instead of
- *  maintaining their own copy. That makes it structurally impossible for
- *  the marketing preview's tab set/labels to drift from the real,
- *  signed-in nav -- the failure mode that let the preview silently keep
- *  showing a pre-existing four-item taxonomy after this list was cut down
- *  to three. */
+ *  maintaining their own copy, so the marketing preview's tab set/labels
+ *  cannot drift from the real, signed-in nav. */
 export const SIDEBAR_NAV_ITEMS = [
   { to: "overview", labelKey: "design:overview", Icon: LayoutDashboard },
   { to: "route-analysis", labelKey: "design:analysis", Icon: BarChart3 },

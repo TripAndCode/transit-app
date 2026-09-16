@@ -34,9 +34,7 @@ function average(values: number[]): number {
  *  route ranking below (not decorative pills), plus stat tiles recomputed
  *  from the filtered subset -- reusing the real `network.col_*` labels
  *  since they already say exactly what these numbers are. Stands in for the
- *  real `ReportsHomeTab`'s ranking/summary view (this mock predates the
- *  Overview/Route analysis/Reports restructure, when it depicted the tab
- *  then named "Overview"). */
+ *  real `ReportsHomeTab`'s ranking/summary view. */
 export function PreviewReportsPanel({ agencyKey }: { agencyKey: PreviewAgencyKey }) {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<RouteFilter>("all");
