@@ -11,7 +11,6 @@ import {
   ChevronLeft,
   ChevronRight,
   PanelLeft,
-  type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
