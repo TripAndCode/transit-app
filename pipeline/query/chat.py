@@ -74,7 +74,10 @@ def _allowed_providers() -> set[str] | None:
     providers are tried, and an empty intersection with the configured
     ``CHAT_PROVIDERS`` ladder fails the request rather than falling back
     (see ``LLMClient.chat_completions``'s ``allowed_providers`` handling).
-    Unset by default (returns ``None``, i.e. no restriction) so the
+    Also applied to a BYOK caller's own stored provider (see ``_call_llm``),
+    not just the shared ladder — an operator's restriction must hold
+    regardless of whose API key answers the request. Unset by default
+    (returns ``None``, i.e. no restriction) so the
     documented historical default — Groq — is unchanged. Some models
     (notably Groq ``llama-3.3-70b``) have been shown to obey instructions
     injected into user text rather than the system prompt (see
@@ -454,9 +457,22 @@ async def chat_with_tools(
         :class:`~pipeline.query.llm_client.LLMClient` ladder. Both of
         ``_sync``'s call sites go through here so they can't drift apart on
         how a BYOK caller is handled.
+
+        A BYOK caller's stored provider is still checked against
+        ``_allowed_providers()`` before use: an operator who restricts
+        ``ASK_CHAT_ALLOWED_PROVIDERS`` (e.g. to exclude a provider shown to
+        obey injected instructions) must not have that policy silently
+        bypassed just because the caller supplied their own key. Mirrors
+        the shared ladder's own "empty intersection degrades" behavior
+        (``"no_providers"``) rather than raising or falling back to the
+        shared ladder, so a disallowed BYOK provider fails the same
+        machine-readable way the caller already knows how to handle.
         """
         if user_key is None:
             return client.chat_completions(allowed_providers=_allowed_providers(), **kwargs)
+        allowed = _allowed_providers()
+        if allowed is not None and user_key.provider not in allowed:
+            return None, "no_providers"
         from openai import APIConnectionError, APITimeoutError, BadRequestError, RateLimitError
 
         try:
