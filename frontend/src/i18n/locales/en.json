@@ -1,16 +1,10 @@
 {
   "nav": {
-    "overview": "Overview",
     "overview_subtitle": "What's happening right now",
-    "map": "Operations",
-    "map_subtitle": "Current delays and reported stops",
     "ask": "Ask",
     "live": "Latest observations",
     "live_subtitle": "Stop-by-stop readings",
-    "analysis": "Analysis",
     "analysis_subtitle": "When and why delays happen",
-    "network": "Agencies",
-    "network_subtitle": "How you compare to others",
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
     "open_menu": "Open menu",
@@ -33,6 +27,7 @@
     },
     "explorer": {
       "heading": "See what's inside",
+      "reports_preview": "Delay trends, route rankings, and one-click CSV exports for any period.",
       "ask_preview": "Ask freely in natural language and get an answer right away.",
       "excerpt_unavailable": "Manual preview unavailable."
     },

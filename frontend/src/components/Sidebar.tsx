@@ -23,13 +23,23 @@ import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 
-type Item = { to: string; labelKey: string; Icon: LucideIcon };
-
-const ITEMS: Item[] = [
+/** The sidebar's real nav destinations -- exported so the landing page's
+ *  preview mockups (`pages/landing/PreviewSidebar.tsx`, `TabExplorer.tsx`,
+ *  `manualExcerpt.ts`'s `TabManualKey`) import this array instead of
+ *  maintaining their own copy. That makes it structurally impossible for
+ *  the marketing preview's tab set/labels to drift from the real,
+ *  signed-in nav -- the failure mode that let the preview silently keep
+ *  showing a pre-existing four-item taxonomy after this list was cut down
+ *  to three. */
+export const SIDEBAR_NAV_ITEMS = [
   { to: "overview", labelKey: "design:overview", Icon: LayoutDashboard },
   { to: "route-analysis", labelKey: "design:analysis", Icon: BarChart3 },
   { to: "reports", labelKey: "design:reports", Icon: FileText },
-];
+] as const;
+
+export type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
+
+const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
 

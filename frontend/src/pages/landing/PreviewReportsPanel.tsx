@@ -30,11 +30,14 @@ function average(values: number[]): number {
   return values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0) / values.length;
 }
 
-/** Dashboard-preview Overview tab: filter chips that genuinely re-filter the
- *  route list below (not decorative pills), plus stat tiles recomputed from
- *  the filtered subset -- reusing the real `network.col_*` labels since
- *  they already say exactly what these numbers are. */
-export function PreviewOverviewPanel({ agencyKey }: { agencyKey: PreviewAgencyKey }) {
+/** Dashboard-preview Reports tab: filter chips that genuinely re-filter the
+ *  route ranking below (not decorative pills), plus stat tiles recomputed
+ *  from the filtered subset -- reusing the real `network.col_*` labels
+ *  since they already say exactly what these numbers are. Stands in for the
+ *  real `ReportsHomeTab`'s ranking/summary view (this mock predates the
+ *  Overview/Route analysis/Reports restructure, when it depicted the tab
+ *  then named "Overview"). */
+export function PreviewReportsPanel({ agencyKey }: { agencyKey: PreviewAgencyKey }) {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<RouteFilter>("all");
   const routes = PREVIEW_ROUTES[agencyKey];
