@@ -15,8 +15,10 @@ typechecking and focused behavior tests. Do not merge or deploy this stack.
 ## Data contracts
 
 - A keito is the existing API `route_code`, not `service_type` (weekday calendar)
-  or a direction. Group routes by the published `route_long_name`, falling back
-  to the published short name and then id. Do not infer groups from number prefixes.
+  or a direction. Group routes by the published `route_long_name` (falling back
+  to the published short name and then id) with any leading 系統番号 token
+  stripped first, since some feeds embed the pattern number directly in
+  `route_long_name` (e.g. "14-5 共立ハイツ線") rather than in `route_short_name`.
 - The shared `routes` URL parameter contains the exact selected keito codes.
   Keep that scope in queries, links, saved analyses and CSV exports.
 - Existing stop data is **mean departure delay**, not median, exact vehicle GPS

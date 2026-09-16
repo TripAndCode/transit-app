@@ -343,6 +343,8 @@
   "help": {
     "title": "User Manual",
     "sections_nav": "Manual sections",
+    "search_placeholder": "Search the manual (coming soon)",
+    "category_shortcut_label": "Jump to: {{title}}",
     "hint_text": "New here? Check out the User Manual for a walkthrough.",
     "hint_cta": "View Help",
     "hint_dismiss_aria": "Dismiss help hint"

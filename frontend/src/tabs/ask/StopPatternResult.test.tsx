@@ -41,7 +41,7 @@ describe("complete stop patterns", () => {
     }
     renderWithProviders(<Composer />);
     expect(send).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText("Send"));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(send).toHaveBeenCalledWith(99, "Explain\nSelected: Park (sequence 2).", true, 1);
   });
 });

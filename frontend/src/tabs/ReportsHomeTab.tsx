@@ -14,6 +14,15 @@ import { EmptyState } from "../components/EmptyState";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import "../styles/focusedAnalysis.css";
 
+const DAYS_CSV_HEADER = ["date", "mean_departure_delay_minutes", "observations"];
+function daysToCsvRows(days: TrendDay[]) {
+  return [DAYS_CSV_HEADER, ...days.map((d) => [d.date, d.avg_min, d.samples])];
+}
+const RANKING_CSV_HEADER = ["route_code", "service_type", "mean_minutes", "median_minutes", "p90_minutes", "observations"];
+function rankingToCsvRows(rows: unknown[][]) {
+  return [RANKING_CSV_HEADER, ...rows];
+}
+
 export function ReportsHomeTab() {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
@@ -27,10 +36,19 @@ export function ReportsHomeTab() {
   const names = useRouteNames(id);
   const [saved, setSaved] = useState(readAnalyses);
   const [notice, setNotice] = useState("");
+  const [shareNotice, setShareNotice] = useState("");
   const days = ((trend.data?.rows[0] as { days?: TrendDay[] } | undefined)?.days ?? []).filter((d) => Number.isFinite(d.avg_min) && d.samples > 0).sort((a, b) => a.date.localeCompare(b.date));
   const rows = (ranking.data?.rows ?? []).filter(Array.isArray) as unknown[][];
   const queryString = ctxToQueryString(ctx);
   const metadata = [["agency_id", "from", "to", "dow", "time_band", "service", "route_codes"], [id, ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, ctx.routes.join(",")]];
+  async function copyShareLink() {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?${queryString}`);
+      setShareNotice(t("copied"));
+    } catch {
+      setShareNotice(t("copyFailed"));
+    }
+  }
   return <div className="focus-page">
     <header className="focus-header"><div><h1>{t("reports")}</h1><p>{t("reportTitle")}</p></div>
       {!savedTab && <div className="focus-actions"><button onClick={() => window.print()}>{t("print")}</button></div>}
@@ -49,14 +67,14 @@ export function ReportsHomeTab() {
     </section> : <>
       <AnalysisFilters agencyId={id} />
       <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name} · {ctx.from} – {ctx.to}</h2>
-      <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
-        ...metadata, [], ["definition", JSON.stringify(trend.data?.definition)], [], ["date", "mean_departure_delay_minutes", "observations"], ...days.map((d) => [d.date, d.avg_min, d.samples]),
+      <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
+        ...metadata, [], ["definition", JSON.stringify(trend.data?.definition)], [], ...daysToCsvRows(days),
       ])}>{t("csv")}</button></div></div>
       <AsyncSection loading={trend.isPending} error={trend.error} onRetry={() => void trend.refetch()} data={trend.data} hasContent={() => days.length > 0} empty={<EmptyState title={t("empty")} />}>
         {() => <><p className="focus-muted">{t("mean")} · {t("coverage", { from: days[0]?.date, to: days.at(-1)?.date })}</p><PeriodChart days={days} /></>}
       </AsyncSection></section>
-      <section><div className="focus-header"><h2>{t("routesToCheck")}</h2><div className="focus-actions"><button disabled={!rows.length || !!ranking.error || ranking.isFetching} onClick={() => downloadCsv(`patterns-${id}-${ctx.from}-${ctx.to}`, [
-        ...metadata, [], ["definition", JSON.stringify(ranking.data?.definition)], [], ["route_code", "service_type", "mean_minutes", "median_minutes", "p90_minutes", "observations"], ...rows,
+      <section><div className="focus-header"><h2>{t("routesToCheck")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!rows.length || !!ranking.error || ranking.isFetching} onClick={() => downloadCsv(`patterns-${id}-${ctx.from}-${ctx.to}`, [
+        ...metadata, [], ["definition", JSON.stringify(ranking.data?.definition)], [], ...rankingToCsvRows(rows),
       ])}>{t("csv")}</button></div></div>
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} />}>
         {() => <div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("pattern")}</th><th>{t("days")}</th><th>{t("mean")}</th><th>{t("samples")}</th><th /></tr></thead><tbody>
@@ -70,6 +88,15 @@ export function ReportsHomeTab() {
         {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
         <Link to={`/agencies/${id}/analysis/trend?${queryString}`}>{t("advanced")} →</Link>
       </details>
+      <footer className="focus-report-footer">
+        {shareNotice && <span role="status" className="focus-muted">{shareNotice}</span>}
+        <div className="focus-actions">
+          <button className="btn-ghost" disabled={!rows.length && !days.length} onClick={() => downloadCsv(`report-${id}-${ctx.from}-${ctx.to}`, [
+            ...metadata, [], ...daysToCsvRows(days), [], ...rankingToCsvRows(rows),
+          ])}>{t("csv")}</button>
+          <button className="btn-ghost" onClick={() => void copyShareLink()}>{t("shareLink")}</button>
+        </div>
+      </footer>
     </>}
   </div>;
 }

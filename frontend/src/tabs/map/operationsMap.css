@@ -52,17 +52,15 @@
 .ops-map__canvas { position: absolute; inset: 0; }
 .ops-map__loading { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 13px; border-radius: 999px; color: #2a2a2a; background: rgba(255,255,255,.92); box-shadow: 0 3px 12px rgba(0,0,0,.18); font-size: 12px; }
 .ops-map__empty { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg-page) 92%, transparent); }
-.ops-map__disclosure { position: absolute; left: 14px; bottom: 14px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 170px); padding: 7px 11px; border: 1px solid #3a4664; border-radius: 7px; color: #e5eaf6; background: rgba(15,20,34,.93); box-shadow: 0 3px 13px rgba(0,0,0,.28); font-size: 11px; font-weight: 600; }
-.ops-map__disclosure svg { flex: 0 0 auto; color: #2ea87a; }
+/* Top-right, stacked below MapLibre's own NavigationControl (also top-right,
+   ~76px tall for its two zoom buttons) -- previously bottom-left, where this
+   box's length (a dynamic, sometimes-wrapping count/date string) could grow
+   tall enough to overlap MapStyleControl's own bottom-left "レイヤー" control. */
+.ops-map__disclosure { position: absolute; right: 14px; top: 92px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 28px); padding: 7px 11px; border: 1px solid var(--card-border); border-radius: var(--card-radius); color: var(--text-primary); background: var(--bg-surface); box-shadow: 0 2px 6px rgba(20,30,50,.08); font-size: 11px; font-weight: 600; }
+.ops-map__disclosure svg { flex: 0 0 auto; color: var(--accent-strong); }
 
-.ops-map-legend { position: absolute; top: 14px; left: 58px; display: flex; align-items: center; gap: 13px; padding: 7px 10px; border: 1px solid #3a4664; border-radius: 7px; color: #edf1fb; background: rgba(15,20,34,.92); font-size: 10px; font-weight: 700; }
-.ops-map-legend span { display: inline-flex; align-items: center; gap: 5px; }
-.ops-map-legend i { width: 9px; height: 9px; border-radius: 50%; background: #7c8ebc; }
-.ops-map-legend i.is-current { background: #2bc5aa; box-shadow: 0 0 0 2px #fff; }
-.ops-map-legend i.is-trail { width: 17px; height: 4px; border-radius: 2px; background: #2bc5aa; }
-.ops-map-legend i.is-delayed { background: #f06b5c; }
-.ops-map-legend i.is-cluster { display: grid; width: 15px; height: 15px; place-items: center; color: #071916; background: #2bc5aa; font-size: 7px; }
-.ops-map-fit { position: absolute; right: 14px; bottom: 14px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid #3a4664; border-radius: 7px; color: #f3f6ff; background: rgba(15,20,34,.94); font-size: 11px; font-weight: 700; }
+.ops-map-legend { position: absolute; top: 12px; left: 12px; display: flex; align-items: center; gap: 12px; padding: 7px 12px; border: 1px solid var(--card-border); border-radius: var(--card-radius); background: var(--bg-surface); box-shadow: 0 2px 6px rgba(20,30,50,.08); }
+.ops-map-fit { position: absolute; right: 14px; bottom: 14px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--card-border); border-radius: var(--card-radius); color: var(--text-primary); background: var(--bg-surface); box-shadow: 0 2px 6px rgba(20,30,50,.08); font-size: 11px; font-weight: 700; }
 
 .ops-trip-panel { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 16px 14px 12px; color: #f5f7ff; background: linear-gradient(155deg, var(--ops-navy-soft), var(--ops-navy) 58%); border-left: 1px solid #303952; }
 .ops-trip-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
@@ -186,6 +184,9 @@
   .ops-header { gap: 10px; }
   .ops-heading { width: 100%; }
   .ops-freshness { margin-left: auto; }
-  .ops-map__disclosure { right: 8px; bottom: 52px; left: 8px; max-width: none; }
-  .ops-map-legend { right: 8px; left: 48px; gap: 8px; overflow: hidden; }
+  .ops-map__disclosure { right: 8px; bottom: 52px; left: 8px; top: auto; max-width: none; }
+  /* Reserves the same right-side clearance NavigationControl needs (moved
+     to top-right, see MapTab.tsx) so the full-width legend bar doesn't
+     paint over the zoom buttons. */
+  .ops-map-legend { right: 48px; left: 8px; gap: 8px; overflow: hidden; }
 }
