@@ -70,6 +70,36 @@ async def test_authenticated_user_with_byok_key_bypasses_shared_client(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_byok_provider_disallowed_by_operator_degrades_without_calling(monkeypatch):
+    """ASK_CHAT_ALLOWED_PROVIDERS must gate a BYOK caller's stored provider
+    too, not just the shared ladder -- an operator who restricts the ladder
+    to exclude an injection-prone provider must not have that policy
+    silently bypassed just because the caller supplied their own key of the
+    excluded provider."""
+    monkeypatch.setenv("ASK_CHAT_ALLOWED_PROVIDERS", "openai")
+    monkeypatch.setattr(chat, "get_user_llm_key", AsyncMock(return_value=_fake_user_key(provider="gemini")))
+    monkeypatch.setattr(chat, "_completion_with_key", _must_not_be_called)
+    monkeypatch.setattr(chat, "_get_client", lambda: _BoomClient())
+
+    result = await chat.chat_with_tools("hi", _ctx(), conn=None, agency_id=1, locale="en", user_id=42)
+    assert result["success"] is False
+    assert result["answer"] == chat._chat_str("llm_unconfigured", "en")
+
+
+@pytest.mark.asyncio
+async def test_byok_provider_allowed_by_operator_allowlist_proceeds(monkeypatch):
+    """A BYOK provider that IS in the operator's allowlist still works."""
+    monkeypatch.setenv("ASK_CHAT_ALLOWED_PROVIDERS", "gemini, openai")
+    monkeypatch.setattr(chat, "get_user_llm_key", AsyncMock(return_value=_fake_user_key(provider="gemini")))
+    monkeypatch.setattr(chat, "_completion_with_key", lambda *a, **k: _fake_text_message("ok"))
+    monkeypatch.setattr(chat, "_get_client", lambda: _BoomClient())
+
+    result = await chat.chat_with_tools("hi", _ctx(), conn=None, agency_id=1, locale="en", user_id=42)
+    assert result["success"] is True
+    assert result["answer"] == "ok"
+
+
+@pytest.mark.asyncio
 async def test_byok_caller_skips_anon_quota_even_when_exhausted(monkeypatch):
     """A BYOK caller must never hit AnonAskQuotaExceeded — anon_quota is never
     constructed for a signed-in caller at the API layer, but this defense-in-
