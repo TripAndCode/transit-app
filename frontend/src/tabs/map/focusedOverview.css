@@ -5,9 +5,16 @@
 .focused-overview .focus-filters { align-items: end; margin: 0; }
 .focused-overview .focus-filters > span { padding: 10px 0; }
 .focused-overview .focus-filters > button { margin-left: auto; padding: 9px; }
-.focused-overview .ops-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 290px; flex: 1; height: auto; min-height: 340px; max-height: calc(100dvh - 220px); border: 0; background: var(--bg-surface); }
+.focused-overview .ops-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 11px var(--ops-queue-width, 290px); flex: 1; height: auto; min-height: 340px; max-height: calc(100dvh - 220px); border: 0; background: var(--bg-surface); }
 .focused-overview .ops-map { min-height: 340px; height: 100%; }
-.focus-live-queue { min-height: 0; overflow: auto; padding: 0 0 0 20px; border-left: 1px solid var(--border-subtle); }
+/* Drag handle between map and panel. The hit area spans the full column while
+   the visible line is a centered pseudo-element, so the target stays reachable
+   without widening the seam itself. */
+.ops-resizer { position: relative; cursor: col-resize; touch-action: none; }
+.ops-resizer::before { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); background: var(--border-subtle); content: ""; }
+.ops-resizer:hover::before, .ops-resizer:focus-visible::before { width: 3px; background: var(--accent-strong); }
+.ops-resizer:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+.focus-live-queue { min-height: 0; overflow: auto; padding: 0 0 0 20px; border-left: 0; }
 .focus-live-queue h2 { margin: 8px 0 16px; font-size: 18px; }
 .focus-summary-strip { display: flex; gap: 8px; margin: 0 0 16px; }
 .focus-summary-strip .stat-tile { flex: 1; }
@@ -17,4 +24,4 @@
 .focus-trip b { margin-left: auto; color: var(--color-danger); white-space: nowrap; }
 .focus-trip a { font-size: 12px; }
 .focus-live-queue details { margin-top: 20px; }
-@media (max-width: 1000px) { .focused-overview .ops-workspace { grid-template-columns: 1fr; max-height: none; } .focused-overview .ops-map { height: 50dvh; } .focus-live-queue { padding: 16px 0; border-left: 0; } }
+@media (max-width: 1000px) { .focused-overview .ops-workspace { grid-template-columns: 1fr; max-height: none; } .focused-overview .ops-map { height: 50dvh; } .focus-live-queue { padding: 16px 0; } .ops-resizer { display: none; } }
