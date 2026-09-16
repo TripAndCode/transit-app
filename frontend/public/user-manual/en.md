@@ -271,7 +271,8 @@ Once you ask, the result appears on screen like this.
   pattern?**" and "**Is the sample size reliable?**." Click one to continue the conversation.
 - **There's also a free-text box below that.** For a question that isn't covered by the
   provided buttons (e.g. "Are any routes worse than last week?"), type it in as plain text
-  and press "Send" to get an answer grounded in the result currently on screen.
+  and press the send button (the paper-plane icon at the right of the box) to get an
+  answer grounded in the result currently on screen.
 
 ![Follow-up free-text input](./14-ask-followup-freetext.en.png)
 
