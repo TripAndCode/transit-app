@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
@@ -854,6 +855,79 @@ async def test_followup_authed_success_appends_messages(conv_app, monkeypatch):
         ("user", "what about X?"),
         ("assistant", "the answer"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_followup_holds_no_pool_connection_across_the_llm_call(conv_app, monkeypatch):
+    """A provider call takes seconds; a connection parked for that long is one
+    no other request can use.
+
+    Asserted behaviorally rather than by inspecting pool internals: the app
+    runs against a pool capped at a single connection, so the probe below —
+    standing in for a concurrent request — can only acquire one if the
+    in-flight follow-up is holding none. Any dependency that keeps a
+    connection open for the whole request (`Depends(get_conn)`, directly or
+    through another dependency) makes this time out.
+    """
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, pool = conv_app
+
+    async with pool.acquire() as conn:
+        conv = await conv_router._conv.create_conversation(
+            conn, user_id=uid, agency_id=agency, title="T", filter_ctx={}
+        )
+        conv_id = conv["conversation_id"]
+        msg = await conv_router._conv.append_message(
+            conn,
+            conv_id,
+            role="assistant",
+            chip_id=None,
+            tool="describe_data",
+            args={"kind": "stops"},
+            signature_hash=None,
+            result={"ok": True},
+            rendered_summary="prior answer",
+        )
+
+    probe: dict = {}
+
+    async def _probing_answer_followup(**_kwargs):
+        try:
+            async with app.state.pool.acquire(timeout=3) as other:
+                probe["acquired"] = await other.fetchval("SELECT 1")
+        except asyncio.TimeoutError:
+            probe["acquired"] = "timed out — a connection is held across the LLM call"
+        return "the answer", None
+
+    monkeypatch.setattr(conv_router._followup, "answer_followup", _probing_answer_followup)
+
+    single = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=1)
+    original_pool = app.state.pool
+    app.state.pool = single
+    try:
+        async with _authed_optional_client(app, uid) as c:
+            # Bounded: a request that holds the only connection deadlocks
+            # against its own later acquire rather than failing, so without
+            # this a regression would hang the suite instead of reporting.
+            r = await asyncio.wait_for(
+                c.post(
+                    f"/api/{agency}/conversations/{conv_id}/followup",
+                    json={"question": "what about X?", "context_message_id": msg["message_id"]},
+                    headers=_CSRF,
+                ),
+                timeout=20,
+            )
+    except asyncio.TimeoutError:
+        pytest.fail(f"request never completed — the follow-up path holds a pool connection ({probe})")
+    finally:
+        app.state.pool = original_pool
+        await single.close()
+
+    assert probe["acquired"] == 1, probe
+    assert r.status_code == 200, r.text
+    assert r.json()["assistant"]["rendered_summary"] == "the answer"
 
 
 @pytest.mark.asyncio

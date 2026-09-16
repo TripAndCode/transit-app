@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 
 from api.security import current_user, require_user
 
@@ -50,8 +50,22 @@ async def get_ch(request: Request):
     return _CH_UNAVAILABLE if ch_client is None else ch_client
 
 
-async def get_agency(agency_id: int, conn=Depends(get_conn)):
-    row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1 AND deleted_at IS NULL", agency_id)
+async def get_agency(agency_id: int, request: Request):
+    """Validate the path's agency and return it as the request's auth scope.
+
+    Acquires its own connection for the one SELECT instead of taking
+    ``Depends(get_conn)``: a ``yield`` dependency stays open until the request
+    finishes, so borrowing that one would pin a pool connection for the whole
+    handler — including across a multi-second provider call on the routes that
+    make one (``/copilot/insight``, ``/conversations/{id}/followup``), which
+    deliberately declare no ``conn`` of their own for exactly that reason.
+    Routes that do declare ``Depends(get_conn)`` list it after this
+    dependency, so the two acquisitions are sequential, not concurrent.
+    """
+    async with request.app.state.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT agency_id FROM agencies WHERE agency_id=$1 AND deleted_at IS NULL", agency_id
+        )
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
     return agency_id
