@@ -60,7 +60,11 @@ describe("FilterDock", () => {
   });
 
   it("treats a selection that round-trips back to the applied one as not pending", async () => {
-    const { onApply } = renderDock(["101", "102"]);
+    // Applied in the reverse of the fixture's own route order: PatternFilters
+    // rebuilds a whole group's code list from ROUTES order ("101" before
+    // "102"), so this only round-trips cleanly if the comparison below is
+    // genuinely order-insensitive.
+    const { onApply } = renderDock(["102", "101"]);
     const [line] = screen.getAllByRole("combobox");
 
     // Away and back: PatternFilters rebuilds a whole group's code list, so the

@@ -4,11 +4,12 @@ import { PatternFilters } from "../../components/analysis/AnalysisFilters";
 
 /** Deferred-commit wrapper around the route/pattern filters.
  *
- * The operations map re-queries live trips, re-derives every counter, and
- * re-fits the map on each committed filter change, so applying a half-built
- * selection (a route chosen but its pattern not yet narrowed) makes the whole
- * screen churn through a state the operator never asked to see. Draft state
- * here keeps the selection local until they say it's ready.
+ * The operations map re-derives every counter on each committed filter
+ * change, and re-fits the map when the change narrows to a single route, so
+ * applying a half-built selection (a route chosen but its pattern not yet
+ * narrowed) makes the whole screen churn through a state the operator never
+ * asked to see. Draft state here keeps the selection local until they say
+ * it's ready.
  *
  * `PatternFilters` stays a controlled component shared with the analysis
  * screen, which commits immediately and should keep doing so — the deferral
