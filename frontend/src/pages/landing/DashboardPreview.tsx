@@ -1,20 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PreviewSidebar, type PreviewTabKey } from "./PreviewSidebar";
-import { PreviewOverviewPanel } from "./PreviewOverviewPanel";
 import { PreviewMapPanel } from "./PreviewMapPanel";
 import { PreviewAnalysisPanel } from "./PreviewAnalysisPanel";
-import { PreviewNetworkPanel } from "./PreviewNetworkPanel";
+import { PreviewReportsPanel } from "./PreviewReportsPanel";
 import { PreviewAskPanel } from "./PreviewAskPanel";
 import { PreviewHelpHint } from "./PreviewHelpHint";
 import type { PreviewAgencyKey } from "./previewData";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { SIDEBAR_NAV_ITEMS } from "../../components/Sidebar";
 
 // The tabs the living-demo timer cycles through, in the same order as the
-// real sidebar's nav list (`PreviewSidebar`'s `ITEMS`). "ask" is deliberately
-// excluded -- it's a CTA the visitor opts into, not a peer tab, matching how
-// `PreviewSidebar` itself treats it.
-const AUTO_ADVANCE_ORDER: PreviewTabKey[] = ["overview", "map", "analysis", "network"];
+// real sidebar's nav list (`SIDEBAR_NAV_ITEMS`, shared with `PreviewSidebar`).
+// "ask" is deliberately excluded -- it's a CTA the visitor opts into, not a
+// peer tab, matching how `PreviewSidebar` itself treats it.
+const AUTO_ADVANCE_ORDER: PreviewTabKey[] = SIDEBAR_NAV_ITEMS.map((item) => item.to);
 
 // A visitor who never touches the preview should still see the whole cycle
 // play out like a demo video would; one tab change every few seconds reads
@@ -112,11 +112,12 @@ export function DashboardPreview() {
           onSelectAgency={setAgencyKey}
         />
         <main style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-          <div style={{ position: "absolute", inset: 0, overflowY: activeTab === "map" ? "hidden" : "auto" }}>
-            {activeTab === "overview" && <PreviewOverviewPanel agencyKey={agencyKey} />}
-            {activeTab === "map" && <PreviewMapPanel />}
-            {activeTab === "analysis" && <PreviewAnalysisPanel />}
-            {activeTab === "network" && <PreviewNetworkPanel selectedKey={agencyKey} onSelect={setAgencyKey} />}
+          <div style={{ position: "absolute", inset: 0, overflowY: activeTab === "overview" ? "hidden" : "auto" }}>
+            {/* "overview" renders the live-map mock -- the real sidebar's
+                Overview nav item routes to `MapTab`, not a KPI dashboard. */}
+            {activeTab === "overview" && <PreviewMapPanel />}
+            {activeTab === "route-analysis" && <PreviewAnalysisPanel />}
+            {activeTab === "reports" && <PreviewReportsPanel agencyKey={agencyKey} />}
             {activeTab === "ask" && <PreviewAskPanel />}
           </div>
           <PreviewHelpHint />

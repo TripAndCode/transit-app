@@ -33,7 +33,8 @@ def client(monkeypatch, tmp_path):
     """TestClient backed by a temp static dir that mimics a real Vite build.
 
     Avoids ``with TestClient(app)`` so the lifespan (which needs ``DATABASE_URL``
-    and ``GROQ_API_KEY``) is not triggered. Cleans up SPA routes on teardown.
+    and a configured LLM provider key) is not triggered. Cleans up SPA routes
+    on teardown.
     """
     static_dir = tmp_path / "static"
     (static_dir / "assets").mkdir(parents=True)

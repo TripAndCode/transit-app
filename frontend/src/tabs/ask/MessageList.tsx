@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import type { ConvMessage, ToolResult } from "../../api/types";
 import { RichResult } from "./RichResult";
+import "./messageList.css";
 
 export function MessageList({
   messages,
@@ -34,22 +35,12 @@ function Bubble({
   const wide = !isUser && (result?.kind === "table" || result?.kind === "series");
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: isUser ? "flex-end" : "flex-start",
-        margin: "12px 0",
-      }}
-    >
+    <div className={isUser ? "msg-row msg-row--user" : "msg-row msg-row--assistant"}>
       <div
+        className={isUser ? "msg-bubble msg-bubble--user" : "msg-bubble msg-bubble--assistant"}
         style={{
           maxWidth: wide ? "100%" : "85%",
           width: wide ? "100%" : undefined,
-          padding: "10px 14px",
-          background: isUser ? "var(--accent-soft)" : "var(--bg-surface)",
-          border: isUser ? "none" : "1px solid var(--border-soft)",
-          borderRadius: "var(--radius-lg)",
           whiteSpace: isUser ? "pre-wrap" : undefined,
         }}
       >

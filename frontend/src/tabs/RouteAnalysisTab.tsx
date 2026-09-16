@@ -30,6 +30,7 @@ export function RouteAnalysisTab() {
   const [selection, setSelection] = useState<{ route: string | null; sequence: number } | null>(null);
   const [notice, setNotice] = useState("");
   const [activeTab, setActiveTab] = useState<"map" | "trend" | "byStop">("trend");
+  const [mapVisited, setMapVisited] = useState(false);
   const stops = query.data ? orderedStops(query.data) : [];
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? stops.find((s) => s.avg_min != null) ?? stops[0];
@@ -54,7 +55,7 @@ export function RouteAnalysisTab() {
         {compare && !previous.isPending && !previous.error && !prevStops.length && <p>{t("compareUnavailable")}</p>}
         <div className="focus-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={activeTab === "trend"} onClick={() => setActiveTab("trend")}>{t("tabTrend")}</button>
-          <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => setActiveTab("map")}>{t("tabMap")}</button>
+          <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => { setActiveTab("map"); setMapVisited(true); }}>{t("tabMap")}</button>
           <button type="button" role="tab" aria-selected={activeTab === "byStop"} onClick={() => setActiveTab("byStop")}>{t("tabByStop")}</button>
         </div>
         <div className="focus-split">
@@ -64,8 +65,8 @@ export function RouteAnalysisTab() {
               <StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
               <p className="focus-muted">{t("selected")} {ctx.from} – {ctx.to}{compare && ` · ${t("previous")} ${prevCtx.from} – ${prevCtx.to}`}</p>
             </div>}
-            {activeTab === "map" && <div className="focus-tab-panel focus-tab-panel--map">
-              <AnalysisMap data={query.data!} selected={selected} />
+            {mapVisited && <div className={`focus-tab-panel${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`}>
+              <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} />
             </div>}
             {activeTab === "byStop" && <div className="focus-tab-panel">
               <div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("stop")}</th><th>{t("mean")}</th><th>{t("samples")}</th></tr></thead><tbody>

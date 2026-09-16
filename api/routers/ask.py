@@ -1,8 +1,8 @@
 """Ask tab — natural-language Japanese questions answered via tool-use.
 
 v1 used a single intent classifier that fell off a cliff for anything
-outside ~15 known templates. v2 uses Groq's tool-use mode against the
-six tools defined in :mod:`pipeline.query.tools`. Out-of-scope questions
+outside ~15 known templates. v2 uses tool-use mode against the six
+tools defined in :mod:`pipeline.query.tools`. Out-of-scope questions
 get a friendly text refusal with 2–3 supported suggestions.
 
 The request body now carries the global :class:`~api.range.RangeCtx`
@@ -159,7 +159,7 @@ async def ask(
     """Answer a natural-language question via tool-use.
 
     Cross-origin POSTs are rejected by ``csrf_guard`` before the LLM call
-    fires, so an attacker can't burn the operator's Groq quota or extract
+    fires, so an attacker can't burn the operator's LLM quota or extract
     answers through a victim's session cookie. The Accept-Language header
     picks the response locale (defaults to JP).
     """

@@ -1,0 +1,20 @@
+.msg-row { display: flex; flex-direction: column; margin: 12px 0; }
+.msg-row--user { align-items: flex-end; }
+.msg-row--assistant { align-items: flex-start; }
+
+.msg-bubble { padding: 10px 14px; }
+
+/* Right-aligned, filled accent, tail toward the bottom-right corner. */
+.msg-bubble--user {
+  background: var(--accent-strong);
+  color: var(--on-accent);
+  border-radius: 12px 12px 3px 12px;
+}
+
+/* Left-aligned, soft surface, tail toward the bottom-left corner. */
+.msg-bubble--assistant {
+  background: var(--bg-soft);
+  border: 1px solid var(--card-border);
+  color: var(--text-primary);
+  border-radius: 12px 12px 12px 3px;
+}

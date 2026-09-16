@@ -24,9 +24,9 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 def _fake_message(arguments: str, tool_name: str = "capabilities"):
-    """Build the minimal object shape Groq's chat completions return.
+    """Build the minimal object shape an OpenAI-compatible chat completion returns.
 
-    Mirrors ``resp.choices[0].message`` from the openai/Groq SDK so the
+    Mirrors ``resp.choices[0].message`` from the openai SDK so the
     orchestrator's ``getattr(msg, 'tool_calls', None)`` and
     ``call.function.arguments`` reads both resolve cleanly.
     """
