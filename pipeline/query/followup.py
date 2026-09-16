@@ -103,18 +103,27 @@ async def answer_followup(
     context_args: dict | None,
     context_result: dict | None,
     locale: str = "ja",
+    llm_approved: bool = True,
 ) -> tuple[str, str | None]:
     """Return ``(answer_text, error_kind)``.
 
     ``error_kind`` is ``None`` on success. ``"too_long"`` if the question
-    exceeds :data:`MAX_QUESTION_CHARS`. Otherwise the underlying provider
-    error kind (``rate_limit``, ``connection``, etc.).
+    exceeds :data:`MAX_QUESTION_CHARS`. ``"not_approved"`` if
+    ``llm_approved`` is ``False`` (the caller's own ``users.llm_approved``
+    flag, or an anonymous caller who never has one -- checked before any
+    provider is touched). Otherwise the underlying provider error kind
+    (``rate_limit``, ``connection``, etc.). Defaults to ``True`` so internal
+    callers/tests that don't construct the real value aren't silently
+    gated -- the API layer is responsible for passing the caller's actual
+    approval status.
     """
     q = question.strip()
     if not q:
         return "", "empty"
     if len(q) > MAX_QUESTION_CHARS:
         return "", "too_long"
+    if not llm_approved:
+        return "", "not_approved"
 
     system = _SYS_PROMPT_EN if locale == "en" else _SYS_PROMPT_JA
     context_block = _serialize_context(context_tool, context_args, context_result)

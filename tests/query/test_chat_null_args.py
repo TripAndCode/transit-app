@@ -387,6 +387,27 @@ async def test_degradation_message_no_providers(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_degradation_message_not_approved(monkeypatch):
+    """llm_approved=False shows the admin-approval message, in both locales,
+    without ever reaching the provider client."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        def chat_completions(self, **k):
+            raise AssertionError("the LLM provider must not be reached when llm_approved=False")
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    for locale in ("ja", "en"):
+        out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale=locale, llm_approved=False)
+        assert out["success"] is False
+        assert out["answer"] == chat._chat_str("llm_not_approved", locale)
+
+
+@pytest.mark.asyncio
 async def test_history_block_scopes_use_to_explicit_references(monkeypatch):
     """item 16 fix: the history block must tell the model not to answer an
     unrelated question from stale prior-turn data.

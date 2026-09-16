@@ -19,6 +19,7 @@ import {
   useAppendMessage,
   useMigrateAnon,
   useIsAuthenticated,
+  useIsLlmApproved,
   useUpdateConversation,
   useFollowup,
   useFollowupEnabled,
@@ -66,6 +67,7 @@ export function AskTab() {
 
   // ── Hooks ─────────────────────────────────────────────────────────────────
   const authed = useIsAuthenticated();
+  const llmApproved = useIsLlmApproved();
   const migrateAnon = useMigrateAnon(id ?? 0);
   const migratedRef = useRef(false);
 
@@ -83,9 +85,12 @@ export function AskTab() {
   const createConv = useCreateConversation(id ?? 0);
   const appendMsg = useAppendMessage(id ?? 0);
   const updateConv = useUpdateConversation(id ?? 0);
-  const followup = useFollowup(id ?? 0, authed);
+  const followup = useFollowup(id ?? 0);
   const followupFlag = useFollowupEnabled(id);
-  const followupEnabled = followupFlag.data?.enabled === true;
+  // Both must hold: the deployment flag AND this caller's own approval.
+  // Without the second, an unapproved caller (the default for every new
+  // account) is offered chips whose every submission 403s.
+  const followupEnabled = followupFlag.data?.enabled === true && llmApproved;
 
   // ── Filter context (derived, no sync effects) ─────────────────────────────
   // Single source of truth, in priority order:

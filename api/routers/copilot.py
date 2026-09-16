@@ -6,22 +6,12 @@ caller's own view payload, never free-form user text, which is why this
 route needs no RAG grounding or answer verification unlike ``/ask``.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_current_user_optional, get_locale
-from api.middleware.ratelimit import (
-    FREE_LIMIT,
-    PRO_LIMIT,
-    AnonCopilotQuotaExceeded,
-    anon_ip_key,
-    check_and_consume_anon_quota,
-    copilot_anon_daily_limit,
-    copilot_anon_ip_daily_limit,
-    get_or_issue_anon_session,
-    limiter,
-)
-from api.security import csrf_guard
+from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.security import csrf_guard, require_llm_approved
 from pipeline.query.copilot import NoInsightAvailable, generate_proactive_insight, is_enabled
 from pipeline.query.user_llm_keys import get_user_llm_key
 
@@ -44,7 +34,6 @@ class CopilotInsightResponse(BaseModel):
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def copilot_insight(
     request: Request,
-    response: Response,
     body: CopilotInsightRequest,
     agency_id: int = Depends(get_agency),
     locale: str = Depends(get_locale),
@@ -52,21 +41,16 @@ async def copilot_insight(
 ):
     csrf_guard(request)
     if not is_enabled():
-        # Short-circuit ahead of the quota check: a disabled feature must not
-        # spend the caller's daily budget, and the panel hides itself off the
+        # Short-circuit ahead of the approval gate and quota check: a
+        # disabled feature must not spend the caller's daily budget or 403
+        # an unapproved caller, and the panel hides itself off the
         # ``/copilot/enabled`` flag rather than relying on this response.
         raise HTTPException(status_code=503, detail="copilot_disabled")
-    if user is None:
-        session_key = get_or_issue_anon_session(request, response)
-        ip_key = anon_ip_key(request)
-        if not check_and_consume_anon_quota(
-            session_key,
-            ip_key,
-            scope="copilot",
-            daily_limit=copilot_anon_daily_limit(),
-            ip_daily_limit=copilot_anon_ip_daily_limit(),
-        ):
-            raise AnonCopilotQuotaExceeded()
+    # Called directly (not via Depends) on the already-resolved `user` so it
+    # runs after the kill-switch check above, not before it -- FastAPI
+    # resolves Depends() params before the endpoint body, which would
+    # reverse that precedence.
+    user = require_llm_approved(user)
 
     # Resolve the caller's BYOK key (if any) with a pool connection acquired
     # and released *before* the LLM call below — never held across it, which
@@ -75,10 +59,8 @@ async def copilot_insight(
     # through for tool dispatch regardless of BYOK), so avoid declaring
     # ``conn=Depends(get_conn)`` for the whole handler, matching
     # ``api/routers/me.py``'s ``put_llm_key`` lazy-acquire pattern.
-    user_key = None
-    if user is not None:
-        async with request.app.state.pool.acquire() as conn:
-            user_key = await get_user_llm_key(conn, user.user_id)
+    async with request.app.state.pool.acquire() as conn:
+        user_key = await get_user_llm_key(conn, user.user_id)
 
     try:
         result = await generate_proactive_insight(

@@ -145,51 +145,45 @@ Ask-tab analysis previews, but no current file under
 `frontend/src/tabs/ask/` or `AskTab.tsx` calls it — treat as
 unwired/consumed elsewhere rather than assuming it's live in this UI.
 
-## Anonymous LLM-call daily quota
+## Who may reach the Stage-3 LLM
 
-`POST /ask` has no auth dependency, so anonymous callers reach the Stage-3 LLM
-path directly. The per-minute `FREE_LIMIT`/`PRO_LIMIT` buckets in
-`api/middleware/ratelimit.py` are sized for generic request abuse, not for the
-per-call cost of an LLM invocation, so a separate per-day budget covers that
-one stage. Logged-in users are subject to neither anonymous bucket.
+Reaching an LLM requires a signed-in caller whose `users.llm_approved` flag an
+admin has set. The three LLM-backed surfaces enforce it in two different
+places, for one structural reason:
 
-Two buckets are consumed together, per scope (`ask` and `copilot` share the
-mechanism via `check_and_consume_anon_quota(..., scope=...)`):
+| Surface | Where the gate runs | Rejected caller sees |
+| --- | --- | --- |
+| `POST /copilot/insight` | `require_llm_approved(user)` at the top of the handler (`api/security.py`) | `403 llm_not_approved` |
+| `POST /conversations/{id}/followup` | same | `403 llm_not_approved` |
+| `POST /ask` | inside `chat_with_tools`'s `_call_llm` (`pipeline/query/chat.py`), via the `llm_approved` argument the router threads in | `200` with an honest-degradation answer |
 
-| Bucket | Key | Env knob | Default |
-| --- | --- | --- | --- |
-| Per anon session | signed httpOnly `ask_anon_sid` cookie | `ASK_ANON_DAILY_LIMIT` | 5 |
-| Per source IP | client IP | `ASK_ANON_IP_DAILY_LIMIT` | 20 |
-| Per anon session (Copilot) | same cookie | `COPILOT_ANON_DAILY_LIMIT` | 20 |
-| Per source IP (Copilot) | client IP | `COPILOT_ANON_IP_DAILY_LIMIT` | 80 |
+`/ask` cannot reject the whole request upfront the way the other two do:
+Stages 1 and 2 (regex rules, embedding nearest-neighbour) answer many
+questions with no LLM at all, and those stay open to everyone. So the flag
+travels into the orchestrator and short-circuits only the Stage-3 call,
+returning `error_kind="not_approved"` before any provider or BYOK key is
+touched. Anonymous callers have no user row, so the router passes
+`llm_approved=False` for them — they get Stages 1-2 and nothing more.
 
-The session bucket is the primary limit; the IP ceiling is deliberately looser
-and exists only as a backstop, because `get_or_issue_anon_session` mints a
-fresh session for any request arriving without the cookie — a caller can always
-cycle cookies.
+Admins toggle the flag from `PATCH /api/admin/users/{uid}`, which writes an
+`llm_approved_changed` row to `login_events` whenever the value actually
+changes.
 
-Do not rely on either bucket to bound a determined caller. The session key is
-plainly client-supplied — dropping the cookie mints a new session. Whether the
-IP key is too depends on an open question: it comes from `get_remote_address`,
-and the container runs uvicorn with `--forwarded-allow-ips='*'`, so uvicorn
-trusts the leftmost `X-Forwarded-For` entry unconditionally. Whether an
-external client can set that entry depends on whether the platform edge
-replaces the header or appends to it, which is **unverified** — the
-`Dockerfile`'s own `CAVEAT` comment is the single source of truth on this and
-should be consulted (and settled) before anything security-load-bearing rests
-on the IP bucket. Until then, treat these buckets as protection against
-accidental and casual repeat traffic running up an LLM bill, not as an
-anti-abuse control.
+### The anonymous daily quota is currently unreachable
 
-Both buckets are in-memory and process-local (reset on restart/redeploy), the
-same trade-off `FREE_LIMIT`/`PRO_LIMIT` already accept for this app's
-single-uvicorn-process deployment (see `Dockerfile`: no `--workers`). A
-multi-instance deployment needs a shared storage backend instead — slowapi and
-`limits` both support one via a `storage_uri`.
+`api/middleware/ratelimit.py` still carries a per-day anonymous LLM-call
+budget (`ASK_ANON_DAILY_LIMIT` / `ASK_ANON_IP_DAILY_LIMIT`, killable via
+`ASK_ANON_QUOTA_ENABLED`, keyed on a signed httpOnly `ask_anon_sid` cookie
+plus a per-IP backstop). It predates the approval gate, and the gate has made
+it dead weight: the quota is consumed only when `user_key is None and
+llm_approved`, but an anonymous caller is exactly the caller for whom
+`llm_approved` is `False`, and a signed-in caller never gets an
+`AnonQuotaContext` built in the first place. No caller can consume either
+bucket today.
 
-`ASK_ANON_QUOTA_ENABLED=false` disables both scopes entirely. Exhaustion raises
-`AnonAskQuotaExceeded`/`AnonCopilotQuotaExceeded`, surfaced to the SPA as a
-calm sign-in nudge rather than an error state.
+It is retained, not yet deleted, so the removal gets its own reviewed change
+rather than riding along with the gate that obsoleted it. Do not build on it,
+and do not document it as a live control.
 
 ## Key files
 

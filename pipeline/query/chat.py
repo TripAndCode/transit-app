@@ -145,6 +145,13 @@ _CHAT_STRINGS = {
     ),
     ("llm_unconfigured", "ja"): "AIプロバイダーが設定されていません。",
     ("llm_unconfigured", "en"): "No AI provider is configured.",
+    ("llm_not_approved", "ja"): (
+        "この機能は現在、管理者の承認が必要です。路線一覧・遅延ランキング・停留所数などの質問は引き続きご利用いただけます。"
+    ),
+    ("llm_not_approved", "en"): (
+        "This feature currently requires admin approval. "
+        "Questions like route lists, delay rankings, and stop counts still work."
+    ),
     ("refusal_fallback", "ja"): "ご質問の内容を理解できませんでした。",
     ("refusal_fallback", "en"): "I couldn't understand your question.",
     # Deliberately does NOT interpolate the exception text (same rationale as
@@ -360,6 +367,7 @@ async def chat_with_tools(
     anon_quota: AnonQuotaContext | None = None,
     panel_ctx: dict | None = None,
     user_id: int | None = None,
+    llm_approved: bool = True,
 ) -> dict:
     """Run one round-trip Ask flow.
 
@@ -429,6 +437,18 @@ async def chat_with_tools(
     (see ``anon_quota`` above). The raw key is never logged anywhere in this
     path.
 
+    ``llm_approved``, set by the API layer from the caller's own
+    ``users.llm_approved`` flag (``False`` for every anonymous caller — there
+    is no user row to check), gates both real LLM-invocation sites the same
+    way ``anon_quota``/``user_key`` do: checked inside :func:`_call_llm`
+    before any provider or BYOK key is touched. ``False`` short-circuits to
+    the same honest-degradation shape as a rate-limited/unconfigured ladder
+    (``error_kind="not_approved"``) without ever calling
+    :func:`_consume_anon_quota_or_raise` or a provider. Defaults to ``True``
+    so internal callers/tests that don't construct the real value aren't
+    silently gated — the API layer is the one place responsible for passing
+    the caller's actual approval status.
+
     Returns ``{ answer: str, tool_call: {name, args} | None, result: ToolResult | None }``.
     The ``answer`` is what the assistant bubble displays; ``result`` is a
     structured payload the frontend can use for richer rendering (charts,
@@ -445,7 +465,11 @@ async def chat_with_tools(
     fallback ladder accepts it.
     """
     client = _get_client()
-    user_key = await get_user_llm_key(conn, user_id) if user_id is not None else None
+    # Skip the lookup (a DB round-trip + Fernet decrypt) entirely when the
+    # caller isn't approved: _call_llm below rejects them unconditionally
+    # before user_key is ever read, so fetching it would be wasted work on
+    # every request from a not-yet-approved signed-in caller.
+    user_key = await get_user_llm_key(conn, user_id) if user_id is not None and llm_approved else None
 
     def _call_llm(**kwargs: Any) -> tuple[Any | None, str | None]:
         """Dispatch one completion call, normalized to ``(message, error_kind)``.
@@ -454,7 +478,8 @@ async def chat_with_tools(
         provider ladder) when ``user_key`` is set, else through the shared
         :class:`~pipeline.query.llm_client.LLMClient` ladder. Both of
         ``_sync``'s call sites go through here so they can't drift apart on
-        how a BYOK caller is handled.
+        how a BYOK caller is handled, on the ``llm_approved`` gate, or on
+        provider-allowlist enforcement.
 
         A BYOK caller's stored provider is still checked against
         ``_allowed_providers()`` before use: an operator who restricts
@@ -466,6 +491,8 @@ async def chat_with_tools(
         shared ladder, so a disallowed BYOK provider fails the same
         machine-readable way the caller already knows how to handle.
         """
+        if not llm_approved:
+            return None, "not_approved"
         if user_key is None:
             return client.chat_completions(allowed_providers=_allowed_providers(), **kwargs)
         allowed = _allowed_providers()
@@ -765,14 +792,18 @@ async def chat_with_tools(
         # above (which never reaches here) — see this function's docstring.
         # A BYOK caller (user_key set) skips this: defense-in-depth, since
         # anon_quota is never constructed for a signed-in caller in the
-        # first place (see the docstring's ``user_id`` section).
-        if user_key is None:
+        # first place (see the docstring's ``user_id`` section). An
+        # unapproved caller skips it too, regardless of BYOK/user_key state:
+        # _call_llm rejects them unconditionally, so consuming their quota
+        # first would bill a request that was always going to fail.
+        if user_key is None and llm_approved:
             _consume_anon_quota_or_raise(anon_quota)
         msg, error_kind = await asyncio.to_thread(_sync)
         if msg is None:
             key = {
                 "rate_limit": "llm_rate_limited",
                 "no_providers": "llm_unconfigured",
+                "not_approved": "llm_not_approved",
             }.get(error_kind or "", "service_unreachable")
             return {
                 "answer": _chat_str(key, locale),
@@ -901,7 +932,7 @@ async def chat_with_tools(
             },
         )
 
-    if user_key is None:
+    if user_key is None and llm_approved:
         _consume_anon_quota_or_raise(anon_quota)
     msg, error_kind = await asyncio.to_thread(_sync)
     if msg is None:
@@ -913,6 +944,7 @@ async def chat_with_tools(
         key = {
             "rate_limit": "llm_rate_limited",
             "no_providers": "llm_unconfigured",
+            "not_approved": "llm_not_approved",
         }.get(error_kind or "", "service_unreachable")
         return {
             "answer": _chat_str(key, locale),

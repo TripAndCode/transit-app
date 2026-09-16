@@ -64,6 +64,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         return {
             "answer": "テスト回答",
@@ -253,6 +254,7 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         captured["rag_examples"] = rag_examples
         captured["force_tool_call"] = force_tool_call
@@ -293,6 +295,7 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         captured["history"] = history
         captured["force_tool_call"] = force_tool_call
@@ -353,6 +356,7 @@ async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -403,6 +407,7 @@ async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, m
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -455,6 +460,7 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
@@ -550,6 +556,7 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         captured["history"] = history
         captured["force_tool_call"] = force_tool_call
@@ -607,6 +614,7 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
 
@@ -656,6 +664,7 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         return {
             "answer": "ok",
@@ -804,7 +813,9 @@ async def test_logged_in_caller_bypasses_anon_quota(ask_client, monkeypatch):
     monkeypatch.setenv("ASK_ANON_DAILY_LIMIT", "1")
 
     client, agency_id = ask_client
-    fake_user = User(user_id=1, email="t@test", name="T", avatar_url=None, role="user", suspended_at=None)
+    fake_user = User(
+        user_id=1, email="t@test", name="T", avatar_url=None, role="user", suspended_at=None, llm_approved=True
+    )
     app.dependency_overrides[get_current_user_optional] = lambda: fake_user
 
     captured = []
@@ -865,14 +876,16 @@ async def test_stage1_rule_hit_never_touches_anon_quota(ask_client, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_anonymous_caller_over_daily_limit_gets_429_with_code(ask_client, monkeypatch):
-    """End-to-end: once an anonymous caller's daily Stage-3 LLM quota is
-    exhausted, the NEXT call gets a distinct 429 + machine-readable code —
-    not the generic slowapi RateLimitExceeded body, not a 200 degrade.
+async def test_anonymous_caller_never_reaches_llm_or_quota(ask_client, monkeypatch):
+    """An anonymous caller never has a users.llm_approved row, so every
+    Stage-3 question gets the honest "not approved" degrade (200, no
+    tool_call) on the very first call — never the provider, never the
+    anon daily quota, and so never a 429 either, no matter how many times
+    they ask.
 
-    Exercises the REAL chat_with_tools (not mocked), so the quota check
-    inside it actually runs; only the LLM provider call itself is faked —
-    mirrors tests/query/test_chat_null_args.py's ``_FakeClient`` pattern.
+    Exercises the REAL chat_with_tools (not mocked); only the LLM provider
+    call itself is faked, mirroring tests/query/test_chat_null_args.py's
+    ``_FakeClient`` pattern, so a call to it here would be a real failure.
     """
     from types import SimpleNamespace
 
@@ -882,8 +895,11 @@ async def test_anonymous_caller_over_daily_limit_gets_429_with_code(ask_client, 
     monkeypatch.setenv("ASK_ANON_DAILY_LIMIT", "1")
     monkeypatch.setenv("ASK_ANON_IP_DAILY_LIMIT", "100")
 
+    calls = {"n": 0}
+
     class _FakeClient:
         def chat_completions(self, **kwargs):
+            calls["n"] += 1
             func = SimpleNamespace(name="capabilities", arguments="{}")
             call = SimpleNamespace(function=func, id="call_1", type="function")
             return SimpleNamespace(content=None, tool_calls=[call]), None
@@ -895,22 +911,16 @@ async def test_anonymous_caller_over_daily_limit_gets_429_with_code(ask_client, 
 
     monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
 
-    resp1 = await client.post(
-        f"/api/{agency_id}/ask",
-        json={"question": "何ができますか？"},
-        headers={"Origin": TEST_ORIGIN},
-    )
-    assert resp1.status_code == 200
-    assert resp1.json()["tool_call"]["name"] == "capabilities"
+    for question in ("何ができますか？", "他に何かできますか？"):
+        resp = await client.post(
+            f"/api/{agency_id}/ask",
+            json={"question": question},
+            headers={"Origin": TEST_ORIGIN},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["tool_call"] is None
 
-    resp2 = await client.post(
-        f"/api/{agency_id}/ask",
-        json={"question": "他に何かできますか？"},
-        headers={"Origin": TEST_ORIGIN},
-    )
-    assert resp2.status_code == 429, f"expected 429, got {resp2.status_code}: {resp2.text[:200]}"
-    data = resp2.json()
-    assert data["code"] == "ask_anon_quota_exceeded"
+    assert calls["n"] == 0, "the LLM provider must never be reached by an unapproved caller"
 
 
 @pytest.mark.asyncio
@@ -936,6 +946,7 @@ async def test_ask_forwards_panel_ctx_to_chat_with_tools(ask_client, monkeypatch
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         captured["panel_ctx"] = panel_ctx
         return {"answer": "ok", "tool_call": None, "result": None, "success": True}
@@ -977,6 +988,7 @@ async def test_ask_omits_panel_ctx_by_default(ask_client, monkeypatch):
         anon_quota=None,
         panel_ctx=None,
         user_id=None,
+        llm_approved=True,
     ):
         captured["panel_ctx"] = panel_ctx
         return {"answer": "ok", "tool_call": None, "result": None, "success": True}
@@ -1010,3 +1022,59 @@ async def test_ask_rejects_unknown_panel_ctx_tab(ask_client):
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_signed_in_unapproved_caller_never_reaches_llm(ask_client, monkeypatch):
+    """A signed-in caller whose ``users.llm_approved`` is False gets the same
+    honest degrade an anonymous caller does -- 200, no tool_call, provider
+    never called.
+
+    Covers the router's own ``llm_approved=user.llm_approved if user is not
+    None else False`` wiring, which no other test exercises: the anonymous
+    case takes the ``else False`` branch, and every other signed-in test
+    passes ``llm_approved=True``. Inverting or dropping that ternary would
+    silently let unapproved signed-in users reach the LLM, and only this
+    test would catch it. Exercises the REAL chat_with_tools with just the
+    provider faked, mirroring test_anonymous_caller_never_reaches_llm_or_quota.
+    """
+    from types import SimpleNamespace
+
+    from api.deps import get_current_user_optional
+    from api.main import app
+    from api.security import User
+    from pipeline.query import chat as chat_module
+
+    client, agency_id = ask_client
+    unapproved = User(
+        user_id=1, email="t@test", name="T", avatar_url=None, role="user", suspended_at=None, llm_approved=False
+    )
+    app.dependency_overrides[get_current_user_optional] = lambda: unapproved
+
+    calls = {"n": 0}
+
+    class _FakeClient:
+        def chat_completions(self, **kwargs):
+            calls["n"] += 1
+            func = SimpleNamespace(name="capabilities", arguments="{}")
+            call = SimpleNamespace(function=func, id="call_1", type="function")
+            return SimpleNamespace(content=None, tool_calls=[call]), None
+
+    async def no_decision(*a, **k):
+        return (None, [])
+
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+
+    try:
+        resp = await client.post(
+            f"/api/{agency_id}/ask",
+            json={"question": "何ができますか？"},
+            headers={"Origin": TEST_ORIGIN},
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user_optional, None)
+
+    assert resp.status_code == 200
+    assert resp.json()["tool_call"] is None
+    assert calls["n"] == 0, "the LLM provider must never be reached by an unapproved signed-in caller"

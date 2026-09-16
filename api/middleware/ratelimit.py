@@ -102,22 +102,8 @@ def ask_anon_ip_daily_limit() -> int:
     return int(os.environ.get("ASK_ANON_IP_DAILY_LIMIT", "20"))
 
 
-def copilot_anon_daily_limit() -> int:
-    """Per-anon-session daily cap on proactive Copilot insight calls
-    (``COPILOT_ANON_DAILY_LIMIT``). Looser than the Ask default since each
-    call is a cheap template-selection call, not a full RAG answer.
-    """
-    return int(os.environ.get("COPILOT_ANON_DAILY_LIMIT", "20"))
-
-
-def copilot_anon_ip_daily_limit() -> int:
-    """Per-IP daily backstop for Copilot insight calls (``COPILOT_ANON_IP_DAILY_LIMIT``)."""
-    return int(os.environ.get("COPILOT_ANON_IP_DAILY_LIMIT", "80"))
-
-
 _SCOPE_DEFAULT_LIMITS: dict[str, tuple[Callable[[], int], Callable[[], int]]] = {
     "ask": (ask_anon_daily_limit, ask_anon_ip_daily_limit),
-    "copilot": (copilot_anon_daily_limit, copilot_anon_ip_daily_limit),
 }
 
 
@@ -174,12 +160,14 @@ def check_and_consume_anon_quota(
 
     Always returns True when :func:`anon_quota_enabled` is False.
 
-    ``scope`` namespaces the counted buckets (e.g. ``"ask"`` vs.
-    ``"copilot"``) so independent callers never share a counter, and also
-    picks the scope-appropriate default limits via :data:`_SCOPE_DEFAULT_LIMITS`
-    when ``daily_limit``/``ip_daily_limit`` aren't given explicitly. The
-    default ``scope="ask"`` reproduces today's `/ask` behavior exactly, since
-    both existing callers invoke this positionally with no keyword args.
+    ``scope`` namespaces the counted buckets so independent callers never
+    share a counter, and also picks the scope-appropriate default limits via
+    :data:`_SCOPE_DEFAULT_LIMITS` when ``daily_limit``/``ip_daily_limit``
+    aren't given explicitly. ``/ask`` is the only caller left since the
+    ``llm_approved`` gate (pipeline/query/chat.py) retired the anonymous
+    Copilot/follow-up paths this quota used to protect; the default
+    ``scope="ask"`` reproduces its call exactly, positionally with no keyword
+    args.
     """
     if not anon_quota_enabled():
         return True
@@ -283,24 +271,3 @@ async def ask_quota_exceeded_handler(request: Request, exc: Exception) -> JSONRe
     locale = get_locale(request)
     detail = _ANON_QUOTA_MESSAGE.get(locale, _ANON_QUOTA_MESSAGE["ja"])
     return JSONResponse(status_code=429, content={"detail": detail, "code": ASK_ANON_QUOTA_EXCEEDED_CODE})
-
-
-COPILOT_ANON_QUOTA_EXCEEDED_CODE = "copilot_anon_quota_exceeded"
-
-_COPILOT_ANON_QUOTA_MESSAGE = {
-    "ja": "本日の無料AIコパイロットの上限に達しました。時間をおいて再度お試しください。",
-    "en": "Today's free AI Copilot limit has been reached. Please try again later.",
-}
-
-
-class AnonCopilotQuotaExceeded(Exception):
-    """Raised when an anonymous caller's daily Copilot-insight quota is exhausted."""
-
-
-async def copilot_quota_exceeded_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Map :class:`AnonCopilotQuotaExceeded` to a localized 429 (mirrors ``ask_quota_exceeded_handler`` exactly)."""
-    from api.deps import get_locale
-
-    locale = get_locale(request)
-    detail = _COPILOT_ANON_QUOTA_MESSAGE.get(locale, _COPILOT_ANON_QUOTA_MESSAGE["ja"])
-    return JSONResponse(status_code=429, content={"detail": detail, "code": COPILOT_ANON_QUOTA_EXCEEDED_CODE})

@@ -106,6 +106,11 @@ export function AdminUsersPage() {
     patch.mutate({ uid, body: { suspended: !suspendedAt } });
   }
 
+  function handleLlmApprovedToggle(uid: number, currentlyApproved: boolean) {
+    del.reset();
+    patch.mutate({ uid, body: { llm_approved: !currentlyApproved } });
+  }
+
   function handleDelete(uid: number, email: string) {
     if (!confirm(t("admin.users.confirm_delete", { email }))) return;
     patch.reset();
@@ -149,13 +154,14 @@ export function AdminUsersPage() {
             <th>{t("admin.users.col.name")}</th>
             <th>{t("admin.users.col.role")}</th>
             <th>{t("admin.users.col.status")}</th>
+            <th>{t("admin.users.col.llm_approved")}</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {data && data.users.length === 0 && (
             <tr>
-              <td colSpan={5} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 24 }}>
+              <td colSpan={6} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 24 }}>
                 {t("admin.users.empty")}
               </td>
             </tr>
@@ -184,7 +190,22 @@ export function AdminUsersPage() {
                   {u.suspended_at ? t("admin.users.status.suspended") : t("admin.users.status.active")}
                 </StatusChip>
               </td>
+              <td>
+                <StatusChip tone={u.llm_approved ? "good" : "warn"}>
+                  {u.llm_approved ? t("admin.users.llm_approved.yes") : t("admin.users.llm_approved.no")}
+                </StatusChip>
+              </td>
               <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                <AdminButton
+                  variant="secondary"
+                  disabled={isRowLocked(u.user_id)}
+                  onClick={() => handleLlmApprovedToggle(u.user_id, u.llm_approved)}
+                  style={{ marginRight: 8 }}
+                >
+                  {u.llm_approved
+                    ? t("admin.users.action.revoke_llm")
+                    : t("admin.users.action.approve_llm")}
+                </AdminButton>
                 <AdminButton
                   variant="secondary"
                   disabled={isRowLocked(u.user_id)}

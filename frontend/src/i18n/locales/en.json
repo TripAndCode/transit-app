@@ -1208,7 +1208,7 @@
     "followup_connection": "Connection dropped for a moment. Please retry.",
     "followup_llm_generic": "Couldn't answer that question. Please try again.",
     "ask_anon_quota_exceeded": "You've reached today's free AI question limit. Sign in to keep asking.",
-    "copilot_anon_quota_exceeded": "You've reached today's free Copilot insight limit. Sign in to keep going."
+    "llm_not_approved": "This feature currently requires admin approval."
   },
   "admin": {
     "users": {
@@ -1218,11 +1218,16 @@
         "email": "Email",
         "name": "Name",
         "role": "Role",
-        "status": "Status"
+        "status": "Status",
+        "llm_approved": "AI access"
       },
       "status": {
         "suspended": "Suspended",
         "active": "Active"
+      },
+      "llm_approved": {
+        "yes": "Approved",
+        "no": "Not approved"
       },
       "filter": {
         "role_all": "All roles",
@@ -1231,7 +1236,9 @@
       "action": {
         "resume": "Resume",
         "suspend": "Suspend",
-        "delete": "Delete"
+        "delete": "Delete",
+        "approve_llm": "Approve AI access",
+        "revoke_llm": "Revoke AI access"
       },
       "confirm_delete": "Delete {{email}}? (anonymized, irreversible)",
       "confirm_promote": "Grant admin access to {{email}}?",
