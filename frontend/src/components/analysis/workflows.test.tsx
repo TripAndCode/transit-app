@@ -67,16 +67,16 @@ it("footer CSV exports the report data, not just the filter-metadata prefix", as
   show("reports");
   const user = userEvent.setup();
   // Three "Download CSV" buttons exist: the trend section, the ranking
-  // section, and the closing footer. Only the footer one is meant to combine
-  // both datasets; it previously shipped the shared 2-row metadata prefix
-  // alone, producing a near-empty file under the same label as the two that
-  // worked.
+  // section, and the closing footer. Only the footer button combines both
+  // datasets; the trend and ranking buttons above each export just their own
+  // dataset ("changing keito scopes both report queries and CSV to the
+  // selected code" covers those).
   const footerCsv = screen.getAllByRole("button", { name: "Download CSV" }).at(-1)!;
   await user.click(footerCsv);
   const payload = vi.mocked(downloadCsv).mock.calls.at(-1)![1];
-  expect(payload.flat()).toContain("2026-09-07");
-  expect(payload.flat()).toContain("101");
-  expect(payload.length).toBeGreaterThan(4);
+  expect(payload.flat()).toContain("mean_departure_delay_minutes");
+  expect(payload.flat()).toContain("median_minutes");
+  expect(payload.length).toBe(8);
 });
 
 it("keeps the route map mounted across tab switches instead of recreating its WebGL context", async () => {
