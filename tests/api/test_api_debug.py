@@ -9,12 +9,12 @@ Contract:
 
 import os
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from pipeline import perf
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -41,7 +41,7 @@ async def debug_client(apply_schema, monkeypatch):
 
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     app.state.pool = pool
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -108,7 +108,7 @@ async def test_perf_default_is_closed(apply_schema, monkeypatch):
 
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     app.state.pool = pool
     try:
         async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

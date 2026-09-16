@@ -1,7 +1,6 @@
 import json as _json
 import os
 
-import asyncpg
 import pytest
 import pytest_asyncio
 
@@ -12,6 +11,7 @@ from pipeline.query.router import (
     route_question,
     set_golden_set_path,
 )
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -64,7 +64,7 @@ def golden_jsonl(tmp_path, monkeypatch):
 
 @pytest_asyncio.fixture
 async def conn_with_embedded_chunks(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"

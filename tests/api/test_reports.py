@@ -2,13 +2,12 @@
 
 import os
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from tests.api.test_network import _seed_service_delivered_daily, _seed_static_schedule, _set_ingest_strategy
-from tests.conftest import confirm_rt_field_coverage
+from tests.conftest import _test_pool, confirm_rt_field_coverage
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -25,7 +24,7 @@ async def _trust_dwell_run(pool, *agency_ids):
 async def reports_app(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     app.state.pool = pool
     # get_report() now declares ch=Depends(get_ch) alongside conn (Task 8,
     # compare_ranking's time_band-filtered live-fallback) — every report type

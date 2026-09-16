@@ -11,10 +11,11 @@ import os
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
+
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -56,7 +57,7 @@ def _set_oauth_env(monkeypatch):
 async def auth_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

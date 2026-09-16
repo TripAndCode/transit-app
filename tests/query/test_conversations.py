@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 
-import asyncpg
 import pytest
 
 from pipeline.query.conversations import (
@@ -18,6 +17,7 @@ from pipeline.query.conversations import (
     migrate_anon_threads,
     update_conversation,
 )
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -25,7 +25,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 @pytest.fixture
 async def pool_with_users(apply_schema):
     """Pool + two test users + one agency."""
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_conversations")
         a = await c.fetchrow(

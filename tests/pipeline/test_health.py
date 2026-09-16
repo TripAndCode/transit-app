@@ -6,10 +6,10 @@ import os
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-import asyncpg
 import pytest
 
 from pipeline.health import aggregate_freshness
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 JST = ZoneInfo("Asia/Tokyo")
@@ -17,7 +17,7 @@ JST = ZoneInfo("Asia/Tokyo")
 
 @pytest.fixture
 async def health_pool(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("TRUNCATE agencies, updates, agg_route_daily, agg_meta CASCADE")
     yield pool

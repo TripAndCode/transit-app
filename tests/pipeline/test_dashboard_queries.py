@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 from datetime import date, time
 
-import asyncpg
 import pytest
 
 from api.range import RangeCtx
@@ -23,13 +22,14 @@ from pipeline.dashboard_queries import (
     delay_heatmap,
     movers,
 )
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 @pytest.fixture
 async def movers_pool(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("DELETE FROM agencies WHERE feed_url = 'http://dash-agg'")
         row = await c.fetchrow(

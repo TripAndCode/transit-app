@@ -4,17 +4,17 @@ import os
 import tempfile
 from pathlib import Path
 
-import asyncpg
 import pytest
 
 from pipeline.query.rag_index import Match, build_index, nearest
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 @pytest.fixture
 async def conn_with_chunks(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"
@@ -80,7 +80,7 @@ class _FakeEmbedder:
 
 @pytest.fixture
 async def conn_clean(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T','http://t') RETURNING agency_id"

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import os
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.conftest import TEST_ORIGIN
+from tests.conftest import TEST_ORIGIN, _test_pool
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 _CSRF_HEADERS = {"Origin": TEST_ORIGIN}
@@ -20,7 +19,7 @@ async def ask_endpoints_app(apply_schema):
     """Agency + a small seed so the endpoints have something to work with."""
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     app.state.pool = pool
 
     async with pool.acquire() as c:

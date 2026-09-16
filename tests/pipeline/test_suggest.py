@@ -9,16 +9,15 @@ import pytest
 from api.range import jst_today
 from pipeline.analyze import analyze
 from pipeline.reports.suggest import compute_suggestion
-from tests.conftest import mirror_updates_to_ch
+from tests.conftest import _test_pool, mirror_updates_to_ch
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 @pytest.fixture
 async def suggest_agency(apply_schema, ch_client):
-    import asyncpg
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
         "Suggest Test Agency",

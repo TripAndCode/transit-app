@@ -1,48 +1,11 @@
 import os
 from datetime import datetime, timezone
 
-import clickhouse_connect
 import pytest
 
-from db.clickhouse.bootstrap import apply_schema
 from pipeline.clickhouse import distinct_file_names, insert_updates, max_captured_at, recent_file_name_exists
 
-
-def _ch_test_client():
-    return clickhouse_connect.get_client(
-        host="localhost",
-        port=int(os.environ.get("CLICKHOUSE_TEST_PORT", "8124")),
-        username="transit",
-        password="transit",
-        database="transit_test",
-    )
-
-
 pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
-
-
-@pytest.fixture(scope="module")
-def _ch_schema() -> None:
-    """Create the `updates` table once for this module; the whole module is
-    skipped above when ClickHouse integration isn't enabled, so this never
-    runs in that case."""
-    client = _ch_test_client()
-    try:
-        client.command("DROP TABLE IF EXISTS updates")
-        apply_schema(client)
-    finally:
-        client.close()
-
-
-@pytest.fixture
-def ch_client(_ch_schema):
-    """Truncate (not drop+recreate) for per-test isolation — the schema
-    never changes mid-module, so only `_ch_schema` needs to pay MergeTree's
-    CREATE TABLE cost, once."""
-    client = _ch_test_client()
-    client.command("TRUNCATE TABLE IF EXISTS updates")
-    yield client
-    client.close()
 
 
 def test_insert_updates_prepends_agency_id(ch_client):

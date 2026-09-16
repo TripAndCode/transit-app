@@ -1,11 +1,11 @@
 import os
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -20,7 +20,7 @@ def _reset_limiter():
 async def map_app(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",

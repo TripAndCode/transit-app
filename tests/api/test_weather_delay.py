@@ -15,10 +15,11 @@ hand-checkable integer: each seeded route-day carries 100 samples, and its
 import os
 from datetime import date, timedelta
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
+
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -32,7 +33,7 @@ _STATION_ID = "99999"
 async def weather_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1)
+    pool = await _test_pool()
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
