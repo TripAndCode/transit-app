@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { QueueResizer } from "./QueueResizer";
@@ -8,6 +8,23 @@ const renderResizer = (width = 300) => {
   const onWidth = vi.fn();
   render(<QueueResizer width={width} label="パネルの幅を変更" onWidth={onWidth} />);
   return { onWidth, handle: screen.getByRole("separator") };
+};
+
+// jsdom has no PointerEvent constructor (confirmed: `typeof window.PointerEvent`
+// is "undefined" even on the version this project pins), so fireEvent.pointerDown
+// et al. can't populate clientX the way they would for a real PointerEvent.
+// MouseEvent does support clientX and PointerEvent is a MouseEvent subtype in
+// browsers, so a MouseEvent with the pointer event's type name exercises the
+// same onPointerDown/onPointerMove/onPointerUp React handlers with a real
+// clientX, which is all this component's drag math reads.
+const firePointer = (
+  target: Element,
+  type: "pointerdown" | "pointermove" | "pointerup",
+  clientX: number,
+) => {
+  const event = new MouseEvent(type, { clientX, bubbles: true, cancelable: true });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  fireEvent(target, event);
 };
 
 describe("QueueResizer", () => {
@@ -46,5 +63,31 @@ describe("QueueResizer", () => {
     const { onWidth, handle } = renderResizer(640);
     await userEvent.dblClick(handle);
     expect(onWidth).toHaveBeenLastCalledWith(DEFAULT_QUEUE_WIDTH);
+  });
+
+  it("widens on a leftward pointer drag and narrows on a rightward one", () => {
+    const { onWidth, handle } = renderResizer(300);
+    firePointer(handle, "pointerdown", 300);
+    firePointer(handle, "pointermove", 280);
+    expect(onWidth).toHaveBeenLastCalledWith(320);
+    firePointer(handle, "pointermove", 340);
+    expect(onWidth).toHaveBeenLastCalledWith(260);
+  });
+
+  it("clamps pointer-drag resizing at the bounds", () => {
+    const { onWidth, handle } = renderResizer(MIN_QUEUE_WIDTH);
+    firePointer(handle, "pointerdown", 300);
+    firePointer(handle, "pointermove", 1000);
+    expect(onWidth).toHaveBeenLastCalledWith(MIN_QUEUE_WIDTH);
+  });
+
+  it("stops resizing once the pointer is released", () => {
+    const { onWidth, handle } = renderResizer(300);
+    firePointer(handle, "pointerdown", 300);
+    firePointer(handle, "pointermove", 280);
+    onWidth.mockClear();
+    firePointer(handle, "pointerup", 280);
+    firePointer(handle, "pointermove", 200);
+    expect(onWidth).not.toHaveBeenCalled();
   });
 });
