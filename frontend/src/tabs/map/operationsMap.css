@@ -194,3 +194,22 @@
      paint over the zoom buttons. */
   .ops-map-legend { right: 48px; left: 8px; gap: 8px; overflow: hidden; }
 }
+
+/* Filter dock: the route/pattern selection and its commit action read as one
+   raised surface rather than controls scattered on the page background, so
+   it's visually obvious that nothing below changes until 適用 is pressed.
+   Depth comes from a border and a low-spread shadow, not from motion or
+   saturated color -- this screen is watched for long stretches. */
+.ops-dock { margin: 0 0 20px; padding: 14px 16px; border: 1px solid var(--card-border); border-radius: var(--card-radius); background: var(--bg-surface); box-shadow: 0 1px 3px rgba(20,30,50,.06); transition: border-color var(--transition), box-shadow var(--transition); }
+.ops-dock__controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.ops-dock__controls label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-secondary); }
+.ops-dock__controls select { max-width: 235px; min-height: 38px; padding: 6px 9px; }
+.ops-dock__apply { min-height: 38px; padding: 8px 18px; border: 1px solid var(--accent); border-radius: var(--card-radius); color: #fff; background: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; transition: background var(--transition), opacity var(--transition); }
+.ops-dock__apply:disabled { border-color: var(--border-soft); color: var(--text-tertiary); background: var(--bg-surface); cursor: default; }
+.ops-dock__export { margin-left: auto; }
+
+/* Pending state: the dock's own edge carries the signal, so the operator sees
+   that the screen and the controls disagree without a banner elbowing the
+   layout around. */
+.ops-dock--dirty { border-color: var(--accent); box-shadow: 0 2px 10px rgba(20,30,50,.10); }
+.ops-dock__pending { margin: 10px 0 0; color: var(--accent-strong); font-size: 12px; font-weight: 600; }

@@ -482,7 +482,7 @@
       "delay": "遅延 {{delay}}",
       "reported_stop": "報告停留所: {{stop}}",
       "updated": "更新 {{when}}",
-      "disclosure": "{{located}}/{{total}}便をGTFS-RT TripUpdateの最新報告停留所に表示（観測 {{when}}・静的GTFS座標・GPS位置ではありません）",
+      "disclosure": "{{located}}/{{total}}便 · 最新報告停留所の位置（GPSではありません）",
       "legend_label": "地図の凡例",
       "legend_current": "最新報告",
       "legend_trail": "報告履歴",
