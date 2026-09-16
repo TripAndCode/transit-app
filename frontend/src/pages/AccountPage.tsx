@@ -20,7 +20,7 @@ type LlmKeyStatus = {
 };
 
 /** BYOK LLM key settings — lets a signed-in user store their own provider key
- * so Copilot/Ask calls use it instead of the shared operator key + quota. The
+ * so Copilot/Ask calls bill their provider account, not the operator's. The
  * raw key is write-only: the backend never echoes it back, only the masked
  * `key_suffix`, and this component never holds it in state past the mutation
  * call that sends it. */

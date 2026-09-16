@@ -38,7 +38,6 @@ import asyncpg
 import clickhouse_connect
 from fastapi import HTTPException
 
-from api.middleware.ratelimit import AnonAskQuotaExceeded, AnonQuotaContext, check_and_consume_anon_quota
 from api.range import RangeCtx
 from pipeline.query.hallucination_guard import verify_numeric_claims
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
@@ -244,16 +243,6 @@ def _completion_with_key(
     return resp.choices[0].message
 
 
-def _consume_anon_quota_or_raise(anon_quota: AnonQuotaContext | None) -> None:
-    """Consume one unit of the anon LLM-call quota, or raise if exhausted.
-
-    Shared by both real LLM-invocation sites in :func:`chat_with_tools` so
-    they can't drift apart from each other.
-    """
-    if anon_quota is not None and not check_and_consume_anon_quota(anon_quota.session_key, anon_quota.ip_key):
-        raise AnonAskQuotaExceeded()
-
-
 def _numeric_guard(answer: str | None, grounding: dict, locale: str) -> tuple[str | None, bool]:
     """Replace ``answer`` with the localized fallback if it makes a numeric
     claim not traceable to ``grounding``.
@@ -364,7 +353,6 @@ async def chat_with_tools(
     history: list | None = None,
     ch=None,
     force_tool_call: bool = False,
-    anon_quota: AnonQuotaContext | None = None,
     panel_ctx: dict | None = None,
     user_id: int | None = None,
     llm_approved: bool = True,
@@ -406,16 +394,6 @@ async def chat_with_tools(
     cached for that exact text — ignoring this conversation's actual prior
     turn — instead of the history-aware answer this parameter exists to get.
 
-    ``anon_quota``, when set by the API layer for an unauthenticated caller,
-    is checked and consumed immediately around each of this function's two
-    actual LLM-invocation sites below (never at the build-mode short-circuit
-    or an intent-cache hit, both of which skip the LLM entirely, and never
-    when ``None`` — i.e. a logged-in caller). Exhaustion raises
-    :class:`~api.middleware.ratelimit.AnonAskQuotaExceeded`, which this
-    function does not catch — it propagates out to the API layer the same
-    way an ``asyncpg.exceptions.UndefinedTableError`` does, so a registered
-    FastAPI exception handler can turn it into a machine-readable response.
-
     ``panel_ctx``, when supplied by the Copilot side panel, carries the
     frontend's active-tab hint (e.g. ``{"tab": "overview"}``). The API layer
     (``api/routers/ask.py``'s ``PanelCtx`` model) restricts ``tab`` to a
@@ -431,20 +409,16 @@ async def chat_with_tools(
     key is found, both real LLM-invocation sites below route through a
     one-off :func:`_completion_with_key` call scoped to that caller's own
     provider/key instead of the shared :class:`~pipeline.query.llm_client.LLMClient`
-    ladder, and skip :func:`_consume_anon_quota_or_raise` entirely — a
-    defense-in-depth skip, not the primary mechanism, since ``anon_quota`` is
-    only ever constructed for an unauthenticated caller in the first place
-    (see ``anon_quota`` above). The raw key is never logged anywhere in this
-    path.
+    ladder. The raw key is never logged anywhere in this path.
 
     ``llm_approved``, set by the API layer from the caller's own
     ``users.llm_approved`` flag (``False`` for every anonymous caller — there
     is no user row to check), gates both real LLM-invocation sites the same
-    way ``anon_quota``/``user_key`` do: checked inside :func:`_call_llm`
-    before any provider or BYOK key is touched. ``False`` short-circuits to
-    the same honest-degradation shape as a rate-limited/unconfigured ladder
-    (``error_kind="not_approved"``) without ever calling
-    :func:`_consume_anon_quota_or_raise` or a provider. Defaults to ``True``
+    way ``user_key`` does: checked inside :func:`_call_llm` before any
+    provider or BYOK key is touched. ``False`` short-circuits to the same
+    honest-degradation shape as a rate-limited/unconfigured ladder
+    (``error_kind="not_approved"``) without ever reaching a provider.
+    Defaults to ``True``
     so internal callers/tests that don't construct the real value aren't
     silently gated — the API layer is the one place responsible for passing
     the caller's actual approval status.
@@ -788,16 +762,6 @@ async def chat_with_tools(
             )
 
         # Stage 2: question is new — call LLM to get the intent signature.
-        # The anon quota gates the actual LLM call, not the cache pre-hit
-        # above (which never reaches here) — see this function's docstring.
-        # A BYOK caller (user_key set) skips this: defense-in-depth, since
-        # anon_quota is never constructed for a signed-in caller in the
-        # first place (see the docstring's ``user_id`` section). An
-        # unapproved caller skips it too, regardless of BYOK/user_key state:
-        # _call_llm rejects them unconditionally, so consuming their quota
-        # first would bill a request that was always going to fail.
-        if user_key is None and llm_approved:
-            _consume_anon_quota_or_raise(anon_quota)
         msg, error_kind = await asyncio.to_thread(_sync)
         if msg is None:
             key = {
@@ -932,8 +896,6 @@ async def chat_with_tools(
             },
         )
 
-    if user_key is None and llm_approved:
-        _consume_anon_quota_or_raise(anon_quota)
     msg, error_kind = await asyncio.to_thread(_sync)
     if msg is None:
         # The LLM ladder is exhausted — a hard failure, not a deliberate

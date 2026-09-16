@@ -169,8 +169,8 @@ async def test_copilot_insight_rejects_cross_origin(copilot_client, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_copilot_insight_rejects_anonymous_caller(copilot_client, monkeypatch):
-    """Anonymous callers never have a users.llm_approved row -- the anon
-    copilot-insight path (and its dedicated daily quota) no longer exists."""
+    """Anonymous callers never have a users.llm_approved row, so the anonymous
+    copilot-insight path does not exist at all."""
     client, agency_id = copilot_client
 
     async def must_not_be_called(tab, filters, view_payload, *, locale="ja", user_key=None):
@@ -237,7 +237,7 @@ async def _must_not_run(tab, filters, view_payload, *, locale="ja", user_key=Non
 
 @pytest.mark.asyncio
 async def test_copilot_insight_returns_503_when_disabled(copilot_client, monkeypatch):
-    """The kill switch short-circuits before any quota or LLM work."""
+    """The kill switch short-circuits before any approval or LLM work."""
     client, agency_id = copilot_client
     monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "false")
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", _must_not_run)

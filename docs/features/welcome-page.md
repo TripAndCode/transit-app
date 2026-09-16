@@ -96,46 +96,27 @@ free of any cost or data-exposure question entirely independently of the
 guest-access policy described above: the preview would render identically
 even if guest access to the real app were removed tomorrow.
 
-## Anonymous Ask usage carries a daily quota; the rest of the dashboard does not
+## A guest reaches no LLM at all; the rest of the dashboard is fully open
 
 Every read-only tab — Overview, Map, Analysis, Agencies, Live — behaves
 identically for a guest and a signed-in user: same data, same precomputed
 aggregates, no throttling beyond the ordinary API-wide rate limit (see
-below). The one exception is the Ask tab's Stage-3 LLM path
-(`api/middleware/ratelimit.py`), because it is the one guest-accessible
-feature that invokes a paid LLM call per request; every other guest-visible
-tab only reads precomputed `agg_*` tables.
+below). Those tabs only read precomputed `agg_*` tables, so guest access
+costs nothing per request.
 
-- Default caps: 5 Stage-3 LLM calls per anonymous session per day
-  (`ASK_ANON_DAILY_LIMIT`), with a looser 20/day per-IP backstop
-  (`ASK_ANON_IP_DAILY_LIMIT`) that exists only to blunt wholesale abuse from
-  one source cycling through many anon-session cookies, not to further
-  restrict the common case of several distinct legitimate visitors sharing
-  one IP (e.g. office wifi). Both read live from the environment
-  (`ask_anon_daily_limit()` / `ask_anon_ip_daily_limit()` in
-  `api/middleware/ratelimit.py`), not import-frozen.
-- A single-digit daily cap on anonymous AI usage before requiring an
-  account is an established pattern, not a bespoke restriction invented for
-  this app — see
-  [Perplexity's free-tier daily limit on anonymous search](https://www.perplexity.ai/hub/faq/what-is-perplexity-pro)
-  for a comparable published example.
-- Exhausting the quota does not error or block the rest of the app: the
-  Ask tab shows a calm sign-in nudge (the quota-exceeded response,
-  `ASK_ANON_QUOTA_EXCEEDED_CODE`) and every non-Ask tab, plus Ask's own
-  deterministic template dispatch (the primary landing-card/chip path,
-  which never calls an LLM), keeps working.
-- This is a pragmatic per-session/IP cap, not a sophisticated abuse-
-  detection system — a deliberate, documented scope limit. It does not
-  fingerprint devices, rate-limit by behavioral heuristics, or attempt to
-  survive an attacker rotating both session cookies and IPs; it only needs
-  to keep a casual anonymous visitor from running up a meaningful LLM bill,
-  which a flat daily counter accomplishes without added complexity.
-- The kill switch (`ASK_ANON_QUOTA_ENABLED`, default on) disables the quota
-  entirely when set falsy — the anon caller then behaves exactly as it did
-  before this quota existed. The quota applies only to anonymous callers;
-  once a user signs in, this quota no longer applies to them (whatever the
-  authenticated per-key rate-limit tier is takes over instead — see the
-  comparison below).
+The LLM-backed surfaces are the exception, and they are closed to guests
+outright rather than budgeted: reaching an LLM requires a signed-in caller
+an admin has approved (`users.llm_approved` — see
+`docs/features/ask-tab.md`'s "Who may reach the Stage-3 LLM"). That keeps
+paid calls off the guest path entirely, which is why no anonymous LLM
+allowance exists to tune.
+
+Guests are not shut out of the Ask tab itself. Its deterministic stages —
+the regex rules and the embedding nearest-neighbour lookup behind the
+landing cards and chips, which is the primary path — answer without an LLM
+and stay open to everyone. Only a free-text question that would need
+Stage 3 degrades, and it degrades honestly (a `200` explaining the answer
+isn't available) rather than erroring.
 
 ## Guest vs. authenticated: what actually differs
 
@@ -143,7 +124,7 @@ tab only reads precomputed `agg_*` tables.
 |---|---|---|
 | Overview / Map / Analysis / Agencies / Live tabs | Full read access, identical data | Identical |
 | Ask tab — deterministic template dispatch (cards/chips) | Works, no LLM involved | Identical |
-| Ask tab — Stage-3 LLM (free-text / novel questions) | Works, subject to the daily quota above | Works, no quota |
+| Ask tab — Stage-3 LLM (free-text / novel questions) | Unreachable; degrades to an honest "not available" answer | Works once an admin sets `users.llm_approved`; same degradation until then |
 | Ask conversation persistence | Browser `localStorage` only (`frontend/src/api/conversationsAnon.ts`) | Server-side, durable across devices |
 | First login after guest Ask use | N/A | One-time anon→server migration of any local conversations fires automatically (`frontend/src/tabs/AskTab.tsx`'s `authed` effect, guarded by a ref so it fires at most once) |
 | Saved filter presets | Cannot save (`presets.login_to_save_tooltip` — `frontend/src/components/PresetMenu.tsx` disables the save action with this tooltip) | Can save and reuse |
@@ -169,7 +150,7 @@ duplicating that flow here.
 | `frontend/src/components/OnboardingGate.tsx` | What `/` actually renders — the real, guest-accessible dashboard entry; redirects a genuinely first-time anonymous visitor to `/welcome` |
 | `frontend/src/api/welcomeSeen.ts` | localStorage-backed "has this browser passed the welcome step" flag consulted by `OnboardingGate` |
 | `frontend/src/components/GuestPrompt.tsx` | Persistent, dismissible guest-login nudge shown inside the real app shell |
-| `api/middleware/ratelimit.py` | `FREE_LIMIT`/`PRO_LIMIT` generic tiers; anonymous Ask daily quota (`ask_anon_daily_limit`, `check_and_consume_anon_quota`) |
+| `api/middleware/ratelimit.py` | `FREE_LIMIT`/`PRO_LIMIT` generic per-minute tiers |
 | `frontend/src/api/conversationsAnon.ts` | localStorage-backed anon Ask conversation store |
 | `frontend/src/components/RequireAdmin.tsx` | Admin-only route guard |
 
