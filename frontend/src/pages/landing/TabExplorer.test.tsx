@@ -10,21 +10,9 @@ const FAKE_MANUAL = `# Delay Dashboard — User Manual
 
 Overview excerpt paragraph.
 
-## 4. Map tab — "where it's happening"
-
-Map excerpt paragraph.
-
 ## 5. Analysis tab — "when and why delays happen"
 
 Analysis excerpt paragraph.
-
-## 6. Agencies tab — "how you compare to others"
-
-Agencies excerpt paragraph.
-
-## 7. Latest observations tab — "the buses right now"
-
-Live excerpt paragraph.
 
 ## 8. Ask tab — ask in a conversation
 
@@ -50,16 +38,27 @@ describe("TabExplorer", () => {
     renderWithProviders(<TabExplorer />);
     await waitFor(() => expect(screen.getByText("Overview excerpt paragraph.")).toBeTruthy());
 
-    await user.click(screen.getByRole("button", { name: /Agencies/ }));
+    await user.click(screen.getByRole("button", { name: /Route analysis/ }));
 
-    expect(screen.getByText("How you compare to others")).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("Agencies excerpt paragraph.")).toBeTruthy());
+    expect(screen.getByText("When and why delays happen")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Analysis excerpt paragraph.")).toBeTruthy());
     expect(screen.queryByText("Overview excerpt paragraph.")).toBeNull();
   });
 
-  it("has exactly one navigation pattern: only the list buttons, no second widget", () => {
+  it("shows an unavailable excerpt for Reports, which the manual doesn't document as its own section yet", async () => {
+    const user = userEvent.setup();
     renderWithProviders(<TabExplorer />);
-    // Five tabs, one button each -- nothing else interactive on the page.
-    expect(screen.getAllByRole("button")).toHaveLength(5);
+    await waitFor(() => expect(screen.getByText("Overview excerpt paragraph.")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: /^Reports/ }));
+
+    expect(screen.getByText("Manual preview unavailable.")).toBeTruthy();
+  });
+
+  it("shows the real three sidebar tabs plus Ask, and nothing else", () => {
+    renderWithProviders(<TabExplorer />);
+    // Overview, Route analysis, Reports, Ask -- one button each, nothing
+    // else interactive on the page.
+    expect(screen.getAllByRole("button")).toHaveLength(4);
   });
 });
