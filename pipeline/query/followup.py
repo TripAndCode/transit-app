@@ -50,19 +50,16 @@ def _allowed_providers() -> set[str]:
 
     The free-text follow-up echoes a system prompt that forbids obeying
     in-question instructions -- verify a candidate provider against
-    scripts/followup_eval.py before adding it here, don't assume. Groq's
-    old default model (``llama-3.3-70b-versatile``, since decommissioned)
-    failed that eval by obeying injected instructions; the current default
-    (``gpt-oss-120b``, see GROQ_MODEL in .env.example) re-ran clean at
-    11/11 probes, so ``groq`` alone is a verified-safe default -- but that
-    verification is tied to the specific model each provider runs, not the
-    provider name, and doesn't transfer if the model changes again, or to
-    any other provider (e.g. Gemini) that hasn't been run through the eval.
-    Defaults to ``groq`` alone so an unverified operator's follow-up never
-    silently answers from an injection-prone fallback; operators widen it
-    explicitly (and re-verify) via env. Empty/unset → the default.
+    scripts/followup_eval.py before adding it here, don't assume. Both
+    ``gemini`` (``gemini-3.1-flash-lite``) and ``openai`` (``gpt-5.4-mini``)
+    re-ran clean at 11/11 probes, so both are verified-safe defaults -- but
+    that verification is tied to the specific model each provider runs, not
+    the provider name, and doesn't transfer if a model default changes.
+    Defaults to both so an unverified operator's follow-up never silently
+    answers from an injection-prone provider; operators widen it explicitly
+    (and re-verify) via env. Empty/unset → the default.
     """
-    raw = os.environ.get("ASK_FOLLOWUP_PROVIDERS", "groq")
+    raw = os.environ.get("ASK_FOLLOWUP_PROVIDERS", "gemini,openai")
     return {n.strip().lower() for n in raw.split(",") if n.strip()}
 
 

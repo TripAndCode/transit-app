@@ -8,7 +8,7 @@ of falling off the cliff with ``unknown: true``.
 
 Public surface:
 
-* :data:`TOOLS` — Groq-style function specs to pass as ``tools=`` on the
+* :data:`TOOLS` — OpenAI-style function specs to pass as ``tools=`` on the
   chat-completions call.
 * :func:`dispatch` — execute a tool call against Postgres (and, for the
   handful of handlers that read the live ``updates`` table, ClickHouse) and
@@ -325,7 +325,7 @@ def _summary(template: str, lang: str = "ja", **vars: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Groq function specs (v2 tool surface)
+# OpenAI-style function specs (v2 tool surface)
 # ---------------------------------------------------------------------------
 
 _DATE_OVERRIDE_PROPS = {

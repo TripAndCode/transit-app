@@ -16,7 +16,7 @@ from typing import NamedTuple
 
 from cryptography.fernet import Fernet, InvalidToken
 
-ALLOWED_PROVIDERS = ("groq", "openai", "gemini", "openrouter")
+ALLOWED_PROVIDERS = ("openai", "gemini")
 
 
 class UserLLMKey(NamedTuple):

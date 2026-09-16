@@ -12,13 +12,13 @@ aggregates, and application data live in Postgres/PostGIS.
 - Python 3.11+
 - [Poetry](https://python-poetry.org/)
 - Docker Desktop
-- A Groq API key for the optional Ask LLM fallback
+- A Gemini API key for the optional Ask LLM fallback
 
 ### Local setup
 
 ```bash
 cp .env.example .env
-# Set GROQ_API_KEY in .env. Other settings have local defaults.
+# Set GEMINI_API_KEY in .env. Other settings have local defaults.
 make bootstrap
 make doctor
 make serve
@@ -130,7 +130,7 @@ Example targeted test:
 
 ```bash
 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
-  GROQ_API_KEY=test-key \
+  GEMINI_API_KEY=test-key \
   poetry run pytest tests/query/test_tool_queries.py -v
 ```
 
@@ -195,7 +195,7 @@ curl -X POST http://localhost:8000/api/1/ask \
 Copy `.env.example` and set only what your environment needs. Important groups:
 
 - `DATABASE_URL`, `CLICKHOUSE_*`: database connections.
-- `GROQ_API_KEY`, `GEMINI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
 - `ASK_FOLLOWUP_ENABLED`, `COPILOT_INSIGHT_ENABLED`, `WEATHER_INGEST_ENABLED`:
   feature kill switches.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.

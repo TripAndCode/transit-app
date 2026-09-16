@@ -681,7 +681,7 @@
     },
     "hint": {
       "title": "How to use & what it can do",
-      "body_1": "Ask freely in natural language. Groq function calls pick from 6 SQL tools (ranking, time-band comparison, trend aggregation, etc.) to build the answer.",
+      "body_1": "Ask freely in natural language. An AI function call picks from 6 SQL tools (ranking, time-band comparison, trend aggregation, etc.) to build the answer.",
       "body_2": "Examples: \"Today's worst 3 routes?\" \"Most-delayed stops during the morning peak?\" \"Compare last week and this week\"",
       "body_3_intro": "The current",
       "body_3_strong": "date / day / time-band filters",

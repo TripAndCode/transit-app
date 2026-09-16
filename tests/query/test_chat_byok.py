@@ -28,7 +28,7 @@ def _ctx() -> RangeCtx:
     return RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 26))
 
 
-def _fake_user_key(provider: str = "groq", raw_key: str = "gsk_user_key", key_suffix: str = "9999"):
+def _fake_user_key(provider: str = "gemini", raw_key: str = "gemini_user_key", key_suffix: str = "9999"):
     return SimpleNamespace(provider=provider, raw_key=raw_key, key_suffix=key_suffix)
 
 
@@ -63,8 +63,8 @@ async def test_authenticated_user_with_byok_key_bypasses_shared_client(monkeypat
     monkeypatch.setattr(chat, "_get_client", lambda: _BoomClient())
 
     result = await chat.chat_with_tools("hi", _ctx(), conn=None, agency_id=1, locale="en", user_id=42)
-    assert used_key["provider"] == "groq"
-    assert used_key["api_key"] == "gsk_user_key"
+    assert used_key["provider"] == "gemini"
+    assert used_key["api_key"] == "gemini_user_key"
     assert result["success"] is True
     assert result["answer"] == "ok"
 
@@ -174,8 +174,8 @@ async def test_generate_proactive_insight_uses_byok_key(monkeypatch):
         locale="en",
         user_key=_fake_user_key(),
     )
-    assert used_key["provider"] == "groq"
-    assert used_key["api_key"] == "gsk_user_key"
+    assert used_key["provider"] == "gemini"
+    assert used_key["api_key"] == "gemini_user_key"
     assert result["text"]
 
 
@@ -188,7 +188,7 @@ def test_completion_with_key_omits_tool_choice_when_no_tools():
     fake_response = MagicMock(choices=[MagicMock(message=MagicMock(content="ok"))])
     with patch("openai.OpenAI") as mock_openai:
         mock_openai.return_value.chat.completions.create.return_value = fake_response
-        chat._completion_with_key("groq", "gsk_user_key", messages=[{"role": "user", "content": "hi"}])
+        chat._completion_with_key("gemini", "gemini_user_key", messages=[{"role": "user", "content": "hi"}])
     _, create_kwargs = mock_openai.return_value.chat.completions.create.call_args
     assert "tools" not in create_kwargs
     assert "tool_choice" not in create_kwargs

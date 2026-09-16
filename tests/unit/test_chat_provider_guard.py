@@ -1,12 +1,11 @@
 """_allowed_providers() gates the primary Ask path's LLM provider ladder.
 
-Unlike pipeline/query/followup.py (which defaults to Groq-only because
-that's the one provider/model pair verified injection-resistant so far),
-the primary Ask path's documented default is Groq (chat.py's module
-docstring: "the historical default of Groq is preserved when
-CHAT_PROVIDERS is unset") - restricting it the same way
-would silently change cost/latency/answer-quality for the main feature.
-ASK_CHAT_ALLOWED_PROVIDERS is opt-in: unset means "no restriction"
+Unlike pipeline/query/followup.py (which restricts itself to the providers
+verified injection-resistant via scripts/followup_eval.py), the primary Ask
+path's documented default is Gemini (chat.py's module docstring: "the
+default of Gemini is used when CHAT_PROVIDERS is unset") - restricting it
+the same way would silently change cost/latency/answer-quality for the main
+feature. ASK_CHAT_ALLOWED_PROVIDERS is opt-in: unset means "no restriction"
 (today's behavior, unchanged), and operators can widen the guard once they
 choose to trade off cost/latency for injection resistance.
 """

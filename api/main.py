@@ -1,6 +1,6 @@
 """FastAPI application bootstrap.
 
-Wires routers, middleware, lifespan (asyncpg pool + Groq key validation), CORS,
+Wires routers, middleware, lifespan (asyncpg pool + LLM provider validation), CORS,
 and an optional SPA static mount. In production the multistage Dockerfile copies
 the built React frontend into ``api/static/``; this module then mounts the SPA
 at ``/`` with an explicit JSON 404 for unknown ``/api/*`` paths so frontend
@@ -137,8 +137,13 @@ async def lifespan(app: FastAPI):
     partial set is rejected as a misconfiguration since a half-wired OAuth
     flow would leak state cookies without ever completing.
     """
-    if not os.environ.get("GROQ_API_KEY"):
-        raise RuntimeError("GROQ_API_KEY env var is required")
+    from pipeline.query.llm_client import _load_providers
+
+    if not _load_providers():
+        raise RuntimeError(
+            "No usable LLM provider configured. Set at least one provider's "
+            "API key (e.g. GEMINI_API_KEY) — see .env.example."
+        )
     enabled, missing = auth_status()
     if not enabled and len(missing) != len(_AUTH_ENV):
         raise RuntimeError(
