@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Maximize2, Radio, RefreshCw } from "lucide-react";
@@ -26,6 +26,8 @@ import { StatTile } from "../components/StatTile";
 import { signedMin } from "./live/signedMin";
 import { OperationsTripPanel, type ActiveRouteOption, type DirectionOption } from "./map/OperationsTripPanel";
 import { useBasemapDim } from "./map/useBasemapDim";
+import { QueueResizer } from "./map/QueueResizer";
+import { readQueueWidth, storeQueueWidth } from "./map/queueWidth";
 import {
   LIVE_TRIPS_CLUSTER_LAYER,
   LIVE_TRIPS_LABEL_LAYER,
@@ -110,6 +112,7 @@ export function MapTab() {
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [routeSelection, setRouteSelection] = useState<RouteSelection>({ agencyId: id, route: null });
+  const [queueWidth, setQueueWidth] = useState(readQueueWidth);
   const [selectedDirectionKey, setSelectedDirectionKey] = useState<string | null>(null);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
@@ -411,7 +414,7 @@ export function MapTab() {
         />
       )}
 
-      <div className="ops-workspace">
+      <div className="ops-workspace" style={{ "--ops-queue-width": `${queueWidth}px` } as CSSProperties}>
         <section className="ops-map" aria-label={t("operations.map.aria_label")}>
           <div ref={mapContainerRef} className="ops-map__canvas" />
           {mapUnavailable && <div className="ops-map__empty"><p role="status">{td("mapUnavailable")}</p></div>}
@@ -441,11 +444,13 @@ export function MapTab() {
           </div>
         </section>
 
+        <QueueResizer width={queueWidth} label={td("resizeQueue")} onWidth={(px) => { setQueueWidth(px); storeQueueWidth(px); }} />
+
         <aside className="focus-live-queue">
           <h2>{td("attention")}</h2>
           <div className="focus-summary-strip">
-            <StatTile label={td("observed", { count: liveRows.length })} value={String(liveRows.length)} />
-            <StatTile label={td("delayed", { count: delayedRows.length })} value={String(delayedRows.length)} flagged={delayedRows.length > 0} />
+            <StatTile label={td("observedLabel")} value={String(liveRows.length)} />
+            <StatTile label={td("delayedLabel")} value={String(delayedRows.length)} flagged={delayedRows.length > 0} />
             {onTimePct != null && <StatTile label={td("onTimePct")} value={`${onTimePct}%`} />}
           </div>
           {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
