@@ -31,30 +31,9 @@ export function isAggregateNotReady(err: unknown): boolean {
   }
 }
 
-/** Machine code the API returns (429) when an anonymous caller has exhausted
- * their daily Stage-3 LLM-call quota on the Ask flow. Mirrors
- * api/middleware/ratelimit.py::ASK_ANON_QUOTA_EXCEEDED_CODE. Logged-in callers
- * are never subject to this quota, so this code can only ever come back for
- * an unauthenticated request. */
-const ASK_ANON_QUOTA_EXCEEDED_CODE = "ask_anon_quota_exceeded";
-
-/** True when an error is the anonymous Ask daily-quota 429 — a caller-scoped,
- * resets-tomorrow condition, so the UI should explain it calmly and invite
- * sign-in rather than show a generic rate-limit banner or offer a retry. */
-export function isAnonAskQuotaExceeded(err: unknown): boolean {
-  if (!(err instanceof ApiError) || err.status !== 429) return false;
-  try {
-    const parsed = JSON.parse(err.body);
-    return parsed?.code === ASK_ANON_QUOTA_EXCEEDED_CODE;
-  } catch {
-    return false;
-  }
-}
-
 /** Detail string the API returns (403) on /copilot/insight and /followup when
- * the caller isn't an admin-approved signed-in user (anonymous callers 403
- * here too — there's no separate quota path for them anymore). Mirrors
- * api/security.py::require_llm_approved. */
+ * the caller isn't an admin-approved signed-in user — anonymous callers 403
+ * here too. Mirrors api/security.py::require_llm_approved. */
 const LLM_NOT_APPROVED_DETAIL = "llm_not_approved";
 
 /** True when an error is the admin-approval-required 403 — a standing

@@ -25,22 +25,6 @@ describe("ErrorBanner", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("renders a calm sign-in nudge (not a generic rate-limit banner) for the anon Ask quota 429", () => {
-    renderWithProviders(
-      <MemoryRouter>
-        <ErrorBanner
-          error={new ApiError(429, JSON.stringify({ detail: "x", code: "ask_anon_quota_exceeded" }))}
-          onRetry={vi.fn()}
-        />
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole("status")).toHaveTextContent(/free AI question limit/i);
-    // Calm status, not the alarming role="alert" generic-error styling.
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    // Invites sign-in rather than a futile immediate retry.
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
-  });
-
   it("renders a calm explanation (not a generic error banner) for the admin-approval-required 403", () => {
     renderWithProviders(
       <MemoryRouter>

@@ -1207,7 +1207,6 @@
     "followup_rate_limit": "High traffic right now. Please wait a moment and retry.",
     "followup_connection": "Connection dropped for a moment. Please retry.",
     "followup_llm_generic": "Couldn't answer that question. Please try again.",
-    "ask_anon_quota_exceeded": "You've reached today's free AI question limit. Sign in to keep asking.",
     "llm_not_approved": "This feature currently requires admin approval."
   },
   "admin": {

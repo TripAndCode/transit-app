@@ -5,9 +5,7 @@ A signed-in caller with a stored key (``pipeline.query.user_llm_keys.
 get_user_llm_key``) routes both of ``chat_with_tools``'s real LLM-invocation
 sites through :func:`pipeline.query.chat._completion_with_key` — a one-off
 client scoped to that caller's own provider/key — instead of the shared
-:class:`~pipeline.query.llm_client.LLMClient` ladder, and skips the anon-quota
-check entirely (defense-in-depth: ``anon_quota`` is never constructed for a
-signed-in caller at the API layer in the first place). No test here ever
+:class:`~pipeline.query.llm_client.LLMClient` ladder. No test here ever
 asserts on a raw key value beyond confirming it reached the one-off call —
 matching this module's "never log the raw key" rule.
 """
@@ -19,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from api.middleware.ratelimit import AnonQuotaContext
 from api.range import RangeCtx
 from pipeline.query import chat
 
@@ -97,23 +94,6 @@ async def test_byok_provider_allowed_by_operator_allowlist_proceeds(monkeypatch)
     result = await chat.chat_with_tools("hi", _ctx(), conn=None, agency_id=1, locale="en", user_id=42)
     assert result["success"] is True
     assert result["answer"] == "ok"
-
-
-@pytest.mark.asyncio
-async def test_byok_caller_skips_anon_quota_even_when_exhausted(monkeypatch):
-    """A BYOK caller must never hit AnonAskQuotaExceeded — anon_quota is never
-    constructed for a signed-in caller at the API layer, but this defense-in-
-    depth skip is verified directly here regardless of that upstream gate."""
-    monkeypatch.setattr(chat, "get_user_llm_key", AsyncMock(return_value=_fake_user_key()))
-    monkeypatch.setattr(chat, "_completion_with_key", lambda *a, **k: _fake_text_message("ok"))
-    monkeypatch.setattr(chat, "_get_client", lambda: _BoomClient())
-    monkeypatch.setattr(chat, "check_and_consume_anon_quota", lambda *a, **k: False)
-
-    anon_quota = AnonQuotaContext(session_key="sess", ip_key="1.2.3.4")
-    result = await chat.chat_with_tools(
-        "hi", _ctx(), conn=None, agency_id=1, locale="en", user_id=42, anon_quota=anon_quota
-    )
-    assert result["success"] is True
 
 
 @pytest.mark.asyncio

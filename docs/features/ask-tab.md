@@ -169,21 +169,11 @@ Admins toggle the flag from `PATCH /api/admin/users/{uid}`, which writes an
 `llm_approved_changed` row to `login_events` whenever the value actually
 changes.
 
-### The anonymous daily quota is currently unreachable
-
-`api/middleware/ratelimit.py` still carries a per-day anonymous LLM-call
-budget (`ASK_ANON_DAILY_LIMIT` / `ASK_ANON_IP_DAILY_LIMIT`, killable via
-`ASK_ANON_QUOTA_ENABLED`, keyed on a signed httpOnly `ask_anon_sid` cookie
-plus a per-IP backstop). It predates the approval gate, and the gate has made
-it dead weight: the quota is consumed only when `user_key is None and
-llm_approved`, but an anonymous caller is exactly the caller for whom
-`llm_approved` is `False`, and a signed-in caller never gets an
-`AnonQuotaContext` built in the first place. No caller can consume either
-bucket today.
-
-It is retained, not yet deleted, so the removal gets its own reviewed change
-rather than riding along with the gate that obsoleted it. Do not build on it,
-and do not document it as a live control.
+Approval is the whole budget control: an approved caller's LLM calls are
+bounded only by the generic per-minute limiter every route shares
+(`FREE_LIMIT`/`PRO_LIMIT` in `api/middleware/ratelimit.py`), not by any
+per-day LLM allowance. Metering approved callers would key on the user row,
+so it is a separate mechanism to build, not a knob to turn on.
 
 ## Key files
 

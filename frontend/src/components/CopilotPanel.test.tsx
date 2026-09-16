@@ -191,11 +191,10 @@ describe("CopilotPanel", () => {
   });
 
   it("never retries a failed insight POST, even under the production QueryClient's retry:1 default", async () => {
-    // A retry here would silently burn a second anonymous-quota unit for
-    // what the user experiences as one request (the endpoint consumes quota
-    // per attempt with no refund on failure) — so this must hold regardless
-    // of the ambient QueryClient default, not just under the test suite's
-    // own retry:false QueryClients.
+    // A retry here would silently pay for a second provider call for what
+    // the user experiences as one request — so this must hold regardless of
+    // the ambient QueryClient default, not just under the test suite's own
+    // retry:false QueryClients.
     mockApiGet();
     const postSpy = vi.spyOn(client, "apiPost").mockRejectedValue(new Error("boom"));
     renderPanelWithProductionRetryDefault("/agencies/1/overview");
@@ -334,7 +333,7 @@ describe("CopilotPanel", () => {
 
     // Off Overview the query key goes null; coming back re-subscribes to the
     // *same* key. Without a staleTime that re-subscription refetches, spending
-    // another LLM call and quota unit for a view state that has not changed.
+    // another LLM call for a view state that has not changed.
     fireEvent.click(screen.getByText("go-map"));
     await waitFor(() => expect(screen.queryByText("Route 12 is delayed.")).toBeNull());
     // Returning before the key debounce elapses leaves the key untouched and

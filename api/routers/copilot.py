@@ -41,9 +41,8 @@ async def copilot_insight(
 ):
     csrf_guard(request)
     if not is_enabled():
-        # Short-circuit ahead of the approval gate and quota check: a
-        # disabled feature must not spend the caller's daily budget or 403
-        # an unapproved caller, and the panel hides itself off the
+        # Short-circuit ahead of the approval gate: a disabled feature must
+        # not 403 an unapproved caller, and the panel hides itself off the
         # ``/copilot/enabled`` flag rather than relying on this response.
         raise HTTPException(status_code=503, detail="copilot_disabled")
     # Called directly (not via Depends) on the already-resolved `user` so it
