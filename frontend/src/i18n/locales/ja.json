@@ -1,16 +1,10 @@
 {
   "nav": {
-    "overview": "概況",
     "overview_subtitle": "今すぐ何が起きているか",
-    "map": "運行状況",
-    "map_subtitle": "現在の遅延と報告停留所",
     "ask": "質問",
     "live": "最新観測",
     "live_subtitle": "停留所ごとの実測値",
-    "analysis": "分析",
     "analysis_subtitle": "いつ・なぜ遅れるか",
-    "network": "事業者比較",
-    "network_subtitle": "他社と比べてどうか",
     "collapse_sidebar": "サイドバーを折りたたむ",
     "expand_sidebar": "サイドバーを開く",
     "open_menu": "メニューを開く",
@@ -33,6 +27,7 @@
     },
     "explorer": {
       "heading": "中身をのぞいてみる",
+      "reports_preview": "任意の期間の遅延傾向・系統ランキング・CSVダウンロードをまとめて確認できます。",
       "ask_preview": "自然な言葉で自由に質問して、すぐに答えを得られます。",
       "excerpt_unavailable": "マニュアルのプレビューは利用できません。"
     },

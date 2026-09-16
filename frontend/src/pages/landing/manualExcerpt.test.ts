@@ -77,13 +77,11 @@ describe("manualExcerptFor", () => {
     );
   });
 
-  it("resolves the map tab's excerpt from heading number 4", () => {
-    expect(manualExcerptFor(SAMPLE_MANUAL, "map")).toBe(
-      "The map shows average delay at each stop/station as a colored circle (bubble).",
-    );
-  });
-
   it("returns null when the manual is missing the tab's section entirely", () => {
     expect(manualExcerptFor(SAMPLE_MANUAL, "ask")).toBeNull();
+  });
+
+  it("returns null for reports without even checking the manual, since it has no Reports section yet", () => {
+    expect(manualExcerptFor(SAMPLE_MANUAL, "reports")).toBeNull();
   });
 });

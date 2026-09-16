@@ -1,33 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Map as MapIcon,
-  BarChart3,
-  LayoutDashboard,
-  GitCompare,
-  HelpCircle,
-  ChevronLeft,
-  ChevronRight,
-  type LucideIcon,
-} from "lucide-react";
+import { HelpCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { onActivateKey } from "../../utils/a11y";
+import { SIDEBAR_NAV_ITEMS } from "../../components/Sidebar";
 import { PREVIEW_AGENCIES, type PreviewAgencyKey } from "./previewData";
 
-export type PreviewTabKey = "overview" | "map" | "analysis" | "network" | "ask";
+export type PreviewTabKey = (typeof SIDEBAR_NAV_ITEMS)[number]["to"] | "ask";
 
-type NavItem = { key: PreviewTabKey; labelKey: string; subtitleKey: string; Icon: LucideIcon };
-
-// Same four tabs, in the same order, with the same labelKey/subtitleKey pairs
-// and icons as the real signed-in sidebar's own `ITEMS`
-// (components/Sidebar.tsx) -- Ask is deliberately excluded from this list
-// (rendered as the dashed-border CTA below, matching Sidebar.tsx's own
-// comment on why Ask isn't a peer tab).
-const ITEMS: NavItem[] = [
-  { key: "overview", labelKey: "nav.overview", subtitleKey: "nav.overview_subtitle", Icon: LayoutDashboard },
-  { key: "map", labelKey: "nav.map", subtitleKey: "nav.map_subtitle", Icon: MapIcon },
-  { key: "analysis", labelKey: "nav.analysis", subtitleKey: "nav.analysis_subtitle", Icon: BarChart3 },
-  { key: "network", labelKey: "nav.network", subtitleKey: "nav.network_subtitle", Icon: GitCompare },
-];
+// Imported directly from the real signed-in sidebar (components/Sidebar.tsx)
+// rather than duplicated here -- same three tabs, in the same order, with
+// the same labelKey and icon, so this preview cannot drift from the real
+// nav. Ask is deliberately excluded from this list (rendered as the
+// dashed-border CTA below, matching Sidebar.tsx's own comment on why Ask
+// isn't a peer tab).
+const ITEMS = SIDEBAR_NAV_ITEMS;
 
 // Same key as the real Sidebar.tsx's COLLAPSED_PREF_KEY -- intentionally
 // shared, not reinvented, so toggling collapse here persists exactly like
@@ -256,12 +242,12 @@ export function PreviewSidebar({
 
       <nav style={{ display: "flex", flexDirection: "column" }} aria-label={t("landing.preview.heading")}>
         {ITEMS.map((item) => {
-          const isActive = item.key === activeTab;
+          const isActive = item.to === activeTab;
           return (
             <button
-              key={item.key}
+              key={item.to}
               type="button"
-              onClick={() => onSelectTab(item.key)}
+              onClick={() => onSelectTab(item.to)}
               title={collapsed ? t(item.labelKey) : undefined}
               aria-current={isActive ? "true" : undefined}
               style={{
@@ -280,12 +266,9 @@ export function PreviewSidebar({
               }}
             >
               <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsed ? 0 : 2, flexShrink: 0 }} />
-              {!collapsed && (
-                <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  <span>{t(item.labelKey)}</span>
-                  <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-tertiary)" }}>{t(item.subtitleKey)}</span>
-                </span>
-              )}
+              {/* No subtitle line -- the real Sidebar.tsx's ITEMS carries
+                  only a labelKey per item, not a subtitleKey. */}
+              {!collapsed && <span>{t(item.labelKey)}</span>}
             </button>
           );
         })}
