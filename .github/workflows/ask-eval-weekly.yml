@@ -36,7 +36,7 @@ jobs:
       CLICKHOUSE_USER: transit
       CLICKHOUSE_PASSWORD: transit
       CLICKHOUSE_DATABASE: transit_test
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       # Hiroden (agency 8) has full static+realtime fixtures under
       # tests/fixtures/; Aomori (agency 1, test_baseline.py's own default)
       # only has a raw .pb sample for parser-regression tests, not enough
@@ -146,7 +146,7 @@ jobs:
       # gate here could go unnoticed for a long time. Deliberately
       # `!cancelled()` rather than `always()`: unlike the cheap cleanup
       # below, this step makes real, potentially slow, quota-consuming
-      # live-LLM (Groq) calls, so an explicit run cancellation should still
+      # live-LLM calls, so an explicit run cancellation should still
       # skip it rather than let it start and burn quota/runtime anyway.
       # Talks to api.main.app directly via an in-process ASGI transport,
       # not the external uvicorn server above, so RUN_CH_INTEGRATION=1

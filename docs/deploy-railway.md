@@ -156,8 +156,7 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
    CLICKHOUSE_SECURE=false                 # private network, no TLS needed internally
    GEMINI_API_KEY=...
    CRON_SECRET=<openssl rand -hex 32>      # save this — it must match the GH secret (step 4)
-   CHAT_PROVIDERS=gemini                    # add OPENAI_API_KEY too if using it as a paid fallback
-   OPENAI_API_KEY=...                      # optional (paid fallback rung)
+   CHAT_PROVIDERS=gemini                    # add ",openai" (and set OPENAI_API_KEY) for a paid fallback rung
    CORS_ORIGINS=                           # leave EMPTY — SPA + API are same-origin
    ```
    - `PORT` is injected by Railway automatically; the Dockerfile's

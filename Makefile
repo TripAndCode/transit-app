@@ -53,7 +53,7 @@ bake:
 doctor:
 	@echo "── env ──"
 	@test -f .env && echo "  .env present" || echo "  .env MISSING (run \`cp .env.example .env\`)"
-	@grep -q '^GROQ_API_KEY=..*' .env 2>/dev/null && echo "  GROQ_API_KEY set" || echo "  GROQ_API_KEY MISSING — Ask tab will 503"
+	@grep -qE '^(GEMINI_API_KEY|OPENAI_API_KEY)=..+' .env 2>/dev/null && echo "  LLM provider key set" || echo "  GEMINI_API_KEY/OPENAI_API_KEY MISSING — Ask tab will 503"
 	@n=$$(grep -cE '^(SESSION_SIGNING_KEY|GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GITHUB_CLIENT_ID|GITHUB_CLIENT_SECRET)=..+' .env 2>/dev/null || true); \
 		if [ "$$n" = "5" ]; then echo "  SSO env: all 5 set (login enabled)"; \
 		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (anonymous-only)"; \

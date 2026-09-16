@@ -138,7 +138,7 @@ export CLICKHOUSE_PORT="${ch_port}"
 export CLICKHOUSE_USER=transit
 export CLICKHOUSE_PASSWORD=transit
 export CLICKHOUSE_DATABASE=transit_test
-export GROQ_API_KEY="${GROQ_API_KEY:-test-key}"
+export GEMINI_API_KEY="${GEMINI_API_KEY:-test-key}"
 
 echo "→ applying Postgres schema"
 poetry run python gtfs_pipeline.py migrate up
