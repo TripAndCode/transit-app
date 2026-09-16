@@ -10,6 +10,33 @@ self-contained, don't block on reading it. Note `docs/refactor-log.md` is *not* 
 `.gitignore` negates it and it's tracked, so Steps 4 and 6 can and must write it.) Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
 skip ahead.
 
+## Non-interactive execution — never end a turn on pending work
+
+This command's normal home is a headless `claude -p` invocation, where the
+session ends the instant the coordinator ends a turn. A turn that ends while
+an `Agent` dispatch or a backgrounded Bash command is still outstanding
+therefore kills that pending work along with the session: the worker's
+uncommitted progress is lost, no Status log entry is written, and the wrapper
+sees a tick that made no forward progress. "I'll wait for the handback rather
+than polling" is the exact shape of this failure — correct in an interactive
+session, silently fatal here.
+
+So, for as long as a dispatch or command is outstanding:
+
+- Do not end the turn. Keep issuing tool calls within the same turn until the
+  work resolves — poll `TaskOutput` against the dispatch, or read the
+  command's own output.
+- Do not start a long verification command (`make test`, `npm run test`,
+  `scripts/prepare_review.py`, an aggregate rebuild) with
+  `run_in_background`. Run it in the foreground with an explicit `timeout`
+  sized to the tick's remaining budget.
+- Treat that budget as a known quantity, not a surprise. Before starting a
+  step that plausibly outlasts the time left, stop deliberately instead:
+  confirm the worker has a checkpoint commit, append a Status log entry
+  ending in `**Blocker-tag:** tick-budget-exhausted` per Step 0, and finish
+  the turn. A logged stop resumes cleanly through Step 3/3b; a silent
+  turn-end leaves nothing to resume from.
+
 ## Step 0 — Circuit breaker: back off after a repeated identical blocker
 
 Every Status log entry logged when a tick stops making zero forward progress
@@ -18,7 +45,8 @@ tool-error stop, Step 2b's branch-only-no-worktree stop, Step 3's
 OPEN-PR-resume worktree-missing stop, Step 3b's
 worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
 stop paths, Step 4b's
-worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops,
+worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops, the
+non-interactive tick-budget stop described just above,
 and Boundaries' generic tool-call-errored stop — must end with its own
 line: `**Blocker-tag:** <kebab-case-slug>`. Pick the slug to name the root
 cause's *class* (e.g. `review-scratch-leftover`, `git-stash-permission-denied`,
