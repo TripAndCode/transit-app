@@ -163,25 +163,45 @@ def _ch_test_client():
     )
 
 
+@pytest.fixture(scope="session")
+def _ch_schema() -> None:
+    """Create the ClickHouse `updates` table once per test session.
+
+    A no-op when RUN_CH_INTEGRATION isn't set, so requesting `ch_client`
+    still skips cleanly instead of attempting a connection — the check must
+    live here too, not just in `ch_client`, since a session-scoped fixture
+    runs before the test-scoped fixture that depends on it.
+    """
+    if os.environ.get("RUN_CH_INTEGRATION") != "1":
+        return
+    client = _ch_test_client()
+    try:
+        client.command("DROP TABLE IF EXISTS updates")
+        _apply_ch_schema(client)
+    finally:
+        client.close()
+
+
 @pytest.fixture
-def ch_client():
+def ch_client(_ch_schema):
     """ClickHouse client against the throwaway `make ch-test` instance.
 
     Hoisted here (from tests/pipeline/conftest.py, Task 5) because Task 6
     (analyze()'s dedup materialization) needs it from tests/api/ and
     tests/query/ too, not just tests/pipeline/ — a root conftest fixture is
-    visible to every subdirectory. Drop + reapply the schema before each test
-    for isolation, since ClickHouse has no transactional rollback to lean on
-    like the pg_conn fixture does. The skip (rather than a file-level
-    pytestmark) lives here so pure, DB-free tests elsewhere in the suite still
-    run without `make ch-test` — only tests that actually request this
-    fixture are gated behind RUN_CH_INTEGRATION.
+    visible to every subdirectory. Truncate (not drop+recreate) before each
+    test for isolation, since ClickHouse has no transactional rollback to
+    lean on like the pg_conn fixture does — the schema itself never changes
+    mid-session, so only `_ch_schema` needs to pay MergeTree's CREATE TABLE
+    cost, once. The skip (rather than a file-level pytestmark) lives here so
+    pure, DB-free tests elsewhere in the suite still run without
+    `make ch-test` — only tests that actually request this fixture are
+    gated behind RUN_CH_INTEGRATION.
     """
     if os.environ.get("RUN_CH_INTEGRATION") != "1":
         pytest.skip("requires `make ch-test` (RUN_CH_INTEGRATION=1)")
     client = _ch_test_client()
-    client.command("DROP TABLE IF EXISTS updates")
-    _apply_ch_schema(client)
+    client.command("TRUNCATE TABLE IF EXISTS updates")
     yield client
     client.close()
 
@@ -332,6 +352,12 @@ async def client(apply_schema):
 
     The pool is per-test (created + closed inside the fixture) so
     concurrent tests can't share or step on app.state.pool.
+
+    `min_size=1` (default is 10): this suite runs one request at a time per
+    test, so pre-warming asyncpg's default 10 connections on every single
+    test buys no concurrency headroom here and only pays for it in
+    connection-setup latency. `max_size` stays at asyncpg's default so a
+    handler that does need more than one connection at once still can.
     """
     import asyncpg
     import httpx
@@ -339,7 +365,7 @@ async def client(apply_schema):
 
     from api.main import app
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1)
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
