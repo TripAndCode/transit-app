@@ -114,6 +114,46 @@ def test_all_providers_rate_limited_returns_none(monkeypatch):
     assert kind == "rate_limit"
 
 
+def test_bad_request_descends_ladder(monkeypatch):
+    """An unrecoverable BadRequestError (no salvage path since Groq's removal)
+    descends to the next provider rather than raising."""
+    from openai import BadRequestError
+
+    _set_providers(monkeypatch, providers="gemini,openai", GEMINI_API_KEY="c", OPENAI_API_KEY="o")
+    fake_message = MagicMock(content="ok")
+    fake_response = MagicMock(choices=[MagicMock(message=fake_message)])
+
+    calls = {"n": 0}
+
+    def side(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise BadRequestError(message="bad", response=MagicMock(status_code=400), body=None)
+        return fake_response
+
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.side_effect = side
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is fake_message
+    assert kind is None
+    assert calls["n"] == 2  # gemini bad_request, openai succeeded
+
+
+def test_all_providers_bad_request_returns_none(monkeypatch):
+    from openai import BadRequestError
+
+    _set_providers(monkeypatch, providers="gemini", GEMINI_API_KEY="c")
+
+    def always_400(*a, **kw):
+        raise BadRequestError(message="bad", response=MagicMock(status_code=400), body=None)
+
+    with patch("openai.OpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create.side_effect = always_400
+        msg, kind = llm_client.LLMClient().chat_completions(messages=[])
+    assert msg is None
+    assert kind == "bad_request"
+
+
 def test_gemini_requires_api_key(monkeypatch):
     """Gemini listed but no API key set → dropped from the ladder like any other provider."""
     _set_providers(monkeypatch, providers="gemini")

@@ -52,12 +52,13 @@ def _allowed_providers() -> set[str]:
     in-question instructions -- verify a candidate provider against
     scripts/followup_eval.py before adding it here, don't assume. Both
     ``gemini`` (``gemini-3.1-flash-lite``) and ``openai`` (``gpt-5.4-mini``)
-    re-ran clean at 11/11 probes, so both are verified-safe defaults -- but
-    that verification is tied to the specific model each provider runs, not
-    the provider name, and doesn't transfer if a model default changes.
-    Defaults to both so an unverified operator's follow-up never silently
-    answers from an injection-prone provider; operators widen it explicitly
-    (and re-verify) via env. Empty/unset → the default.
+    are verified-safe defaults against that eval's injection-resistance probe
+    set -- but that verification is tied to the specific model each provider
+    runs, not the provider name, and doesn't transfer if a model default
+    changes or the probe set grows; a prior pass is not evidence once either
+    changes. Defaults to both so an unverified operator's follow-up never
+    silently answers from an injection-prone provider; operators widen it
+    explicitly (and re-verify) via env. Empty/unset → the default.
     """
     raw = os.environ.get("ASK_FOLLOWUP_PROVIDERS", "gemini,openai")
     return {n.strip().lower() for n in raw.split(",") if n.strip()}
