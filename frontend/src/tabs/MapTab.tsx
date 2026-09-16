@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from 
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Maximize2, Radio, RefreshCw } from "lucide-react";
-import { PatternFilters } from "../components/analysis/AnalysisFilters";
+import { FilterDock } from "./map/FilterDock";
 import { downloadCsv } from "../components/analysis/csv";
 import "../styles/focusedAnalysis.css";
 import "./map/focusedOverview.css";
@@ -395,17 +395,23 @@ export function MapTab() {
         )}
       </header>
 
-      <div className="focus-filters">
-        <PatternFilters agencyId={id} codes={ctx.routes} onChange={(routes) => {
+      {/* The trip counts live only in the queue panel's stat tiles, not here
+          as well: two live readings of the same number on one screen invite
+          the reader to check whether they agree instead of reading either.
+          Staleness likewise reads once, from the header's freshness dot. */}
+      <FilterDock
+        agencyId={id}
+        applied={ctx.routes}
+        onApply={(routes) => {
           updateCtx({ routes }); setRouteSelection({ agencyId: id, route: null }); setSelectedTripId(null); setSelectedDirectionKey(null);
-        }} />
-        <span className="focus-muted">{td("observed", { count: liveRows.length })} · {td("delayed", { count: delayedRows.length })}</span>
-        <button type="button" className="btn-ghost" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
-          ["agency_id", "route_code", "trip_id", "headsign", "stop_id", "stop_name", "departure_delay_seconds", "captured_at"],
-          ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
-        ])}>{td("csv")}</button>
-      </div>
-      {freshness === "stale" && <p role="status" className="focus-muted">{td("stale")}</p>}
+        }}
+        trailing={
+          <button type="button" className="btn-ghost ops-dock__export" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
+            ["agency_id", "route_code", "trip_id", "headsign", "stop_id", "stop_name", "departure_delay_seconds", "captured_at"],
+            ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
+          ])}>{td("csv")}</button>
+        }
+      />
 
       {(liveQuery.error || summaryQuery.error) && (
         <ErrorBanner
@@ -436,11 +442,10 @@ export function MapTab() {
           </button>
           <div className="ops-map__disclosure">
             <Radio size={15} aria-hidden="true" />
-            <span>{t("operations.map.disclosure", {
-              located: locatedTrips,
-              total: liveRows.length,
-              when: liveQuery.data?.latest_captured_at ? relativeTime(liveQuery.data.latest_captured_at) : t("operations.no_update"),
-            })}</span>
+            {/* States what the markers mean, and nothing else: the reading's
+                age is the header freshness dot's job, and repeating it here
+                put the same fact on screen three times. */}
+            <span>{t("operations.map.disclosure", { located: locatedTrips, total: liveRows.length })}</span>
           </div>
         </section>
 

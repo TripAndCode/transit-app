@@ -482,7 +482,7 @@
       "delay": "Delay {{delay}}",
       "reported_stop": "Reported stop: {{stop}}",
       "updated": "Updated {{when}}",
-      "disclosure": "{{located}} of {{total}} trips shown at their latest GTFS-RT TripUpdate stop (observed {{when}}; static GTFS coordinates, not GPS positions)",
+      "disclosure": "{{located}} of {{total}} trips · last reported stop, not GPS",
       "legend_label": "Map legend",
       "legend_current": "Latest report",
       "legend_trail": "Report trail",
