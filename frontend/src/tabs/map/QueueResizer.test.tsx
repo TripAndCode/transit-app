@@ -6,17 +6,14 @@ import { DEFAULT_QUEUE_WIDTH, MAX_QUEUE_WIDTH, MIN_QUEUE_WIDTH } from "./queueWi
 
 const renderResizer = (width = 300) => {
   const onWidth = vi.fn();
-  render(<QueueResizer width={width} label="パネルの幅を変更" onWidth={onWidth} />);
-  return { onWidth, handle: screen.getByRole("separator") };
+  const onCommit = vi.fn();
+  render(<QueueResizer width={width} label="パネルの幅を変更" onWidth={onWidth} onCommit={onCommit} />);
+  return { onWidth, onCommit, handle: screen.getByRole("separator") };
 };
 
-// jsdom has no PointerEvent constructor (confirmed: `typeof window.PointerEvent`
-// is "undefined" even on the version this project pins), so fireEvent.pointerDown
-// et al. can't populate clientX the way they would for a real PointerEvent.
-// MouseEvent does support clientX and PointerEvent is a MouseEvent subtype in
-// browsers, so a MouseEvent with the pointer event's type name exercises the
-// same onPointerDown/onPointerMove/onPointerUp React handlers with a real
-// clientX, which is all this component's drag math reads.
+// jsdom lacks a PointerEvent constructor, so fireEvent.pointerDown can't carry
+// clientX. PointerEvent is a MouseEvent subtype, so a same-named MouseEvent
+// exercises the same onPointer* handlers with a real clientX.
 const firePointer = (
   target: Element,
   type: "pointerdown" | "pointermove" | "pointerup",
@@ -37,12 +34,14 @@ describe("QueueResizer", () => {
   });
 
   it("widens the right-hand panel on ArrowLeft and narrows it on ArrowRight", async () => {
-    const { onWidth, handle } = renderResizer(300);
+    const { onWidth, onCommit, handle } = renderResizer(300);
     handle.focus();
     await userEvent.keyboard("{ArrowLeft}");
     expect(onWidth).toHaveBeenLastCalledWith(316);
+    expect(onCommit).toHaveBeenLastCalledWith(316);
     await userEvent.keyboard("{ArrowRight}");
     expect(onWidth).toHaveBeenLastCalledWith(284);
+    expect(onCommit).toHaveBeenLastCalledWith(284);
   });
 
   it("takes a bigger step while shift is held", async () => {
@@ -60,9 +59,10 @@ describe("QueueResizer", () => {
   });
 
   it("restores the default width on double click", async () => {
-    const { onWidth, handle } = renderResizer(640);
+    const { onWidth, onCommit, handle } = renderResizer(640);
     await userEvent.dblClick(handle);
     expect(onWidth).toHaveBeenLastCalledWith(DEFAULT_QUEUE_WIDTH);
+    expect(onCommit).toHaveBeenLastCalledWith(DEFAULT_QUEUE_WIDTH);
   });
 
   it("widens on a leftward pointer drag and narrows on a rightward one", () => {
@@ -81,13 +81,18 @@ describe("QueueResizer", () => {
     expect(onWidth).toHaveBeenLastCalledWith(MIN_QUEUE_WIDTH);
   });
 
-  it("stops resizing once the pointer is released", () => {
-    const { onWidth, handle } = renderResizer(300);
+  it("does not commit on every move, only once the pointer is released", () => {
+    const { onWidth, onCommit, handle } = renderResizer(300);
     firePointer(handle, "pointerdown", 300);
     firePointer(handle, "pointermove", 280);
-    onWidth.mockClear();
+    expect(onCommit).not.toHaveBeenCalled();
     firePointer(handle, "pointerup", 280);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenLastCalledWith(320);
+    onWidth.mockClear();
+    onCommit.mockClear();
     firePointer(handle, "pointermove", 200);
     expect(onWidth).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
   });
 });

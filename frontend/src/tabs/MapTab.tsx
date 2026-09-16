@@ -444,7 +444,7 @@ export function MapTab() {
           </div>
         </section>
 
-        <QueueResizer width={queueWidth} label={td("resizeQueue")} onWidth={(px) => { setQueueWidth(px); storeQueueWidth(px); }} />
+        <QueueResizer width={queueWidth} label={td("resizeQueue")} onWidth={setQueueWidth} onCommit={storeQueueWidth} />
 
         <aside className="focus-live-queue">
           <h2>{td("attention")}</h2>
