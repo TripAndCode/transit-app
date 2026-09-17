@@ -3,7 +3,7 @@ analyses. The summary shows the existing API's mean-delay series and pattern
 ranking, with filter-aware CSV downloads and browser print/PDF. It does not
 fabricate the mockup's five-minute delay rates or comparison figures.
 
-The main navigation is Overview / Route analysis / Reports. Detailed historical
+The main navigation is Overview / Segment analysis / Reports. Detailed historical
 reports and agency comparison remain accessible by legacy URL, outside the main
 navigation. On the three primary screens, persistent banner stacks and the
 Copilot panel no longer cover the visualizations. Data status is available in

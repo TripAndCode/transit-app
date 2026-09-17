@@ -1,4 +1,4 @@
-Route analysis now focuses on one service pattern: a stop-delay chart, selected
+Segment analysis now focuses on one service pattern: a stop-delay chart, selected
 stop, a small map and optional raw observations. Route and keito filters share
 the query scope with CSV and saved analysis bookmarks.
 
