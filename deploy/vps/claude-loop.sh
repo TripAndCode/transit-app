@@ -191,6 +191,7 @@ while (( TICKS_RUN < CLAUDE_LOOP_MAX_CHAIN_TICKS )); do
 
   timeout --foreground --kill-after=30s "${CLAUDE_TICK_TIMEOUT_SEC}s" \
     env CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
+        CLAUDE_TICK_TIMEOUT_SEC="$CLAUDE_TICK_TIMEOUT_SEC" \
     claude --model "$CLAUDE_MODEL" --permission-mode auto -p "/vps-loop-run" --output-format text
   CLAUDE_EXIT=$?
   FINAL_EXIT=$CLAUDE_EXIT

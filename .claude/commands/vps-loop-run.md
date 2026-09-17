@@ -10,6 +10,41 @@ self-contained, don't block on reading it. Note `docs/refactor-log.md` is *not* 
 `.gitignore` negates it and it's tracked, so Steps 4 and 6 can and must write it.) Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
 skip ahead.
 
+## Non-interactive execution — never end a turn on pending work
+
+This command's normal home is a headless `claude -p` invocation, where the
+session ends the instant the coordinator ends a turn. A turn that ends while
+an `Agent` dispatch or a backgrounded Bash command is still outstanding
+therefore kills that pending work along with the session: the worker's
+uncommitted progress is lost, no Status log entry is written, and the wrapper
+sees a tick that made no forward progress. "I'll wait for the handback rather
+than polling" is the exact shape of this failure — correct in an interactive
+session, silently fatal here.
+
+So, for as long as a dispatch or command is outstanding:
+
+- Do not end the turn. Keep issuing tool calls within the same turn until the
+  work resolves — poll `TaskOutput` against the dispatch, or read the
+  command's own output.
+- Do not start a long verification command (`make test`, `npm run test`,
+  `scripts/prepare_review.py`, an aggregate rebuild) with
+  `run_in_background`. Run it in the foreground with an explicit `timeout`
+  sized to the tick's remaining budget.
+- Make that budget a number you actually hold, rather than an assumed
+  quantity. At Step 1, record the tick's start time (`date +%s`) and read
+  `CLAUDE_TICK_TIMEOUT_SEC` from the environment — the wrapper's per-tick
+  ceiling. If that read comes back empty, fall back to the default
+  `.claude/README.md` documents rather than skipping the check; a deployed
+  wrapper that predates this variable being exported is the one case where
+  it won't be set. Remaining budget is that ceiling minus elapsed; size
+  every foreground `timeout` from it.
+- Before starting a step that plausibly outlasts what is left, stop
+  deliberately instead of being cut off mid-step: confirm the worker has a
+  checkpoint commit, append a Status log entry ending in
+  `**Blocker-tag:** tick-budget-exhausted` per Step 0, and finish the turn.
+  A logged stop resumes cleanly through Step 3/3b; a silent turn-end leaves
+  nothing to resume from.
+
 ## Step 0 — Circuit breaker: back off after a repeated identical blocker
 
 Every Status log entry logged when a tick stops making zero forward progress
@@ -18,21 +53,24 @@ tool-error stop, Step 2b's branch-only-no-worktree stop, Step 3's
 OPEN-PR-resume worktree-missing stop, Step 3b's
 worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
 stop paths, Step 4b's
-worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops,
+worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops, the
+non-interactive tick-budget stop described just above,
 and Boundaries' generic tool-call-errored stop — must end with its own
 line: `**Blocker-tag:** <kebab-case-slug>`. Pick the slug to name the root
 cause's *class* (e.g. `review-scratch-leftover`, `git-stash-permission-denied`,
 `settings-drift`, `sensitive-file-no-approver`, `db-write-blocked`), not the
 specific instance (not the item number, not the exact file path) — the same
 class of problem recurring on different items must reuse the identical slug,
-or this mechanism can never detect the pattern. Two outcome-category slugs
+or this mechanism can never detect the pattern. Three outcome-category slugs
 (`review-major-unresolved` for an unresolved review finding,
-`worker-blocked` for a Step 4b report) are generic buckets, not
+`worker-blocked` for a Step 4b report, `tick-budget-exhausted` for a
+deliberate out-of-time stop) are generic buckets, not
 necessarily a real recurring root cause on their own — before reusing one of
 these because the last 2 entries also used it, sanity-check that the
 underlying cause is actually the same, not just the same outcome shape; if
 it's clearly a different underlying issue that happens to also end in an
-unresolved review or a blocked worker, use a more specific compound slug
+unresolved review, a blocked worker, or an exhausted budget, use a more
+specific compound slug
 instead (e.g. `review-major-unresolved-null-handling`) so unrelated one-off
 failures don't spuriously trip the streak. This tagging requirement does NOT
 apply to a "skip item N, keep going" outcome that doesn't stop the whole
@@ -182,6 +220,9 @@ different, benign kind of "no progress" and must NOT accumulate toward this
 circuit breaker's streak count. Only genuine blocker/failure outcomes count.
 
 ## Step 1 — State check
+
+Record the tick's start time first: `date +%s`. Everything the budget rule above
+computes hangs off this one number, and no later step re-derives it.
 
 `git status --porcelain -- ':(top)' ':(exclude,top)NEXT_TASK.md'` — everything except
 the one file that is untracked by design. (`NEXT_TASK.md` isn't gitignored, so an
