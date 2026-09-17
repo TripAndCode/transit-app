@@ -207,31 +207,54 @@ html, body, #root { height: 100%; margin: 0; }
 /* Notices are supplementary UI. Keep them available without pushing the
    active tab's primary visualization below the fold. Individual notices keep
    their own dismiss controls; the stack itself does not block the page. */
+/* In flow at the top of <main>, not floating over it. Everything around this
+   stack already assumes it occupies layout: App.tsx sizes the content area
+   with `flex: 1` precisely because "the banners/strip above take variable
+   height", and ActivityStrip describes itself as "an always-present 24 px
+   row in the App shell" and sets `flex-shrink: 0`. A `position: fixed`
+   overlay contradicted all of that, and on every route where the banners
+   render it landed on the filter bar: the card covered the filter chips'
+   remove button and "Clear all" completely and, being `pointer-events:
+   auto`, swallowed the clicks aimed at them.
+
+   These banners are also the wrong shape for an overlay. They persist until
+   dismissed rather than timing out, so they belong in the layout the same
+   way a page header does; a toast that never leaves is just a blocked
+   region. */
+/* In flow at the top of <main>, not floating over it. Everything around this
+   stack already assumed it occupies layout: App.tsx sizes the content area
+   with `flex: 1` precisely because "the banners/strip above take variable
+   height", and ActivityStrip documents itself as "an always-present 24 px row
+   in the App shell" and sets `flex-shrink: 0`. The `position: fixed` overlay
+   contradicted both, and on every route where the banners render it landed on
+   the filter bar -- covering the filter chips' remove button and "Clear all"
+   outright and, being `pointer-events: auto`, swallowing the clicks aimed at
+   them.
+
+   These banners are also the wrong shape for an overlay: they persist until
+   dismissed rather than timing out, so they belong in the layout the way a
+   page header does. A toast that never leaves is just a blocked region. The
+   drop shadow goes with the fixed positioning -- in flow, the border alone
+   carries the edge. */
 .app-notice-stack {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 400;
   display: flex;
-  width: min(520px, calc(100vw - 32px));
   flex-direction: column;
+  flex-shrink: 0;
   gap: 8px;
-  pointer-events: none;
 }
 
-.app-notice-stack > * {
-  pointer-events: auto;
+/* The inset rides on the banners, not on the stack: the stack also holds
+   ActivityStrip -- a flush, full-width band -- and stack padding would
+   reserve dead space at the top of every screen where no banner is
+   showing, since the strip is `display: none` when idle. */
+.app-notice-stack > *:not([data-activity-strip]) {
+  margin: 0 16px;
   border: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
 }
 
-@media (max-width: 560px) {
-  .app-notice-stack {
-    top: 8px;
-    right: 8px;
-    width: calc(100vw - 16px);
-  }
+.app-notice-stack > *:not([data-activity-strip]):first-child {
+  margin-top: 16px;
 }
 
 body {
