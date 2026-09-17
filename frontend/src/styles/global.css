@@ -49,6 +49,11 @@
      distinct from --delay-severe/--color-danger, which stay the map's own
      per-point severity ramp; this is specifically for aggregate counts. */
   --delay-flag: #C4501F;
+  /* Fallback first for engines without color-mix() support (same reasoning as
+     --map-badge-bg above); the mix itself tracks --delay-flag automatically
+     in both themes, so it needs no separate dark-block entry. */
+  --delay-flag-soft: var(--bg-soft);
+  --delay-flag-soft: color-mix(in srgb, var(--delay-flag) 10%, transparent);
   --card-border: #E4E7EC;
   --card-radius: 10px;
   /* Tooltip is intentionally theme-invariant (always a dark chip with white
