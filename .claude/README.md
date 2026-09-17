@@ -166,12 +166,15 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   (clear the flight flag and decide `continue` vs. `stop`, escalating an
   exponential, capped backoff — `CLAUDE_LOOP_BACKOFF_BASE_SEC`/
   `CLAUDE_LOOP_BACKOFF_CAP_SEC`, default 300s/3600s — on every outcome except
-  `"progress"` and `"died_with_commits"`, so a genuinely stuck or genuinely
-  idle loop backs off instead of retrying at full speed; `"died_with_commits"`
-  resets the backoff streak like real progress does, since work genuinely
-  landed, but still signals `"stop"` rather than chaining automatically —
-  a tick that died before explaining why it died shouldn't have more
-  automated work piled onto the same branch unsupervised). The
+  `"progress"`, so a genuinely stuck or genuinely idle loop backs off instead
+  of retrying at full speed. `"died_with_commits"` still signals `"stop"`
+  rather than chaining automatically — a tick that died before explaining why
+  it died shouldn't have more automated work piled onto the same branch
+  unsupervised — but, unlike real progress, it does *not* reset the backoff
+  streak: it stays on the same escalating schedule as plain `"died"`, since a
+  coordinator that reliably dies with commits every tick still needs to slow
+  down rather than retrying at full, unthrottled cadence forever just because
+  its checkpoint commits kept landing). The
   chain is still bounded on every axis: `CLAUDE_LOOP_MAX_CHAIN_TICKS`
   (default 5) caps the tick count, `CLAUDE_LOOP_MAX_CHAIN_WALLCLOCK_SEC`
   (default 14400s) is a wrapper-enforced wall-clock ceiling independent of

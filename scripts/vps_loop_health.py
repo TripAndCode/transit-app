@@ -12,7 +12,8 @@ far longer than its own reduced probe cadence -- can go unnoticed for days
 between manual checks.
 
 This script parses the Status log (pure file reads -- no `git`/`gh` calls, so
-it is cheap and safe to run every tick) and reports five health facts:
+it is cheap and safe to run every tick) and reports the following health
+facts:
 
 - `last_successful_tick`: the most recent entry that is neither a
   `Blocker-tag`-bearing stop nor a PAUSED-family bookkeeping-only entry.

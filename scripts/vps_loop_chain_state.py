@@ -74,25 +74,21 @@ TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 # produced it.
 HEALTH_LOG_OUTCOMES = frozenset({"progress", "idle", "blocked", "paused", "unknown"})
 
-# A tick that died -- crashed, was killed by the wrapper's own timeout, or
-# ended its turn with an `Agent` dispatch still outstanding -- before writing
-# any Status log entry at all. `_with_commits` means the tick's own
-# target-item branch still gained new commits despite that silence (e.g. a
-# dispatched worker's checkpoint commits landed, but the coordinator turn
-# ended before it could log the tick's own summary) -- real forward motion
-# happened even though nothing was logged.
+# See `classify_tick_outcome`'s docstring for what triggers a died tick.
+# `_with_commits` means the tick's own target-item branch still gained new
+# commits despite that silence.
 DIED_OUTCOMES = frozenset({"died", "died_with_commits"})
 
 # A tick that made real forward progress (`vps_loop_health.py`'s `"progress"`)
-# is the only outcome worth chaining into another tick immediately. Every
-# other outcome stops the chain for this invocation.
+# is the only outcome worth chaining into another tick immediately, and the
+# only one that resets the escalating backoff streak: even `died_with_commits`
+# left real commits behind, but the tick died before it could explain why, so
+# it stays on the same escalating-backoff footing as `"died"` rather than
+# being trusted like genuine progress -- otherwise a coordinator that reliably
+# dies with commits every tick would reset its own backoff to zero forever and
+# retry at full, unthrottled cadence. Every other outcome stops the chain for
+# this invocation.
 CONTINUE_OUTCOMES = frozenset({"progress"})
-# Outcomes representing real forward motion, whether or not the tick lived
-# long enough to log its own outcome. These reset the escalating backoff
-# streak; only `CONTINUE_OUTCOMES` also chains immediately -- a tick that
-# died before logging anything needs a look before more ticks pile onto the
-# same branch unsupervised, even if it happened to leave real commits behind.
-PROGRESS_LIKE_OUTCOMES = frozenset({"progress", "died_with_commits"})
 KNOWN_OUTCOMES = HEALTH_LOG_OUTCOMES | DIED_OUTCOMES
 
 
@@ -294,24 +290,20 @@ def record_outcome(
 ) -> tuple[ChainState, str]:
     """Record one tick's outcome and decide `"continue"` vs. `"stop"` for the chain.
 
-    `"progress"` resets the backoff schedule and clears the flight flag, but
-    signals `"continue"` -- the caller (the shell wrapper) may immediately
-    `begin()` another tick, subject to its own bounded tick-count/wall-clock
-    ceilings.
+    `"progress"` (the only member of `CONTINUE_OUTCOMES`) resets the backoff
+    schedule and clears the flight flag, and signals `"continue"` -- the
+    caller (the shell wrapper) may immediately `begin()` another tick, subject
+    to its own bounded tick-count/wall-clock ceilings.
 
-    `"died_with_commits"` (see `classify_tick_outcome`) also resets the
-    backoff schedule -- real commits landed on the tick's own target branch,
-    so this is not the same "nothing happened" signal as a quiet backlog or a
-    repeated blocker -- but signals `"stop"`, not `"continue"`: the tick died
-    before it could log why, so chaining straight into another one
-    unsupervised risks piling more automated work onto a branch whose last
-    attempt never explained itself.
-
-    Every other outcome (`"idle"`, `"blocked"`, `"paused"`, `"unknown"`,
-    `"died"`) escalates `consecutive_non_progress`, schedules
-    `next_earliest_attempt` via `compute_backoff_seconds`, and signals
-    `"stop"`. These share one schedule deliberately -- all are "no evidence of
-    forward motion, don't hammer this" -- but each still stays distinguishable
+    Every other outcome -- `"idle"`, `"blocked"`, `"paused"`, `"unknown"`,
+    `"died"`, and `"died_with_commits"` -- escalates `consecutive_non_progress`,
+    schedules `next_earliest_attempt` via `compute_backoff_seconds`, and
+    signals `"stop"`. `"died_with_commits"` (see `classify_tick_outcome`) is
+    deliberately on this same escalating footing rather than resetting like
+    genuine progress: real commits landed on the tick's own target branch, but
+    the tick died before it could log why, so a coordinator that reliably
+    dies with commits every tick still backs off instead of retrying at full,
+    unthrottled cadence forever. Each outcome still stays distinguishable
     afterward via `last_outcome`, so health reporting never conflates a quiet
     backlog, a real failure, and a tick that silently died with no work to
     show for it.
@@ -321,47 +313,27 @@ def record_outcome(
         raise ValueError(f"unknown outcome {outcome!r}; expected one of {sorted(KNOWN_OUTCOMES)}")
 
     if outcome in CONTINUE_OUTCOMES:
-        new_state = replace(
-            state,
-            in_progress=False,
-            pid=None,
-            started_at=None,
-            consecutive_non_progress=0,
-            next_earliest_attempt=None,
-            last_outcome=outcome,
-            last_updated=format_timestamp(now),
+        consecutive_non_progress = 0
+        next_earliest_attempt = None
+    else:
+        consecutive_non_progress = state.consecutive_non_progress + 1
+        backoff_seconds = compute_backoff_seconds(
+            consecutive_non_progress=consecutive_non_progress, base_seconds=base_seconds, cap_seconds=cap_seconds
         )
-        return new_state, "continue"
+        next_earliest_attempt = format_timestamp(now + timedelta(seconds=backoff_seconds))
 
-    if outcome in PROGRESS_LIKE_OUTCOMES:
-        new_state = replace(
-            state,
-            in_progress=False,
-            pid=None,
-            started_at=None,
-            consecutive_non_progress=0,
-            next_earliest_attempt=None,
-            last_outcome=outcome,
-            last_updated=format_timestamp(now),
-        )
-        return new_state, "stop"
-
-    consecutive = state.consecutive_non_progress + 1
-    backoff_seconds = compute_backoff_seconds(
-        consecutive_non_progress=consecutive, base_seconds=base_seconds, cap_seconds=cap_seconds
-    )
-    next_earliest_attempt = format_timestamp(now + timedelta(seconds=backoff_seconds))
     new_state = replace(
         state,
         in_progress=False,
         pid=None,
         started_at=None,
-        consecutive_non_progress=consecutive,
+        consecutive_non_progress=consecutive_non_progress,
         next_earliest_attempt=next_earliest_attempt,
         last_outcome=outcome,
         last_updated=format_timestamp(now),
     )
-    return new_state, "stop"
+    action = "continue" if outcome in CONTINUE_OUTCOMES else "stop"
+    return new_state, action
 
 
 def classify_tick_outcome(

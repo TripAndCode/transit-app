@@ -258,18 +258,19 @@ def test_record_outcome_died_escalates_backoff_like_other_non_progress_outcomes(
     assert state.next_earliest_attempt is not None
 
 
-def test_record_outcome_died_with_commits_resets_backoff_but_does_not_continue():
+def test_record_outcome_died_with_commits_escalates_backoff_like_plain_died():
     state = chain.ChainState(consecutive_non_progress=3, next_earliest_attempt="2026-09-12T11:00:00Z")
 
     new_state, action = chain.record_outcome(state, outcome="died_with_commits", now=NOW)
 
-    # Real commits landed, so this must not be punished with an escalated
-    # backoff the way a genuine failure or empty backlog would be -- but it
-    # also must not chain automatically, since the tick died before it could
-    # explain why.
+    # Real commits landed, but the tick died before it could explain why, so
+    # this must not be trusted like genuine progress: a coordinator that
+    # reliably dies with commits every tick still needs to back off, not
+    # reset to zero and retry at full, unthrottled cadence forever. It also
+    # must not chain automatically.
     assert action == "stop"
-    assert new_state.consecutive_non_progress == 0
-    assert new_state.next_earliest_attempt is None
+    assert new_state.consecutive_non_progress == 4
+    assert new_state.next_earliest_attempt is not None
     assert new_state.last_outcome == "died_with_commits"
 
 
@@ -283,16 +284,38 @@ def test_repeated_died_ticks_escalate_backoff_independently_of_idle_or_blocked()
     assert state.last_outcome == "died"
 
 
-def test_died_with_commits_does_not_leave_a_leftover_unrelated_branch_uncounted():
+def test_repeated_died_with_commits_ticks_keep_escalating_backoff_not_resetting():
+    # This is the scenario the escalation exists to catch: a coordinator
+    # whose worker checkpoints land every tick but whose own turn always ends
+    # before it can log a Status-log entry. If died_with_commits reset the
+    # streak like real progress, this would retry at full, unthrottled
+    # cadence forever instead of ever backing off.
+    state = chain.ChainState()
+    waits: list[datetime] = []
+    for _ in range(3):
+        state, action = chain.record_outcome(
+            state, outcome="died_with_commits", now=NOW, base_seconds=60, cap_seconds=3600
+        )
+        assert action == "stop"
+        waits.append(datetime.strptime(state.next_earliest_attempt, chain.TIMESTAMP_FORMAT))
+
+    assert state.consecutive_non_progress == 3
+    assert state.last_outcome == "died_with_commits"
+    assert waits[0] < waits[1] < waits[2]
+
+
+def test_died_then_died_with_commits_both_add_to_the_same_streak():
     # A tick that died without commits, immediately followed by one that
-    # died with commits, must still show the reset -- the streak-reset
-    # behavior is about *this* tick's own signal, not a running average.
+    # died with commits, must keep escalating the same streak -- neither
+    # outcome resets it, since both are "died before explaining why".
     state, _ = chain.record_outcome(chain.ChainState(), outcome="died", now=NOW, base_seconds=300, cap_seconds=3600)
     assert state.consecutive_non_progress == 1
 
-    state, action = chain.record_outcome(state, outcome="died_with_commits", now=NOW)
+    state, action = chain.record_outcome(
+        state, outcome="died_with_commits", now=NOW, base_seconds=300, cap_seconds=3600
+    )
     assert action == "stop"
-    assert state.consecutive_non_progress == 0
+    assert state.consecutive_non_progress == 2
 
 
 # --- CLI classify --------------------------------------------------------------
@@ -697,6 +720,12 @@ def test_wrapper_gated_exit_still_dispatches_a_heartbeat():
     dispatch_fn_body = wrapper_source[dispatch_fn_start:dispatch_fn_end]
     assert "gh api repos/TripAndCode/transit-app/dispatches" in dispatch_fn_body
 
+    gated_branch_start = wrapper_source.index('if [[ "$ALLOWED" != "true" ]]; then')
+    gated_branch_end = wrapper_source.index("\nfi", gated_branch_start)
+    gated_branch_body = wrapper_source[gated_branch_start:gated_branch_end]
+    assert "dispatch_heartbeat" in gated_branch_body
+    assert "exit 0" in gated_branch_body
+
 
 def test_wrapper_feeds_execution_facts_through_classify_before_recording():
     """Regression guard for `deploy/vps/claude-loop.sh` reverting to trusting
@@ -739,12 +768,6 @@ def test_wrapper_scopes_commit_detection_to_the_pre_tick_item_branch():
 
     assert 'item_branch_head_sha "$PRE_TICK_ITEM"' in wrapper_source
     assert "vps-loop/item-" in wrapper_source
-
-    gated_branch_start = wrapper_source.index('if [[ "$ALLOWED" != "true" ]]; then')
-    gated_branch_end = wrapper_source.index("\nfi", gated_branch_start)
-    gated_branch_body = wrapper_source[gated_branch_start:gated_branch_end]
-    assert "dispatch_heartbeat" in gated_branch_body
-    assert "exit 0" in gated_branch_body
 
 
 def test_cli_show_json_reports_current_state_without_mutating(tmp_path, capsys):
