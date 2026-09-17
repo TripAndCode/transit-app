@@ -75,12 +75,14 @@
 .ops-map-fit:disabled { color: var(--text-tertiary); box-shadow: none; cursor: default; }
 
 /* Trip panel. Every colour here resolves through a token, and deliberately so:
-   this block used to carry its own dark theme -- a navy gradient plus ~20
-   hardcoded hex values -- which left it dark inside the light app and made it
-   ignore dark mode entirely. Teal accents go through --accent, which
+   this block used to carry its own dark theme -- a navy gradient plus dozens
+   of hardcoded hex values -- which left it dark inside the light app and made
+   it ignore dark mode entirely. Teal accents go through --accent, which
    .app-shell sets to the app's teal, so the panel follows the theme rather
    than restating it. Emphasis on the selected trip is one teal left edge, not
-   a full accent border, to keep a long-watched screen calm. */
+   a full accent border, to keep a long-watched screen calm. Padding, border
+   shape and header type size were retuned alongside the colours, to match the
+   tighter card look the tokens replace the old bespoke chrome with. */
 .ops-trip-panel { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 14px 12px; color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--card-border); border-radius: var(--card-radius); }
 .ops-trip-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .ops-trip-panel__header h2 { overflow: hidden; margin: 2px 0 0; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
@@ -138,7 +140,7 @@
 .ops-delay-chart circle { fill: var(--color-warning); stroke: var(--bg-surface); stroke-width: 1; }
 .ops-delay-insights { display: flex; flex-wrap: wrap; gap: 5px; }
 .ops-delay-insights span { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 5px; font-size: 9px; }
-.ops-delay-insights .is-growth { color: var(--delay-flag); background: color-mix(in srgb, var(--delay-flag) 10%, transparent); }
+.ops-delay-insights .is-growth { color: var(--delay-flag); background: var(--delay-flag-soft); }
 .ops-delay-insights .is-recovery { color: var(--accent); background: var(--accent-soft); }
 .ops-other-trips { min-height: 0; margin-top: 10px; overflow-y: auto; }
 .ops-other-trips h3 { margin: 0 0 6px; color: var(--text-tertiary); font-size: 10px; text-transform: uppercase; }
