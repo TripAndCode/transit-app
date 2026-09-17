@@ -488,7 +488,10 @@
       "legend_trail": "報告履歴",
       "legend_delay": "遅延",
       "legend_cluster": "数字＝重複便",
-      "fit_all": "全便を表示"
+      "fit_all": "全便を画面に収める",
+      "reference_show": "凡例と注記を表示",
+      "reference_hide": "凡例と注記を隠す",
+      "fit_all_hint": "絞り込み中の便すべてが入る範囲に地図を動かします。表示する便は変わりません。"
     },
     "trip_panel": {
       "aria_label": "方面と便別の運行状況",
@@ -888,7 +891,10 @@
       }
     },
     "card": {
-      "stop_patterns": { "title": "経路ごとの全停留所を見る", "summary": "{{route}}の停留所全体で、出発遅延はどう分布している？" },
+      "stop_patterns": {
+        "title": "経路ごとの全停留所を見る",
+        "summary": "{{route}}の停留所全体で、出発遅延はどう分布している？"
+      },
       "stop_hotspots": {
         "title": "どの停留所で遅れが大きい？",
         "summary": "{{route}}は、どの停留所で平均出発遅延が大きい？"
