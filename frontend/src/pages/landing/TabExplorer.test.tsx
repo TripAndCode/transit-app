@@ -38,7 +38,7 @@ describe("TabExplorer", () => {
     renderWithProviders(<TabExplorer />);
     await waitFor(() => expect(screen.getByText("Overview excerpt paragraph.")).toBeTruthy());
 
-    await user.click(screen.getByRole("button", { name: /Route analysis/ }));
+    await user.click(screen.getByRole("button", { name: /Segment analysis/ }));
 
     expect(screen.getByText("When and why delays happen")).toBeTruthy();
     await waitFor(() => expect(screen.getByText("Analysis excerpt paragraph.")).toBeTruthy());
@@ -57,7 +57,7 @@ describe("TabExplorer", () => {
 
   it("shows the real three sidebar tabs plus Ask, and nothing else", () => {
     renderWithProviders(<TabExplorer />);
-    // Overview, Route analysis, Reports, Ask -- one button each, nothing
+    // Overview, Segment analysis, Reports, Ask -- one button each, nothing
     // else interactive on the page.
     expect(screen.getAllByRole("button")).toHaveLength(4);
   });
