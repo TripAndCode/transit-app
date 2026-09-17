@@ -476,8 +476,7 @@ async def followup_endpoint(
     # on a provider for seconds, and a pool connection parked for that long
     # is one no other request can use. The reads here and the writes below
     # share no transaction — the writes open their own — so nothing needs a
-    # single connection to span both. Same lazy acquire/release shape as
-    # ``api/routers/copilot.py``.
+    # single connection to span both.
     async with request.app.state.pool.acquire() as conn:
         # Ownership check (also confirms the conversation exists).
         await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))

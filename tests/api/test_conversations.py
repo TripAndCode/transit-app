@@ -11,7 +11,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.conftest import TEST_ORIGIN, _test_pool
+from tests.conftest import DATABASE_URL, TEST_ORIGIN, _test_pool
 
 _CSRF = {"Origin": TEST_ORIGIN}
 
