@@ -41,7 +41,7 @@ facts:
   paused?" check exactly: scan backward for the most recent PAUSED-family or
   `RESUMED` bookkeeping entry.
 
-It also computes two alert flags:
+It also computes four alert flags:
 
 - `repeated_without_progress`: the last 3 `Blocker-tag`-bearing entries,
   bounded by the most recent `RESUMED` exactly like Step 0's own streak
@@ -54,6 +54,26 @@ It also computes two alert flags:
   `deploy/systemd/claude-loop.timer`'s `OnCalendar`, plus `--stale-pause-
   buffer` slack for scheduling jitter) -- a probe should already have run and
   logged a fresh bookkeeping line by now.
+- `duplicate_idle_tail`: the two most recent entries are both Step 3's
+  "nothing actionable this run." idle-throttle marker. Step 3 itself refuses
+  to log a second one back to back (it stops silently once the last entry
+  already reads that way), so two of them landing adjacently can only mean
+  two writers each decided independently off a Status log state that didn't
+  yet include the other's append.
+- `out_of_order_tail`: the most recent entry's own timestamp sorts before the
+  previous entry's. Every writer only ever appends, so file order should be
+  non-decreasing in timestamp; a reversal is the same class of symptom as
+  `duplicate_idle_tail` -- a writer decided what to append from a Status log
+  state that was already stale by the time it actually wrote.
+
+Both tail alerts are scoped to just the two most recent entries, not "has
+this pattern ever occurred in this file" -- like `repeated_without_progress`/
+`stale_pause`, they report current state and clear themselves the moment any
+further entry is appended, rather than permanently flagging a historical
+occurrence that already stopped being live. Neither alert rewrites or
+reorders the file; `NEXT_TASK.md`'s history is append-only evidence, so a
+past anomaly stays in the text and is only ever surfaced, never repaired,
+here.
 
 `--format shell` emits `KEY='value'` lines safe to `eval` from a POSIX shell
 (no `jq` dependency, unlike `--format json`, the default) -- `deploy/vps/
@@ -401,6 +421,46 @@ def compute_stale_pause(
     return elapsed_seconds > reduced_cadence_seconds * buffer_multiplier
 
 
+def compute_duplicate_idle_tail(entries: Sequence[StatusEntry]) -> bool:
+    """True if the two most recent entries are both Step 3's idle-throttle marker.
+
+    A single, sequential tick can never produce this on its own: Step 3 reads
+    the Status log's own last entry and stops silently if it already reads
+    "nothing actionable this run." before appending a second one. Two such
+    entries landing back to back means two writers each independently
+    decided the log had no such entry yet -- a stale read racing against
+    another writer's append, not a broken throttle rule. Scoped to the tail
+    only (see module docstring) so the alert self-clears once anything else
+    is appended.
+    """
+
+    if len(entries) < 2:
+        return False
+    return IDLE_TICK_TEXT in entries[-1].raw and IDLE_TICK_TEXT in entries[-2].raw
+
+
+def compute_out_of_order_tail(entries: Sequence[StatusEntry]) -> bool:
+    """True if the most recent entry's timestamp sorts before the previous entry's.
+
+    Every writer appends to the end of the file, so entries should be
+    non-decreasing in timestamp by file order; a reversal can only happen
+    when a writer's append reflects a decision made before an earlier-
+    positioned-but-later-timestamped entry existed on disk -- the same
+    stale-read/racing-writer symptom `compute_duplicate_idle_tail` detects,
+    just visible even when the two entries aren't both idle markers. An
+    entry with no parseable timestamp (see `parse_entry`'s docstring for the
+    one known historical shape) can't be compared, so it never trips this.
+    Scoped to the tail only, for the same self-clearing reason.
+    """
+
+    if len(entries) < 2:
+        return False
+    previous, last = entries[-2], entries[-1]
+    if previous.timestamp is None or last.timestamp is None:
+        return False
+    return last.timestamp < previous.timestamp
+
+
 def build_report(
     *,
     next_task_path: Path,
@@ -443,6 +503,8 @@ def build_report(
         reduced_cadence_seconds=reduced_cadence_seconds,
         buffer_multiplier=stale_pause_buffer,
     )
+    duplicate_idle_tail = compute_duplicate_idle_tail(entries)
+    out_of_order_tail = compute_out_of_order_tail(entries)
 
     return {
         "last_successful_tick": last_successful_tick,
@@ -459,6 +521,8 @@ def build_report(
         "alerts": {
             "repeated_without_progress": repeated_without_progress,
             "stale_pause": stale_pause,
+            "duplicate_idle_tail": duplicate_idle_tail,
+            "out_of_order_tail": out_of_order_tail,
         },
     }
 
@@ -485,6 +549,8 @@ def format_shell(report: dict[str, object]) -> str:
         "VPS_LOOP_PAUSED_SINCE": report["paused_since"],
         "VPS_LOOP_REPEATED_WITHOUT_PROGRESS": alerts["repeated_without_progress"],
         "VPS_LOOP_STALE_PAUSE": alerts["stale_pause"],
+        "VPS_LOOP_DUPLICATE_IDLE_TAIL": alerts.get("duplicate_idle_tail", False),
+        "VPS_LOOP_OUT_OF_ORDER_TAIL": alerts.get("out_of_order_tail", False),
     }
     return "".join(f"{name}={shlex.quote(scalar(value))}\n" for name, value in fields.items())
 
