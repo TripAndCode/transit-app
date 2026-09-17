@@ -11,7 +11,6 @@ config table, so exercising `pipeline.analyze()`'s own population of them
 is other tests' job, not this file's.
 """
 
-import os
 from datetime import date
 
 import httpx
@@ -19,8 +18,6 @@ import pytest
 from httpx import ASGITransport
 
 from tests.conftest import _test_pool, confirm_rt_field_coverage
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 @pytest.fixture

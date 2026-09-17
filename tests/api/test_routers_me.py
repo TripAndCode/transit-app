@@ -1,6 +1,5 @@
 """Tests for self-service ``/api/me`` endpoints: profile, sessions, presets."""
 
-import os
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -8,8 +7,6 @@ import pytest
 from httpx import ASGITransport
 
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 async def _seed_user_and_session(conn, *, role="user"):

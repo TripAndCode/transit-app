@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import os
-
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from tests.conftest import TEST_ORIGIN, _test_pool
 
-DATABASE_URL = os.environ["DATABASE_URL"]
 _CSRF_HEADERS = {"Origin": TEST_ORIGIN}
 
 

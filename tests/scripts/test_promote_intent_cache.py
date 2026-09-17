@@ -25,7 +25,7 @@ class _FakeEmbedder:
     idempotency, edited-action skip), not embedding quality. Mocking the
     embedder keeps them fast and free of the flaky ~120MB model download that
     otherwise made CI fail intermittently with "Embedder unavailable". Real
-    embedder behaviour is covered (gated) in tests/query/test_embeddings.py.
+    embedder behaviour is covered (gated) in tests/unit/test_embeddings.py.
     """
 
     available = True

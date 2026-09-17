@@ -1,5 +1,4 @@
 import json as _json
-import os
 
 import pytest
 import pytest_asyncio
@@ -12,8 +11,6 @@ from pipeline.query.router import (
     set_golden_set_path,
 )
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 class _FakeEmbedder:

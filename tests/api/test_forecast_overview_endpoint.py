@@ -1,6 +1,5 @@
 """API tests for GET /api/{agency_id}/forecast/overview."""
 
-import os
 from datetime import date
 
 import httpx
@@ -8,8 +7,6 @@ import pytest
 from httpx import ASGITransport
 
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 @pytest.fixture

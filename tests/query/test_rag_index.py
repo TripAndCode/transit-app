@@ -1,6 +1,5 @@
 import hashlib
 import json as _json
-import os
 import tempfile
 from pathlib import Path
 
@@ -8,8 +7,6 @@ import pytest
 
 from pipeline.query.rag_index import Match, build_index, nearest
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 @pytest.fixture

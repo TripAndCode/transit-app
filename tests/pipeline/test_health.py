@@ -2,7 +2,6 @@
 checks). Guards the _LIVE_MAX_SQL rewrite (LATERAL per agency instead of a bare
 GROUP BY over all of `updates`) against a regression in the computed values."""
 
-import os
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -11,7 +10,6 @@ import pytest
 from pipeline.health import aggregate_freshness
 from tests.conftest import _test_pool
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 JST = ZoneInfo("Asia/Tokyo")
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
@@ -13,8 +12,6 @@ from api.range import RangeCtx
 from pipeline.query import chat as chat_module
 from pipeline.query.chat import chat_with_tools
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 def _ctx() -> RangeCtx:

@@ -1,6 +1,5 @@
 """Tests for GET /api/{agency_id}/delays/heatmap — p90_delay_min field."""
 
-import os
 from datetime import date, datetime, time, timedelta, timezone
 
 import httpx
@@ -8,8 +7,6 @@ import pytest
 from httpx import ASGITransport
 
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 @pytest.fixture

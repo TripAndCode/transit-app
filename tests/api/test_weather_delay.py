@@ -12,7 +12,6 @@ hand-checkable integer: each seeded route-day carries 100 samples, and its
 `sum_delay_sec` is 100 x the intended per-day average.
 """
 
-import os
 from datetime import date, timedelta
 
 import httpx
@@ -20,8 +19,6 @@ import pytest
 from httpx import ASGITransport
 
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 _FROM = date(2026, 4, 1)
 _TO = date(2026, 4, 30)

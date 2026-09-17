@@ -17,7 +17,6 @@ string. All cases must still log the full detail server-side.
 """
 
 import logging
-import os
 from datetime import date
 from types import SimpleNamespace
 
@@ -29,8 +28,6 @@ from fastapi import HTTPException
 from api.range import RangeCtx
 from pipeline.query import chat
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 _SECRET = "http://ch-internal.example:8123/?database=transit&param_x=leak SELECT * FROM updates"
 

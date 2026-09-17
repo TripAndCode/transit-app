@@ -9,7 +9,6 @@ real behaviour end-to-end by monkeypatching the LLM adapter so we
 control the exact ``arguments`` string the model returns.
 """
 
-import os
 from datetime import date
 from types import SimpleNamespace
 
@@ -19,8 +18,6 @@ from api.range import RangeCtx
 from pipeline.query import chat as chat_module
 from pipeline.query.chat import chat_with_tools
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 def _fake_message(arguments: str, tool_name: str = "capabilities"):

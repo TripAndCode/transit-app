@@ -1,13 +1,9 @@
-import os
-
 import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from tests.conftest import TEST_ORIGIN, _test_pool
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 @pytest.fixture
@@ -630,7 +626,6 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
     )
     assert resp.status_code == 200
 
-
     pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -684,7 +679,6 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200
-
 
     pool = await _test_pool()
     async with pool.acquire() as conn:

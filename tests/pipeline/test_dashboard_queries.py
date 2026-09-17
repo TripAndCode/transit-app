@@ -7,7 +7,6 @@ no-ops on these overview cards. Tests seed the aggregates directly.
 
 from __future__ import annotations
 
-import os
 from datetime import date, time
 
 import pytest
@@ -23,8 +22,6 @@ from pipeline.dashboard_queries import (
     movers,
 )
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 @pytest.fixture

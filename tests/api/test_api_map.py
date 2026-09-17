@@ -7,8 +7,6 @@ from httpx import ASGITransport
 from api.middleware.ratelimit import limiter
 from tests.conftest import _test_pool
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
-
 
 @pytest.fixture(autouse=True)
 def _reset_limiter():
@@ -1448,7 +1446,6 @@ def _run_analyze(agency_id, ch_client):
     values straight into a timestamptz column is only safe under a UTC
     session; under the JST session production actually uses, it silently
     shifted every captured_at (and last_seen_at) by 9 hours."""
-    import os
 
     import psycopg2
 

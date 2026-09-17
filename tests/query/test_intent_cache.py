@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from pipeline.query.intent import IntentSignature
@@ -15,8 +13,6 @@ from pipeline.query.intent_cache import (
     upsert,
 )
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 @pytest.fixture

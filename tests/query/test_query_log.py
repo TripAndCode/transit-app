@@ -1,11 +1,7 @@
-import os
-
 import pytest
 
 from pipeline.query.query_log import log_query
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 @pytest.fixture

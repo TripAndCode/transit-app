@@ -1,11 +1,7 @@
-import os
-
 import pytest
 
 from pipeline.query.schema_linker import RouteResolution, resolve_route
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 @pytest.fixture

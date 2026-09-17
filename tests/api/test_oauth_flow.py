@@ -7,7 +7,6 @@ so the callback's state check accepts it, then asserts redirect target +
 database side effects (users, oauth_identities, sessions, login_events).
 """
 
-import os
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
@@ -16,8 +15,6 @@ import pytest
 from httpx import ASGITransport
 
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 @pytest.fixture(autouse=True)

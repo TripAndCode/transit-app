@@ -2,16 +2,12 @@
 (seed_local_admin) and the POST /api/auth/local/login endpoint. Mirrors
 test_oauth_flow.py's fixture shape but never touches Authlib/OAuth."""
 
-import os
-
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
 
 @pytest.fixture(autouse=True)

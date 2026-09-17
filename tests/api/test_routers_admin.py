@@ -3,15 +3,13 @@ the self-guard, last-admin guard, suspend kills sessions, and soft-delete anonym
 """
 
 import asyncio
-import os
 from datetime import datetime, timedelta, timezone
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from tests.conftest import _test_pool
 
 
 async def _seed(conn, *, role="user", email=None, suspended=False):
@@ -38,13 +36,12 @@ async def _seed(conn, *, role="user", email=None, suspended=False):
 async def admin_client(apply_schema):
     from api.main import app
 
-    # min_size=2, not the shared tests/conftest.py `_test_pool` helper's 1:
-    # test_last_admin_guard_survives_concurrent_demotes fires two concurrent
-    # requests via asyncio.gather and needs both to already hold a live
-    # connection, or the second pays a real connect round trip before its
-    # handler starts, turning the intended race into an effectively
+    # min_size=2: test_last_admin_guard_survives_concurrent_demotes fires two
+    # concurrent requests via asyncio.gather and needs both to already hold a
+    # live connection, or the second pays a real connect round trip before
+    # its handler starts, turning the intended race into an effectively
     # sequential run.
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=2)
+    pool = await _test_pool(min_size=2)
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

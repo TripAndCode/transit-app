@@ -345,21 +345,23 @@ async def confirm_rt_field_coverage(conn, *agency_ids, confirmed=True, expires_a
             )
 
 
-async def _test_pool(**kw):
+async def _test_pool(*, min_size=1, **kw):
     """`asyncpg.create_pool` against the test DB, pre-warming 1 connection.
 
-    `min_size=1` (asyncpg's default is 10): this suite runs one request at a
-    time per test/fixture, so pre-warming asyncpg's default 10 connections
-    on every single test buys no concurrency headroom here and only pays for
-    it in connection-setup latency. `max_size` stays at asyncpg's default
-    (pass it via `**kw` to override) so a handler that does need more than
-    one connection at once still can. Centralized so a future test author
-    copying an existing fixture doesn't reintroduce the slow default by
-    hand-rolling `asyncpg.create_pool(...)` again.
+    `min_size` defaults to 1 (asyncpg's own default is 10): this suite runs
+    one request at a time per test/fixture, so pre-warming asyncpg's default
+    10 connections on every single test buys no concurrency headroom here
+    and only pays for it in connection-setup latency. A caller whose test
+    fires concurrent requests can raise `min_size` explicitly so every
+    request already holds a live connection. `max_size` stays at asyncpg's
+    default (pass it via `**kw` to override) so a handler that does need
+    more than one connection at once still can. Centralized so a future test
+    author copying an existing fixture doesn't reintroduce the slow default
+    by hand-rolling `asyncpg.create_pool(...)` again.
     """
     import asyncpg
 
-    return await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1, **kw)
+    return await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=min_size, **kw)
 
 
 @pytest.fixture

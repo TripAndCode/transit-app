@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from pipeline.query.conversations import (
@@ -18,8 +16,6 @@ from pipeline.query.conversations import (
     update_conversation,
 )
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 @pytest.fixture

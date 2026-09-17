@@ -1,4 +1,3 @@
-import os
 from datetime import date, datetime
 
 import pytest
@@ -6,8 +5,6 @@ import pytest
 from api.range import RangeCtx
 from pipeline.query.meta_tools import capabilities, describe_data
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 async def _setup_jst(conn):
