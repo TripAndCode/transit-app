@@ -209,23 +209,6 @@ input[type="date"] { color-scheme: light; }
 }
 html, body, #root { height: 100%; margin: 0; }
 
-/* Notices are supplementary UI. Keep them available without pushing the
-   active tab's primary visualization below the fold. Individual notices keep
-   their own dismiss controls; the stack itself does not block the page. */
-/* In flow at the top of <main>, not floating over it. Everything around this
-   stack already assumes it occupies layout: App.tsx sizes the content area
-   with `flex: 1` precisely because "the banners/strip above take variable
-   height", and ActivityStrip describes itself as "an always-present 24 px
-   row in the App shell" and sets `flex-shrink: 0`. A `position: fixed`
-   overlay contradicted all of that, and on every route where the banners
-   render it landed on the filter bar: the card covered the filter chips'
-   remove button and "Clear all" completely and, being `pointer-events:
-   auto`, swallowed the clicks aimed at them.
-
-   These banners are also the wrong shape for an overlay. They persist until
-   dismissed rather than timing out, so they belong in the layout the same
-   way a page header does; a toast that never leaves is just a blocked
-   region. */
 /* In flow at the top of <main>, not floating over it. Everything around this
    stack already assumed it occupies layout: App.tsx sizes the content area
    with `flex: 1` precisely because "the banners/strip above take variable
