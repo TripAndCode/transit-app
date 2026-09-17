@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 
@@ -13,7 +12,6 @@ from httpx import ASGITransport
 
 from tests.conftest import TEST_ORIGIN, _test_pool
 
-DATABASE_URL = os.environ["DATABASE_URL"]
 _CSRF = {"Origin": TEST_ORIGIN}
 
 

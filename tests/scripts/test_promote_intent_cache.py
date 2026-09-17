@@ -6,14 +6,10 @@ transit_test) and the DATABASE_URL redirect to ``transit_test``.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from scripts.promote_intent_cache import promote
 from tests.conftest import _test_pool
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 _EMBED_DIM = 384  # matches rag_chunks.embedding vector(384)
 

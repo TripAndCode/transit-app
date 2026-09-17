@@ -1,6 +1,5 @@
 """Cross-agency network summary — compute + endpoint (transit_test only)."""
 
-import os
 from datetime import date, datetime, time, timezone
 
 import httpx
@@ -9,9 +8,6 @@ from httpx import ASGITransport
 
 from pipeline.reports.network import compute_network_summary
 from tests.conftest import _test_pool, confirm_rt_field_coverage
-
-DATABASE_URL = os.environ["DATABASE_URL"]
-
 
 _TRUNCATE_SQL = (
     "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, agg_service_delivered_daily, "
