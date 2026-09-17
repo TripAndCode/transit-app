@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { ConvMessage } from "../../api/types";
 import { csvText } from "../../components/analysis/csv";

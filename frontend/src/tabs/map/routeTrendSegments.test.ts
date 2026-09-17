@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { buildTrendSegments } from "./routeTrendSegments";
 import type { RouteShapeStop, UnobservedStop } from "../../api/types";

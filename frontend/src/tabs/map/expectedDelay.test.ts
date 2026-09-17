@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { expectedDelayForHour } from "./expectedDelay";
 import type { ForecastHeatmapCell } from "../../api/types";
