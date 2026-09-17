@@ -488,7 +488,10 @@
       "legend_trail": "Report trail",
       "legend_delay": "Delayed",
       "legend_cluster": "Number = overlapping trips",
-      "fit_all": "Show all trips"
+      "fit_all": "Fit all trips in view",
+      "reference_show": "Show legend and note",
+      "reference_hide": "Hide legend and note",
+      "fit_all_hint": "Moves the map to frame every trip in the current filter. Which trips are shown does not change."
     },
     "trip_panel": {
       "aria_label": "Operations by direction and trip",
@@ -888,7 +891,10 @@
       }
     },
     "card": {
-      "stop_patterns": { "title": "Explore all stops by pattern", "summary": "How are departure delays distributed across stops on {{route}}?" },
+      "stop_patterns": {
+        "title": "Explore all stops by pattern",
+        "summary": "How are departure delays distributed across stops on {{route}}?"
+      },
       "stop_hotspots": {
         "title": "Which stops have larger delays?",
         "summary": "Where are average departure delays largest on {{route}}?"

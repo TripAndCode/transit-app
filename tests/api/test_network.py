@@ -1,18 +1,13 @@
 """Cross-agency network summary — compute + endpoint (transit_test only)."""
 
-import os
 from datetime import date, datetime, time, timezone
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from pipeline.reports.network import compute_network_summary
-from tests.conftest import confirm_rt_field_coverage
-
-DATABASE_URL = os.environ["DATABASE_URL"]
-
+from tests.conftest import _test_pool, confirm_rt_field_coverage
 
 _TRUNCATE_SQL = (
     "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, agg_service_delivered_daily, "
@@ -25,7 +20,7 @@ async def net_pool(apply_schema):
     # In-process compute cache is keyed on (from_date, to_date) only, so two
     # tests sharing a date range would leak results — clear it per test.
     compute_network_summary.cache_clear()
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute(_TRUNCATE_SQL)
         ins = "INSERT INTO agencies (agency_name, feed_url) VALUES ($1,$2) RETURNING agency_id"

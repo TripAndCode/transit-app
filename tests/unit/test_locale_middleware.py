@@ -4,15 +4,7 @@ Pins the supported-locale set ({ja, en}), q-value handling, primary-tag
 matching, and the JP default fallback. Pure-Python — no DB.
 """
 
-import pytest
-
 from api.middleware.locale import DEFAULT_LOCALE, _pick_locale
-
-
-# Override the session-scoped DB fixture — pure-Python tests, no DB needed.
-@pytest.fixture(scope="session", autouse=True)
-def apply_schema():
-    yield
 
 
 def test_pick_locale_missing_header_falls_back_to_default():

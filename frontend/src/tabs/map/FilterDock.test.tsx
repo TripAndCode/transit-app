@@ -10,6 +10,9 @@ const ROUTES = [
   { route_id: "r2", route_code: "102", route_short_name: "102", route_long_name: "青森駅前", agency_id: 1 },
 ];
 
+const APPLY = /適用|apply/i;
+const PENDING = /変更が未適用|not applied yet/i;
+
 function renderDock(applied: string[] = []) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({
     data: ROUTES,
@@ -33,49 +36,49 @@ describe("FilterDock", () => {
     await userEvent.selectOptions(line, "青森駅前");
     expect(onApply).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole("button", { name: /適用|apply/i }));
+    await userEvent.click(screen.getByRole("button", { name: APPLY }));
     expect(onApply).toHaveBeenCalledTimes(1);
     expect(onApply.mock.calls[0][0]).toEqual(expect.arrayContaining(["101", "102"]));
   });
 
-  it("keeps apply inert until something actually changes", async () => {
-    const { onApply } = renderDock();
-    const applyButton = screen.getByRole("button", { name: /適用|apply/i });
-    expect(applyButton).toBeDisabled();
+  it("offers no apply button at all until something actually changes", async () => {
+    // The resting state is the common one (every route), so an always-present
+    // button would be disabled almost all the time. Absent, not disabled.
+    renderDock();
+    expect(screen.queryByRole("button", { name: APPLY })).toBeNull();
 
-    await userEvent.click(applyButton);
-    expect(onApply).not.toHaveBeenCalled();
+    const [line] = screen.getAllByRole("combobox");
+    await userEvent.selectOptions(line, "青森駅前");
+    expect(screen.getByRole("button", { name: APPLY })).toBeTruthy();
   });
 
-  it("surfaces that edits are pending, then stops once they are applied", async () => {
+  it("announces the pending state for a screen reader, then stops once applied", async () => {
+    // The button's appearance is the sighted signal; this status text is the
+    // same fact for a reader that can't see the dock's edge change.
     renderDock();
+    expect(screen.queryByText(PENDING)).toBeNull();
+
     const [line] = screen.getAllByRole("combobox");
-    expect(screen.queryByText(/変更が未適用|not applied yet/i)).toBeNull();
-
     await userEvent.selectOptions(line, "青森駅前");
-    expect(screen.getByText(/変更が未適用|not applied yet/i)).toBeTruthy();
+    expect(screen.getByRole("status")).toHaveTextContent(PENDING);
 
-    await userEvent.click(screen.getByRole("button", { name: /適用|apply/i }));
-    expect(screen.queryByText(/変更が未適用|not applied yet/i)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: APPLY }));
+    expect(screen.queryByText(PENDING)).toBeNull();
   });
 
   it("treats a selection that round-trips back to the applied one as not pending", async () => {
-    // Applied in the reverse of the fixture's own route order: PatternFilters
-    // rebuilds a whole group's code list from ROUTES order ("101" before
-    // "102"), so this only round-trips cleanly if the comparison below is
-    // genuinely order-insensitive.
-    const { onApply } = renderDock(["102", "101"]);
+    const { onApply } = renderDock(["101", "102"]);
     const [line] = screen.getAllByRole("combobox");
 
     // Away and back: PatternFilters rebuilds a whole group's code list, so the
     // returning value can differ in order from `applied` while meaning the
     // same thing. Order must not read as a pending change.
     await userEvent.selectOptions(line, "");
-    expect(screen.getByText(/変更が未適用|not applied yet/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: APPLY })).toBeTruthy();
     await userEvent.selectOptions(line, "青森駅前");
 
-    expect(screen.queryByText(/変更が未適用|not applied yet/i)).toBeNull();
-    expect(screen.getByRole("button", { name: /適用|apply/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: APPLY })).toBeNull();
+    expect(screen.queryByText(PENDING)).toBeNull();
     expect(onApply).not.toHaveBeenCalled();
   });
 
@@ -89,7 +92,7 @@ describe("FilterDock", () => {
     const [line] = screen.getAllByRole("combobox");
 
     await userEvent.selectOptions(line, "青森駅前");
-    fireEvent.submit(screen.getByRole("button", { name: /適用|apply/i }).closest("form")!);
+    fireEvent.submit(screen.getByRole("button", { name: APPLY }).closest("form")!);
 
     expect(onApply).toHaveBeenCalledTimes(1);
   });

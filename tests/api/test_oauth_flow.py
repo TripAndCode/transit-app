@@ -7,16 +7,14 @@ so the callback's state check accepts it, then asserts redirect target +
 database side effects (users, oauth_identities, sessions, login_events).
 """
 
-import os
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from tests.conftest import _test_pool
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +54,7 @@ def _set_oauth_env(monkeypatch):
 async def auth_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

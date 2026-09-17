@@ -2,15 +2,12 @@
 
 import os
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from tests.api.test_network import _seed_service_delivered_daily, _seed_static_schedule, _set_ingest_strategy
-from tests.conftest import confirm_rt_field_coverage
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from tests.conftest import _test_pool, confirm_rt_field_coverage
 
 
 async def _trust_dwell_run(pool, *agency_ids):
@@ -25,7 +22,7 @@ async def _trust_dwell_run(pool, *agency_ids):
 async def reports_app(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     # get_report() now declares ch=Depends(get_ch) alongside conn (Task 8,
     # compare_ranking's time_band-filtered live-fallback) — every report type
@@ -58,7 +55,6 @@ def _run_analyze(agency_id, ch_client):
     file's fixtures seed Postgres `updates` directly (pre-dating that
     migration), so mirror the same rows into ClickHouse first — see
     tests.conftest.mirror_updates_to_ch."""
-    import os
 
     import psycopg2
 
@@ -695,7 +691,6 @@ async def test_reports_trend_surfaces_schedule_revision_boundary(reports_client,
     boundary in range is 2026-05-03. Rows carry no delay content beyond what
     the static_version_id builder needs (that builder doesn't depend on
     agg_daily_trend's own >5-samples-per-group gate at all)."""
-    import os
     from datetime import datetime, timezone
 
     import psycopg2
@@ -1396,7 +1391,6 @@ def _run_analyze_from_ch(agency_id, ch_client):
     schema (Postgres `updates` has zero production readers and was never
     extended to carry it -- see the `transit-app-gotchas` skill), so
     `mirror_updates_to_ch` can't carry an `arr_delay` value through."""
-    import os
 
     import psycopg2
 

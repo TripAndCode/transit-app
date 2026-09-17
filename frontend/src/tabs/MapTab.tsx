@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Maximize2, Radio, RefreshCw } from "lucide-react";
+import { Download, Maximize2, RefreshCw } from "lucide-react";
 import { FilterDock } from "./map/FilterDock";
 import { downloadCsv } from "../components/analysis/csv";
 import "../styles/focusedAnalysis.css";
@@ -21,7 +21,7 @@ import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { EmptyState } from "../components/EmptyState";
-import { LegendChip } from "../components/LegendChip";
+import { MapReference } from "./map/MapReference";
 import { StatTile } from "../components/StatTile";
 import { signedMin } from "./live/signedMin";
 import { OperationsTripPanel, type ActiveRouteOption, type DirectionOption } from "./map/OperationsTripPanel";
@@ -395,24 +395,6 @@ export function MapTab() {
         )}
       </header>
 
-      {/* The trip counts live only in the queue panel's stat tiles, not here
-          as well: two live readings of the same number on one screen invite
-          the reader to check whether they agree instead of reading either.
-          Staleness likewise reads once, from the header's freshness dot. */}
-      <FilterDock
-        agencyId={id}
-        applied={ctx.routes}
-        onApply={(routes) => {
-          updateCtx({ routes }); setRouteSelection({ agencyId: id, route: null }); setSelectedTripId(null); setSelectedDirectionKey(null);
-        }}
-        trailing={
-          <button type="button" className="btn-ghost ops-dock__export" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
-            ["agency_id", "route_code", "trip_id", "headsign", "stop_id", "stop_name", "departure_delay_seconds", "captured_at"],
-            ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
-          ])}>{td("csv")}</button>
-        }
-      />
-
       {(liveQuery.error || summaryQuery.error) && (
         <ErrorBanner
           error={liveQuery.error ?? summaryQuery.error}
@@ -431,33 +413,53 @@ export function MapTab() {
               <EmptyState title={t("operations.empty.title")} hint={t("operations.empty.hint")} />
             </div>
           )}
-          <div className="ops-map-legend" aria-label={t("operations.map.legend_label")}>
-            <LegendChip color="var(--accent-strong)" label={t("operations.map.legend_current")} />
-            <LegendChip color="#2bc5aa" label={t("operations.map.legend_trail")} />
-            <LegendChip color="var(--delay-flag)" label={t("operations.map.legend_delay")} />
-            <LegendChip color="#2bc5aa" label={t("operations.map.legend_cluster")} />
-          </div>
-          <button type="button" className="ops-map-fit" onClick={fitAllTrips}>
+          <MapReference located={locatedTrips} total={liveRows.length} t={t} />
+          {/* Rendered after the overlays that cover this corner
+              (.ops-map__empty, .ops-map__loading) so a control is never
+              buried behind decoration; the CSS pins that with a z-index too. */}
+          <FilterDock
+            agencyId={id}
+            applied={ctx.routes}
+            onApply={(routes) => {
+              updateCtx({ routes }); setRouteSelection({ agencyId: id, route: null }); setSelectedTripId(null); setSelectedDirectionKey(null);
+            }}
+          />
+          {/* Disabled rather than silently doing nothing when there is
+              nothing to frame: fitBounds only moves the camera, so with no
+              located trip a press is indistinguishable from a broken button.
+              The tooltip carries the part the label can't -- that this moves
+              the map and changes nothing about which trips are shown. */}
+          <button
+            type="button"
+            className="ops-map-fit tip"
+            data-tip={t("operations.map.fit_all_hint")}
+            onClick={fitAllTrips}
+            disabled={locatedTrips === 0}
+          >
             <Maximize2 size={14} />{t("operations.map.fit_all")}
           </button>
-          <div className="ops-map__disclosure">
-            <Radio size={15} aria-hidden="true" />
-            {/* States what the markers mean, and nothing else: the reading's
-                age is the header freshness dot's job, and repeating it here
-                put the same fact on screen three times. */}
-            <span>{t("operations.map.disclosure", { located: locatedTrips, total: liveRows.length })}</span>
-          </div>
         </section>
 
         <QueueResizer width={queueWidth} label={td("resizeQueue")} onWidth={setQueueWidth} onCommit={storeQueueWidth} />
 
         <aside className="focus-live-queue">
           <h2>{td("attention")}</h2>
+          {/* The only live reading of these counts on the screen. Repeating
+              them next to the filters invited the reader to check whether the
+              two agreed instead of reading either; staleness likewise reads
+              once, from the header's freshness dot. */}
           <div className="focus-summary-strip">
             <StatTile label={td("observedLabel")} value={String(liveRows.length)} />
             <StatTile label={td("delayedLabel")} value={String(delayedRows.length)} flagged={delayedRows.length > 0} />
             {onTimePct != null && <StatTile label={td("onTimePct")} value={`${onTimePct}%`} />}
           </div>
+          {/* Directly under the tiles, because the CSV is exactly the rows
+              they count -- and above the delay list, so a long list can't
+              push the export below the panel's scroll. */}
+          <button type="button" className="btn-ghost ops-queue__export" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
+            ["agency_id", "route_code", "trip_id", "headsign", "stop_id", "stop_name", "departure_delay_seconds", "captured_at"],
+            ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
+          ])}><Download size={13} aria-hidden="true" />{td("csv")}</button>
           {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
           {delayedRows.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { if (trip.route_code) focusRoute(trip.route_code); setSelectedDirectionKey(directionKey(trip)); setSelectedTripId(trip.trip_id); }}>

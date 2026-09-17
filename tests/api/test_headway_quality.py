@@ -16,7 +16,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.conftest import confirm_rt_field_coverage
+from tests.conftest import _test_pool, confirm_rt_field_coverage
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -25,7 +25,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 async def headway_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) VALUES ($1, $2, 'static_join') "

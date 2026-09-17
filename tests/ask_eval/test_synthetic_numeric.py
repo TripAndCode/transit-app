@@ -72,7 +72,7 @@ import pytest
 from httpx import ASGITransport
 
 from tests.ask_eval.numeric_ground_truth import assert_matches_ground_truth
-from tests.conftest import TEST_ORIGIN
+from tests.conftest import TEST_ORIGIN, _test_pool
 from tests.fixtures.synthetic_gtfs import (
     ALL_PATTERNS,
     SyntheticPattern,
@@ -123,7 +123,6 @@ async def _ask_about_pattern(
     is a REAL async ClickHouse client (``ch_async_client``), not ``None`` —
     this test needs the live ``route_stats`` dispatch path, not a mock.
     """
-    import asyncpg
 
     from api.main import app
 
@@ -135,7 +134,7 @@ async def _ask_about_pattern(
     pg_conn.commit()
     insert_pattern_updates(pattern, ch_client, agency_id)
 
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    pool = await _test_pool()
     app.state.pool = pool
     app.state.ch_client = ch_async_client
     try:

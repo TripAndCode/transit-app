@@ -1,31 +1,9 @@
 import os
 from datetime import datetime, timezone
 
-import clickhouse_connect
 import pytest
 
-from db.clickhouse.bootstrap import apply_schema
 from pipeline.clickhouse import distinct_file_names, insert_updates, max_captured_at, recent_file_name_exists
-
-
-def _ch_test_client():
-    return clickhouse_connect.get_client(
-        host="localhost",
-        port=int(os.environ.get("CLICKHOUSE_TEST_PORT", "8124")),
-        username="transit",
-        password="transit",
-        database="transit_test",
-    )
-
-
-@pytest.fixture
-def ch_client():
-    client = _ch_test_client()
-    client.command("DROP TABLE IF EXISTS updates")
-    apply_schema(client)
-    yield client
-    client.close()
-
 
 pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 

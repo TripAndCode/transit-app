@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
 
-import asyncpg
 import pytest
 
 from api.range import RangeCtx
 from pipeline.query import chat as chat_module
 from pipeline.query.chat import chat_with_tools
-
-DATABASE_URL = os.environ["DATABASE_URL"]
+from tests.conftest import _test_pool
 
 
 def _ctx() -> RangeCtx:
@@ -49,7 +46,7 @@ class _FakeClient:
 @pytest.fixture
 async def pool_with_agency(apply_schema):
     """Pool + agency_id + a route so describe_data + tool dispatch can run."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_intent_cache")
         await c.execute("DELETE FROM ask_query_log")
