@@ -2,8 +2,6 @@
   "nav": {
     "overview_subtitle": "What's happening right now",
     "ask": "Ask",
-    "live": "Latest observations",
-    "live_subtitle": "Stop-by-stop readings",
     "analysis_subtitle": "When and why delays happen",
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
@@ -43,12 +41,6 @@
         "filter_all": "All routes",
         "filter_on_time": "On-time",
         "filter_delayed": "Delayed"
-      },
-      "live": {
-        "sort_latest": "Latest",
-        "sort_delay": "Most delayed",
-        "stop_label": "Stop {{n}}",
-        "minutes_ago": "{{n}} min ago"
       },
       "ask": {
         "q1": "Which route is running late right now?",
@@ -919,69 +911,6 @@
       "header_subtitle": "Answers via a 3-stage pipeline: rules → embedding search → RAG",
       "cards_title": "You can ask things like",
       "pills_title": "More questions"
-    }
-  },
-  "live": {
-    "title": "Latest observations",
-    "hint": {
-      "title": "What this tab shows",
-      "body_1_intro": "Per-route summary for the latest observation day.",
-      "avg_strong": "Avg",
-      "avg_meaning": "is the day's average across all trips;",
-      "max_strong": "Max",
-      "max_meaning": "is the single most-delayed trip. Colored ● dots indicate severity at a glance.",
-      "body_2": "Routes with more samples (trips / observations) have more reliable numbers.",
-      "body_3": "Sort by \"Max delay\" to surface the day's hotspot routes right away."
-    },
-    "last_observation": "Last observation: {{when}}",
-    "auto_refresh": "Auto-refresh (30s)",
-    "manual_refresh": "Refresh now",
-    "filter_placeholder": "Filter by route",
-    "sort_label": "Sort",
-    "sort": {
-      "deviation": "vs normal",
-      "worst": "Max delay",
-      "avg": "Avg delay",
-      "trips": "Trips",
-      "name": "Name"
-    },
-    "bucket": {
-      "anomaly": "Anomalous",
-      "watch": "Watch",
-      "normal": "Normal",
-      "no_baseline": "No baseline",
-      "count": "{{count}}"
-    },
-    "row": {
-      "deviation": "vs normal {{sign}}{{value}} min",
-      "deviation_flat": "as usual",
-      "baseline_today": "normal {{baseline}} → today {{today}}",
-      "no_baseline_note": "baseline pending",
-      "low_confidence": "low confidence (few obs.)",
-      "low_confidence_baseline": "baseline low confidence (few obs.)",
-      "samples": "{{count}} obs.",
-      "late5_pct": ">5min {{value}}%"
-    },
-    "drill": {
-      "title": "{{route}} detail",
-      "trips_heading": "Delay by trip (worst first)",
-      "stops_heading": "Average delay by stop (in route order)",
-      "trip_label": "{{time}} {{headsign}}",
-      "trip_label_no_headsign": "{{time}}",
-      "stop_label": "#{{seq}} {{name}}",
-      "stop_label_no_name": "Stop #{{seq}}",
-      "stop_outlier_one": "{{delta}}min more than {{count}} other route's avg",
-      "stop_outlier_other": "{{delta}}min more than {{count}} other routes' avg",
-      "stop_outlier_low_confidence": "few observations",
-      "close": "Close",
-      "empty": "No trip data for this route"
-    },
-    "updating": "Updating...",
-    "updated_at": "Updated: {{time}}",
-    "empty": {
-      "with_last": "No observations to display yet (last received: {{when}})",
-      "title": "No observations to display yet",
-      "hint": "Waiting for the next ingest. Data will refresh automatically in a few minutes."
     }
   },
   "reports": {
