@@ -22,6 +22,16 @@
 # `transit-test-pg`/`transit-test-ch` containers at all.
 #
 # Usage: scripts/run_full_ci.sh [extra pytest args...]
+#        COVERAGE=0 scripts/run_full_ci.sh   # same gate, no coverage measurement
+#
+# Coverage is on by default because that is what .github/workflows/ci.yml's
+# `test` job measures, and this script exists to reproduce that job. Set
+# COVERAGE=0 when the run is being used purely as a pass/fail verification
+# gate -- a pre-merge re-check after a review fix, say -- where the
+# instrumentation is paid for and never read. On a loaded VPS sharing CPU
+# with a concurrent job that is minutes per run, and this gate often runs
+# more than once per branch.
+#
 # Requires: docker, poetry (with `poetry install` already run in this
 # worktree's own virtualenv -- this script does not install dependencies).
 set -euo pipefail
@@ -154,6 +164,15 @@ poetry run ruff format --check .
 echo "→ type check"
 poetry run mypy
 
-echo "→ tests"
+# Mirrors ci.yml's flags unless COVERAGE=0 asks for the bare gate. Built as
+# an array so an empty setting expands to no arguments at all rather than to
+# one empty string, which pytest would read as a path.
+coverage_args=(--cov=api --cov=pipeline --cov=db --cov-report=term)
+if [ "${COVERAGE:-1}" = "0" ]; then
+  coverage_args=()
+  echo "→ tests (COVERAGE=0: pass/fail gate only, no coverage measurement)"
+else
+  echo "→ tests"
+fi
 TEST_PG_PORT="$pg_port" TEST_CH_PORT="$ch_port" \
-  scripts/run_integration_tests.sh --cov=api --cov=pipeline --cov=db --cov-report=term "$@"
+  scripts/run_integration_tests.sh "${coverage_args[@]+"${coverage_args[@]}"}" "$@"

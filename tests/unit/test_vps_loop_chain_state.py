@@ -133,6 +133,255 @@ def test_ambiguous_unknown_outcome_stops_and_backs_off():
     assert state.next_earliest_attempt is not None
 
 
+# --- classify_tick_outcome ----------------------------------------------------
+
+
+def test_classify_trusts_status_log_outcome_when_tick_completed_normally():
+    outcome = chain.classify_tick_outcome(
+        claude_exit_code=0,
+        timed_out=False,
+        wrote_new_status_entry=True,
+        had_new_commits=False,
+        status_log_outcome="progress",
+    )
+
+    assert outcome == "progress"
+
+
+def test_classify_trusts_idle_status_log_outcome_for_a_genuinely_empty_backlog():
+    # A real idle tick: it ran to completion, logged its own "nothing
+    # actionable this run" entry, and left no new commits. Must not be
+    # reclassified as died just because nothing happened.
+    outcome = chain.classify_tick_outcome(
+        claude_exit_code=0,
+        timed_out=False,
+        wrote_new_status_entry=True,
+        had_new_commits=False,
+        status_log_outcome="idle",
+    )
+
+    assert outcome == "idle"
+
+
+def test_classify_dies_when_timeout_fired_even_if_the_process_exited_zero():
+    # `timeout` itself normalizes its own exit code to 124 when it kills the
+    # command, but a process that traps the signal could still report 0 --
+    # `timed_out` is threaded through as an independent fact precisely so a
+    # trapped-signal-and-exit(0) tick can't slip through as ordinary progress.
+    outcome = chain.classify_tick_outcome(
+        claude_exit_code=0,
+        timed_out=True,
+        wrote_new_status_entry=False,
+        had_new_commits=False,
+        status_log_outcome="progress",
+    )
+
+    assert outcome == "died"
+
+
+def test_classify_dies_with_commits_when_timed_out_but_work_landed():
+    outcome = chain.classify_tick_outcome(
+        claude_exit_code=124,
+        timed_out=True,
+        wrote_new_status_entry=False,
+        had_new_commits=True,
+        status_log_outcome="idle",
+    )
+
+    assert outcome == "died_with_commits"
+
+
+def test_classify_dies_on_nonzero_exit_regardless_of_stale_log_contents():
+    outcome = chain.classify_tick_outcome(
+        claude_exit_code=1,
+        timed_out=False,
+        wrote_new_status_entry=False,
+        had_new_commits=False,
+        status_log_outcome="progress",
+    )
+
+    assert outcome == "died"
+
+
+def test_classify_dies_when_no_new_status_entry_even_with_a_clean_exit():
+    # The outstanding-Agent-dispatch case: `claude -p` ends its turn and
+    # exits 0 normally, but the coordinator never reached the point of
+    # logging this tick's own outcome -- the Status log's entry count did
+    # not grow, so whatever `status_log_outcome` reports is really some
+    # earlier tick's result, not this one's.
+    outcome = chain.classify_tick_outcome(
+        claude_exit_code=0,
+        timed_out=False,
+        wrote_new_status_entry=False,
+        had_new_commits=False,
+        status_log_outcome="progress",
+    )
+
+    assert outcome == "died"
+
+
+def test_classify_dies_with_commits_when_agent_dispatch_left_outstanding_but_committed():
+    outcome = chain.classify_tick_outcome(
+        claude_exit_code=0,
+        timed_out=False,
+        wrote_new_status_entry=False,
+        had_new_commits=True,
+        status_log_outcome="idle",
+    )
+
+    assert outcome == "died_with_commits"
+
+
+def test_classify_falls_back_to_unknown_for_an_unrecognized_status_log_outcome():
+    outcome = chain.classify_tick_outcome(
+        claude_exit_code=0,
+        timed_out=False,
+        wrote_new_status_entry=True,
+        had_new_commits=False,
+        status_log_outcome="not-a-real-outcome",
+    )
+
+    assert outcome == "unknown"
+
+
+# --- record_outcome: died / died_with_commits ---------------------------------
+
+
+def test_record_outcome_died_escalates_backoff_like_other_non_progress_outcomes():
+    state, action = chain.record_outcome(
+        chain.ChainState(), outcome="died", now=NOW, base_seconds=300, cap_seconds=3600
+    )
+
+    assert action == "stop"
+    assert state.last_outcome == "died"
+    assert state.consecutive_non_progress == 1
+    assert state.next_earliest_attempt is not None
+
+
+def test_record_outcome_died_with_commits_escalates_backoff_like_plain_died():
+    state = chain.ChainState(consecutive_non_progress=3, next_earliest_attempt="2026-09-12T11:00:00Z")
+
+    new_state, action = chain.record_outcome(state, outcome="died_with_commits", now=NOW)
+
+    # Real commits landed, but the tick died before it could explain why, so
+    # this must not be trusted like genuine progress: a coordinator that
+    # reliably dies with commits every tick still needs to back off, not
+    # reset to zero and retry at full, unthrottled cadence forever. It also
+    # must not chain automatically.
+    assert action == "stop"
+    assert new_state.consecutive_non_progress == 4
+    assert new_state.next_earliest_attempt is not None
+    assert new_state.last_outcome == "died_with_commits"
+
+
+def test_repeated_died_ticks_escalate_backoff_independently_of_idle_or_blocked():
+    state = chain.ChainState()
+    for _ in range(3):
+        state, action = chain.record_outcome(state, outcome="died", now=NOW, base_seconds=300, cap_seconds=3600)
+        assert action == "stop"
+
+    assert state.consecutive_non_progress == 3
+    assert state.last_outcome == "died"
+
+
+def test_repeated_died_with_commits_ticks_keep_escalating_backoff_not_resetting():
+    # This is the scenario the escalation exists to catch: a coordinator
+    # whose worker checkpoints land every tick but whose own turn always ends
+    # before it can log a Status-log entry. If died_with_commits reset the
+    # streak like real progress, this would retry at full, unthrottled
+    # cadence forever instead of ever backing off.
+    state = chain.ChainState()
+    waits: list[datetime] = []
+    for _ in range(3):
+        state, action = chain.record_outcome(
+            state, outcome="died_with_commits", now=NOW, base_seconds=60, cap_seconds=3600
+        )
+        assert action == "stop"
+        waits.append(datetime.strptime(state.next_earliest_attempt, chain.TIMESTAMP_FORMAT))
+
+    assert state.consecutive_non_progress == 3
+    assert state.last_outcome == "died_with_commits"
+    assert waits[0] < waits[1] < waits[2]
+
+
+def test_died_then_died_with_commits_both_add_to_the_same_streak():
+    # A tick that died without commits, immediately followed by one that
+    # died with commits, must keep escalating the same streak -- neither
+    # outcome resets it, since both are "died before explaining why".
+    state, _ = chain.record_outcome(chain.ChainState(), outcome="died", now=NOW, base_seconds=300, cap_seconds=3600)
+    assert state.consecutive_non_progress == 1
+
+    state, action = chain.record_outcome(
+        state, outcome="died_with_commits", now=NOW, base_seconds=300, cap_seconds=3600
+    )
+    assert action == "stop"
+    assert state.consecutive_non_progress == 2
+
+
+# --- CLI classify --------------------------------------------------------------
+
+
+def test_cli_classify_emits_outcome_progress(capsys):
+    exit_code = chain.main(
+        [
+            "classify",
+            "--claude-exit-code",
+            "0",
+            "--wrote-new-status-entry",
+            "--status-log-outcome",
+            "progress",
+        ]
+    )
+
+    assert exit_code == 0
+    assert "OUTCOME=progress" in capsys.readouterr().out
+
+
+def test_cli_classify_died_when_no_flags_set(capsys):
+    exit_code = chain.main(["classify", "--claude-exit-code", "0", "--status-log-outcome", "idle"])
+
+    assert exit_code == 0
+    assert "OUTCOME=died" in capsys.readouterr().out
+
+
+def test_cli_classify_died_with_commits(capsys):
+    exit_code = chain.main(
+        [
+            "classify",
+            "--claude-exit-code",
+            "124",
+            "--timed-out",
+            "--had-new-commits",
+            "--status-log-outcome",
+            "idle",
+        ]
+    )
+
+    assert exit_code == 0
+    assert "OUTCOME=died_with_commits" in capsys.readouterr().out
+
+
+def test_cli_record_outcome_accepts_died_outcomes(tmp_path, capsys):
+    state_file = tmp_path / "chain-state.json"
+
+    exit_code = chain.main(
+        [
+            "record-outcome",
+            "--state-file",
+            str(state_file),
+            "--outcome",
+            "died_with_commits",
+            "--now",
+            "2026-09-12T12:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "ACTION=stop" in out
+    assert "LAST_OUTCOME=died_with_commits" in out
+
+
 # --- no-actionable-work (idle) backoff --------------------------------------
 
 
@@ -476,6 +725,49 @@ def test_wrapper_gated_exit_still_dispatches_a_heartbeat():
     gated_branch_body = wrapper_source[gated_branch_start:gated_branch_end]
     assert "dispatch_heartbeat" in gated_branch_body
     assert "exit 0" in gated_branch_body
+
+
+def test_wrapper_feeds_execution_facts_through_classify_before_recording():
+    """Regression guard for `deploy/vps/claude-loop.sh` reverting to trusting
+    `VPS_LOOP_LAST_TICK_OUTCOME` (or a bare non-zero-exit check) directly.
+
+    The wrapper must route every tick's outcome through `classify` -- which
+    also needs `timeout`'s own 124 exit code, the pre/post Status log entry
+    count, and a pre/post branch-HEAD comparison -- rather than trusting
+    `vps_loop_health.py`'s own report at face value, which cannot tell a died
+    tick apart from a stale entry an earlier tick already wrote.
+    """
+
+    wrapper_source = WRAPPER_SCRIPT.read_text(encoding="utf-8")
+
+    assert '"$CHAIN_STATE_SCRIPT" classify' in wrapper_source
+    assert "--claude-exit-code" in wrapper_source
+    assert 'CLAUDE_EXIT" -eq 124' in wrapper_source
+    assert "--timed-out" in wrapper_source
+    assert "--wrote-new-status-entry" in wrapper_source
+    assert "--had-new-commits" in wrapper_source
+    assert "PRE_TICK_ENTRY_COUNT" in wrapper_source
+    assert "PRE_TICK_BRANCH_SHA" in wrapper_source
+    assert "POST_TICK_BRANCH_SHA" in wrapper_source
+    # record-outcome must consume classify's own OUTCOME, not the raw health
+    # field or a hand-rolled non-zero-exit fallback.
+    record_outcome_call = wrapper_source.index('"$CHAIN_STATE_SCRIPT" record-outcome')
+    nearby = wrapper_source[record_outcome_call : record_outcome_call + 200]
+    assert '"$CHAIN_OUTCOME"' in nearby
+
+
+def test_wrapper_scopes_commit_detection_to_the_pre_tick_item_branch():
+    """A leftover `vps-loop/item-*` branch from an unrelated earlier run must
+    never be attributed to a tick it wasn't part of -- the branch check has
+    to use the item the log already named as current *before* the tick
+    started, not whatever the log says afterward (which, for a died tick, is
+    exactly the corrupted signal being worked around here).
+    """
+
+    wrapper_source = WRAPPER_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'item_branch_head_sha "$PRE_TICK_ITEM"' in wrapper_source
+    assert "vps-loop/item-" in wrapper_source
 
 
 def test_cli_show_json_reports_current_state_without_mutating(tmp_path, capsys):
