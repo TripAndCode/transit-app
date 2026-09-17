@@ -228,18 +228,18 @@ so it is a separate mechanism to build, not a knob to turn on.
 **Automated tests:**
 
 - Backend router/pipeline: `tests/query/test_router.py` (rules +
-  embedding stage), `tests/query/test_embeddings.py`,
-  `tests/query/test_rag_index.py`, `tests/query/test_chat_confidence.py`,
+  embedding stage), `tests/unit/test_embeddings.py`,
+  `tests/query/test_rag_index.py`, `tests/unit/test_chat_confidence.py`,
   `tests/query/test_chat_intent_cache.py`,
   `tests/query/test_chat_null_args.py`,
   `tests/query/test_chat_error_leakage.py`,
-  `tests/query/test_llm_client.py`, `tests/query/test_intent.py`,
+  `tests/query/test_llm_client.py`, `tests/unit/test_intent.py`,
   `tests/query/test_intent_cache.py`, `tests/query/test_meta_tools.py`,
   `tests/query/test_tool_queries.py`,
   `tests/query/test_tools_integration.py`,
   `tests/query/test_tools_locale.py` (pins exact `_LOCALES` strings),
   `tests/query/test_conversations.py`,
-  `tests/query/test_paraphrase_collapse.py`,
+  `tests/unit/test_paraphrase_collapse.py`,
   `tests/query/test_query_log.py`, `tests/query/test_schema_linker.py`.
 - API-level: `tests/api/test_api_ask.py` (end-to-end `/ask` — rule-hit
   skip, ClickHouse-degrade, follow-up rerouting, query-log writes, CSRF),

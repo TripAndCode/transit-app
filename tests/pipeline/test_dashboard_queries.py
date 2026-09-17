@@ -7,10 +7,8 @@ no-ops on these overview cards. Tests seed the aggregates directly.
 
 from __future__ import annotations
 
-import os
 from datetime import date, time
 
-import asyncpg
 import pytest
 
 from api.range import RangeCtx
@@ -23,13 +21,12 @@ from pipeline.dashboard_queries import (
     delay_heatmap,
     movers,
 )
-
-DATABASE_URL = os.environ["DATABASE_URL"]
+from tests.conftest import _test_pool
 
 
 @pytest.fixture
 async def movers_pool(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("DELETE FROM agencies WHERE feed_url = 'http://dash-agg'")
         row = await c.fetchrow(

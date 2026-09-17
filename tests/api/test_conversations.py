@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 
@@ -11,9 +10,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.conftest import TEST_ORIGIN
+from tests.conftest import TEST_ORIGIN, _test_pool
 
-DATABASE_URL = os.environ["DATABASE_URL"]
 _CSRF = {"Origin": TEST_ORIGIN}
 
 
@@ -22,7 +20,7 @@ async def conv_app(apply_schema):
     """Agency + a user; client authed as that user."""
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     # append_message_endpoint now declares ch=Depends(get_ch) alongside conn
     # (Task 8); tests in this file mock dispatch so the real client is never

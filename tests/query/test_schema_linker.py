@@ -1,16 +1,12 @@
-import os
-
-import asyncpg
 import pytest
 
 from pipeline.query.schema_linker import RouteResolution, resolve_route
-
-DATABASE_URL = os.environ["DATABASE_URL"]
+from tests.conftest import _test_pool
 
 
 @pytest.fixture
 async def conn_with_routes(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"

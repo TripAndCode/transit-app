@@ -27,7 +27,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
-from tests.conftest import DATABASE_URL
+from tests.conftest import DATABASE_URL, _test_pool
 
 SLEEP_SECONDS = 30  # far longer than the test runs; only ever cancelled
 MARKER = "/* cancellation-test */"
@@ -46,7 +46,7 @@ def _build_app() -> FastAPI:
 
     @app.on_event("startup")
     async def _startup() -> None:
-        app.state.pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=2)
+        app.state.pool = await _test_pool(max_size=2)
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:

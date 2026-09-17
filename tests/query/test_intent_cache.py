@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
-import asyncpg
 import pytest
 
 from pipeline.query.intent import IntentSignature
@@ -15,14 +12,13 @@ from pipeline.query.intent_cache import (
     update_user_action,
     upsert,
 )
-
-DATABASE_URL = os.environ["DATABASE_URL"]
+from tests.conftest import _test_pool
 
 
 @pytest.fixture
 async def conn_with_agency(apply_schema):
     """Single asyncpg connection + agency_id 1; cleans cache table between tests."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_intent_cache")  # safe: transit_test only
         row = await c.fetchrow(
