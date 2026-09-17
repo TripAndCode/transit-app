@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -124,6 +125,57 @@ async def test_copilot_insight_resolves_signed_in_users_byok_key(copilot_client,
     assert captured["user_key"] is not None
     assert captured["user_key"].provider == "gemini"
     assert captured["user_key"].raw_key == "gsk_stored_key"
+
+
+@pytest.mark.asyncio
+async def test_copilot_insight_holds_no_pool_connection_across_the_llm_call(copilot_app, aconn, monkeypatch):
+    """The route's whole reason for acquiring its own connection for the BYOK
+    lookup is to not hold one across the provider call.
+
+    Asserted behaviorally: the app runs against a pool capped at a single
+    connection, so the probe below — standing in for a concurrent request —
+    can only acquire one if the in-flight insight is holding none.
+    """
+    app, agency_id = copilot_app
+    sid, _uid = await _seed_user_and_session(aconn, llm_approved=True)
+
+    probe: dict = {}
+
+    async def probing_insight(tab, filters, view_payload, *, locale="ja", user_key=None):
+        try:
+            async with app.state.pool.acquire(timeout=3) as other:
+                probe["acquired"] = await other.fetchval("SELECT 1")
+        except asyncio.TimeoutError:
+            probe["acquired"] = "timed out — a connection is held across the LLM call"
+        return {"text": "ok", "cite": "c", "low_confidence": False}
+
+    monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", probing_insight)
+
+    single = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=1)
+    original_pool = app.state.pool
+    app.state.pool = single
+    try:
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            # Bounded: a request holding the only connection deadlocks against
+            # its own later acquire rather than failing, so without this a
+            # regression would hang the suite instead of reporting.
+            resp = await asyncio.wait_for(
+                client.post(
+                    f"/api/{agency_id}/copilot/insight",
+                    json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+                    headers={"Origin": TEST_ORIGIN},
+                    cookies={"sid": sid},
+                ),
+                timeout=20,
+            )
+    except asyncio.TimeoutError:
+        pytest.fail(f"request never completed — the insight path holds a pool connection ({probe})")
+    finally:
+        app.state.pool = original_pool
+        await single.close()
+
+    assert probe["acquired"] == 1, probe
+    assert resp.status_code == 200, resp.text
 
 
 @pytest.mark.asyncio

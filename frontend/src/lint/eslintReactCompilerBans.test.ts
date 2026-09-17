@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { Linter } from "eslint";
 import { describe, expect, test } from "vitest";
 // eslint.config.js is plain JS with no type declarations; the flat-config

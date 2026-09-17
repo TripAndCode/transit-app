@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { routeGroups, selectedGroup } from "./routeGroups";
 import type { Route } from "../../api/types";

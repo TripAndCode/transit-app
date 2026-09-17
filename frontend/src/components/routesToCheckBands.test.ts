@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { groupBySeverityBand } from "./routesToCheckBands";
 import type { OverviewTopDelayedRoute } from "../api/types";

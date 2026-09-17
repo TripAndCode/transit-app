@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import { drawMakiPath, MAKI_VIEWBOX_SIZE, VEHICLE_ICON_PATHS, type VehicleMode } from "./vehicleIcons";
 

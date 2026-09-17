@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
 import { matchedPrevious, orderedStops } from "./stopSeries";
 import type { RouteShapeStop } from "../../api/types";
