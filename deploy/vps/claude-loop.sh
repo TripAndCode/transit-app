@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# This lock only covers ticks launched through this script (the cron-triggered
-# systemd path). An interactive `/vps-loop-run` session runs the same Steps
-# 0-6 against the same NEXT_TASK.md without ever acquiring it, so it can race
-# a concurrent cron tick's Status log append with no mutual exclusion at all.
+# This lock only covers whole-tick mutual exclusion between two
+# cron-triggered systemd invocations of this script; it is never held around
+# an individual Status log append. An interactive `/vps-loop-run` session
+# runs the same Steps 0-6 against the same NEXT_TASK.md without ever
+# acquiring this lock, but that's fine: every Status log append, from either
+# path, instead goes through `scripts/append_status_log.py`'s own separate
+# `/tmp/claude-loop-status-log.lock` (see that script's module docstring for
+# why it deliberately does NOT reuse this file -- a nested acquisition of the
+# same lock from a subprocess this script's own `claude -p` invocation spawns
+# would self-deadlock).
 exec 200>/tmp/claude-loop.lock
 if ! flock -n 200; then
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ): previous run still in progress, skipping this tick"

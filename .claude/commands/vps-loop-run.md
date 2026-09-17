@@ -10,6 +10,42 @@ self-contained, don't block on reading it. Note `docs/refactor-log.md` is *not* 
 `.gitignore` negates it and it's tracked, so Steps 4 and 6 can and must write it.) Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
 skip ahead.
 
+## Status log writes — always through the lock helper
+
+This section is the canonical routing for every instruction anywhere in this
+file that adds an entry to the Status log, no matter which verb it's phrased
+with — "append", "log", "record", or any other wording (including Step 0's
+`PAUSED`/`Still paused`/`RESUMED` bookkeeping lines, "log it and stop this
+tick", "append residual findings ... to the Status log", "Record that a
+direct fallback was used in the Status log", and "log the error to the
+Status log"). Every one of those means the same thing: run `python3
+scripts/append_status_log.py --repo /root/transit-app --entry '<the text
+that would otherwise follow the timestamp prefix>'` — never a direct
+Edit/bash write to `NEXT_TASK.md`. That script takes a short-lived advisory
+lock around the read-then-append step and generates the entry's own
+timestamp itself, only once it actually holds the lock and is about to
+write; give it only the entry's text, not a timestamp. This is the only
+thing that serializes this file's Status log against a concurrent
+cron-triggered `claude-loop.service` tick (`deploy/vps/claude-loop.sh` holds
+its own, deliberately separate `/tmp/claude-loop.lock` for the whole tick,
+which is why the append helper uses its own dedicated lock file rather than
+that one — see the script's module docstring for why reusing that exact
+file would self-deadlock a cron-triggered run) or another interactive
+`/vps-loop-run` session — a direct write reopens exactly that race. For
+Step 3's idle-throttle check specifically ("stop silently once the last
+entry already reads that way"), pass `--skip-if-tail-startswith 'nothing
+actionable this run.'` so that check itself is re-evaluated fresh, under
+the lock, instead of trusting whatever was last read before this tick
+requested the append — this is what closes the `duplicate_idle_tail`
+alert `scripts/vps_loop_health.py` watches for at its root, rather than
+only preventing the underlying write from being corrupted. If the entry
+text contains an apostrophe or quote character, don't fight shell quoting —
+write the text to a temp file and pass `--entry-file <path>` instead of
+`--entry`. A non-zero exit means the append did not happen — code `3` is a
+lock-acquisition timeout, handled like any other tool-call failure under
+Boundaries (log it and stop with a `**Blocker-tag:** status-log-lock-timeout`,
+per Step 0).
+
 ## Non-interactive execution — never end a turn on pending work
 
 This command's normal home is a headless `claude -p` invocation, where the
