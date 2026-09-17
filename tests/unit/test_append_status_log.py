@@ -126,9 +126,7 @@ def test_append_entry_skip_if_tail_startswith_matches_does_not_write(next_task: 
 
 
 def test_append_entry_skip_if_tail_startswith_no_match_still_writes(next_task: Path):
-    appended, _ = mod.append_entry(
-        next_task, "item 8 shipped.", now=NOW, skip_if_tail_startswith="nonexistent marker"
-    )
+    appended, _ = mod.append_entry(next_task, "item 8 shipped.", now=NOW, skip_if_tail_startswith="nonexistent marker")
 
     assert appended is True
     assert "item 8 shipped." in next_task.read_text(encoding="utf-8")
