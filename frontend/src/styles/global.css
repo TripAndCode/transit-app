@@ -64,7 +64,7 @@
   /* Same theme-invariant reasoning as --tooltip-bg/--tooltip-fg above, for
      map overlay chrome that hardcodes a white pill background (so it reads
      over any basemap, including dark aerial imagery) instead of using
-     --bg-surface: MapStyleControl and RouteModeToggle. Pairing that fixed
+     --bg-surface: MapStyleControl. Pairing that fixed
      white with --text-primary/--text-secondary/--accent broke contrast in
      dark mode (those tokens assume a dark surface) — e.g. dark --text-primary
      (#DDD9F3) on white computed to 1.37:1. These values equal the light
