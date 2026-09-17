@@ -1,8 +1,8 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useNavigate } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CopilotPanel } from "./CopilotPanel";
 import * as client from "../api/client";
 import { DEBOUNCE_MS } from "../api/copilot";
@@ -12,6 +12,35 @@ import { DEBOUNCE_MS } from "../api/copilot";
 // keeps stacking onto the same spy, so later tests' call counts/histories
 // leak earlier tests' calls.
 afterEach(() => vi.restoreAllMocks());
+
+// @testing-library/dom's `waitFor`/`findBy*` only drive a fake clock forward
+// themselves (instead of polling real wall-clock time, which would hang
+// forever once timers are faked) when they detect a Jest-shaped global fake
+// timer -- vitest's `vi` doesn't match that check on its own. Shimming just
+// the one method it calls is enough to make every waitFor/findBy below
+// resolve as soon as the panel's real DEBOUNCE_MS timer (and any promise
+// chain past it) settles, with no per-call advance needed. A handful of
+// spots below with no waitFor/findBy after them still advance the clock
+// explicitly, since nothing else would.
+declare global {
+  var jest: { advanceTimersByTime: (ms: number) => unknown } | undefined;
+}
+beforeEach(() => {
+  globalThis.jest = { advanceTimersByTime: vi.advanceTimersByTime };
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
+  delete globalThis.jest;
+});
+
+/** Same fake-timer-aware setup `userEvent`'s own docs recommend: without
+ * `advanceTimers`, userEvent's internal per-keystroke delay awaits a
+ * setTimeout that these fake timers never advance on their own, so typing
+ * would hang forever. */
+function setupUser() {
+  return userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
+}
 
 function renderPanel(path: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -152,7 +181,7 @@ describe("CopilotPanel", () => {
       low_confidence: false,
     });
     renderPanel("/agencies/1/overview");
-    await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy(), { timeout: 2000 });
+    await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
   });
 
   it("does not render anything on routes other than Overview/Ask", () => {
@@ -166,7 +195,7 @@ describe("CopilotPanel", () => {
       new client.ApiError(403, JSON.stringify({ detail: "llm_not_approved" })),
     );
     renderPanel("/agencies/1/overview");
-    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy(), { timeout: 2000 });
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
     expect(
       screen.queryByText(/couldn't generate an insight|インサイトを生成できません/i),
     ).toBeNull();
@@ -177,9 +206,8 @@ describe("CopilotPanel", () => {
     vi.spyOn(client, "apiPost").mockRejectedValue(new Error("boom"));
     const { container } = renderPanelWithNav("/agencies/1/overview");
 
-    await waitFor(
-      () => expect(screen.getByText(/couldn't generate an insight|インサイトを生成できません/i)).toBeTruthy(),
-      { timeout: 2000 },
+    await waitFor(() =>
+      expect(screen.getByText(/couldn't generate an insight|インサイトを生成できません/i)).toBeTruthy(),
     );
 
     fireEvent.click(screen.getByText("go-map"));
@@ -199,12 +227,11 @@ describe("CopilotPanel", () => {
     const postSpy = vi.spyOn(client, "apiPost").mockRejectedValue(new Error("boom"));
     renderPanelWithProductionRetryDefault("/agencies/1/overview");
 
-    await waitFor(
-      () => expect(screen.getByText(/couldn't generate an insight|インサイトを生成できません/i)).toBeTruthy(),
-      { timeout: 2000 },
+    await waitFor(() =>
+      expect(screen.getByText(/couldn't generate an insight|インサイトを生成できません/i)).toBeTruthy(),
     );
     // Give a would-be retry a chance to fire before asserting it didn't.
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
     expect(postSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -216,7 +243,7 @@ describe("CopilotPanel", () => {
       low_confidence: false,
     });
     renderPanel("/agencies/1/overview");
-    await waitFor(() => expect(postSpy).toHaveBeenCalled(), { timeout: 2000 });
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
 
     const [, , opts] = postSpy.mock.calls[0];
     expect((opts as { signal?: AbortSignal } | undefined)?.signal).toBeInstanceOf(AbortSignal);
@@ -244,7 +271,7 @@ describe("CopilotPanel", () => {
     renderPanel("/agencies/1/overview");
     await screen.findByText("Route 12 is delayed.");
     const input = await screen.findByPlaceholderText(/ask a follow-up|続けて質問/i);
-    await userEvent.type(input, "how is route 12 doing{enter}");
+    await setupUser().type(input, "how is route 12 doing{enter}");
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith(
         "/api/1/ask",
@@ -271,7 +298,7 @@ describe("CopilotPanel", () => {
       ctx: {},
     });
     const input = await screen.findByPlaceholderText(/ask a follow-up|続けて質問/i);
-    await userEvent.type(input, "how is route 12 doing{enter}");
+    await setupUser().type(input, "how is route 12 doing{enter}");
     expect(await screen.findByText("Agency 1 answer.")).toBeTruthy();
 
     fireEvent.click(screen.getByText("go-agency-2"));
@@ -301,11 +328,12 @@ describe("CopilotPanel", () => {
     const off = renderPanel("/agencies/1/overview");
     await waitFor(() => expect(client.apiGet).toHaveBeenCalled());
     expect(off.container.querySelector(".copilot-panel")).toBeNull();
-    // Wait past the key debounce before asserting no POST. Rendering nothing
-    // and issuing nothing are two separate gates — the early return covers the
-    // first, `tab` covers the second — and the POST only fires DEBOUNCE_MS
-    // later, so asserting immediately would pass with the `tab` gate removed.
-    await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 300));
+    // Advance past the key debounce before asserting no POST. Rendering
+    // nothing and issuing nothing are two separate gates — the early return
+    // covers the first, `tab` covers the second — and the POST only fires
+    // DEBOUNCE_MS later, so asserting immediately would pass with the `tab`
+    // gate removed.
+    await act(() => vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 300));
     expect(postSpy).not.toHaveBeenCalled();
   });
 
@@ -326,9 +354,7 @@ describe("CopilotPanel", () => {
       low_confidence: false,
     } as never);
     renderPanelWithNav("/agencies/1/overview");
-    await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy(), {
-      timeout: 3000,
-    });
+    await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
     expect(postSpy).toHaveBeenCalledTimes(1);
 
     // Off Overview the query key goes null; coming back re-subscribes to the
@@ -336,13 +362,13 @@ describe("CopilotPanel", () => {
     // another LLM call for a view state that has not changed.
     fireEvent.click(screen.getByText("go-map"));
     await waitFor(() => expect(screen.queryByText("Route 12 is delayed.")).toBeNull());
-    // Returning before the key debounce elapses leaves the key untouched and
-    // the scenario unexercised, so wait the window out rather than racing it.
-    await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 300));
+    // Clicking back before this key-debounce timer actually fires would let
+    // its cleanup cancel it, leaving `debounced.key` at its old non-null
+    // value and the null-key round trip below unexercised -- so this must be
+    // an explicit advance, not left for a later waitFor to drive.
+    await act(() => vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 300));
     fireEvent.click(screen.getByText("go-overview"));
-    await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy(), {
-      timeout: 3000,
-    });
+    await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
     expect(postSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
 import { drawScene } from "./cityMapDraw";
 import { buildCityScene, buildVehicles, poseAtT } from "./cityMapScene";

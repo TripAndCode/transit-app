@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { rangeLabel } from "./rangeLabel";
 import type { FilterCtx } from "../api/types";
