@@ -465,18 +465,6 @@
     "refresh_failed": "Reload failed",
     "refresh_rate_limited": "Too many refreshes; please try again shortly",
     "loading": "Loading the latest operations...",
-    "context": {
-      "route_selected": "Showing: {{route}}",
-      "all_routes": "Showing: all routes",
-      "selected_hint": "Trips on the selected route are emphasized; the queue lists routes needing attention.",
-      "all_hint": "The map shows all routes; the queue lists anomalies and watch items only. Normal routes are counted below."
-    },
-    "freshness": {
-      "normal": "Healthy",
-      "delayed": "Delayed",
-      "stale": "Check feed",
-      "unknown": "Unknown"
-    },
     "map": {
       "aria_label": "Map of latest reported stops and delays",
       "delay": "Delay {{delay}}",
@@ -516,23 +504,7 @@
       "recovery": "{{delay}} min recovered at {{stop}}"
     },
     "queue": {
-      "eyebrow": "PRIORITY ORDER",
-      "title": "Needs attention",
-      "total": "{{count}} routes",
-      "explain_title": "How to read this queue",
-      "explain_body": "Anomaly means above baseline; watch means a delay trend. Normal routes are represented on the map and in the count below.",
-      "deviation": "{{delay}} vs baseline",
-      "current_delay": "Current {{delay}}",
-      "reported_stop": "Reported stop: {{stop}}",
-      "location_unavailable": "Stop location unavailable",
-      "show_on_map": "Show on map",
-      "open_trip": "Open trips",
-      "show_more": "Show {{count}} more routes",
-      "show_less": "Show less",
-      "selected_route": "Selected route",
-      "clear_title": "No routes currently need attention",
-      "clear_body": "Latest reports are checked every 30 seconds.",
-      "normal_routes": "{{count}} routes operating normally"
+      "location_unavailable": "Stop location unavailable"
     },
     "empty": {
       "title": "No current trips to display",
@@ -600,16 +572,6 @@
     "heatmapMode": {
       "avg": "Avg delay",
       "p90": "90th percentile"
-    },
-    "scrubber": {
-      "title": "Expected delay by time of day",
-      "subtitle": "This route's typical congestion pattern (not live vehicle position)",
-      "hour_label": "{{hour}}:00",
-      "expected_delay": "Expected delay {{min}} min",
-      "no_data": "Not enough data for this hour",
-      "play": "Play",
-      "pause": "Pause",
-      "aria_label": "Time-of-day scrubber"
     },
     "route_mode": {
       "trend": "Historical trend",

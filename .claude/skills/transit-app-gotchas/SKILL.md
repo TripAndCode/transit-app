@@ -64,6 +64,13 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `scripts/run_integration_tests.sh` itself also accepts `TEST_PG_PORT`/
   `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
   for a caller that starts its own containers by some other means.
+- `run_full_ci.sh` measures coverage by default, because it exists to
+  reproduce CI's `test` job and that job measures it. Pass `COVERAGE=0` when
+  the run is only a pass/fail gate — a pre-merge re-check after a review
+  fix, say — and the coverage report will never be read. The
+  instrumentation is minutes per run on a VPS sharing CPU with a concurrent
+  `/vps-loop-run` tick, and this gate is often paid more than once per
+  branch. Keep coverage on whenever the number itself matters.
 
 ## Frontend dev proxy — two config files
 - `frontend/` ships BOTH `vite.config.ts` (tracked) and a gitignored
