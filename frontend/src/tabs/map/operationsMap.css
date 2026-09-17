@@ -269,7 +269,7 @@
      size and being clipped by the dock's own overflow: at this width the
      dock plus the zoom buttons no longer both fit at natural size. */
   .ops-dock { right: 48px; left: 8px; }
-  .ops-dock label { flex: 1 1 0; padding: 7px 10px; }
+  .ops-dock label { flex: 1 1 0; padding: 4px 10px 5px; }
   .ops-dock select { max-width: none; width: 100%; }
 }
 
