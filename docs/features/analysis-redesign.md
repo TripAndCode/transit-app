@@ -4,9 +4,9 @@
    bilingual copy and responsive styles.
 2. Overview: map-first current observations, bounded map, compact freshness,
    filtered CSV, and a link to investigate the selected keito.
-3. Route analysis: stop delay chart, selected stop context, matched-stop
+3. Segment analysis: stop delay chart, selected stop context, matched-stop
    previous-week comparison, filtered CSV and locally saved analysis links.
-4. Reports and navigation: three main destinations (overview, route analysis,
+4. Reports and navigation: three main destinations (overview, segment analysis,
    reports), period summary, saved analyses, CSV and browser print/PDF.
 
 All PRs remain draft. CI is not a merge gate for this design review; run local

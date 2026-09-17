@@ -14,7 +14,7 @@ export type TabManualKey = SidebarNavItem["to"] | "ask";
 // English *and* Japanese pattern per tab.
 //
 // The manual still documents the pre-restructure Overview/Map/Analysis/
-// Agencies taxonomy, not today's Overview/Route analysis/Reports sidebar --
+// Agencies taxonomy, not today's Overview/Segment analysis/Reports sidebar --
 // "overview" and "route-analysis" point at the closest still-accurate
 // sections (3 and 5), but the manual has no Reports section yet, so
 // `reports` is `null` until one exists. `manualExcerptFor` treats `null`
