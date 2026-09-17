@@ -63,9 +63,7 @@ async def get_agency(agency_id: int, request: Request):
     dependency, so the two acquisitions are sequential, not concurrent.
     """
     async with request.app.state.pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT agency_id FROM agencies WHERE agency_id=$1 AND deleted_at IS NULL", agency_id
-        )
+        row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1 AND deleted_at IS NULL", agency_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
     return agency_id

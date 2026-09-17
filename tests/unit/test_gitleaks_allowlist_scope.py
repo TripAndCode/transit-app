@@ -47,7 +47,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # comma-separated tuple form has no `:`/`=`-shaped operator between the
 # path and its hash, so it never matches.
 _REVIEWED_FILES: list[tuple[str, str]] = [
-    ("tests/api/test_api_copilot.py", "9c8514e74a13ef962f3fd067c0a7f9a9f0d89f0336d31760ff38fac790ea2815"),
+    ("tests/api/test_api_copilot.py", "9c1ba0f6b2792f26d0924bdc77444501c99a9c6c1740d9fac578f668ce5c73e1"),
     ("tests/api/test_api_me_llm_key.py", "7e2b691351239fbf67df3cd1bed4b7a0a29103189ebaffe66eb8f4cd51c4d993"),
     ("tests/db/test_user_llm_keys_db.py", "575465fabc7a0372f3533aea6d791615d1807a8150a592664a6d58d23821c8b2"),
     ("tests/unit/test_user_llm_keys.py", "3feb73af2e59776592f3e2b9fc7945631b2b6147cd1b6a4cbbebc2bfe2c4f87a"),

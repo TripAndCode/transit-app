@@ -128,9 +128,7 @@ async def test_copilot_insight_resolves_signed_in_users_byok_key(copilot_client,
 
 
 @pytest.mark.asyncio
-async def test_copilot_insight_holds_no_pool_connection_across_the_llm_call(
-    copilot_app, aconn, monkeypatch
-):
+async def test_copilot_insight_holds_no_pool_connection_across_the_llm_call(copilot_app, aconn, monkeypatch):
     """The route's whole reason for acquiring its own connection for the BYOK
     lookup is to not hold one across the provider call.
 
