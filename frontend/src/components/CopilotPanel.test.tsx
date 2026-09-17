@@ -23,7 +23,6 @@ afterEach(() => vi.restoreAllMocks());
 // spots below with no waitFor/findBy after them still advance the clock
 // explicitly, since nothing else would.
 declare global {
-  // eslint-disable-next-line no-var -- matches the ambient `var` Jest itself declares.
   var jest: { advanceTimersByTime: (ms: number) => unknown } | undefined;
 }
 beforeEach(() => {
