@@ -34,9 +34,18 @@
   font-size: 12px;
 }
 
+/* One rule per state `freshnessFor` can return, so no named state depends on
+   inheriting the base. The base stays a fallback for a state that does not
+   exist yet, rather than being load-bearing for one that does. */
 .ops-freshness > span { width: 8px; height: 8px; border-radius: 50%; background: var(--color-warning); box-shadow: 0 0 0 4px rgba(201,154,46,.12); }
 .ops-freshness--normal > span { background: #2ea87a; box-shadow: 0 0 0 4px rgba(46,168,122,.12); }
+.ops-freshness--delayed > span { background: var(--color-warning); box-shadow: 0 0 0 4px rgba(201,154,46,.12); }
 .ops-freshness--stale > span { background: var(--color-danger); box-shadow: 0 0 0 4px rgba(192,57,43,.12); }
+/* Neutral, not amber: "unknown" means there is no reading to judge -- no
+   timestamp at all, labelled "no update" -- which is a different fact from a
+   feed that is lagging. Sharing the warning colour with `delayed` presented
+   the two identically at a glance. */
+.ops-freshness--unknown > span { background: var(--text-tertiary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--text-tertiary) 12%, transparent); }
 .ops-refresh { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 34px; height: 34px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: 7px; color: var(--text-primary); background: var(--bg-surface); font-size: 11px; font-weight: 700; }
 .ops-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .ops-refresh:disabled svg { animation: ops-spin 1s linear infinite; }
@@ -170,16 +179,23 @@
   .ops-dock { background: var(--bg-surface); }
 }
 
-/* Each filter is a chip: its label rides above the value in the same cell, so
+/* The select carries a real minimum height rather than collapsing to its
+   text: stripping its chrome left the control's own box 21px tall inside a
+   51px chip, with the caption band above it merely focusing the select
+   instead of opening it -- so on touch the visible target and the working
+   one disagreed. The chip's padding shrinks by the same amount the control
+   grows, keeping the dock's height roughly where it was.
+
+   Each filter is a chip: its label rides above the value in the same cell, so
    the pair costs one column instead of a label column plus a control column.
    The select keeps its native behaviour (keyboard, mobile picker) and only
    loses its chrome -- the chip is the chrome. */
-.ops-dock label { display: flex; min-width: 0; flex-direction: column; gap: 0; padding: 7px 14px; font-size: 10px; letter-spacing: .05em; color: var(--text-tertiary); cursor: pointer; }
+.ops-dock label { display: flex; min-width: 0; flex-direction: column; gap: 0; padding: 4px 14px 5px; font-size: 10px; letter-spacing: .05em; color: var(--text-tertiary); cursor: pointer; }
 .ops-dock label + label { border-left: 1px solid var(--card-border); }
 /* Capped because a native select sizes itself to its widest option, and the
    pattern list carries full route names -- left alone, one long name sets the
    dock's width for every state. The value truncates instead. */
-.ops-dock select { max-width: 150px; min-height: 0; padding: 0 16px 0 0; border: 0; border-radius: 0; color: var(--text-primary); background: transparent; font-size: 13px; font-weight: 600; text-overflow: ellipsis; appearance: none; -webkit-appearance: none; cursor: pointer;
+.ops-dock select { max-width: 150px; min-height: 28px; padding: 0 16px 0 0; border: 0; border-radius: 0; color: var(--text-primary); background: transparent; font-size: 13px; font-weight: 600; text-overflow: ellipsis; appearance: none; -webkit-appearance: none; cursor: pointer;
   /* Caret drawn here rather than left to the native control, which reserves
      its own wider gutter and would reintroduce the chrome this chip removes. */
   background-image: linear-gradient(45deg, transparent 50%, var(--text-tertiary) 50%), linear-gradient(135deg, var(--text-tertiary) 50%, transparent 50%);
@@ -214,7 +230,7 @@
      size and being clipped by the dock's own overflow: at this width the
      dock plus the zoom buttons no longer both fit at natural size. */
   .ops-dock { right: 48px; left: 8px; }
-  .ops-dock label { flex: 1 1 0; padding: 7px 10px; }
+  .ops-dock label { flex: 1 1 0; padding: 4px 10px 5px; }
   .ops-dock select { max-width: none; width: 100%; }
 }
 
