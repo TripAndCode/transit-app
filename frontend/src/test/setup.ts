@@ -12,8 +12,9 @@ afterEach(() => {
 // mobile/desktop split) that read it to conditionally render need a stub, or
 // every render throws "matchMedia is not a function". Defaults to a
 // non-matching MediaQueryList so viewport-narrow queries resolve to desktop
-// behavior unless a test explicitly overrides it.
-if (!window.matchMedia) {
+// behavior unless a test explicitly overrides it. Pure-logic test files that
+// opt into the cheaper `node` environment (no `window` at all) skip this.
+if (typeof window !== "undefined" && !window.matchMedia) {
   window.matchMedia = (query: string) => ({
     matches: false,
     media: query,

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { LiveTrip, RouteSummary } from "../../api/types";
 import { buildCurrentRouteSummaries } from "./currentRouteStatus";

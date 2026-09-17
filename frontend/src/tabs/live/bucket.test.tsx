@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { groupByBucket, BUCKET_ORDER } from "./bucket";
 import type { RouteSummary } from "../../api/types";
