@@ -391,10 +391,36 @@ def test_build_report_clean_state(tmp_path):
     assert report["last_successful_tick"] == "2026-09-01T00:00:00Z"
     assert report["current_item"] == 1
     assert report["last_tick_outcome"] == "progress"
+    assert report["status_log_entry_count"] == 1
     assert report["blocker_class"] is None
     assert report["paused"] is False
     assert report["tick_interval_seconds"] == 3600
     assert report["alerts"] == {"repeated_without_progress": False, "stale_pause": False}
+
+
+def test_build_report_status_log_entry_count_reflects_every_entry_kind(tmp_path):
+    # Any entry -- shipped, blocked, or bookkeeping -- proves the tick that
+    # wrote it got far enough to log something; the count doesn't
+    # distinguish kinds, only presence, since `deploy/vps/claude-loop.sh`
+    # uses growth in this count alone to detect "did this tick log anything
+    # at all" before trusting `last_tick_outcome`'s own value.
+    status_log = (
+        "- 2026-09-01T00:00:00Z: item 1 shipped as PR #1.\n"
+        "- 2026-09-01T01:00:00Z: item 2 blocked. **Blocker-tag:** foo\n"
+        "- 2026-09-01T02:00:00Z: **PAUSED after the last 3 ticks blocked on foo. Backing off.**\n"
+    )
+    next_task, timer = write_fixture(tmp_path, status_log)
+
+    report = health.build_report(
+        next_task_path=next_task,
+        timer_path=timer,
+        tick_interval_seconds=None,
+        probe_multiplier=3.0,
+        stale_pause_buffer=1.5,
+        now=datetime(2026, 9, 1, 3, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert report["status_log_entry_count"] == 3
 
 
 def test_build_report_flags_repeated_without_progress(tmp_path):
@@ -451,6 +477,7 @@ def test_format_shell_quotes_values_and_covers_every_field(tmp_path):
     assert "VPS_LOOP_LAST_SUCCESSFUL_TICK=2026-09-01T00:00:00Z" in rendered
     assert "VPS_LOOP_CURRENT_ITEM=1" in rendered
     assert "VPS_LOOP_LAST_TICK_OUTCOME=progress" in rendered
+    assert "VPS_LOOP_STATUS_LOG_ENTRY_COUNT=1" in rendered
     assert "VPS_LOOP_PAUSED=false" in rendered
     assert "VPS_LOOP_REPEATED_WITHOUT_PROGRESS=false" in rendered
 
