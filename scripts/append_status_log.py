@@ -111,7 +111,7 @@ sys.modules[_HEALTH_SPEC.name] = vps_loop_health
 _HEALTH_SPEC.loader.exec_module(vps_loop_health)
 
 DEFAULT_LOCK_FILE = Path(os.environ.get("CLAUDE_LOOP_STATUS_LOG_LOCK_FILE", "/tmp/claude-loop-status-log.lock"))
-DEFAULT_LOCK_TIMEOUT_SECONDS = 3600.0
+DEFAULT_LOCK_TIMEOUT_SECONDS = 60.0
 LOCK_POLL_INTERVAL_SECONDS = 0.05
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 # Matches a top-level `# Heading` line but never a `## Subheading` (the second
@@ -285,8 +285,8 @@ def run(
     if not next_task_path.exists():
         raise AppendStatusLogError(f"{next_task_path} does not exist")
 
-    now = now or datetime.now(timezone.utc)
     with held_lock(lock_path, timeout_seconds=lock_timeout_seconds):
+        now = now or datetime.now(timezone.utc)
         appended, detail = append_entry(
             next_task_path,
             entry_text,

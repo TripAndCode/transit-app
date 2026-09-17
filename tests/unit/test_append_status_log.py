@@ -1,15 +1,17 @@
 """Tests for the crash-safe, lock-guarded NEXT_TASK.md Status log appender.
 
-See `scripts/append_status_log.py`'s own module docstring for why item 141
-(an interactive `/vps-loop-run` session racing the cron-triggered
-`claude-loop.service` tick's own Status log append) needs a dedicated lock
-file rather than reusing `deploy/vps/claude-loop.sh`'s own
-`/tmp/claude-loop.lock`, and why a real lock was chosen over a PID-file or a
-lock-free retry protocol.
+An interactive `/vps-loop-run` session can race the cron-triggered
+`claude-loop.service` tick's own Status log append, so both need to
+serialize through a dedicated lock file rather than reusing
+`deploy/vps/claude-loop.sh`'s own `/tmp/claude-loop.lock`. See
+`scripts/append_status_log.py`'s own module docstring for why that lock
+must be a separate file, and why a real lock was chosen over a PID-file or
+a lock-free retry protocol.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import os
 import sys
@@ -323,3 +325,89 @@ def test_two_concurrent_idle_throttle_appends_produce_only_one_idle_entry(tmp_pa
     assert sorted(appended_flags) == [False, True]
     text = next_task.read_text(encoding="utf-8")
     assert text.count(f": {idle_text}") == 1
+
+
+def test_run_captures_timestamp_after_acquiring_the_lock_not_before(
+    next_task: Path, lock_file: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`run()` must timestamp each entry only once it holds the lock, not when first invoked.
+
+    Two callers each let `run()` generate its own real `datetime.now()` --
+    neither passes a fixed `now`. Caller "A" is invoked first but is made to
+    reach the physical lock acquisition well after caller "B", which starts
+    over a second later but attempts the lock immediately -- lock
+    acquisition order is deliberately the reverse of invocation order. If
+    the timestamp were captured before the lock is acquired (the bug this
+    guards against), A's earlier-invoked-but-later-acquired write would
+    still carry an earlier timestamp than B's, landing an out-of-order
+    (decreasing) timestamp in the file even though writes themselves are
+    correctly serialized. Capturing the timestamp only after acquiring the
+    lock ties the timestamp to write order, keeping the file non-decreasing
+    regardless of invocation order.
+    """
+
+    real_held_lock = mod.held_lock
+    reached_lock_attempt = {"A": threading.Event(), "B": threading.Event()}
+    # A's own attempt to acquire the physical lock is delayed well past B's
+    # -- forcing B to acquire (and, post-fix, timestamp) first even though
+    # A was invoked first.
+    pre_lock_delay_seconds = {"A": 2.0, "B": 0.0}
+
+    @contextlib.contextmanager
+    def instrumented_held_lock(
+        lock_path: Path, *, timeout_seconds: float, poll_interval_seconds: float = mod.LOCK_POLL_INTERVAL_SECONDS
+    ):
+        name = threading.current_thread().name
+        time.sleep(pre_lock_delay_seconds[name])
+        reached_lock_attempt[name].set()
+        with real_held_lock(lock_path, timeout_seconds=timeout_seconds, poll_interval_seconds=poll_interval_seconds):
+            yield
+
+    monkeypatch.setattr(mod, "held_lock", instrumented_held_lock)
+    results: dict[str, dict[str, object]] = {}
+
+    def call_run(name: str) -> None:
+        results[name] = mod.run(
+            next_task_path=next_task,
+            entry_text=f"item from {name}.",
+            lock_path=lock_file,
+            lock_timeout_seconds=10.0,
+            now=None,
+        )
+
+    thread_a = threading.Thread(target=call_run, args=("A",), name="A")
+    thread_a.start()
+    # A must actually be mid-delay (invoked, not yet at the lock) before
+    # B starts -- otherwise this wouldn't demonstrate "invoked first,
+    # acquires later".
+    time.sleep(0.2)
+    assert not reached_lock_attempt["A"].is_set()
+
+    # A real gap of well over one second between the two callers' actual
+    # `datetime.now()` calls, so their timestamps (second resolution) are
+    # guaranteed to differ -- not just close enough for scheduling jitter to
+    # blur.
+    time.sleep(1.3)
+    thread_b = threading.Thread(target=call_run, args=("B",), name="B")
+    thread_b.start()
+
+    thread_a.join(timeout=10)
+    thread_b.join(timeout=10)
+
+    assert results["A"]["appended"] is True
+    assert results["B"]["appended"] is True
+
+    text = next_task.read_text(encoding="utf-8")
+    entry_lines = [line for line in text.splitlines() if line.startswith("- ")]
+    # Original fixture entry plus A's and B's, always appended at the tail
+    # in write order.
+    assert len(entry_lines) == 3
+    b_line, a_line = entry_lines[-2], entry_lines[-1]
+    assert "item from B." in b_line
+    assert "item from A." in a_line
+    b_timestamp = b_line.split(": ", 1)[0].removeprefix("- ")
+    a_timestamp = a_line.split(": ", 1)[0].removeprefix("- ")
+    # B acquires the lock (and, post-fix, timestamps its entry) well before
+    # A does, even though A was invoked first -- so despite writing second,
+    # A's timestamp must be >= B's, keeping the whole file non-decreasing.
+    assert b_timestamp <= a_timestamp, f"out-of-order timestamps: B={b_timestamp!r} written before A={a_timestamp!r}"
