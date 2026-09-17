@@ -22,7 +22,7 @@
 }
 
 .ops-heading > svg { color: var(--accent); }
-.ops-heading h1, .ops-queue h2 { margin: 0; font-size: 21px; line-height: 1.15; }
+.ops-heading h1 { margin: 0; font-size: 21px; line-height: 1.15; }
 .ops-eyebrow { display: block; color: var(--text-tertiary); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 
 .ops-freshness {
@@ -50,11 +50,6 @@
 .ops-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .ops-refresh:disabled svg { animation: ops-spin 1s linear infinite; }
 .ops-refresh-result { max-width: 190px; color: var(--text-tertiary); font-size: 11px; line-height: 1.35; }
-
-.ops-context { display: flex; align-items: center; gap: 12px; min-height: 34px; padding: 7px 11px; border: 1px solid var(--border-soft); border-radius: 8px; color: var(--text-secondary); background: var(--bg-soft); font-size: 12px; }
-.ops-context__route { display: inline-flex; align-items: center; gap: 6px; color: var(--text-primary); font-weight: 700; }
-.ops-context__route svg { color: var(--accent); }
-.ops-context__hint { color: var(--text-tertiary); }
 
 .ops-workspace { display: grid; grid-template-columns: minmax(0, 2fr) minmax(360px, 440px); flex: 1 1 auto; min-height: clamp(320px, calc(100vh - 300px), 560px); overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-surface); box-shadow: 0 14px 40px rgba(0,0,0,.1); }
 .ops-map { position: relative; min-width: 0; overflow: hidden; }
@@ -160,39 +155,6 @@
 .ops-other-trips button small { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
 .ops-other-trips button b { color: var(--color-warning); font-size: 11px; }
 
-.ops-queue { display: flex; min-height: 0; flex-direction: column; overflow-y: auto; padding: 18px 16px 12px; color: #f5f7ff; background: linear-gradient(155deg, var(--ops-navy-soft), var(--ops-navy) 58%); border-left: 1px solid #303952; }
-.ops-queue .ops-eyebrow { color: #c4cbe0; }
-.ops-queue__header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
-.ops-queue__total { padding: 3px 8px; border: 1px solid #3a4563; border-radius: 999px; color: #c4cbe0; font-size: 11px; }
-.ops-queue__explain { display: flex; flex-direction: column; gap: 2px; margin: -5px 0 15px; padding: 9px 10px; border: 1px solid #3a4563; border-radius: 7px; color: #e8ebf5; background: rgba(255,255,255,.045); font-size: 11px; line-height: 1.45; }
-.ops-queue__explain span { color: #cbd2e4; }
-.ops-queue-section { margin-bottom: 18px; }
-.ops-queue-section h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; font-size: 13px; }
-.ops-queue-section h3 span { color: #9ca5bd; font-weight: 500; }
-.ops-queue-section--anomaly h3 svg { color: #f06b5c; }
-.ops-queue-section--watch h3 svg { color: #e9b949; }
-.ops-queue-section__items { display: flex; flex-direction: column; gap: 8px; }
-.ops-queue-section__selected { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; padding-top: 9px; border-top: 1px dashed #3a4563; }
-.ops-queue-section__selected > span { color: #cbd2e4; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
-.ops-queue-section__more { margin: 8px 0 0 56px; padding: 4px 8px; border: 1px solid #3b4d71; border-radius: 5px; color: #dbe7ff; background: #202c45; font-size: 11px; }
-.ops-route-card { overflow: hidden; border: 1px solid #303a55; border-radius: 9px; background: rgba(255,255,255,.025); transition: border-color 140ms ease, background 140ms ease; }
-.ops-route-card.is-selected { border-color: #e16851; background: rgba(225,104,81,.09); box-shadow: inset 3px 0 #e16851; }
-.ops-route-card__main { display: grid; grid-template-columns: 36px minmax(0, 1fr) 18px; align-items: center; gap: 10px; width: 100%; padding: 11px; border: 0; color: inherit; background: transparent; text-align: left; }
-.ops-route-card__badge { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: #fff; background: #d95747; font-size: 11px; font-weight: 800; }
-.ops-queue-section--watch .ops-route-card__badge { color: #1b1a15; background: #e9b949; }
-.ops-route-card__copy { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
-.ops-route-card__copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.ops-route-card__copy b { color: #f27a67; font-size: 14px; }
-.ops-queue-section--watch .ops-route-card__copy b { color: #efc158; }
-.ops-route-card__copy span { display: flex; align-items: center; gap: 4px; overflow: hidden; color: #b7bfd3; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.ops-route-card__actions { display: flex; gap: 6px; padding: 0 10px 10px 56px; }
-.ops-route-card__actions button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #3b4d71; border-radius: 5px; color: #dbe7ff; background: #202c45; font-size: 10px; }
-.ops-queue__clear { display: flex; flex: 1; align-items: center; justify-content: center; flex-direction: column; gap: 5px; color: #adb6cc; text-align: center; }
-.ops-queue__clear-mark { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 5px; border-radius: 50%; color: #8ce0c3; background: rgba(46,168,122,.13); font-size: 20px; }
-.ops-queue__clear strong { color: #f5f7ff; }
-.ops-queue__clear span { max-width: 250px; font-size: 11px; }
-.ops-queue__footer { margin-top: auto; padding-top: 10px; border-top: 1px solid #2d354c; color: #9ca5bd; font-size: 11px; }
-
 .ops-map-popup { display: flex; min-width: 190px; flex-direction: column; gap: 3px; color: var(--text-primary); }
 .ops-map-popup strong { padding-right: 18px; font-size: 13px; }
 .ops-map-popup b { color: var(--color-danger); font-size: 18px; }
@@ -252,7 +214,6 @@
   .operations-page { height: auto; }
   .ops-workspace { grid-template-columns: 1fr; height: auto; min-height: 0; overflow: visible; }
   .ops-map { min-height: 0; height: clamp(320px, 46vh, 480px); }
-  .ops-queue { max-height: none; border-top: 1px solid #303952; border-left: 0; }
   .ops-trip-panel { max-height: 620px; }
 }
 
