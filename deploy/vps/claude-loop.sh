@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# This lock only covers ticks launched through this script (the cron-triggered
+# systemd path). An interactive `/vps-loop-run` session runs the same Steps
+# 0-6 against the same NEXT_TASK.md without ever acquiring it, so it can race
+# a concurrent cron tick's Status log append with no mutual exclusion at all.
 exec 200>/tmp/claude-loop.lock
 if ! flock -n 200; then
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ): previous run still in progress, skipping this tick"
@@ -92,7 +96,8 @@ CHAIN_STATE_SCRIPT="scripts/vps_loop_chain_state.py"
 # Populates the VPS_LOOP_* globals from scripts/vps_loop_health.py's own
 # `--format shell` output: parses NEXT_TASK.md's Status log for
 # last_successful_tick/current_item/last_tick_outcome/blocker_class/paused
-# state and the repeated_without_progress/stale_pause alert flags. Defaults
+# state and the repeated_without_progress/stale_pause/duplicate_idle_tail/
+# out_of_order_tail alert flags. Defaults
 # are set before the eval so a parse error there (it fails closed, non-zero
 # exit, empty stdout) never leaves a variable unset under this script's own
 # `set -u`. Shared by the per-tick heartbeat below and the gated-exit
@@ -107,6 +112,8 @@ collect_vps_loop_health() {
   VPS_LOOP_PAUSED_SINCE=""
   VPS_LOOP_REPEATED_WITHOUT_PROGRESS="false"
   VPS_LOOP_STALE_PAUSE="false"
+  VPS_LOOP_DUPLICATE_IDLE_TAIL="false"
+  VPS_LOOP_OUT_OF_ORDER_TAIL="false"
   local health_shell_output
   health_shell_output=$(python3 scripts/vps_loop_health.py --repo /root/transit-app \
     --out /root/vps-loop-health.json --format shell 2>/root/vps-loop-health.err) || true
@@ -141,6 +148,8 @@ dispatch_heartbeat() {
     -F "client_payload[paused]=$VPS_LOOP_PAUSED" \
     -F "client_payload[repeated_without_progress]=$VPS_LOOP_REPEATED_WITHOUT_PROGRESS" \
     -F "client_payload[stale_pause]=$VPS_LOOP_STALE_PAUSE" \
+    -F "client_payload[duplicate_idle_tail]=$VPS_LOOP_DUPLICATE_IDLE_TAIL" \
+    -F "client_payload[out_of_order_tail]=$VPS_LOOP_OUT_OF_ORDER_TAIL" \
     -F "client_payload[blocker_class]=$VPS_LOOP_BLOCKER_CLASS" \
     -F "client_payload[current_item]=$VPS_LOOP_CURRENT_ITEM" \
     -F "client_payload[last_successful_tick]=$VPS_LOOP_LAST_SUCCESSFUL_TICK" \

@@ -73,7 +73,7 @@ STATES: frozenset[str] = frozenset({"healthy", "degraded", "stale", "failed", "u
 # reporting a future timestamp.
 DEFAULT_MAX_CLOCK_SKEW_SECONDS = 300.0
 
-MAX_DETAIL_KEYS = 20
+MAX_DETAIL_KEYS = 22
 MAX_DETAIL_KEY_LENGTH = 64
 MAX_DETAIL_STRING_LENGTH = 200
 MAX_DETAIL_LIST_LENGTH = 10

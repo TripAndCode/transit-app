@@ -361,6 +361,105 @@ def test_stale_pause_false_when_not_paused():
     )
 
 
+# --- compute_duplicate_idle_tail / compute_out_of_order_tail ------------------
+
+
+def test_duplicate_idle_tail_true_for_two_adjacent_idle_entries():
+    entries = [
+        entry("- 2026-09-16T11:34:32Z: item 135 merged as PR #473."),
+        entry("- 2026-09-16T13:04:30Z: nothing actionable this run."),
+        entry("- 2026-09-16T11:36:49Z: nothing actionable this run."),
+    ]
+
+    assert health.compute_duplicate_idle_tail(entries) is True
+
+
+def test_duplicate_idle_tail_false_when_only_one_idle_entry():
+    entries = [
+        entry("- 2026-09-16T11:34:32Z: item 135 merged as PR #473."),
+        entry("- 2026-09-16T13:04:30Z: nothing actionable this run."),
+    ]
+
+    assert health.compute_duplicate_idle_tail(entries) is False
+
+
+def test_duplicate_idle_tail_clears_once_a_further_entry_is_appended():
+    # The anomalous pair stays in history, but a later, unrelated entry means
+    # it is no longer the tail -- the alert reports current state, not "did
+    # this ever happen."
+    entries = [
+        entry("- 2026-09-16T13:04:30Z: nothing actionable this run."),
+        entry("- 2026-09-16T11:36:49Z: nothing actionable this run."),
+        entry("- 2026-09-16T20:07:13Z: item 136 blocked. **Blocker-tag:** worktree-dirty-pre-commit"),
+    ]
+
+    assert health.compute_duplicate_idle_tail(entries) is False
+
+
+def test_duplicate_idle_tail_false_on_short_or_empty_log():
+    assert health.compute_duplicate_idle_tail([]) is False
+    assert health.compute_duplicate_idle_tail([entry("- 2026-09-01T00:00:00Z: nothing actionable this run.")]) is False
+
+
+def test_duplicate_idle_tail_false_when_phrase_only_appears_in_later_prose():
+    # Neither entry's own first line is Step 3's idle marker -- one merely
+    # discusses the phrase while narrating unrelated work, and the other
+    # references it while describing this very throttle rule. A whole-block
+    # substring search would misread both as idle markers and flag a
+    # duplicate that never happened.
+    entries = [
+        entry(
+            "- 2026-09-16T11:34:32Z: item 139 fixed a false positive where an\n"
+            '  entry merely quoting "nothing actionable this run." in prose was\n'
+            "  mistaken for an idle marker."
+        ),
+        entry(
+            "- 2026-09-16T13:04:30Z: item 140 documented that Step 3 logs\n"
+            '  "nothing actionable this run." only when the backlog is fully\n'
+            "  claimed or blocked."
+        ),
+    ]
+
+    assert health.compute_duplicate_idle_tail(entries) is False
+
+
+def test_out_of_order_tail_true_when_last_timestamp_precedes_previous():
+    entries = [
+        entry("- 2026-09-16T13:04:30Z: nothing actionable this run."),
+        entry("- 2026-09-16T11:36:49Z: nothing actionable this run."),
+    ]
+
+    assert health.compute_out_of_order_tail(entries) is True
+
+
+def test_out_of_order_tail_false_when_chronological():
+    entries = [
+        entry("- 2026-09-16T11:36:49Z: nothing actionable this run."),
+        entry("- 2026-09-16T13:04:30Z: item 136 blocked. **Blocker-tag:** worktree-dirty-pre-commit"),
+    ]
+
+    assert health.compute_out_of_order_tail(entries) is False
+
+
+def test_out_of_order_tail_false_when_a_timestamp_is_unparseable():
+    entries = [
+        entry(
+            "- 2026-09-10T~03:19Z (approximate — `date` was unavailable once the blocker\n"
+            "  below hit; `03:19:34Z` is a hard lower bound, derived from elsewhere):\n"
+            "  **RESUMED — agent-dispatch-safety-blocked cleared (paused since\n"
+            "  2026-09-09T23:23:54Z).** item 105 resumed."
+        ),
+        entry("- 2026-09-10T04:00:00Z: item 106 shipped as PR #1."),
+    ]
+
+    assert health.compute_out_of_order_tail(entries) is False
+
+
+def test_out_of_order_tail_false_on_short_or_empty_log():
+    assert health.compute_out_of_order_tail([]) is False
+    assert health.compute_out_of_order_tail([entry("- 2026-09-01T00:00:00Z: item 1 shipped as PR #1.")]) is False
+
+
 # --- build_report / format_shell (end to end) ---------------------------------
 
 
@@ -395,7 +494,12 @@ def test_build_report_clean_state(tmp_path):
     assert report["blocker_class"] is None
     assert report["paused"] is False
     assert report["tick_interval_seconds"] == 3600
-    assert report["alerts"] == {"repeated_without_progress": False, "stale_pause": False}
+    assert report["alerts"] == {
+        "repeated_without_progress": False,
+        "stale_pause": False,
+        "duplicate_idle_tail": False,
+        "out_of_order_tail": False,
+    }
 
 
 def test_build_report_status_log_entry_count_reflects_every_entry_kind(tmp_path):
@@ -461,6 +565,30 @@ def test_build_report_flags_stale_pause(tmp_path):
     assert report["alerts"]["stale_pause"] is True
 
 
+def test_build_report_flags_duplicate_idle_and_out_of_order_tail(tmp_path):
+    # Reproduces the real NEXT_TASK.md anomaly this alert exists to catch:
+    # two adjacent "nothing actionable this run." entries whose timestamps
+    # are reversed relative to file order.
+    status_log = (
+        "- 2026-09-16T11:34:32Z: item 135 merged as PR #473.\n"
+        "- 2026-09-16T13:04:30Z: nothing actionable this run.\n"
+        "- 2026-09-16T11:36:49Z: nothing actionable this run.\n"
+    )
+    next_task, timer = write_fixture(tmp_path, status_log)
+
+    report = health.build_report(
+        next_task_path=next_task,
+        timer_path=timer,
+        tick_interval_seconds=None,
+        probe_multiplier=3.0,
+        stale_pause_buffer=1.5,
+        now=datetime(2026, 9, 16, 14, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert report["alerts"]["duplicate_idle_tail"] is True
+    assert report["alerts"]["out_of_order_tail"] is True
+
+
 def test_format_shell_quotes_values_and_covers_every_field(tmp_path):
     next_task, timer = write_fixture(tmp_path, "- 2026-09-01T00:00:00Z: item 1 shipped as PR #1.\n")
     report = health.build_report(
@@ -480,6 +608,8 @@ def test_format_shell_quotes_values_and_covers_every_field(tmp_path):
     assert "VPS_LOOP_STATUS_LOG_ENTRY_COUNT=1" in rendered
     assert "VPS_LOOP_PAUSED=false" in rendered
     assert "VPS_LOOP_REPEATED_WITHOUT_PROGRESS=false" in rendered
+    assert "VPS_LOOP_DUPLICATE_IDLE_TAIL=false" in rendered
+    assert "VPS_LOOP_OUT_OF_ORDER_TAIL=false" in rendered
 
 
 def test_format_shell_quotes_shell_significant_values():
