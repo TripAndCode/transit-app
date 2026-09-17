@@ -401,6 +401,28 @@ def test_duplicate_idle_tail_false_on_short_or_empty_log():
     assert health.compute_duplicate_idle_tail([entry("- 2026-09-01T00:00:00Z: nothing actionable this run.")]) is False
 
 
+def test_duplicate_idle_tail_false_when_phrase_only_appears_in_later_prose():
+    # Neither entry's own first line is Step 3's idle marker -- one merely
+    # discusses the phrase while narrating unrelated work, and the other
+    # references it while describing this very throttle rule. A whole-block
+    # substring search would misread both as idle markers and flag a
+    # duplicate that never happened.
+    entries = [
+        entry(
+            "- 2026-09-16T11:34:32Z: item 139 fixed a false positive where an\n"
+            '  entry merely quoting "nothing actionable this run." in prose was\n'
+            "  mistaken for an idle marker."
+        ),
+        entry(
+            "- 2026-09-16T13:04:30Z: item 140 documented that Step 3 logs\n"
+            '  "nothing actionable this run." only when the backlog is fully\n'
+            "  claimed or blocked."
+        ),
+    ]
+
+    assert health.compute_duplicate_idle_tail(entries) is False
+
+
 def test_out_of_order_tail_true_when_last_timestamp_precedes_previous():
     entries = [
         entry("- 2026-09-16T13:04:30Z: nothing actionable this run."),

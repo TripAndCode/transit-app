@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# This lock only covers ticks launched through this script (the cron-triggered
+# systemd path). An interactive `/vps-loop-run` session runs the same Steps
+# 0-6 against the same NEXT_TASK.md without ever acquiring it, so it can race
+# a concurrent cron tick's Status log append with no mutual exclusion at all.
 exec 200>/tmp/claude-loop.lock
 if ! flock -n 200; then
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ): previous run still in progress, skipping this tick"

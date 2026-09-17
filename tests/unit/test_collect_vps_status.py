@@ -309,6 +309,8 @@ def make_health_report(
     paused=False,
     repeated_without_progress=False,
     stale_pause=False,
+    duplicate_idle_tail=False,
+    out_of_order_tail=False,
     tick_interval_seconds=3600,
 ) -> dict:
     return {
@@ -321,7 +323,12 @@ def make_health_report(
         "tick_interval_source": "parsed",
         "reduced_probe_cadence_seconds": tick_interval_seconds * 3.0,
         "recent_blocker_tags": [],
-        "alerts": {"repeated_without_progress": repeated_without_progress, "stale_pause": stale_pause},
+        "alerts": {
+            "repeated_without_progress": repeated_without_progress,
+            "stale_pause": stale_pause,
+            "duplicate_idle_tail": duplicate_idle_tail,
+            "out_of_order_tail": out_of_order_tail,
+        },
     }
 
 
@@ -392,6 +399,8 @@ def test_build_status_details_reflect_restarting_activity_and_blocker():
             last_successful_tick="2026-09-11T11:30:00Z",
             blocker_class="db-write-blocked",
             repeated_without_progress=True,
+            duplicate_idle_tail=True,
+            out_of_order_tail=True,
         ),
         claude_process_state="absent",
     )
@@ -400,6 +409,8 @@ def test_build_status_details_reflect_restarting_activity_and_blocker():
     assert status.details["loop_activity"] == "restarting"
     assert status.details["blocker_class"] == "db-write-blocked"
     assert status.details["repeated_without_progress"] is True
+    assert status.details["duplicate_idle_tail"] is True
+    assert status.details["out_of_order_tail"] is True
 
 
 def test_build_status_details_reflect_active_process():

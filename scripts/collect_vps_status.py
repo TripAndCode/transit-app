@@ -303,6 +303,8 @@ def build_vps_loop_status(
         "paused": health["paused"],
         "repeated_without_progress": alerts["repeated_without_progress"],
         "stale_pause": alerts["stale_pause"],
+        "duplicate_idle_tail": alerts["duplicate_idle_tail"],
+        "out_of_order_tail": alerts["out_of_order_tail"],
         "branch": facts.branch or "unknown",
         "worktree_count": facts.worktree_count,
         "stash_count": facts.stash_count,
