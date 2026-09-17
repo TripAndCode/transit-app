@@ -137,23 +137,41 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   — an item shipped, or an ordinary in-tick skip that isn't itself a
   blocker), it immediately starts the next tick rather than waiting up to a
   full timer interval. A tick that's idle (`"idle"`, nothing actionable),
-  blocked (`"blocked"`, a `Blocker-tag`), paused (`"paused"`, Step 0's own
-  circuit breaker already tripped), or ambiguous (`"unknown"`, e.g. the
-  `claude` invocation itself timed out or crashed) stops the chain for this
-  invocation instead. `scripts/vps_loop_chain_state.py` is the small,
-  separately unit-tested state machine behind this: it persists wrapper-only
-  bookkeeping (distinct from `NEXT_TASK.md`'s own Status log) at
+  blocked (`"blocked"`, a `Blocker-tag`), or paused (`"paused"`, Step 0's own
+  circuit breaker already tripped) stops the chain for this invocation
+  instead — and so does a tick that died before it could log any outcome at
+  all (`"died"`, or `"died_with_commits"` if it still left real commits on
+  its own target branch): `vps_loop_health.py`'s Status-log parsing alone
+  cannot tell a died tick apart from an ordinary idle one, since the file
+  still shows whatever an earlier tick last wrote. `scripts/
+  vps_loop_chain_state.py`'s `classify` subcommand is what tells them apart,
+  using facts only the wrapper itself observes: its own `claude` exit
+  status, whether its `timeout` invocation had to kill the tick, whether
+  `NEXT_TASK.md`'s Status log entry count actually grew this tick, and
+  whether the tick's own target-item branch (captured *before* the tick
+  starts, so a leftover branch from an unrelated earlier run is never
+  attributed to it) gained new commits. A residual `"unknown"` remains for a
+  tick that logged something, but not a value `vps_loop_health.py` itself
+  can produce. `scripts/vps_loop_chain_state.py` is the small,
+  separately unit-tested state machine behind all of this: it persists
+  wrapper-only bookkeeping (distinct from `NEXT_TASK.md`'s own Status log) at
   `CLAUDE_LOOP_CHAIN_STATE_FILE` (default `/root/vps-loop-chain-state.json`)
-  and exposes three shell-eval'able subcommands the wrapper calls around
+  and exposes shell-eval'able subcommands the wrapper calls around
   every tick: `gate` (may a new tick start now — also recovers a chain-state
   file left stuck `in_progress` by a wrapper process that was hard-killed
   mid-tick, before it could record an outcome, treating that recovery itself
   as one more non-progress occurrence), `begin` (mark a tick in flight,
-  immediately before invoking `claude`), and `record-outcome` (clear the
-  flight flag and decide `continue` vs. `stop`, escalating an exponential,
-  capped backoff — `CLAUDE_LOOP_BACKOFF_BASE_SEC`/`CLAUDE_LOOP_BACKOFF_CAP_SEC`,
-  default 300s/3600s — on every non-`"progress"` outcome so a genuinely stuck
-  or genuinely idle loop backs off instead of retrying at full speed). The
+  immediately before invoking `claude`), `classify` (turn the wrapper's own
+  execution facts into one of the outcomes above), and `record-outcome`
+  (clear the flight flag and decide `continue` vs. `stop`, escalating an
+  exponential, capped backoff — `CLAUDE_LOOP_BACKOFF_BASE_SEC`/
+  `CLAUDE_LOOP_BACKOFF_CAP_SEC`, default 300s/3600s — on every outcome except
+  `"progress"` and `"died_with_commits"`, so a genuinely stuck or genuinely
+  idle loop backs off instead of retrying at full speed; `"died_with_commits"`
+  resets the backoff streak like real progress does, since work genuinely
+  landed, but still signals `"stop"` rather than chaining automatically —
+  a tick that died before explaining why it died shouldn't have more
+  automated work piled onto the same branch unsupervised). The
   chain is still bounded on every axis: `CLAUDE_LOOP_MAX_CHAIN_TICKS`
   (default 5) caps the tick count, `CLAUDE_LOOP_MAX_CHAIN_WALLCLOCK_SEC`
   (default 14400s) is a wrapper-enforced wall-clock ceiling independent of

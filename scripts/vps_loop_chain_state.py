@@ -35,6 +35,18 @@ A fourth, `show`, is a read-only inspector for manual/ops use (not called by
 the wrapper itself): it prints the current state, in the same `KEY='value'`
 shell form under `--format shell` or as JSON (the default).
 
+A fifth, `classify`, sits between the tick's own execution and
+`record-outcome`. `vps_loop_health.py`'s `last_tick_outcome` is derived
+purely from whatever `NEXT_TASK.md` currently says, which cannot tell "this
+tick produced that outcome" apart from "this tick died -- crashed, was
+killed by the wrapper's own timeout, or ended its turn with an `Agent`
+dispatch still outstanding -- before writing anything, and the file still
+shows an earlier tick's entry". `classify` folds in the two extra facts only
+the wrapper itself can observe (its process exit status/timeout signal, and
+whether the tick's own target-item branch gained new commits despite no new
+Status log entry) to produce the outcome `record-outcome` actually acts on.
+See `classify_tick_outcome`'s docstring for the resulting vocabulary.
+
 Exit code: 0 normally; `gate` additionally exits 1 when not currently allowed
 to run (mirroring `vps_loop_health.py`'s "1 means look closer" convention),
 2 on a hard error.
@@ -55,11 +67,33 @@ from typing import Any, Callable, Sequence
 
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
+# The outcome vocabulary `vps_loop_health.py`'s `last_tick_outcome` itself can
+# report -- i.e. what the Status log's most recent entry, taken at face
+# value, says. `classify_tick_outcome` only trusts one of these when the
+# wrapper's own signals corroborate that this tick is the one that actually
+# produced it.
+HEALTH_LOG_OUTCOMES = frozenset({"progress", "idle", "blocked", "paused", "unknown"})
+
+# A tick that died -- crashed, was killed by the wrapper's own timeout, or
+# ended its turn with an `Agent` dispatch still outstanding -- before writing
+# any Status log entry at all. `_with_commits` means the tick's own
+# target-item branch still gained new commits despite that silence (e.g. a
+# dispatched worker's checkpoint commits landed, but the coordinator turn
+# ended before it could log the tick's own summary) -- real forward motion
+# happened even though nothing was logged.
+DIED_OUTCOMES = frozenset({"died", "died_with_commits"})
+
 # A tick that made real forward progress (`vps_loop_health.py`'s `"progress"`)
 # is the only outcome worth chaining into another tick immediately. Every
 # other outcome stops the chain for this invocation.
 CONTINUE_OUTCOMES = frozenset({"progress"})
-KNOWN_OUTCOMES = frozenset({"progress", "idle", "blocked", "paused", "unknown"})
+# Outcomes representing real forward motion, whether or not the tick lived
+# long enough to log its own outcome. These reset the escalating backoff
+# streak; only `CONTINUE_OUTCOMES` also chains immediately -- a tick that
+# died before logging anything needs a look before more ticks pile onto the
+# same branch unsupervised, even if it happened to leave real commits behind.
+PROGRESS_LIKE_OUTCOMES = frozenset({"progress", "died_with_commits"})
+KNOWN_OUTCOMES = HEALTH_LOG_OUTCOMES | DIED_OUTCOMES
 
 
 @dataclass(frozen=True)
@@ -263,13 +297,24 @@ def record_outcome(
     `"progress"` resets the backoff schedule and clears the flight flag, but
     signals `"continue"` -- the caller (the shell wrapper) may immediately
     `begin()` another tick, subject to its own bounded tick-count/wall-clock
-    ceilings. Every other outcome (`"idle"`, `"blocked"`, `"paused"`,
-    `"unknown"`) escalates `consecutive_non_progress`, schedules
+    ceilings.
+
+    `"died_with_commits"` (see `classify_tick_outcome`) also resets the
+    backoff schedule -- real commits landed on the tick's own target branch,
+    so this is not the same "nothing happened" signal as a quiet backlog or a
+    repeated blocker -- but signals `"stop"`, not `"continue"`: the tick died
+    before it could log why, so chaining straight into another one
+    unsupervised risks piling more automated work onto a branch whose last
+    attempt never explained itself.
+
+    Every other outcome (`"idle"`, `"blocked"`, `"paused"`, `"unknown"`,
+    `"died"`) escalates `consecutive_non_progress`, schedules
     `next_earliest_attempt` via `compute_backoff_seconds`, and signals
-    `"stop"`. Idle and blocked share one schedule deliberately -- both are
-    "no new information yet, don't hammer this" -- but each still stays
-    distinguishable afterward via `last_outcome`, so health reporting never
-    conflates a quiet backlog with a real failure.
+    `"stop"`. These share one schedule deliberately -- all are "no evidence of
+    forward motion, don't hammer this" -- but each still stays distinguishable
+    afterward via `last_outcome`, so health reporting never conflates a quiet
+    backlog, a real failure, and a tick that silently died with no work to
+    show for it.
     """
 
     if outcome not in KNOWN_OUTCOMES:
@@ -288,6 +333,19 @@ def record_outcome(
         )
         return new_state, "continue"
 
+    if outcome in PROGRESS_LIKE_OUTCOMES:
+        new_state = replace(
+            state,
+            in_progress=False,
+            pid=None,
+            started_at=None,
+            consecutive_non_progress=0,
+            next_earliest_attempt=None,
+            last_outcome=outcome,
+            last_updated=format_timestamp(now),
+        )
+        return new_state, "stop"
+
     consecutive = state.consecutive_non_progress + 1
     backoff_seconds = compute_backoff_seconds(
         consecutive_non_progress=consecutive, base_seconds=base_seconds, cap_seconds=cap_seconds
@@ -304,6 +362,54 @@ def record_outcome(
         last_updated=format_timestamp(now),
     )
     return new_state, "stop"
+
+
+def classify_tick_outcome(
+    *,
+    claude_exit_code: int,
+    timed_out: bool,
+    wrote_new_status_entry: bool,
+    had_new_commits: bool,
+    status_log_outcome: str,
+) -> str:
+    """Classify one wrapper tick, folding in signals `vps_loop_health.py` alone cannot see.
+
+    `vps_loop_health.py`'s own `last_tick_outcome` is derived purely from
+    whatever `NEXT_TASK.md` currently contains -- it has no notion of *this
+    particular tick's* own execution, so a tick that died before writing
+    anything reads exactly like whatever an earlier tick already logged
+    (commonly a stale `"idle"` or `"progress"`). This function is the
+    authority that decides whether that reading may actually be trusted as
+    this tick's own outcome.
+
+    A tick is classified as died -- `"died"`, or `"died_with_commits"` if
+    `had_new_commits` -- whenever any of:
+
+    - `timed_out`: the wrapper's own `timeout` invocation reports it had to
+      kill the tick (independent of whatever exit code the killed process
+      itself happened to report -- a caught, trapped signal can still exit
+      0).
+    - `claude_exit_code != 0`: the `claude` invocation itself reported a
+      non-zero exit for any other reason (crash, uncaught error).
+    - `not wrote_new_status_entry`: the Status log's entry count did not grow
+      during this tick -- covers the case this repo's own `/vps-loop-run`
+      spec calls out explicitly: a turn that ends while an `Agent` dispatch
+      or backgrounded command is still outstanding exits the `claude`
+      process normally (`claude_exit_code == 0`, no timeout), yet the
+      coordinator never reached the point of logging its own outcome.
+
+    Otherwise, `status_log_outcome` (already computed by
+    `vps_loop_health.py` from the freshly-written entry) is trusted as-is,
+    falling back to `"unknown"` if it isn't one of the values that module can
+    actually produce.
+    """
+
+    died = timed_out or claude_exit_code != 0 or not wrote_new_status_entry
+    if died:
+        return "died_with_commits" if had_new_commits else "died"
+    if status_log_outcome not in HEALTH_LOG_OUTCOMES:
+        return "unknown"
+    return status_log_outcome
 
 
 def _scalar(value: object) -> str:
@@ -380,6 +486,18 @@ def cmd_record_outcome(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_classify(args: argparse.Namespace) -> int:
+    outcome = classify_tick_outcome(
+        claude_exit_code=args.claude_exit_code,
+        timed_out=args.timed_out,
+        wrote_new_status_entry=args.wrote_new_status_entry,
+        had_new_commits=args.had_new_commits,
+        status_log_outcome=args.status_log_outcome,
+    )
+    _emit_shell({"OUTCOME": outcome})
+    return 0
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     state = load_state(args.state_file)
     if args.format == "shell":
@@ -430,6 +548,30 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser.add_argument("--backoff-base-seconds", type=float, default=300.0)
     record_parser.add_argument("--backoff-cap-seconds", type=float, default=3600.0)
     record_parser.set_defaults(func=cmd_record_outcome)
+
+    classify_parser = subparsers.add_parser(
+        "classify", help="Classify one tick's outcome from the wrapper's own execution facts"
+    )
+    classify_parser.add_argument("--claude-exit-code", type=int, required=True)
+    classify_parser.add_argument(
+        "--timed-out", action="store_true", help="Set when the wrapper's `timeout` invocation had to kill the tick"
+    )
+    classify_parser.add_argument(
+        "--wrote-new-status-entry",
+        action="store_true",
+        help="Set when NEXT_TASK.md's Status log entry count grew during this tick",
+    )
+    classify_parser.add_argument(
+        "--had-new-commits",
+        action="store_true",
+        help="Set when this tick's own target-item branch gained new commits",
+    )
+    classify_parser.add_argument(
+        "--status-log-outcome",
+        default="unknown",
+        help="vps_loop_health.py's last_tick_outcome, read after the tick",
+    )
+    classify_parser.set_defaults(func=cmd_classify)
 
     show_parser = subparsers.add_parser("show", help="Print the current state without changing it")
     show_parser.add_argument("--state-file", type=Path, required=True)

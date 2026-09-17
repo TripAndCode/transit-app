@@ -12,7 +12,7 @@ far longer than its own reduced probe cadence -- can go unnoticed for days
 between manual checks.
 
 This script parses the Status log (pure file reads -- no `git`/`gh` calls, so
-it is cheap and safe to run every tick) and reports four health facts:
+it is cheap and safe to run every tick) and reports five health facts:
 
 - `last_successful_tick`: the most recent entry that is neither a
   `Blocker-tag`-bearing stop nor a PAUSED-family bookkeeping-only entry.
@@ -20,9 +20,17 @@ it is cheap and safe to run every tick) and reports four health facts:
   to the first backlog item without a terminal status marker
   (`DONE`/`MOOT`/`DO NOT START`) if no entry names one.
 - `last_tick_outcome`: `"progress"` / `"idle"` / `"blocked"` / `"paused"` /
-  `"unknown"` for the single most recent entry -- `deploy/vps/claude-loop.sh`
-  uses this to decide whether to chain immediately into another tick
-  (`"progress"`) or stop and back off (everything else).
+  `"unknown"` for the single most recent entry, taken purely at face value
+  from whatever is currently in the file. This cannot by itself distinguish
+  "this tick genuinely produced that outcome" from "this tick died before
+  writing anything and the file still shows an earlier tick's entry" --
+  `deploy/vps/claude-loop.sh` combines this with `status_log_entry_count`
+  (below), its own process exit status, and a target-branch commit check via
+  `scripts/vps_loop_chain_state.py`'s `classify` subcommand to tell those
+  apart before deciding whether to chain into another tick.
+- `status_log_entry_count`: the total number of parsed entries. Comparing
+  this before and after a tick is how a caller detects "no new entry was
+  appended this run" without needing its own duplicate parsing.
 - `blocker_class`: the tag behind the current stop, if the tick is currently
   blocked or the loop is currently paused (a `Still paused` bookkeeping line
   carries no tag of its own, so this looks back to the tag that caused the
@@ -439,6 +447,7 @@ def build_report(
         "last_successful_tick": last_successful_tick,
         "current_item": current_item,
         "last_tick_outcome": last_tick_outcome,
+        "status_log_entry_count": len(entries),
         "blocker_class": blocker_class,
         "paused": paused,
         "paused_since": paused_entry.timestamp if paused_entry else None,
@@ -469,6 +478,7 @@ def format_shell(report: dict[str, object]) -> str:
         "VPS_LOOP_LAST_SUCCESSFUL_TICK": report["last_successful_tick"],
         "VPS_LOOP_CURRENT_ITEM": report["current_item"],
         "VPS_LOOP_LAST_TICK_OUTCOME": report["last_tick_outcome"],
+        "VPS_LOOP_STATUS_LOG_ENTRY_COUNT": report.get("status_log_entry_count", 0),
         "VPS_LOOP_BLOCKER_CLASS": report["blocker_class"],
         "VPS_LOOP_PAUSED": report["paused"],
         "VPS_LOOP_PAUSED_SINCE": report["paused_since"],
