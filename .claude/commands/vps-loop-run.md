@@ -30,12 +30,18 @@ So, for as long as a dispatch or command is outstanding:
   `scripts/prepare_review.py`, an aggregate rebuild) with
   `run_in_background`. Run it in the foreground with an explicit `timeout`
   sized to the tick's remaining budget.
-- Treat that budget as a known quantity, not a surprise. Before starting a
-  step that plausibly outlasts the time left, stop deliberately instead:
-  confirm the worker has a checkpoint commit, append a Status log entry
-  ending in `**Blocker-tag:** tick-budget-exhausted` per Step 0, and finish
-  the turn. A logged stop resumes cleanly through Step 3/3b; a silent
-  turn-end leaves nothing to resume from.
+- Make that budget a number you actually hold, rather than an assumed
+  quantity. At Step 1, record the tick's start time (`date +%s`) and read
+  `CLAUDE_TICK_TIMEOUT_SEC` from the environment — the wrapper's per-tick
+  ceiling, whose current default `.claude/README.md` documents. Remaining
+  budget is that ceiling minus elapsed; size every foreground `timeout`
+  from it.
+- Before starting a step that plausibly outlasts what is left, stop
+  deliberately instead of being cut off mid-step: confirm the worker has a
+  checkpoint commit, append a Status log entry ending in
+  `**Blocker-tag:** tick-budget-exhausted` per Step 0, and finish the turn.
+  A logged stop resumes cleanly through Step 3/3b; a silent turn-end leaves
+  nothing to resume from.
 
 ## Step 0 — Circuit breaker: back off after a repeated identical blocker
 
@@ -53,14 +59,16 @@ cause's *class* (e.g. `review-scratch-leftover`, `git-stash-permission-denied`,
 `settings-drift`, `sensitive-file-no-approver`, `db-write-blocked`), not the
 specific instance (not the item number, not the exact file path) — the same
 class of problem recurring on different items must reuse the identical slug,
-or this mechanism can never detect the pattern. Two outcome-category slugs
+or this mechanism can never detect the pattern. Three outcome-category slugs
 (`review-major-unresolved` for an unresolved review finding,
-`worker-blocked` for a Step 4b report) are generic buckets, not
+`worker-blocked` for a Step 4b report, `tick-budget-exhausted` for a
+deliberate out-of-time stop) are generic buckets, not
 necessarily a real recurring root cause on their own — before reusing one of
 these because the last 2 entries also used it, sanity-check that the
 underlying cause is actually the same, not just the same outcome shape; if
 it's clearly a different underlying issue that happens to also end in an
-unresolved review or a blocked worker, use a more specific compound slug
+unresolved review, a blocked worker, or an exhausted budget, use a more
+specific compound slug
 instead (e.g. `review-major-unresolved-null-handling`) so unrelated one-off
 failures don't spuriously trip the streak. This tagging requirement does NOT
 apply to a "skip item N, keep going" outcome that doesn't stop the whole
