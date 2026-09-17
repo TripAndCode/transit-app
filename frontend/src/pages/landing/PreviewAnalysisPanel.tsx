@@ -12,7 +12,7 @@ const MAX_HOURLY = Math.max(...PREVIEW_HOURLY.map((h) => h.delayMin));
  *  swaps which figures render below it (a bar-per-day trend vs. a handful
  *  of representative hourly cells), reusing the real `map.route_mode.*`
  *  labels since the underlying "historical trend vs. by hour" distinction
- *  is the same one `RouteModeToggle` already names for the Map tab. */
+ *  is the one those keys already name. */
 export function PreviewAnalysisPanel() {
   const { t } = useTranslation();
   const [mode, setMode] = useState<AnalysisMode>("trend");

@@ -439,7 +439,6 @@ async def followup_endpoint(
     body: FollowupBody,
     agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user_optional),
-    conn=Depends(get_conn),
     locale: str = Depends(get_locale),
 ):
     """LLM-grounded follow-up on a prior assistant result.
@@ -472,11 +471,19 @@ async def followup_endpoint(
             detail="authed followup requires context_message_id",
         )
 
-    # Ownership check (also confirms the conversation exists).
-    await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
+    # Two short-lived connections acquired around the LLM call, rather than
+    # one held across it via ``Depends(get_conn)``: ``answer_followup`` waits
+    # on a provider for seconds, and a pool connection parked for that long
+    # is one no other request can use. The reads here and the writes below
+    # share no transaction — the writes open their own — so nothing needs a
+    # single connection to span both.
+    async with request.app.state.pool.acquire() as conn:
+        # Ownership check (also confirms the conversation exists).
+        await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
-    # Fetch the context message (must belong to this conversation).
-    messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
+        # Fetch the context message (must belong to this conversation).
+        messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
+
     ctx_msg = next(
         (m for m in messages if m["message_id"] == body.context_message_id),
         None,
@@ -498,29 +505,30 @@ async def followup_endpoint(
 
     # Append both messages atomically so a mid-flight cancel doesn't leave
     # a dangling user message in the thread.
-    async with conn.transaction():
-        user_msg = await _conv.append_message(
-            conn,
-            conversation_id,
-            role="user",
-            chip_id=None,
-            tool=None,
-            args=None,
-            signature_hash=None,
-            result=None,
-            rendered_summary=body.question,
-        )
-        assistant_msg = await _conv.append_message(
-            conn,
-            conversation_id,
-            role="assistant",
-            chip_id=None,
-            tool=None,
-            args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
-            signature_hash=None,
-            result=None,
-            rendered_summary=answer,
-        )
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.transaction():
+            user_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="user",
+                chip_id=None,
+                tool=None,
+                args=None,
+                signature_hash=None,
+                result=None,
+                rendered_summary=body.question,
+            )
+            assistant_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="assistant",
+                chip_id=None,
+                tool=None,
+                args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
+                signature_hash=None,
+                result=None,
+                rendered_summary=answer,
+            )
     return {"user": user_msg, "assistant": assistant_msg}
 
 

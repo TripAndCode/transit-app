@@ -101,6 +101,7 @@ collect_vps_loop_health() {
   VPS_LOOP_LAST_SUCCESSFUL_TICK=""
   VPS_LOOP_CURRENT_ITEM=""
   VPS_LOOP_LAST_TICK_OUTCOME=""
+  VPS_LOOP_STATUS_LOG_ENTRY_COUNT=""
   VPS_LOOP_BLOCKER_CLASS=""
   VPS_LOOP_PAUSED="false"
   VPS_LOOP_PAUSED_SINCE=""
@@ -110,6 +111,17 @@ collect_vps_loop_health() {
   health_shell_output=$(python3 scripts/vps_loop_health.py --repo /root/transit-app \
     --out /root/vps-loop-health.json --format shell 2>/root/vps-loop-health.err) || true
   eval "$health_shell_output"
+}
+
+# The item's fixed branch name (`vps-loop/item-<N>`, never derived from the
+# item's own text -- see vps-loop-run.md's Step 3). Prints nothing if `$1` is
+# empty (no current item known yet).
+item_branch_head_sha() {
+  local item_number="$1"
+  if [[ -z "$item_number" ]]; then
+    return
+  fi
+  git rev-parse --verify --quiet "refs/heads/vps-loop/item-${item_number}" 2>/dev/null
 }
 
 # Fires the same GitHub `vps-heartbeat` repository_dispatch every invocation
@@ -187,6 +199,19 @@ while (( TICKS_RUN < CLAUDE_LOOP_MAX_CHAIN_TICKS )); do
     break
   fi
 
+  # Snapshot pre-tick state used to classify a tick that dies without
+  # logging anything (see scripts/vps_loop_chain_state.py's `classify`): the
+  # Status log's own entry count (any new entry, of any kind, proves the
+  # tick got far enough to record its own outcome) and, scoped to the item
+  # the log already names as current before this tick even starts (never a
+  # leftover, unrelated branch), that item's own branch HEAD -- so a died
+  # tick that still managed to commit real work isn't indistinguishable from
+  # one that produced nothing at all.
+  collect_vps_loop_health
+  PRE_TICK_ENTRY_COUNT="$VPS_LOOP_STATUS_LOG_ENTRY_COUNT"
+  PRE_TICK_ITEM="$VPS_LOOP_CURRENT_ITEM"
+  PRE_TICK_BRANCH_SHA=$(item_branch_head_sha "$PRE_TICK_ITEM")
+
   python3 "$CHAIN_STATE_SCRIPT" begin --state-file "$CLAUDE_LOOP_CHAIN_STATE_FILE" --pid $$ >/dev/null 2>>/root/vps-loop-chain-state.err
 
   timeout --foreground --kill-after=30s "${CLAUDE_TICK_TIMEOUT_SEC}s" \
@@ -197,16 +222,42 @@ while (( TICKS_RUN < CLAUDE_LOOP_MAX_CHAIN_TICKS )); do
   FINAL_EXIT=$CLAUDE_EXIT
   TICKS_RUN=$((TICKS_RUN + 1))
 
+  # `timeout` itself normalizes to exit 124 whenever the time limit fires
+  # (whether or not --kill-after's SIGKILL was actually needed to finish the
+  # job) -- this is a distinct, wrapper-owned fact from "the process errored
+  # on its own", and must reach classification as such rather than being
+  # folded into a generic non-zero exit that could just as easily be a
+  # crash.
+  TIMED_OUT_ARGS=()
+  if [[ "$CLAUDE_EXIT" -eq 124 ]]; then
+    TIMED_OUT_ARGS=(--timed-out)
+  fi
+
   # Fold vps-loop-run's own progress signal into the heartbeat.
   collect_vps_loop_health
 
-  # A non-zero `claude` exit (the tick's own hard timeout, a crash) overrides
-  # whatever the Status log happens to say -- that log entry may predate the
-  # failure entirely, or may not exist yet this tick.
-  CHAIN_OUTCOME="$VPS_LOOP_LAST_TICK_OUTCOME"
-  if [[ "$CLAUDE_EXIT" -ne 0 || -z "$CHAIN_OUTCOME" ]]; then
-    CHAIN_OUTCOME="unknown"
+  WROTE_NEW_STATUS_ENTRY_ARGS=()
+  if [[ -n "$VPS_LOOP_STATUS_LOG_ENTRY_COUNT" && -n "$PRE_TICK_ENTRY_COUNT" \
+        && "$VPS_LOOP_STATUS_LOG_ENTRY_COUNT" -gt "$PRE_TICK_ENTRY_COUNT" ]]; then
+    WROTE_NEW_STATUS_ENTRY_ARGS=(--wrote-new-status-entry)
   fi
+
+  HAD_NEW_COMMITS_ARGS=()
+  POST_TICK_BRANCH_SHA=$(item_branch_head_sha "$PRE_TICK_ITEM")
+  if [[ -n "$POST_TICK_BRANCH_SHA" && "$POST_TICK_BRANCH_SHA" != "$PRE_TICK_BRANCH_SHA" ]]; then
+    HAD_NEW_COMMITS_ARGS=(--had-new-commits)
+  fi
+
+  CLASSIFY_OUTPUT=$(python3 "$CHAIN_STATE_SCRIPT" classify \
+    --claude-exit-code "$CLAUDE_EXIT" \
+    "${TIMED_OUT_ARGS[@]}" \
+    "${WROTE_NEW_STATUS_ENTRY_ARGS[@]}" \
+    "${HAD_NEW_COMMITS_ARGS[@]}" \
+    --status-log-outcome "${VPS_LOOP_LAST_TICK_OUTCOME:-unknown}" \
+    2>>/root/vps-loop-chain-state.err)
+  OUTCOME=""
+  eval "$CLASSIFY_OUTPUT"
+  CHAIN_OUTCOME="$OUTCOME"
 
   RECORD_OUTPUT=$(python3 "$CHAIN_STATE_SCRIPT" record-outcome \
     --state-file "$CLAUDE_LOOP_CHAIN_STATE_FILE" \

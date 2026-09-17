@@ -19,7 +19,7 @@
 //  - MapLibre (builds plain-JS paint expressions that CANNOT consume var()):
 //    call `severeColorResolved()`, which returns a real parseable hex. These
 //    call sites already subscribe to `useThemeSignal` and rebuild their
-//    expressions on toggle (see useHeatmapLayer / useRouteOverlay).
+//    expressions on toggle (see useOperationsMapLayers).
 const SEVERE_VAR = "var(--delay-severe)";
 
 // Light-mode severe red — the fallback when the CSS custom property can't be
