@@ -83,17 +83,33 @@ jobs:
           # exactly the ungraceful failure this check is meant to avoid.
           REPEATED=$(echo "$LOG" | grep -o 'HEALTH repeated_without_progress=[a-z]*' | tail -n1 | cut -d= -f2 || true)
           STALE=$(echo "$LOG" | grep -o 'HEALTH stale_pause=[a-z]*' | tail -n1 | cut -d= -f2 || true)
+          DUPLICATE_IDLE_TAIL=$(echo "$LOG" | grep -o 'HEALTH duplicate_idle_tail=[a-z]*' | tail -n1 | cut -d= -f2 || true)
+          OUT_OF_ORDER_TAIL=$(echo "$LOG" | grep -o 'HEALTH out_of_order_tail=[a-z]*' | tail -n1 | cut -d= -f2 || true)
           BLOCKER=$(echo "$LOG" | grep -o 'HEALTH blocker_class=[^[:space:]]*' | tail -n1 | cut -d= -f2- || true)
           PAUSED_SINCE=$(echo "$LOG" | grep -o 'HEALTH paused_since=[^[:space:]]*' | tail -n1 | cut -d= -f2- || true)
           CHAIN_OUTCOME=$(echo "$LOG" | grep -o 'HEALTH chain_tick_outcome=[a-z_]*' | tail -n1 | cut -d= -f2 || true)
           CHAIN_CONSECUTIVE=$(echo "$LOG" | grep -o 'HEALTH chain_consecutive_non_progress=[0-9]*' | tail -n1 | cut -d= -f2 || true)
-          echo "Reported: repeated_without_progress=${REPEATED:-unknown} stale_pause=${STALE:-unknown} blocker_class=${BLOCKER:-none} paused_since=${PAUSED_SINCE:-n/a} chain_tick_outcome=${CHAIN_OUTCOME:-unknown} chain_consecutive_non_progress=${CHAIN_CONSECUTIVE:-unknown}"
+          echo "Reported: repeated_without_progress=${REPEATED:-unknown} stale_pause=${STALE:-unknown} duplicate_idle_tail=${DUPLICATE_IDLE_TAIL:-unknown} out_of_order_tail=${OUT_OF_ORDER_TAIL:-unknown} blocker_class=${BLOCKER:-none} paused_since=${PAUSED_SINCE:-n/a} chain_tick_outcome=${CHAIN_OUTCOME:-unknown} chain_consecutive_non_progress=${CHAIN_CONSECUTIVE:-unknown}"
           if [ "$REPEATED" = "true" ]; then
             echo "::error::VPS loop reported repeated_without_progress: the last 3 ticks stopped on the same blocker (${BLOCKER:-unknown}) with no shipped progress in between — see NEXT_TASK.md's Status log on the VPS."
             exit 1
           fi
           if [ "$STALE" = "true" ]; then
             echo "::error::VPS loop reported stale_pause: paused since ${PAUSED_SINCE:-an unknown time}, longer than its own reduced probe cadence allows — a probe should already have logged a fresh bookkeeping entry. Check NEXT_TASK.md's Status log and the claude-loop.timer/service on the VPS."
+            exit 1
+          fi
+          # Both of these mean the Status log's own append-only, chronological
+          # invariant just broke -- Step 0's circuit breaker and
+          # scripts/reconcile_next_task.py/vps_loop_health.py all read "last N
+          # entries in file order" as "last N entries in time," so a violation
+          # here can silently change what those three compute even though the
+          # loop itself isn't necessarily stuck.
+          if [ "$DUPLICATE_IDLE_TAIL" = "true" ]; then
+            echo "::error::VPS loop reported duplicate_idle_tail: two adjacent Status log entries both read 'nothing actionable this run.', which Step 3's own idle-throttle rule should prevent — check NEXT_TASK.md's Status log for a stale-read/racing-writer append on the VPS."
+            exit 1
+          fi
+          if [ "$OUT_OF_ORDER_TAIL" = "true" ]; then
+            echo "::error::VPS loop reported out_of_order_tail: the most recent Status log entry's timestamp sorts before the previous entry's, even though entries are only ever appended — check NEXT_TASK.md's Status log for a stale-read/racing-writer append on the VPS."
             exit 1
           fi
           # died/died_with_commits (scripts/vps_loop_chain_state.py's
