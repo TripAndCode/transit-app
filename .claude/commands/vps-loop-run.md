@@ -33,9 +33,11 @@ So, for as long as a dispatch or command is outstanding:
 - Make that budget a number you actually hold, rather than an assumed
   quantity. At Step 1, record the tick's start time (`date +%s`) and read
   `CLAUDE_TICK_TIMEOUT_SEC` from the environment — the wrapper's per-tick
-  ceiling, whose current default `.claude/README.md` documents. Remaining
-  budget is that ceiling minus elapsed; size every foreground `timeout`
-  from it.
+  ceiling. If that read comes back empty, fall back to the default
+  `.claude/README.md` documents rather than skipping the check; a deployed
+  wrapper that predates this variable being exported is the one case where
+  it won't be set. Remaining budget is that ceiling minus elapsed; size
+  every foreground `timeout` from it.
 - Before starting a step that plausibly outlasts what is left, stop
   deliberately instead of being cut off mid-step: confirm the worker has a
   checkpoint commit, append a Status log entry ending in
@@ -218,6 +220,9 @@ different, benign kind of "no progress" and must NOT accumulate toward this
 circuit breaker's streak count. Only genuine blocker/failure outcomes count.
 
 ## Step 1 — State check
+
+Record the tick's start time first: `date +%s`. Everything the budget rule above
+computes hangs off this one number, and no later step re-derives it.
 
 `git status --porcelain -- ':(top)' ':(exclude,top)NEXT_TASK.md'` — everything except
 the one file that is untracked by design. (`NEXT_TASK.md` isn't gitignored, so an
