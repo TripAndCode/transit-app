@@ -8,7 +8,7 @@ type AnalysisMode = "trend" | "hourly";
 const MAX_TREND = Math.max(...PREVIEW_TREND_BY_DOW);
 const MAX_HOURLY = Math.max(...PREVIEW_HOURLY.map((h) => h.delayMin));
 
-/** Dashboard-preview Route analysis tab: a trend/hour toggle that genuinely
+/** Dashboard-preview Segment analysis tab: a trend/hour toggle that genuinely
  *  swaps which figures render below it (a bar-per-day trend vs. a handful
  *  of representative hourly cells), reusing the real `map.route_mode.*`
  *  labels since the underlying "historical trend vs. by hour" distinction

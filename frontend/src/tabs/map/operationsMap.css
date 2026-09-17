@@ -52,22 +52,27 @@
 .ops-map__canvas { position: absolute; inset: 0; }
 .ops-map__loading { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 13px; border-radius: 999px; color: #2a2a2a; background: rgba(255,255,255,.92); box-shadow: 0 3px 12px rgba(0,0,0,.18); font-size: 12px; }
 .ops-map__empty { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg-page) 92%, transparent); }
-/* Top-right, stacked below MapLibre's own NavigationControl (also top-right).
-   Previously bottom-left, where this box's length (a dynamic, sometimes-wrapping
-   count/date string) could grow tall enough to overlap MapStyleControl's own
-   bottom-left "レイヤー" control. Width is capped so a long string wraps into a
-   compact block anchored to the right edge instead of stretching across the map
-   and reading as an unanchored floating bar. */
-.ops-map__disclosure { position: absolute; right: 14px; top: 92px; display: flex; align-items: center; gap: 8px; max-width: min(420px, calc(100% - 28px)); padding: 7px 11px; border: 1px solid var(--card-border); border-radius: var(--card-radius); color: var(--text-primary); background: var(--bg-surface); box-shadow: 0 2px 6px rgba(20,30,50,.08); font-size: 11px; font-weight: 600; line-height: 1.45; }
-.ops-map__disclosure svg { flex: 0 0 auto; color: var(--accent-strong); }
-
-/* Stacked under the filter dock, which owns the top-left corner: the dock is
-   a control the operator acts on, the legend is reference text they read
-   once, so the control takes the reachable position. */
-.ops-map-legend { position: absolute; top: 70px; left: 12px; display: flex; align-items: center; gap: 12px; padding: 7px 12px; border: 1px solid var(--card-border); border-radius: var(--card-radius); background: var(--bg-surface); box-shadow: 0 2px 6px rgba(20,30,50,.08); }
+/* Reference panel: what the markers mean, and what they are. Stacked under
+   the filter dock, which owns the top-left corner -- the dock is a control the
+   operator acts on, this is text they read once, so the control keeps the
+   reachable position. The marker disclosure used to be a second floating box
+   pinned at a fixed `top` on the opposite side of the map, anchored to
+   nothing; it is the same kind of content, so it lives here. Padded on the
+   right for the hide button that overlaps the corner. */
+.ops-map-ref { position: absolute; top: 70px; left: 12px; z-index: 2; max-width: calc(100% - 24px); padding: 7px 26px 7px 12px; border: 1px solid var(--card-border); border-radius: var(--card-radius); background: var(--bg-surface); box-shadow: 0 2px 6px rgba(20,30,50,.08); }
+.ops-map-ref__legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.ops-map-ref__note { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--border-soft); color: var(--text-secondary); font-size: 10.5px; line-height: 1.45; }
+.ops-map-ref__note svg { flex: 0 0 auto; color: var(--accent-strong); }
+.ops-map-ref__hide { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 5px; color: var(--text-tertiary); background: none; cursor: pointer; }
+.ops-map-ref__hide:hover { color: var(--text-primary); background: var(--bg-soft); }
+/* Collapsed: the panel becomes one icon in the same corner, so restoring it
+   happens where dismissing it did. */
+.ops-map-ref__peek { position: absolute; top: 70px; left: 12px; z-index: 2; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--card-border); border-radius: 8px; color: var(--accent-strong); background: var(--bg-surface); box-shadow: 0 2px 6px rgba(20,30,50,.08); cursor: pointer; }
+.ops-map-ref__peek:hover { background: var(--bg-soft); }
 /* Sits clear of MapLibre's bottom-right attribution strip, which is always
    present and would otherwise paint over this button's lower half. */
 .ops-map-fit { position: absolute; right: 14px; bottom: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--card-border); border-radius: var(--card-radius); color: var(--text-primary); background: var(--bg-surface); box-shadow: 0 2px 6px rgba(20,30,50,.08); font-size: 11px; font-weight: 700; }
+.ops-map-fit:disabled { color: var(--text-tertiary); box-shadow: none; cursor: default; }
 
 /* Trip panel. Every colour here resolves through a token, and deliberately so:
    this block used to carry its own dark theme -- a navy gradient plus ~20
@@ -237,11 +242,11 @@
   .ops-header { gap: 10px; }
   .ops-heading { width: 100%; }
   .ops-freshness { margin-left: auto; }
-  .ops-map__disclosure { right: 8px; bottom: 52px; left: 8px; top: auto; max-width: none; }
   /* Reserves the same right-side clearance NavigationControl needs (moved
-     to top-right, see MapTab.tsx) so the full-width legend bar doesn't
+     to top-right, see MapTab.tsx) so the full-width reference panel doesn't
      paint over the zoom buttons. */
-  .ops-map-legend { right: 48px; left: 8px; gap: 8px; overflow: hidden; }
+  .ops-map-ref { right: 48px; left: 8px; max-width: none; }
+  .ops-map-ref__peek { left: 8px; }
   /* The chips share the width that's left instead of keeping their desktop
      size and being clipped by the dock's own overflow: at this width the
      dock plus the zoom buttons no longer both fit at natural size. */

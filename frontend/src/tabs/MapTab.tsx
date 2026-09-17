@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Download, Maximize2, Radio, RefreshCw } from "lucide-react";
+import { Download, Maximize2, RefreshCw } from "lucide-react";
 import { FilterDock } from "./map/FilterDock";
 import { downloadCsv } from "../components/analysis/csv";
 import "../styles/focusedAnalysis.css";
@@ -21,7 +21,7 @@ import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { EmptyState } from "../components/EmptyState";
-import { LegendChip } from "../components/LegendChip";
+import { MapReference } from "./map/MapReference";
 import { StatTile } from "../components/StatTile";
 import { signedMin } from "./live/signedMin";
 import { OperationsTripPanel, type ActiveRouteOption, type DirectionOption } from "./map/OperationsTripPanel";
@@ -413,12 +413,7 @@ export function MapTab() {
               <EmptyState title={t("operations.empty.title")} hint={t("operations.empty.hint")} />
             </div>
           )}
-          <div className="ops-map-legend" aria-label={t("operations.map.legend_label")}>
-            <LegendChip color="var(--accent-strong)" label={t("operations.map.legend_current")} />
-            <LegendChip color="#2bc5aa" label={t("operations.map.legend_trail")} />
-            <LegendChip color="var(--delay-flag)" label={t("operations.map.legend_delay")} />
-            <LegendChip color="#2bc5aa" label={t("operations.map.legend_cluster")} />
-          </div>
+          <MapReference located={locatedTrips} total={liveRows.length} t={t} />
           {/* Rendered after the overlays that cover this corner
               (.ops-map__empty, .ops-map__loading) so a control is never
               buried behind decoration; the CSS pins that with a z-index too. */}
@@ -429,16 +424,20 @@ export function MapTab() {
               updateCtx({ routes }); setRouteSelection({ agencyId: id, route: null }); setSelectedTripId(null); setSelectedDirectionKey(null);
             }}
           />
-          <button type="button" className="ops-map-fit" onClick={fitAllTrips}>
+          {/* Disabled rather than silently doing nothing when there is
+              nothing to frame: fitBounds only moves the camera, so with no
+              located trip a press is indistinguishable from a broken button.
+              The tooltip carries the part the label can't -- that this moves
+              the map and changes nothing about which trips are shown. */}
+          <button
+            type="button"
+            className="ops-map-fit tip"
+            data-tip={t("operations.map.fit_all_hint")}
+            onClick={fitAllTrips}
+            disabled={locatedTrips === 0}
+          >
             <Maximize2 size={14} />{t("operations.map.fit_all")}
           </button>
-          <div className="ops-map__disclosure">
-            <Radio size={15} aria-hidden="true" />
-            {/* States what the markers mean, and nothing else: the reading's
-                age is the header freshness dot's job, and repeating it here
-                put the same fact on screen three times. */}
-            <span>{t("operations.map.disclosure", { located: locatedTrips, total: liveRows.length })}</span>
-          </div>
         </section>
 
         <QueueResizer width={queueWidth} label={td("resizeQueue")} onWidth={setQueueWidth} onCommit={storeQueueWidth} />

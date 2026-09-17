@@ -50,7 +50,7 @@ function renderPreview() {
 
 // The real signed-in sidebar's three tabs (components/Sidebar.tsx's
 // SIDEBAR_NAV_ITEMS, shared with PreviewSidebar).
-const NAV_LABELS = ["Overview", "Route analysis", "Reports"];
+const NAV_LABELS = ["Overview", "Segment analysis", "Reports"];
 
 describe("DashboardPreview", () => {
   beforeEach(() => {
@@ -102,7 +102,7 @@ describe("DashboardPreview", () => {
     const user = userEvent.setup();
     renderPreview();
 
-    await user.click(screen.getByRole("button", { name: /^Route analysis/ }));
+    await user.click(screen.getByRole("button", { name: /^Segment analysis/ }));
     expect(screen.getByRole("button", { name: "Historical trend" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /^Reports/ }));
@@ -144,10 +144,10 @@ describe("DashboardPreview", () => {
     expect(screen.getByText("Route R7")).toBeTruthy();
   });
 
-  it("swaps Route analysis figures when the trend/hour toggle changes", async () => {
+  it("swaps Segment analysis figures when the trend/hour toggle changes", async () => {
     const user = userEvent.setup();
     renderPreview();
-    await user.click(screen.getByRole("button", { name: /^Route analysis/ }));
+    await user.click(screen.getByRole("button", { name: /^Segment analysis/ }));
     expect(screen.getByText("Mon")).toBeTruthy();
     expect(screen.queryByText("18:00")).toBeNull();
 
@@ -194,7 +194,7 @@ describe("DashboardPreview auto-advance", () => {
     vi.restoreAllMocks();
   });
 
-  it("cycles Overview -> Route analysis -> Reports -> Overview when left untouched", () => {
+  it("cycles Overview -> Segment analysis -> Reports -> Overview when left untouched", () => {
     mockMatchMedia(false);
     renderPreview();
     expect(screen.getByText("On-time route")).toBeTruthy();

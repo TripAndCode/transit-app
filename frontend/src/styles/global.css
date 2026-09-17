@@ -262,6 +262,56 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   border-color: var(--border-subtle);
   cursor: not-allowed;
 }
+
+/* Hover/focus tooltip for controls whose label can't carry the whole
+   explanation -- icon-only buttons, or a short label with a caveat worth
+   stating. Opt in with `className="tip" data-tip={t("...")}`: no wrapper
+   component and no JS state, and it appears on keyboard focus as well as
+   hover.
+
+   The tooltip is visual reinforcement only. The control keeps its own
+   accessible name (its text, or an aria-label), so a screen reader never
+   depends on `content: attr()`, which assistive tech is not required to
+   announce.
+
+   `:where()` gives the positioning zero specificity, so a host that is
+   already positioned -- an absolutely-placed map control, say -- keeps its
+   own `position` regardless of stylesheet order, while a statically-placed
+   host still gets the containing block this needs. */
+:where(.tip) { position: relative; }
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: 240px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-fg);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-line;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms;
+}
+.tip:hover::after,
+.tip:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
+/* For a control near the top edge, where an upward tooltip would be clipped. */
+.tip--below::after {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 

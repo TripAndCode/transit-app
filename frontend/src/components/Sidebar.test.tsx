@@ -40,7 +40,7 @@ describe("Sidebar", () => {
   it("renders three focused destinations without the former report catalog", () => {
     renderSidebar();
     expect(screen.getByText("Overview")).toBeTruthy();
-    expect(screen.getByText("Route analysis")).toBeTruthy();
+    expect(screen.getByText("Segment analysis")).toBeTruthy();
     expect(screen.getByText("Reports")).toBeTruthy();
     expect(screen.queryByText("Agencies")).toBeNull();
     expect(screen.queryByText("Latest observations")).toBeNull();
