@@ -2,8 +2,6 @@
   "nav": {
     "overview_subtitle": "今すぐ何が起きているか",
     "ask": "質問",
-    "live": "最新観測",
-    "live_subtitle": "停留所ごとの実測値",
     "analysis_subtitle": "いつ・なぜ遅れるか",
     "collapse_sidebar": "サイドバーを折りたたむ",
     "expand_sidebar": "サイドバーを開く",
@@ -43,12 +41,6 @@
         "filter_all": "すべての路線",
         "filter_on_time": "定刻",
         "filter_delayed": "遅延"
-      },
-      "live": {
-        "sort_latest": "最新順",
-        "sort_delay": "遅延順",
-        "stop_label": "停留所{{n}}",
-        "minutes_ago": "{{n}}分前"
       },
       "ask": {
         "q1": "今、遅れている路線はどれ?",
@@ -919,69 +911,6 @@
       "header_subtitle": "ルール → 埋め込みNN → RAGの3段階で回答します",
       "cards_title": "こんな質問ができます",
       "pills_title": "その他の質問"
-    }
-  },
-  "live": {
-    "title": "最新観測",
-    "hint": {
-      "title": "このタブで分かること",
-      "body_1_intro": "最新観測日の路線別サマリー。",
-      "avg_strong": "平均",
-      "avg_meaning": "はその日の全便平均、",
-      "max_strong": "最大",
-      "max_meaning": "は最も遅れた便。色付きの ● で深刻度が一目で分かります。",
-      "body_2": "サンプル数（便数 / 観測数）が多い路線ほど、数字の信頼性が高くなります。",
-      "body_3": "並び替えを「最大遅延」にすると、その日のホットスポット路線をすぐに把握できます。"
-    },
-    "last_observation": "最終観測: {{when}}",
-    "auto_refresh": "自動更新 (30秒)",
-    "manual_refresh": "手動更新",
-    "filter_placeholder": "路線で絞り込み",
-    "sort_label": "並び順",
-    "sort": {
-      "deviation": "平常比",
-      "worst": "最大遅延",
-      "avg": "平均遅延",
-      "trips": "運行便数",
-      "name": "名前順"
-    },
-    "bucket": {
-      "anomaly": "異常",
-      "watch": "注意",
-      "normal": "平常",
-      "no_baseline": "基準なし",
-      "count": "{{count}}件"
-    },
-    "row": {
-      "deviation": "平常比 {{sign}}{{value}}分",
-      "deviation_flat": "平常どおり",
-      "baseline_today": "平常 {{baseline}} → 今日 {{today}}",
-      "no_baseline_note": "平常データ準備中",
-      "low_confidence": "要確認（観測少）",
-      "low_confidence_baseline": "平常値要確認（母数少）",
-      "samples": "{{count}}観測",
-      "late5_pct": "5分超 {{value}}%"
-    },
-    "drill": {
-      "title": "{{route}} の詳細",
-      "trips_heading": "便ごとの遅延（遅い順）",
-      "stops_heading": "停留所ごとの平均遅延（経路順）",
-      "trip_label": "{{time}} {{headsign}}",
-      "trip_label_no_headsign": "{{time}}発",
-      "stop_label": "#{{seq}} {{name}}",
-      "stop_label_no_name": "停留所 #{{seq}}",
-      "stop_outlier_one": "他{{count}}路線の平均より{{delta}}分多い",
-      "stop_outlier_other": "他{{count}}路線の平均より{{delta}}分多い",
-      "stop_outlier_low_confidence": "観測数が少ない",
-      "close": "閉じる",
-      "empty": "この路線の便データがありません"
-    },
-    "updating": "更新中...",
-    "updated_at": "更新: {{time}}",
-    "empty": {
-      "with_last": "まだ表示できる観測がありません (最終受信: {{when}})",
-      "title": "まだ表示できる観測がありません",
-      "hint": "次の取り込みを待っています。数分後に自動で更新されます。"
     }
   },
   "reports": {
