@@ -1,8 +1,6 @@
 {
   "nav": {
-    "overview_subtitle": "今すぐ何が起きているか",
     "ask": "質問",
-    "analysis_subtitle": "いつ・なぜ遅れるか",
     "collapse_sidebar": "サイドバーを折りたたむ",
     "expand_sidebar": "サイドバーを開く",
     "open_menu": "メニューを開く",
@@ -22,12 +20,6 @@
       "title": "今すぐ何が起きているか。どこで起きているか。",
       "subtitle": "各事業者の最新報告停留所、現在の遅延、履歴分析、事業者間の比較をまとめて確認できます。",
       "guest_cta": "ゲストとして利用する"
-    },
-    "explorer": {
-      "heading": "中身をのぞいてみる",
-      "reports_preview": "任意の期間の遅延傾向・系統ランキング・CSVダウンロードをまとめて確認できます。",
-      "ask_preview": "自然な言葉で自由に質問して、すぐに答えを得られます。",
-      "excerpt_unavailable": "マニュアルのプレビューは利用できません。"
     },
     "preview": {
       "heading": "中身をのぞいてみる",
@@ -306,7 +298,6 @@
     "route_code_fallback": "路線{{code}}",
     "save": "保存",
     "search_placeholder": "検索...",
-    "unit_count": "件",
     "yes": "はい",
     "no": "いいえ",
     "unit_min": "分",
@@ -505,34 +496,9 @@
   },
   "map": {
     "legend": {
-      "title": "凡例",
-      "collapse": "凡例を折りたたむ",
-      "expand": "凡例を開く",
-      "show_single_sample": "1観測のみも表示",
-      "delay_avg": "遅延 (平均)",
-      "band_lt_1_5": "< 1.5分",
       "band_1_5_3": "1.5 – 3分",
       "band_3_5": "3 – 5分",
-      "band_gt_5": "> 5分",
-      "band_empty": "この範囲の停留所はありません",
-      "no_data": "計測なし",
-      "clear_selection": "選択を解除",
-      "size_density": "ドットの大きさ",
-      "few_to_many": "遅延 小 → 大",
-      "color_explainer": "色: 平均遅延の段階",
-      "bubble_explainer": "バブル: 停留所のまとまり（数字 = 停留所の数）",
-      "size_explainer": "ドットの大きさ: 遅延が大きいほど大きく",
-      "low_confidence_explainer": "薄い点: 観測数が少ないため参考値"
-    },
-    "popup": {
-      "platform_label": "のりば",
-      "stop_seq_prefix": "停留所 #",
-      "route_prefix": "路線",
-      "routes_label": "路線:",
-      "avg_delay_label": "平均遅延:",
-      "samples_label": "サンプル:",
-      "no_data": "この期間の計測はありません",
-      "period_label": "期間:"
+      "band_gt_5": "> 5分"
     },
     "hint": {
       "title": "地図の読み方",
