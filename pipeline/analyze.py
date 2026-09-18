@@ -357,26 +357,18 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             )
             # `query_row_block_stream` (not `query`) so we never hold the whole
             # dedup result in memory at once. `.query()` buffers the ENTIRE
-            # result as a Python list (`result_rows`) before returning it, and
-            # the tzinfo fixup below used to build a SECOND full-size list from
-            # that — two live copies of a set that scales with the agency's
-            # total row count. Streaming yields one block (a list of row-tuples)
-            # at a time, so peak memory is bounded by one block, not the whole
-            # table. Each block is tzinfo-fixed and INSERTed independently;
-            # `execute_values`'s own page_size=10_000 chunking of the Postgres
-            # side is unaffected by how the ClickHouse side is fetched.
-            # One label covers the ClickHouse dedup and the Postgres load
-            # together, because streaming interleaves them -- the split that
-            # matters here is this whole transfer versus the GROUP BYs below.
+            # result as a Python list (`result_rows`) before returning it — one
+            # live copy of a set that scales with the agency's total row count.
+            # Streaming yields one block at a time, so peak memory is bounded by
+            # one block, and each block is written to Postgres before the next
+            # is fetched.
+            #
             # COPY, not row-wise INSERT: this is the single largest step of a
-            # run, and a bulk load of the same rows measures several times
-            # faster than `execute_values` over them. The two phases are timed
-            # apart rather than under one label — they interleave, so only
-            # separate measurements say whether the cost is the remote scan or
-            # the local write, and that is the question any further work here
-            # starts from. `_copy_field` owns the encoding, including the UTC
-            # offset that used to require rebuilding every row as a tz-aware
-            # tuple first.
+            # run, and bulk-loading the same rows measures several times faster.
+            # `_copy_field` owns the encoding, including the UTC offset that
+            # otherwise has to be put back on every timestamp before the driver
+            # sees it.
+            #
             # The load is timed directly and the scan taken as the remainder,
             # rather than timing both: the query runs inside the stream's own
             # __enter__, so measuring only the time between yielded blocks

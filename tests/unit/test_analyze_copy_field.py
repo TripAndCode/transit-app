@@ -31,14 +31,26 @@ def test_empty_string_stays_an_empty_string():
         ("44372", "44372"),
         ("平日", "平日"),
         ("平日_11時37分_系統44372", "平日_11時37分_系統44372"),
+        ("cb3b49f1-ac77-4be9-a280-012d38489a91", "cb3b49f1-ac77-4be9-a280-012d38489a91"),
+        # scheduled_time arrives as text, not as a `time`, even though the
+        # column it lands in is `time` — Postgres parses it, exactly as it did
+        # when the driver sent the same string.
+        ("09:11:00", "09:11:00"),
         (0, "0"),
         (-300, "-300"),
         (date(2026, 6, 9), "2026-06-09"),
+        # `datetime` subclasses `date`, so the datetime branch must test the
+        # narrower type or a plain date would pick up a spurious offset.
         (time(11, 37), "11:37:00"),
     ],
 )
 def test_plain_values_render_as_themselves(value, expected):
     assert _copy_field(value) == expected
+
+
+def test_a_date_does_not_take_the_timestamp_branch():
+    """Guards the isinstance ordering: `datetime` is a subclass of `date`."""
+    assert "+00:00" not in _copy_field(date(2026, 6, 9))
 
 
 def test_a_naive_datetime_is_written_as_utc():
