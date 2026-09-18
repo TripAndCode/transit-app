@@ -1,8 +1,6 @@
 {
   "nav": {
-    "overview_subtitle": "What's happening right now",
     "ask": "Ask",
-    "analysis_subtitle": "When and why delays happen",
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
     "open_menu": "Open menu",
@@ -22,12 +20,6 @@
       "title": "What's happening right now — and where it's happening.",
       "subtitle": "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track.",
       "guest_cta": "Continue as a guest"
-    },
-    "explorer": {
-      "heading": "See what's inside",
-      "reports_preview": "Delay trends, route rankings, and one-click CSV exports for any period.",
-      "ask_preview": "Ask freely in natural language and get an answer right away.",
-      "excerpt_unavailable": "Manual preview unavailable."
     },
     "preview": {
       "heading": "See what's inside",
@@ -306,7 +298,6 @@
     "route_code_fallback": "Route {{code}}",
     "save": "Save",
     "search_placeholder": "Search...",
-    "unit_count": "obs.",
     "yes": "Yes",
     "no": "No",
     "unit_min": "min",
@@ -505,34 +496,9 @@
   },
   "map": {
     "legend": {
-      "title": "Legend",
-      "collapse": "Collapse legend",
-      "expand": "Expand legend",
-      "show_single_sample": "Show single-sample stops",
-      "delay_avg": "Delay (avg)",
-      "band_lt_1_5": "< 1.5 min",
       "band_1_5_3": "1.5–3 min",
       "band_3_5": "3–5 min",
-      "band_gt_5": "> 5 min",
-      "band_empty": "No stops in this range",
-      "no_data": "No data",
-      "clear_selection": "Clear selection",
-      "size_density": "Dot size",
-      "few_to_many": "delay: low → high",
-      "color_explainer": "Color: average delay band",
-      "bubble_explainer": "Bubble: a group of stops (number = how many stops)",
-      "size_explainer": "Dot size: bigger = longer delay",
-      "low_confidence_explainer": "Faint dot: few observations, treat with caution"
-    },
-    "popup": {
-      "platform_label": "Platform",
-      "stop_seq_prefix": "Stop #",
-      "route_prefix": "Route",
-      "routes_label": "Routes:",
-      "avg_delay_label": "Avg delay:",
-      "samples_label": "Samples:",
-      "no_data": "No measurements in this period",
-      "period_label": "Period:"
+      "band_gt_5": "> 5 min"
     },
     "hint": {
       "title": "How to read the map",

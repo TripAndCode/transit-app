@@ -31,7 +31,7 @@ export function PreviewMapPanel() {
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--bg-page)" }}>
       <PreviewMapCanvas filterCss={filterFor(styleVariant, heatmapField)} />
 
-      {/* Legend -- top-left, matching the real MapLegend's badge placement. */}
+      {/* Legend -- top-left, matching where the real map places its own. */}
       <div
         style={{
           position: "absolute",

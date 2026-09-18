@@ -23,10 +23,10 @@ import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 
 /** The sidebar's real nav destinations -- exported so the landing page's
- *  preview mockups (`pages/landing/PreviewSidebar.tsx`, `TabExplorer.tsx`,
- *  `manualExcerpt.ts`'s `TabManualKey`) import this array instead of
- *  maintaining their own copy, so the marketing preview's tab set/labels
- *  cannot drift from the real, signed-in nav. */
+ *  preview mockups (`pages/landing/PreviewSidebar.tsx`, and
+ *  `DashboardPreview.tsx` for its auto-advance order) import this array
+ *  instead of maintaining their own copy, so the marketing preview's tab
+ *  set/labels cannot drift from the real, signed-in nav. */
 export const SIDEBAR_NAV_ITEMS = [
   { to: "overview", labelKey: "design:overview", Icon: LayoutDashboard },
   { to: "route-analysis", labelKey: "design:analysis", Icon: BarChart3 },
