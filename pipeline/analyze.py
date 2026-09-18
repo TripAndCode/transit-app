@@ -139,25 +139,10 @@ _AGG_TABLES_ORDERED = (
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 
 # Aggregates rebuilt only for the dates whose source rows changed. Membership
-# is a contract between two places that must agree exactly: a table listed here
-# has BOTH its purge and its build restricted to those dates. Restricting only
-# one deletes rows nothing replaces, or writes rows that collide with what was
-# never deleted — so a table joins this set only when both halves are done.
-#
-# Membership also requires that the staleness signal actually covers what the
-# table reads. The ledger counts rows with a `dep_delay`, so only aggregates
-# drawn from that same population qualify: agg_feed_health's own count IS that
-# number, and agg_route_headway_daily discards a row without one before doing
-# anything with it. agg_service_delivered_daily (which counts cancellations and
-# skipped stops) and agg_schedule_revision_daily (which reads
-# static_version_id) both read rows the ledger cannot see, so a date could
-# change for them while the count stands still — they stay on the full rebuild
-# until the ledger carries a signal that moves with them.
-#
-# Both qualifying tables build straight from a ClickHouse GROUP BY that can
-# carry the date restriction itself. The per-date aggregates reading the
-# deduped TEMP table are a separate matter: restricting them means restricting
-# that load.
+# binds two places that must agree — a listed table has BOTH its purge and its
+# build restricted — and requires that the staleness signal cover what the
+# table reads; see _dates_needing_rebuild for what that signal can and cannot
+# see.
 _INCREMENTAL_AGG_TABLES = frozenset({"agg_feed_health", "agg_route_headway_daily"})
 # agg_static_version_summary is NOT in _AGG_TABLES_ORDERED: it is UPSERTed
 # (never wiped) so a past static-feed version's planned-trip-count/vehicle-km
@@ -317,6 +302,13 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     backlog ingest writes rows whose dates are weeks old, and any fixed window
     would leave those aggregates silently wrong. This asks what changed rather
     than when.
+
+    What the signal cannot see bounds who may use it: a row without a
+    ``dep_delay`` is invisible to the count, so an aggregate drawn from those
+    rows could go stale while it stands still. That is why
+    ``agg_service_delivered_daily`` (cancellations and skipped stops) and
+    ``agg_schedule_revision_daily`` (static_version_id) are not in
+    :data:`_INCREMENTAL_AGG_TABLES`.
     """
     # The ledger is read first so an absent one costs nothing: a first run has
     # to rebuild everything regardless, and asking ClickHouse to prove it would
@@ -345,21 +337,43 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     return sorted(stale)
 
 
-def _date_filter(rebuild_dates: list | None, agency_id: int, column: str = "captured_at") -> tuple[str, dict]:
+def _date_filter(rebuild_dates: list | None, agency_id: int) -> tuple[str, dict]:
     """A ClickHouse WHERE fragment restricting a builder to *rebuild_dates*.
 
     ``None`` yields an empty fragment, so a full rebuild runs the query these
-    builders always ran. *column* is named because one builder aliases
-    ``captured_at`` inside a subquery before the filter can apply.
+    builders always ran. The fragment names the raw ``captured_at`` column
+    rather than a date alias: ClickHouse substitutes a SELECT-list alias into
+    WHERE, which turns a filter over an aliased aggregate into an illegal one
+    (see ``build_dedup_ch_sql``'s docstring, which hit this).
     """
     params: dict = {"agency_id": agency_id}
     if rebuild_dates is None:
         return "", params
     params["rebuild_dates"] = rebuild_dates
-    return f" AND toDate({column}, 'Asia/Tokyo') IN {{rebuild_dates:Array(Date)}}", params
+    return " AND toDate(captured_at, 'Asia/Tokyo') IN {rebuild_dates:Array(Date)}", params
 
 
-def _ch_build_and_insert(table: str, cols: str, agency_id: int, ch_client, sql: str, parameters: dict, conn) -> None:
+def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
+    """True when *table* is incremental and no date changed.
+
+    The run where nothing changed is the common one, and without this the
+    query still goes to ClickHouse carrying an empty date list — costing a
+    round trip, and for the headway scan a good deal more, to be told what the
+    ledger already established.
+    """
+    return rebuild_dates == [] and table in _INCREMENTAL_AGG_TABLES
+
+
+def _ch_build_and_insert(
+    table: str,
+    cols: str,
+    agency_id: int,
+    ch_client,
+    sql: str,
+    parameters: dict,
+    conn,
+    rebuild_dates: list | None = None,
+) -> None:
     """Aggregate in ClickHouse, then bulk-load the per-day result.
 
     The counterpart to :func:`_build_and_insert` for the aggregates that need
@@ -374,6 +388,9 @@ def _ch_build_and_insert(table: str, cols: str, agency_id: int, ch_client, sql: 
     """
     if table not in _VALID_AGG_TABLES:
         raise ValueError(f"Unknown aggregation table: {table!r}")
+    if _nothing_to_rebuild(table, rebuild_dates):
+        logger.info(f"  {table}: unchanged, not rebuilt")
+        return
     result = _ch_query(f"{table}: build", ch_client, sql, parameters)
     rows = [(agency_id, *r) for r in result.result_rows]
     if rows:
@@ -842,6 +859,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             """,
             {**date_params, "max_delay": p["max_delay"]},
             conn,
+            rebuild_dates,
         )
         with conn.cursor() as cur:
             cur.execute(
@@ -1365,7 +1383,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         with conn.cursor() as cur:
             cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
             row = cur.fetchone()
-        if row and row[0] in RT_INGEST_STRATEGIES:
+        if _nothing_to_rebuild("agg_route_headway_daily", rebuild_dates):
+            # The heaviest of the two incremental scans, so the run where
+            # nothing changed is exactly the one worth not paying for.
+            logger.info("  agg_route_headway_daily: unchanged, not rebuilt")
+        elif row and row[0] in RT_INGEST_STRATEGIES:
             # One row per (route_code, stop_id, service day) with an ARRAY of
             # that group's actual event times (seconds-of-day, scheduled_time
             # parsed + dep_delay) -- cardinality is bounded by routes × stops

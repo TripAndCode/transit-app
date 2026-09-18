@@ -1645,6 +1645,25 @@ def test_analyze_times_every_aggregate_it_populates(pg_conn, agency_id, ch_clien
     assert not untimed, f"populated but untimed: {sorted(untimed)}"
 
 
+def _incremental_snapshot(pg_conn, agency_id):
+    """Every row of every table in the incremental set, keyed by table.
+
+    Iterating the set rather than naming one table is the point: the contract
+    those tables share — purge scope and build scope must match, and the
+    ledger's signal must cover what the table reads — is otherwise enforced
+    only by a comment, and a table added to the set later would inherit no
+    coverage at all.
+    """
+    from pipeline.analyze import _INCREMENTAL_AGG_TABLES
+
+    out = {}
+    with pg_conn.cursor() as cur:
+        for table in sorted(_INCREMENTAL_AGG_TABLES):
+            cur.execute(f"SELECT * FROM {table} WHERE agency_id = %s", (agency_id,))
+            out[table] = sorted(map(str, cur.fetchall()))
+    return out
+
+
 def _feed_health(pg_conn, agency_id):
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -1688,7 +1707,7 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     all of them — otherwise the optimisation silently corrupts history."""
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
-    first = _feed_health(pg_conn, agency_id)
+    first = _incremental_snapshot(pg_conn, agency_id)
 
     # analyze() directly, not the _analyze() helper: that helper re-mirrors the
     # Postgres seed into ClickHouse each time, which really does change the row
@@ -1696,8 +1715,8 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     # data.
     analyze(agency_id, pg_conn, ch_client)
 
-    assert _feed_health(pg_conn, agency_id) == first
-    assert first, "fixture produced no dates, so this would pass vacuously"
+    assert _incremental_snapshot(pg_conn, agency_id) == first
+    assert any(rows for rows in first.values()), "fixture produced no rows, so this would pass vacuously"
 
 
 def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, ch_client):
@@ -1710,8 +1729,8 @@ def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, c
 
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
-    before = _feed_health(pg_conn, agency_id)
-    assert before
+    before = _incremental_snapshot(pg_conn, agency_id)
+    assert any(rows for rows in before.values())
 
     # A ledger entry for a date ClickHouse never had.
     with pg_conn.cursor() as cur:
@@ -1723,4 +1742,4 @@ def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, c
 
     assert date(2099, 1, 1) in _dates_needing_rebuild(agency_id, pg_conn, ch_client)
     analyze(agency_id, pg_conn, ch_client)
-    assert _feed_health(pg_conn, agency_id) == before
+    assert _incremental_snapshot(pg_conn, agency_id) == before
