@@ -67,7 +67,6 @@ export function InlineSparkline({
 
   return (
     <svg
-      className="ov-sparkline"
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
