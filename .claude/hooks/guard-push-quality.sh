@@ -169,6 +169,12 @@ if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
   SCOPE_OK=0
 fi
 
+PY_PATHSPEC=('*.py')
+FE_PATHSPEC=(
+  'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs'
+  'frontend/*.json' 'frontend/*.html' 'frontend/*.css' 'tests/frontend/*.mjs'
+)
+
 PY_FILES=()
 FE_FILES=()
 # `git -C "$GATE_DIR"` for every diff below: HEAD has to mean the branch being
@@ -177,11 +183,11 @@ FE_FILES=()
 if [ "$SCOPE_OK" -eq 1 ]; then
   while IFS= read -r line; do
     [ -n "$line" ] && PY_FILES+=("$GATE_DIR/$line")
-  done < <(git -C "$GATE_DIR" diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- '*.py')
+  done < <(git -C "$GATE_DIR" diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- "${PY_PATHSPEC[@]}")
 
   while IFS= read -r line; do
     [ -n "$line" ] && FE_FILES+=("$GATE_DIR/$line")
-  done < <(git -C "$GATE_DIR" diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- 'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs' 'frontend/*.json' 'frontend/*.html' 'frontend/*.css' 'tests/frontend/*.mjs')
+  done < <(git -C "$GATE_DIR" diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- "${FE_PATHSPEC[@]}")
 fi
 
 # "Nothing changed here" is the shape a misdirected gate takes, so it cannot
@@ -198,13 +204,32 @@ if printf '%s' "$cmd" | grep -Eq '(^| )--delete( |$)|(^| )-d( |$)| :[^ ]' ; then
   IS_DELETE=1
 fi
 if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ]; then
-  for ref in $(printf '%s' "$cmd" | sed -nE 's/.*push//p' | tr ' ' '\n' | grep -Ev '^(-|origin$|$)'); do
+  # Collect the arguments after the `push` TOKEN. Cutting the string at the
+  # text "push" instead would cut at the last occurrence, which lands inside
+  # any branch name containing it (`fix/push-gate-...`) and leaves the list
+  # empty — silently disabling this very check for such a branch.
+  refs=()
+  seen_push=0
+  for tok in $cmd; do
+    if [ "$seen_push" -eq 1 ]; then
+      case "$tok" in
+        -*|origin) ;;
+        *) refs+=("$tok") ;;
+      esac
+    fi
+    [ "$tok" = "push" ] && seen_push=1
+  done
+
+  for ref in ${refs[@]+"${refs[@]}"}; do
     # Take the destination half of a `src:dst` refspec, then drop a
     # `refs/heads/` prefix so the fully-qualified form resolves too.
     branch="${ref##*:}"
     branch="${branch#refs/heads/}"
     git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 || continue
-    if [ -n "$(git diff --name-only "$BASE_REF...refs/heads/$branch" 2>/dev/null)" ]; then
+    # Filtered to the same pathspecs the scoped checks use: a branch that
+    # changes only shell, SQL or Markdown legitimately produces no files for
+    # them, and comparing against its whole diff would refuse that push.
+    if [ -n "$(git diff --name-only "$BASE_REF...refs/heads/$branch" -- "${PY_PATHSPEC[@]}" "${FE_PATHSPEC[@]}" 2>/dev/null)" ]; then
       echo "BLOCKED: git push — the gate is running in $GATE_DIR, where nothing differs from $BASE_REF," >&2
       echo "  but branch '$branch' does differ. The scoped checks would inspect no files and pass" >&2
       echo "  without verifying anything. Push from the worktree holding '$branch', or use" >&2
