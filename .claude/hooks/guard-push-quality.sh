@@ -9,6 +9,17 @@
 # for a deliberate, visible opt-out of the DB-dependent backend tests only,
 # or PUSH_GATE_SKIP_BUILD=1 to skip the frontend build:bundle + entry-chunk
 # check specifically.
+#
+# Scope limitation, stated because it is not obvious and is easy to mistake
+# for coverage: the file-scoped ruff checks read the branch being pushed (see
+# $GATE_DIR below), but mypy, the backend tests and the frontend checks run
+# against $CLAUDE_PROJECT_DIR's own working tree. For a push from a worktree
+# those validate whatever the main checkout currently holds, not the branch.
+# Running them in the worktree instead would need a provisioned virtualenv
+# and node_modules there, which a worktree does not inherit; until that is
+# solved, `scripts/run_full_ci.sh` from the worktree is the only check that
+# covers the pushed content end to end.
+#
 # Reads the tool input JSON on stdin; exit 2 = block the tool call.
 set -uo pipefail
 input="$(cat)"
@@ -33,7 +44,52 @@ if [ -z "${CLAUDE_PROJECT_DIR:-}" ]; then
   echo "BLOCKED: git push — CLAUDE_PROJECT_DIR is unset, guard-push-quality.sh cannot locate the repo to run checks." >&2
   exit 2
 fi
+
+# Every branch in this repo is developed in its own worktree, so the push
+# being gated is almost never from $CLAUDE_PROJECT_DIR — that checkout sits
+# on `main`, where `main...HEAD` is empty. Checking there scopes ruff to zero
+# files and skips it entirely while still reporting success: the gate passes
+# having inspected nothing. Resolve the directory the push actually comes
+# from, in decreasing order of reliability, and verify it belongs to this
+# same repository before trusting it.
+GATE_DIR=""
+same_repo() {
+  [ -d "$1" ] || return 1
+  local theirs ours
+  theirs="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  ours="$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [ "$theirs" = "$ours" ]
+}
+
+# The command's own directive wins over the payload's `cwd`: `cwd` is the
+# session's directory, which stays at the main checkout even for a command
+# that cds into a worktree first — so trusting it would re-introduce exactly
+# the misdirection being fixed.
+# No `\b` or `\s` in these patterns: BSD sed (macOS, where this hook also
+# runs) supports neither, and silently matches nothing instead of erroring.
+for candidate in \
+  "$(printf '%s' "$cmd" | sed -nE 's/.*git[[:space:]]+-C[[:space:]]+([^[:space:]]+).*/\1/p' | head -1)" \
+  "$(printf '%s' "$cmd" | sed -nE 's/^[[:space:]]*cd[[:space:]]+([^[:space:]&;|]+).*/\1/p' | head -1)" \
+  "$(printf '%s' "$input" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("cwd") or "")' 2>/dev/null)"
+do
+  if [ -n "$candidate" ] && same_repo "$candidate"; then
+    GATE_DIR="$candidate"
+    break
+  fi
+done
+[ -n "$GATE_DIR" ] || GATE_DIR="$CLAUDE_PROJECT_DIR"
+
+# Stay in $CLAUDE_PROJECT_DIR to RUN the tools, and read the file list from
+# $GATE_DIR: poetry resolves its virtualenv by cwd identity, so running from a
+# worktree picks up that worktree's own — usually unprovisioned — environment
+# and would turn this gate's silent false pass into an equally useless false
+# block. The changed files are therefore passed as absolute paths under
+# $GATE_DIR instead; ruff reads its configuration from each file's own nearest
+# pyproject.toml, which is the same file in either checkout.
 cd "$CLAUDE_PROJECT_DIR" || { echo "BLOCKED: git push — could not cd to \$CLAUDE_PROJECT_DIR ($CLAUDE_PROJECT_DIR)." >&2; exit 2; }
+if [ "$GATE_DIR" != "$CLAUDE_PROJECT_DIR" ]; then
+  echo "== push gate: files from $GATE_DIR, tools from $CLAUDE_PROJECT_DIR ==" >&2
+fi
 
 LOG="$(mktemp)"
 # run_with_timeout's fallback path (below) creates a marker temp file per
@@ -115,14 +171,45 @@ fi
 
 PY_FILES=()
 FE_FILES=()
+# `git -C "$GATE_DIR"` for every diff below: HEAD has to mean the branch being
+# pushed, not whatever $CLAUDE_PROJECT_DIR happens to sit on. Paths come back
+# repo-relative, so they are anchored to $GATE_DIR to stay valid from here.
 if [ "$SCOPE_OK" -eq 1 ]; then
   while IFS= read -r line; do
-    [ -n "$line" ] && PY_FILES+=("$line")
-  done < <(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- '*.py')
+    [ -n "$line" ] && PY_FILES+=("$GATE_DIR/$line")
+  done < <(git -C "$GATE_DIR" diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- '*.py')
 
   while IFS= read -r line; do
-    [ -n "$line" ] && FE_FILES+=("$line")
-  done < <(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- 'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs' 'frontend/*.json' 'frontend/*.html' 'frontend/*.css' 'tests/frontend/*.mjs')
+    [ -n "$line" ] && FE_FILES+=("$GATE_DIR/$line")
+  done < <(git -C "$GATE_DIR" diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- 'frontend/*.ts' 'frontend/*.tsx' 'frontend/*.js' 'frontend/*.jsx' 'frontend/*.mjs' 'frontend/*.json' 'frontend/*.html' 'frontend/*.css' 'tests/frontend/*.mjs')
+fi
+
+# "Nothing changed here" is the shape a misdirected gate takes, so it cannot
+# be accepted on the word of a directory we only guessed at. When the push
+# names a branch that does carry changes, this directory is the wrong one and
+# the scoped checks below would inspect nothing while still reporting success.
+#
+# Deleting a remote branch is the exception: it legitimately adds no files, so
+# the named branch still differing from base says nothing about whether this
+# directory is the right one. Treated separately because the heuristic below
+# would otherwise refuse every `git push origin :branch`.
+IS_DELETE=0
+if printf '%s' "$cmd" | grep -Eq '(^| )--delete( |$)|(^| )-d( |$)| :[^ ]' ; then
+  IS_DELETE=1
+fi
+if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ]; then
+  for ref in $(printf '%s' "$cmd" | sed -nE 's/.*push//p' | tr ' ' '\n' | grep -Ev '^(-|origin$|$)'); do
+    branch="${ref##*:}"
+    git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 || continue
+    if [ -n "$(git diff --name-only "$BASE_REF...refs/heads/$branch" 2>/dev/null)" ]; then
+      echo "BLOCKED: git push — the gate is running in $GATE_DIR, where nothing differs from $BASE_REF," >&2
+      echo "  but branch '$branch' does differ. The scoped checks would inspect no files and pass" >&2
+      echo "  without verifying anything. Push from the worktree holding '$branch', or use" >&2
+      echo "  'git -C <that worktree> push ...' so this gate can find it:" >&2
+      git worktree list | sed 's/^/    /' >&2
+      exit 2
+    fi
+  done
 fi
 
 if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
