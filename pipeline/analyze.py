@@ -137,6 +137,25 @@ _AGG_TABLES_ORDERED = (
     "agg_schedule_revision_daily",
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
+
+# Aggregates rebuilt only for the dates whose source rows changed. Membership
+# is a contract between two places that must agree exactly: a table listed here
+# has BOTH its purge and its build restricted to those dates. Restricting only
+# one deletes rows nothing replaces, or writes rows that collide with what was
+# never deleted — so a table joins this set only when both halves are done.
+#
+# These four qualify because each builds straight from a ClickHouse GROUP BY
+# that can carry the date restriction itself. The remaining per-date
+# aggregates read the deduped TEMP table, which is still materialised whole;
+# restricting them means restricting that load, which is a separate change.
+_INCREMENTAL_AGG_TABLES = frozenset(
+    {
+        "agg_feed_health",
+        "agg_service_delivered_daily",
+        "agg_schedule_revision_daily",
+        "agg_route_headway_daily",
+    }
+)
 # agg_static_version_summary is NOT in _AGG_TABLES_ORDERED: it is UPSERTed
 # (never wiped) so a past static-feed version's planned-trip-count/vehicle-km
 # survives `static_loader.load_static()` overwriting the raw static_* tables
@@ -276,6 +295,67 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn) -> N
     logger.info(f"  {table}: {len(rows)} rows")
 
 
+def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
+    """The service dates whose aggregates no longer match ClickHouse.
+
+    ``None`` means every date, which is what a first run or a missing ledger
+    resolves to.
+
+    A row's service date is ``toDate(captured_at, 'Asia/Tokyo')``, fixed by the
+    observation itself, so a date's aggregates can only go stale when rows land
+    in it — and ``agg_feed_health`` already records, per date, how many rows
+    carrying a ``dep_delay`` that date held when it was last built. Comparing
+    that ledger against the same count in ClickHouse names exactly the dates
+    that moved, in both directions: a date the ledger has and ClickHouse no
+    longer does is listed too, so the caller's purge clears aggregate rows
+    whose source is gone.
+
+    Deliberately not "the last N days". A collector outage followed by a
+    backlog ingest writes rows whose dates are weeks old, and any fixed window
+    would leave those aggregates silently wrong. This asks what changed rather
+    than when.
+    """
+    # The ledger is read first so an absent one costs nothing: a first run has
+    # to rebuild everything regardless, and asking ClickHouse to prove it would
+    # add a full-history scan to exactly the run that can least afford one.
+    with conn.cursor() as cur:
+        cur.execute("SELECT date, raw_samples FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
+        stored = dict(cur.fetchall())
+    if not stored:
+        return None
+
+    live = _ch_query(
+        "plan: per-date ledger",
+        ch_client,
+        """
+        SELECT toDate(captured_at, 'Asia/Tokyo') AS date, count() AS raw_samples
+        FROM updates
+        WHERE agency_id = {agency_id:UInt16} AND dep_delay IS NOT NULL
+        GROUP BY date
+        """,
+        {"agency_id": agency_id},
+    )
+    live_counts = {row[0]: row[1] for row in live.result_rows}
+
+    stale = {d for d, n in live_counts.items() if stored.get(d) != n}
+    stale |= {d for d in stored if d not in live_counts}
+    return sorted(stale)
+
+
+def _date_filter(rebuild_dates: list | None, agency_id: int, column: str = "captured_at") -> tuple[str, dict]:
+    """A ClickHouse WHERE fragment restricting a builder to *rebuild_dates*.
+
+    ``None`` yields an empty fragment, so a full rebuild runs the query these
+    builders always ran. *column* is named because one builder aliases
+    ``captured_at`` inside a subquery before the filter can apply.
+    """
+    params: dict = {"agency_id": agency_id}
+    if rebuild_dates is None:
+        return "", params
+    params["rebuild_dates"] = rebuild_dates
+    return f" AND toDate({column}, 'Asia/Tokyo') IN {{rebuild_dates:Array(Date)}}", params
+
+
 def _ch_build_and_insert(table: str, cols: str, agency_id: int, ch_client, sql: str, parameters: dict, conn) -> None:
     """Aggregate in ClickHouse, then bulk-load the per-day result.
 
@@ -324,11 +404,30 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     # INSERTs if it fired mid-run. Hoisting the probe keeps analyze's
     # transactional shape clean.
     has_static = _static_loaded(conn, agency_id)
+    # Resolved before the txn, like has_static: it reads the ledger this run is
+    # about to overwrite, and a rollback must leave that ledger describing the
+    # aggregates that actually survived — so the next run reaches the same
+    # answer instead of skipping dates on the strength of a run that failed.
+    rebuild_dates = _dates_needing_rebuild(agency_id, conn, ch_client)
+    if rebuild_dates is None:
+        logger.info("  incremental: every date (no prior ledger)")
+    else:
+        logger.info(f"  incremental: {len(rebuild_dates)} date(s) changed since the last run")
+    date_where, date_params = _date_filter(rebuild_dates, agency_id)
     try:
         # ── Purge stale rows for this agency ─────────────────────────────
+        # Scoped for the incremental tables, whole for the rest. The scope must
+        # match what each table's build below produces; see
+        # _INCREMENTAL_AGG_TABLES for why the two cannot diverge.
         with _step("purge: DELETE prior rows"), conn.cursor() as cur:
             for tbl in _AGG_TABLES_ORDERED:
-                cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
+                if rebuild_dates is None or tbl not in _INCREMENTAL_AGG_TABLES:
+                    cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
+                elif rebuild_dates:
+                    cur.execute(
+                        f"DELETE FROM {tbl} WHERE agency_id = %s AND date = ANY(%s)",
+                        (agency_id, rebuild_dates),
+                    )
 
         # ── Materialise the deduped fact slice ONCE ──────────────────────
         # The dedup is a full-partition scan + sort; previously every
@@ -733,9 +832,12 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                    countIf(abs(dep_delay) > {max_delay:Int32}) AS clamp_count
             FROM updates
             WHERE agency_id = {agency_id:UInt16} AND dep_delay IS NOT NULL
+            """
+            + date_where
+            + """
             GROUP BY date
             """,
-            {"agency_id": agency_id, "max_delay": p["max_delay"]},
+            {**date_params, "max_delay": p["max_delay"]},
             conn,
         )
         with conn.cursor() as cur:
@@ -1068,19 +1170,23 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     SELECT svc_date, trip_id FROM (
                         SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}
+                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
+                + date_where
+                + """
                         GROUP BY svc_date, trip_id
                     ) WHERE trip_rel = 3
                     UNION DISTINCT
                     SELECT svc_date, trip_id FROM (
                         SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_stop, -1), (captured_at, file_name)) AS stop_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}
+                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
+                + date_where
+                + """
                         GROUP BY svc_date, trip_id, stop_sequence
                     ) WHERE stop_rel = 1
                 ) GROUP BY svc_date
                 """,
-                {"agency_id": agency_id},
+                date_params,
                 conn,
             )
         else:
@@ -1115,13 +1221,15 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date,
                        static_version_id AS version,
                        count() AS cnt
-                FROM updates WHERE agency_id = {agency_id:UInt16}
+                FROM updates WHERE agency_id = {agency_id:UInt16}"""
+            + date_where
+            + """
                 GROUP BY svc_date, version
             )
             GROUP BY svc_date
             HAVING static_version_id IS NOT NULL
             """,
-            {"agency_id": agency_id},
+            date_params,
             conn,
         )
 
@@ -1307,7 +1415,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                            argMax(dep_delay, (captured_at, file_name)) AS dep_delay,
                            argMax(scheduled_time, (captured_at, file_name)) AS scheduled_time
                     FROM updates
-                    WHERE agency_id = {agency_id:UInt16} AND stop_id IS NOT NULL AND route_code IS NOT NULL
+                    WHERE agency_id = {agency_id:UInt16} AND stop_id IS NOT NULL AND route_code IS NOT NULL"""
+                + date_where
+                + """
                     GROUP BY route_code, stop_id, svc_date, trip_id, stop_sequence
                 ),
                 filtered AS (
@@ -1333,7 +1443,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 GROUP BY route_code, stop_id, svc_date
                 """,
                 {
-                    "agency_id": agency_id,
+                    **date_params,
                     "min_delay": -MAX_PLAUSIBLE_DELAY_SEC,
                     "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
                 },

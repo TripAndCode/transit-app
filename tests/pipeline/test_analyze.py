@@ -1,4 +1,4 @@
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 
 import pytest
 
@@ -1643,3 +1643,84 @@ def test_analyze_times_every_aggregate_it_populates(pg_conn, agency_id, ch_clien
 
     untimed = {t for t in populated if not any(label.startswith(f"{t}:") for label in timing)}
     assert not untimed, f"populated but untimed: {sorted(untimed)}"
+
+
+def _feed_health(pg_conn, agency_id):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, raw_samples FROM agg_feed_health WHERE agency_id = %s ORDER BY date",
+            (agency_id,),
+        )
+        return cur.fetchall()
+
+
+def test_dates_needing_rebuild_is_everything_without_a_ledger(pg_conn, agency_id):
+    """No agg_feed_health rows means nothing is known, so nothing is assumed."""
+    from pipeline.analyze import _dates_needing_rebuild
+
+    assert _dates_needing_rebuild(agency_id, pg_conn, None) is None
+
+
+def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_client):
+    from pipeline.analyze import _dates_needing_rebuild
+
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == []
+
+    # The ledger is the only thing consulted, so editing it is the same signal
+    # a newly ingested row would produce.
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_feed_health SET raw_samples = raw_samples + 1 "
+            "WHERE agency_id = %s AND date = (SELECT max(date) FROM agg_feed_health WHERE agency_id = %s) "
+            "RETURNING date",
+            (agency_id, agency_id),
+        )
+        moved = cur.fetchone()[0]
+    pg_conn.commit()
+
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == [moved]
+
+
+def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch_client):
+    """Rebuilding only the changed dates must reach the same state as rebuilding
+    all of them — otherwise the optimisation silently corrupts history."""
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    first = _feed_health(pg_conn, agency_id)
+
+    # analyze() directly, not the _analyze() helper: that helper re-mirrors the
+    # Postgres seed into ClickHouse each time, which really does change the row
+    # counts and so is a different scenario from re-running against unchanged
+    # data.
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert _feed_health(pg_conn, agency_id) == first
+    assert first, "fixture produced no dates, so this would pass vacuously"
+
+
+def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, ch_client):
+    """A date present in the ledger but gone from ClickHouse must be purged.
+
+    It cannot be repaired by rebuilding — there is nothing to rebuild from — so
+    it is listed as needing work precisely so the purge clears it.
+    """
+    from pipeline.analyze import _dates_needing_rebuild
+
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    before = _feed_health(pg_conn, agency_id)
+    assert before
+
+    # A ledger entry for a date ClickHouse never had.
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES (%s, %s, %s, %s)",
+            (agency_id, date(2099, 1, 1), 42, 0),
+        )
+    pg_conn.commit()
+
+    assert date(2099, 1, 1) in _dates_needing_rebuild(agency_id, pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _feed_health(pg_conn, agency_id) == before
