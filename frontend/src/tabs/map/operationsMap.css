@@ -1,6 +1,4 @@
 .operations-page {
-  --ops-navy: #0f1422;
-  --ops-navy-soft: #171f33;
   display: flex;
   min-height: 0;
   height: 100%;
