@@ -57,7 +57,7 @@ const MANIFEST_PATH = join(DIST_DIR, ".vite", "manifest.json");
 // survives minification (property/method names aren't mangled by
 // default), unlike an arbitrary local variable, and unlike the CSS class
 // prefix below it can't collide with app code that merely references
-// MapLibre's CSS classes (e.g. components/MapPopupHTML.ts).
+// MapLibre's CSS classes (e.g. tabs/map/mapOverrides.css).
 const JS_MARKER = "getRTLTextPluginStatus";
 // MapLibre generates this class on its own root canvas element; it's part
 // of the library's actual stylesheet, not something app code would
