@@ -63,47 +63,117 @@ same_repo() {
   [ "$theirs" = "$ours" ]
 }
 
-unquote() {
-  # Strip one matching layer of quotes. A quoted path is mandatory when it
-  # contains a space and common style when it does not, and the capture keeps
-  # the quote characters, which no directory name has.
-  local s="$1"
-  case "$s" in
-    \"*\") s="${s#\"}"; s="${s%\"}" ;;
-    \'*\') s="${s#\'}"; s="${s%\'}" ;;
-  esac
-  printf '%s' "$s"
+# The command is tokenised and its statements walked, rather than searched
+# with a regex. A regex over the raw text cannot tell which `git` invocation a
+# flag belongs to, so `ls -C /tmp && git push` or a commit message quoting
+# `-C /tmp` read as a directory directive, and `grep -C 3 …` read as one that
+# does not exist. shlex applies the shell's own quoting rules, so a quoted or
+# escaped path arrives intact, and walking the statement that actually carries
+# the `push` subcommand is what makes a flag elsewhere in the line irrelevant.
+PARSED="$(
+  printf '%s' "$input" | python3 -c '
+import json, shlex, sys
+
+SEPARATORS = {"&&", "||", ";", "|", "&"}
+out = {"dir": "", "cd_dir": "", "refs": [], "is_delete": False, "is_push": False}
+try:
+    data = json.load(sys.stdin)
+    tokens = shlex.split(data.get("tool_input", {}).get("command", ""))
+except Exception:
+    print(json.dumps(out)); raise SystemExit(0)
+
+statements, current = [], []
+for token in tokens:
+    if token in SEPARATORS:
+        if current:
+            statements.append(current)
+        current = []
+    else:
+        current.append(token)
+if current:
+    statements.append(current)
+
+
+def as_git(statement):
+    """(dir_from_dash_C, subcommand, args) for a git invocation, else None."""
+    i = 0
+    while i < len(statement) and "=" in statement[i] and not statement[i].startswith("-"):
+        i += 1  # leading VAR=value assignments
+    if i >= len(statement) or statement[i] != "git":
+        return None
+    i += 1
+    directory = None
+    while i < len(statement) and statement[i].startswith("-"):
+        if statement[i] in ("-C", "-c", "--git-dir", "--work-tree") and i + 1 < len(statement):
+            if statement[i] == "-C":
+                directory = statement[i + 1]
+            i += 2
+        else:
+            i += 1
+    if i >= len(statement):
+        return None
+    return directory, statement[i], statement[i + 1 :]
+
+
+for statement in statements:
+    parsed = as_git(statement)
+    if parsed and parsed[1] == "push":
+        directory, _, args = parsed
+        out["is_push"] = True
+        out["dir"] = directory or ""
+        out["is_delete"] = any(a in ("--delete", "-d") for a in args) or any(
+            a.startswith(":") and len(a) > 1 for a in args
+        )
+        out["refs"] = [a for a in args if not a.startswith("-") and a != "origin"]
+        break
+    # A later cd overrides an earlier one, as it would in the shell.
+    if statement[:1] == ["cd"] and len(statement) > 1:
+        out["cd_dir"] = statement[1]
+
+print(json.dumps(out))
+' 2>/dev/null
+)"
+[ -n "$PARSED" ] || PARSED='{}'
+
+read_parsed() {
+  printf '%s' "$PARSED" | python3 -c "import json,sys; v=json.load(sys.stdin).get('$1'); print('' if v is None else (' '.join(v) if isinstance(v, list) else v))" 2>/dev/null
 }
 
-# Only the text up to the `push` token is searched for a directory, so a
-# compound command's later, unrelated `git -C <elsewhere> status` cannot be
-# mistaken for where the push happens.
-PUSH_PREFIX="$(printf '%s' "$cmd" | sed -nE 's/(.*)[[:space:]]push([[:space:]].*)?$/\1/p' | head -1)"
-[ -n "$PUSH_PREFIX" ] || PUSH_PREFIX="$cmd"
+# The push's own `-C` is the most explicit statement of where it runs, so it
+# comes first.
+NAMED_DIR="$(read_parsed dir)"
+if [ -n "$NAMED_DIR" ] && same_repo "$NAMED_DIR"; then
+  GATE_DIR="$NAMED_DIR"
+fi
 
-# The command's own directive wins over the payload's `cwd`: `cwd` is the
-# session's directory, which stays at the main checkout even for a command
-# that cds into a worktree first — so trusting it would re-introduce exactly
-# the misdirection being fixed.
-# No `\b` or `\s` in these patterns: BSD sed (macOS, where this hook also
-# runs) supports neither, and silently matches nothing instead of erroring.
-NAMED_DIR=""
-for pattern in \
-  's/.*-C[[:space:]]+"([^"]+)".*/\1/p' \
-  "s/.*-C[[:space:]]+'([^']+)'.*/\\1/p" \
-  's/.*-C[[:space:]]+([^[:space:]]+).*/\1/p' \
-  's/^[[:space:]]*cd[[:space:]]+"([^"]+)".*/\1/p' \
-  "s/^[[:space:]]*cd[[:space:]]+'([^']+)'.*/\\1/p" \
-  's/^[[:space:]]*cd[[:space:]]+([^[:space:]&;|]+).*/\1/p'
-do
-  found="$(printf '%s' "$PUSH_PREFIX" | sed -nE "$pattern" | head -1)"
-  [ -n "$found" ] || continue
-  NAMED_DIR="$(unquote "$found")"
-  if same_repo "$NAMED_DIR"; then
-    GATE_DIR="$NAMED_DIR"
-    break
+# Then the branch being pushed, which identifies the worktree holding it. This
+# outranks a preceding `cd` because it says where the pushed FILES are rather
+# than where the command happens to run: pushing a branch from the main
+# checkout is ordinary, and the branch's content still lives in its worktree.
+# It also needs nothing from the command's shape.
+if [ -z "$GATE_DIR" ]; then
+  for ref in $(read_parsed refs); do
+    branch="${ref##*:}"
+    branch="${branch#refs/heads/}"
+    [ -n "$branch" ] || continue
+    holder="$(git worktree list --porcelain | awk -v want="refs/heads/$branch" '
+      /^worktree /{dir=substr($0, 10)}
+      /^branch /{if (substr($0, 8) == want) {print dir; exit}}')"
+    if [ -n "$holder" ] && same_repo "$holder"; then
+      GATE_DIR="$holder"
+      break
+    fi
+  done
+fi
+
+# Then a preceding `cd`, for a push that names no ref at all.
+if [ -z "$GATE_DIR" ]; then
+  CD_DIR="$(read_parsed cd_dir)"
+  if [ -n "$CD_DIR" ] && same_repo "$CD_DIR"; then
+    GATE_DIR="$CD_DIR"
   fi
-done
+  [ -n "$NAMED_DIR" ] || NAMED_DIR="$CD_DIR"
+fi
 
 # A named directory that did not match this repository is judged on whether it
 # exists at all. A path that does not exist is the signature of parsing this
@@ -250,32 +320,14 @@ fi
 # the named branch still differing from base says nothing about whether this
 # directory is the right one. Treated separately because the heuristic below
 # would otherwise refuse every `git push origin :branch`.
+#
+# Both this and the ref list come from the parsed push argv, not from the raw
+# text: a `-d` belonging to something else on the line (`docker run -d …`)
+# would otherwise read as a deletion and switch this whole check off.
 IS_DELETE=0
-if printf '%s' "$cmd" | grep -Eq '(^| )--delete( |$)|(^| )-d( |$)| :[^ ]' ; then
-  IS_DELETE=1
-fi
+[ "$(read_parsed is_delete)" = "True" ] && IS_DELETE=1
 if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ]; then
-  # Collect the arguments after the `push` TOKEN. Cutting the string at the
-  # text "push" instead would cut at the last occurrence, which lands inside
-  # any branch name containing it (`fix/push-gate-...`) and leaves the list
-  # empty — silently disabling this very check for such a branch.
-  # `read -ra`, not `for tok in $cmd`: the latter also expands globs, and the
-  # script has already cd'd into the repo — so `git push origin 'refs/heads/*'`
-  # would turn into a list of matching filenames, dropping the real ref.
-  refs=()
-  read -ra cmd_tokens <<<"$cmd"
-  seen_push=0
-  for tok in ${cmd_tokens[@]+"${cmd_tokens[@]}"}; do
-    if [ "$seen_push" -eq 1 ]; then
-      case "$tok" in
-        -*|origin) ;;
-        *) refs+=("$tok") ;;
-      esac
-    fi
-    [ "$tok" = "push" ] && seen_push=1
-  done
-
-  for ref in ${refs[@]+"${refs[@]}"}; do
+  for ref in $(read_parsed refs); do
     # Take the destination half of a `src:dst` refspec, then drop a
     # `refs/heads/` prefix so the fully-qualified form resolves too.
     branch="${ref##*:}"
