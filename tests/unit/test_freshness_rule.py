@@ -1,6 +1,6 @@
 """Unit tests for the pure agg-freshness rule (no DB)."""
 
-from datetime import date, datetime, timezone
+from datetime import date
 
 from pipeline.freshness import is_stale
 

@@ -8,7 +8,7 @@ import { ReportsHomeTab } from "../../tabs/ReportsHomeTab";
 import { RouteAnalysisTab } from "../../tabs/RouteAnalysisTab";
 import { readAnalyses, saveAnalysis } from "./savedAnalyses";
 import { downloadCsv } from "./csv";
-import { useReport } from "../../api/hooks";
+import { useReport, useRouteShape } from "../../api/hooks";
 
 const mapMounts = vi.fn();
 const mapProps = vi.fn();
@@ -34,7 +34,7 @@ vi.mock("../../api/hooks", () => ({
     { route_id: "b", route_code: "999", route_long_name: "Coast", route_short_name: "9", trip_headsigns: [] },
   ], isPending: false }),
   useAgencies: () => ({ data: [{ agency_id: 1, agency_name: "Test Agency" }] }),
-  useRouteShape: () => ({ data: { route: "101", geometry: null, stops: [{ stop_id: "A", stop_sequence: 1, stop_name: "Station A", lon: 140, lat: 40, avg_min: 2, samples: 5 }] }, isPending: false }),
+  useRouteShape: vi.fn(() => ({ data: { route: "101", geometry: null, stops: [{ stop_id: "A", stop_sequence: 1, stop_name: "Station A", lon: 140, lat: 40, avg_min: 2, samples: 5 }] }, isPending: false })),
   useReport: vi.fn((_id, type) => ({ data: type ? { report_type: type, definition: {}, rows: type === "trend" ? [{ days: [{ date: "2026-09-07", avg_min: 2, samples: 4 }] }] : [["101", null, 2, 1, 3, 4]] } : undefined, isPending: false })),
 }));
 const ctx = { from: "2026-09-07", to: "2026-09-12", dow: "weekday" as const, time_band: "morning" as const, service: "all" as const, routes: ["101"] };
@@ -103,6 +103,28 @@ it("footer CSV exports the report data, not just the filter-metadata prefix", as
   expect(payload.flat()).toContain("mean_departure_delay_minutes");
   expect(payload.flat()).toContain("median_minutes");
   expect(payload.length).toBe(8);
+});
+
+it("defers the analysis filters until Apply instead of querying mid-selection", async () => {
+  // This screen renders only while exactly one pattern is selected, and
+  // narrowing to one passes through a multi-code state, so committing each
+  // step dropped it into its empty state mid-selection. The selection must
+  // therefore not reach the shape query until Apply.
+  show("route-analysis");
+  const user = userEvent.setup();
+  // The tab calls useRouteShape twice per render -- once for the period and
+  // once for the comparison window, which passes null while compare is off --
+  // so the last non-null argument is the route actually being requested.
+  const lastRequestedRoute = () =>
+    vi.mocked(useRouteShape).mock.calls.filter((c) => c[1] != null).at(-1)?.[1];
+  expect(lastRequestedRoute()).toBe("101");
+
+  await user.selectOptions(screen.getByRole("combobox", { name: "Service pattern" }), "999");
+  expect(lastRequestedRoute()).toBe("101");
+  expect(screen.queryByText("Choose a route and service pattern")).toBeNull();
+
+  await user.click(screen.getByRole("button", { name: "Apply" }));
+  expect(lastRequestedRoute()).toBe("999");
 });
 
 it("keeps the route map mounted across tab switches instead of recreating its WebGL context", async () => {
