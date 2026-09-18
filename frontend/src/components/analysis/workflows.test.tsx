@@ -47,7 +47,13 @@ it("keeps pattern and period in exported observations and saved analysis", async
 it("changing keito scopes both report queries and CSV to the selected code", async () => {
   show("reports");
   const user = userEvent.setup();
+  // The filters now commit on Apply, so the selection alone must not reach
+  // the queries -- asserted before the apply as well as after, because the
+  // deferral is the behaviour being added and the old test could not have
+  // caught a regression in that direction.
   await user.selectOptions(screen.getByRole("combobox", { name: "Service pattern" }), "999");
+  expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["101"]);
+  await user.click(screen.getByRole("button", { name: "Apply" }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["999"]);
   await user.click(screen.getAllByRole("button", { name: "Download CSV" })[0]);
   expect(vi.mocked(downloadCsv).mock.calls[0][1][1]).toContain("999");
