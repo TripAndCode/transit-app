@@ -83,20 +83,19 @@
      and JS consumers (MapLibre style expressions) resolve the same source
      of truth. */
   --delay-severe: #d92121;
-  /* Overview trend chips / mover-streak dots + generic track/hover accents.
+  /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
-     .ov-chip-down/-up/-neutral and the mover-streak dots; track-bg is a
-     background fill for bar/rail tracks (pareto, service-split); hover-tint
-     is a bare (non-brand) hover feedback tint; skeleton-* feed .skeleton's
-     shimmer gradient. All theme-aware — light values below match the
-     pre-existing hardcoded overview.css hex exactly; dark values are lifted
-     to pass contrast / stay visible on the dark surfaces. */
+     ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
+     (fills/strokes) plus overview.css's pareto/peak/service-split hover and
+     fill rules; track-bg is a background fill for bar/rail tracks (pareto,
+     service-split); hover-tint is a bare (non-brand) hover feedback tint;
+     skeleton-* feed .skeleton's shimmer gradient. All theme-aware — light
+     values below match the pre-existing hardcoded overview.css hex exactly;
+     dark values are lifted to pass contrast / stay visible on the dark
+     surfaces. */
   --trend-good: #166534;
-  --trend-good-bg: rgba(22, 101, 52, 0.10);
   --trend-bad: #b45309;
-  --trend-bad-bg: rgba(180, 83, 9, 0.10);
   --trend-neutral: #475569;
-  --trend-neutral-bg: rgba(71, 85, 105, 0.08);
   --track-bg: rgba(0, 0, 0, 0.03);
   --hover-tint: rgba(0, 0, 0, 0.04);
   --bg-soft-hover: #e4e4e0;
@@ -143,11 +142,8 @@
      "fix" this by substituting a brighter red. */
   --delay-severe: #A83A1A;
   --trend-good: #4ade80;
-  --trend-good-bg: rgba(74, 222, 128, 0.16);
   --trend-bad: #fbbf24;
-  --trend-bad-bg: rgba(251, 191, 36, 0.16);
   --trend-neutral: #94a3b8;
-  --trend-neutral-bg: rgba(148, 163, 184, 0.16);
   --track-bg: rgba(255, 255, 255, 0.08);
   --hover-tint: rgba(255, 255, 255, 0.08);
   --bg-soft-hover: #2a2f4a;

@@ -58,6 +58,12 @@ describe("OverviewTab", () => {
       }),
     );
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
-    expect(document.querySelector(".ov-map-strip")).not.toBeInTheDocument();
+    // Asserted on the map container MapLibre itself creates, not on a class
+    // name this screen once used: `.ov-map-strip` exists in no stylesheet and
+    // no component, so asserting its absence could never fail and guarded
+    // nothing. Any map reintroduced here would mount through the app's own
+    // MapLibre helper and carry this class whatever the wrapper is called.
+    expect(document.querySelector(".maplibregl-map")).not.toBeInTheDocument();
+    expect(document.querySelector("canvas")).not.toBeInTheDocument();
   });
 });
