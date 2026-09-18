@@ -242,9 +242,7 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn) -> N
     logger.info(f"  {table}: {len(rows)} rows")
 
 
-def _ch_build_and_insert(
-    table: str, cols: str, agency_id: int, ch_client, sql: str, parameters: dict, conn
-) -> None:
+def _ch_build_and_insert(table: str, cols: str, agency_id: int, ch_client, sql: str, parameters: dict, conn) -> None:
     """Aggregate in ClickHouse, then bulk-load the per-day result.
 
     The counterpart to :func:`_build_and_insert` for the aggregates that need
