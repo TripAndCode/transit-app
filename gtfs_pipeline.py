@@ -42,11 +42,20 @@ def describe_target(url: str) -> str:
     raised would pre-empt the driver's own error — and the driver's is the
     better one, because it names what is wrong with the URL.
     """
-    parsed = urlsplit(url)
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        # `urlsplit` itself rejects some malformed netlocs before we ever get
+        # to parse anything — an unencoded literal `[` or `]`, which an
+        # ordinary password can contain, trips its IPv6-bracket check. Strip
+        # credentials by hand instead, using the same "everything up to the
+        # last `@`" boundary rule as the parsed path below.
+        _, _, rest = url.rpartition("@")
+        return rest or "?"
     _, _, hostspec = parsed.netloc.rpartition("@")
     host = parsed.hostname or "?"
     try:
-        port = f":{parsed.port}" if parsed.port else ""
+        port = f":{parsed.port}" if parsed.port is not None else ""
     except ValueError:
         # `.port` raises rather than returning None when the substring is not
         # an in-range integer. Echo it as written: it is part of the hostspec,
@@ -118,8 +127,7 @@ def _get_conn(require_schema: bool = True):
     # to be listening — another project's database, or the throwaway test one.
     # Left unchecked the first symptom is an UndefinedTable traceback that
     # names the missing table but not the database it was missing from, which
-    # is the one fact needed to see that the target is wrong. The commands
-    # whose job is a database without this schema opt out.
+    # is the one fact needed to see that the target is wrong.
     if require_schema:
         with conn.cursor() as cur:
             cur.execute(SCHEMA_PROBE_SQL)

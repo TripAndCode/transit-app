@@ -20,6 +20,12 @@ def test_renders_host_port_and_database(url, expected):
     assert describe_target(url) == expected
 
 
+def test_port_zero_is_rendered_not_dropped():
+    """`parsed.port` returns the int 0 for an explicit `:0`, which is falsy —
+    a bare truthiness check would silently drop a real (if unusual) port."""
+    assert describe_target("postgresql://host:0/db") == "host:0/db"
+
+
 def test_omits_credentials_entirely():
     """Dropped, not masked — a mask still leaks the password's length."""
     rendered = describe_target("postgresql://admin:sup3r-s3cret@localhost:5433/transit")
@@ -75,3 +81,20 @@ def test_userinfo_is_dropped_even_when_the_port_is_unparseable():
     assert "sup3r-s3cret" not in rendered
     assert "admin" not in rendered
     assert rendered == "localhost:badport/transit"
+
+
+def test_does_not_raise_on_a_netloc_urlsplit_itself_rejects():
+    """An unencoded `[` or `]` in a password trips `urlsplit`'s own IPv6-bracket
+    check before this function gets a chance to parse anything — a real
+    password can easily contain either character. This must still not be the
+    thing that raises, and must still drop the credential.
+    """
+    rendered = describe_target("postgresql://admin:pa]ss@localhost:5432/transit")
+
+    assert "pa]ss" not in rendered
+    assert "admin" not in rendered
+    assert rendered == "localhost:5432/transit"
+
+
+def test_does_not_raise_on_an_unmatched_bracket_with_no_credentials():
+    assert describe_target("postgresql://[::1/transit") == "postgresql://[::1/transit"
