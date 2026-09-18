@@ -61,10 +61,9 @@ def test_analyze_creates_agg_route_stats(pg_conn, agency_id, ch_client):
 
 def _seed_thin_route(pg_conn, agency_id, route_code, n):
     """Insert *n* fake rows for a single (route_code, service_type='平日',
-    stop_sequence=1) group — deliberately fewer than both agg_route_stats'
-    former per-(route, service_type) gate (`HAVING COUNT(*) > 20`) and
-    agg_stop_seq's former per-(route, stop_sequence) gate
-    (`HAVING COUNT(*) > 5`). A unique day per row (like _seed_updates) keeps
+    stop_sequence=1) group — deliberately fewer than agg_route_stats' former
+    per-(route, service_type) gate (`HAVING COUNT(*) > 20`). A unique day per
+    row (like _seed_updates) keeps
     every row a distinct post-dedup (trip_id, date, stop_sequence) key, so
     the post-dedup sample count is exactly *n*.
     """
@@ -106,23 +105,6 @@ def test_analyze_keeps_low_sample_agg_route_stats_row(pg_conn, agency_id, ch_cli
     assert row[0] == 3
 
 
-def test_analyze_keeps_low_sample_agg_stop_seq_row(pg_conn, agency_id, ch_client):
-    """analyze() has no insert-time minimum-sample gate on any agg_* table —
-    a (route, stop_sequence) group with only 3 samples must still appear in
-    agg_stop_seq (with samples=3), not be silently dropped the way the former
-    `HAVING COUNT(*) > 5` gate would have dropped it."""
-    _seed_thin_route(pg_conn, agency_id, "99998", 3)
-    _analyze(agency_id, pg_conn, ch_client)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT samples FROM agg_stop_seq WHERE agency_id = %s AND route_code = %s AND stop_sequence = 1",
-            (agency_id, "99998"),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    assert row[0] == 3
-
-
 def test_analyze_creates_agg_route_hour(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
@@ -133,19 +115,6 @@ def test_analyze_creates_agg_route_hour(pg_conn, agency_id, ch_client):
         )
         count = cur.fetchone()[0]
     assert count > 0
-
-
-def test_analyze_creates_agg_route_dow(pg_conn, agency_id, ch_client):
-    _seed_updates(pg_conn, agency_id)
-    _analyze(agency_id, pg_conn, ch_client)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT DISTINCT dow FROM agg_route_dow WHERE agency_id = %s",
-            (agency_id,),
-        )
-        dows = {r[0] for r in cur.fetchall()}
-    assert dows <= {1, 2, 3, 4, 5, 6, 7}
-    assert len(dows) > 0
 
 
 def test_analyze_creates_agg_route_hour_dow(pg_conn, agency_id, ch_client):
@@ -199,43 +168,6 @@ def test_analyze_creates_agg_route_daily(pg_conn, agency_id, ch_client):
         assert trips_observed > 0
         assert samples > 0
         assert last_seen_at is not None
-
-
-def test_analyze_creates_agg_stop_seq_with_stop_name(pg_conn, agency_id, ch_client):
-    _seed_updates(pg_conn, agency_id)
-    _analyze(agency_id, pg_conn, ch_client)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT stop_name FROM agg_stop_seq WHERE agency_id = %s LIMIT 1",
-            (agency_id,),
-        )
-        stop_name = cur.fetchone()[0]
-    assert stop_name is not None
-    assert "番停留所" in stop_name
-
-
-def test_analyze_agg_stop_seq_with_real_stop_name(pg_conn, agency_id, ch_client):
-    _seed_updates(pg_conn, agency_id)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, %s, %s)",
-            (agency_id, "S1", "青森駅"),
-        )
-        cur.execute(
-            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (agency_id, "平日_11時37分_系統44372", 1, "S1", "11:37"),
-        )
-    pg_conn.commit()
-    _analyze(agency_id, pg_conn, ch_client)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT stop_name FROM agg_stop_seq WHERE agency_id = %s AND stop_sequence = 1",
-            (agency_id,),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    assert row[0] == "青森駅"
 
 
 def test_analyze_creates_agg_daily_trend(pg_conn, agency_id, ch_client):
@@ -555,11 +487,6 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
             "(%s, 'GHOST', '平日', '11:30:00', 99.9, 99.9, 99.9, 100)",
         ),
         (
-            "agg_route_dow",
-            "(agency_id, route_code, service_type, dow, avg_min, samples)",
-            "(%s, 'GHOST', '平日', 1, 99.9, 100)",
-        ),
-        (
             "agg_daily_trend",
             "(agency_id, date, route_code, service_type, avg_min, samples)",
             "(%s, '2099-01-01', 'GHOST', '平日', 99.9, 100)",
@@ -568,11 +495,6 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
             "agg_hour_daily",
             "(agency_id, date, hour, avg_min, samples)",
             "(%s, '2099-01-01', 11, 99.9, 100)",
-        ),
-        (
-            "agg_stop_seq",
-            "(agency_id, route_code, stop_sequence, stop_name, avg_min, samples)",
-            "(%s, 'GHOST', 99, 'GHOST STOP', 99.9, 100)",
         ),
         (
             "agg_stop_daily",

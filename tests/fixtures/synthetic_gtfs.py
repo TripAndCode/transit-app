@@ -235,7 +235,6 @@ def uniform_delays() -> SyntheticPattern:
             "samples": n,
         },
         "agg_route_hour": {"avg_min": 0.5, "p50_min": 0.5, "p90_min": 0.5, "samples": n},
-        "agg_route_dow": {"avg_min": 0.5, "samples": n},
         "agg_route_hour_dow": {"avg_min": 0.5, "samples": n},
         "agg_daily_trend": {"avg_min": 0.5, "samples": n},
         "agg_route_daily": {
@@ -245,7 +244,6 @@ def uniform_delays() -> SyntheticPattern:
             "samples": n,
         },
         "agg_hour_daily": {"hour": 8, "avg_min": 0.5, "samples": n},
-        "agg_stop_seq": {"avg_min": 0.5, "samples": n},
         "agg_stop_daily": {"delay_sum": n * delay_sec, "samples": n},
         "agg_stop_routes": {"route_codes": route_code},
         "agg_feed_health": {"raw_samples": n, "clamp_count": 0},
@@ -321,7 +319,6 @@ def outlier_spike() -> SyntheticPattern:
             "samples": n,
         },
         "agg_route_hour": {"avg_min": 0.88, "p50_min": 0.5, "p90_min": 0.5, "samples": n},
-        "agg_route_dow": {"avg_min": 0.88, "samples": n},
         "agg_route_hour_dow": {"avg_min": 0.88, "samples": n},
         "agg_daily_trend": {"avg_min": 0.88, "samples": n},
         "agg_route_daily": {
@@ -331,7 +328,6 @@ def outlier_spike() -> SyntheticPattern:
             "samples": n,
         },
         "agg_hour_daily": {"hour": 8, "avg_min": 0.88, "samples": n},
-        "agg_stop_seq": {"avg_min": 0.88, "samples": n},
         "agg_stop_daily": {"delay_sum": total_delay_sec, "samples": n},
         "agg_stop_routes": {"route_codes": route_code},
         "agg_feed_health": {"raw_samples": n, "clamp_count": 0},
@@ -415,7 +411,6 @@ def null_delays() -> SyntheticPattern:
             "samples": n_valid,
         },
         "agg_route_hour": {"avg_min": 1.0, "p50_min": 1.0, "p90_min": 1.0, "samples": n_valid},
-        "agg_route_dow": {"avg_min": 1.0, "samples": n_valid},
         "agg_route_hour_dow": {"avg_min": 1.0, "samples": n_valid},
         "agg_daily_trend": {"avg_min": 1.0, "samples": n_valid},
         "agg_route_daily": {
@@ -425,7 +420,6 @@ def null_delays() -> SyntheticPattern:
             "samples": n_valid,
         },
         "agg_hour_daily": {"hour": 8, "avg_min": 1.0, "samples": n_valid},
-        "agg_stop_seq": {"avg_min": 1.0, "samples": n_valid},
         "agg_stop_daily": {"delay_sum": n_valid * delay_sec, "samples": n_valid},
         "agg_stop_routes": {"route_codes": route_code},
         "agg_feed_health": {"raw_samples": n_valid, "clamp_count": 0},
