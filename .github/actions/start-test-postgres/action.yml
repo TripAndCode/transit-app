@@ -34,7 +34,13 @@ runs:
     # The port and database are fixed here rather than parameterised: callers
     # name them again in their own DATABASE_URL, and a second knob would let
     # the two drift apart with nothing to catch it until a job failed to
-    # connect.
+    # connect. Unlike the ClickHouse service container this repo's CI also
+    # runs (whose host port is dynamically assigned specifically because a
+    # persistent runner already had another container permanently bound to
+    # its old fixed port), 5433 is not known to be occupied by anything
+    # long-lived on any runner this workflow targets -- if that ever
+    # changes, prefer dynamizing this port the same way over reclaiming it
+    # by convention.
     - name: Run the container
       shell: bash
       run: |

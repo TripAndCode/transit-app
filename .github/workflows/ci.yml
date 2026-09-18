@@ -151,9 +151,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HOME/bin"
-          curl -sSfL \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | tar -xz -C "$HOME/bin" gitleaks
+          # A persistent runner can already have the right binary left over
+          # from a previous run -- skip the download/extract in that case
+          # rather than refetching an unchanged tarball from GitHub every job.
+          if [ "$("$HOME/bin/gitleaks" version 2>/dev/null || true)" != "$GITLEAKS_VERSION" ]; then
+            curl -sSfL \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+              | tar -xz -C "$HOME/bin" gitleaks
+          fi
           echo "$HOME/bin" >> "$GITHUB_PATH"
           "$HOME/bin/gitleaks" version
 
@@ -162,7 +167,13 @@ jobs:
           DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
           GEMINI_API_KEY: test-key
           CLICKHOUSE_HOST: localhost
+          # tests/conftest.py's ch_client/ch_async_client fixtures (and a
+          # handful of standalone test_*_ch.py files) read
+          # CLICKHOUSE_TEST_PORT independently of pipeline/clickhouse.py's
+          # own CLICKHOUSE_PORT -- scripts/run_integration_tests.sh sets
+          # both from the same value for exactly this reason.
           CLICKHOUSE_PORT: ${{ job.services.clickhouse.ports['8123'] }}
+          CLICKHOUSE_TEST_PORT: ${{ job.services.clickhouse.ports['8123'] }}
           CLICKHOUSE_USER: transit
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
