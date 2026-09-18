@@ -85,6 +85,19 @@ def test_multiline_with_preceding_unrelated_statement_still_resolves_cd():
     assert parsed["refs"] == ["feature"]
 
 
+def test_backslash_newline_line_continuation_does_not_corrupt_the_next_token():
+    """The bug: an unquoted backslash-newline is a real shell line
+    continuation (both characters vanish, joining the two physical lines),
+    but a naive newline-to-separator rewrite left the backslash in place
+    and shlex.split() then kept the following newline as a literal
+    character glued onto the next token instead of eliding the pair --
+    corrupting cd_dir with an embedded newline rather than a clean path."""
+    command = "cd \\\n/some/worktree\ngit push origin somebranch"
+    parsed = _parse(command)
+    assert parsed["cd_dir"] == "/some/worktree"
+    assert parsed["refs"] == ["somebranch"]
+
+
 def test_newline_inside_a_quoted_string_is_not_treated_as_a_separator():
     """A multi-line commit message is ordinary content, not a statement
     boundary -- only a newline outside quotes splits statements."""

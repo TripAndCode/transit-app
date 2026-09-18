@@ -86,22 +86,33 @@ try:
     # collapses into a single unsplit statement, and every heuristic below
     # that keys off a statement first token ("git", "cd") silently stops
     # firing. A newline inside a quoted string (a multi-line commit message)
-    # is left alone so its content is not altered. chr(34)/chr(39) stand in
-    # for literal double/single-quote characters here because this whole
-    # script is itself embedded in a single-quoted shell argument.
+    # is left alone so its content is not altered, and an unquoted
+    # backslash-newline pair (a real shell line continuation) is dropped
+    # entirely rather than turned into a literal newline character --
+    # shlex.split() has no concept of line continuation itself, so passing
+    # "\<newline>" straight through leaves a literal newline glued onto
+    # whatever token follows instead of eliding it the way a real shell
+    # would. chr(34)/chr(39) stand in for literal double/single-quote
+    # characters here because this whole script is itself embedded in a
+    # single-quoted shell argument.
     dq, sq = chr(34), chr(39)
-    quote, escaped, chars = None, False, []
-    for ch in raw_cmd:
-        if escaped:
-            chars.append(ch); escaped = False
-        elif quote:
+    quote, chars = None, []
+    i, n = 0, len(raw_cmd)
+    while i < n:
+        ch = raw_cmd[i]
+        if quote:
             chars.append(ch)
-            if ch == "\\" and quote == dq:
-                escaped = True
-            elif ch == quote:
+            if ch == quote:
                 quote = None
-        elif ch == "\\":
-            chars.append(ch); escaped = True
+            elif ch == "\\" and quote == dq and i + 1 < n:
+                i += 1
+                chars.append(raw_cmd[i])
+        elif ch == "\\" and i + 1 < n and raw_cmd[i + 1] == "\n":
+            i += 1  # line continuation: both characters vanish
+        elif ch == "\\" and i + 1 < n:
+            chars.append(ch)
+            i += 1
+            chars.append(raw_cmd[i])
         elif ch in (sq, dq):
             quote = ch; chars.append(ch)
         elif ch == "\n":
@@ -112,6 +123,7 @@ try:
             chars.append(" ; ")
         else:
             chars.append(ch)
+        i += 1
     tokens = shlex.split("".join(chars))
 except Exception:
     print(json.dumps(out)); raise SystemExit(0)
@@ -375,30 +387,31 @@ fi
 IS_DELETE=0
 [ "$(read_parsed is_delete)" = "True" ] && IS_DELETE=1
 if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ]; then
-  # A bare `git push` (relying on the branch's own upstream tracking) parses
-  # to no ref tokens at all, but it still means "push HEAD" -- treat that
-  # the same as an explicit `git push origin HEAD` below instead of skipping
-  # this safety net just because the argv happened not to spell the branch
-  # out.
-  REFS_TO_CHECK="$(read_parsed refs)"
-  [ -n "$REFS_TO_CHECK" ] || REFS_TO_CHECK="HEAD"
-  for ref in $REFS_TO_CHECK; do
+  # A literal `HEAD` (`git push origin HEAD`) or a completely bare
+  # `git push` (relying on the branch's own upstream tracking) cannot be
+  # checked by this safety net: both mean "whatever branch GATE_DIR is
+  # actually on", which is exactly the value this net exists to
+  # cross-check GATE_DIR against. Resolving "HEAD" from GATE_DIR itself
+  # would just read back GATE_DIR's own branch, which can never disagree
+  # with itself -- there is no independent second data point in the
+  # command's own argv for either shape, so `read_parsed refs` returning
+  # nothing or a lone "HEAD" is left to fall through this loop untouched
+  # (the same as it always could not be checked before this comment was
+  # written). This is a real, accepted gap, not something a smarter
+  # regex or resolution step can close from parsing alone.
+  for ref in $(read_parsed refs); do
     # Take the SOURCE half of a `src:dst` refspec, then drop a
     # `refs/heads/` prefix so the fully-qualified form resolves too.
     branch="${ref%%:*}"
     branch="${branch#refs/heads/}"
-    if [ "$branch" = "HEAD" ]; then
-      # Neither a literal "HEAD" nor an implicit one names a branch in its
-      # own argv -- resolve it from GATE_DIR's own checkout instead, since
-      # that is what HEAD actually refers to for the push being checked.
-      branch="$(git -C "$GATE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-    fi
-    [ -n "$branch" ] && [ "$branch" != "HEAD" ] || continue
     git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 || continue
-    # Filtered to the same pathspecs the scoped checks use: a branch that
-    # changes only shell, SQL or Markdown legitimately produces no files for
-    # them, and comparing against its whole diff would refuse that push.
-    if [ -n "$(git diff --name-only "$BASE_REF...refs/heads/$branch" -- "${PY_PATHSPEC[@]}" "${FE_PATHSPEC[@]}" 2>/dev/null)" ]; then
+    # Filtered to the same pathspecs the scoped checks use (and with the
+    # same --diff-filter=ACMR as PY_FILES/FE_FILES above): a branch whose
+    # only Python/frontend change is a deletion, or one that changes only
+    # shell/SQL/Markdown, legitimately produces no files here, and
+    # comparing against its unfiltered diff would refuse both pushes for
+    # a directory that was never actually wrong.
+    if [ -n "$(git diff --name-only --diff-filter=ACMR "$BASE_REF...refs/heads/$branch" -- "${PY_PATHSPEC[@]}" "${FE_PATHSPEC[@]}" 2>/dev/null)" ]; then
       echo "BLOCKED: git push — the gate is running in $GATE_DIR, where nothing differs from $BASE_REF," >&2
       echo "  but branch '$branch' does differ. The scoped checks would inspect no files and pass" >&2
       echo "  without verifying anything. Push from the worktree holding '$branch', or use" >&2
