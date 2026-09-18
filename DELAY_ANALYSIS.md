@@ -23,7 +23,7 @@ After ingest, `analyze` turns the raw readings into summary tables:
 3. **aggregate** — precompute averages and p90 sliced different ways into `agg_*` tables:
    - `agg_route_hour` — route × service type (weekday / Saturday / Sunday-holiday) ×
      scheduled departure time → average delay
-   - `agg_route_dow` — route × day-of-week → average delay
+   - `agg_route_hour_dow` — route × day-of-week × scheduled hour → average delay
    - `agg_route_daily` — route × day → average delay
    - `agg_route_stats` — route overall (avg, p50, p90, on-time %)
    - …and per-stop / per-hour / feed-health variants

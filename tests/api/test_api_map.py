@@ -31,8 +31,8 @@ async def map_app(apply_schema):
         await conn.execute(
             "TRUNCATE agencies, updates, static_stops, static_stop_times, "
             "static_trips, static_routes, static_calendar_dates, static_shapes, "
-            "agg_route_stats, agg_route_hour, agg_route_dow, "
-            "agg_daily_trend, agg_route_daily, agg_stop_seq, agg_stop_daily, agg_stop_routes, "
+            "agg_route_stats, agg_route_hour, "
+            "agg_daily_trend, agg_route_daily, agg_stop_daily, agg_stop_routes, "
             "agg_route_stop_daily, agg_feed_health, rag_chunks CASCADE"
         )
     await pool.close()
