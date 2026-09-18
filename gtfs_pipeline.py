@@ -5,6 +5,7 @@ import argparse
 import logging
 import os
 import sys
+from urllib.parse import urlsplit
 
 import psycopg2
 
@@ -27,7 +28,81 @@ EX_TEMPFAIL = 75
 ACTIVE_AGENCY_IDS_SQL = "SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
 
 
-def _get_conn():
+def describe_target(url: str) -> str:
+    """Render *url*'s host, port and database name, never its credentials.
+
+    Safe to log and to put in an error message. A password can only appear in
+    the userinfo half, before the ``@`` — libpq reads a netloc with no ``@`` as
+    a hostspec, so ``postgresql://admin:54321/db`` connects to host ``admin``
+    on port 54321 and holds no credential at all. Everything read here is taken
+    from the hostspec alone; the userinfo half is dropped rather than masked,
+    so neither the password nor its length leaks.
+
+    Never raises. This runs before the connection is attempted, so anything it
+    raised would pre-empt the driver's own error — and the driver's is the
+    better one, because it names what is wrong with the URL.
+    """
+    parsed = urlsplit(url)
+    _, _, hostspec = parsed.netloc.rpartition("@")
+    host = parsed.hostname or "?"
+    try:
+        port = f":{parsed.port}" if parsed.port else ""
+    except ValueError:
+        # `.port` raises rather than returning None when the substring is not
+        # an in-range integer. Echo it as written: it is part of the hostspec,
+        # and the driver's own "invalid integer value" error quotes the same
+        # text, so withholding it here would hide nothing and cost the one
+        # detail that makes a typo'd port obvious in the log.
+        _, _, raw = hostspec.rpartition(":")
+        port = f":{raw}"
+    return f"{host}{port}/{parsed.path.lstrip('/') or '?'}"
+
+
+# Whether the target database holds this schema. Resolved through `search_path`
+# like every other unqualified reference in this codebase, so it answers the
+# question the commands themselves will ask a moment later.
+SCHEMA_PROBE_SQL = "SELECT to_regclass('agencies') IS NOT NULL"
+
+
+def _log_target() -> None:
+    """Record which database this run connected to.
+
+    Logged on success, not only on failure: these jobs write, and which
+    database they wrote to is the first thing anyone reconstructing a run
+    needs — and the hardest to recover afterwards.
+    """
+    logger.info(f"database: {describe_target(DATABASE_URL)}")
+
+
+def _wrong_target_error() -> SystemExit:
+    """The shared "this is not a transit database" failure.
+
+    Built in one place because two connection stacks enforce it: the psycopg2
+    commands through :func:`_get_conn` and the asyncpg ones through
+    :func:`guard_async_conn`. One message with two bindings cannot drift the
+    way two copies would.
+    """
+    return SystemExit(
+        f"DATABASE_URL points at {describe_target(DATABASE_URL)}, which has no "
+        "`agencies` table, so it is not a migrated transit database. Check the "
+        "port and database name, then run `migrate up` if it really is meant to "
+        "be a fresh one."
+    )
+
+
+async def guard_async_conn(conn) -> None:
+    """Apply the wrong-target guard to an already-open asyncpg connection.
+
+    The asyncpg-backed commands cannot borrow :func:`_get_conn`, so they share
+    the probe and the message instead. Called after connecting rather than
+    before, because the probe is a query.
+    """
+    if not await conn.fetchval(SCHEMA_PROBE_SQL):
+        raise _wrong_target_error()
+
+
+def _get_conn(require_schema: bool = True):
+    _log_target()
     conn = psycopg2.connect(DATABASE_URL)
     # Pin JST so `captured_at::date` buckets every aggregate on the same civil
     # day the API reads it under (api/main pins Asia/Tokyo; tests too). The
@@ -38,6 +113,20 @@ def _get_conn():
     with conn.cursor() as cur:
         cur.execute("SET TIME ZONE 'Asia/Tokyo'")
     conn.autocommit = False
+    # These commands write, and DATABASE_URL is a port on localhost in
+    # development, so a stale or wrong value points at whatever else happens
+    # to be listening — another project's database, or the throwaway test one.
+    # Left unchecked the first symptom is an UndefinedTable traceback that
+    # names the missing table but not the database it was missing from, which
+    # is the one fact needed to see that the target is wrong. The commands
+    # whose job is a database without this schema opt out.
+    if require_schema:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA_PROBE_SQL)
+            found = cur.fetchone()[0]
+        if not found:
+            conn.close()
+            raise _wrong_target_error()
     return conn
 
 
@@ -322,7 +411,9 @@ def cmd_check_migrations(args):
     """Report migrations on disk not applied to the DB; nonzero exit if any behind."""
     from db.migrate import pending_migrations
 
-    conn = _get_conn()
+    # Reports "everything is pending" against a database that has no schema
+    # yet, which is a legitimate thing to ask before migrating one.
+    conn = _get_conn(require_schema=False)
     pending = pending_migrations(conn)
     conn.close()
     if pending:
@@ -401,7 +492,9 @@ def cmd_migrate(args):
     """Apply or roll back schema migrations."""
     from db.migrate import migrate_down, migrate_up
 
-    conn = _get_conn()
+    # The one command whose whole purpose is a database that does not have the
+    # schema yet, so it cannot require one.
+    conn = _get_conn(require_schema=False)
     if args.direction == "up":
         migrate_up(conn)
     else:
@@ -426,27 +519,33 @@ def cmd_build_rag_index(args):
 
     async def run():
         """Async body executed via asyncio.run()."""
+        _log_target()
         pool = await asyncpg.create_pool(DATABASE_URL)
-        if args.all_agencies:
+        # try/finally so the pool closes on the early exits too — the guard
+        # below and the missing-argument check both leave before the loop.
+        try:
             async with pool.acquire() as conn:
-                rows = await conn.fetch(
-                    "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+                await guard_async_conn(conn)
+            if args.all_agencies:
+                async with pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+                    )
+                ids = [(r["agency_id"], r["agency_name"]) for r in rows]
+            else:
+                if args.agency_id is None:
+                    raise SystemExit("--agency-id or --all-agencies required")
+                ids = [(args.agency_id, f"agency {args.agency_id}")]
+
+            for aid, name in ids:
+                async with pool.acquire() as conn:
+                    counts = await build_index(conn, aid, golden)
+                logger.info(
+                    f"  {aid:>3} {name}: "
+                    f"inserted={counts['inserted']} updated={counts['updated']} skipped={counts['skipped']}"
                 )
-            ids = [(r["agency_id"], r["agency_name"]) for r in rows]
-        else:
-            if args.agency_id is None:
-                raise SystemExit("--agency-id or --all-agencies required")
-            ids = [(args.agency_id, f"agency {args.agency_id}")]
-
-        for aid, name in ids:
-            async with pool.acquire() as conn:
-                counts = await build_index(conn, aid, golden)
-            logger.info(
-                f"  {aid:>3} {name}: "
-                f"inserted={counts['inserted']} updated={counts['updated']} skipped={counts['skipped']}"
-            )
-
-        await pool.close()
+        finally:
+            await pool.close()
 
     asyncio.run(run())
 
@@ -461,10 +560,14 @@ def cmd_prune_query_log(args):
 
     async def run():
         """Async body executed via asyncio.run()."""
+        _log_target()
         conn = await asyncpg.connect(DATABASE_URL)
-        result = await conn.execute(f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{days} days'")
-        logger.info(f"prune_query_log: {result}")
-        await conn.close()
+        try:
+            await guard_async_conn(conn)
+            result = await conn.execute(f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{days} days'")
+            logger.info(f"prune_query_log: {result}")
+        finally:
+            await conn.close()
 
     asyncio.run(run())
 
