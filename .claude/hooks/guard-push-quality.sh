@@ -199,7 +199,10 @@ if printf '%s' "$cmd" | grep -Eq '(^| )--delete( |$)|(^| )-d( |$)| :[^ ]' ; then
 fi
 if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ]; then
   for ref in $(printf '%s' "$cmd" | sed -nE 's/.*push//p' | tr ' ' '\n' | grep -Ev '^(-|origin$|$)'); do
+    # Take the destination half of a `src:dst` refspec, then drop a
+    # `refs/heads/` prefix so the fully-qualified form resolves too.
     branch="${ref##*:}"
+    branch="${branch#refs/heads/}"
     git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 || continue
     if [ -n "$(git diff --name-only "$BASE_REF...refs/heads/$branch" 2>/dev/null)" ]; then
       echo "BLOCKED: git push — the gate is running in $GATE_DIR, where nothing differs from $BASE_REF," >&2
