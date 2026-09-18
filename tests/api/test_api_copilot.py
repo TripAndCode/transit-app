@@ -55,8 +55,8 @@ async def copilot_app(apply_schema):
         await conn.execute(
             "TRUNCATE agencies, updates, static_stops, static_stop_times, "
             "static_trips, static_routes, static_calendar_dates, "
-            "agg_route_stats, agg_route_hour, agg_route_dow, "
-            "agg_daily_trend, agg_stop_seq, rag_chunks CASCADE"
+            "agg_route_stats, agg_route_hour, "
+            "agg_daily_trend, rag_chunks CASCADE"
         )
     await pool.close()
 

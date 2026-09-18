@@ -45,13 +45,11 @@ GOLDEN_PATH = os.path.join(
 _AGG_TABLES = (
     "agg_route_stats",
     "agg_route_hour",
-    "agg_route_dow",
     "agg_route_hour_dow",
     "agg_daily_trend",
     "agg_route_daily",
     "agg_route_daily_dist",
     "agg_hour_daily",
-    "agg_stop_seq",
     "agg_stop_daily",
     "agg_stop_routes",
     "agg_route_stop_daily",

@@ -8,13 +8,11 @@ mid-run rolls back to the prior snapshot.
 Aggregation tables produced:
 - agg_route_stats      — overall delay stats per route/service_type
 - agg_route_hour       — delay by scheduled departure time
-- agg_route_dow        — delay by day-of-week (ISODOW 1=Mon..7=Sun)
 - agg_route_hour_dow   — delay by day-of-week × scheduled hour (Forecast heatmap)
 - agg_daily_trend      — per-day delay averages for trend queries
 - agg_route_daily      — per-route, per-day summary (powers today/route-summary)
 - agg_route_daily_dist — per-day delay distribution (powers range-scoped reports)
 - agg_hour_daily       — per-day, per-hour-of-day delay (Overview peak-hour-by-DOW)
-- agg_stop_seq         — per-stop delay by sequence (synthesizes stop names without static)
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
@@ -37,7 +35,7 @@ grain, or flag as low-confidence (see api.triage.LOW_CONFIDENCE_SAMPLES) —
 rather than silently vanishing below some insert-time threshold that varies
 table to table.
 
-agg_route_stats / agg_route_hour / agg_route_dow / agg_route_hour_dow /
+agg_route_stats / agg_route_hour / agg_route_hour_dow /
 agg_daily_trend / agg_route_daily / agg_hour_daily each carry a
 `sum_delay_sec` column alongside their pre-rounded `avg_min` (or, for
 agg_route_daily, `avg_delay_sec`) — the exact SUM(dep_delay) in seconds
@@ -123,13 +121,11 @@ _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in r
 _AGG_TABLES_ORDERED = (
     "agg_route_stats",
     "agg_route_hour",
-    "agg_route_dow",
     "agg_route_hour_dow",
     "agg_daily_trend",
     "agg_route_daily",
     "agg_route_daily_dist",
     "agg_hour_daily",
-    "agg_stop_seq",
     "agg_stop_daily",
     "agg_stop_routes",
     "agg_route_stop_daily",
@@ -528,28 +524,6 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             conn,
         )
 
-        # ── agg_route_dow ────────────────────────────────────────────────
-        sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL)
-            SELECT
-                %(agency_id)s AS agency_id,
-                route_code, service_type,
-                EXTRACT(ISODOW FROM date::date)::smallint AS dow,
-                ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                COUNT(*) AS samples,
-                SUM(dep_delay) AS sum_delay_sec
-            FROM deduped
-            GROUP BY route_code, service_type, EXTRACT(ISODOW FROM date::date)
-            ORDER BY route_code
-        """
-        _build_and_insert(
-            sql,
-            "agg_route_dow",
-            ["agency_id", "route_code", "service_type", "dow", "avg_min", "samples", "sum_delay_sec"],
-            p,
-            conn,
-        )
-
         # ── agg_route_hour_dow ───────────────────────────────────────────
         # Per route × service × day-of-week × hour, for the Forecast heatmap.
         # `scheduled_time IS NOT NULL` guards the NOT NULL `hour` column: a typed
@@ -742,57 +716,6 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             sql,
             "agg_hour_daily",
             ["agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"],
-            p,
-            conn,
-        )
-
-        # ── agg_stop_seq ─────────────────────────────────────────────────
-        # has_static branches the stop_name source: with static GTFS loaded,
-        # join static_stop_times/static_stops for the real name; without it,
-        # synthesize a numbered placeholder ("N番停留所") from stop_sequence
-        # alone, since there's no other source of stop names to key on.
-        # No minimum-sample HAVING here either — see the module docstring's
-        # no-gate policy.
-        if has_static:
-            sql = """
-                WITH deduped AS (SELECT * FROM _analyze_deduped)
-                SELECT
-                    %(agency_id)s AS agency_id,
-                    d.route_code, d.stop_sequence,
-                    COALESCE(MAX(ss.stop_name),
-                             CAST(d.stop_sequence AS TEXT) || '番停留所') AS stop_name,
-                    ROUND(AVG(d.dep_delay)/60.0::numeric, 2) AS avg_min,
-                    COUNT(*) AS samples
-                FROM deduped d
-                LEFT JOIN static_stop_times sst
-                    ON d.trip_id = sst.trip_id
-                    AND d.stop_sequence = sst.stop_sequence
-                    AND sst.agency_id = %(agency_id)s
-                LEFT JOIN static_stops ss
-                    ON sst.stop_id = ss.stop_id
-                    AND ss.agency_id = %(agency_id)s
-                WHERE d.stop_sequence IS NOT NULL
-                GROUP BY d.route_code, d.stop_sequence
-                ORDER BY ROUND(AVG(d.dep_delay)/60.0::numeric, 2) DESC
-            """
-        else:
-            sql = """
-                WITH deduped AS (SELECT * FROM _analyze_deduped)
-                SELECT
-                    %(agency_id)s AS agency_id,
-                    route_code, stop_sequence,
-                    CAST(stop_sequence AS TEXT) || '番停留所' AS stop_name,
-                    ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
-                    COUNT(*) AS samples
-                FROM deduped
-                WHERE stop_sequence IS NOT NULL
-                GROUP BY route_code, stop_sequence
-                ORDER BY ROUND(AVG(dep_delay)/60.0::numeric, 2) DESC
-            """
-        _build_and_insert(
-            sql,
-            "agg_stop_seq",
-            ["agency_id", "route_code", "stop_sequence", "stop_name", "avg_min", "samples"],
             p,
             conn,
         )
