@@ -44,23 +44,6 @@ export function severeColorResolved(): string {
   return v || SEVERE_FALLBACK;
 }
 
-// Light-mode accent — the fallback when --accent can't be resolved (SSR /
-// jsdom), matching global.css's base :root value.
-const ACCENT_FALLBACK = "#5b6cad";
-
-/** Resolve `--accent` to a concrete hex for callers that need a real,
- *  parseable color string — MapLibre paint expressions, which can't consume
- *  `var()`. Mirrors severeColorResolved() for the same reason: the default
- *  (no-scrubbed-delay) route-line color needs to track the active theme's
- *  accent, not stay pinned to the old hardcoded blue-purple. */
-export function accentColorResolved(): string {
-  if (typeof document === "undefined") return ACCENT_FALLBACK;
-  const v = getComputedStyle(document.documentElement)
-    .getPropertyValue("--accent")
-    .trim();
-  return v || ACCENT_FALLBACK;
-}
-
 const BASE_RAMP = {
   ok: "#2EA87A",       // < 1.5 min
   mild: "#C99A2E",     // 1.5 – 3 min

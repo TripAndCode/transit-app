@@ -7,7 +7,7 @@ on:
 
 jobs:
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vps]
     defaults:
       run:
         working-directory: frontend
@@ -56,7 +56,7 @@ jobs:
           npm run check:entry-chunk
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vps]
 
     services:
       clickhouse:
@@ -65,8 +65,12 @@ jobs:
           CLICKHOUSE_USER: transit
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DB: transit_test
+        # Host port left unmapped (dynamic) rather than pinned to 8124: a
+        # persistent runner can already have something bound to a fixed
+        # port, which an ephemeral GitHub-hosted VM never hits. Steps below
+        # read the assigned port from `job.services.clickhouse.ports`.
         ports:
-          - 8124:8123
+          - 8123
         options: >-
           --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
           --health-interval 10s
@@ -76,15 +80,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # This runner's root filesystem is small and shared with a lot of
-      # preinstalled tooling this job never uses (Android SDK, .NET, GHC,
-      # etc.) — reclaim it before anything else runs, including `poetry
-      # install` itself: the db/Dockerfile image build (the big consumer,
-      # see below) can exhaust the disk before this cleanup if it runs
-      # first. Hundreds of small Postgres data files written by the suite
-      # have also tipped this already-tight disk into intermittent
-      # `DiskFull` mid-run in the past.
+      # Only meaningful on GitHub-hosted VMs, whose shared root filesystem
+      # comes pre-loaded with tooling this job never uses (Android SDK,
+      # .NET, GHC, etc.) and has tipped into intermittent `DiskFull` mid-run.
+      # A persistent self-hosted runner doesn't carry that preinstalled
+      # bulk and the cleanup commands need sudo, which this runner's user
+      # intentionally does not have.
       - name: Free disk space on the runner
+        if: runner.environment == 'github-hosted'
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
             /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
@@ -120,7 +123,7 @@ jobs:
           from db.clickhouse.bootstrap import apply_schema; apply_schema(get_client())"
         env:
           CLICKHOUSE_HOST: localhost
-          CLICKHOUSE_PORT: 8124
+          CLICKHOUSE_PORT: ${{ job.services.clickhouse.ports['8123'] }}
           CLICKHOUSE_USER: transit
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
@@ -147,17 +150,19 @@ jobs:
           GITLEAKS_VERSION: 8.18.4
         run: |
           set -euo pipefail
+          mkdir -p "$HOME/bin"
           curl -sSfL \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin gitleaks
-          gitleaks version
+            | tar -xz -C "$HOME/bin" gitleaks
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/gitleaks" version
 
       - name: Run tests
         env:
           DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
           GEMINI_API_KEY: test-key
           CLICKHOUSE_HOST: localhost
-          CLICKHOUSE_PORT: 8124
+          CLICKHOUSE_PORT: ${{ job.services.clickhouse.ports['8123'] }}
           CLICKHOUSE_USER: transit
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test

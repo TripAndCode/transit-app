@@ -11,6 +11,15 @@ inputs:
 runs:
   using: composite
   steps:
+    # A GitHub-hosted VM is destroyed after the job, so a same-named
+    # container from a prior run never exists. A persistent self-hosted
+    # runner keeps its filesystem/Docker state between runs, so a container
+    # left behind by a cancelled or crashed job would otherwise collide
+    # with this one on both name and port.
+    - name: Remove any leftover container from a previous run
+      shell: bash
+      run: docker rm -f "${{ inputs.container-name }}" 2>/dev/null || true
+
     # Built from db/Dockerfile rather than declared as a `services:` entry:
     # that block can only pull a published image, and none carries PostGIS and
     # pgvector together. Building it keeps every workflow, local dev, and the
