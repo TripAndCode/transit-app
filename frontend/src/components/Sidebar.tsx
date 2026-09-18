@@ -33,7 +33,7 @@ export const SIDEBAR_NAV_ITEMS = [
   { to: "reports", labelKey: "design:reports", Icon: FileText },
 ] as const;
 
-export type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
+type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
 const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
