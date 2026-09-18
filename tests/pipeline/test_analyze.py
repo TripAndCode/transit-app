@@ -1686,3 +1686,38 @@ def test_analyze_skips_agg_schedule_revision_daily_when_static_version_id_always
         cur.execute("SELECT COUNT(*) FROM agg_schedule_revision_daily WHERE agency_id = %s", (agency_id,))
         count = cur.fetchone()[0]
     assert count == 0
+
+
+def test_analyze_times_every_aggregate_it_populates(pg_conn, agency_id, ch_client):
+    """Any agg_* table that ends up with rows must appear in the step timing.
+
+    The timing exists to rank aggregates by cost so the expensive ones can be
+    moved off Postgres. A builder that does real work but reports no time at
+    all reads as free and biases that ranking — worse than not measuring,
+    because the gap is invisible in the summary. Several builders bypass
+    `_build_and_insert` (a fused `INSERT ... SELECT`, or a hand-rolled
+    `execute_values`), so instrumenting the shared primitives is not on its
+    own enough to guarantee this.
+    """
+    from pipeline.analyze import _AGG_TABLES_ORDERED, _step_ms
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+
+    timing = dict(_step_ms)
+    with pg_conn.cursor() as cur:
+        populated = set()
+        # agg_meta and agg_static_version_summary are UPSERTed rather than
+        # wiped and rebuilt, so they are absent from _AGG_TABLES_ORDERED while
+        # still writing rows every run that resolves one.
+        for table in (*_AGG_TABLES_ORDERED, "agg_meta", "agg_static_version_summary"):
+            cur.execute(f"SELECT COUNT(*) FROM {table} WHERE agency_id = %s", (agency_id,))
+            if cur.fetchone()[0]:
+                populated.add(table)
+
+    # Guards the fixture, not the feature: an empty run would pass vacuously.
+    assert len(populated) >= 10, f"fixture exercised too few builders: {sorted(populated)}"
+
+    untimed = {t for t in populated if not any(label.startswith(f"{t}:") for label in timing)}
+    assert not untimed, f"populated but untimed: {sorted(untimed)}"

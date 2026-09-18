@@ -60,7 +60,10 @@ lateness contribution instead of counting it.
 """
 
 import logging
+import time
 from collections import defaultdict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timezone
 from statistics import median
 
@@ -144,6 +147,64 @@ _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 # section below for why deleting it every run would defeat its purpose.
 
 
+# ── Step timing ──────────────────────────────────────────────────────────
+# Deliberately not `pipeline.perf`: that registry is in-process and read back
+# through the API's /debug snapshot, which nothing does for a batch job that
+# exits. analyze's observability channel is its own log, so these land as
+# INFO lines plus one sorted summary per agency.
+#
+# `build` (the GROUP BY) and `insert` (writing the result) are timed
+# separately on purpose: they answer different questions. The build cost is
+# what moving an aggregate to ClickHouse would remove; the insert cost stays
+# wherever the aggregate is computed. Where a builder fuses both into one
+# `INSERT ... SELECT`, the label says `build+insert` rather than attributing
+# the whole statement to either side.
+#
+# Timing lives inside the shared primitives (`_insert_agg`, `_ch_query`,
+# `_build_and_insert`) rather than at each call site, so an aggregate cannot
+# be added without being measured. The builders that bypass those primitives
+# — a fused `INSERT ... SELECT`, or a hand-rolled `execute_values` — still
+# wrap themselves, which is why the summary reports measured-vs-wall-clock
+# coverage: an unmeasured step shows up as a gap instead of silently making
+# every other step's share look larger than it is.
+_step_ms: dict[str, float] = {}
+
+
+@contextmanager
+def _step(label: str) -> Iterator[None]:
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        _step_ms[label] = _step_ms.get(label, 0.0) + (time.perf_counter() - t0) * 1000
+
+
+def _ch_query(label: str, ch_client, sql: str, parameters: dict):
+    """Run a ClickHouse query under a timing label.
+
+    The aggregates sourced straight from ClickHouse are the ones a migration
+    would touch first, so their scan cost has to be visible next to the
+    Postgres GROUP BYs rather than hidden in the caller.
+    """
+    with _step(label):
+        return ch_client.query(sql, parameters=parameters)
+
+
+def _log_step_summary(agency_id: int, wall_ms: float) -> None:
+    """Log a header with the totals, then one line per step, slowest first."""
+    if not _step_ms:
+        return
+    measured = sum(_step_ms.values())
+    covered = measured / wall_ms * 100 if wall_ms else 0
+    logger.info(
+        f"step timing for agency {agency_id}: {wall_ms / 1000:.1f}s wall, "
+        f"{measured / 1000:.1f}s measured ({covered:.0f}% covered)"
+    )
+    for label, ms in sorted(_step_ms.items(), key=lambda kv: kv[1], reverse=True):
+        share = ms / wall_ms * 100 if wall_ms else 0
+        logger.info(f"    {ms / 1000:7.2f}s  {share:5.1f}%  {label}")
+
+
 def _run_query(sql: str, params: dict, conn) -> list:
     """Execute *sql* with *params* via psycopg2 and return all rows."""
     with conn.cursor() as cur:
@@ -165,7 +226,7 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
     col_list = ", ".join(col_names)
     placeholders = ", ".join(["%s"] * len(col_names))
     sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})"
-    with conn.cursor() as cur:
+    with _step(f"{table}: insert"), conn.cursor() as cur:
         psycopg2.extras.execute_batch(cur, sql, rows)
 
 
@@ -175,8 +236,38 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn) -> N
     Shared by the query/dedup/rank-style aggregate builders below, which all
     follow the same run-then-insert-then-log shape.
     """
-    rows = _run_query(sql, p, conn)
-    _insert_agg(table, col_names, rows, conn)
+    with _step(f"{table}: build"):
+        rows = _run_query(sql, p, conn)
+    _insert_agg(table, col_names, rows, conn)  # times itself
+    logger.info(f"  {table}: {len(rows)} rows")
+
+
+def _ch_build_and_insert(
+    table: str, cols: str, agency_id: int, ch_client, sql: str, parameters: dict, conn
+) -> None:
+    """Aggregate in ClickHouse, then bulk-load the per-day result.
+
+    The counterpart to :func:`_build_and_insert` for the aggregates that need
+    no static JOIN: the whole build is one remote GROUP BY, and its small
+    result is prepended with agency_id and pushed straight into Postgres.
+    Sharing the shape is what keeps this family's timing structural — a new
+    aggregate cannot join it without being measured.
+
+    ``execute_values``, not :func:`_insert_agg`'s ``execute_batch``: these
+    results are one row per day, so a single multi-row VALUES statement beats
+    batching individual ones.
+    """
+    if table not in _VALID_AGG_TABLES:
+        raise ValueError(f"Unknown aggregation table: {table!r}")
+    result = _ch_query(f"{table}: build", ch_client, sql, parameters)
+    rows = [(agency_id, *r) for r in result.result_rows]
+    if rows:
+        with _step(f"{table}: insert"), conn.cursor() as cur:
+            psycopg2.extras.execute_values(cur, f"INSERT INTO {table} {cols} VALUES %s", rows)
+    # len(rows), not cur.rowcount: when ClickHouse returns nothing, no
+    # statement runs on the cursor, so rowcount is psycopg2's "nothing
+    # executed" sentinel -1 — misleading in the one operational log line
+    # that confirms this builder ran.
     logger.info(f"  {table}: {len(rows)} rows")
 
 
@@ -193,6 +284,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     aggregate builder below still reads the Postgres TEMP TABLE it's
     loaded into, unchanged.
     """
+    _step_ms.clear()  # per-agency, so analyze-all reports each agency separately
+    wall_t0 = time.perf_counter()
     p = {"agency_id": agency_id, "max_delay": MAX_PLAUSIBLE_DELAY_SEC}
     # Resolved BEFORE the txn opens: _static_loaded calls conn.rollback() in
     # its UndefinedTable branch, which would silently wipe our DELETE + partial
@@ -201,7 +294,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     has_static = _static_loaded(conn, agency_id)
     try:
         # ── Purge stale rows for this agency ─────────────────────────────
-        with conn.cursor() as cur:
+        with _step("purge: DELETE prior rows"), conn.cursor() as cur:
             for tbl in _AGG_TABLES_ORDERED:
                 cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
 
@@ -240,7 +333,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # table. Each block is tzinfo-fixed and INSERTed independently;
             # `execute_values`'s own page_size=10_000 chunking of the Postgres
             # side is unaffected by how the ClickHouse side is fetched.
-            with ch_client.query_row_block_stream(ch_sql, parameters={"agency_id": agency_id}) as stream:
+            # One label covers the ClickHouse dedup and the Postgres load
+            # together, because streaming interleaves them -- the split that
+            # matters here is this whole transfer versus the GROUP BYs below.
+            with (
+                _step("dedup: ClickHouse scan + load into TEMP"),
+                ch_client.query_row_block_stream(ch_sql, parameters={"agency_id": agency_id}) as stream,
+            ):
                 for block in stream:
                     if not block:
                         continue
@@ -272,7 +371,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                         rows,
                         page_size=10_000,
                     )
-            cur.execute("ANALYZE _analyze_deduped")
+            with _step("dedup: ANALYZE TEMP"):
+                cur.execute("ANALYZE _analyze_deduped")
 
         # ── agg_route_stats ──────────────────────────────────────────────
         # No minimum-sample HAVING here — see the module docstring's no-gate
@@ -674,7 +774,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # result into Postgres. toDate(captured_at, 'Asia/Tokyo'), NOT bare
         # toDate() — same JST-not-UTC reasoning as everywhere else in this
         # migration (see build_dedup_ch_sql's docstring in pipeline/db.py).
-        ch_feed_health = ch_client.query(
+        _ch_build_and_insert(
+            "agg_feed_health",
+            "(agency_id, date, raw_samples, clamp_count)",
+            agency_id,
+            ch_client,
             """
             SELECT toDate(captured_at, 'Asia/Tokyo') AS date,
                    count() AS raw_samples,
@@ -683,20 +787,10 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             WHERE agency_id = {agency_id:UInt16} AND dep_delay IS NOT NULL
             GROUP BY date
             """,
-            parameters={"agency_id": agency_id, "max_delay": p["max_delay"]},
+            {"agency_id": agency_id, "max_delay": p["max_delay"]},
+            conn,
         )
         with conn.cursor() as cur:
-            if ch_feed_health.result_rows:
-                psycopg2.extras.execute_values(
-                    cur,
-                    "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES %s",
-                    [(agency_id, *row) for row in ch_feed_health.result_rows],
-                )
-            # len(result_rows), not cur.rowcount: when ClickHouse returns no
-            # rows, no statement runs on this cursor, so cur.rowcount is the
-            # psycopg2 "nothing executed" sentinel -1 -- misleading in the
-            # one operational log line that confirms this builder ran.
-            logger.info(f"  agg_feed_health: {len(ch_feed_health.result_rows)} rows")
             cur.execute(
                 "SELECT COALESCE(SUM(clamp_count), 0) FROM agg_feed_health WHERE agency_id = %(agency_id)s",
                 p,
@@ -738,7 +832,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 GROUP BY sst.stop_id, d.date, COALESCE(d.service_type, ''), {band_case}
             """
             with conn.cursor() as cur:
-                cur.execute(sql, p)
+                with _step("agg_stop_daily: build+insert"):
+                    cur.execute(sql, p)
                 logger.info(f"  agg_stop_daily: {cur.rowcount} rows")
 
             # ── agg_stop_routes (distinct observed routes per stop) ──────────────
@@ -779,7 +874,10 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
                     "WHERE agency_id = {agency_id:UInt16}"
                 )
-                with ch_client.query_row_block_stream(ch_keys_sql, parameters={"agency_id": agency_id}) as stream:
+                with (
+                    _step("agg_stop_routes: ClickHouse key scan + load into TEMP"),
+                    ch_client.query_row_block_stream(ch_keys_sql, parameters={"agency_id": agency_id}) as stream,
+                ):
                     for block in stream:
                         if not block:
                             continue
@@ -791,7 +889,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 # actually holds, and this table drives the join below against
                 # static_stop_times -- ANALYZE gives the planner real stats to
                 # pick a join strategy from, same as _analyze_deduped gets.
-                cur.execute("ANALYZE _analyze_raw_keys")
+                with _step("agg_stop_routes: ANALYZE TEMP"):
+                    cur.execute("ANALYZE _analyze_raw_keys")
                 sql = """
                     INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
                     SELECT %(agency_id)s, sst.stop_id,
@@ -803,7 +902,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                      AND sst.stop_sequence = k.stop_sequence
                     GROUP BY sst.stop_id
                 """
-                cur.execute(sql, p)
+                with _step("agg_stop_routes: build+insert"):
+                    cur.execute(sql, p)
                 logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
 
             # ── agg_route_stop_daily (per-route-per-stop; powers route-filtered heatmap) ──
@@ -831,7 +931,8 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                          COALESCE(d.service_type, ''), {band_case}
             """
             with conn.cursor() as cur:
-                cur.execute(sql, p)
+                with _step("agg_route_stop_daily: build+insert"):
+                    cur.execute(sql, p)
                 logger.info(f"  agg_route_stop_daily: {cur.rowcount} rows")
 
             # ── agg_route_headway (scheduled-headway classification) ─────
@@ -1009,7 +1110,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # trips has no matching row in the inner UNION, so it emits no row
             # here at all -- the read path sums with a zero default rather than
             # assuming row-per-day density.
-            ch_service_delivered = ch_client.query(
+            _ch_build_and_insert(
+                "agg_service_delivered_daily",
+                "(agency_id, date, non_executed_trips)",
+                agency_id,
+                ch_client,
                 """
                 SELECT svc_date, count() FROM (
                     SELECT svc_date, trip_id FROM (
@@ -1027,16 +1132,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     ) WHERE stop_rel = 1
                 ) GROUP BY svc_date
                 """,
-                parameters={"agency_id": agency_id},
+                {"agency_id": agency_id},
+                conn,
             )
-            with conn.cursor() as cur:
-                if ch_service_delivered.result_rows:
-                    psycopg2.extras.execute_values(
-                        cur,
-                        "INSERT INTO agg_service_delivered_daily (agency_id, date, non_executed_trips) VALUES %s",
-                        [(agency_id, *r) for r in ch_service_delivered.result_rows],
-                    )
-                logger.info(f"  agg_service_delivered_daily: {len(ch_service_delivered.result_rows)} rows")
         else:
             logger.info("  agg_service_delivered_daily: 0 rows (ingest_strategy != static_join)")
 
@@ -1058,7 +1156,11 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # -- a reload happening mid-day should attribute that day to whichever
         # version actually served most of it, not to whichever the last poll
         # happened to see.
-        ch_schedule_revision = ch_client.query(
+        _ch_build_and_insert(
+            "agg_schedule_revision_daily",
+            "(agency_id, date, static_version_id)",
+            agency_id,
+            ch_client,
             """
             SELECT svc_date, argMax(version, cnt) AS static_version_id
             FROM (
@@ -1071,16 +1173,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             GROUP BY svc_date
             HAVING static_version_id IS NOT NULL
             """,
-            parameters={"agency_id": agency_id},
+            {"agency_id": agency_id},
+            conn,
         )
-        with conn.cursor() as cur:
-            if ch_schedule_revision.result_rows:
-                psycopg2.extras.execute_values(
-                    cur,
-                    "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) VALUES %s",
-                    [(agency_id, *r) for r in ch_schedule_revision.result_rows],
-                )
-            logger.info(f"  agg_schedule_revision_daily: {len(ch_schedule_revision.result_rows)} rows")
 
         # ── agg_route_daily_dwell_run (per-day dwell/running-time distribution) ──
         # Decomposes arr_delay + dep_delay into per-stop-visit dwell time (this
@@ -1254,7 +1349,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # assumeNotNull() call runtime-safe; it does nothing to satisfy
             # the planner on its own; splitByChar needs a statically
             # non-Nullable argument type.
-            ch_headway = ch_client.query(
+            ch_headway = _ch_query(
+                "agg_route_headway_daily: ClickHouse scan",
+                ch_client,
                 """
                 WITH per_event AS (
                     SELECT route_code, stop_id, toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
@@ -1287,7 +1384,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 FROM timed
                 GROUP BY route_code, stop_id, svc_date
                 """,
-                parameters={
+                {
                     "agency_id": agency_id,
                     "min_delay": -MAX_PLAUSIBLE_DELAY_SEC,
                     "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
@@ -1301,8 +1398,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # Zero/negative gaps (a duplicate or out-of-order observation)
             # are excluded, not counted as a real zero-headway event.
             pooled: dict[tuple[object, object], list[float]] = defaultdict(list)
-            for route_code, _stop_id, svc_date, times in ch_headway.result_rows:
-                pooled[(route_code, svc_date)].extend(g for g in reconstruct_headways(times) if g > 0)
+            # Timed apart from the ClickHouse scan above: this is the one
+            # aggregate whose build is partly Python, so moving it would mean
+            # expressing reconstruct_headways in SQL, not just relocating a
+            # GROUP BY. Knowing how much of its cost is here decides that.
+            with _step("agg_route_headway_daily: reconstruct in Python"):
+                for route_code, _stop_id, svc_date, times in ch_headway.result_rows:
+                    pooled[(route_code, svc_date)].extend(g for g in reconstruct_headways(times) if g > 0)
             # Scheduled median per route, read back from agg_route_headway
             # (already INSERTed earlier in this SAME transaction, above) --
             # used only to threshold "long" gaps (item 94). A route with no
@@ -1317,20 +1419,23 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     (agency_id,),
                 )
                 scheduled_median_by_route = dict(cur.fetchall())
-            headway_rows = [
-                (
-                    agency_id,
-                    route_code,
-                    svc_date,
-                    median(gaps),
-                    len(gaps),
-                    sum(gaps),
-                    sum(g * g for g in gaps),
-                    count_long_gaps(gaps, scheduled_median_by_route.get(route_code)),
-                )
-                for (route_code, svc_date), gaps in pooled.items()
-                if gaps
-            ]
+            # Same label as the pooling above — `_step` accumulates, so the
+            # summary reports one figure for this aggregate's Python build.
+            with _step("agg_route_headway_daily: reconstruct in Python"):
+                headway_rows = [
+                    (
+                        agency_id,
+                        route_code,
+                        svc_date,
+                        median(gaps),
+                        len(gaps),
+                        sum(gaps),
+                        sum(g * g for g in gaps),
+                        count_long_gaps(gaps, scheduled_median_by_route.get(route_code)),
+                    )
+                    for (route_code, svc_date), gaps in pooled.items()
+                    if gaps
+                ]
             _insert_agg(
                 "agg_route_headway_daily",
                 [
@@ -1396,7 +1501,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # real value exists" convention as every other nullable column
             # added by item 88.
             if static_version_id is not None:
-                with conn.cursor() as cur:
+                with _step("agg_static_version_summary: upsert"), conn.cursor() as cur:
                     cur.execute(
                         "INSERT INTO agg_static_version_summary "
                         "(agency_id, static_version_id, trip_count, vehicle_km, computed_at) "
@@ -1421,8 +1526,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # only answers "when was this agency last analyzed". `updates` now
         # lives in ClickHouse, so this reuses the same max_captured_at helper
         # Task 4 built and Task 5 already uses elsewhere (pipeline/freshness.py).
-        max_cap = ch_max_captured_at(ch_client, agency_id)
-        with conn.cursor() as cur:
+        with _step("agg_meta: max_captured_at"):
+            max_cap = ch_max_captured_at(ch_client, agency_id)
+        with _step("agg_meta: upsert"), conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at) "
                 "VALUES (%s, now(), %s) "
@@ -1433,7 +1539,14 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             )
 
         conn.commit()
+        _log_step_summary(agency_id, (time.perf_counter() - wall_t0) * 1000)
         logger.info("Analysis complete.")
     except Exception:
         conn.rollback()
+        # The analyze-all caller logs the traceback and moves to the next
+        # agency, whose own run clears the registry; a single-agency run just
+        # propagates. Either way the partial timing is lost unless it is
+        # logged here, and a run that dies in a slow step is exactly when
+        # knowing which step that was matters most.
+        _log_step_summary(agency_id, (time.perf_counter() - wall_t0) * 1000)
         raise
