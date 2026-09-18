@@ -16,9 +16,11 @@
 # against $CLAUDE_PROJECT_DIR's own working tree. For a push from a worktree
 # those validate whatever the main checkout currently holds, not the branch.
 # Running them in the worktree instead would need a provisioned virtualenv
-# and node_modules there, which a worktree does not inherit; until that is
-# solved, `scripts/run_full_ci.sh` from the worktree is the only check that
-# covers the pushed content end to end.
+# and node_modules there, which a worktree does not inherit. Until that is
+# solved, `scripts/run_full_ci.sh` from the worktree covers the backend
+# against the branch — it mirrors CI's `test` job only, so CI's separate
+# frontend job has no worktree-runnable equivalent and a frontend change
+# still has nothing checking it against the branch being pushed.
 #
 # Reads the tool input JSON on stdin; exit 2 = block the tool call.
 set -uo pipefail
@@ -61,22 +63,71 @@ same_repo() {
   [ "$theirs" = "$ours" ]
 }
 
+unquote() {
+  # Strip one matching layer of quotes. A quoted path is mandatory when it
+  # contains a space and common style when it does not, and the capture keeps
+  # the quote characters, which no directory name has.
+  local s="$1"
+  case "$s" in
+    \"*\") s="${s#\"}"; s="${s%\"}" ;;
+    \'*\') s="${s#\'}"; s="${s%\'}" ;;
+  esac
+  printf '%s' "$s"
+}
+
+# Only the text up to the `push` token is searched for a directory, so a
+# compound command's later, unrelated `git -C <elsewhere> status` cannot be
+# mistaken for where the push happens.
+PUSH_PREFIX="$(printf '%s' "$cmd" | sed -nE 's/(.*)[[:space:]]push([[:space:]].*)?$/\1/p' | head -1)"
+[ -n "$PUSH_PREFIX" ] || PUSH_PREFIX="$cmd"
+
 # The command's own directive wins over the payload's `cwd`: `cwd` is the
 # session's directory, which stays at the main checkout even for a command
 # that cds into a worktree first — so trusting it would re-introduce exactly
 # the misdirection being fixed.
 # No `\b` or `\s` in these patterns: BSD sed (macOS, where this hook also
 # runs) supports neither, and silently matches nothing instead of erroring.
-for candidate in \
-  "$(printf '%s' "$cmd" | sed -nE 's/.*git[[:space:]]+-C[[:space:]]+([^[:space:]]+).*/\1/p' | head -1)" \
-  "$(printf '%s' "$cmd" | sed -nE 's/^[[:space:]]*cd[[:space:]]+([^[:space:]&;|]+).*/\1/p' | head -1)" \
-  "$(printf '%s' "$input" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("cwd") or "")' 2>/dev/null)"
+NAMED_DIR=""
+for pattern in \
+  's/.*-C[[:space:]]+"([^"]+)".*/\1/p' \
+  "s/.*-C[[:space:]]+'([^']+)'.*/\\1/p" \
+  's/.*-C[[:space:]]+([^[:space:]]+).*/\1/p' \
+  's/^[[:space:]]*cd[[:space:]]+"([^"]+)".*/\1/p' \
+  "s/^[[:space:]]*cd[[:space:]]+'([^']+)'.*/\\1/p" \
+  's/^[[:space:]]*cd[[:space:]]+([^[:space:]&;|]+).*/\1/p'
 do
-  if [ -n "$candidate" ] && same_repo "$candidate"; then
-    GATE_DIR="$candidate"
+  found="$(printf '%s' "$PUSH_PREFIX" | sed -nE "$pattern" | head -1)"
+  [ -n "$found" ] || continue
+  NAMED_DIR="$(unquote "$found")"
+  if same_repo "$NAMED_DIR"; then
+    GATE_DIR="$NAMED_DIR"
     break
   fi
 done
+
+# A named directory that did not match this repository is judged on whether it
+# exists at all. A path that does not exist is the signature of parsing this
+# gate got wrong — a spelling it does not cover (an escaped space, a variable,
+# a relative path) reduced to something meaningless — and silently continuing
+# from there is precisely how the original defect behaved, so it is reported
+# instead. A path that does exist is simply not this repository's push, and
+# gating someone else's repository is not this hook's business.
+if [ -z "$GATE_DIR" ] && [ -n "$NAMED_DIR" ]; then
+  if [ -e "$NAMED_DIR" ]; then
+    exit 0
+  fi
+  echo "BLOCKED: git push — the command names directory '$NAMED_DIR', which does not exist, so" >&2
+  echo "  this gate cannot tell which branch's files to check. That usually means the path was" >&2
+  echo "  written in a form it failed to read; pass it unquoted and absolute." >&2
+  exit 2
+fi
+
+if [ -z "$GATE_DIR" ]; then
+  hook_cwd="$(printf '%s' "$input" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("cwd") or "")' 2>/dev/null)"
+  if [ -n "$hook_cwd" ] && same_repo "$hook_cwd"; then
+    GATE_DIR="$hook_cwd"
+  fi
+fi
 [ -n "$GATE_DIR" ] || GATE_DIR="$CLAUDE_PROJECT_DIR"
 
 # Stay in $CLAUDE_PROJECT_DIR to RUN the tools, and read the file list from
@@ -208,9 +259,13 @@ if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 
   # text "push" instead would cut at the last occurrence, which lands inside
   # any branch name containing it (`fix/push-gate-...`) and leaves the list
   # empty — silently disabling this very check for such a branch.
+  # `read -ra`, not `for tok in $cmd`: the latter also expands globs, and the
+  # script has already cd'd into the repo — so `git push origin 'refs/heads/*'`
+  # would turn into a list of matching filenames, dropping the real ref.
   refs=()
+  read -ra cmd_tokens <<<"$cmd"
   seen_push=0
-  for tok in $cmd; do
+  for tok in ${cmd_tokens[@]+"${cmd_tokens[@]}"}; do
     if [ "$seen_push" -eq 1 ]; then
       case "$tok" in
         -*|origin) ;;
