@@ -144,18 +144,21 @@ _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 # one deletes rows nothing replaces, or writes rows that collide with what was
 # never deleted — so a table joins this set only when both halves are done.
 #
-# These four qualify because each builds straight from a ClickHouse GROUP BY
-# that can carry the date restriction itself. The remaining per-date
-# aggregates read the deduped TEMP table, which is still materialised whole;
-# restricting them means restricting that load, which is a separate change.
-_INCREMENTAL_AGG_TABLES = frozenset(
-    {
-        "agg_feed_health",
-        "agg_service_delivered_daily",
-        "agg_schedule_revision_daily",
-        "agg_route_headway_daily",
-    }
-)
+# Membership also requires that the staleness signal actually covers what the
+# table reads. The ledger counts rows with a `dep_delay`, so only aggregates
+# drawn from that same population qualify: agg_feed_health's own count IS that
+# number, and agg_route_headway_daily discards a row without one before doing
+# anything with it. agg_service_delivered_daily (which counts cancellations and
+# skipped stops) and agg_schedule_revision_daily (which reads
+# static_version_id) both read rows the ledger cannot see, so a date could
+# change for them while the count stands still — they stay on the full rebuild
+# until the ledger carries a signal that moves with them.
+#
+# Both qualifying tables build straight from a ClickHouse GROUP BY that can
+# carry the date restriction itself. The per-date aggregates reading the
+# deduped TEMP table are a separate matter: restricting them means restricting
+# that load.
+_INCREMENTAL_AGG_TABLES = frozenset({"agg_feed_health", "agg_route_headway_daily"})
 # agg_static_version_summary is NOT in _AGG_TABLES_ORDERED: it is UPSERTed
 # (never wiped) so a past static-feed version's planned-trip-count/vehicle-km
 # survives `static_loader.load_static()` overwriting the raw static_* tables
@@ -1170,23 +1173,19 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                     SELECT svc_date, trip_id FROM (
                         SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
-                + date_where
-                + """
+                        FROM updates WHERE agency_id = {agency_id:UInt16}
                         GROUP BY svc_date, trip_id
                     ) WHERE trip_rel = 3
                     UNION DISTINCT
                     SELECT svc_date, trip_id FROM (
                         SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_stop, -1), (captured_at, file_name)) AS stop_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
-                + date_where
-                + """
+                        FROM updates WHERE agency_id = {agency_id:UInt16}
                         GROUP BY svc_date, trip_id, stop_sequence
                     ) WHERE stop_rel = 1
                 ) GROUP BY svc_date
                 """,
-                date_params,
+                {"agency_id": agency_id},
                 conn,
             )
         else:
@@ -1221,15 +1220,13 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date,
                        static_version_id AS version,
                        count() AS cnt
-                FROM updates WHERE agency_id = {agency_id:UInt16}"""
-            + date_where
-            + """
+                FROM updates WHERE agency_id = {agency_id:UInt16}
                 GROUP BY svc_date, version
             )
             GROUP BY svc_date
             HAVING static_version_id IS NOT NULL
             """,
-            date_params,
+            {"agency_id": agency_id},
             conn,
         )
 
