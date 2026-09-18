@@ -5,7 +5,7 @@ import { useAgencies, useReport } from "../api/hooks";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
 import type { TrendDay } from "../api/types";
-import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
+import { TabFilterBar } from "../components/TabFilterBar";
 import { downloadCsv } from "../components/analysis/csv";
 import { deleteAnalysis, readAnalyses } from "../components/analysis/savedAnalyses";
 import { PeriodChart } from "../components/analysis/PeriodChart";
@@ -65,7 +65,7 @@ export function ReportsHomeTab() {
         <button aria-label={`${t("remove")}: ${s.title}`} onClick={() => { try { deleteAnalysis(s.id); setSaved(readAnalyses()); } catch { setNotice(t("saveFailed")); } }}>{t("remove")}</button>
       </li>)}</ul>
     </section> : <>
-      <AnalysisFilters agencyId={id} />
+      <TabFilterBar />
       <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name} · {ctx.from} – {ctx.to}</h2>
       <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
         ...metadata, [], ["definition", JSON.stringify(trend.data?.definition)], [], ...daysToCsvRows(days),
