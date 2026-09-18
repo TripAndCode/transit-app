@@ -31,8 +31,9 @@ the task needs them.
 ## Verification commands
 
 - Backend: `make serve`, `make test`, `make check`, `poetry run ruff check`,
-  `poetry run mypy`. Never let `make test/check` inherit the default `:5433` URL;
-  point it at `:5544`.
+  `poetry run ruff format --check`, `poetry run mypy`. Never let `make test/check`
+  inherit the default `:5433` URL; point it at `:5544`. `make fmt` rewrites files
+  rather than reporting, so it does not verify formatting.
 - Frontend: `npm run typecheck`, `npm run test`, `npm run lint`, `npm run lint:i18n`,
   `npm run lint:i18n-strings`, `npm run test:check-entry-chunk`, then
   `npm run build:bundle && npm run check:entry-chunk`.
