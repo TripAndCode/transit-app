@@ -27,7 +27,20 @@ class UserLLMKey(NamedTuple):
 
 @lru_cache(maxsize=1)
 def _fernet() -> Fernet:
-    return Fernet(os.environ["LLM_KEY_ENCRYPTION_KEY"].encode())
+    # Named explicitly rather than letting `os.environ[...]` raise: a bare
+    # KeyError surfaces from inside a Fernet constructor with no hint of which
+    # variable is missing or how to produce one, and this key is only reached
+    # on the BYOK screen -- long after startup, where a misconfigured deploy
+    # would otherwise have shown itself.
+    raw = os.environ.get("LLM_KEY_ENCRYPTION_KEY")
+    if not raw:
+        raise RuntimeError(
+            "LLM_KEY_ENCRYPTION_KEY is not set, so per-user provider keys cannot "
+            "be encrypted or read. Generate one with: python -c \"from "
+            "cryptography.fernet import Fernet; print(Fernet.generate_key()"
+            ".decode())\" — see .env.example."
+        )
+    return Fernet(raw.encode())
 
 
 def encrypt_key(raw: str) -> bytes:
