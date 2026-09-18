@@ -6,9 +6,8 @@ the legacy /api/{id}/query route was retired with executor.py. SQL is
 lifted from the corresponding _exec_* functions, with one intentional
 change: ``route_dow_breakdown`` always reads from the deduped
 ``updates`` table and honours ``ctx`` (date / DOW / time band /
-service), where the old executor's by_dow path silently preferred the
-all-time ``agg_route_dow`` aggregate when present, ignoring the
-requested window.
+service), rather than falling back to an all-time aggregate that would
+ignore the requested window.
 
 ``route_dow_breakdown`` / ``route_compare_service`` always read the live
 ``updates`` table (there is no agg-table fast path for either), which now
@@ -150,10 +149,9 @@ async def segment_hotspots(
 
     Returns rows: (stop_sequence, stop_name, avg_min, samples), sorted by
     avg_min DESC, limited to `limit`. Only stop_sequences with > 5 samples
-    are returned — this tool's own noise gate on its live ClickHouse scan
-    (independent of agg_stop_seq, which this tool does not read and which
-    carries no insert-time sample gate of its own). Backs
-    tools._tool_segment_hotspots.
+    are returned — this tool's own noise gate on its live ClickHouse scan,
+    not an inherited one: no aggregate table applies an insert-time sample
+    gate. Backs tools._tool_segment_hotspots.
 
     `updates` lives in ClickHouse; static_stop_times/static_stops live in
     Postgres — no cross-database join, so this runs in two steps: (1) a
