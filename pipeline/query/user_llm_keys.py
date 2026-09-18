@@ -36,9 +36,9 @@ def _fernet() -> Fernet:
     if not raw:
         raise RuntimeError(
             "LLM_KEY_ENCRYPTION_KEY is not set, so per-user provider keys cannot "
-            "be encrypted or read. Generate one with: python -c \"from "
+            'be encrypted or read. Generate one with: python -c "from '
             "cryptography.fernet import Fernet; print(Fernet.generate_key()"
-            ".decode())\""
+            '.decode())"'
         )
     return Fernet(raw.encode())
 
