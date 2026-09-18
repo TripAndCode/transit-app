@@ -75,10 +75,44 @@ PARSED="$(
 import json, shlex, sys
 
 SEPARATORS = {"&&", "||", ";", "|", "&"}
-out = {"dir": "", "cd_dir": "", "refs": [], "is_delete": False, "is_push": False}
+out = {"dir": "", "cd_dir": "", "refs": [], "is_delete": False}
 try:
     data = json.load(sys.stdin)
-    tokens = shlex.split(data.get("tool_input", {}).get("command", ""))
+    raw_cmd = data.get("tool_input", {}).get("command", "")
+    # A newline outside quotes is a statement separator exactly like ";" --
+    # shlex.split() alone treats it as ordinary whitespace, so a multi-line
+    # command (an entirely normal way to author a compound Bash-tool call,
+    # e.g. a "cd <worktree>" line followed by a "git push ..." line)
+    # collapses into a single unsplit statement, and every heuristic below
+    # that keys off a statement first token ("git", "cd") silently stops
+    # firing. A newline inside a quoted string (a multi-line commit message)
+    # is left alone so its content is not altered. chr(34)/chr(39) stand in
+    # for literal double/single-quote characters here because this whole
+    # script is itself embedded in a single-quoted shell argument.
+    dq, sq = chr(34), chr(39)
+    quote, escaped, chars = None, False, []
+    for ch in raw_cmd:
+        if escaped:
+            chars.append(ch); escaped = False
+        elif quote:
+            chars.append(ch)
+            if ch == "\\" and quote == dq:
+                escaped = True
+            elif ch == quote:
+                quote = None
+        elif ch == "\\":
+            chars.append(ch); escaped = True
+        elif ch in (sq, dq):
+            quote = ch; chars.append(ch)
+        elif ch == "\n":
+            # Surrounding spaces matter: SEPARATORS below only matches a
+            # standalone ";" token, and shlex.split() has no idea ";" is
+            # special -- glued to a neighbour with no whitespace it is just
+            # another character in that word, same as "cmd1;cmd2" would be.
+            chars.append(" ; ")
+        else:
+            chars.append(ch)
+    tokens = shlex.split("".join(chars))
 except Exception:
     print(json.dumps(out)); raise SystemExit(0)
 
@@ -119,7 +153,6 @@ for statement in statements:
     parsed = as_git(statement)
     if parsed and parsed[1] == "push":
         directory, _, args = parsed
-        out["is_push"] = True
         out["dir"] = directory or ""
         out["is_delete"] = any(a in ("--delete", "-d") for a in args) or any(
             a.startswith(":") and len(a) > 1 for a in args
@@ -153,9 +186,16 @@ fi
 # It also needs nothing from the command's shape.
 if [ -z "$GATE_DIR" ]; then
   for ref in $(read_parsed refs); do
-    branch="${ref##*:}"
+    # Take the SOURCE half of a `src:dst` refspec: that names the local
+    # branch/worktree actually being pushed, not where it lands remotely.
+    branch="${ref%%:*}"
     branch="${branch#refs/heads/}"
-    [ -n "$branch" ] || continue
+    # A literal "HEAD" (`git push origin HEAD`) or an empty token can't be
+    # resolved here -- this tier finds a directory FROM a branch name, and
+    # neither is one. That's fine: it falls through to the `cd`/cwd tiers
+    # below, which resolve HEAD from a directory instead of the other way
+    # around.
+    [ -n "$branch" ] && [ "$branch" != "HEAD" ] || continue
     holder="$(git worktree list --porcelain | awk -v want="refs/heads/$branch" '
       /^worktree /{dir=substr($0, 10)}
       /^branch /{if (substr($0, 8) == want) {print dir; exit}}')"
@@ -193,6 +233,14 @@ if [ -z "$GATE_DIR" ] && [ -n "$NAMED_DIR" ]; then
 fi
 
 if [ -z "$GATE_DIR" ]; then
+  # Last resort for a push whose own argv names no directory and no branch
+  # (a bare `git push` with no leading `cd`/`-C` in this same command) --
+  # the payload's cwd, which reflects wherever the session's shell state
+  # currently sits, including a `cd` done in an earlier, separate tool
+  # call. If that ever stops being accurate for some payload shape, there
+  # is nothing left in the command text for this hook to fall back to: a
+  # push this contextless is, by construction, indistinguishable from one
+  # made from $CLAUDE_PROJECT_DIR itself.
   hook_cwd="$(printf '%s' "$input" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("cwd") or "")' 2>/dev/null)"
   if [ -n "$hook_cwd" ] && same_repo "$hook_cwd"; then
     GATE_DIR="$hook_cwd"
@@ -327,11 +375,25 @@ fi
 IS_DELETE=0
 [ "$(read_parsed is_delete)" = "True" ] && IS_DELETE=1
 if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ]; then
-  for ref in $(read_parsed refs); do
-    # Take the destination half of a `src:dst` refspec, then drop a
+  # A bare `git push` (relying on the branch's own upstream tracking) parses
+  # to no ref tokens at all, but it still means "push HEAD" -- treat that
+  # the same as an explicit `git push origin HEAD` below instead of skipping
+  # this safety net just because the argv happened not to spell the branch
+  # out.
+  REFS_TO_CHECK="$(read_parsed refs)"
+  [ -n "$REFS_TO_CHECK" ] || REFS_TO_CHECK="HEAD"
+  for ref in $REFS_TO_CHECK; do
+    # Take the SOURCE half of a `src:dst` refspec, then drop a
     # `refs/heads/` prefix so the fully-qualified form resolves too.
-    branch="${ref##*:}"
+    branch="${ref%%:*}"
     branch="${branch#refs/heads/}"
+    if [ "$branch" = "HEAD" ]; then
+      # Neither a literal "HEAD" nor an implicit one names a branch in its
+      # own argv -- resolve it from GATE_DIR's own checkout instead, since
+      # that is what HEAD actually refers to for the push being checked.
+      branch="$(git -C "$GATE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    fi
+    [ -n "$branch" ] && [ "$branch" != "HEAD" ] || continue
     git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 || continue
     # Filtered to the same pathspecs the scoped checks use: a branch that
     # changes only shell, SQL or Markdown legitimately produces no files for
