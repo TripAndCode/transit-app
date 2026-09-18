@@ -1,6 +1,5 @@
 /* frontend/src/styles/overview.css
-   Editorial redesign for the 概況 tab. Hero is a full-bleed editorial
-   panel (NOT a card); everything else is a borderless soft-shadow card.
+   KPI hero row up top, everything else a borderless soft-shadow card.
    Calm-UI compliant: no alarm reds, no tilts/parallax, animations
    ≤800 ms behind reduced-motion. */
 
@@ -35,7 +34,7 @@
   font-weight: 600;
 }
 
-/* ---------- 3. Concentration ---------- */
+/* ---------- Concentration ---------- */
 .ov-conc-headline {
   font-size: 14px;
   color: var(--text-primary);
@@ -189,7 +188,7 @@
   color: var(--text-tertiary);
 }
 
-/* ---------- 4. Peak hour ---------- */
+/* ---------- Peak hour ---------- */
 .ov-peak-svg-wrap {
   position: relative;
   width: 100%;
@@ -198,7 +197,7 @@
    resolve `fill` to its initial value (black), not transparent. */
 .ov-peak-spread { fill: rgba(180, 83, 9, 0.06); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
 
-/* ---------- 5. Service split ---------- */
+/* ---------- Service split ---------- */
 .ov-svc-list {
   display: flex;
   flex-direction: column;
