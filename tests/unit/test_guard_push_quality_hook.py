@@ -1,13 +1,12 @@
 """Regression coverage for guard-push-quality.sh's command parser.
 
 The hook's own resolution logic (which directory a `git push` actually
-comes from) has gone through six prior fix commits, each catching a new
-command shape that manual review missed -- most recently a multi-line
-command silently collapsing into one unsplit statement, and a `src:dst`
-refspec resolving the wrong half. Both are real bugs a human has to
-re-notice by inspection today; these tests pin the parser's behavior for
-the shapes those bugs came from so a regression fails a test run instead
-of waiting for the next review pass.
+comes from) has repeatedly needed a new heuristic for a command shape
+manual review missed -- most recently a multi-line command silently
+collapsing into one unsplit statement, and a `src:dst` refspec resolving
+the wrong half. These tests pin the parser's behavior for the shapes
+those bugs came from so a regression fails a test run instead of waiting
+for the next review pass.
 
 Only the embedded Python parser is exercised here (extracted verbatim
 from the hook file, so this can't silently drift out of sync with what

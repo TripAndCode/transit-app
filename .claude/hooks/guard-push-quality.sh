@@ -185,10 +185,30 @@ read_parsed() {
 }
 
 # The push's own `-C` is the most explicit statement of where it runs, so it
-# comes first.
-NAMED_DIR="$(read_parsed dir)"
-if [ -n "$NAMED_DIR" ] && same_repo "$NAMED_DIR"; then
-  GATE_DIR="$NAMED_DIR"
+# is resolved definitively right here rather than being allowed to fall
+# through to a later tier: an explicit `-C` on the statement that actually
+# carries `push` is unambiguous about which repository that git invocation
+# touches, and nothing else in the command -- a ref name, a preceding `cd`
+# -- can override it. Without this early exit, a foreign-but-real `-C`
+# (one that exists and resolves, just not to this repository) that failed
+# to match here would fall through to tier 2/3 below, which could then
+# substitute some unrelated directory the rest of the command happens to
+# also mention -- checking a repository/branch the push never actually
+# touches while never inspecting its real target at all.
+EXPLICIT_C_DIR="$(read_parsed dir)"
+if [ -n "$EXPLICIT_C_DIR" ]; then
+  if same_repo "$EXPLICIT_C_DIR"; then
+    GATE_DIR="$EXPLICIT_C_DIR"
+  elif [ -e "$EXPLICIT_C_DIR" ]; then
+    # Exists, just isn't this repository -- gating someone else's
+    # repository is not this hook's business.
+    exit 0
+  else
+    echo "BLOCKED: git push — the command names directory '$EXPLICIT_C_DIR', which does not exist, so" >&2
+    echo "  this gate cannot tell which branch's files to check. That usually means the path was" >&2
+    echo "  written in a form it failed to read; pass it unquoted and absolute." >&2
+    exit 2
+  fi
 fi
 
 # Then the branch being pushed, which identifies the worktree holding it. This
@@ -208,7 +228,12 @@ if [ -z "$GATE_DIR" ]; then
     # below, which resolve HEAD from a directory instead of the other way
     # around.
     [ -n "$branch" ] && [ "$branch" != "HEAD" ] || continue
-    holder="$(git worktree list --porcelain | awk -v want="refs/heads/$branch" '
+    # `-C "$CLAUDE_PROJECT_DIR"` matters here: this tier runs before the
+    # script ever `cd`s anywhere, so an unscoped `git worktree list` would
+    # depend on the invoking shell's own cwd -- which is exactly the kind
+    # of unreliable location this whole hook exists to route around, not
+    # something a lookup tier should quietly inherit.
+    holder="$(git -C "$CLAUDE_PROJECT_DIR" worktree list --porcelain | awk -v want="refs/heads/$branch" '
       /^worktree /{dir=substr($0, 10)}
       /^branch /{if (substr($0, 8) == want) {print dir; exit}}')"
     if [ -n "$holder" ] && same_repo "$holder"; then
@@ -218,27 +243,31 @@ if [ -z "$GATE_DIR" ]; then
   done
 fi
 
-# Then a preceding `cd`, for a push that names no ref at all.
+# Then a preceding `cd`, for a push that names no ref at all. (The explicit
+# `-C` case above already either set $GATE_DIR or exited, so reaching here
+# means there was no `-C` on the push statement at all -- $CD_DIR is the
+# only remaining directory candidate.)
+CD_DIR=""
 if [ -z "$GATE_DIR" ]; then
   CD_DIR="$(read_parsed cd_dir)"
   if [ -n "$CD_DIR" ] && same_repo "$CD_DIR"; then
     GATE_DIR="$CD_DIR"
   fi
-  [ -n "$NAMED_DIR" ] || NAMED_DIR="$CD_DIR"
 fi
 
-# A named directory that did not match this repository is judged on whether it
-# exists at all. A path that does not exist is the signature of parsing this
-# gate got wrong — a spelling it does not cover (an escaped space, a variable,
-# a relative path) reduced to something meaningless — and silently continuing
-# from there is precisely how the original defect behaved, so it is reported
-# instead. A path that does exist is simply not this repository's push, and
-# gating someone else's repository is not this hook's business.
-if [ -z "$GATE_DIR" ] && [ -n "$NAMED_DIR" ]; then
-  if [ -e "$NAMED_DIR" ]; then
+# A named `cd` directory that did not match this repository is judged on
+# whether it exists at all. A path that does not exist is the signature of
+# parsing this gate got wrong — a spelling it does not cover (an escaped
+# space, a variable, a relative path) reduced to something meaningless —
+# and silently continuing from there is precisely how the original defect
+# behaved, so it is reported instead. A path that does exist is simply not
+# this repository's push, and gating someone else's repository is not this
+# hook's business.
+if [ -z "$GATE_DIR" ] && [ -n "$CD_DIR" ]; then
+  if [ -e "$CD_DIR" ]; then
     exit 0
   fi
-  echo "BLOCKED: git push — the command names directory '$NAMED_DIR', which does not exist, so" >&2
+  echo "BLOCKED: git push — the command names directory '$CD_DIR', which does not exist, so" >&2
   echo "  this gate cannot tell which branch's files to check. That usually means the path was" >&2
   echo "  written in a form it failed to read; pass it unquoted and absolute." >&2
   exit 2

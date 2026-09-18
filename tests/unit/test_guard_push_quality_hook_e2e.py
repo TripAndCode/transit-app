@@ -78,6 +78,12 @@ def _run_hook(command: str, *, claude_project_dir: Path, cwd: str = "") -> subpr
         text=True,
         timeout=30,
         env=env,
+        # Matches how the real harness invokes this hook: the shell's own
+        # cwd sits wherever the session currently is, not necessarily at
+        # $CLAUDE_PROJECT_DIR -- pytest's own cwd (this repo, not the fake
+        # one) would otherwise make tier 2's `git worktree list` list the
+        # wrong repository entirely.
+        cwd=claude_project_dir,
     )
 
 
@@ -100,6 +106,66 @@ def test_misresolved_gate_dir_is_caught_by_the_safety_net(fake_repo):
     assert result.returncode == 2, result.stderr
     assert "nothing differs from" in result.stderr
     assert "feature" in result.stderr
+
+
+def test_explicit_dash_c_to_a_foreign_repo_is_not_overridden_by_a_preceding_cd(fake_repo):
+    """Regression: an explicit `-C <other-repo>` on the statement that
+    actually carries `push` must be resolved before tiers 2/3 run at all.
+    A prior version left GATE_DIR empty when `-C` named a real, existing,
+    but unrelated repository, which let a *preceding* `cd` into this
+    repo's own worktree silently fill GATE_DIR instead -- checking a
+    branch the push never touches while never inspecting the real
+    target (the other repo) at all."""
+    _git("branch", "feature", cwd=fake_repo)
+    worktree = fake_repo.parent / "feature-worktree"
+    _git("worktree", "add", "-q", str(worktree), "feature", cwd=fake_repo)
+    (worktree / "existing.py").write_text("VALUE = 2\n")
+    _git("add", "existing.py", cwd=worktree)
+    _git("commit", "-q", "-m", "change value", cwd=worktree)
+
+    other_repo = fake_repo.parent / "other-repo"
+    other_repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=other_repo)
+
+    result = _run_hook(
+        f"cd {worktree} && git -C {other_repo} push origin some-branch",
+        claude_project_dir=fake_repo,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_explicit_refspec_resolves_via_its_source_half_with_no_dash_c_or_cd(fake_repo):
+    """Regression: `${ref##*:}` (destination half) was used where the
+    source half -- the local branch actually being pushed -- was needed,
+    so an explicit `src:dst` refspec resolved to a remote-side name that
+    isn't a local worktree/branch, and this tier silently found nothing.
+    Drives the real tier-2 (ref -> worktree) lookup with no `-C`/`cd` in
+    the command at all, so only a correct source-half extraction can
+    resolve GATE_DIR here."""
+    _git("branch", "local-feature", cwd=fake_repo)
+    worktree = fake_repo.parent / "refspec-worktree"
+    _git("worktree", "add", "-q", str(worktree), "local-feature", cwd=fake_repo)
+    (worktree / "existing.py").write_text("VALUE = 3\n")
+    _git("add", "existing.py", cwd=worktree)
+    _git("commit", "-q", "-m", "change value", cwd=worktree)
+
+    result = _run_hook(
+        "git push origin local-feature:renamed-remote-branch",
+        claude_project_dir=fake_repo,
+    )
+    # Only care that GATE_DIR resolved to the worktree holding the local
+    # branch (the banner only prints when GATE_DIR != CLAUDE_PROJECT_DIR);
+    # what happens afterward depends on a provisioned poetry/ruff
+    # environment this throwaway repo deliberately doesn't have. Matched
+    # on the worktree's directory name rather than its full path: git
+    # canonicalizes a linked worktree's path (resolving a macOS /var ->
+    # /private/var symlink) in a way tempfile's own Path does not, so a
+    # byte-exact path comparison would be comparing two spellings of the
+    # same directory.
+    banner = result.stderr.splitlines()[0] if result.stderr else ""
+    assert banner.startswith("== push gate: files from"), result.stderr
+    assert worktree.name in banner, result.stderr
 
 
 def test_deletion_only_branch_from_the_correct_worktree_is_not_blocked(fake_repo):
