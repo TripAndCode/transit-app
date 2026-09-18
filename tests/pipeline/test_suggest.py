@@ -27,8 +27,7 @@ async def suggest_agency(apply_schema, ch_client):
     yield pool, agency_id
     async with pool.acquire() as conn:
         await conn.execute(
-            "TRUNCATE agencies, updates, agg_route_stats, agg_route_hour, agg_route_dow, "
-            "agg_daily_trend, agg_route_daily_dist, agg_stop_seq CASCADE"
+            "TRUNCATE agencies, updates, agg_route_stats, agg_route_hour, agg_daily_trend, agg_route_daily_dist CASCADE"
         )
     await pool.close()
 

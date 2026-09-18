@@ -131,8 +131,8 @@ def pg_conn(apply_schema):
             cur.execute("""
                 TRUNCATE agencies, updates, static_stops, static_stop_times,
                 static_trips, static_routes, static_calendar_dates, static_shapes,
-                agg_route_stats, agg_route_hour, agg_route_dow, agg_route_hour_dow,
-                agg_daily_trend, agg_stop_seq, agg_stop_daily, agg_stop_routes,
+                agg_route_stats, agg_route_hour, agg_route_hour_dow,
+                agg_daily_trend, agg_stop_daily, agg_stop_routes,
                 agg_feed_health, agg_service_delivered_daily, agg_meta, rag_chunks, api_keys,
                 filter_presets, login_events, sessions, oauth_identities, users CASCADE
             """)
@@ -290,8 +290,8 @@ async def aconn(apply_schema):
         await conn.execute("""
             TRUNCATE agencies, updates, static_stops, static_stop_times,
             static_trips, static_routes, static_calendar_dates, static_shapes,
-            agg_route_stats, agg_route_hour, agg_route_dow, agg_route_hour_dow,
-            agg_daily_trend, agg_stop_seq, agg_stop_daily, agg_stop_routes,
+            agg_route_stats, agg_route_hour, agg_route_hour_dow,
+            agg_daily_trend, agg_stop_daily, agg_stop_routes,
             agg_feed_health, agg_service_delivered_daily, agg_meta, rag_chunks, api_keys,
             filter_presets, login_events, sessions, oauth_identities, users CASCADE
         """)

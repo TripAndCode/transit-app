@@ -58,8 +58,8 @@ async def agencies_client(apply_schema):
     truncate_sql = (
         "TRUNCATE agencies, updates, static_stops, static_stop_times, "
         "static_trips, static_routes, static_calendar_dates, "
-        "agg_route_stats, agg_route_hour, agg_route_dow, agg_route_daily, "
-        "agg_daily_trend, agg_stop_seq, rag_chunks, agg_meta, sessions, users CASCADE"
+        "agg_route_stats, agg_route_hour, agg_route_daily, "
+        "agg_daily_trend, rag_chunks, agg_meta, sessions, users CASCADE"
     )
     # Pre-truncate so each test starts from a known-empty state — otherwise
     # data left over from `make seed-agencies` (or a parallel session) would
@@ -87,8 +87,8 @@ async def agencies_client_real_validator(apply_schema):
     truncate_sql = (
         "TRUNCATE agencies, updates, static_stops, static_stop_times, "
         "static_trips, static_routes, static_calendar_dates, "
-        "agg_route_stats, agg_route_hour, agg_route_dow, agg_route_daily, "
-        "agg_daily_trend, agg_stop_seq, rag_chunks, agg_meta, sessions, users CASCADE"
+        "agg_route_stats, agg_route_hour, agg_route_daily, "
+        "agg_daily_trend, rag_chunks, agg_meta, sessions, users CASCADE"
     )
     async with pool.acquire() as conn:
         await conn.execute(truncate_sql)
