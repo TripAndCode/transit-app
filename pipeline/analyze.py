@@ -59,12 +59,13 @@ average out to near zero, which would silently zero out that day's real
 lateness contribution instead of counting it.
 """
 
+import io
 import logging
 import time
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import timezone
+from datetime import datetime
 from statistics import median
 
 import psycopg2.extras
@@ -170,13 +171,50 @@ _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 _step_ms: dict[str, float] = {}
 
 
+def _add_step(label: str, ms: float) -> None:
+    """Accumulate a duration measured by hand.
+
+    For the two phases of a streamed transfer, which interleave: nesting
+    :func:`_step` inside itself would count the inner phase twice and push the
+    summary's measured total past the wall clock, destroying the coverage
+    figure. Timing each phase separately and adding it here keeps the
+    labels disjoint.
+    """
+    _step_ms[label] = _step_ms.get(label, 0.0) + ms
+
+
 @contextmanager
 def _step(label: str) -> Iterator[None]:
     t0 = time.perf_counter()
     try:
         yield
     finally:
-        _step_ms[label] = _step_ms.get(label, 0.0) + (time.perf_counter() - t0) * 1000
+        _add_step(label, (time.perf_counter() - t0) * 1000)
+
+
+def _copy_field(value) -> str:
+    """Render one value for ``COPY ... FROM STDIN`` in its default TEXT format.
+
+    TEXT, not CSV: in CSV an unquoted empty field *is* NULL, so an empty
+    string and NULL become indistinguishable. TEXT spells NULL ``\\N`` and
+    leaves an empty string empty, which keeps the temp table's contents
+    identical to what row-wise inserts produced.
+
+    A naive datetime from ClickHouse means UTC (clickhouse-connect's default
+    tz_mode is ``naive_utc``), and this is where that has to be made explicit:
+    written without an offset, Postgres reads it in the session's timezone,
+    which every real analyze() caller pins to Asia/Tokyo — landing the row
+    nine hours early. Writing the offset also removes the need to rebuild each
+    row as a tz-aware tuple before handing it to the driver.
+    """
+    if value is None:
+        return "\\N"
+    if isinstance(value, datetime):
+        return value.isoformat() + ("+00:00" if value.tzinfo is None else "")
+    text = str(value)
+    if "\\" in text or "\t" in text or "\n" in text or "\r" in text:
+        text = text.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
+    return text
 
 
 def _ch_query(label: str, ch_client, sql: str, parameters: dict):
@@ -334,41 +372,38 @@ def analyze(agency_id: int, conn, ch_client) -> None:
             # One label covers the ClickHouse dedup and the Postgres load
             # together, because streaming interleaves them -- the split that
             # matters here is this whole transfer versus the GROUP BYs below.
-            with (
-                _step("dedup: ClickHouse scan + load into TEMP"),
-                ch_client.query_row_block_stream(ch_sql, parameters={"agency_id": agency_id}) as stream,
-            ):
+            # COPY, not row-wise INSERT: this is the single largest step of a
+            # run, and a bulk load of the same rows measures several times
+            # faster than `execute_values` over them. The two phases are timed
+            # apart rather than under one label — they interleave, so only
+            # separate measurements say whether the cost is the remote scan or
+            # the local write, and that is the question any further work here
+            # starts from. `_copy_field` owns the encoding, including the UTC
+            # offset that used to require rebuilding every row as a tz-aware
+            # tuple first.
+            # The load is timed directly and the scan taken as the remainder,
+            # rather than timing both: the query runs inside the stream's own
+            # __enter__, so measuring only the time between yielded blocks
+            # would leave that — the bulk of a large agency's scan — out of
+            # the summary entirely. Deriving one from the whole elapsed span
+            # keeps the two labels summing to it exactly.
+            transfer_start = time.perf_counter()
+            load_ms = 0.0
+            with ch_client.query_row_block_stream(ch_sql, parameters={"agency_id": agency_id}) as stream:
                 for block in stream:
                     if not block:
                         continue
-                    # clickhouse-connect returns DateTime64(0, 'UTC') columns as
-                    # NAIVE Python datetimes (its default tz_mode is
-                    # "naive_utc") that mean UTC. psycopg2 sends a naive
-                    # datetime to Postgres as a plain literal, which Postgres
-                    # then interprets in the SESSION's timezone — and every
-                    # real analyze() caller (gtfs_pipeline._get_conn, the cron
-                    # endpoint) pins `SET TIME ZONE 'Asia/Tokyo'`. Without this
-                    # fixup, a ClickHouse timestamp that's naive-but-means-UTC
-                    # would get reinterpreted as JST and land 9h early. Same
-                    # guard as pipeline/clickhouse.py's max_captured_at /
-                    # max_captured_at_before. last_captured_at is the
-                    # second-to-last element of each row -- arr_delay is
-                    # always last regardless of include_captured_at (see
-                    # build_dedup_ch_sql's SELECT list above).
-                    rows = [
-                        (
-                            *r[:-2],
-                            r[-2].replace(tzinfo=timezone.utc) if r[-2] is not None and r[-2].tzinfo is None else r[-2],
-                            r[-1],
-                        )
-                        for r in block
-                    ]
-                    psycopg2.extras.execute_values(
-                        cur,
-                        "INSERT INTO _analyze_deduped VALUES %s",
-                        rows,
-                        page_size=10_000,
-                    )
+                    t0 = time.perf_counter()
+                    buf = io.StringIO()
+                    for row in block:
+                        buf.write("\t".join(_copy_field(v) for v in row))
+                        buf.write("\n")
+                    buf.seek(0)
+                    cur.copy_expert("COPY _analyze_deduped FROM STDIN", buf)
+                    load_ms += (time.perf_counter() - t0) * 1000
+            transfer_ms = (time.perf_counter() - transfer_start) * 1000
+            _add_step("dedup: ClickHouse scan", transfer_ms - load_ms)
+            _add_step("dedup: COPY into TEMP", load_ms)
             with _step("dedup: ANALYZE TEMP"):
                 cur.execute("ANALYZE _analyze_deduped")
 
