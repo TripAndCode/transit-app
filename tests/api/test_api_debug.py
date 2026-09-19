@@ -2,17 +2,24 @@
 
 Contract:
 1. GET  /api/debug/perf  -> 200; body has ops, caches, pool {size, idle}.
-2. POST /api/debug/perf/reset -> 200; subsequent GET shows ops == {}.
-3. PERF_DEBUG_ENABLED=false -> 404 on both endpoints.
-4. No env var set (default) -> 404 on both endpoints (fail-closed).
+2. POST /api/debug/perf/reset (authenticated admin, same-origin) -> 200;
+   subsequent GET shows ops == {}.
+3. POST /api/debug/perf/reset requires an authenticated admin and is
+   CSRF-guarded: anonymous -> 401, non-admin -> 403, cross-origin admin -> 403.
+4. PERF_DEBUG_ENABLED=false -> 404 on GET; POST still enforces auth first
+   (401/403) since ``require_admin`` is a dependency that runs before the
+   handler body's env-gate check.
+5. No env var set (default) -> 404 on GET (fail-closed); POST as above.
 """
+
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from pipeline import perf
-from tests.conftest import _test_pool
+from tests.conftest import TEST_ORIGIN, _test_pool
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +28,21 @@ def reset_perf():
     perf.reset()
     yield
     perf.reset()
+
+
+async def _seed_session(aconn, *, role="admin"):
+    email = f"{role}-{datetime.now().timestamp()}@x"
+    uid = (await aconn.fetchrow("INSERT INTO users (email, role) VALUES ($1, $2) RETURNING user_id", email, role))[
+        "user_id"
+    ]
+    sid = f"sid-{uid}-{datetime.now().timestamp()}"
+    await aconn.execute(
+        "INSERT INTO sessions (sid, user_id, expires_at) VALUES ($1, $2, $3)",
+        sid,
+        uid,
+        datetime.now(timezone.utc) + timedelta(days=30),
+    )
+    return sid
 
 
 @pytest.fixture
@@ -66,11 +88,17 @@ async def test_perf_snapshot(debug_client):
 
 
 @pytest.mark.asyncio
-async def test_perf_reset(debug_client):
-    """POST /api/debug/perf/reset clears the registry; subsequent GET shows ops == {}."""
+async def test_perf_reset(debug_client, aconn):
+    """POST /api/debug/perf/reset (admin, same-origin) clears the registry;
+    subsequent GET shows ops == {}."""
     perf.record("pre.reset", 10.0)
+    sid = await _seed_session(aconn, role="admin")
 
-    reset_resp = await debug_client.post("/api/debug/perf/reset")
+    reset_resp = await debug_client.post(
+        "/api/debug/perf/reset",
+        cookies={"sid": sid},
+        headers={"Origin": TEST_ORIGIN},
+    )
     assert reset_resp.status_code == 200
     assert reset_resp.json() == {"status": "reset"}
 
@@ -81,24 +109,71 @@ async def test_perf_reset(debug_client):
 
 
 @pytest.mark.asyncio
+async def test_perf_reset_requires_authentication(debug_client):
+    """An anonymous caller is rejected before the handler ever runs."""
+    resp = await debug_client.post("/api/debug/perf/reset", headers={"Origin": TEST_ORIGIN})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_perf_reset_requires_admin_role(debug_client, aconn):
+    """A signed-in non-admin is forbidden."""
+    sid = await _seed_session(aconn, role="user")
+    resp = await debug_client.post(
+        "/api/debug/perf/reset",
+        cookies={"sid": sid},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_perf_reset_rejects_cross_origin(debug_client, aconn):
+    """An authenticated admin still fails csrf_guard on a cross-origin POST."""
+    sid = await _seed_session(aconn, role="admin")
+    resp = await debug_client.post(
+        "/api/debug/perf/reset",
+        cookies={"sid": sid},
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_perf_disabled(monkeypatch, debug_client):
-    """Both endpoints return 404 when PERF_DEBUG_ENABLED=false."""
+    """GET returns 404 when PERF_DEBUG_ENABLED=false. POST still requires
+    admin auth first (401 here, anonymous) since that dependency runs before
+    the handler body's env-gate check."""
     monkeypatch.setenv("PERF_DEBUG_ENABLED", "false")
 
     get_resp = await debug_client.get("/api/debug/perf")
     assert get_resp.status_code == 404
 
-    post_resp = await debug_client.post("/api/debug/perf/reset")
-    assert post_resp.status_code == 404
+    post_resp = await debug_client.post("/api/debug/perf/reset", headers={"Origin": TEST_ORIGIN})
+    assert post_resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_perf_disabled_404s_an_authenticated_admin_too(monkeypatch, debug_client, aconn):
+    """Past the auth/CSRF gates, a disabled surface still 404s for an admin."""
+    monkeypatch.setenv("PERF_DEBUG_ENABLED", "false")
+    sid = await _seed_session(aconn, role="admin")
+
+    resp = await debug_client.post(
+        "/api/debug/perf/reset",
+        cookies={"sid": sid},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_perf_default_is_closed(apply_schema, monkeypatch):
-    """With no PERF_DEBUG_ENABLED env var set, both endpoints return 404.
-
-    This verifies the fail-closed default: the surface must be explicitly
-    enabled in dev; it must never be reachable on a fresh/production deploy
-    that hasn't set the env var.
+    """With no PERF_DEBUG_ENABLED env var set, GET returns 404 (fail-closed
+    default: the surface must be explicitly enabled in dev; it must never be
+    reachable on a fresh/production deploy that hasn't set the env var).
+    POST as an anonymous caller is rejected at the auth dependency (401)
+    before that env-gate is ever reached.
     """
     monkeypatch.delenv("PERF_DEBUG_ENABLED", raising=False)
 
@@ -111,7 +186,7 @@ async def test_perf_default_is_closed(apply_schema, monkeypatch):
             get_resp = await client.get("/api/debug/perf")
             assert get_resp.status_code == 404
 
-            post_resp = await client.post("/api/debug/perf/reset")
-            assert post_resp.status_code == 404
+            post_resp = await client.post("/api/debug/perf/reset", headers={"Origin": TEST_ORIGIN})
+            assert post_resp.status_code == 401
     finally:
         await pool.close()

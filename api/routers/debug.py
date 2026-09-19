@@ -5,25 +5,24 @@ and return 404 when ``PERF_DEBUG_ENABLED`` is not set to a truthy value
 (``1``, ``true``, or ``yes``).
 
 **Disabled by default.** Set ``PERF_DEBUG_ENABLED=true`` in your dev ``.env``
-to enable. The surface is unauthenticated when enabled — never enable on an
-internet-reachable deploy. The reset endpoint wipes all caches, which is a
-cheap DoS lever if exposed.
-
-No user dependency — matches sibling read-routers (reports, overview,
-ask_dashboard). The env gate is the access control.
+to enable. The reset endpoint wipes all caches, which is a cheap DoS lever
+if exposed, so it requires an authenticated admin and is CSRF-guarded; the
+read-only snapshot has no user dependency, matching sibling read-routers
+(reports, overview, ask_dashboard) — the env gate is its only access control.
 
 Routes
 ------
 GET  /api/debug/perf        -- pipeline.perf snapshot + pool utilization.
 POST /api/debug/perf/reset  -- clear perf registry AND all async_lru_caches
-                               (cold-run benchmarking).
+                               (cold-run benchmarking); admin + CSRF guarded.
 """
 
 import os
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from api.security import User, csrf_guard, require_admin
 from pipeline import cache, perf
 
 router = APIRouter(prefix="/api/debug", tags=["debug"], include_in_schema=False)
@@ -62,13 +61,16 @@ async def perf_snapshot(request: Request) -> dict[str, Any]:
 
 
 @router.post("/perf/reset")
-async def perf_reset() -> dict[str, str]:
+async def perf_reset(request: Request, admin: User = Depends(require_admin)) -> dict[str, str]:
     """Clear the perf registry and all async_lru_caches.
 
     Intended for cold-run benchmarking: call this before a bench run to
     ensure no warm-cache or accumulated-stat bias in the next snapshot.
+    Mutating and cache-wiping, so it requires an authenticated admin
+    (``require_admin``) and is CSRF-guarded like other mutating routes.
     """
     _require_enabled()
+    csrf_guard(request)
     perf.reset()
     cache.clear_all()
     return {"status": "reset"}
