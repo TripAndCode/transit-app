@@ -186,11 +186,11 @@ def _ch_schema() -> None:
 def ch_client(_ch_schema):
     """ClickHouse client against the throwaway `make ch-test` instance.
 
-    Lives in the root conftest, not a subdirectory one, because it's needed
-    from tests/api/ and tests/query/ as well as tests/pipeline/ — a root
-    conftest fixture is visible to every subdirectory. Truncate (not
-    drop+recreate) before each
-    test for isolation, since ClickHouse has no transactional rollback to
+    Lives in the root conftest, not a subdirectory one, because analyze()'s
+    dedup materialization means tests/api/ and tests/query/ need a ClickHouse
+    client too, not just tests/pipeline/ — a root conftest fixture is visible
+    to every subdirectory. Truncate (not drop+recreate) before each test for
+    isolation, since ClickHouse has no transactional rollback to
     lean on like the pg_conn fixture does — the schema itself never changes
     mid-session, so only `_ch_schema` needs to pay MergeTree's CREATE TABLE
     cost, once. The skip (rather than a file-level pytestmark) lives here so
@@ -209,9 +209,9 @@ def ch_client(_ch_schema):
 @pytest.fixture
 async def ch_async_client(ch_client):
     """Async ClickHouse client for wiring into a test FastAPI app's
-    ``app.state.ch_client`` (Task 8 — the async counterpart of `ch_client`,
-    for endpoints/tool-layer functions that now read live `updates` via the
-    async `get_ch` dependency instead of Postgres).
+    ``app.state.ch_client`` — the async counterpart of `ch_client`, for the
+    endpoints and tool-layer functions that read live `updates` through the
+    async `get_ch` dependency rather than Postgres.
 
     Depends on `ch_client` (not a duplicate schema drop/apply of its own) so
     schema setup happens exactly once and ordering is deterministic: the sync

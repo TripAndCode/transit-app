@@ -10,8 +10,6 @@ from httpx import ASGITransport
 
 from tests.conftest import TEST_ORIGIN, _test_pool
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
-
 
 async def _seed_user_and_session(conn, *, role="user", llm_approved=False):
     uid = (
