@@ -8,8 +8,12 @@ chroma_db/
 gtfs.db
 raw_archives/
 raw_archives_static/
-.env
+.env*
+!.env.example
 .cloudflare_api.txt
+# macOS Finder duplicate-file naming ("file copy.txt", "file copy 2.txt").
+* copy*
+* copy.*
 # Ops-status collectors' local cache files (e.g. scripts/collect_github_status.py's
 # --cache-file default), keyed by component name -- a resilience aid for a single
 # checkout, never repo content.
@@ -24,11 +28,10 @@ raw_archives_static/
 .claude/settings.local.json
 .claude/**/*.local.md
 .claude/**/.DS_Store
-docs/*
-!docs/deploy-railway.md
-!docs/ops-monitoring-deploy.md
-!docs/refactor-log.md
-!docs/features/
+# docs/ is tracked by default; only these local-only planning trees (never
+# meant for the team) stay ignored.
+docs/superpowers/
+docs/specs/
 specs/
 .worktrees/
 .superpowers/
