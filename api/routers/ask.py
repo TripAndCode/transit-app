@@ -36,6 +36,7 @@ from api.security import csrf_guard
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
+from pipeline.query.followup import MAX_QUESTION_CHARS
 from pipeline.query.intent import _TOOL_DEFAULTS as _PAGINATABLE_TOOL_DEFAULTS
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
@@ -61,7 +62,7 @@ class AskCtx(BaseModel):
 
 
 class Turn(BaseModel):
-    question: str
+    question: str = Field(max_length=MAX_QUESTION_CHARS)
     tool: str | None = None
     args: dict | None = None
 
@@ -79,7 +80,7 @@ class PanelCtx(BaseModel):
 
 
 class AskRequest(BaseModel):
-    question: str
+    question: str = Field(max_length=MAX_QUESTION_CHARS)
     model: str | None = None
     ctx: AskCtx | None = None
     history: list[Turn] = []

@@ -100,16 +100,16 @@ class AnonThread(BaseModel):
     # The agency the thread belongs to; threads span agencies in localStorage,
     # so each is homed under its own agency (None → fall back to request scope).
     agency_id: int | None = None
-    title: str
+    title: str = Field(max_length=200)
     filter_ctx: dict[str, Any] = Field(default_factory=dict)
     pinned: bool = False
     created_at: str
     updated_at: str
-    messages: list[dict[str, Any]] = Field(default_factory=list)
+    messages: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
 
 
 class MigrateAnon(BaseModel):
-    threads: list[AnonThread]
+    threads: list[AnonThread] = Field(max_length=100)
 
 
 @router.get("/conversations")

@@ -6,7 +6,7 @@ from typing import Any
 import asyncpg
 import openai
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
@@ -127,12 +127,23 @@ async def revoke_session(
     return Response(status_code=204)
 
 
+_MAX_PRESET_RANGE_CTX_BYTES = 4096
+
+
 class PresetIn(BaseModel):
     """Body for creating a saved filter preset."""
 
     agency_id: int
-    name: str
+    name: str = Field(max_length=120)
     range_ctx: dict[str, Any]
+
+    @field_validator("range_ctx")
+    @classmethod
+    def _range_ctx_bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
+        size = len(json.dumps(v).encode())
+        if size > _MAX_PRESET_RANGE_CTX_BYTES:
+            raise ValueError(f"range_ctx exceeds {_MAX_PRESET_RANGE_CTX_BYTES} bytes serialized")
+        return v
 
 
 class PresetOut(BaseModel):

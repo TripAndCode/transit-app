@@ -6,8 +6,10 @@ caller's own view payload, never free-form user text, which is why this
 route needs no RAG grounding or answer verification unlike ``/ask``.
 """
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from api.deps import get_agency, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
@@ -17,11 +19,21 @@ from pipeline.query.user_llm_keys import get_user_llm_key
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["copilot"])
 
+_MAX_PAYLOAD_BYTES = 16384
+
 
 class CopilotInsightRequest(BaseModel):
     tab: str
     filters: dict
     view_payload: dict
+
+    @field_validator("filters", "view_payload")
+    @classmethod
+    def _bounded_payload(cls, v: dict) -> dict:
+        size = len(json.dumps(v).encode())
+        if size > _MAX_PAYLOAD_BYTES:
+            raise ValueError(f"payload exceeds {_MAX_PAYLOAD_BYTES} bytes serialized")
+        return v
 
 
 class CopilotInsightResponse(BaseModel):
