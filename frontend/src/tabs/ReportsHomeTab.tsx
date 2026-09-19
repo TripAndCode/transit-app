@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
+import { useAgencyId } from "../api/useAgencyId";
 import type { TrendDay } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { downloadCsv } from "../components/analysis/csv";
@@ -24,8 +25,7 @@ function rankingToCsvRows(rows: unknown[][]) {
 }
 
 export function ReportsHomeTab() {
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const { t } = useTranslation("design");
   const [ctx] = useRangeContext();
   const [params, setParams] = useSearchParams();
@@ -62,7 +62,7 @@ export function ReportsHomeTab() {
       {!saved.some((s) => s.agencyId === id) && <EmptyState title={t("noSaved")} />}
       <ul className="focus-saved">{saved.filter((s) => s.agencyId === id).map((s) => <li key={s.id}>
         <Link to={`/agencies/${id}/route-analysis?${new URLSearchParams(s.query)}`}>{s.title}</Link>
-        <button aria-label={`${t("remove")}: ${s.title}`} onClick={() => { try { deleteAnalysis(s.id); setSaved(readAnalyses()); } catch { setNotice(t("saveFailed")); } }}>{t("remove")}</button>
+        <button aria-label={`${t("remove")}: ${s.title}`} onClick={() => { if (deleteAnalysis(s.id)) setSaved(readAnalyses()); else setNotice(t("saveFailed")); }}>{t("remove")}</button>
       </li>)}</ul>
     </section> : <>
       <TabFilterBar />

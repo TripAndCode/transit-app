@@ -2,7 +2,8 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
-import { useParams } from "react-router-dom";
+import { useAgencyId } from "../api/useAgencyId";
+import { th, td } from "./tableStyles";
 
 type Schema = {
   /** Column index in the row tuple */
@@ -162,8 +163,7 @@ type Props = {
 
 export function ReportTable({ reportType, rows }: Props) {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const { format: formatRoute } = useRouteNames(id);
   const schema = SCHEMAS[reportType];
 
@@ -179,7 +179,7 @@ export function ReportTable({ reportType, rows }: Props) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
-            <th style={th(40)}>#</th>
+            <th style={th({ width: 40 })}>#</th>
             {schema.map((c) => (
               <th key={c.labelKey} style={{ ...th(), textAlign: c.align ?? "left" }}>
                 {t(c.labelKey)}
@@ -256,16 +256,3 @@ function BarCell({ text, ratio, color }: { text: string; ratio: number; color: s
     </div>
   );
 }
-
-const th = (w?: number): React.CSSProperties => ({
-  padding: "8px 10px",
-  textAlign: "left",
-  fontWeight: 500,
-  color: "var(--text-secondary)",
-  fontSize: 12,
-  width: w,
-});
-const td = (): React.CSSProperties => ({
-  padding: "6px 10px",
-  fontSize: 13,
-});

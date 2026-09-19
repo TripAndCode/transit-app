@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import { routeDisplayName } from "../api/routeDisplayName";
 import type { Route } from "../api/types";
 
@@ -11,11 +11,6 @@ type RouteGroup = {
   variants: RouteVariant[];
   shared_long_name: string | null;
 };
-
-function useAgencyId(): number | null {
-  const { agencyId } = useParams();
-  return agencyId ? Number(agencyId) : null;
-}
 
 function variantLabel(v: RouteVariant): string {
   const long = v.long_name?.trim();

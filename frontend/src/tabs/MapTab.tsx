@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Download, Maximize2, RefreshCw } from "lucide-react";
 import { FilterDock } from "./map/FilterDock";
@@ -14,7 +14,9 @@ import { useLiveTripProgress, useLiveTrips, useRouteShape, useTodayRouteSummary 
 import { useRangeContext } from "../api/rangeContext";
 import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
+import { useAgencyId } from "../api/useAgencyId";
 import { ApiError, apiPost } from "../api/client";
+import { hhmm } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
 import { buildStyle, getMapStyleOverride, readMapStylePref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
@@ -98,8 +100,7 @@ function popupNode(trip: LiveTrip, routeName: string, t: ReturnType<typeof useTr
 }
 
 export function MapTab() {
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const { t, i18n } = useTranslation();
   const { t: td } = useTranslation("design");
   const [ctx, updateCtx] = useRangeContext();
@@ -463,7 +464,7 @@ export function MapTab() {
           {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
           {delayedRows.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { if (trip.route_code) focusRoute(trip.route_code); setSelectedDirectionKey(directionKey(trip)); setSelectedTripId(trip.trip_id); }}>
-              <span>{routeNames.format(trip.route_code)}<small>{trip.scheduled_time?.slice(0, 5)} · {trip.headsign} · {trip.stop_name}</small></span>
+              <span>{routeNames.format(trip.route_code)}<small>{hhmm(trip)} · {trip.headsign} · {trip.stop_name}</small></span>
               <b>{signedMin(trip.dep_delay, t)}</b>
             </button>
             {trip.route_code && <Link to={`/agencies/${id}/route-analysis?${new URLSearchParams({ routes: trip.route_code })}`}>{td("openAnalysis")}</Link>}

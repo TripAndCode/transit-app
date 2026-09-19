@@ -14,6 +14,7 @@ import { useRouteNames } from "../api/useRouteNames";
 import type { RangeCtx } from "../api/rangeContext";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
+import { th, td } from "./tableStyles";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
   if (sec == null) return "—";
@@ -49,11 +50,11 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
-                <th style={th("left")}>{t("reports.headway_quality.col.route")}</th>
-                <th style={th("right")}>{t("reports.headway_quality.col.ewt")}</th>
-                <th style={th("right")}>{t("reports.headway_quality.col.cov")}</th>
-                <th style={th("right")}>{t("reports.headway_quality.col.long_gap_rate")}</th>
-                <th style={th("right")}>{t("reports.headway_quality.col.samples")}</th>
+                <th style={th({ align: "left" })}>{t("reports.headway_quality.col.route")}</th>
+                <th style={th({ align: "right" })}>{t("reports.headway_quality.col.ewt")}</th>
+                <th style={th({ align: "right" })}>{t("reports.headway_quality.col.cov")}</th>
+                <th style={th({ align: "right" })}>{t("reports.headway_quality.col.long_gap_rate")}</th>
+                <th style={th({ align: "right" })}>{t("reports.headway_quality.col.samples")}</th>
               </tr>
             </thead>
             <tbody>
@@ -74,14 +75,3 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }
   );
 }
 
-const th = (align: "left" | "right"): React.CSSProperties => ({
-  padding: "8px 10px",
-  textAlign: align,
-  fontWeight: 500,
-  color: "var(--text-secondary)",
-  fontSize: 12,
-});
-const td = (): React.CSSProperties => ({
-  padding: "6px 10px",
-  fontSize: 13,
-});

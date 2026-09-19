@@ -1,13 +1,13 @@
-import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../../api/hooks";
+import { useAgencyId } from "../../api/useAgencyId";
 import { ErrorBanner } from "../ErrorBanner";
 
 export function CompactDataStatus() {
-  const { agencyId } = useParams();
+  const id = useAgencyId();
   const { t } = useTranslation("design");
-  const query = useTodayRouteSummary(agencyId ? Number(agencyId) : null, { autoRefresh: false });
-  if (!agencyId) return null;
+  const query = useTodayRouteSummary(id, { autoRefresh: false });
+  if (id === null) return null;
   return <details className="focus-data-status"><summary>{t("status")}</summary>
     {query.error ? <ErrorBanner error={query.error} onRetry={() => void query.refetch()} /> : <div>
       <p>{t("aggregateDate")}: {query.data?.date ?? "—"}</p>

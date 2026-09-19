@@ -22,6 +22,8 @@ import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
 import { useRouteNames } from "../api/useRouteNames";
+import { useAgencyId } from "../api/useAgencyId";
+import { th, td } from "../components/tableStyles";
 
 /** "This week" = the 7 days ending today, in the ctx's from/to string
  *  format. Used by the "no data" EmptyState's recovery action to jump to a
@@ -33,8 +35,8 @@ function thisWeekRange(): { from: string; to: string } {
 
 export function AnalysisTab() {
   const { t } = useTranslation();
-  const { agencyId, reportType } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const { reportType } = useParams();
+  const id = useAgencyId();
   const navigate = useNavigate();
   const [ctx, update] = useRangeContext();
   // Build the filter querystring from ctx so navigating between reports
@@ -324,8 +326,7 @@ function TrendBlock({
 
 function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const { format: formatRoute } = useRouteNames(id);
 
   if (!payload || !payload.available) {
@@ -351,7 +352,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
-            <th style={th(40)}>#</th>
+            <th style={th({ width: 40 })}>#</th>
             <th style={th()}>{t("reports.col.route")}</th>
             <th style={th()}>{t("reports.col.service")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_avg")}</th>
@@ -436,19 +437,3 @@ function DowBandHeatmapCard({
   );
 }
 
-// Local table-cell helpers for DwellRunBlock above -- same shape as
-// ReportTable.tsx's own (unexported) th/td, duplicated here rather than
-// exported cross-module since DwellRunBlock's table doesn't share
-// ReportTable's tuple-row/SCHEMAS shape.
-const th = (w?: number): React.CSSProperties => ({
-  padding: "8px 10px",
-  textAlign: "left",
-  fontWeight: 500,
-  color: "var(--text-secondary)",
-  fontSize: 12,
-  width: w,
-});
-const td = (): React.CSSProperties => ({
-  padding: "6px 10px",
-  fontSize: 13,
-});
