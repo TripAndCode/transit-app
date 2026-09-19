@@ -5,18 +5,21 @@ which FastAPI resolves to a :class:`RangeCtx` via the :func:`get_range_ctx`
 dependency. SQL helpers in this module turn the context into ``WHERE`` clause
 fragments + parameter lists ready to splice into asyncpg queries.
 
-Defaults: last 30 days inclusive, all DOW, all time bands. Server clamps
-ranges wider than 365 days to avoid runaway scans.
+Defaults: last 30 days inclusive, all DOW, all time bands. Every entry
+point — query params, request body, a conversation's stored filters — goes
+through :func:`clamp_range_ctx`, which clamps both boundaries to today and
+the window to 365 days to avoid runaway scans.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Literal
+from typing import Literal, cast, get_args
 from zoneinfo import ZoneInfo
 
-from fastapi import Query
+from fastapi import HTTPException, Query
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -50,7 +53,12 @@ ServiceType = Literal["all", "平日", "土日祝"]
 # 0011 made `scheduled_time` a TIME column, so `time_band_case_sql` casts both
 # sides of the comparison to TIME — these literals are sent over the wire as
 # text and cast server-side. '24:00' is a valid Postgres TIME (end-of-day).
-_TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
+#
+# Public because it is the single definition of the band grid: the Postgres
+# CASE (`time_band_case_sql`), the ClickHouse filter (`time_band_clause_ch`)
+# and pipeline/reports/filters.py's TIME-column filter all read it, and a
+# second copy would let analyze's bucketing drift from the query filters.
+TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
     "morning": ("05:00", "09:00"),
     "forenoon": ("09:00", "12:00"),
     "noon": ("12:00", "14:00"),
@@ -62,6 +70,9 @@ _TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
 
 DEFAULT_RANGE_DAYS = 30
 MAX_RANGE_DAYS = 365
+# Bounds both the SQL predicate and the JSON envelope; the UI's own route
+# picker surfaces far fewer than this.
+MAX_ROUTE_FILTERS = 100
 
 
 @dataclass(frozen=True)
@@ -80,6 +91,106 @@ class RangeCtx:
         return (self.to_date - self.from_date).days + 1
 
 
+def _coerce_enum(value: str, allowed: tuple[str, ...], field: str) -> str:
+    """Return ``value`` if it names one of ``allowed``, else raise 422.
+
+    Silently folding an unrecognised value to ``"all"`` answers a different
+    question than the caller asked and hides client/stored-state bugs.
+    """
+    if value not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"invalid {field}: expected one of {', '.join(allowed)}",
+        )
+    return value
+
+
+def _coerce_date(value: str | date | None, field: str) -> date | None:
+    """Parse one boundary of the requested window.
+
+    ``None`` and the empty string mean "not supplied" and yield ``None`` so
+    the caller can apply its default. Anything else non-empty must be a real
+    ISO-8601 date: a malformed value is a client error (422), never a silent
+    fall-through to the default window, which would return a confident answer
+    for a period nobody asked about.
+    """
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"invalid {field}: expected YYYY-MM-DD") from None
+
+
+def clamp_range_ctx(
+    *,
+    from_: str | date | None,
+    to: str | date | None,
+    dow: str = "all",
+    time_band: str = "all",
+    service: str = "all",
+    routes: Iterable[str] = (),
+) -> RangeCtx:
+    """Validate and clamp raw filter values into a :class:`RangeCtx`.
+
+    The single entry point for every source of a RangeCtx — query params,
+    a request body, and a conversation's persisted ``filter_ctx`` — because
+    a persisted filter is still client input: it was accepted from a client,
+    stored verbatim, and can be replayed long after the code that wrote it
+    changed. Hand-copied variants of this logic drifted apart before, each
+    enforcing a different subset of the rules below.
+
+    Rules, in order:
+
+    * absent dates default to a trailing :data:`DEFAULT_RANGE_DAYS` window;
+      a malformed non-empty date is a 422;
+    * neither boundary may exceed :func:`jst_today` — no aggregate holds a
+      future date, so a future bound can only widen the scan. Both ends are
+      clamped *before* the reversed-range swap, so the swap can't reopen a
+      future ``to_date``;
+    * a reversed range is swapped rather than rejected;
+    * a window wider than :data:`MAX_RANGE_DAYS` is clamped at the *start*,
+      preserving the most recent data;
+    * unknown ``dow``/``time_band``/``service`` values are a 422;
+    * routes are stripped, de-duplicated preserving order, and capped at
+      :data:`MAX_ROUTE_FILTERS` to bound the query and the JSON envelope.
+    """
+    today = jst_today()
+
+    to_date = _coerce_date(to, "to") or today
+    to_date = min(to_date, today)
+    from_date = _coerce_date(from_, "from") or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
+    from_date = min(from_date, today)
+
+    if from_date > to_date:
+        from_date, to_date = to_date, from_date
+    if (to_date - from_date).days >= MAX_RANGE_DAYS:
+        from_date = to_date - timedelta(days=MAX_RANGE_DAYS - 1)
+
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for raw in routes:
+        r = raw.strip()
+        if r and r not in seen:
+            seen.add(r)
+            cleaned.append(r)
+        if len(cleaned) >= MAX_ROUTE_FILTERS:
+            break
+
+    return RangeCtx(
+        from_date=from_date,
+        to_date=to_date,
+        dow=cast(DowFilter, _coerce_enum(dow, get_args(DowFilter), "dow")),
+        time_band=cast(TimeBand, _coerce_enum(time_band, get_args(TimeBand), "time_band")),
+        service=cast(ServiceType, _coerce_enum(service, get_args(ServiceType), "service")),
+        routes=tuple(cleaned),
+    )
+
+
 def get_range_ctx(
     from_: str | None = Query(default=None, alias="from"),
     to: str | None = Query(default=None),
@@ -90,46 +201,28 @@ def get_range_ctx(
 ) -> RangeCtx:
     """FastAPI dependency: parse query params into a :class:`RangeCtx`.
 
-    Missing dates fall back to ``today - 30d`` / ``today``. Ranges wider than
-    :data:`MAX_RANGE_DAYS` are clamped at the start (newer end stays as given)
-    so the most recent data is preserved.
+    Thin adapter over :func:`clamp_range_ctx` — it only splits the
+    comma-separated ``routes`` param; every default, clamp and validation
+    rule lives in the shared function.
     """
-    today = jst_today()
-    to_date = parse_iso_date(to) or today
-    from_date = parse_iso_date(from_) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
-
-    if from_date > to_date:
-        from_date, to_date = to_date, from_date
-    if (to_date - from_date).days >= MAX_RANGE_DAYS:
-        from_date = to_date - timedelta(days=MAX_RANGE_DAYS - 1)
-
-    route_tuple: tuple[str, ...] = ()
-    if routes:
-        # Cap at 100 codes to bound query and JSON envelope; UI surface is much
-        # smaller than that. Drop empties, dedupe while preserving order.
-        seen: set[str] = set()
-        cleaned: list[str] = []
-        for raw in routes.split(","):
-            r = raw.strip()
-            if r and r not in seen:
-                seen.add(r)
-                cleaned.append(r)
-            if len(cleaned) >= 100:
-                break
-        route_tuple = tuple(cleaned)
-
-    return RangeCtx(
-        from_date=from_date,
-        to_date=to_date,
+    return clamp_range_ctx(
+        from_=from_,
+        to=to,
         dow=dow,
         time_band=time_band,
         service=service,
-        routes=route_tuple,
+        routes=routes.split(",") if routes else (),
     )
 
 
 def parse_iso_date(s: str | None) -> date | None:
-    """Lenient ISO-8601 date parser: ``None``/empty/invalid → ``None``."""
+    """Lenient ISO-8601 date parser: ``None``/empty/invalid → ``None``.
+
+    For callers that genuinely have no opinion on a bad value. Request and
+    stored-filter boundaries do NOT go through this — they use
+    :func:`clamp_range_ctx`, which rejects a malformed date instead of
+    quietly substituting a default window.
+    """
     if not s:
         return None
     try:
@@ -220,6 +313,21 @@ def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     return f"{day_expr} IN (6, 7)", {}
 
 
+# ClickHouse expression normalizing `updates.scheduled_time` to a same-day,
+# zero-padded "HH:MM". GTFS expresses a trip that continues past midnight as
+# an hour >= 24 on the previous service day ("25:30:00" is 01:30 the next
+# calendar morning), and a band is a wall-clock window, so the hour must wrap
+# modulo 24 before it is compared — otherwise such a trip matches no band at
+# all and silently disappears from every time-band-filtered report.
+# `toUInt8OrNull` (not `toUInt8`) keeps a malformed or NULL scheduled_time
+# from aborting the whole query: it yields NULL, which the comparison then
+# excludes, exactly as an unparseable value was excluded before.
+_CH_SAME_DAY_HHMM = (
+    "concat(leftPad(toString(toUInt8OrNull(substring(scheduled_time, 1, 2)) % 24), 2, '0'), "
+    "substring(scheduled_time, 3, 3))"
+)
+
+
 def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     """Return a WHERE fragment filtering ClickHouse's ``updates.scheduled_time``
     to the range named by ``ctx.time_band``.
@@ -229,8 +337,9 @@ def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     TIME column, so the comparison is a zero-padded lexicographic string
     range rather than a ``::time`` cast.
 
-    Compares a normalized 5-char ``"HH:MM"`` prefix of `scheduled_time`,
-    NOT the raw string: every static_join agency writes 8-char
+    Compares the normalized same-day 5-char ``"HH:MM"`` form of
+    `scheduled_time` (:data:`_CH_SAME_DAY_HHMM`), NOT the raw string: every
+    static_join agency writes 8-char
     ``"HH:MM:SS"`` (GTFS `departure_time` TEXT), but agency 1 (青森市バス,
     the `aomori_regex` ingest strategy — see
     pipeline/strategies/aomori_regex.py) writes 5-char ``"HH:MM"`` with no
@@ -243,15 +352,20 @@ def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     12:00, 14:00, 17:00, 20:00) would fall into the PREVIOUS band, and
     00:00 departures wouldn't match any band at all. Truncating both
     sides to 5 chars is exact for both ingest-strategy shapes, since a
-    zero-padded ``"HH:MM"`` prefix alone is already enough to place a
-    clock time within these hour-granularity bands.
+    zero-padded ``"HH:MM"`` alone is already enough to place a clock time
+    within these hour-granularity bands.
+
+    Anything not named in :data:`TIME_BAND_RANGES` — ``"all"``, and any
+    value that isn't a band at all — yields the "no time filter" fragment
+    rather than raising: ``ctx.time_band`` is typed, but a RangeCtx can also
+    be rebuilt from stored client state, and a filter that can't be honoured
+    must not turn a read into a 500.
     """
-    if ctx.time_band == "all":
+    if ctx.time_band not in TIME_BAND_RANGES:
         return "1", {}
-    start, end = _TIME_BAND_RANGES[ctx.time_band]
+    start, end = TIME_BAND_RANGES[ctx.time_band]
     return (
-        "(substring(scheduled_time, 1, 5) >= {ch_tb_start:String} "
-        "AND substring(scheduled_time, 1, 5) < {ch_tb_end:String})",
+        f"({_CH_SAME_DAY_HHMM} >= {{ch_tb_start:String}} AND {_CH_SAME_DAY_HHMM} < {{ch_tb_end:String}})",
         {"ch_tb_start": start, "ch_tb_end": end},
     )
 
@@ -295,14 +409,14 @@ def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:
 
 
 def time_band_case_sql(column: str) -> str:
-    """SQL CASE mapping a TIME column to its `_TIME_BAND_RANGES` band key.
+    """SQL CASE mapping a TIME column to its `TIME_BAND_RANGES` band key.
 
-    Generated from `_TIME_BAND_RANGES` so analyze's bucketing can never drift
+    Generated from `TIME_BAND_RANGES` so analyze's bucketing can never drift
     from `time_band_clause_ch`'s filter. NULL / out-of-range -> 'none'.
     """
     arms = "\n".join(
         f"            WHEN {column} >= '{start}'::time AND {column} < '{end}'::time THEN '{band}'"
-        for band, (start, end) in _TIME_BAND_RANGES.items()
+        for band, (start, end) in TIME_BAND_RANGES.items()
     )
     return f"CASE\n            WHEN {column} IS NULL THEN 'none'\n{arms}\n            ELSE 'none'\n        END"
 

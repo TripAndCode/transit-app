@@ -81,10 +81,27 @@ def test_time_band_clause_ch_morning_band():
     # 5-char form sorts as "less than" its own 8-char equivalent), so both
     # sides must be normalized to 5 chars for the comparison to be exact
     # regardless of which ingest strategy wrote the row.
-    assert "substring(scheduled_time, 1, 5) >=" in frag
-    assert "substring(scheduled_time, 1, 5) <" in frag
+    assert "substring(scheduled_time, 1, 2)" in frag
+    assert "substring(scheduled_time, 3, 3)" in frag
     assert params["ch_tb_start"] == "05:00"
     assert params["ch_tb_end"] == "09:00"
+
+
+def test_time_band_clause_ch_normalizes_extended_hours_modulo_24():
+    """GTFS writes post-midnight continuations of a service day as hours
+    >= 24 ("25:30:00"). Banding must wrap the hour onto the same-day clock
+    so such a trip lands in the band a rider actually experiences
+    (25:30 -> 01:30 -> late_night) instead of falling outside every band."""
+    frag, _ = time_band_clause_ch(_ctx(time_band="late_night"))
+    assert "% 24" in frag
+
+
+def test_time_band_clause_ch_unknown_band_is_noop_not_keyerror():
+    """RangeCtx is typed, but it is also built from stored/client JSON; an
+    unrecognised band must degrade to "no time filter", never raise."""
+    frag, params = time_band_clause_ch(_ctx(time_band="brunch"))
+    assert frag == "1"
+    assert params == {}
 
 
 def test_build_updates_filter_ch_default_date_only():
@@ -260,4 +277,34 @@ def test_time_band_clause_ch_boundary_matches_5char_scheduled_time():
 
     assert _count("forenoon") == 1, "09:00 must land in its own band (forenoon starts at 09:00)"
     assert _count("morning") == 0, "09:00 must NOT fall back into the previous band (morning ends at 09:00)"
+    client.close()
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+def test_time_band_clause_ch_places_extended_hour_in_its_same_day_band():
+    """A "25:30:00" departure is 01:30 on the following calendar day, so it
+    belongs to `late_night` ([00:00, 05:00)) — not to no band at all, which
+    is what a raw lexicographic compare against the band bounds produces."""
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.clickhouse import insert_updates
+
+    client = _ch_test_client()
+    client.command("DROP TABLE IF EXISTS updates")
+    apply_schema(client)
+    insert_updates(
+        client,
+        1,
+        [("a/1.pb", datetime(2026, 8, 3, 3, 0, 0, tzinfo=timezone.utc), "T1", "weekday", "25:30:00", "R1", 1, 30)],
+    )
+
+    def _count(time_band):
+        frag, params = time_band_clause_ch(_ctx(time_band=time_band))
+        result = client.query(
+            f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
+            parameters={"agency_id": 1, **params},
+        )
+        return result.result_rows[0][0]
+
+    assert _count("late_night") == 1, "25:30 wraps to 01:30, inside late_night [00:00, 05:00)"
+    assert _count("night") == 0, "25:30 must not stay in the 20:00-24:00 band it lexicographically sorts after"
     client.close()

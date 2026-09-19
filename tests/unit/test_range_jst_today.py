@@ -55,3 +55,38 @@ def test_apply_date_overrides_default_window_uses_jst_today(monkeypatch):
     ctx = range_mod.RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 31))
     derived = _apply_date_overrides(ctx, {"from_date": "2026-01-01"})  # from set, to omitted -> defaults to today
     assert derived.to_date == date(2026, 1, 2)
+
+
+def test_get_range_ctx_clamps_a_future_to_date_to_today(monkeypatch):
+    """`to` is client input; a future end date can only widen the scan
+    without adding rows, since no aggregate holds tomorrow's data."""
+    fixed_utc = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)
+
+    class FakeDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_utc.astimezone(tz) if tz else fixed_utc
+
+    monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
+    ctx = range_mod.get_range_ctx(
+        from_="2025-12-01", to="2099-01-01", dow="all", time_band="all", service="all", routes=None
+    )
+    assert ctx.to_date == date(2026, 1, 2)
+
+
+def test_get_range_ctx_rejects_a_malformed_date_instead_of_defaulting():
+    """A typo'd `from` used to fall through to the default 30-day window and
+    return a confident answer for a period the caller never asked for."""
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        range_mod.get_range_ctx(from_="2026-99-99", to=None, dow="all", time_band="all", service="all", routes=None)
+    assert exc.value.status_code == 422
+
+
+def test_get_range_ctx_dedupes_and_caps_routes():
+    ctx = range_mod.get_range_ctx(
+        from_=None, to=None, dow="all", time_band="all", service="all", routes=" R2 ,R1,R2,,R3"
+    )
+    assert ctx.routes == ("R2", "R1", "R3")

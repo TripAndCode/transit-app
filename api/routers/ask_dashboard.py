@@ -3,23 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import timedelta
-from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.deps import get_agency, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import (
-    DEFAULT_RANGE_DAYS,
-    MAX_RANGE_DAYS,
-    DowFilter,
-    RangeCtx,
-    ServiceType,
-    TimeBand,
-    jst_today,
-    parse_iso_date,
-)
+from api.range import RangeCtx, clamp_range_ctx
 from pipeline.dashboard_queries import anomaly_timeline, delay_heatmap, movers
 
 router = APIRouter(prefix="/api/{agency_id}/ask/dashboard", tags=["dashboard"])
@@ -33,24 +22,20 @@ def _resolve_ctx(
     service: str,
     routes: tuple[str, ...] = (),
 ) -> RangeCtx:
-    """Build a clamped RangeCtx from query params, defaulting invalid enums to 'all'."""
-    today = jst_today()
-    to_d = parse_iso_date(to_date) or today
-    from_d = parse_iso_date(from_date) or (to_d - timedelta(days=DEFAULT_RANGE_DAYS - 1))
-    if from_d > to_d:
-        from_d, to_d = to_d, from_d
-    if (to_d - from_d).days >= MAX_RANGE_DAYS:
-        from_d = to_d - timedelta(days=MAX_RANGE_DAYS - 1)
-    dow_ = cast(DowFilter, dow if dow in ("all", "weekday", "weekend") else "all")
-    valid_bands = {"all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"}
-    tb_ = cast(TimeBand, time_band if time_band in valid_bands else "all")
-    svc_ = cast(ServiceType, service if service in ("all", "平日", "土日祝") else "all")
-    return RangeCtx(
-        from_date=from_d,
-        to_date=to_d,
-        dow=dow_,
-        time_band=tb_,
-        service=svc_,
+    """Build a validated, clamped RangeCtx from this router's query params.
+
+    These endpoints declare their filters as loose ``str``/``list[str]``
+    params rather than the shared :func:`api.range.get_range_ctx` dependency
+    (they carry extra per-endpoint params alongside), so the validation,
+    clamping and route de-duplication have to come from the same shared
+    helper instead of a hand-copied variant.
+    """
+    return clamp_range_ctx(
+        from_=from_date,
+        to=to_date,
+        dow=dow,
+        time_band=time_band,
+        service=service,
         routes=routes,
     )
 
