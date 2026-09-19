@@ -1,5 +1,26 @@
 import { useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Components } from "react-markdown";
+
+const TITLE_LINE = /^\s*title\s*:?\s+(.+?)\s*$/im;
+const NODE_LABEL = /[[({]([^[\](){}]{1,80})[\])}]/;
+
+/** Best-effort human label for a diagram's `aria-label`: the source's own
+ *  `title` directive (supported by most mermaid diagram types) when
+ *  present, else the first node's bracketed/parenthesized label, else
+ *  `fallback`. Never throws on unparseable source -- worst case is the
+ *  fallback, matching the raw-`<pre>` degrade this component already uses
+ *  for a `mermaid.render()` failure. */
+function deriveDiagramLabel(source: string, fallback: string): string {
+  const titleMatch = source.match(TITLE_LINE);
+  if (titleMatch?.[1]) return titleMatch[1].trim();
+
+  const nodeMatch = source.match(NODE_LABEL);
+  const nodeLabel = nodeMatch?.[1]?.trim().replace(/^["']|["']$/g, "");
+  if (nodeLabel) return nodeLabel;
+
+  return fallback;
+}
 
 /** Lazily imported so `mermaid` (a sizeable rendering library, similar in
  *  spirit to why MapLibre is kept out of the entry chunk) only loads on the
@@ -42,6 +63,7 @@ async function loadMermaid() {
  *  config, only allows setState from a callback reacting to the external
  *  `mermaid.render()` promise settling, not from the effect body itself). */
 function MermaidDiagram({ source }: { source: string }) {
+  const { t } = useTranslation();
   const reactId = useId();
   const diagramId = `mermaid-${reactId.replace(/[^a-zA-Z0-9]/g, "")}`;
   const [svg, setSvg] = useState<string | null>(null);
@@ -70,7 +92,8 @@ function MermaidDiagram({ source }: { source: string }) {
   // `react/no-danger` rule is configured in this repo's eslint.config.js to
   // suppress -- jsx-a11y doesn't ship an equivalent -- so no disable comment
   // is needed here.)
-  return <div role="img" aria-label="diagram" dangerouslySetInnerHTML={{ __html: svg }} />;
+  const label = deriveDiagramLabel(source, t("markdownMermaid.diagram_fallback_label"));
+  return <div role="img" aria-label={label} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
 function isMermaidClassName(className: string | undefined): boolean {

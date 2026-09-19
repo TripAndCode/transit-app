@@ -11,4 +11,6 @@
 export const Z_INDEX = {
   drawerBackdrop: 300,
   drawer: 301,
+  modalBackdrop: 400,
+  modal: 401,
 } as const;
