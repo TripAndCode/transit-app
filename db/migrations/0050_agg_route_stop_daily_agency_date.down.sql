@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_agg_route_stop_daily_agency_date;
