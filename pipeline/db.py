@@ -9,8 +9,8 @@ endpoint, and the LLM tool helpers can't drift apart on the definition of
 
 import psycopg2
 
-# ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause and agg_route_dow.dow
-# (SMALLINT) after migration 0011.
+# ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause and
+# agg_route_hour_dow.dow (SMALLINT).
 _DOW_JP_TO_ISO = {"月": 1, "火": 2, "水": 3, "木": 4, "金": 5, "土": 6, "日": 7}
 _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 

@@ -1,8 +1,8 @@
 /**
  * DataStalenessBanner — calm warning when GTFS ingest hasn't run recently.
  *
- * Reads the same /today/route-summary endpoint that LiveTab uses (shared
- * cache, no extra request). When the latest observation is more than
+ * Reads the same /today/route-summary endpoint the operations map uses
+ * (shared cache, no extra request). When the latest observation is more than
  * STALE_THRESHOLD_HOURS old, render a soft warning pill above the main
  * content so users know they're looking at historical data even when the
  * rest of the UI reads as live.

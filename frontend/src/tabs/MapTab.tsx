@@ -1,8 +1,8 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Maximize2, Radio, RefreshCw } from "lucide-react";
-import { PatternFilters } from "../components/analysis/AnalysisFilters";
+import { Download, Maximize2, RefreshCw } from "lucide-react";
+import { FilterDock } from "./map/FilterDock";
 import { downloadCsv } from "../components/analysis/csv";
 import "../styles/focusedAnalysis.css";
 import "./map/focusedOverview.css";
@@ -21,9 +21,13 @@ import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { EmptyState } from "../components/EmptyState";
+import { MapReference } from "./map/MapReference";
+import { StatTile } from "../components/StatTile";
 import { signedMin } from "./live/signedMin";
 import { OperationsTripPanel, type ActiveRouteOption, type DirectionOption } from "./map/OperationsTripPanel";
 import { useBasemapDim } from "./map/useBasemapDim";
+import { QueueResizer } from "./map/QueueResizer";
+import { readQueueWidth, storeQueueWidth } from "./map/queueWidth";
 import {
   LIVE_TRIPS_CLUSTER_LAYER,
   LIVE_TRIPS_LABEL_LAYER,
@@ -108,6 +112,7 @@ export function MapTab() {
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [routeSelection, setRouteSelection] = useState<RouteSelection>({ agencyId: id, route: null });
+  const [queueWidth, setQueueWidth] = useState(readQueueWidth);
   const [selectedDirectionKey, setSelectedDirectionKey] = useState<string | null>(null);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
@@ -195,7 +200,10 @@ export function MapTab() {
     );
     if (!created.map) return created.cleanup;
     const map: MLMap = created.map;
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+    // top-right, not the default top-left: the legend now occupies top-left
+    // (see .ops-map-legend) and the two used to be squeezed into the same
+    // corner, forcing the legend to offset itself around the zoom buttons.
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     const onEnter = () => { map.getCanvas().style.cursor = "pointer"; };
     const onLeave = () => { map.getCanvas().style.cursor = ""; };
     map.on("click", LIVE_TRIPS_LAYER, onTripClick);
@@ -355,6 +363,7 @@ export function MapTab() {
 
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
   const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
+  const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
 
   return (
     <div className="operations-page focused-overview">
@@ -386,18 +395,6 @@ export function MapTab() {
         )}
       </header>
 
-      <div className="focus-filters">
-        <PatternFilters agencyId={id} codes={ctx.routes} onChange={(routes) => {
-          updateCtx({ routes }); setRouteSelection({ agencyId: id, route: null }); setSelectedTripId(null); setSelectedDirectionKey(null);
-        }} />
-        <span className="focus-muted">{td("observed", { count: liveRows.length })} · {td("delayed", { count: delayedRows.length })}</span>
-        <button type="button" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
-          ["agency_id", "route_code", "trip_id", "headsign", "stop_id", "stop_name", "departure_delay_seconds", "captured_at"],
-          ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
-        ])}>{td("csv")}</button>
-      </div>
-      {freshness === "stale" && <p role="status" className="focus-muted">{td("stale")}</p>}
-
       {(liveQuery.error || summaryQuery.error) && (
         <ErrorBanner
           error={liveQuery.error ?? summaryQuery.error}
@@ -405,7 +402,7 @@ export function MapTab() {
         />
       )}
 
-      <div className="ops-workspace">
+      <div className="ops-workspace" style={{ "--ops-queue-width": `${queueWidth}px` } as CSSProperties}>
         <section className="ops-map" aria-label={t("operations.map.aria_label")}>
           <div ref={mapContainerRef} className="ops-map__canvas" />
           {mapUnavailable && <div className="ops-map__empty"><p role="status">{td("mapUnavailable")}</p></div>}
@@ -416,27 +413,53 @@ export function MapTab() {
               <EmptyState title={t("operations.empty.title")} hint={t("operations.empty.hint")} />
             </div>
           )}
-          <div className="ops-map-legend" aria-label={t("operations.map.legend_label")}>
-            <span><i className="is-current" />{t("operations.map.legend_current")}</span>
-            <span><i className="is-trail" />{t("operations.map.legend_trail")}</span>
-            <span><i className="is-delayed" />{t("operations.map.legend_delay")}</span>
-            <span><i className="is-cluster" />{t("operations.map.legend_cluster")}</span>
-          </div>
-          <button type="button" className="ops-map-fit" onClick={fitAllTrips}>
+          <MapReference located={locatedTrips} total={liveRows.length} t={t} />
+          {/* Rendered after the overlays that cover this corner
+              (.ops-map__empty, .ops-map__loading) so a control is never
+              buried behind decoration; the CSS pins that with a z-index too. */}
+          <FilterDock
+            agencyId={id}
+            applied={ctx.routes}
+            onApply={(routes) => {
+              updateCtx({ routes }); setRouteSelection({ agencyId: id, route: null }); setSelectedTripId(null); setSelectedDirectionKey(null);
+            }}
+          />
+          {/* Disabled rather than silently doing nothing when there is
+              nothing to frame: fitBounds only moves the camera, so with no
+              located trip a press is indistinguishable from a broken button.
+              The tooltip carries the part the label can't -- that this moves
+              the map and changes nothing about which trips are shown. */}
+          <button
+            type="button"
+            className="ops-map-fit tip"
+            data-tip={t("operations.map.fit_all_hint")}
+            onClick={fitAllTrips}
+            disabled={locatedTrips === 0}
+          >
             <Maximize2 size={14} />{t("operations.map.fit_all")}
           </button>
-          <div className="ops-map__disclosure">
-            <Radio size={15} aria-hidden="true" />
-            <span>{t("operations.map.disclosure", {
-              located: locatedTrips,
-              total: liveRows.length,
-              when: liveQuery.data?.latest_captured_at ? relativeTime(liveQuery.data.latest_captured_at) : t("operations.no_update"),
-            })}</span>
-          </div>
         </section>
+
+        <QueueResizer width={queueWidth} label={td("resizeQueue")} onWidth={setQueueWidth} onCommit={storeQueueWidth} />
 
         <aside className="focus-live-queue">
           <h2>{td("attention")}</h2>
+          {/* The only live reading of these counts on the screen. Repeating
+              them next to the filters invited the reader to check whether the
+              two agreed instead of reading either; staleness likewise reads
+              once, from the header's freshness dot. */}
+          <div className="focus-summary-strip">
+            <StatTile label={td("observedLabel")} value={String(liveRows.length)} />
+            <StatTile label={td("delayedLabel")} value={String(delayedRows.length)} flagged={delayedRows.length > 0} />
+            {onTimePct != null && <StatTile label={td("onTimePct")} value={`${onTimePct}%`} />}
+          </div>
+          {/* Directly under the tiles, because the CSV is exactly the rows
+              they count -- and above the delay list, so a long list can't
+              push the export below the panel's scroll. */}
+          <button type="button" className="btn-ghost ops-queue__export" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
+            ["agency_id", "route_code", "trip_id", "headsign", "stop_id", "stop_name", "departure_delay_seconds", "captured_at"],
+            ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
+          ])}><Download size={13} aria-hidden="true" />{td("csv")}</button>
           {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
           {delayedRows.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { if (trip.route_code) focusRoute(trip.route_code); setSelectedDirectionKey(directionKey(trip)); setSelectedTripId(trip.trip_id); }}>

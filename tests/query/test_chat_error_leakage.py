@@ -17,7 +17,6 @@ string. All cases must still log the full detail server-side.
 """
 
 import logging
-import os
 from datetime import date
 from types import SimpleNamespace
 
@@ -28,14 +27,13 @@ from fastapi import HTTPException
 
 from api.range import RangeCtx
 from pipeline.query import chat
-
-DATABASE_URL = os.environ["DATABASE_URL"]
+from tests.conftest import _test_pool
 
 _SECRET = "http://ch-internal.example:8123/?database=transit&param_x=leak SELECT * FROM updates"
 
 
 def _fake_message(tool_name: str = "describe_data", arguments: str = '{"kind": "routes"}'):
-    """Minimal object shape mirroring the Groq/openai SDK's tool_calls response."""
+    """Minimal object shape mirroring the OpenAI-compatible SDK's tool_calls response."""
     func = SimpleNamespace(name=tool_name, arguments=arguments)
     call = SimpleNamespace(function=func, id="call_1", type="function")
     return SimpleNamespace(content=None, tool_calls=[call])
@@ -255,7 +253,7 @@ async def test_build_mode_sentinel_undefined_table_error_propagates(monkeypatch)
 @pytest.fixture
 async def pool_with_agency(apply_schema):
     """Pool + agency_id + a route so describe_data + tool dispatch can run."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_intent_cache")
         row = await c.fetchrow(

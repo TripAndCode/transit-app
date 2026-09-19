@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from datetime import date
 from types import SimpleNamespace
+from typing import Any
 
-import asyncpg
 import pytest
 
 from api.range import RangeCtx
 from pipeline.query import chat as chat_module
 from pipeline.query.chat import chat_with_tools
-
-DATABASE_URL = os.environ["DATABASE_URL"]
+from tests.conftest import _test_pool
 
 
 def _ctx() -> RangeCtx:
@@ -48,7 +46,7 @@ class _FakeClient:
 @pytest.fixture
 async def pool_with_agency(apply_schema):
     """Pool + agency_id + a route so describe_data + tool dispatch can run."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_intent_cache")
         await c.execute("DELETE FROM ask_query_log")
@@ -144,7 +142,7 @@ async def test_cache_hit_skips_llm(pool_with_agency, monkeypatch):
     from pipeline.query.intent import signature_hash as _sig_hash
 
     _tool = "capabilities"
-    _args = {}
+    _args: dict[str, Any] = {}
     _ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
     _can_args = canonicalize(_tool, _args, _ctx_dict)
     _hash = _sig_hash(_tool, _can_args)
@@ -188,7 +186,8 @@ async def test_force_tool_call_skips_stale_cache_pre_hit(pool_with_agency, monke
     # Pre-populate a stale cache row for the exact literal text "次の50件",
     # from some unrelated earlier question/tool — this is what a naive
     # pre-hit lookup would return regardless of the current history.
-    _stale_tool, _stale_args = "capabilities", {}
+    _stale_tool = "capabilities"
+    _stale_args: dict[str, Any] = {}
     _ctx_dict = {"from_date": _ctx().from_date, "to_date": _ctx().to_date}
     _stale_can_args = canonicalize(_stale_tool, _stale_args, _ctx_dict)
     _stale_hash = _sig_hash(_stale_tool, _stale_can_args)

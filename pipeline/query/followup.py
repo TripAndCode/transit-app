@@ -50,19 +50,17 @@ def _allowed_providers() -> set[str]:
 
     The free-text follow-up echoes a system prompt that forbids obeying
     in-question instructions -- verify a candidate provider against
-    scripts/followup_eval.py before adding it here, don't assume. Groq's
-    old default model (``llama-3.3-70b-versatile``, since decommissioned)
-    failed that eval by obeying injected instructions Cerebras
-    ``gpt-oss-120b`` resisted; Groq now defaults to ``gpt-oss-120b`` too
-    (see GROQ_MODEL in .env.example) and re-ran clean at 11/11 probes, so
-    ``cerebras,groq`` is a verified-safe default to widen to -- but that
-    verification is tied to the specific model each provider runs, not the
-    provider name, and doesn't transfer if either model changes again.
-    Defaults to ``cerebras`` alone so an unverified operator's follow-up
-    never silently answers from an injection-prone fallback; operators
-    widen it explicitly (and re-verify) via env. Empty/unset → the default.
+    scripts/followup_eval.py before adding it here, don't assume. Both
+    ``gemini`` (``gemini-3.1-flash-lite``) and ``openai`` (``gpt-5.4-mini``)
+    are verified-safe defaults against that eval's injection-resistance probe
+    set -- but that verification is tied to the specific model each provider
+    runs, not the provider name, and doesn't transfer if a model default
+    changes or the probe set grows; a prior pass is not evidence once either
+    changes. Defaults to both so an unverified operator's follow-up never
+    silently answers from an injection-prone provider; operators widen it
+    explicitly (and re-verify) via env. Empty/unset → the default.
     """
-    raw = os.environ.get("ASK_FOLLOWUP_PROVIDERS", "cerebras")
+    raw = os.environ.get("ASK_FOLLOWUP_PROVIDERS", "gemini,openai")
     return {n.strip().lower() for n in raw.split(",") if n.strip()}
 
 
@@ -105,18 +103,27 @@ async def answer_followup(
     context_args: dict | None,
     context_result: dict | None,
     locale: str = "ja",
+    llm_approved: bool = True,
 ) -> tuple[str, str | None]:
     """Return ``(answer_text, error_kind)``.
 
     ``error_kind`` is ``None`` on success. ``"too_long"`` if the question
-    exceeds :data:`MAX_QUESTION_CHARS`. Otherwise the underlying provider
-    error kind (``rate_limit``, ``connection``, etc.).
+    exceeds :data:`MAX_QUESTION_CHARS`. ``"not_approved"`` if
+    ``llm_approved`` is ``False`` (the caller's own ``users.llm_approved``
+    flag, or an anonymous caller who never has one -- checked before any
+    provider is touched). Otherwise the underlying provider error kind
+    (``rate_limit``, ``connection``, etc.). Defaults to ``True`` so internal
+    callers/tests that don't construct the real value aren't silently
+    gated -- the API layer is responsible for passing the caller's actual
+    approval status.
     """
     q = question.strip()
     if not q:
         return "", "empty"
     if len(q) > MAX_QUESTION_CHARS:
         return "", "too_long"
+    if not llm_approved:
+        return "", "not_approved"
 
     system = _SYS_PROMPT_EN if locale == "en" else _SYS_PROMPT_JA
     context_block = _serialize_context(context_tool, context_args, context_result)

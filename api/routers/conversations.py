@@ -3,32 +3,23 @@
 from __future__ import annotations
 
 import logging
-import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any
 
 import asyncpg
 import clickhouse_connect
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, Field, model_validator
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
-from api.middleware.ratelimit import (
-    FREE_LIMIT,
-    PRO_LIMIT,
-    AnonAskQuotaExceeded,
-    AnonQuotaContext,
-    anon_ip_key,
-    check_and_consume_anon_quota,
-    get_or_issue_anon_session,
-    limiter,
-)
+from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, RangeCtx, jst_today
-from api.security import csrf_guard
+from api.security import csrf_guard, require_llm_approved
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str
+from pipeline.query.followup_context import select_context_row
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 from pipeline.query.tools import dispatch, render_tool_result
 
@@ -53,11 +44,15 @@ def _raise_for_followup_error(err: str | None) -> None:
     ``too_long``/``empty`` are client input-validation failures (400), not
     provider/LLM failures (502) -- the frontend's ``canSubmit`` guard means
     ``empty`` should never reach here from the real UI, but a direct API
-    call must still get a client-error status, not "bad gateway"."""
+    call must still get a client-error status, not "bad gateway".
+    ``not_approved`` is an authorization failure (403), not a provider
+    outage -- retrying won't help until an admin flips the flag."""
     if err == "too_long":
         raise HTTPException(status_code=400, detail="question_too_long")
     if err == "empty":
         raise HTTPException(status_code=400, detail="question_empty")
+    if err == "not_approved":
+        raise HTTPException(status_code=403, detail="llm_not_approved")
     if err is not None:
         raise HTTPException(status_code=502, detail=f"llm_error:{err}")
 
@@ -427,34 +422,23 @@ class FollowupBody(BaseModel):
     # actually fire for a real oversized question -- only for the mocked
     # unit test that calls `answer_followup` directly.
     question: str = Field(...)
-    # Authed path: reference an existing assistant message stored in DB
+    # Grounding context is always read from the referenced assistant message
+    # in the DB, never inlined by the client: this endpoint requires a
+    # signed-in, admin-approved caller, so the prior turn is always stored
+    # server-side. A missing reference is rejected in the handler rather than
+    # by a validator here, so the 400 carries the endpoint's own message.
     context_message_id: int | None = None
-    # Anon path: inline the prior result (frontend has it in localStorage)
-    context_tool: str | None = None
-    context_args: dict[str, Any] | None = None
-    context_result: dict[str, Any] | None = None
-
-    @model_validator(mode="after")
-    def _validate_context(self) -> "FollowupBody":
-        has_db_ref = self.context_message_id is not None
-        has_inline = self.context_result is not None
-        if has_db_ref and has_inline:
-            raise ValueError("Provide either context_message_id or inline context, not both")
-        # Neither is valid but we let the endpoint decide based on auth — anon
-        # without inline context will 400 in the handler.
-        return self
+    context_row_index: int | None = Field(default=None, ge=0, strict=True)
 
 
 @router.post("/conversations/{conversation_id}/followup")
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def followup_endpoint(
     request: Request,
-    response: Response,
     conversation_id: str,
     body: FollowupBody,
     agency_id: int = Depends(get_agency),  # implicit auth scope
     user=Depends(get_current_user_optional),
-    conn=Depends(get_conn),
     locale: str = Depends(get_locale),
 ):
     """LLM-grounded follow-up on a prior assistant result.
@@ -463,86 +447,43 @@ async def followup_endpoint(
     follow-up calls the LLM with the prior message's structured result as the
     sole grounding context — no tool dispatch, no external retrieval.
 
-    Auth: accepts both authenticated and anonymous callers.
-    - Authed: context_message_id points to a DB-stored assistant message.
-    - Anon: context_tool/context_args/context_result inlined in request body
-      (the frontend holds these in localStorage).
+    Auth: requires a signed-in, admin-approved caller (``users.llm_approved``).
+    Anonymous callers never have a ``users.llm_approved`` row, so they're
+    rejected before the LLM is touched — there is no anonymous path here.
+    ``context_message_id`` must point to a DB-stored assistant message in one
+    of the caller's own conversations.
     """
     csrf_guard(request)
 
     if not _followup.is_enabled():
+        # Short-circuit ahead of the approval gate: a disabled feature must
+        # not 403 an unapproved caller before reporting itself as off.
         raise HTTPException(status_code=503, detail="followup_disabled")
+    # Called directly (not via Depends) on the already-resolved `user` so it
+    # runs after the kill-switch check above, not before it -- FastAPI
+    # resolves Depends() params before the endpoint body, which would
+    # reverse that precedence.
+    user = require_llm_approved(user)
 
-    if user is None:
-        # ── Anon path ─────────────────────────────────────────────────────────
-        if body.context_result is None:
-            raise HTTPException(
-                status_code=400,
-                detail="anon followup requires inline context (context_result)",
-            )
-
-        # Same daily LLM-call quota as chat_with_tools's two call sites
-        # (pipeline.query.chat) — without this, an anonymous caller could
-        # establish free context via a zero-cost dispatch and then submit
-        # unlimited follow-up questions through this endpoint instead.
-        anon_quota = AnonQuotaContext(
-            session_key=get_or_issue_anon_session(request, response),
-            ip_key=anon_ip_key(request),
-        )
-        if not check_and_consume_anon_quota(anon_quota.session_key, anon_quota.ip_key):
-            raise AnonAskQuotaExceeded()
-
-        answer, err = await _followup.answer_followup(
-            question=body.question,
-            context_tool=body.context_tool,
-            context_args=body.context_args,
-            context_result=body.context_result,
-            locale=locale,
-        )
-        _raise_for_followup_error(err)
-
-        # Return synthetic messages — frontend persists them to localStorage.
-        now = datetime.now(tz=timezone.utc).isoformat()
-        base_id = -int(time.time() * 1000)
-        return {
-            "user": {
-                "message_id": base_id,
-                "conversation_id": conversation_id,
-                "role": "user",
-                "chip_id": None,
-                "tool": None,
-                "args": None,
-                "signature_hash": None,
-                "result": None,
-                "rendered_summary": body.question,
-                "created_at": now,
-            },
-            "assistant": {
-                "message_id": base_id - 1,
-                "conversation_id": conversation_id,
-                "role": "assistant",
-                "chip_id": None,
-                "tool": None,
-                "args": {"context_message_id": body.context_message_id},
-                "signature_hash": None,
-                "result": None,
-                "rendered_summary": answer,
-                "created_at": now,
-            },
-        }
-
-    # ── Authed path ───────────────────────────────────────────────────────────
     if body.context_message_id is None:
         raise HTTPException(
             status_code=400,
             detail="authed followup requires context_message_id",
         )
 
-    # Ownership check (also confirms the conversation exists).
-    await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
+    # Two short-lived connections acquired around the LLM call, rather than
+    # one held across it via ``Depends(get_conn)``: ``answer_followup`` waits
+    # on a provider for seconds, and a pool connection parked for that long
+    # is one no other request can use. The reads here and the writes below
+    # share no transaction — the writes open their own — so nothing needs a
+    # single connection to span both.
+    async with request.app.state.pool.acquire() as conn:
+        # Ownership check (also confirms the conversation exists).
+        await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
-    # Fetch the context message (must belong to this conversation).
-    messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
+        # Fetch the context message (must belong to this conversation).
+        messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
+
     ctx_msg = next(
         (m for m in messages if m["message_id"] == body.context_message_id),
         None,
@@ -556,36 +497,38 @@ async def followup_endpoint(
         question=body.question,
         context_tool=ctx_msg.get("tool"),
         context_args=ctx_msg.get("args"),
-        context_result=ctx_msg.get("result"),
+        context_result=select_context_row(ctx_msg.get("result"), body.context_row_index),
         locale=locale,
+        llm_approved=user.llm_approved,
     )
     _raise_for_followup_error(err)
 
     # Append both messages atomically so a mid-flight cancel doesn't leave
     # a dangling user message in the thread.
-    async with conn.transaction():
-        user_msg = await _conv.append_message(
-            conn,
-            conversation_id,
-            role="user",
-            chip_id=None,
-            tool=None,
-            args=None,
-            signature_hash=None,
-            result=None,
-            rendered_summary=body.question,
-        )
-        assistant_msg = await _conv.append_message(
-            conn,
-            conversation_id,
-            role="assistant",
-            chip_id=None,
-            tool=None,
-            args={"context_message_id": body.context_message_id},
-            signature_hash=None,
-            result=None,
-            rendered_summary=answer,
-        )
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.transaction():
+            user_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="user",
+                chip_id=None,
+                tool=None,
+                args=None,
+                signature_hash=None,
+                result=None,
+                rendered_summary=body.question,
+            )
+            assistant_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="assistant",
+                chip_id=None,
+                tool=None,
+                args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
+                signature_hash=None,
+                result=None,
+                rendered_summary=answer,
+            )
     return {"user": user_msg, "assistant": assistant_msg}
 
 

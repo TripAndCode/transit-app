@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -24,7 +25,7 @@ def make_component(
     *,
     state_kwargs: dict | None = None,
 ) -> dict:
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         component=component,
         observed_at=T0,
         last_success_at=T0 - timedelta(minutes=5),
@@ -310,6 +311,7 @@ def test_reason_for_github_summarizes_prs():
         },
     )
     reason = ops_status_page.reason_for(doc)
+    assert reason is not None
     assert "2 PR(s) conflicting" in reason
     assert "1 PR(s) with failing checks" in reason
 
@@ -320,6 +322,7 @@ def test_reason_for_github_last_error_kind():
         state_kwargs={"last_success_at": None, "details": {"last_error_kind": "rate_limited"}},
     )
     reason = ops_status_page.reason_for(doc)
+    assert reason is not None
     assert "rate_limited" in reason
 
 
@@ -332,6 +335,7 @@ def test_reason_for_oracle_crawler_names_the_bad_feed():
         },
     )
     reason = ops_status_page.reason_for(doc)
+    assert reason is not None
     assert reason == "static feed is stale"
 
 
@@ -345,6 +349,7 @@ def test_reason_for_oracle_crawler_not_applicable_is_not_a_reason():
     )
     # Nothing is actually wrong per the mined details; falls back to the generic reason.
     reason = ops_status_page.reason_for(doc)
+    assert reason is not None
     assert reason == "the component itself reported an explicit failure"
 
 
@@ -362,6 +367,7 @@ def test_reason_for_r2_names_disk_and_listing_state():
         },
     )
     reason = ops_status_page.reason_for(doc)
+    assert reason is not None
     assert "disk usage is 91% (degraded)" in reason
     assert "R2 listing is failed (timeout)" in reason
 
@@ -377,6 +383,7 @@ def test_reason_for_generic_stale_mentions_age():
         },
     )
     reason = ops_status_page.reason_for(doc)
+    assert reason is not None
     assert "past the staleness threshold" in reason
 
 

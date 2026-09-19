@@ -8,15 +8,13 @@ fixture, same pattern as `tests/api/test_routers_admin.py`, even though the
 handlers themselves never touch `conn`.
 """
 
-import os
 from datetime import datetime, timedelta, timezone
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from tests.conftest import _test_pool
 
 
 async def _seed(conn, *, role="user"):
@@ -42,7 +40,7 @@ async def _seed(conn, *, role="user"):
 async def arch_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

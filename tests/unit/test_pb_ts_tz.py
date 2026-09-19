@@ -50,7 +50,9 @@ def test_ts_returns_jst_offset_for_full_timestamp():
     iso = _ts("20260115", "some_feed_150000.pb")
     dt = datetime.fromisoformat(iso)
     assert dt.tzinfo is not None
-    assert dt.utcoffset().total_seconds() == 9 * 3600
+    offset = dt.utcoffset()
+    assert offset is not None
+    assert offset.total_seconds() == 9 * 3600
     assert (dt.hour, dt.minute, dt.second) == (15, 0, 0)
 
 
@@ -58,4 +60,6 @@ def test_ts_date_only_fallback_is_jst_aware():
     iso = _ts("20260115", "no_time_in_name.pb")
     dt = datetime.fromisoformat(iso)
     assert dt.tzinfo is not None
-    assert dt.utcoffset().total_seconds() == 9 * 3600
+    offset = dt.utcoffset()
+    assert offset is not None
+    assert offset.total_seconds() == 9 * 3600

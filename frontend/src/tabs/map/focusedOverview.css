@@ -5,14 +5,35 @@
 .focused-overview .focus-filters { align-items: end; margin: 0; }
 .focused-overview .focus-filters > span { padding: 10px 0; }
 .focused-overview .focus-filters > button { margin-left: auto; padding: 9px; }
-.focused-overview .ops-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 290px; flex: 1; height: auto; min-height: 340px; max-height: calc(100dvh - 220px); border: 0; background: var(--bg-surface); }
+/* The subtraction is the chrome above the workspace: the page header plus the
+   column gaps. It used to also budget for the filter card that sat here; the
+   filters now float on the map, so that height belongs to the map instead.
+   This rule, not the base `.ops-workspace` one, is what sizes this screen --
+   it overrides height, min-height and max-height together. */
+.focused-overview .ops-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 11px var(--ops-queue-width, 380px); flex: 1; height: auto; min-height: 340px; max-height: calc(100dvh - 110px); border: 0; background: var(--bg-surface); }
 .focused-overview .ops-map { min-height: 340px; height: 100%; }
-.focus-live-queue { min-height: 0; overflow: auto; padding: 0 0 0 20px; border-left: 1px solid var(--border-subtle); }
+/* Drag handle between map and panel. The hit area spans the full column while
+   the visible line is a centered pseudo-element, so the target stays reachable
+   without widening the seam itself. */
+.ops-resizer { position: relative; cursor: col-resize; touch-action: none; }
+.ops-resizer::before { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); background: var(--border-subtle); content: ""; }
+.ops-resizer:hover::before, .ops-resizer:focus-visible::before { width: 3px; background: var(--accent-strong); }
+.ops-resizer:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+/* Symmetric inset: with no right padding every row in this panel -- the tile
+   strip, each divider, and the right-aligned delay figure -- ended exactly on
+   the workspace's border, so the column read as clipped rather than as a
+   panel. The scrollbar this column can show sits inside that inset too. */
+.focus-live-queue { min-height: 0; overflow: auto; padding: 0 20px; border-left: 0; }
 .focus-live-queue h2 { margin: 8px 0 16px; font-size: 18px; }
+/* Wraps rather than compressing: this column is user-resizable, and three
+   tiles held on one row would keep shrinking past the width their labels
+   need. Whatever doesn't fit drops to the next row at a legible size. */
+.focus-summary-strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.focus-summary-strip .stat-tile { flex: 1 1 78px; }
 .focus-trip { padding: 16px 0; border-bottom: 1px solid var(--border-soft); }
 .focus-trip button { display: flex; align-items: center; width: 100%; gap: 12px; border: 0; background: none; color: var(--text-primary); text-align: left; padding: 0; }
 .focus-trip small { display: block; margin: 7px 0; color: var(--text-secondary); }
 .focus-trip b { margin-left: auto; color: var(--color-danger); white-space: nowrap; }
 .focus-trip a { font-size: 12px; }
 .focus-live-queue details { margin-top: 20px; }
-@media (max-width: 1000px) { .focused-overview .ops-workspace { grid-template-columns: 1fr; max-height: none; } .focused-overview .ops-map { height: 50dvh; } .focus-live-queue { padding: 16px 0; border-left: 0; } }
+@media (max-width: 1000px) { .focused-overview .ops-workspace { grid-template-columns: 1fr; max-height: none; } .focused-overview .ops-map { height: 50dvh; } .focus-live-queue { padding: 16px 0; } .ops-resizer { display: none; } }

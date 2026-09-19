@@ -13,8 +13,8 @@
 # against that same fixed pair -- e.g. an interactive session's own
 # verification and a concurrent `/vps-loop-run` worker's, in two different
 # worktrees on the same VPS -- don't just risk a `docker run` name
-# collision: `tests/conftest.py`'s per-test Postgres `TRUNCATE ... CASCADE`
-# and its ClickHouse `DROP TABLE`/`CREATE TABLE` both race across the two
+# collision: `tests/conftest.py`'s per-test Postgres reset and its
+# ClickHouse `DROP TABLE`/`CREATE TABLE` both race across the two
 # runs, producing spurious failures with no connection to either diff. This
 # script picks a fresh container name and a free host port on every invocation
 # instead, so any number of worktrees/jobs can run it at the same time on
@@ -22,6 +22,17 @@
 # `transit-test-pg`/`transit-test-ch` containers at all.
 #
 # Usage: scripts/run_full_ci.sh [extra pytest args...]
+#        COVERAGE=1 scripts/run_full_ci.sh   # same gate, plus a coverage report
+#
+# Coverage is off by default, matching the run this script exists to
+# reproduce: .github/workflows/ci.yml measures it on `main` only, because
+# nothing gates on the number and instrumenting every line the suite
+# executes is not free. Every other use of this script -- the pre-merge
+# check, the re-check after a review fix -- is a pass/fail gate that would
+# be paying for a report nobody reads, and on a VPS sharing CPU with a
+# concurrent job that is minutes per run. Set COVERAGE=1 when the number
+# itself is the point.
+#
 # Requires: docker, poetry (with `poetry install` already run in this
 # worktree's own virtualenv -- this script does not install dependencies).
 set -euo pipefail
@@ -138,7 +149,7 @@ export CLICKHOUSE_PORT="${ch_port}"
 export CLICKHOUSE_USER=transit
 export CLICKHOUSE_PASSWORD=transit
 export CLICKHOUSE_DATABASE=transit_test
-export GROQ_API_KEY="${GROQ_API_KEY:-test-key}"
+export GEMINI_API_KEY="${GEMINI_API_KEY:-test-key}"
 
 echo "→ applying Postgres schema"
 poetry run python gtfs_pipeline.py migrate up
@@ -154,6 +165,15 @@ poetry run ruff format --check .
 echo "→ type check"
 poetry run mypy
 
-echo "→ tests"
+# Mirrors ci.yml's own flags, where coverage is a `main`-only extra. Built as
+# an array so the default expands to no arguments at all rather than to one
+# empty string, which pytest would read as a path.
+coverage_args=()
+if [ "${COVERAGE:-0}" = "1" ]; then
+  coverage_args=(--cov=api --cov=pipeline --cov=db --cov-report=term)
+  echo "→ tests (COVERAGE=1: with coverage measurement)"
+else
+  echo "→ tests"
+fi
 TEST_PG_PORT="$pg_port" TEST_CH_PORT="$ch_port" \
-  scripts/run_integration_tests.sh --cov=api --cov=pipeline --cov=db --cov-report=term "$@"
+  scripts/run_integration_tests.sh "${coverage_args[@]+"${coverage_args[@]}"}" "$@"

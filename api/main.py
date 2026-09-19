@@ -1,6 +1,6 @@
 """FastAPI application bootstrap.
 
-Wires routers, middleware, lifespan (asyncpg pool + Groq key validation), CORS,
+Wires routers, middleware, lifespan (asyncpg pool + LLM provider validation), CORS,
 and an optional SPA static mount. In production the multistage Dockerfile copies
 the built React frontend into ``api/static/``; this module then mounts the SPA
 at ``/`` with an explicit JSON 404 for unknown ``/api/*`` paths so frontend
@@ -28,13 +28,7 @@ from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.locale import LocaleMiddleware
-from api.middleware.ratelimit import (
-    AnonAskQuotaExceeded,
-    AnonCopilotQuotaExceeded,
-    ask_quota_exceeded_handler,
-    copilot_quota_exceeded_handler,
-    limiter,
-)
+from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
 from api.routers.admin import router as admin_router
@@ -55,6 +49,7 @@ from api.routers.overview import router as overview_router
 from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
 from api.security import cookie_secure
+from pipeline.query.llm_client import ProviderConfig
 
 _log = logging.getLogger(__name__)
 
@@ -128,6 +123,21 @@ def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> Non
         )
 
 
+def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
+    """Refuse to boot with zero usable LLM providers configured.
+
+    ``providers`` is the resolved ladder from
+    :func:`pipeline.query.llm_client._load_providers` — already filtered to
+    entries with a real API key. An empty ladder means the Ask tab has no
+    provider to fall back to at all.
+    """
+    if not providers:
+        raise RuntimeError(
+            "No usable LLM provider configured. Set at least one provider's "
+            "API key (e.g. GEMINI_API_KEY) — see .env.example."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
@@ -137,8 +147,9 @@ async def lifespan(app: FastAPI):
     partial set is rejected as a misconfiguration since a half-wired OAuth
     flow would leak state cookies without ever completing.
     """
-    if not os.environ.get("GROQ_API_KEY"):
-        raise RuntimeError("GROQ_API_KEY env var is required")
+    from pipeline.query.llm_client import _load_providers
+
+    _validate_llm_providers(_load_providers())
     enabled, missing = auth_status()
     if not enabled and len(missing) != len(_AUTH_ENV):
         raise RuntimeError(
@@ -204,14 +215,6 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 # A read endpoint hitting an agg_* table that doesn't exist yet (deployment behind
 # on migrations) degrades to a localized 503 instead of an opaque 500.
 app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_ready_handler)  # type: ignore[arg-type]
-# An anonymous caller who exhausted today's free Stage-3 (LLM) Ask quota gets
-# a 429 with a machine-readable code distinct from both the generic
-# RateLimitExceeded response above and an opaque 500 — see
-# api/middleware/ratelimit.py's anon-quota section.
-app.add_exception_handler(AnonAskQuotaExceeded, ask_quota_exceeded_handler)  # type: ignore[arg-type]
-# Maps the anon-quota exception raised by POST /copilot/insight
-# (api/routers/copilot.py) to a localized 429, mirroring the Ask mapping above.
-app.add_exception_handler(AnonCopilotQuotaExceeded, copilot_quota_exceeded_handler)  # type: ignore[arg-type]
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. Order today (request-side, outermost first):
 #   StarletteSessionMiddleware  (Authlib needs request.session)

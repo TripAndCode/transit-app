@@ -3,10 +3,10 @@ import { useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import { useCopilotEnabled, useCopilotInsight } from "../api/copilot";
-import { apiPost, isCopilotQuotaExceeded } from "../api/client";
+import { apiPost, isLlmNotApproved } from "../api/client";
 import { ErrorBanner } from "./ErrorBanner";
 import { useRangeContext } from "../api/rangeContext";
-import { useOverviewSummary } from "../api/hooks";
+import { useIsLlmApproved, useOverviewSummary } from "../api/hooks";
 import type { AskResponse } from "../api/types";
 import "./CopilotPanel.css";
 
@@ -23,6 +23,7 @@ export function CopilotPanel() {
   // Anything but an explicit true is treated as off, so an unresolved or
   // failed flag check never reaches the billed insight POST.
   const enabled = useCopilotEnabled(agencyId).data?.enabled === true;
+  const llmApproved = useIsLlmApproved();
   // Deliberately NOT gated on `enabled`: this is a free aggregate read that
   // OverviewTab already issues under the same query key, and the billed
   // insight is withheld by `tab` below. Gating it here would only stall the
@@ -34,7 +35,13 @@ export function CopilotPanel() {
   // outside <Outlet />) rather than remounting, so an early return above
   // this point would change the hook count between renders of the same
   // instance.
-  const tab = overviewMatch && enabled ? "overview" : null;
+
+  // `llmApproved` belongs in this condition, not just in the render branches
+  // below: the insight POST fires on its own from a pageview, with no user
+  // action, and the endpoint 403s an unapproved caller. Since the flag
+  // defaults to false for every new account, omitting it here would make the
+  // default experience one doomed request per Overview visit.
+  const tab = overviewMatch && enabled && llmApproved ? "overview" : null;
   const { insight, loading, error } = useCopilotInsight(agencyId, tab, filters, overviewQuery.data ?? null);
 
   // The kill switch removes the panel outright rather than showing an empty
@@ -61,7 +68,7 @@ export function CopilotPanel() {
       <h2>{t("copilot.title")}</h2>
       {loading && <p>{t("copilot.loading")}</p>}
       {error != null &&
-        (isCopilotQuotaExceeded(error) ? <ErrorBanner error={error} /> : <p>{t("copilot.error")}</p>)}
+        (isLlmNotApproved(error) ? <ErrorBanner error={error} /> : <p>{t("copilot.error")}</p>)}
       {insight && (
         <div>
           <p>{insight.text}</p>

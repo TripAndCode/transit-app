@@ -48,6 +48,7 @@ class UserRow(BaseModel):
     avatar_url: str | None
     role: str
     suspended_at: Any
+    llm_approved: bool
     created_at: Any
 
 
@@ -94,7 +95,7 @@ async def list_users(
     total = await conn.fetchval(f"SELECT count(*) FROM users {where_sql}", *args)
     rows = await conn.fetch(
         f"""
-        SELECT user_id, email, name, avatar_url, role, suspended_at, created_at
+        SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at
         FROM users {where_sql}
         ORDER BY created_at DESC
         LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}
@@ -125,7 +126,8 @@ async def user_detail(
     string-of-json quirk.
     """
     row = await conn.fetchrow(
-        "SELECT user_id, email, name, avatar_url, role, suspended_at, created_at FROM users WHERE user_id=$1",
+        "SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at "
+        "FROM users WHERE user_id=$1",
         uid,
     )
     if not row:
@@ -161,6 +163,7 @@ class UserPatch(BaseModel):
 
     role: str | None = None
     suspended: bool | None = None
+    llm_approved: bool | None = None
 
 
 async def _lock_target_and_active_admins(conn: asyncpg.Connection, uid: int) -> tuple[asyncpg.Record | None, int]:
@@ -180,7 +183,7 @@ async def _lock_target_and_active_admins(conn: asyncpg.Connection, uid: int) -> 
     """
     rows = await conn.fetch(
         """
-        SELECT user_id, role, suspended_at FROM users
+        SELECT user_id, role, suspended_at, llm_approved FROM users
         WHERE user_id = $1 OR (role='admin' AND suspended_at IS NULL)
         ORDER BY user_id
         FOR UPDATE
@@ -223,8 +226,10 @@ async def patch_user(
             raise HTTPException(404, "user not found")
         old_role = row["role"]
         old_suspended = row["suspended_at"] is not None
+        old_llm_approved = row["llm_approved"]
         new_role = body.role if body.role is not None else old_role
         new_suspended = body.suspended if body.suspended is not None else old_suspended
+        new_llm_approved = body.llm_approved if body.llm_approved is not None else old_llm_approved
 
         # last-admin guard: trip if this admin is demoted OR newly suspended
         becoming_non_admin = old_role == "admin" and new_role != "admin"
@@ -233,9 +238,10 @@ async def patch_user(
             raise HTTPException(400, "would leave no admins")
 
         await conn.execute(
-            "UPDATE users SET role=$1, suspended_at=$2, updated_at=now() WHERE user_id=$3",
+            "UPDATE users SET role=$1, suspended_at=$2, llm_approved=$3, updated_at=now() WHERE user_id=$4",
             new_role,
             datetime.now(timezone.utc) if new_suspended else None,
+            new_llm_approved,
             uid,
         )
         if new_suspended and not old_suspended:
@@ -247,9 +253,18 @@ async def patch_user(
             await record_event(
                 conn, user_id=uid, actor_id=admin.user_id, kind="role_changed", meta={"old": old_role, "new": new_role}
             )
+        if new_llm_approved != old_llm_approved:
+            await record_event(
+                conn,
+                user_id=uid,
+                actor_id=admin.user_id,
+                kind="llm_approved_changed",
+                meta={"old": old_llm_approved, "new": new_llm_approved},
+            )
 
         out = await conn.fetchrow(
-            "SELECT user_id, email, name, avatar_url, role, suspended_at, created_at FROM users WHERE user_id=$1",
+            "SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at "
+            "FROM users WHERE user_id=$1",
             uid,
         )
     return UserRow(**dict(out))

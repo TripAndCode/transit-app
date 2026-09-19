@@ -42,6 +42,20 @@
      on light — not changing the light-mode value here, out of scope. */
   --color-warning: #C99A2E;
   --color-danger: #c0392b;
+  /* Deepened variant of --accent for primary buttons/active states -- more
+     confident at button weight than --accent reads on its own. */
+  --accent-strong: #3E5C9A;
+  /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
+     distinct from --delay-severe/--color-danger, which stay the map's own
+     per-point severity ramp; this is specifically for aggregate counts. */
+  --delay-flag: #C4501F;
+  /* Fallback first for engines without color-mix() support (same reasoning as
+     --map-badge-bg above); the mix itself tracks --delay-flag automatically
+     in both themes, so it needs no separate dark-block entry. */
+  --delay-flag-soft: var(--bg-soft);
+  --delay-flag-soft: color-mix(in srgb, var(--delay-flag) 10%, transparent);
+  --card-border: #E4E7EC;
+  --card-radius: 10px;
   /* Tooltip is intentionally theme-invariant (always a dark chip with white
      text, in both light and dark mode) — NOT derived from --text-primary,
      which flips light-to-dark and would otherwise break tooltip contrast. */
@@ -50,7 +64,7 @@
   /* Same theme-invariant reasoning as --tooltip-bg/--tooltip-fg above, for
      map overlay chrome that hardcodes a white pill background (so it reads
      over any basemap, including dark aerial imagery) instead of using
-     --bg-surface: MapStyleControl and RouteModeToggle. Pairing that fixed
+     --bg-surface: MapStyleControl. Pairing that fixed
      white with --text-primary/--text-secondary/--accent broke contrast in
      dark mode (those tokens assume a dark surface) — e.g. dark --text-primary
      (#DDD9F3) on white computed to 1.37:1. These values equal the light
@@ -69,20 +83,19 @@
      and JS consumers (MapLibre style expressions) resolve the same source
      of truth. */
   --delay-severe: #d92121;
-  /* Overview trend chips / mover-streak dots + generic track/hover accents.
+  /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
-     .ov-chip-down/-up/-neutral and the mover-streak dots; track-bg is a
-     background fill for bar/rail tracks (pareto, service-split); hover-tint
-     is a bare (non-brand) hover feedback tint; skeleton-* feed .skeleton's
-     shimmer gradient. All theme-aware — light values below match the
-     pre-existing hardcoded overview.css hex exactly; dark values are lifted
-     to pass contrast / stay visible on the dark surfaces. */
+     ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
+     (fills/strokes) plus overview.css's pareto/peak/service-split hover and
+     fill rules; track-bg is a background fill for bar/rail tracks (pareto,
+     service-split); hover-tint is a bare (non-brand) hover feedback tint;
+     skeleton-* feed .skeleton's shimmer gradient. All theme-aware — light
+     values below match the pre-existing hardcoded overview.css hex exactly;
+     dark values are lifted to pass contrast / stay visible on the dark
+     surfaces. */
   --trend-good: #166534;
-  --trend-good-bg: rgba(22, 101, 52, 0.10);
   --trend-bad: #b45309;
-  --trend-bad-bg: rgba(180, 83, 9, 0.10);
   --trend-neutral: #475569;
-  --trend-neutral-bg: rgba(71, 85, 105, 0.08);
   --track-bg: rgba(0, 0, 0, 0.03);
   --hover-tint: rgba(0, 0, 0, 0.04);
   --bg-soft-hover: #e4e4e0;
@@ -129,16 +142,22 @@
      "fix" this by substituting a brighter red. */
   --delay-severe: #A83A1A;
   --trend-good: #4ade80;
-  --trend-good-bg: rgba(74, 222, 128, 0.16);
   --trend-bad: #fbbf24;
-  --trend-bad-bg: rgba(251, 191, 36, 0.16);
   --trend-neutral: #94a3b8;
-  --trend-neutral-bg: rgba(148, 163, 184, 0.16);
   --track-bg: rgba(255, 255, 255, 0.08);
   --hover-tint: rgba(255, 255, 255, 0.08);
   --bg-soft-hover: #2a2f4a;
   --skeleton-a: #202642;
   --skeleton-b: #30385A;
+  /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
+     --bg-soft -- re-check contrast if this color or those tokens change. */
+  --accent-strong: #7C96D9;
+  /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
+     --bg-soft -- re-check contrast if this color or those tokens change. */
+  --delay-flag: #E08A54;
+  /* Border, not text -- reuses the existing dark --border-subtle value
+     rather than introducing a third near-identical border hue. */
+  --card-border: var(--border-subtle);
 }
 
 /* Keep native date controls legible on both themes. Without an explicit
@@ -186,34 +205,40 @@ input[type="date"] { color-scheme: light; }
 }
 html, body, #root { height: 100%; margin: 0; }
 
-/* Notices are supplementary UI. Keep them available without pushing the
-   active tab's primary visualization below the fold. Individual notices keep
-   their own dismiss controls; the stack itself does not block the page. */
+/* In flow at the top of <main>, not floating over it. Everything around this
+   stack already assumed it occupies layout: App.tsx sizes the content area
+   with `flex: 1` precisely because "the banners/strip above take variable
+   height", and ActivityStrip documents itself as "an always-present 24 px row
+   in the App shell" and sets `flex-shrink: 0`. The `position: fixed` overlay
+   contradicted both, and on every route where the banners render it landed on
+   the filter bar -- covering the filter chips' remove button and "Clear all"
+   outright and, being `pointer-events: auto`, swallowing the clicks aimed at
+   them.
+
+   These banners are also the wrong shape for an overlay: they persist until
+   dismissed rather than timing out, so they belong in the layout the way a
+   page header does. A toast that never leaves is just a blocked region. The
+   drop shadow goes with the fixed positioning -- in flow, the border alone
+   carries the edge. */
 .app-notice-stack {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 400;
   display: flex;
-  width: min(520px, calc(100vw - 32px));
   flex-direction: column;
+  flex-shrink: 0;
   gap: 8px;
-  pointer-events: none;
 }
 
-.app-notice-stack > * {
-  pointer-events: auto;
+/* The inset rides on the banners, not on the stack: the stack also holds
+   ActivityStrip -- a flush, full-width band -- and stack padding would
+   reserve dead space at the top of every screen where no banner is
+   showing, since the strip is `display: none` when idle. */
+.app-notice-stack > *:not([data-activity-strip]) {
+  margin: 0 16px;
   border: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
 }
 
-@media (max-width: 560px) {
-  .app-notice-stack {
-    top: 8px;
-    right: 8px;
-    width: calc(100vw - 16px);
-  }
+.app-notice-stack > *:not([data-activity-strip]):first-child {
+  margin-top: 16px;
 }
 
 body {
@@ -226,6 +251,74 @@ body {
 
 button { font: inherit; cursor: pointer; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Shared secondary-button style (CSV downloads, share actions, etc.) --
+   an explicit visible border + accent text, so it never looks disabled
+   when the action is actually available (default browser button chrome
+   reads as flat/grey either way). */
+.btn-ghost {
+  background: var(--bg-surface);
+  color: var(--accent-strong);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 7px 13px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.btn-ghost:disabled {
+  color: var(--text-tertiary);
+  border-color: var(--border-subtle);
+  cursor: not-allowed;
+}
+
+/* Hover/focus tooltip for controls whose label can't carry the whole
+   explanation -- icon-only buttons, or a short label with a caveat worth
+   stating. Opt in with `className="tip" data-tip={t("...")}`: no wrapper
+   component and no JS state, and it appears on keyboard focus as well as
+   hover.
+
+   The tooltip is visual reinforcement only. The control keeps its own
+   accessible name (its text, or an aria-label), so a screen reader never
+   depends on `content: attr()`, which assistive tech is not required to
+   announce.
+
+   `:where()` gives the positioning zero specificity, so a host that is
+   already positioned -- an absolutely-placed map control, say -- keeps its
+   own `position` regardless of stylesheet order, while a statically-placed
+   host still gets the containing block this needs. */
+:where(.tip) { position: relative; }
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: 240px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-fg);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-line;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms;
+}
+.tip:hover::after,
+.tip:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
+/* For a control near the top edge, where an upward tooltip would be clipped. */
+.tip--below::after {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 

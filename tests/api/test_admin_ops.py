@@ -1,14 +1,12 @@
 """Tests for GET /api/admin/ops — admin health dashboard endpoint."""
 
-import os
 from datetime import datetime, timedelta, timezone
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from tests.conftest import _test_pool
 
 
 async def _seed_admin_session(conn) -> str:
@@ -32,10 +30,10 @@ async def _seed_admin_session(conn) -> str:
 async def ops_client(apply_schema, ch_async_client):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
-    # admin_ops() -> aggregate_freshness(conn, ch) now unconditionally queries
-    # ClickHouse (Task 8); without a real client the call raises and
+    # admin_ops() -> aggregate_freshness(conn, ch) unconditionally queries
+    # ClickHouse; without a real client the call raises and
     # admin_ops's own try/except degrades to an empty `agencies` list, which
     # would break test_ops_agency_freshness's assertion that a seeded agency
     # appears in the response.

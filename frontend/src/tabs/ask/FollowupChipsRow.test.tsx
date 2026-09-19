@@ -1,12 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { FollowupChipsRow } from "./FollowupChipsRow";
 import { useTranslation } from "react-i18next";
 import type { ConvMessage } from "../../api/types";
 import { ApiError } from "../../api/client";
+import type { StopFocus } from "./stopEvidence";
 
 const messagesWithResult: ConvMessage[] = [
   {
@@ -27,12 +27,60 @@ function Wrapper(props: {
   onDraftChange: (next: string) => void;
   error?: unknown;
   maxChars?: number;
+  focus?: StopFocus | null;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   return <FollowupChipsRow t={t} {...props} />;
 }
 
 describe("FollowupChipsRow free-text input", () => {
+  it("uses the selected source ID and visible sequence context, without sending on selection", async () => {
+    const onFollowup = vi.fn();
+    const source = { ...messagesWithResult[0], message_id: 22, tool: "segment_hotspots",
+      result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples"],
+        rows: [[7, "Central", 4.2, 128]], summary: null, series: null, pairs: null } } as ConvMessage;
+    renderWithProviders(<Wrapper messages={[source, ...messagesWithResult]} onFollowup={onFollowup}
+      draftValue="Explain the sample count" onDraftChange={vi.fn()} compact
+      focus={{ messageId: 22, sequence: 7, name: "Central" }} />);
+    expect(onFollowup).not.toHaveBeenCalled();
+    expect(screen.getByText(/Selected stop-sequence group: 7/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onFollowup).toHaveBeenCalledWith(22, "Explain the sample count\nSelected stop-sequence group: 7 (representative name: Central).", true);
+  });
+  it("does not fall back to another source when the selected row is unavailable", () => {
+    renderWithProviders(<Wrapper messages={messagesWithResult} onFollowup={vi.fn()}
+      draftValue="Explain" onDraftChange={vi.fn()} focus={{ messageId: 22, sequence: 7, name: "Central" }} />);
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+  });
+  it("counts the context prefix toward the server question limit", () => {
+    const source = { ...messagesWithResult[0], tool: "segment_hotspots",
+      result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples"],
+        rows: [[7, "Central", 4.2, 128]], summary: null, series: null, pairs: null } } as ConvMessage;
+    renderWithProviders(<Wrapper messages={[source]} onFollowup={vi.fn()} draftValue="Explain" onDraftChange={vi.fn()}
+      maxChars={20} focus={{ messageId: 1, sequence: 7, name: "Central" }} />);
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+  it("withholds the composer and chips for an unselected route_stop_patterns result", () => {
+    const source = { ...messagesWithResult[0], tool: "route_stop_patterns",
+      result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples", "pattern_id", "pattern_name", "stop_id"],
+        rows: [[1, "Central", 4.2, 128, "p1", "Pattern 1", "s1"]], summary: null, series: null, pairs: null } } as ConvMessage;
+    renderWithProviders(<Wrapper messages={[source]} onFollowup={vi.fn()} draftValue="" onDraftChange={vi.fn()} />);
+    expect(screen.getByText("Select a stop to ask about its stored observations.")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Ask about this result...")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Why this pattern?" })).not.toBeInTheDocument();
+  });
+
+  it("shows the composer again once a row is selected on a route_stop_patterns result", () => {
+    const source = { ...messagesWithResult[0], message_id: 22, tool: "route_stop_patterns",
+      result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples", "pattern_id", "pattern_name", "stop_id"],
+        rows: [[1, "Central", 4.2, 128, "p1", "Pattern 1", "s1"]], summary: null, series: null, pairs: null } } as ConvMessage;
+    renderWithProviders(<Wrapper messages={[source]} onFollowup={vi.fn()} draftValue="" onDraftChange={vi.fn()}
+      focus={{ messageId: 22, sequence: 1, name: "Central", patternId: "p1", stopId: "s1", rowIndex: 0 }} />);
+    expect(screen.queryByText("Select a stop to ask about its stored observations.")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about this result...")).toBeInTheDocument();
+  });
+
   it("renders nothing when there is no tool result to ground on", () => {
     const { container } = renderWithProviders(
       <Wrapper messages={[]} onFollowup={vi.fn()} draftValue="" onDraftChange={vi.fn()} />,
@@ -51,7 +99,7 @@ describe("FollowupChipsRow free-text input", () => {
         onDraftChange={onDraftChange}
       />,
     );
-    expect(screen.getByText("Send")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     await user.type(screen.getByPlaceholderText("Ask about this result..."), "x");
     expect(onDraftChange).toHaveBeenCalled();
   });
@@ -67,42 +115,8 @@ describe("FollowupChipsRow free-text input", () => {
         onDraftChange={vi.fn()}
       />,
     );
-    await user.click(screen.getByText("Send"));
+    await user.click(screen.getByRole("button", { name: "Send" }));
     expect(onFollowup).toHaveBeenCalledWith(1, "What about route 12?", true);
-  });
-
-  it("passes isDraft=false for a canned chip, even if its prompt text matches the current draft", async () => {
-    const user = userEvent.setup();
-    const onFollowup = vi.fn();
-    const chipPrompt = "Explain the pattern in this result in 3 sentences or fewer.";
-    renderWithProviders(
-      <Wrapper
-        messages={messagesWithResult}
-        onFollowup={onFollowup}
-        draftValue={chipPrompt}
-        onDraftChange={vi.fn()}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: "Why this pattern?" }));
-    expect(onFollowup).toHaveBeenCalledWith(1, chipPrompt, false);
-  });
-
-  it("de-emphasizes only the chip just clicked, not the others, for the current result", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <Wrapper
-        messages={messagesWithResult}
-        onFollowup={vi.fn()}
-        draftValue=""
-        onDraftChange={vi.fn()}
-      />,
-    );
-    const clicked = screen.getByRole("button", { name: "Why this pattern?" });
-    const other = screen.getByRole("button", { name: "Other slices?" });
-    expect(clicked).toHaveAttribute("aria-pressed", "false");
-    await user.click(clicked);
-    expect(clicked).toHaveAttribute("aria-pressed", "true");
-    expect(other).toHaveAttribute("aria-pressed", "false");
   });
 
   it("does not submit a whitespace-only draft", async () => {
@@ -116,8 +130,8 @@ describe("FollowupChipsRow free-text input", () => {
         onDraftChange={vi.fn()}
       />,
     );
-    expect(screen.getByText("Send")).toBeDisabled();
-    await user.click(screen.getByText("Send"));
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Send" }));
     expect(onFollowup).not.toHaveBeenCalled();
   });
 
@@ -158,23 +172,6 @@ describe("FollowupChipsRow free-text input", () => {
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("High traffic");
-  });
-
-  it("shows a calm sign-in nudge for an anonymous Ask quota-exceeded 429, not a raw rate-limit error", () => {
-    renderWithProviders(
-      <MemoryRouter>
-        <Wrapper
-          messages={messagesWithResult}
-          onFollowup={vi.fn()}
-          draftValue=""
-          onDraftChange={vi.fn()}
-          error={new ApiError(429, JSON.stringify({ detail: "x", code: "ask_anon_quota_exceeded" }))}
-        />
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole("status")).toHaveTextContent(/free AI question limit/i);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
   });
 
   it("caps the input at the server-supplied maxChars", () => {

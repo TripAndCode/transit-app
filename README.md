@@ -12,13 +12,13 @@ aggregates, and application data live in Postgres/PostGIS.
 - Python 3.11+
 - [Poetry](https://python-poetry.org/)
 - Docker Desktop
-- A Groq API key for the optional Ask LLM fallback
+- A Gemini API key for the optional Ask LLM fallback
 
 ### Local setup
 
 ```bash
 cp .env.example .env
-# Set GROQ_API_KEY in .env. Other settings have local defaults.
+# Set GEMINI_API_KEY in .env. Other settings have local defaults.
 make bootstrap
 make doctor
 make serve
@@ -130,7 +130,7 @@ Example targeted test:
 
 ```bash
 DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
-  GROQ_API_KEY=test-key \
+  GEMINI_API_KEY=test-key \
   poetry run pytest tests/query/test_tool_queries.py -v
 ```
 
@@ -195,7 +195,7 @@ curl -X POST http://localhost:8000/api/1/ask \
 Copy `.env.example` and set only what your environment needs. Important groups:
 
 - `DATABASE_URL`, `CLICKHOUSE_*`: database connections.
-- `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
 - `ASK_FOLLOWUP_ENABLED`, `COPILOT_INSIGHT_ENABLED`, `WEATHER_INGEST_ENABLED`:
   feature kill switches.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
@@ -254,6 +254,9 @@ Useful entry points:
 
 - Treat the dev databases as read-only; use throwaway test databases for writes.
 - Never push directly to `main`; use reviewed squash-merged PRs.
-- Every commit must include `[skip ci]` as its own line or trailer in this repo.
+- Commit messages carry `[skip ci]`, except the last push before a PR is
+  readied: its tip must omit the trailer so CI runs and can be green, which
+  the merge gate requires. See `CLAUDE.md` for the rule and
+  `transit-app-gotchas` for how the trailer behaves.
 - Run the relevant checks before opening a PR, then run `make check` when the
   change affects backend behavior.

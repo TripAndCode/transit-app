@@ -20,7 +20,7 @@ type LlmKeyStatus = {
 };
 
 /** BYOK LLM key settings — lets a signed-in user store their own provider key
- * so Copilot/Ask calls use it instead of the shared operator key + quota. The
+ * so Copilot/Ask calls bill their provider account, not the operator's. The
  * raw key is write-only: the backend never echoes it back, only the masked
  * `key_suffix`, and this component never holds it in state past the mutation
  * call that sends it. */
@@ -32,7 +32,7 @@ function LlmKeySection() {
     queryFn: () => apiGet<LlmKeyStatus>("/api/me/llm-key"),
   });
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
-  const provider = providerOverride ?? status?.provider ?? "groq";
+  const provider = providerOverride ?? status?.provider ?? "gemini";
   const [apiKey, setApiKey] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -72,9 +72,8 @@ function LlmKeySection() {
           : t("account.llm_key.status_shared")}
       </p>
       <select value={provider} onChange={(e) => setProviderOverride(e.target.value)}>
-        <option value="groq">Groq</option>
+        <option value="gemini">Gemini</option>
         <option value="openai">OpenAI</option>
-        <option value="cerebras">Cerebras</option>
       </select>
       <label>
         {t("account.llm_key.input_label")}

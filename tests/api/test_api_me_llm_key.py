@@ -5,13 +5,12 @@ from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("LLM_KEY_ENCRYPTION_KEY", "zJj1v3nq7v3rj0aWq2p8m9s4b6d5f7h9k1n3q5s7u9w=")
 
-import asyncpg
 import httpx
 import openai
 import pytest
 from httpx import ASGITransport
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from tests.conftest import _test_pool
 
 
 async def _seed_user_and_session(conn, *, role="user"):
@@ -38,7 +37,7 @@ async def _seed_user_and_session(conn, *, role="user"):
 async def me_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
@@ -68,7 +67,7 @@ async def test_put_llm_key_rejects_invalid_key_before_persisting(monkeypatch, me
     sid, _uid = await _seed_user_and_session(aconn)
     resp = await me_client.put(
         "/api/me/llm-key",
-        json={"provider": "groq", "api_key": "bad"},
+        json={"provider": "gemini", "api_key": "bad"},
         cookies={"sid": sid},
         headers={"Origin": "http://test"},
     )
@@ -109,19 +108,19 @@ async def test_put_then_get_llm_key_never_returns_full_key(monkeypatch, me_clien
     sid, _uid = await _seed_user_and_session(aconn)
     put_resp = await me_client.put(
         "/api/me/llm-key",
-        json={"provider": "groq", "api_key": "gsk_realkey1234"},
+        json={"provider": "gemini", "api_key": "gsk_realkey1234"},
         cookies={"sid": sid},
         headers={"Origin": "http://test"},
     )
     assert put_resp.status_code == 200
     assert "gsk_realkey1234" not in put_resp.text
     body = put_resp.json()
-    assert body == {"configured": True, "provider": "groq", "key_suffix": "1234"}
+    assert body == {"configured": True, "provider": "gemini", "key_suffix": "1234"}
 
     get_resp = await me_client.get("/api/me/llm-key", cookies={"sid": sid})
     body = get_resp.json()
     assert body["configured"] is True
-    assert body["provider"] == "groq"
+    assert body["provider"] == "gemini"
     assert body["key_suffix"] == "1234"
     assert "gsk_realkey1234" not in get_resp.text
 
@@ -135,7 +134,7 @@ async def test_delete_llm_key_clears_configured_status(monkeypatch, me_client, a
     sid, _uid = await _seed_user_and_session(aconn)
     await me_client.put(
         "/api/me/llm-key",
-        json={"provider": "groq", "api_key": "gsk_realkey1234"},
+        json={"provider": "gemini", "api_key": "gsk_realkey1234"},
         cookies={"sid": sid},
         headers={"Origin": "http://test"},
     )
@@ -155,7 +154,7 @@ async def test_put_llm_key_requires_same_origin(me_client, aconn):
     sid, _uid = await _seed_user_and_session(aconn)
     resp = await me_client.put(
         "/api/me/llm-key",
-        json={"provider": "groq", "api_key": "gsk_realkey1234"},
+        json={"provider": "gemini", "api_key": "gsk_realkey1234"},
         cookies={"sid": sid},
         headers={"Origin": "http://evil.example"},
     )
@@ -177,7 +176,7 @@ async def test_put_llm_key_returns_503_when_validation_unavailable(monkeypatch, 
     sid, _uid = await _seed_user_and_session(aconn)
     resp = await me_client.put(
         "/api/me/llm-key",
-        json={"provider": "groq", "api_key": "gsk_realkey1234"},
+        json={"provider": "gemini", "api_key": "gsk_realkey1234"},
         cookies={"sid": sid},
         headers={"Origin": "http://test"},
     )
@@ -198,7 +197,7 @@ async def test_put_llm_key_masks_short_key_suffix(monkeypatch, me_client, aconn)
     sid, _uid = await _seed_user_and_session(aconn)
     put_resp = await me_client.put(
         "/api/me/llm-key",
-        json={"provider": "groq", "api_key": "abcd"},
+        json={"provider": "gemini", "api_key": "abcd"},
         cookies={"sid": sid},
         headers={"Origin": "http://test"},
     )

@@ -1,13 +1,11 @@
 import os
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from tests.conftest import _test_pool
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +18,7 @@ def _reset_limiter():
 async def map_app(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
@@ -33,8 +31,8 @@ async def map_app(apply_schema):
         await conn.execute(
             "TRUNCATE agencies, updates, static_stops, static_stop_times, "
             "static_trips, static_routes, static_calendar_dates, static_shapes, "
-            "agg_route_stats, agg_route_hour, agg_route_dow, "
-            "agg_daily_trend, agg_route_daily, agg_stop_seq, agg_stop_daily, agg_stop_routes, "
+            "agg_route_stats, agg_route_hour, "
+            "agg_daily_trend, agg_route_daily, agg_stop_daily, agg_stop_routes, "
             "agg_route_stop_daily, agg_feed_health, rag_chunks CASCADE"
         )
     await pool.close()
@@ -1448,7 +1446,6 @@ def _run_analyze(agency_id, ch_client):
     values straight into a timestamptz column is only safe under a UTC
     session; under the JST session production actually uses, it silently
     shifted every captured_at (and last_seen_at) by 9 hours."""
-    import os
 
     import psycopg2
 

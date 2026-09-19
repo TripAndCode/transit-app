@@ -84,9 +84,8 @@ export function useCopilotInsight(
       );
     },
     enabled: debounced.params != null,
-    // This POST consumes one anonymous-quota unit per attempt with no
-    // server-side refund on failure, so react-query's default retry would
-    // silently burn a second unit for what the user experiences as one
+    // This POST bills a provider call per attempt, so react-query's default
+    // retry would silently pay twice for what the user experiences as one
     // request. Never retry it, regardless of the global QueryClient default.
     retry: false,
     // One insight per view state, not per subscription. Without this, leaving

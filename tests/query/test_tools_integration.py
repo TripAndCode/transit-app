@@ -1,11 +1,11 @@
 import os
 from datetime import date, datetime, timedelta, timezone
 
-import asyncpg
 import pytest
 
 from api.range import RangeCtx
 from pipeline.query.tools import _is_route_registered, dispatch
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -38,7 +38,7 @@ def _analyze_sync(agency_id, ch_client):
 
 @pytest.fixture
 async def conn_routes(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
@@ -94,7 +94,7 @@ async def test_dispatch_route_unresolved_returns_candidates(conn_routes):
 async def conn_routes_with_alias(apply_schema):
     """Seed routes whose names trigger a trigram match for a deliberately
     similar input — used to assert the 'did you mean' message localises."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
@@ -144,7 +144,7 @@ async def test_dispatch_capabilities(conn_routes):
 async def conn_two_routes_obs(apply_schema, ch_client):
     """Two routes, only route A has observations — used to assert that the
     time_series tool applies the route filter from args."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
         row = await conn.fetchrow(
@@ -608,13 +608,20 @@ async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "tool_name",
-    ["route_stats", "segment_hotspots", "time_pattern", "schedule_realism", "trend_shift"],
+    [
+        "route_stats",
+        "segment_hotspots",
+        "route_stop_patterns",
+        "time_pattern",
+        "schedule_realism",
+        "trend_shift",
+    ],
 )
 async def test_dispatch_missing_route_arg_returns_empty(aconn, aagency_id, tool_name):
     """Route-required tools must short-circuit with the 'route_arg_required'
     message (not attempt registration/data lookup) when no route arg is
     given. Characterization test pinning ``_resolve_and_check_route``'s
-    shared guard behavior across all five route-required tools."""
+    shared guard behavior across all six route-required tools."""
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 26))
     result = await dispatch(tool_name, {}, ctx, aconn, aagency_id, locale="ja")
     assert result.kind == "empty"

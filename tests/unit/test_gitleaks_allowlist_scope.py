@@ -47,10 +47,10 @@ ROOT = Path(__file__).resolve().parents[2]
 # comma-separated tuple form has no `:`/`=`-shaped operator between the
 # path and its hash, so it never matches.
 _REVIEWED_FILES: list[tuple[str, str]] = [
-    ("tests/api/test_api_copilot.py", "5ee021cf19fe9697976b0fdeafb1b47fb2d0ef327e94956bb29460f95c2993a2"),
-    ("tests/api/test_api_me_llm_key.py", "8d722e67b2bca400ca211069fe87857176cdc0e159fdda4aaf65a75791158ad9"),
-    ("tests/db/test_user_llm_keys_db.py", "a6943924d4af7f30f24d88987cfc1235b5ed1ecdb007f2e3ab745dcec06a762f"),
-    ("tests/unit/test_user_llm_keys.py", "3feb73af2e59776592f3e2b9fc7945631b2b6147cd1b6a4cbbebc2bfe2c4f87a"),
+    ("tests/api/test_api_copilot.py", "89c47cc0bc9548a9a55d82bac636741e5afcd583a37f0a5c0a90906ad5c2c89e"),
+    ("tests/api/test_api_me_llm_key.py", "7292647ff1d13e2c077c90bb098e1818bc3592298323b61d0b648e027ab5774e"),
+    ("tests/db/test_user_llm_keys_db.py", "575465fabc7a0372f3533aea6d791615d1807a8150a592664a6d58d23821c8b2"),
+    ("tests/unit/test_user_llm_keys.py", "b48124ed4d47a9c7662e5da513fa13299f22480dd3899ed19c31c0972253c81f"),
 ]
 _REVIEWED_FILE_HASHES: dict[str, str] = dict(_REVIEWED_FILES)
 

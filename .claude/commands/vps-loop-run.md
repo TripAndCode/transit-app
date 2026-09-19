@@ -10,6 +10,77 @@ self-contained, don't block on reading it. Note `docs/refactor-log.md` is *not* 
 `.gitignore` negates it and it's tracked, so Steps 4 and 6 can and must write it.) Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
 skip ahead.
 
+## Status log writes — always through the lock helper
+
+This section is the canonical routing for every instruction anywhere in this
+file that adds an entry to the Status log, no matter which verb it's phrased
+with — "append", "log", "record", or any other wording (including Step 0's
+`PAUSED`/`Still paused`/`RESUMED` bookkeeping lines, "log it and stop this
+tick", "append residual findings ... to the Status log", "Record that a
+direct fallback was used in the Status log", and "log the error to the
+Status log"). Every one of those means the same thing: run `python3
+scripts/append_status_log.py --repo /root/transit-app --entry '<the text
+that would otherwise follow the timestamp prefix>'` — never a direct
+Edit/bash write to `NEXT_TASK.md`. That script takes a short-lived advisory
+lock around the read-then-append step and generates the entry's own
+timestamp itself, only once it actually holds the lock and is about to
+write; give it only the entry's text, not a timestamp. This is the only
+thing that serializes this file's Status log against a concurrent
+cron-triggered `claude-loop.service` tick (`deploy/vps/claude-loop.sh` holds
+its own, deliberately separate `/tmp/claude-loop.lock` for the whole tick,
+which is why the append helper uses its own dedicated lock file rather than
+that one — see the script's module docstring for why reusing that exact
+file would self-deadlock a cron-triggered run) or another interactive
+`/vps-loop-run` session — a direct write reopens exactly that race. For
+Step 3's idle-throttle check specifically ("stop silently once the last
+entry already reads that way"), pass `--skip-if-tail-startswith 'nothing
+actionable this run.'` so that check itself is re-evaluated fresh, under
+the lock, instead of trusting whatever was last read before this tick
+requested the append — this is what closes the `duplicate_idle_tail`
+alert `scripts/vps_loop_health.py` watches for at its root, rather than
+only preventing the underlying write from being corrupted. If the entry
+text contains an apostrophe or quote character, don't fight shell quoting —
+write the text to a temp file and pass `--entry-file <path>` instead of
+`--entry`. A non-zero exit means the append did not happen — code `3` is a
+lock-acquisition timeout, handled like any other tool-call failure under
+Boundaries (log it and stop with a `**Blocker-tag:** status-log-lock-timeout`,
+per Step 0).
+
+## Non-interactive execution — never end a turn on pending work
+
+This command's normal home is a headless `claude -p` invocation, where the
+session ends the instant the coordinator ends a turn. A turn that ends while
+an `Agent` dispatch or a backgrounded Bash command is still outstanding
+therefore kills that pending work along with the session: the worker's
+uncommitted progress is lost, no Status log entry is written, and the wrapper
+sees a tick that made no forward progress. "I'll wait for the handback rather
+than polling" is the exact shape of this failure — correct in an interactive
+session, silently fatal here.
+
+So, for as long as a dispatch or command is outstanding:
+
+- Do not end the turn. Keep issuing tool calls within the same turn until the
+  work resolves — poll `TaskOutput` against the dispatch, or read the
+  command's own output.
+- Do not start a long verification command (`make test`, `npm run test`,
+  `scripts/prepare_review.py`, an aggregate rebuild) with
+  `run_in_background`. Run it in the foreground with an explicit `timeout`
+  sized to the tick's remaining budget.
+- Make that budget a number you actually hold, rather than an assumed
+  quantity. At Step 1, record the tick's start time (`date +%s`) and read
+  `CLAUDE_TICK_TIMEOUT_SEC` from the environment — the wrapper's per-tick
+  ceiling. If that read comes back empty, fall back to the default
+  `.claude/README.md` documents rather than skipping the check; a deployed
+  wrapper that predates this variable being exported is the one case where
+  it won't be set. Remaining budget is that ceiling minus elapsed; size
+  every foreground `timeout` from it.
+- Before starting a step that plausibly outlasts what is left, stop
+  deliberately instead of being cut off mid-step: confirm the worker has a
+  checkpoint commit, append a Status log entry ending in
+  `**Blocker-tag:** tick-budget-exhausted` per Step 0, and finish the turn.
+  A logged stop resumes cleanly through Step 3/3b; a silent turn-end leaves
+  nothing to resume from.
+
 ## Step 0 — Circuit breaker: back off after a repeated identical blocker
 
 Every Status log entry logged when a tick stops making zero forward progress
@@ -19,20 +90,26 @@ OPEN-PR-resume worktree-missing stop, Step 3b's
 worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
 stop paths, Step 4b's
 worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops,
+Step 6.8's `ci-run-never-triggered` and `ci-check-failed` stops, the
+non-interactive tick-budget stop described just above,
 and Boundaries' generic tool-call-errored stop — must end with its own
 line: `**Blocker-tag:** <kebab-case-slug>`. Pick the slug to name the root
 cause's *class* (e.g. `review-scratch-leftover`, `git-stash-permission-denied`,
 `settings-drift`, `sensitive-file-no-approver`, `db-write-blocked`), not the
 specific instance (not the item number, not the exact file path) — the same
 class of problem recurring on different items must reuse the identical slug,
-or this mechanism can never detect the pattern. Two outcome-category slugs
-(`review-major-unresolved` for an unresolved review finding,
-`worker-blocked` for a Step 4b report) are generic buckets, not
+or this mechanism can never detect the pattern. Some slugs name an outcome
+category rather than a cause: `review-major-unresolved` for an unresolved
+review finding, `worker-blocked` for a Step 4b report, `tick-budget-exhausted`
+for a deliberate out-of-time stop, and Step 6.8's `ci-check-failed` and
+`ci-run-never-triggered`, where one failing check has nothing to do with the
+next. These are generic buckets, not
 necessarily a real recurring root cause on their own — before reusing one of
 these because the last 2 entries also used it, sanity-check that the
 underlying cause is actually the same, not just the same outcome shape; if
 it's clearly a different underlying issue that happens to also end in an
-unresolved review or a blocked worker, use a more specific compound slug
+unresolved review, a blocked worker, or an exhausted budget, use a more
+specific compound slug
 instead (e.g. `review-major-unresolved-null-handling`) so unrelated one-off
 failures don't spuriously trip the streak. This tagging requirement does NOT
 apply to a "skip item N, keep going" outcome that doesn't stop the whole
@@ -182,6 +259,9 @@ different, benign kind of "no progress" and must NOT accumulate toward this
 circuit breaker's streak count. Only genuine blocker/failure outcomes count.
 
 ## Step 1 — State check
+
+Record the tick's start time first: `date +%s`. Everything the budget rule above
+computes hangs off this one number, and no later step re-derives it.
 
 `git status --porcelain -- ':(top)' ':(exclude,top)NEXT_TASK.md'` — everything except
 the one file that is untracked by design. (`NEXT_TASK.md` isn't gitignored, so an
@@ -656,21 +736,67 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
 6.7. `gh pr ready <number>`. Step 5 already completed the required
      `/review-branch` pass clean, and 6.6 just confirmed `main` hasn't moved
      since — mark it ready rather than leaving it in draft.
-6.8. `gh pr view <number> --json mergeable,mergeStateStatus`. Only proceed to
-     6.9 if `mergeable` is `MERGEABLE` and `mergeStateStatus` is `CLEAN`. Do
-     not merge through a `CONFLICTING`/`DIRTY` state — if either check fails
-     here despite 6.6 above, treat it the same as 6.6's "main advanced" case,
-     counting against the same 2-try cap (re-sync, re-review, restart from
-     6.5) rather than forcing through.
+6.8. `gh pr view <number> --json mergeable,mergeStateStatus,statusCheckRollup`.
+     Only proceed to 6.9 if `mergeable` is `MERGEABLE`, `mergeStateStatus` is
+     `CLEAN`, and every entry in `statusCheckRollup` concluded `SUCCESS`. An
+     EMPTY rollup is not a pass — see the two CI outcomes below. `main` carries
+     no branch protection, so nothing else enforces this. Do
+     not merge through a `CONFLICTING`/`DIRTY` state — if the mergeability
+     check fails here despite 6.6 above, treat it the same as 6.6's "main
+     advanced" case, counting against the same 2-try cap (re-sync, re-review,
+     restart from 6.5) rather than forcing through.
+
+     A run still in flight is none of these. An entry whose `status` is not
+     `COMPLETED`, or whose `conclusion` is `null`, has not finished — it is
+     not a failure, and 6.8 must not classify it as one. This is the normal
+     state right after a push, and the empty-rollup remedy below creates it
+     deliberately: nothing else in this step waits, so a re-check seconds
+     after pushing will see a run that has barely started.
+
+     So poll `statusCheckRollup` every 30s until every entry is `COMPLETED`.
+     If the tick's budget runs out first, stop — but with NO `Blocker-tag`,
+     because nothing is lost: the run continues on GitHub's infrastructure
+     regardless of this session, and the next tick's Step 3 resumes this PR at
+     6.5 and reads the finished result. Tagging it would feed the circuit
+     breaker a delay that is working as intended.
+
+     A wait of minutes reopens what 6.6 settled: `main` can advance without a
+     textual conflict, which `mergeStateStatus` does not reflect, and the
+     value read at the top of this step predates the wait. So when the poll
+     finishes, re-run 6.6's comparison against `MAIN_SHA_AT_REVIEW` and
+     re-read `mergeable`/`mergeStateStatus` before judging the outcomes below.
+     If `main` moved, that is 6.6's "main advanced" case and takes 6.6's
+     path, not a CI outcome.
+
+     The two terminal CI outcomes are not the same problem:
+     - **Rollup EMPTY** — no run exists, because the pushed tip carried the
+       skip trailer. Append one new commit (`git commit --allow-empty`) whose
+       message omits it and push normally — never amend the existing tip,
+       which would need the force-push Boundaries forbids — then restart from
+       6.5, counted against the same 2-try cap. Restarting is what re-derives
+       `headRefOid` for 6.9; re-checking 6.8 alone would leave 6.9 pinned to
+       a SHA the new commit has superseded, and the merge would be refused.
+       If the rollup is still empty after the cap, something other than the
+       trailer is stopping the run: log it and stop, ending the entry with
+       `**Blocker-tag:** ci-run-never-triggered`.
+     - **Rollup has a non-SUCCESS entry** — CI ran and found something. That
+       is a defect in the branch, not a race, and no number of retries will
+       clear it: log which check failed and stop, ending the entry with
+       `**Blocker-tag:** ci-check-failed`. Leave the PR open. Be clear about
+       what follows: Step 3 resumes such a PR at 6.5, not at a worker, so
+       nothing here diagnoses the check — the next tick reaches 6.8 and stops
+       the same way. That repetition is the point. Three in a row is what
+       Step 0's circuit breaker counts, and pausing for a human is the right
+       outcome for a check the loop cannot fix.
 6.9. `gh pr merge <number> --squash --match-head-commit <headRefOid from 6.5>`.
      Pinning the merge to the exact head SHA closes the gap between 6.8's
      check and this call — if any commit lands on the branch in between, `gh`
      refuses instead of silently merging something unreviewed. This and 6.7
      are the exceptions to "never mark its own PR ready or merge" that used
      to apply here: both are authorized specifically because Step 5's
-     review gate is unconditional and 6.5/6.6/6.8 just re-confirmed nothing
-     slipped in since — not a general grant to skip review or force through a
-     bad state.
+     review gate is unconditional and 6.8 re-confirmed, after its poll rather
+     than before it, that neither the branch nor `main` moved — not a general
+     grant to skip review or force through a bad state.
 6.10. Run `/cleanup-merged` (this repo) to remove the now-merged local
       branch/worktree. `/cleanup-merged` is local-only by design (it never
       deletes GitHub branches — see its own file) and `gh pr merge` above
@@ -700,8 +826,8 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
       tick that dies between 6.9 and 6.11 — but doing it here directly keeps the
       file correct without waiting for that next tick.)
 6.12. Append: `- <UTC timestamp>: item N merged as PR #<number>;
-      /review-branch pass clean, mergeable/clean confirmed, squash-merged and
-      cleaned up.`
+      /review-branch pass clean, CI green, mergeable/clean confirmed,
+      squash-merged and cleaned up.`
 
 ## Boundaries
 
@@ -710,8 +836,8 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
   discard).
 - Marking a PR ready and merging it (Step 6.7/6.9) are authorized, but only after
   Step 5's `/review-branch` pass is clean, GitHub reports
-  the PR mergeable/clean, AND `main` hasn't advanced since that pass ran (Step
-  6.5/6.6/6.8). Never merge through a `CONFLICTING`/`DIRTY` state or a `main` that
+  the PR mergeable/clean, CI is green on the PR's head, AND `main` hasn't
+  advanced since that pass ran (Step 6.5/6.6/6.8). Never merge through a `CONFLICTING`/`DIRTY` state or a `main` that
   moved on, and never skip or shortcut the review gate to reach a merge.
 - If a step's tool call itself errors (a real tool/dispatch failure, not a Major
   finding), stop and log the error to the Status log with as much detail as available

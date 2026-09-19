@@ -1,6 +1,5 @@
 /* frontend/src/styles/overview.css
-   Editorial redesign for the 概況 tab. Hero is a full-bleed editorial
-   panel (NOT a card); everything else is a borderless soft-shadow card.
+   KPI hero row up top, everything else a borderless soft-shadow card.
    Calm-UI compliant: no alarm reds, no tilts/parallax, animations
    ≤800 ms behind reduced-motion. */
 
@@ -12,57 +11,6 @@
                "Helvetica Neue", sans-serif;
   color: var(--text-primary);
   font-feature-settings: "tnum";
-}
-
-/* ---------- 1. Hero (editorial panel, NOT a card) ---------- */
-.ov-hero {
-  padding: 8px 0 40px;
-  margin-bottom: 8px;
-}
-.ov-hero-eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-  margin: 0 0 20px;
-  font-weight: 600;
-}
-.ov-hero-story {
-  font-size: 28px;
-  font-weight: 500;
-  line-height: 1.3;
-  color: var(--text-primary);
-  margin: 0 0 24px;
-  letter-spacing: -0.01em;
-}
-.ov-hero-row {
-  display: flex;
-  align-items: baseline;
-  gap: 24px;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-}
-.ov-hero-number {
-  font-size: 60px;
-  font-weight: 600;
-  letter-spacing: -0.04em;
-  line-height: 1;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-.ov-hero-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--text-secondary);
-  font-size: 14px;
-  flex-wrap: wrap;
-}
-.ov-hero-meta .sep { color: var(--border-subtle); }
-.ov-hero-samples { font-variant-numeric: tabular-nums; }
-.ov-hero-spark {
-  position: relative;
-  width: 100%;
 }
 
 /* ---------- Card surface (everything except hero) ---------- */
@@ -86,111 +34,7 @@
   font-weight: 600;
 }
 
-/* ---------- Chips ---------- */
-.ov-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.4;
-}
-.ov-chip-lg {
-  padding: 4px 12px;
-  font-size: 14px;
-}
-.ov-chip-down    { background: var(--trend-good-bg);   color: var(--trend-good); }
-.ov-chip-up      { background: var(--trend-bad-bg);     color: var(--trend-bad); }
-.ov-chip-neutral { background: var(--trend-neutral-bg); color: var(--trend-neutral); }
-
-/* ---------- 2. Movers (ranked rows) ---------- */
-.ov-movers {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  margin-bottom: 32px;
-}
-.ov-movers > .ov-card { margin-bottom: 0; }
-
-.ov-mover-list {
-  display: flex;
-  flex-direction: column;
-}
-.ov-mover-row {
-  display: grid;
-  grid-template-columns: 28px 1fr auto auto;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border-soft);
-}
-.ov-mover-row:first-child { padding-top: 4px; }
-.ov-mover-row:last-child  { border-bottom: 0; padding-bottom: 0; }
-
-.ov-rank {
-  width: 22px;
-  height: 22px;
-  border-radius: 11px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: #ffffff;
-  font-variant-numeric: tabular-nums;
-}
-/* Deliberately NOT tokenized to --trend-neutral/--trend-good: those tokens'
-   dark-mode values (#94a3b8, #4ade80) are bright/light, meant for use as
-   text/line color on a dark surface — as a solid fill under this badge's
-   fixed white number, they'd give ~2.3:1 and ~1.5:1 contrast, both far
-   below any legibility floor. Unlike .ov-chip-up/-down (soft --*-bg tint +
-   colored text, safe in both themes), this badge is solid-fill + white
-   text, so it stays a fixed, self-contained, always-legible chip instead. */
-.ov-rank-worse  { background: #475569; }
-.ov-rank-better { background: #166534; }
-
-.ov-mover-text { min-width: 0; }
-.ov-mover-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ov-mover-sub {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin-top: 2px;
-  font-variant-numeric: tabular-nums;
-}
-.ov-mover-streak {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.ov-mover-streak::before {
-  content: "●";
-  color: var(--trend-bad);
-  font-size: 6px;
-  line-height: 1;
-}
-.ov-mover-streak.good::before { color: var(--trend-good); }
-
-.ov-mover-spark {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: 80px;
-}
-
-/* ---------- 3. Concentration ---------- */
+/* ---------- Concentration ---------- */
 .ov-conc-headline {
   font-size: 14px;
   color: var(--text-primary);
@@ -344,7 +188,7 @@
   color: var(--text-tertiary);
 }
 
-/* ---------- 4. Peak hour ---------- */
+/* ---------- Peak hour ---------- */
 .ov-peak-svg-wrap {
   position: relative;
   width: 100%;
@@ -353,7 +197,7 @@
    resolve `fill` to its initial value (black), not transparent. */
 .ov-peak-spread { fill: rgba(180, 83, 9, 0.06); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
 
-/* ---------- 5. Service split ---------- */
+/* ---------- Service split ---------- */
 .ov-svc-list {
   display: flex;
   flex-direction: column;
@@ -447,16 +291,8 @@
     from { transform: scaleX(0); }
     to   { transform: scaleX(1); }
   }
-  @keyframes ov-draw {
-    to { stroke-dashoffset: 0; }
-  }
   .ov-anim-fade    { animation: ov-fade-in 400ms ease-out forwards; }
   .ov-anim-grow-x  { animation: ov-grow-x 700ms ease-out 200ms backwards; }
-  .ov-spark-line {
-    stroke-dasharray: 1200;
-    stroke-dashoffset: 1200;
-    animation: ov-draw 800ms ease-out 100ms forwards;
-  }
 }
 
 /* ---------- Click-to-expand modal ---------- */
@@ -525,34 +361,8 @@
   color: var(--text-secondary);
 }
 
-/* Modal mover rows gain a "prev wk → this wk" column; give it the
- * stretch column so the row fills the 900px modal without dead space. */
-.ov-mover-row-modal {
-  grid-template-columns: 28px minmax(180px, 280px) 1fr auto auto;
-}
-.ov-mover-cmp {
-  font-size: 13px;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
-}
-
-@media (max-width: 600px) {
-  /* Collapse to the same 2-col stack as card rows; chip + spark wrap
-   * below the name (generic nth-child rules in the Mobile block). */
-  .ov-mover-row-modal { grid-template-columns: 22px 1fr; }
-  .ov-mover-row-modal > .ov-mover-cmp { display: none; }
-  .ov-mover-row-modal > :nth-child(4),
-  .ov-mover-row-modal > :nth-child(5) {
-    grid-column: 2 / -1;
-    justify-self: flex-start;
-  }
-}
-
-/* Card hover affordance — applied to .ov-card and the .ov-hero wrapper */
-.ov-card.ov-clickable,
-.ov-hero.ov-clickable {
+/* Card hover affordance for the clickable summary cards. */
+.ov-card.ov-clickable {
   cursor: pointer;
   transition: transform 200ms ease, box-shadow 200ms ease;
 }
@@ -562,44 +372,9 @@
     0 2px 8px rgba(0, 0, 0, 0.06),
     0 0 0 1px var(--border-soft);
 }
-.ov-hero.ov-clickable:hover { transform: translateY(-1px); }
-.ov-card.ov-clickable:focus-visible,
-.ov-hero.ov-clickable:focus-visible {
+.ov-card.ov-clickable:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-/* Stat pill row used in modal expansions (hero modal summary stats) */
-.ov-stat-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 20px;
-}
-.ov-stat-pill {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  /* Plain fallback first, same reasoning as .ov-svc-fill above: the exact
-     original literal, not a --trend-*-bg token (fixed alpha, off-target). */
-  background: rgba(71, 85, 105, 0.05);
-  background: color-mix(in srgb, var(--trend-neutral) 5%, transparent);
-  min-width: 90px;
-}
-.ov-stat-pill-label {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-  font-weight: 600;
-}
-.ov-stat-pill-value {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
 }
 
 /* Peak-hour modal: stacked DOW panels */
@@ -653,21 +428,7 @@
 /* ---------- Mobile ---------- */
 @media (max-width: 600px) {
   .ov-page { padding: 24px 16px 60px; }
-  .ov-hero { padding: 4px 0 28px; }
-  .ov-hero-story { font-size: 22px; }
-  .ov-hero-number { font-size: 44px; }
-  .ov-hero-row { flex-direction: column; align-items: flex-start; gap: 12px; }
   .ov-card { padding: 22px; }
-  .ov-movers { grid-template-columns: 1fr; gap: 22px; margin-bottom: 28px; }
-  .ov-mover-row {
-    grid-template-columns: 22px 1fr;
-    gap: 10px;
-  }
-  .ov-mover-row > :nth-child(3),
-  .ov-mover-row > :nth-child(4) {
-    grid-column: 2 / -1;
-    justify-self: flex-start;
-  }
   .ov-pareto-row { grid-template-columns: 1fr 2fr 50px; gap: 6px; font-size: 12px; }
   .ov-pareto-label { white-space: normal; }
   .ov-modal-backdrop { padding: 0; }
@@ -680,7 +441,7 @@
   .ov-modal-body { padding: 20px; }
 }
 
-/* ---------- KPI hero row (replaces the retired .ov-hero-* editorial panel) ---------- */
+/* ---------- KPI hero row ---------- */
 .ov-kpi-row {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;

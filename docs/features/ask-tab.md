@@ -94,10 +94,10 @@ sentinel:
    calls the provider ladder (`pipeline/query/llm_client.py`) with the
    tool-use surface from `pipeline/query/tools.py`. The ladder's order and
    membership are **env-configured**, not fixed: `CHAT_PROVIDERS` (comma
-   list, `.env.example` ships `cerebras,groq`; the code's own back-compat
-   default if unset is just `groq`) selects from `cerebras` / `groq` /
-   `openai` / `ollama` — `openai` is a supported but optional paid rung,
-   meant to be placed last. The chosen tool call is dispatched the same
+   list, `.env.example` ships `gemini,openai`; the code's own back-compat
+   default if unset is just `gemini`) selects from `gemini` / `openai` —
+   `openai` is a supported but optional paid rung, meant to be placed
+   last. The chosen tool call is dispatched the same
    way; out-of-scope questions get a friendly refusal with suggestions.
 5. All paths converge on `dispatch()` → a `_tool_*` handler in
    `pipeline/query/tools.py`. Whether that handler reads precomputed
@@ -145,51 +145,35 @@ Ask-tab analysis previews, but no current file under
 `frontend/src/tabs/ask/` or `AskTab.tsx` calls it — treat as
 unwired/consumed elsewhere rather than assuming it's live in this UI.
 
-## Anonymous LLM-call daily quota
+## Who may reach the Stage-3 LLM
 
-`POST /ask` has no auth dependency, so anonymous callers reach the Stage-3 LLM
-path directly. The per-minute `FREE_LIMIT`/`PRO_LIMIT` buckets in
-`api/middleware/ratelimit.py` are sized for generic request abuse, not for the
-per-call cost of an LLM invocation, so a separate per-day budget covers that
-one stage. Logged-in users are subject to neither anonymous bucket.
+Reaching an LLM requires a signed-in caller whose `users.llm_approved` flag an
+admin has set. The three LLM-backed surfaces enforce it in two different
+places, for one structural reason:
 
-Two buckets are consumed together, per scope (`ask` and `copilot` share the
-mechanism via `check_and_consume_anon_quota(..., scope=...)`):
+| Surface | Where the gate runs | Rejected caller sees |
+| --- | --- | --- |
+| `POST /copilot/insight` | `require_llm_approved(user)` at the top of the handler (`api/security.py`) | `403 llm_not_approved` |
+| `POST /conversations/{id}/followup` | same | `403 llm_not_approved` |
+| `POST /ask` | inside `chat_with_tools`'s `_call_llm` (`pipeline/query/chat.py`), via the `llm_approved` argument the router threads in | `200` with an honest-degradation answer |
 
-| Bucket | Key | Env knob | Default |
-| --- | --- | --- | --- |
-| Per anon session | signed httpOnly `ask_anon_sid` cookie | `ASK_ANON_DAILY_LIMIT` | 5 |
-| Per source IP | client IP | `ASK_ANON_IP_DAILY_LIMIT` | 20 |
-| Per anon session (Copilot) | same cookie | `COPILOT_ANON_DAILY_LIMIT` | 20 |
-| Per source IP (Copilot) | client IP | `COPILOT_ANON_IP_DAILY_LIMIT` | 80 |
+`/ask` cannot reject the whole request upfront the way the other two do:
+Stages 1 and 2 (regex rules, embedding nearest-neighbour) answer many
+questions with no LLM at all, and those stay open to everyone. So the flag
+travels into the orchestrator and short-circuits only the Stage-3 call,
+returning `error_kind="not_approved"` before any provider or BYOK key is
+touched. Anonymous callers have no user row, so the router passes
+`llm_approved=False` for them — they get Stages 1-2 and nothing more.
 
-The session bucket is the primary limit; the IP ceiling is deliberately looser
-and exists only as a backstop, because `get_or_issue_anon_session` mints a
-fresh session for any request arriving without the cookie — a caller can always
-cycle cookies.
+Admins toggle the flag from `PATCH /api/admin/users/{uid}`, which writes an
+`llm_approved_changed` row to `login_events` whenever the value actually
+changes.
 
-Do not rely on either bucket to bound a determined caller. The session key is
-plainly client-supplied — dropping the cookie mints a new session. Whether the
-IP key is too depends on an open question: it comes from `get_remote_address`,
-and the container runs uvicorn with `--forwarded-allow-ips='*'`, so uvicorn
-trusts the leftmost `X-Forwarded-For` entry unconditionally. Whether an
-external client can set that entry depends on whether the platform edge
-replaces the header or appends to it, which is **unverified** — the
-`Dockerfile`'s own `CAVEAT` comment is the single source of truth on this and
-should be consulted (and settled) before anything security-load-bearing rests
-on the IP bucket. Until then, treat these buckets as protection against
-accidental and casual repeat traffic running up an LLM bill, not as an
-anti-abuse control.
-
-Both buckets are in-memory and process-local (reset on restart/redeploy), the
-same trade-off `FREE_LIMIT`/`PRO_LIMIT` already accept for this app's
-single-uvicorn-process deployment (see `Dockerfile`: no `--workers`). A
-multi-instance deployment needs a shared storage backend instead — slowapi and
-`limits` both support one via a `storage_uri`.
-
-`ASK_ANON_QUOTA_ENABLED=false` disables both scopes entirely. Exhaustion raises
-`AnonAskQuotaExceeded`/`AnonCopilotQuotaExceeded`, surfaced to the SPA as a
-calm sign-in nudge rather than an error state.
+Approval is the whole budget control: an approved caller's LLM calls are
+bounded only by the generic per-minute limiter every route shares
+(`FREE_LIMIT`/`PRO_LIMIT` in `api/middleware/ratelimit.py`), not by any
+per-day LLM allowance. Metering approved callers would key on the user row,
+so it is a separate mechanism to build, not a knob to turn on.
 
 ## Key files
 
@@ -229,7 +213,7 @@ calm sign-in nudge rather than an error state.
 | `embeddings.py` | `intfloat/multilingual-e5-small` wrapper for Stage 2 + RAG index build |
 | `rag_index.py` | pgvector cosine-NN reader over `rag_chunks` (`nearest()`) |
 | `chat.py` | Stage 3 orchestration, `__build__` sentinel handling, intent-cache lookup/upsert |
-| `llm_client.py` | `CHAT_PROVIDERS`-ordered provider ladder (cerebras/groq/openai/ollama), malformed tool-call recovery |
+| `llm_client.py` | `CHAT_PROVIDERS`-ordered provider ladder (gemini/openai) |
 | `tools.py` | Tool specs (`TOOLS`), `dispatch()`, `render_tool_result()`, the `_LOCALES` string table |
 | `tool_queries.py` | SQL helpers backing several tool handlers |
 | `intent.py` / `intent_cache.py` | Canonical-intent signature/cache (`ASK_INTENT_CACHE_ENABLED`) |
@@ -244,18 +228,18 @@ calm sign-in nudge rather than an error state.
 **Automated tests:**
 
 - Backend router/pipeline: `tests/query/test_router.py` (rules +
-  embedding stage), `tests/query/test_embeddings.py`,
-  `tests/query/test_rag_index.py`, `tests/query/test_chat_confidence.py`,
+  embedding stage), `tests/unit/test_embeddings.py`,
+  `tests/query/test_rag_index.py`, `tests/unit/test_chat_confidence.py`,
   `tests/query/test_chat_intent_cache.py`,
   `tests/query/test_chat_null_args.py`,
   `tests/query/test_chat_error_leakage.py`,
-  `tests/query/test_llm_client.py`, `tests/query/test_intent.py`,
+  `tests/query/test_llm_client.py`, `tests/unit/test_intent.py`,
   `tests/query/test_intent_cache.py`, `tests/query/test_meta_tools.py`,
   `tests/query/test_tool_queries.py`,
   `tests/query/test_tools_integration.py`,
   `tests/query/test_tools_locale.py` (pins exact `_LOCALES` strings),
   `tests/query/test_conversations.py`,
-  `tests/query/test_paraphrase_collapse.py`,
+  `tests/unit/test_paraphrase_collapse.py`,
   `tests/query/test_query_log.py`, `tests/query/test_schema_linker.py`.
 - API-level: `tests/api/test_api_ask.py` (end-to-end `/ask` — rule-hit
   skip, ClickHouse-degrade, follow-up rerouting, query-log writes, CSRF),
@@ -266,7 +250,7 @@ calm sign-in nudge rather than an error state.
   shells out to `scripts/ask_eval.py`, which reads
   `tests/ask_eval/gold_questions.jsonl` (chip + builder coverage must be
   100%). Separately, `tests/ask_eval/test_baseline.py` (opt-in via
-  `RUN_LLM_EVAL=1` + a real `GROQ_API_KEY`, hits a running dev API) replays
+  `RUN_LLM_EVAL=1` + a real `GEMINI_API_KEY`, hits a running dev API) replays
   `tests/ask_eval/golden_set.jsonl` against the live 3-stage router and
   scores tool-selection accuracy — `golden_set.jsonl` is also the file
   `make build-rag-index` embeds into `rag_chunks` for Stage 2 (see
@@ -281,8 +265,8 @@ calm sign-in nudge rather than an error state.
 **Manual click-through** (`make serve` + `make frontend-dev`, or
 `make serve` alone for single-origin):
 
-1. `cp .env.example .env`; set a real `GROQ_API_KEY` (and optionally
-   `CEREBRAS_API_KEY` — Cerebras is tried first per `CHAT_PROVIDERS`) to
+1. `cp .env.example .env`; set a real `GEMINI_API_KEY` (and optionally
+   `OPENAI_API_KEY` as the paid fallback per `CHAT_PROVIDERS`) to
    exercise Stage 3. `ASK_FOLLOWUP_ENABLED=true` ships as the
    `.env.example` local-dev default, so follow-up chips work out of the
    box; set it `false` to verify the kill-switch (chips hidden,
@@ -319,7 +303,7 @@ calm sign-in nudge rather than an error state.
    ```
    Expect `router_stage: "rules"`. A paraphrase near a golden-set entry
    should return `"embedding"`; a genuinely novel/out-of-scope question
-   should return `"llm"` (needs a working Groq/Cerebras key) or a
+   should return `"llm"` (needs a working Gemini/OpenAI key) or a
    friendly refusal.
 9. Toggle `ASK_ROUTER_ENABLED=false` to force every question to Stage 3,
    or `ASK_HISTORY_ENABLED=false` to disable follow-up-phrase ("もっと")

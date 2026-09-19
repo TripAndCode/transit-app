@@ -1,0 +1,15 @@
+-- The static schedule a per-date aggregate was last built against.
+--
+-- analyze() rebuilds only the service dates whose ClickHouse rows changed, and
+-- several of those per-date aggregates also read the Postgres static schedule
+-- (which stop each trip visit maps to, and the trip/route bridge the scheduled
+-- headway median is keyed by). A static import replaces those rows wholesale
+-- for the agency -- there is no per-date static version -- so a new schedule
+-- changes what every past date should aggregate to while leaving the per-date
+-- row counts untouched. Comparing this fingerprint against the schedule now
+-- loaded is what tells analyze() that "only the dates that changed" is no
+-- longer sufficient and every date has to be rebuilt.
+--
+-- NULL means the last build did not record one, which resolves to a full
+-- rebuild -- so no backfill is needed.
+ALTER TABLE agg_meta ADD COLUMN IF NOT EXISTS static_fingerprint TEXT;

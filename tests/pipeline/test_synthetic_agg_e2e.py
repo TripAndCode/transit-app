@@ -77,21 +77,6 @@ def _assert_agg_route_hour(pattern: SyntheticPattern, pg_conn, agency_id) -> Non
     assert samples == exp["samples"], pattern.name
 
 
-def _assert_agg_route_dow(pattern: SyntheticPattern, pg_conn, agency_id) -> None:
-    exp = pattern.expected["agg_route_dow"]
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT avg_min, samples FROM agg_route_dow "
-            "WHERE agency_id = %s AND route_code = %s AND service_type = %s AND dow = %s",
-            (agency_id, pattern.route_code, pattern.service_type, pattern.dow),
-        )
-        row = cur.fetchone()
-    assert row is not None, f"{pattern.name}: no agg_route_dow row for dow={pattern.dow}"
-    avg_min, samples = row
-    assert round(float(avg_min), 2) == exp["avg_min"], pattern.name
-    assert samples == exp["samples"], pattern.name
-
-
 def _assert_agg_route_hour_dow(pattern: SyntheticPattern, pg_conn, agency_id) -> None:
     exp = pattern.expected["agg_route_hour_dow"]
     with pg_conn.cursor() as cur:
@@ -153,22 +138,6 @@ def _assert_agg_hour_daily(pattern: SyntheticPattern, pg_conn, agency_id) -> Non
     assert samples == exp["samples"], pattern.name
 
 
-def _assert_agg_stop_seq(pattern: SyntheticPattern, pg_conn, agency_id) -> None:
-    exp = pattern.expected["agg_stop_seq"]
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT stop_name, avg_min, samples FROM agg_stop_seq "
-            "WHERE agency_id = %s AND route_code = %s AND stop_sequence = 1",
-            (agency_id, pattern.route_code),
-        )
-        row = cur.fetchone()
-    assert row is not None, f"{pattern.name}: no agg_stop_seq row"
-    stop_name, avg_min, samples = row
-    assert stop_name == pattern.stop_name, pattern.name
-    assert round(float(avg_min), 2) == exp["avg_min"], pattern.name
-    assert samples == exp["samples"], pattern.name
-
-
 def _assert_agg_stop_daily(pattern: SyntheticPattern, pg_conn, agency_id) -> None:
     exp = pattern.expected["agg_stop_daily"]
     with pg_conn.cursor() as cur:
@@ -217,12 +186,10 @@ def _assert_agg_feed_health(pattern: SyntheticPattern, pg_conn, agency_id) -> No
 _ASSERTIONS = (
     _assert_agg_route_stats,
     _assert_agg_route_hour,
-    _assert_agg_route_dow,
     _assert_agg_route_hour_dow,
     _assert_agg_daily_trend,
     _assert_agg_route_daily,
     _assert_agg_hour_daily,
-    _assert_agg_stop_seq,
     _assert_agg_stop_daily,
     _assert_agg_stop_routes,
     _assert_agg_feed_health,

@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 from datetime import date, timedelta
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
+
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -64,7 +65,7 @@ async def _purge(c, agency_ids):
 async def dash_app(apply_schema, ch_client):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         leftover = [
             r["agency_id"] for r in await c.fetch("SELECT agency_id FROM agencies WHERE feed_url = 'http://dash-t'")

@@ -4,7 +4,36 @@ import pytest
 
 os.environ.setdefault("LLM_KEY_ENCRYPTION_KEY", "zJj1v3nq7v3rj0aWq2p8m9s4b6d5f7h9k1n3q5s7u9w=")
 
-from pipeline.query.user_llm_keys import decrypt_key, encrypt_key, key_suffix, save_user_llm_key
+from pipeline.query.user_llm_keys import _fernet, decrypt_key, encrypt_key, key_suffix, save_user_llm_key
+
+
+def test_missing_encryption_key_names_the_variable(monkeypatch):
+    """The failure has to say which variable is missing.
+
+    This key is only reached on the BYOK screen, long after startup, so a
+    misconfigured deploy learns about it from this message and nothing else --
+    a bare KeyError from inside Fernet() names neither the variable nor how to
+    generate a value.
+    """
+    _fernet.cache_clear()
+    monkeypatch.delenv("LLM_KEY_ENCRYPTION_KEY", raising=False)
+    try:
+        with pytest.raises(RuntimeError, match="LLM_KEY_ENCRYPTION_KEY"):
+            encrypt_key("gsk_test_abc")
+    finally:
+        _fernet.cache_clear()
+
+
+def test_blank_encryption_key_is_treated_as_missing(monkeypatch):
+    # An empty value in a .env file is the likeliest way to get here, and
+    # Fernet("") would otherwise fail on key length instead.
+    _fernet.cache_clear()
+    monkeypatch.setenv("LLM_KEY_ENCRYPTION_KEY", "")
+    try:
+        with pytest.raises(RuntimeError, match="LLM_KEY_ENCRYPTION_KEY"):
+            encrypt_key("gsk_test_abc")
+    finally:
+        _fernet.cache_clear()
 
 
 def test_encrypt_then_decrypt_roundtrips():

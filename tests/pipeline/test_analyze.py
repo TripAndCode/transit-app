@@ -1,4 +1,4 @@
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 
 import pytest
 
@@ -61,10 +61,9 @@ def test_analyze_creates_agg_route_stats(pg_conn, agency_id, ch_client):
 
 def _seed_thin_route(pg_conn, agency_id, route_code, n):
     """Insert *n* fake rows for a single (route_code, service_type='平日',
-    stop_sequence=1) group — deliberately fewer than both agg_route_stats'
-    former per-(route, service_type) gate (`HAVING COUNT(*) > 20`) and
-    agg_stop_seq's former per-(route, stop_sequence) gate
-    (`HAVING COUNT(*) > 5`). A unique day per row (like _seed_updates) keeps
+    stop_sequence=1) group — deliberately fewer than agg_route_stats' former
+    per-(route, service_type) gate (`HAVING COUNT(*) > 20`). A unique day per
+    row (like _seed_updates) keeps
     every row a distinct post-dedup (trip_id, date, stop_sequence) key, so
     the post-dedup sample count is exactly *n*.
     """
@@ -106,23 +105,6 @@ def test_analyze_keeps_low_sample_agg_route_stats_row(pg_conn, agency_id, ch_cli
     assert row[0] == 3
 
 
-def test_analyze_keeps_low_sample_agg_stop_seq_row(pg_conn, agency_id, ch_client):
-    """analyze() has no insert-time minimum-sample gate on any agg_* table —
-    a (route, stop_sequence) group with only 3 samples must still appear in
-    agg_stop_seq (with samples=3), not be silently dropped the way the former
-    `HAVING COUNT(*) > 5` gate would have dropped it."""
-    _seed_thin_route(pg_conn, agency_id, "99998", 3)
-    _analyze(agency_id, pg_conn, ch_client)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT samples FROM agg_stop_seq WHERE agency_id = %s AND route_code = %s AND stop_sequence = 1",
-            (agency_id, "99998"),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    assert row[0] == 3
-
-
 def test_analyze_creates_agg_route_hour(pg_conn, agency_id, ch_client):
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
@@ -133,19 +115,6 @@ def test_analyze_creates_agg_route_hour(pg_conn, agency_id, ch_client):
         )
         count = cur.fetchone()[0]
     assert count > 0
-
-
-def test_analyze_creates_agg_route_dow(pg_conn, agency_id, ch_client):
-    _seed_updates(pg_conn, agency_id)
-    _analyze(agency_id, pg_conn, ch_client)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT DISTINCT dow FROM agg_route_dow WHERE agency_id = %s",
-            (agency_id,),
-        )
-        dows = {r[0] for r in cur.fetchall()}
-    assert dows <= {1, 2, 3, 4, 5, 6, 7}
-    assert len(dows) > 0
 
 
 def test_analyze_creates_agg_route_hour_dow(pg_conn, agency_id, ch_client):
@@ -199,43 +168,6 @@ def test_analyze_creates_agg_route_daily(pg_conn, agency_id, ch_client):
         assert trips_observed > 0
         assert samples > 0
         assert last_seen_at is not None
-
-
-def test_analyze_creates_agg_stop_seq_with_stop_name(pg_conn, agency_id, ch_client):
-    _seed_updates(pg_conn, agency_id)
-    _analyze(agency_id, pg_conn, ch_client)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT stop_name FROM agg_stop_seq WHERE agency_id = %s LIMIT 1",
-            (agency_id,),
-        )
-        stop_name = cur.fetchone()[0]
-    assert stop_name is not None
-    assert "番停留所" in stop_name
-
-
-def test_analyze_agg_stop_seq_with_real_stop_name(pg_conn, agency_id, ch_client):
-    _seed_updates(pg_conn, agency_id)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, %s, %s)",
-            (agency_id, "S1", "青森駅"),
-        )
-        cur.execute(
-            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (agency_id, "平日_11時37分_系統44372", 1, "S1", "11:37"),
-        )
-    pg_conn.commit()
-    _analyze(agency_id, pg_conn, ch_client)
-    with pg_conn.cursor() as cur:
-        cur.execute(
-            "SELECT stop_name FROM agg_stop_seq WHERE agency_id = %s AND stop_sequence = 1",
-            (agency_id,),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    assert row[0] == "青森駅"
 
 
 def test_analyze_creates_agg_daily_trend(pg_conn, agency_id, ch_client):
@@ -555,11 +487,6 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
             "(%s, 'GHOST', '平日', '11:30:00', 99.9, 99.9, 99.9, 100)",
         ),
         (
-            "agg_route_dow",
-            "(agency_id, route_code, service_type, dow, avg_min, samples)",
-            "(%s, 'GHOST', '平日', 1, 99.9, 100)",
-        ),
-        (
             "agg_daily_trend",
             "(agency_id, date, route_code, service_type, avg_min, samples)",
             "(%s, '2099-01-01', 'GHOST', '平日', 99.9, 100)",
@@ -568,11 +495,6 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
             "agg_hour_daily",
             "(agency_id, date, hour, avg_min, samples)",
             "(%s, '2099-01-01', 11, 99.9, 100)",
-        ),
-        (
-            "agg_stop_seq",
-            "(agency_id, route_code, stop_sequence, stop_name, avg_min, samples)",
-            "(%s, 'GHOST', 99, 'GHOST STOP', 99.9, 100)",
         ),
         (
             "agg_stop_daily",
@@ -1686,3 +1608,337 @@ def test_analyze_skips_agg_schedule_revision_daily_when_static_version_id_always
         cur.execute("SELECT COUNT(*) FROM agg_schedule_revision_daily WHERE agency_id = %s", (agency_id,))
         count = cur.fetchone()[0]
     assert count == 0
+
+
+def test_analyze_times_every_aggregate_it_populates(pg_conn, agency_id, ch_client):
+    """Any agg_* table that ends up with rows must appear in the step timing.
+
+    The timing exists to rank aggregates by cost so the expensive ones can be
+    moved off Postgres. A builder that does real work but reports no time at
+    all reads as free and biases that ranking — worse than not measuring,
+    because the gap is invisible in the summary. Several builders bypass
+    `_build_and_insert` (a fused `INSERT ... SELECT`, or a hand-rolled
+    `execute_values`), so instrumenting the shared primitives is not on its
+    own enough to guarantee this.
+    """
+    from pipeline.analyze import _AGG_TABLES_ORDERED, _step_ms
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+
+    timing = dict(_step_ms)
+    with pg_conn.cursor() as cur:
+        populated = set()
+        # agg_meta and agg_static_version_summary are UPSERTed rather than
+        # wiped and rebuilt, so they are absent from _AGG_TABLES_ORDERED while
+        # still writing rows every run that resolves one.
+        for table in (*_AGG_TABLES_ORDERED, "agg_meta", "agg_static_version_summary"):
+            cur.execute(f"SELECT COUNT(*) FROM {table} WHERE agency_id = %s", (agency_id,))
+            if cur.fetchone()[0]:
+                populated.add(table)
+
+    # Guards the fixture, not the feature: an empty run would pass vacuously.
+    assert len(populated) >= 10, f"fixture exercised too few builders: {sorted(populated)}"
+
+    untimed = {t for t in populated if not any(label.startswith(f"{t}:") for label in timing)}
+    assert not untimed, f"populated but untimed: {sorted(untimed)}"
+
+
+def _agg_snapshot(pg_conn, agency_id):
+    """Every row of every rebuilt agg_* table, keyed by table.
+
+    Every table, not just the incremental ones, because the failure this
+    catches is asymmetric: a table whose build is date-scoped while its purge
+    is not loses all of its history on the first run that rebuilds nothing,
+    and a table left out of the incremental set while still reading the
+    date-scoped slice is exactly that case. Naming only the tables already
+    known to be incremental would let the next one added inherit no coverage.
+    """
+    from pipeline.analyze import _AGG_TABLES_ORDERED
+
+    out = {}
+    with pg_conn.cursor() as cur:
+        for table in sorted(_AGG_TABLES_ORDERED):
+            cur.execute(f"SELECT * FROM {table} WHERE agency_id = %s", (agency_id,))
+            out[table] = sorted(map(str, cur.fetchall()))
+    return out
+
+
+def _fingerprint(pg_conn, agency_id):
+    """What analyze() would record for this agency right now.
+
+    Resolves `has_static` the same way analyze() does rather than asserting a
+    value for it, so a fixture with no static schedule exercises the same
+    branch production would.
+    """
+    from pipeline.analyze import _static_fingerprint, _static_loaded
+
+    return _static_fingerprint(agency_id, pg_conn, _static_loaded(pg_conn, agency_id))
+
+
+def _feed_health(pg_conn, agency_id):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, raw_samples FROM agg_feed_health WHERE agency_id = %s ORDER BY date",
+            (agency_id,),
+        )
+        return cur.fetchall()
+
+
+def test_dates_needing_rebuild_is_everything_without_a_ledger(pg_conn, agency_id):
+    """No agg_feed_health rows means nothing is known, so nothing is assumed."""
+    from pipeline.analyze import _dates_needing_rebuild
+
+    assert _dates_needing_rebuild(agency_id, pg_conn, None, "") is None
+
+
+def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_client):
+    from pipeline.analyze import _dates_needing_rebuild
+
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == []
+
+    # The ledger is the only thing consulted, so editing it is the same signal
+    # a newly ingested row would produce.
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_feed_health SET raw_samples = raw_samples + 1 "
+            "WHERE agency_id = %s AND date = (SELECT max(date) FROM agg_feed_health WHERE agency_id = %s) "
+            "RETURNING date",
+            (agency_id, agency_id),
+        )
+        moved = cur.fetchone()[0]
+    pg_conn.commit()
+
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == [moved]
+
+
+def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch_client):
+    """Rebuilding only the changed dates must reach the same state as rebuilding
+    all of them — otherwise the optimisation silently corrupts history."""
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    first = _agg_snapshot(pg_conn, agency_id)
+
+    # analyze() directly, not the _analyze() helper: that helper re-mirrors the
+    # Postgres seed into ClickHouse each time, which really does change the row
+    # counts and so is a different scenario from re-running against unchanged
+    # data.
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert _agg_snapshot(pg_conn, agency_id) == first
+    assert any(rows for rows in first.values()), "fixture produced no rows, so this would pass vacuously"
+
+
+def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, ch_client):
+    """A date present in the ledger but gone from ClickHouse must be purged.
+
+    It cannot be repaired by rebuilding — there is nothing to rebuild from — so
+    it is listed as needing work precisely so the purge clears it.
+    """
+    from pipeline.analyze import _dates_needing_rebuild
+
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    before = _agg_snapshot(pg_conn, agency_id)
+    assert any(rows for rows in before.values())
+
+    # A ledger entry for a date ClickHouse never had.
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES (%s, %s, %s, %s)",
+            (agency_id, date(2099, 1, 1), 42, 0),
+        )
+    pg_conn.commit()
+
+    assert date(2099, 1, 1) in _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id))
+    analyze(agency_id, pg_conn, ch_client)
+    assert _agg_snapshot(pg_conn, agency_id) == before
+
+
+def test_every_incremental_table_is_keyed_by_date(pg_conn):
+    """A date-scoped purge can only express itself against a `date` column.
+
+    Membership in the incremental set makes analyze() delete by
+    `agency_id AND date`, so a table without that column would fail loudly —
+    but only on the run where something actually changed, which is not the run
+    a new member is likely to be tested on.
+    """
+    from pipeline.analyze import _INCREMENTAL_AGG_TABLES
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT table_name FROM information_schema.columns WHERE column_name = 'date' AND table_name = ANY(%s)",
+            (sorted(_INCREMENTAL_AGG_TABLES),),
+        )
+        keyed = {r[0] for r in cur.fetchall()}
+    assert keyed == set(_INCREMENTAL_AGG_TABLES)
+
+
+def test_every_incremental_table_can_purge_by_date_from_an_index(pg_conn):
+    """Having a `date` column is not the same as being able to find it.
+
+    The purge deletes by `(agency_id, date)` on every incremental run. Where
+    no index leads with those two columns, the planner narrows to the agency
+    and then reads all of it — which is the cost the incremental rebuild
+    exists to avoid, quietly reintroduced on the table it was added for. Two
+    members reached that state by different routes: one buried `date` behind
+    `route_code` in its primary key, the other behind `route_code` and
+    `stop_id`. Neither was visible from the column list alone.
+    """
+    from pipeline.analyze import _INCREMENTAL_AGG_TABLES
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT t.relname
+            FROM pg_index i
+            JOIN pg_class t ON t.oid = i.indrelid
+            JOIN pg_attribute a1 ON a1.attrelid = t.oid AND a1.attnum = i.indkey[0]
+            JOIN pg_attribute a2 ON a2.attrelid = t.oid AND a2.attnum = i.indkey[1]
+            WHERE t.relname = ANY(%s)
+              AND a1.attname = 'agency_id'
+              AND a2.attname = 'date'
+            """,
+            (sorted(_INCREMENTAL_AGG_TABLES),),
+        )
+        indexed = {r[0] for r in cur.fetchall()}
+    assert indexed == set(_INCREMENTAL_AGG_TABLES), (
+        f"no (agency_id, date)-leading index on: {sorted(set(_INCREMENTAL_AGG_TABLES) - indexed)}"
+    )
+
+
+def test_a_changed_static_schedule_needs_every_date(pg_conn, agency_id, ch_client):
+    """The ledger counts ClickHouse rows, so it cannot see a static reload.
+
+    Several per-date aggregates join the static schedule, which is replaced
+    wholesale for the agency — no per-date version — so a new schedule changes
+    what every past date should aggregate to while every per-date row count
+    stands still.
+    """
+    from pipeline.analyze import _dates_needing_rebuild
+
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == []
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE static_stop_times SET stop_id = 's2' WHERE agency_id = %s",
+            (agency_id,),
+        )
+    pg_conn.commit()
+
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) is None
+
+
+def test_a_changed_static_schedule_repairs_a_past_date(pg_conn, agency_id, ch_client):
+    """And the rebuild it forces actually reaches the already-built date."""
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES (%s,'s2','車庫前',ST_SetSRID(ST_MakePoint(140.75,40.83),4326))",
+            (agency_id,),
+        )
+        cur.execute("UPDATE static_stop_times SET stop_id = 's2' WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+
+    # analyze() directly: the _analyze() helper re-mirrors the Postgres seed
+    # into ClickHouse, which would move the row counts and so prove nothing
+    # about the static signal on its own.
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT stop_id FROM agg_stop_daily WHERE agency_id = %s", (agency_id,))
+        assert [r[0] for r in cur.fetchall()] == ["s2"]
+
+
+def test_the_static_fingerprint_separates_null_from_empty(pg_conn, agency_id):
+    """NULL and '' are different schedules, and hashing must say so.
+
+    A missing arrival_time leaves dwell time unmeasured; an empty one parses
+    to NULL by a different route. Rendering NULL as the empty string would
+    make the two indistinguishable, so a reload that only flipped one to the
+    other would skip the rebuild it needs.
+    """
+    with pg_conn.cursor() as cur:
+        # A static_stops row too: without one there is no loaded schedule to
+        # fingerprint, and the comparison below would hold vacuously.
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s,'s1','駅前')",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time) "
+            "VALUES (%s,'T',1,'s1',NULL)",
+            (agency_id,),
+        )
+    pg_conn.commit()
+    with_null = _fingerprint(pg_conn, agency_id)
+    assert with_null != ""
+
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE static_stop_times SET arrival_time = '' WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+
+    assert _fingerprint(pg_conn, agency_id) != with_null
+
+
+def test_the_static_fingerprint_notices_a_recalendared_trip(pg_conn, agency_id):
+    """Re-calendaring a trip adds and removes no rows, but moves a median.
+
+    agg_route_headway derives each route's scheduled headway median from its
+    dominant calendar — the service_id with the most trips — and
+    agg_route_headway_daily reads that median back to threshold its long
+    gaps. A reimport that moves existing trips onto a different service_id
+    changes the median while leaving every trip_id, route_id and row count
+    exactly as it was, so a fingerprint over only those would miss it and
+    leave the two tables disagreeing.
+    """
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s,'s1','駅前')",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s,'T','R(1)','weekday')",
+            (agency_id,),
+        )
+    pg_conn.commit()
+    before = _fingerprint(pg_conn, agency_id)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE static_trips SET service_id = 'holiday' WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+
+    assert _fingerprint(pg_conn, agency_id) != before
+
+
+def test_the_text_dated_aggregate_stores_iso_dates(pg_conn, agency_id, ch_client):
+    """agg_daily_trend stores its service date as text, and text has a format.
+
+    The per-date purge matches this column against an ISO string, and every
+    reader parses it as one, so the format is a contract rather than an
+    incidental rendering. Nothing else in the suite would notice it drifting:
+    the column is text, so a differently-formatted value stores and reads
+    back perfectly happily, and only the purge quietly stops matching.
+    """
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT date FROM agg_daily_trend WHERE agency_id = %s", (agency_id,))
+        stored = [r[0] for r in cur.fetchall()]
+    assert stored, "fixture produced no rows, so this would pass vacuously"
+    for value in stored:
+        date.fromisoformat(value)
+
+    # A second run purges by that string and reinserts the same primary
+    # keys, which is where a mismatch would surface as a collision.
+    analyze(agency_id, pg_conn, ch_client)
+    assert _agg_snapshot(pg_conn, agency_id)["agg_daily_trend"]

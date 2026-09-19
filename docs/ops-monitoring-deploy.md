@@ -168,21 +168,20 @@ entirely, check out that commit in the deployed checkout and skip straight
 to re-running the smoke check — the unit files themselves rarely need
 reinstalling unless the rollback target predates this doc.
 
-## 8. `[skip ci]` verification
+## 8. CI on an ops-monitoring PR
 
-Every commit in a PR touching this monitoring hub must carry `[skip ci]`
-(see CLAUDE.md's "Git and pull requests" section — CI is skipped repo-wide,
-so this is a hard requirement, not specific to ops changes). Before opening
-or readying such a PR:
+Nothing here is special: this hub follows the repo-wide rule in `CLAUDE.md`'s
+"Git and pull requests" section. Commits carry `[skip ci]` so intermediate
+pushes do not each queue a run, and the last push before the PR is readied
+must have a tip whose message omits it — otherwise no run exists, and the
+merge gate, which requires a green one, can never be satisfied.
 
 ```bash
-git log --format='%H %s%n%b' origin/main..HEAD | grep -c '^\[skip ci\]$\|\[skip ci\]'
-git log --format='%H' origin/main..HEAD | wc -l
+# What the gate reads. An EMPTY rollup means no run was triggered, not a pass.
+gh pr view <number> --json statusCheckRollup
 ```
 
-Confirm the two counts imply every commit has the trailer (each commit's
-subject+body must contain the literal line), and double check the branch's
-actual pushed tip commit specifically — a merge commit from resolving a
-`main` conflict does not get `[skip ci]` automatically from `git merge` and
-must have it added by hand (see `transit-app-gotchas`'s "Git" section for
-the exact failure mode this guards against).
+`transit-app-gotchas`'s "Git" section owns the trailer's mechanics, including
+the case worth knowing here: a merge commit made while resolving a `main`
+conflict carries no trailer of its own, so it triggers a run whether or not
+that was intended.

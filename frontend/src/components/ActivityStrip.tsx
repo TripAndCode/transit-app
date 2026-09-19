@@ -14,8 +14,9 @@
  * Grace period: 80 ms before showing, so cache-hit mutations don't
  * produce a visible blink. 200 ms CSS fade-out for smooth disappearance.
  *
- * The strip is rendered inside the fixed app notice stack, so it never pushes
- * the active tab down or reserves blank space when idle.
+ * The strip is rendered inside the in-flow app notice stack. It reserves no
+ * space while idle, since it's `display: none`, but once mutations start it
+ * takes its own row and pushes the active tab down like any other sibling.
  */
 import { useEffect, useState } from "react";
 import { useIsMutating } from "@tanstack/react-query";

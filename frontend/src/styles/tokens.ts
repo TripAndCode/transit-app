@@ -19,7 +19,7 @@
 //  - MapLibre (builds plain-JS paint expressions that CANNOT consume var()):
 //    call `severeColorResolved()`, which returns a real parseable hex. These
 //    call sites already subscribe to `useThemeSignal` and rebuild their
-//    expressions on toggle (see useHeatmapLayer / useRouteOverlay).
+//    expressions on toggle (see useOperationsMapLayers).
 const SEVERE_VAR = "var(--delay-severe)";
 
 // Light-mode severe red — the fallback when the CSS custom property can't be
@@ -42,23 +42,6 @@ export function severeColorResolved(): string {
     .getPropertyValue("--delay-severe")
     .trim();
   return v || SEVERE_FALLBACK;
-}
-
-// Light-mode accent — the fallback when --accent can't be resolved (SSR /
-// jsdom), matching global.css's base :root value.
-const ACCENT_FALLBACK = "#5b6cad";
-
-/** Resolve `--accent` to a concrete hex for callers that need a real,
- *  parseable color string — MapLibre paint expressions, which can't consume
- *  `var()`. Mirrors severeColorResolved() for the same reason: the default
- *  (no-scrubbed-delay) route-line color needs to track the active theme's
- *  accent, not stay pinned to the old hardcoded blue-purple. */
-export function accentColorResolved(): string {
-  if (typeof document === "undefined") return ACCENT_FALLBACK;
-  const v = getComputedStyle(document.documentElement)
-    .getPropertyValue("--accent")
-    .trim();
-  return v || ACCENT_FALLBACK;
 }
 
 const BASE_RAMP = {

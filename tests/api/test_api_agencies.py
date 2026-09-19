@@ -1,21 +1,17 @@
-import os
 from datetime import date, datetime, timedelta, timezone
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.conftest import TEST_ORIGIN
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from tests.conftest import TEST_ORIGIN, _test_pool
 
 
 @pytest.fixture
 async def app_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
@@ -57,13 +53,13 @@ async def agencies_client(apply_schema):
     _orig = _agencies_mod.validate_feed_url
     _agencies_mod.validate_feed_url = lambda url: None
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     truncate_sql = (
         "TRUNCATE agencies, updates, static_stops, static_stop_times, "
         "static_trips, static_routes, static_calendar_dates, "
-        "agg_route_stats, agg_route_hour, agg_route_dow, agg_route_daily, "
-        "agg_daily_trend, agg_stop_seq, rag_chunks, agg_meta, sessions, users CASCADE"
+        "agg_route_stats, agg_route_hour, agg_route_daily, "
+        "agg_daily_trend, rag_chunks, agg_meta, sessions, users CASCADE"
     )
     # Pre-truncate so each test starts from a known-empty state — otherwise
     # data left over from `make seed-agencies` (or a parallel session) would
@@ -86,13 +82,13 @@ async def agencies_client_real_validator(apply_schema):
     """Like agencies_client but does NOT mock validate_feed_url."""
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     truncate_sql = (
         "TRUNCATE agencies, updates, static_stops, static_stop_times, "
         "static_trips, static_routes, static_calendar_dates, "
-        "agg_route_stats, agg_route_hour, agg_route_dow, agg_route_daily, "
-        "agg_daily_trend, agg_stop_seq, rag_chunks, agg_meta, sessions, users CASCADE"
+        "agg_route_stats, agg_route_hour, agg_route_daily, "
+        "agg_daily_trend, rag_chunks, agg_meta, sessions, users CASCADE"
     )
     async with pool.acquire() as conn:
         await conn.execute(truncate_sql)

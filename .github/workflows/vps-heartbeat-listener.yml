@@ -28,6 +28,8 @@ jobs:
           HEALTH_PAUSED: ${{ github.event.client_payload.paused }}
           HEALTH_REPEATED_WITHOUT_PROGRESS: ${{ github.event.client_payload.repeated_without_progress }}
           HEALTH_STALE_PAUSE: ${{ github.event.client_payload.stale_pause }}
+          HEALTH_DUPLICATE_IDLE_TAIL: ${{ github.event.client_payload.duplicate_idle_tail }}
+          HEALTH_OUT_OF_ORDER_TAIL: ${{ github.event.client_payload.out_of_order_tail }}
           HEALTH_BLOCKER_CLASS: ${{ github.event.client_payload.blocker_class }}
           HEALTH_CURRENT_ITEM: ${{ github.event.client_payload.current_item }}
           HEALTH_LAST_SUCCESSFUL_TICK: ${{ github.event.client_payload.last_successful_tick }}
@@ -41,6 +43,8 @@ jobs:
           echo "HEALTH paused=$HEALTH_PAUSED"
           echo "HEALTH repeated_without_progress=$HEALTH_REPEATED_WITHOUT_PROGRESS"
           echo "HEALTH stale_pause=$HEALTH_STALE_PAUSE"
+          echo "HEALTH duplicate_idle_tail=$HEALTH_DUPLICATE_IDLE_TAIL"
+          echo "HEALTH out_of_order_tail=$HEALTH_OUT_OF_ORDER_TAIL"
           echo "HEALTH blocker_class=$HEALTH_BLOCKER_CLASS"
           echo "HEALTH current_item=$HEALTH_CURRENT_ITEM"
           echo "HEALTH last_successful_tick=$HEALTH_LAST_SUCCESSFUL_TICK"

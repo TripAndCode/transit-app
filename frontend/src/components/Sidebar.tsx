@@ -11,7 +11,6 @@ import {
   ChevronLeft,
   ChevronRight,
   PanelLeft,
-  type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
@@ -23,13 +22,20 @@ import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 
-type Item = { to: string; labelKey: string; Icon: LucideIcon };
-
-const ITEMS: Item[] = [
+/** The sidebar's real nav destinations -- exported so the landing page's
+ *  preview mockups (`pages/landing/PreviewSidebar.tsx`, and
+ *  `DashboardPreview.tsx` for its auto-advance order) import this array
+ *  instead of maintaining their own copy, so the marketing preview's tab
+ *  set/labels cannot drift from the real, signed-in nav. */
+export const SIDEBAR_NAV_ITEMS = [
   { to: "overview", labelKey: "design:overview", Icon: LayoutDashboard },
   { to: "route-analysis", labelKey: "design:analysis", Icon: BarChart3 },
   { to: "reports", labelKey: "design:reports", Icon: FileText },
-];
+] as const;
+
+type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
+
+const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
 
@@ -63,17 +69,16 @@ export function Sidebar() {
   const suffix = filterQS ? `?${filterQS}` : "";
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Narrow-viewport drawer: below 640px (the shared MOBILE_BREAKPOINT_QUERY,
-  // also used by ThreadSidebar) the desktop rail's fixed 230/64px width
-  // would otherwise eat most of a ~390px phone screen, leaving almost no
-  // room for tab content. isMobile conditionally renders only the active
-  // variant — mirroring ThreadSidebar's useMediaQuery-based split — instead
-  // of always mounting both and toggling visibility via CSS `display`,
-  // which used to double the nav's DOM nodes/listeners at every viewport
-  // width. The drawer body itself is additionally only mounted while open
-  // (on top of the desktop/mobile split), so the common case (drawer
-  // closed) doesn't duplicate every nav label/link in the DOM and break
-  // single-match queries in tests or a11y tooling.
+  // Narrow-viewport drawer: below 640px (the shared MOBILE_BREAKPOINT_QUERY)
+  // the desktop rail's fixed 230/64px width would otherwise eat most of a
+  // ~390px phone screen, leaving almost no room for tab content. isMobile
+  // conditionally renders only the active variant instead of always
+  // mounting both and toggling visibility via CSS `display`, which used to
+  // double the nav's DOM nodes/listeners at every viewport width. The
+  // drawer body itself is additionally only mounted while open (on top of
+  // the desktop/mobile split), so the common case (drawer closed) doesn't
+  // duplicate every nav label/link in the DOM and break single-match
+  // queries in tests or a11y tooling.
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const [mobileOpen, setMobileOpen] = useState(false);
 

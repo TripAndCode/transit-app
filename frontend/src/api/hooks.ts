@@ -352,6 +352,20 @@ export function useIsAuthenticated(): boolean {
   return Boolean(data?.user_id);
 }
 
+/**
+ * True when an admin has approved this caller for LLM-backed features.
+ *
+ * Every LLM endpoint rejects an unapproved caller server-side, so this is a
+ * UI-affordance check, not a security boundary: use it to avoid offering (or
+ * auto-firing) a request that is guaranteed to come back 403. The flag
+ * defaults to false for every new account, so an unguarded LLM affordance is
+ * broken for the majority of callers rather than an edge case.
+ */
+export function useIsLlmApproved(): boolean {
+  const { data } = useSession();
+  return data?.llm_approved === true;
+}
+
 function toServerLikeConversation(t: AnonThread): Conversation {
   return {
     conversation_id: t.client_id,
@@ -591,47 +605,30 @@ export function useFollowupEnabled(agencyId: number | null) {
   });
 }
 
-export function useFollowup(agencyId: number, authed: boolean) {
+/**
+ * Ask a follow-up question grounded on a stored assistant message.
+ *
+ * Signed-in and admin-approved only: the endpoint rejects anyone else with a
+ * 403 before it looks at the request body, so there is no anonymous
+ * inline-context variant to send. Callers gate the affordance itself on
+ * {@link useIsLlmApproved} rather than letting a doomed request fire.
+ */
+export function useFollowup(agencyId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: {
+    mutationFn: (vars: {
       conversationId: string;
       contextMessageId: number;
+      contextRowIndex?: number;
       question: string;
-    }) => {
-      if (authed) {
-        return apiPost<AppendMessageResult>(
-          `/api/${agencyId}/conversations/${vars.conversationId}/followup`,
-          { question: vars.question, context_message_id: vars.contextMessageId },
-        );
-      }
-      // Anon path: look up context message from localStorage
-      const localThread = conversationsAnon.get(vars.conversationId, agencyId);
-      const ctx = localThread?.messages.find((m) => m.message_id === vars.contextMessageId);
-      if (!ctx) throw new Error("local context message not found");
-      const resp = await apiPost<AppendMessageResult>(
+    }) =>
+      apiPost<AppendMessageResult>(
         `/api/${agencyId}/conversations/${vars.conversationId}/followup`,
-        {
-          question: vars.question,
-          context_tool: ctx.tool ?? null,
-          context_args: ctx.args ?? null,
-          context_result: ctx.result ?? null,
-        },
-      );
-      // Persist synthetic messages to localStorage
-      conversationsAnon.appendMessage(vars.conversationId, resp.user);
-      conversationsAnon.appendMessage(vars.conversationId, resp.assistant);
-      return resp;
-    },
+        { question: vars.question, context_message_id: vars.contextMessageId, context_row_index: vars.contextRowIndex },
+      ),
     onSuccess: (_result, vars) => {
-      if (authed) {
-        qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
-        qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
-      } else {
-        // Anon: invalidate the local conversation query so UI re-renders
-        qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
-        qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
-      }
+      qc.invalidateQueries({ queryKey: ["conversation", agencyId, vars.conversationId] });
+      qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
     },
   });
 }

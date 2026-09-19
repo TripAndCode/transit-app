@@ -3,11 +3,12 @@
 import os
 from unittest.mock import MagicMock, patch
 
-import asyncpg
 import httpx
 import psycopg2
 import pytest
 from httpx import ASGITransport
+
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -16,7 +17,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 async def cron_app(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     yield app
     await pool.close()

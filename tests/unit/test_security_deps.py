@@ -21,13 +21,13 @@ def test_require_user_anonymous_raises():
 
 
 def test_require_user_returns_user():
-    u = User(user_id=1, email="a@x", name=None, avatar_url=None, role="user", suspended_at=None)
+    u = User(user_id=1, email="a@x", name=None, avatar_url=None, role="user", suspended_at=None, llm_approved=False)
     req = _request_with_state(u)
     assert require_user(req) is u
 
 
 def test_require_admin_non_admin_raises():
-    u = User(user_id=1, email="a@x", name=None, avatar_url=None, role="user", suspended_at=None)
+    u = User(user_id=1, email="a@x", name=None, avatar_url=None, role="user", suspended_at=None, llm_approved=False)
     req = _request_with_state(u)
     with pytest.raises(HTTPException) as exc:
         require_admin(req)
@@ -35,7 +35,7 @@ def test_require_admin_non_admin_raises():
 
 
 def test_require_admin_admin_returns():
-    u = User(user_id=1, email="a@x", name=None, avatar_url=None, role="admin", suspended_at=None)
+    u = User(user_id=1, email="a@x", name=None, avatar_url=None, role="admin", suspended_at=None, llm_approved=False)
     req = _request_with_state(u)
     assert require_admin(req) is u
 

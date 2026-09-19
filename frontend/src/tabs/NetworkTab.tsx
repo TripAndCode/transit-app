@@ -39,8 +39,7 @@ const youBadgeStyle: React.CSSProperties = {
   borderRadius: 4,
   // Solid fill, not --accent-soft — the highlighted card itself uses
   // --accent-soft as its background, so a soft-tint badge would be
-  // invisible against it. Matches .ov-rank's solid-fill + white-text
-  // precedent (frontend/src/styles/overview.css).
+  // invisible against it.
   background: "var(--accent)",
   color: "#ffffff",
   marginLeft: 8,

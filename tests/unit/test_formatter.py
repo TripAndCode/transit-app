@@ -11,6 +11,7 @@ tests/unit/test_trend_weighted_avg.py).
 """
 
 from datetime import date
+from typing import Any
 
 from pipeline.query.formatter import _r, format_result, format_trend_text
 from pipeline.reports.rankings import _weighted_avg_min
@@ -169,7 +170,7 @@ def test_format_trend_text_all_null_days_reports_no_data():
 def test_format_trend_text_skips_null_day_not_zero():
     """A single all-NULL day amid two real days must not drag the mean down
     toward 0, and must not count in the rendered observed-day total."""
-    days = [
+    days: list[dict[str, Any]] = [
         {"date": "2026-04-01", "avg_min": None, "samples": 0},
         {"date": "2026-04-02", "avg_min": 2.0, "samples": 1000},
         {"date": "2026-04-03", "avg_min": 10.0, "samples": 5},
@@ -192,7 +193,7 @@ def test_format_trend_text_matches_weighted_avg_min_helper():
     the two surfaces must not show different headline numbers for the same
     underlying data.
     """
-    days = [
+    days: list[dict[str, Any]] = [
         {"date": "2026-04-01", "avg_min": None, "samples": 0},
         {"date": "2026-04-02", "avg_min": 2.0, "samples": 1000},
         {"date": "2026-04-03", "avg_min": 10.0, "samples": 5},

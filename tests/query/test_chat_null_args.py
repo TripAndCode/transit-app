@@ -9,24 +9,21 @@ real behaviour end-to-end by monkeypatching the LLM adapter so we
 control the exact ``arguments`` string the model returns.
 """
 
-import os
 from datetime import date
 from types import SimpleNamespace
 
-import asyncpg
 import pytest
 
 from api.range import RangeCtx
 from pipeline.query import chat as chat_module
 from pipeline.query.chat import chat_with_tools
-
-DATABASE_URL = os.environ["DATABASE_URL"]
+from tests.conftest import _test_pool
 
 
 def _fake_message(arguments: str, tool_name: str = "capabilities"):
-    """Build the minimal object shape Groq's chat completions return.
+    """Build the minimal object shape an OpenAI-compatible chat completion returns.
 
-    Mirrors ``resp.choices[0].message`` from the openai/Groq SDK so the
+    Mirrors ``resp.choices[0].message`` from the openai SDK so the
     orchestrator's ``getattr(msg, 'tool_calls', None)`` and
     ``call.function.arguments`` reads both resolve cleanly.
     """
@@ -60,7 +57,7 @@ def _ctx() -> RangeCtx:
 async def conn_with_minimal_seed(apply_schema):
     """Pool + agency_id with one route so capabilities/describe_data have
     something to dispatch against."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO agencies (agency_name, feed_url) VALUES ('T', 'http://t') RETURNING agency_id"
@@ -384,6 +381,27 @@ async def test_degradation_message_no_providers(monkeypatch):
     out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
     assert out["success"] is False
     assert out["answer"] == chat._chat_str("llm_unconfigured", "ja")
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_not_approved(monkeypatch):
+    """llm_approved=False shows the admin-approval message, in both locales,
+    without ever reaching the provider client."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        def chat_completions(self, **k):
+            raise AssertionError("the LLM provider must not be reached when llm_approved=False")
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    for locale in ("ja", "en"):
+        out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale=locale, llm_approved=False)
+        assert out["success"] is False
+        assert out["answer"] == chat._chat_str("llm_not_approved", locale)
 
 
 @pytest.mark.asyncio

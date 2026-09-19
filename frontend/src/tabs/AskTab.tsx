@@ -2,10 +2,11 @@
  * AskTab — conversational analytics interface for an agency.
  *
  * Manages thread selection, filter context, message dispatch, and scroll
- * behaviour for the Ask feature. Renders a two-column layout: {@link ThreadSidebar}
- * on the left, and a scrollable message list with a sticky {@link QuestionDock}
- * on the right. Handles anonymous-to-authenticated conversation migration on
- * first login.
+ * behaviour for the Ask feature. Renders a single-column canvas: an
+ * on-demand {@link ThreadSidebar} disclosure for investigation history above
+ * a scrollable message list, with a sticky {@link QuestionDock} at the
+ * bottom. Handles anonymous-to-authenticated conversation migration on first
+ * login.
  *
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
@@ -18,12 +19,12 @@ import {
   useAppendMessage,
   useMigrateAnon,
   useIsAuthenticated,
+  useIsLlmApproved,
   useUpdateConversation,
   useFollowup,
   useFollowupEnabled,
 } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
-import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
 import { useRouteNames } from "../api/useRouteNames";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
@@ -37,6 +38,7 @@ import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
 import { InvestigationCanvas } from "./ask/InvestigationCanvas";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
+import { useInvestigationLocation } from "./ask/useInvestigationLocation";
 
 export function AskTab() {
   const { t } = useTranslation();
@@ -46,7 +48,8 @@ export function AskTab() {
   const routeNames = useRouteNames(id);
 
   // ── Thread state ──────────────────────────────────────────────────────────
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useInvestigationLocation();
+  const historyRef = useRef<HTMLDetailsElement>(null);
 
   // ── Ask-dock composing state (lifted from QuestionDock so a landing-area
   //    suggestion pill can open a specific chip, not just the bottom dock's
@@ -64,6 +67,7 @@ export function AskTab() {
 
   // ── Hooks ─────────────────────────────────────────────────────────────────
   const authed = useIsAuthenticated();
+  const llmApproved = useIsLlmApproved();
   const migrateAnon = useMigrateAnon(id ?? 0);
   const migratedRef = useRef(false);
 
@@ -81,9 +85,12 @@ export function AskTab() {
   const createConv = useCreateConversation(id ?? 0);
   const appendMsg = useAppendMessage(id ?? 0);
   const updateConv = useUpdateConversation(id ?? 0);
-  const followup = useFollowup(id ?? 0, authed);
+  const followup = useFollowup(id ?? 0);
   const followupFlag = useFollowupEnabled(id);
-  const followupEnabled = followupFlag.data?.enabled === true;
+  // Both must hold: the deployment flag AND this caller's own approval.
+  // Without the second, an unapproved caller (the default for every new
+  // account) is offered chips whose every submission 403s.
+  const followupEnabled = followupFlag.data?.enabled === true && llmApproved;
 
   // ── Filter context (derived, no sync effects) ─────────────────────────────
   // Single source of truth, in priority order:
@@ -125,6 +132,7 @@ export function AskTab() {
   // ── Event handlers ────────────────────────────────────────────────────────
 
   function handleSelectThread(threadId: string | null) {
+    historyRef.current?.removeAttribute("open");
     setActiveId(threadId);
     setFilterEdit(null);
     setFollowupDraft("");
@@ -138,6 +146,7 @@ export function AskTab() {
   }
 
   function handleNewThread() {
+    historyRef.current?.removeAttribute("open");
     setActiveId(null);
     setFilterEdit(null);
     setFollowupDraft("");
@@ -214,28 +223,35 @@ export function AskTab() {
 
   const messages = convQuery.data?.messages ?? [];
   const hasMessages = messages.length > 0;
+  const unavailable = activeId !== null && !convQuery.isPending && (convQuery.isError || !convQuery.data);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: "240px 1fr",
+        display: "flex",
+        flexDirection: "column",
         height: "100%",
         minHeight: 0,
       }}
-      className="ask-tab-grid"
     >
-      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      <header className="ask-workspace-bar">
+        <span>{t("nav.ask")}</span>
       {id != null && (
+        <details ref={historyRef} className="ask-thread-menu">
+          <summary>{t("ask.workspace.investigations")}</summary>
+          <div className="ask-thread-menu-content">
         <ThreadSidebar
           agencyId={id}
           activeId={activeId}
           onSelect={handleSelectThread}
           onNewThread={handleNewThread}
         />
+          </div>
+        </details>
       )}
+      </header>
 
       {/* ── Main area ────────────────────────────────────────────────────── */}
       <div
@@ -277,6 +293,12 @@ export function AskTab() {
               <Skeleton height={120} />
               <Skeleton height={64} style={{ alignSelf: "flex-end", width: "60%" }} />
             </div>
+          ) : unavailable ? (
+            <div role="status">
+              <p>{t("ask.workspace.unavailable")}</p>
+              <button type="button" onClick={() => void convQuery.refetch()}>{t("ask.workspace.retry")}</button>
+              <button type="button" onClick={handleNewThread}>{t("ask.sidebar.new_thread")}</button>
+            </div>
           ) : hasMessages ? (
             <InvestigationCanvas
               key={`${id}:${activeId}`}
@@ -285,6 +307,7 @@ export function AskTab() {
               formatRoute={routeNames.format}
               onStepChange={() => scrollRef.current?.scrollTo({ top: 0 })}
             >
+              {({ messages: contextMessages, focus }) => <>
               {(appendMsg.isPending || followup.isPending) && (
                 <div
                   role="status"
@@ -309,15 +332,17 @@ export function AskTab() {
                   answers) to avoid compounding LLM errors. */}
               {followupEnabled && !followup.isPending && !appendMsg.isPending && (
                 <FollowupChipsRow
-                  messages={messages}
+                  messages={contextMessages}
+                  focus={focus}
+                  compact
                   t={t}
-                  onFollowup={(ctxMsgId, question, isDraft) => {
+                  onFollowup={(ctxMsgId, question, isDraft, rowIndex) => {
                     if (!activeId) return;
                     // Only clear the draft if this submission *was* the draft --
                     // a canned chip prompt shouldn't wipe text the user is
                     // still composing.
                     followup.mutate(
-                      { conversationId: activeId, contextMessageId: ctxMsgId, question },
+                      { conversationId: activeId, contextMessageId: ctxMsgId, contextRowIndex: rowIndex, question },
                       { onSuccess: () => isDraft && setFollowupDraft("") },
                     );
                   }}
@@ -327,6 +352,7 @@ export function AskTab() {
                   maxChars={followupFlag.data?.max_question_chars}
                 />
               )}
+              </>}
             </InvestigationCanvas>
           ) : (
             <AskLandingCards
@@ -339,7 +365,9 @@ export function AskTab() {
         </div>
 
         {/* Bottom dock */}
-        {id != null && (
+        <details className="ask-tool-menu" open={!hasMessages || composingId !== null}>
+          <summary>{t("ask.workspace.new_analysis")}</summary>
+        {id != null && !unavailable && !(activeId && convQuery.isPending) && (
           <QuestionDock
             agencyId={id}
             busy={busy}
@@ -352,16 +380,8 @@ export function AskTab() {
             onRunComplete={handleRunComplete}
           />
         )}
+        </details>
       </div>
-
-      {/* Responsive CSS for the two-column grid */}
-      <style>{`
-        @media (max-width: ${MOBILE_BREAKPOINT_PX}px) {
-          .ask-tab-grid {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

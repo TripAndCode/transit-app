@@ -151,7 +151,7 @@ export type RouteShapeResponse = {
    * LineString when the route has one observed shape variant (系統);
    * MultiLineString when it has several (e.g. an express bus with multiple
    * stopping patterns) — every observed variant renders, not just the
-   * most-frequent one. useRouteOverlay flattens coords for bounds-fitting.
+   * most-frequent one. Consumers flatten the coords for bounds-fitting.
    */
   geometry: GeoJSON.LineString | GeoJSON.MultiLineString | null;
   stops: RouteShapeStop[];

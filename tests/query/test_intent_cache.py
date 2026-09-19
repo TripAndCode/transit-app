@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
-import asyncpg
 import pytest
 
 from pipeline.query.intent import IntentSignature
@@ -15,14 +12,13 @@ from pipeline.query.intent_cache import (
     update_user_action,
     upsert,
 )
-
-DATABASE_URL = os.environ["DATABASE_URL"]
+from tests.conftest import _test_pool
 
 
 @pytest.fixture
 async def conn_with_agency(apply_schema):
     """Single asyncpg connection + agency_id 1; cleans cache table between tests."""
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_intent_cache")  # safe: transit_test only
         row = await c.fetchrow(
@@ -66,6 +62,7 @@ async def test_upsert_inserts_then_increments_hit_count(conn_with_agency):
 
         await upsert(c, sig_hash, sig, canonical, agency_id, question="Q1 paraphrased")
         row = await lookup(c, sig_hash, agency_id)
+        assert row is not None
         assert row["hit_count"] == 2
         assert row["last_question"] == "Q1 paraphrased"
 
@@ -78,6 +75,7 @@ async def test_update_user_action_writes_edited(conn_with_agency):
         await upsert(c, sig_hash, _sig(), {"metric": "avg_delay"}, agency_id, question="Q")
         await update_user_action(c, sig_hash, agency_id, "edited")
         row = await lookup(c, sig_hash, agency_id)
+        assert row is not None
         assert row["last_user_action"] == "edited"
 
 
@@ -170,4 +168,5 @@ async def test_mark_promoted_sets_timestamp(conn_with_agency):
         await upsert(c, sig_hash, _sig(), {"metric": "avg_delay"}, agency_id, question="Q")
         await mark_promoted(c, sig_hash, agency_id)
         row = await lookup(c, sig_hash, agency_id)
+        assert row is not None
         assert row["promoted_at"] is not None

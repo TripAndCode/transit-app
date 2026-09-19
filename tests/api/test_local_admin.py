@@ -2,16 +2,12 @@
 (seed_local_admin) and the POST /api/auth/local/login endpoint. Mirrors
 test_oauth_flow.py's fixture shape but never touches Authlib/OAuth."""
 
-import os
-
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from tests.conftest import _test_pool
 
 
 @pytest.fixture(autouse=True)
@@ -37,10 +33,10 @@ def _set_local_admin_env(monkeypatch):
 async def local_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        c.pool = pool  # exposed so tests can call seed_local_admin(c.pool) directly
+        c.pool = pool  # type: ignore[attr-defined]  # exposed so tests can call seed_local_admin(c.pool) directly
         yield c
     await pool.close()
 

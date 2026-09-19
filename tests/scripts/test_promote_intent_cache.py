@@ -6,14 +6,10 @@ transit_test) and the DATABASE_URL redirect to ``transit_test``.
 
 from __future__ import annotations
 
-import os
-
-import asyncpg
 import pytest
 
 from scripts.promote_intent_cache import promote
-
-DATABASE_URL = os.environ["DATABASE_URL"]
+from tests.conftest import _test_pool
 
 _EMBED_DIM = 384  # matches rag_chunks.embedding vector(384)
 
@@ -25,7 +21,7 @@ class _FakeEmbedder:
     idempotency, edited-action skip), not embedding quality. Mocking the
     embedder keeps them fast and free of the flaky ~120MB model download that
     otherwise made CI fail intermittently with "Embedder unavailable". Real
-    embedder behaviour is covered (gated) in tests/query/test_embeddings.py.
+    embedder behaviour is covered (gated) in tests/unit/test_embeddings.py.
     """
 
     available = True
@@ -42,7 +38,7 @@ def _fake_embedder(monkeypatch):
 
 @pytest.fixture
 async def conn_with_agency(apply_schema):
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     async with pool.acquire() as c:
         await c.execute("DELETE FROM ask_intent_cache")
         await c.execute("DELETE FROM rag_chunks WHERE chunk_id LIKE 'cache_%'")

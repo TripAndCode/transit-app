@@ -8,7 +8,7 @@ of falling off the cliff with ``unknown: true``.
 
 Public surface:
 
-* :data:`TOOLS` — Groq-style function specs to pass as ``tools=`` on the
+* :data:`TOOLS` — OpenAI-style function specs to pass as ``tools=`` on the
   chat-completions call.
 * :func:`dispatch` — execute a tool call against Postgres (and, for the
   handful of handlers that read the live ``updates`` table, ClickHouse) and
@@ -39,6 +39,8 @@ from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType, jst_today
 from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
+from pipeline.query.stop_patterns import COLUMNS as PATTERN_COLUMNS
+from pipeline.query.stop_patterns import PatternWindowTooLarge, query_stop_patterns
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
@@ -75,6 +77,12 @@ _JST = ZoneInfo("Asia/Tokyo")
 # string-concatenation noise. Add a new template here rather than peppering
 # inline ``if locale == "en"`` conditionals through the handlers.
 _LOCALES: dict[tuple[str, str], str] = {
+    ("stop_patterns", "ja"): "路線{route}：観測便を現在の時刻表に照合した経路別全停留所。未観測の経路は含みません。",
+    ("stop_patterns", "en"): "Route {route}: complete current-schedule stop lists for observed patterns only.",
+    ("stop_patterns_empty", "ja"): "照合できる経路がありません。期間・系統または時刻表との対応を確認してください。",
+    ("stop_patterns_empty", "en"): "No matching pattern. Check the period, route scope and schedule mapping.",
+    ("stop_patterns_large", "ja"): "対象が多いため期間を狭めてください。全停留所を保つため一部だけの表示は行いません。",
+    ("stop_patterns_large", "en"): "Narrow the period. The complete stop list exceeds the limit and was not truncated.",
     ("route_arg_required", "ja"): "route 引数が必要です。",
     ("route_arg_required", "en"): "The route argument is required.",
     ("route_not_registered", "ja"): (
@@ -317,7 +325,7 @@ def _summary(template: str, lang: str = "ja", **vars: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Groq function specs (v2 tool surface)
+# OpenAI-style function specs (v2 tool surface)
 # ---------------------------------------------------------------------------
 
 _DATE_OVERRIDE_PROPS = {
@@ -554,8 +562,10 @@ SYSTEM_PROMPT = """\
    解決する。それでも解決できない曖昧な入力(例: '雨天')の場合は、route 引数を埋めて
    ツールを呼ぶのではなく、データ可用性を確かめるなら `describe_data`、
    答えられる質問例を見せるなら `capabilities` を呼ぶ。
-3. データの提供範囲外の質問(天気、運賃、事故、車両情報など)はツールを呼ばず、
-   利用できるデータを伝え、関連する答えられる質問を 2〜3 件提案する。
+3. データの提供範囲外の質問(天気、運賃、事故、車両情報、および「あなたは誰?」
+   「どのAIモデル/ベンダーで動いている?」のような自分自身についての質問など)は
+   ツールを呼ばず、利用できるデータを伝え、関連する答えられる質問を 2〜3 件提案する。
+   自分がどのAIモデル・ベンダーの技術で動いているかは明言しない。
 4. **期間の上書き**: ユーザーが「直近X日/週/月」「過去N日」「先週」「先月」「昨日」など
    特定の期間を明示した場合、`days_back` (整数日) または `from`/`to` (YYYY-MM-DD) 引数で
    ツールに渡してUIのデフォルト範囲を上書きする。指定がなければ何も渡さない(UIの範囲が使われる)。
@@ -591,6 +601,9 @@ SYSTEM_PROMPT = """\
 
 == 例 ==
 - "今日の遅延ランキング" → top_n(metric='avg_delay', n=10)
+- "定時運行率が一番低い(悪い)路線" → top_n(metric='on_time_rate', best_first=false)
+  (on_time_rate はデフォルトで best_first=true(良い順)なので、悪い順が聞かれたら
+  明示的に false を渡す)
 - "直近2週間の傾向" → time_series(days_back=14)
 - "路線22171の先週の遅延" → route_stats(route='22171', days_back=7)
 - "過去3日で5分超が一番多い路線" → top_n(metric='worst_5min', n=10, days_back=3)
@@ -1051,6 +1064,28 @@ async def _tool_route_meta(args: dict, ctx: RangeCtx, conn, agency_id: int, loca
     )
 
 
+async def _tool_route_stop_patterns(
+    args: dict,
+    ctx: RangeCtx,
+    conn,
+    agency_id: int,
+    locale: str,
+    ch=None,
+) -> ToolResult:
+    route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
+    if isinstance(route, ToolResult):
+        return route
+    try:
+        rows = await query_stop_patterns(agency_id, ctx, conn, ch, route=str(route))
+    except PatternWindowTooLarge:
+        return ToolResult(kind="empty", summary=_summary("stop_patterns_large", lang=locale))
+    if not rows:
+        return ToolResult(kind="empty", summary=_summary("stop_patterns_empty", lang=locale))
+    return ToolResult(
+        kind="table", summary=_summary("stop_patterns", lang=locale, route=route), columns=PATTERN_COLUMNS, rows=rows
+    )
+
+
 async def _tool_segment_hotspots(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
     if isinstance(route, ToolResult):
@@ -1163,6 +1198,7 @@ _HANDLERS = {
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
+    "route_stop_patterns": _tool_route_stop_patterns,
     "time_pattern": _tool_time_pattern,
     "schedule_realism": _tool_schedule_realism,
     "trend_shift": _tool_trend_shift,
@@ -1235,6 +1271,7 @@ async def dispatch(
             "route_meta",
             "time_series",
             "segment_hotspots",
+            "route_stop_patterns",
             "time_pattern",
             "schedule_realism",
             "trend_shift",
