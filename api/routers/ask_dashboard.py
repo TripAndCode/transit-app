@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import timedelta
-from typing import cast
+from typing import Any, cast
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.deps import get_agency, get_conn
@@ -60,7 +61,7 @@ def _resolve_ctx(
 async def heatmap_endpoint(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     dow: str = Query(default="all"),
@@ -69,7 +70,7 @@ async def heatmap_endpoint(
     routes: list[str] = Query(default=[]),
     dimension: str = Query(default="dow", description="'dow' or 'hour_band'"),
     top_routes: int = Query(default=20, ge=1, le=50),
-):
+) -> dict[str, Any]:
     if dimension not in ("dow", "hour_band"):
         raise HTTPException(status_code=400, detail="dimension must be 'dow' or 'hour_band'")
     ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
@@ -82,7 +83,7 @@ async def heatmap_endpoint(
 async def anomalies_endpoint(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     dow: str = Query(default="all"),
@@ -91,7 +92,7 @@ async def anomalies_endpoint(
     routes: list[str] = Query(default=[]),
     days: int = Query(default=30, ge=7, le=90),
     sigma: float = Query(default=2.0, ge=1.0, le=5.0),
-):
+) -> dict[str, Any]:
     ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
     result = await anomaly_timeline(conn, agency_id=agency_id, ctx=ctx, days=days, sigma=sigma)
     return asdict(result)
@@ -102,7 +103,7 @@ async def anomalies_endpoint(
 async def movers_endpoint(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     dow: str = Query(default="all"),
@@ -111,7 +112,7 @@ async def movers_endpoint(
     routes: list[str] = Query(default=[]),
     window_days: int = Query(default=7, ge=1, le=30),
     top: int = Query(default=10, ge=1, le=50),
-):
+) -> dict[str, Any]:
     ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
     result = await movers(conn, agency_id=agency_id, ctx=ctx, window_days=window_days, top=top)
     return asdict(result)

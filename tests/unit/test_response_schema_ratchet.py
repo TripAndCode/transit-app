@@ -29,32 +29,10 @@ PERMANENTLY_EXEMPT = {
 # never grow it. A new endpoint declares its response model instead of being
 # added here.
 PENDING = {
-    "GET /api/{agency_id}/ask/build-schema",
-    "GET /api/{agency_id}/ask/suggest",
-    "POST /api/{agency_id}/ask/edit-action",
-    "GET /api/{agency_id}/ask/dashboard/heatmap",
-    "GET /api/{agency_id}/ask/dashboard/anomalies",
-    "GET /api/{agency_id}/ask/dashboard/movers",
+    # Returns a raw Response subclass (JSONResponse), not a schema-describable
+    # model -- FastAPI does not infer a response_model from that return
+    # annotation, so this one stays pending until it grows a real model.
     "POST /api/auth/local/login",
-    "GET /api/{agency_id}/conversations",
-    "POST /api/{agency_id}/conversations",
-    "GET /api/{agency_id}/conversations/{conversation_id}",
-    "PATCH /api/{agency_id}/conversations/{conversation_id}",
-    "DELETE /api/{agency_id}/conversations/{conversation_id}",
-    "GET /api/{agency_id}/conversations/{conversation_id}/messages",
-    "POST /api/{agency_id}/conversations/migrate-anon",
-    "POST /api/{agency_id}/conversations/{conversation_id}/messages",
-    "POST /api/{agency_id}/conversations/{conversation_id}/followup",
-    "GET /api/{agency_id}/ask/followup-enabled",
-    "GET /api/{agency_id}/copilot/enabled",
-    "GET /api/{agency_id}/delays/live",
-    "GET /api/{agency_id}/delays/live-progress",
-    "POST /api/{agency_id}/delays/refresh",
-    "GET /api/{agency_id}/route-shape",
-    "GET /api/{agency_id}/today/route-summary",
-    "GET /api/{agency_id}/today/route/{route_code}/trips",
-    "GET /api/{agency_id}/today/route/{route_code}/stop-profile",
-    "GET /api/{agency_id}/delays/heatmap",
 }
 
 
