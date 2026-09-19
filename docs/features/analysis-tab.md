@@ -9,13 +9,19 @@ with a proactive "Insight Panel" suggesting what to look at next.
 
 - Routes: `/agencies/:agencyId/analysis` and
   `/agencies/:agencyId/analysis/:reportType`, registered in
-  `frontend/src/main.tsx` (`React.lazy`-loaded). The old `/reports` and
-  `/forecast` URLs 404 via dedicated redirect components
+  `frontend/src/main.tsx` (`React.lazy`-loaded). The old
+  `/agencies/:agencyId/reports/:reportType` and `/agencies/:agencyId/forecast`
+  URLs redirect here via dedicated components
   (`frontend/src/routes/legacyRedirects.tsx`:
-  `RedirectReportsToAnalysis`/`RedirectForecastToAnalysis`) — Reports was
-  renamed to Analysis and Forecast was folded into it as a report type.
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx` (`nav.analysis`
-  i18n key).
+  `RedirectReportsToAnalysis`/`RedirectForecastToAnalysis`) — Forecast was
+  folded into Analysis as the `route_forecast` report type. The bare
+  `/agencies/:agencyId/reports` URL (no `:reportType`) is a separate, live
+  route rendering `ReportsHomeTab` — see `docs/features/reports-tab.md`.
+- This tab has no entry in the sidebar's main nav (`SIDEBAR_NAV_ITEMS` in
+  `frontend/src/components/Sidebar.tsx` lists only `overview`,
+  `route-analysis`, and `reports`); reach it by direct URL or from
+  `ReportsHomeTab`'s "Detailed reports" link (see
+  `docs/features/reports-tab.md`).
 - Top-level component: `frontend/src/tabs/AnalysisTab.tsx` — owns which
   report type is selected (via the `:reportType` URL param) and composes the
   report list, the selected report's body, and the Insight Panel.
@@ -148,7 +154,8 @@ What the user sees/does:
 - Frontend strings live under the `reports.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
   `npm run lint:i18n`), plus `forecast.*` (dow/band labels shared with
-  `RouteForecastSection`) and `nav.analysis` / `nav.analysis_subtitle`.
+  `RouteForecastSection`). This tab has no sidebar nav entry of its own, so
+  it needs no `nav.*` label key.
 - Server-side CSV column headers are hardcoded Japanese in
   `api/routers/reports.py`'s `_REPORT_CSV_COLUMNS` (operator-facing
   downloads, not routed through `_LOCALES` - update this table directly if a

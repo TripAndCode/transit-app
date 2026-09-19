@@ -37,9 +37,14 @@ but are not plotted.
 
 ## User flow
 
-- Sidebar item **Operations** opens `/agencies/:agencyId/map`.
-- `/agencies/:agencyId/live` redirects to the same workspace and preserves the
-  agency and query string.
+- The sidebar's **Overview** entry (`SIDEBAR_NAV_ITEMS` in
+  `frontend/src/components/Sidebar.tsx`, labeled from the `design:overview`
+  i18n key) opens `/agencies/:agencyId/overview`, which renders this tab —
+  not the `frontend/src/tabs/OverviewTab.tsx` component documented in
+  `docs/features/overview-tab.md`. The same component is also mounted at
+  `/agencies/:agencyId/map`.
+- `/agencies/:agencyId/live` redirects to `/agencies/:agencyId/map` and
+  preserves the agency and query string.
 - **Current** is the active mode. **Historical analysis** links to
   `/agencies/:agencyId/analysis/trend`.
 - With all routes selected, the right panel lists routes from the latest

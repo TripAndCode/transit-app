@@ -9,11 +9,11 @@ compares to the whole network at a glance.
 - Route: `/agencies/:agencyId/network`, registered in `frontend/src/main.tsx`
   (`React.lazy`-loaded). A legacy bare `/network` bookmark still works via
   `frontend/src/routes/networkRedirect.tsx: RedirectNetworkToAgencyNetwork`,
-  which forwards to the current agency's `/agencies/{id}/network` (Network
-  was promoted from a standalone route into the sidebar's uniform per-agency
-  nav — see the comment in `frontend/src/main.tsx`).
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx` (`nav.network`
-  i18n key, labeled "Agencies").
+  which forwards to the current agency's `/agencies/{id}/network`.
+- This tab has no entry in the sidebar's main nav (`SIDEBAR_NAV_ITEMS` in
+  `frontend/src/components/Sidebar.tsx` lists only `overview`,
+  `route-analysis`, and `reports`) and no other in-app link points at it;
+  reach it via the legacy bare `/network` redirect or a direct URL.
 - Top-level component: `frontend/src/tabs/NetworkTab.tsx`. Unlike every other
   tab, it does **not** use the shared `TabFilterBar`/`useRangeContext`
   dow/service/time_band/route filters — only a plain `from`/`to` date-range
@@ -102,7 +102,7 @@ What the user sees/does:
    `make fetch-ingest` (or `ingest_live` + `make load_static`) then
    `make analyze` per agency — a single agency still renders (one card),
    just without a comparison.
-2. Click "Agencies" in the sidebar → URL `/agencies/:agencyId/network`.
+2. Navigate to `/agencies/:agencyId/network` directly.
 3. Expect a ranked card list, worst-avg-delay first, with the current
    agency's card visually highlighted and tagged "YOU".
 4. Click another agency's name — expect navigation to that agency's
@@ -127,6 +127,6 @@ What the user sees/does:
 
 - Frontend strings live under the `network.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
-  `npm run lint:i18n`), plus `nav.network` / `nav.network_subtitle` for the
-  sidebar entry and the shared `common.range_separator` string used in the
-  coverage line.
+  `npm run lint:i18n`), plus the shared `common.range_separator` string used
+  in the coverage line. This tab has no sidebar nav entry, so it needs no
+  `nav.*` label key.
