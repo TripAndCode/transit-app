@@ -55,7 +55,7 @@ export function AgencyPicker() {
   function selectAgency(id: number) {
     setOpen(false);
     setFilter("");
-    const tab = tabMatch?.params.tab ?? "map";
+    const tab = tabMatch?.params.tab ?? "operations";
     navigate(`/agencies/${id}/${tab}`);
   }
 

@@ -37,7 +37,9 @@ but are not plotted.
 
 ## User flow
 
-- Sidebar item **Operations** opens `/agencies/:agencyId/map`.
+- Sidebar item **Operations** opens `/agencies/:agencyId/operations`. The
+  pre-rename `/agencies/:agencyId/overview` and `/agencies/:agencyId/map`
+  URLs redirect here.
 - `/agencies/:agencyId/live` redirects to the same workspace and preserves the
   agency and query string.
 - **Current** is the active mode. **Historical analysis** links to

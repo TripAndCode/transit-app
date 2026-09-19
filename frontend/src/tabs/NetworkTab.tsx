@@ -91,7 +91,7 @@ export function NetworkTab() {
           <div className="network-card-top" style={cardTop}>
           <span style={rankStyle}>#{index + 1}</span>
           <Link
-            to={`/agencies/${a.agency_id}/overview${suffix}`}
+            to={`/agencies/${a.agency_id}/operations${suffix}`}
             title={t("network.view_agency", { name: a.agency_name })}
             style={{ ...agencyNameStyle, color: "var(--accent)", textDecoration: "none" }}
           >

@@ -33,7 +33,13 @@ export default function App() {
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
   const agencyIdNum = agencyId ? Number(agencyId) : null;
   const { pathname } = useLocation();
-  const focused = /\/agencies\/[^/]+\/(overview|map|route-analysis|reports|ask)$/.test(pathname);
+  // `overview` and `map` are kept here even though both now render only a
+  // redirect (never real tab content): react-router's declarative <Navigate>
+  // fires from an effect after the redirect element itself renders once, so
+  // this regex briefly sees the pre-redirect pathname during that render.
+  // Keeping the old segments avoids a one-frame flash of the banners/
+  // CopilotPanel that `!focused` hides on every real tab.
+  const focused = /\/agencies\/[^/]+\/(operations|overview|map|route-analysis|reports|ask)$/.test(pathname);
   useDefaultRangeAnchor(agencyIdNum);
   useAnonymousFilterPersistence(agencyIdNum);
   return (

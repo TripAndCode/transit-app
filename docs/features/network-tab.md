@@ -12,8 +12,9 @@ compares to the whole network at a glance.
   which forwards to the current agency's `/agencies/{id}/network` (Network
   was promoted from a standalone route into the sidebar's uniform per-agency
   nav — see the comment in `frontend/src/main.tsx`).
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx` (`nav.network`
-  i18n key, labeled "Agencies").
+- Sidebar nav link: `frontend/src/components/Sidebar.tsx`'s
+  `SIDEBAR_NAV_ITEMS` (`network.title` i18n key, labeled "Compare agencies" /
+  "事業者比較").
 - Top-level component: `frontend/src/tabs/NetworkTab.tsx`. Unlike every other
   tab, it does **not** use the shared `TabFilterBar`/`useRangeContext`
   dow/service/time_band/route filters — only a plain `from`/`to` date-range
@@ -28,7 +29,7 @@ What the user sees/does:
   independent of the shared range context.
 - **Ranked agency card list** — one card per agency, sorted worst-avg-delay
   first (server-side order), each showing: rank, agency name (links to that
-  agency's Overview tab, carrying the current date range), avg delay (color
+  agency's Operations tab, carrying the current date range), avg delay (color
   by `delayColor()`) + on-time % + service-delivered % (executed trips ÷
   planned trips from the static GTFS schedule — reads "—" rather than a
   misleading 100% for an agency whose feed doesn't report cancellations),
