@@ -349,6 +349,12 @@ def _static_fingerprint(agency_id: int, conn, has_static: bool) -> str:
     hundred thousand rows per agency, where an ordered digest would add a sort
     of all of them to every run.
 
+    Computed here, on read, rather than once per import by whatever wrote the
+    schedule. Caching it at write time would cost a fraction of this, but it
+    would also make the signal only as good as every writer's memory to
+    update it — and this value's whole job is to be trustworthy about rows
+    this function did not watch arrive.
+
     `md5` rather than `hashtext`, which measures the same on this data: this
     value decides whether already-built aggregates are trusted, and
     `hashtext` is an internal function Postgres does not promise to keep
