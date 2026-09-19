@@ -8,6 +8,7 @@ import { AsyncSection } from "../components/AsyncSection";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { delayColor } from "../styles/tokens";
 import type { NetworkAgencyRow } from "../api/types";
+import { useCappedList } from "../hooks/useCappedList";
 
 const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
 
@@ -53,6 +54,7 @@ export function NetworkTab() {
   const [ctx, update] = useRangeContext();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
   const [showRidershipWeighted, setShowRidershipWeighted] = useState(false);
+  const cappedAgencies = useCappedList(data?.agencies ?? [], 200);
 
   // Absent (not just unchecked) whenever NO agency in the current list has a
   // manually-configured ridership weight -- a toggle that flips to a view
@@ -262,9 +264,14 @@ export function NetworkTab() {
         empty={<p style={{ color: "var(--text-secondary)" }}>{t("network.empty")}</p>}
         skeleton={<Skeleton height={320} />}
       >
-        {(summary) => (
+        {() => (
           <div data-testid="network-card-list">
-            {summary.agencies.map((a, i) => renderCard(a, i))}
+            {cappedAgencies.visible.map((a, i) => renderCard(a, i))}
+            {cappedAgencies.remaining > 0 && (
+              <button type="button" className="btn-ghost" onClick={cappedAgencies.showMore}>
+                {t("common.show_more", { count: cappedAgencies.remaining })}
+              </button>
+            )}
           </div>
         )}
       </AsyncSection>

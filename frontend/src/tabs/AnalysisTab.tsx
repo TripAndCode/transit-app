@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
@@ -21,6 +22,7 @@ import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
+import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
 
 /** "This week" = the 7 days ending today, in the ctx's from/to string
@@ -43,6 +45,7 @@ export function AnalysisTab() {
   const filterSuffix = filterQS ? `?${filterQS}` : "";
   const list = useReports(id);
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
+  const [rawRowsOpen, setRawRowsOpen] = useState(false);
 
   const reportLabels: Record<string, string> = {
     ranking: t("reports.type.ranking"),
@@ -259,26 +262,31 @@ export function AnalysisTab() {
               <WeatherDelayPanel aid={id} ctx={ctx} />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
-              <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>
+              <details
+                style={{ marginTop: 16, color: "var(--text-tertiary)" }}
+                onToggle={(e) => setRawRowsOpen(e.currentTarget.open)}
+              >
                 <summary style={{ cursor: "pointer", fontSize: 12 }}>
                   {t("reports.raw_rows", { count: detail.data.rows.length })}
                 </summary>
-                <pre
-                  style={{
-                    background: "var(--bg-surface)",
-                    border: "1px solid var(--border-soft)",
-                    borderRadius: "var(--radius)",
-                    padding: 12,
-                    marginTop: 8,
-                    whiteSpace: "pre-wrap",
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                    fontSize: 12,
-                    lineHeight: 1.6,
-                    maxWidth: 920,
-                  }}
-                >
-                  {detail.data.text}
-                </pre>
+                {rawRowsOpen && (
+                  <pre
+                    style={{
+                      background: "var(--bg-surface)",
+                      border: "1px solid var(--border-soft)",
+                      borderRadius: "var(--radius)",
+                      padding: 12,
+                      marginTop: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                      fontSize: 12,
+                      lineHeight: 1.6,
+                      maxWidth: 920,
+                    }}
+                  >
+                    {detail.data.text}
+                  </pre>
+                )}
               </details>
             )}
           </div>
@@ -327,6 +335,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   const { agencyId } = useParams();
   const id = agencyId ? Number(agencyId) : null;
   const { format: formatRoute } = useRouteNames(id);
+  const cappedRoutes = useCappedList(payload?.routes ?? [], 200);
 
   if (!payload || !payload.available) {
     return <EmptyState title={t("reports.dwell_run.not_available")} />;
@@ -365,7 +374,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           </tr>
         </thead>
         <tbody>
-          {payload.routes.map((r, i) => (
+          {cappedRoutes.visible.map((r, i) => (
             <tr key={`${r.route_code}-${r.service_type ?? ""}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td(), color: "var(--text-tertiary)", textAlign: "right" }}>{i + 1}</td>
               <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
@@ -382,6 +391,11 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           ))}
         </tbody>
       </table>
+      {cappedRoutes.remaining > 0 && (
+        <button type="button" className="btn-ghost" onClick={cappedRoutes.showMore}>
+          {t("common.show_more", { count: cappedRoutes.remaining })}
+        </button>
+      )}
     </div>
   );
 }

@@ -258,6 +258,7 @@
     "route_code_fallback": "Route {{code}}",
     "save": "Save",
     "search_placeholder": "Search...",
+    "show_more": "Show {{count}} more",
     "yes": "Yes",
     "no": "No",
     "unit_min": "min",
