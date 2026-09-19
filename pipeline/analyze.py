@@ -100,21 +100,30 @@ _BUCKET_EXPR = (
 # every row stores exactly N_BUCKETS counts regardless of which bins are empty.
 _HIST_ARRAY = "ARRAY[" + ", ".join(f"COUNT(*) FILTER (WHERE b = {i})" for i in range(N_BUCKETS)) + "]::int[]"
 
-# The deduped fact slice is materialised ONCE per agency into a TEMP TABLE (see
-# analyze()), because the dedup is the expensive full-partition scan+sort and
-# every aggregate needs it. It is the SUPERSET every builder reads from:
-# UNTYPED (keeps NULL-service rows — notably agency 9, 広島バス — which the
-# reports + route-summary surface), plus raw captured_at (agg_route_daily needs a
-# per-day last_seen_at). The service_type-keyed aggregates (route_stats/hour/dow)
-# filter `service_type IS NOT NULL` over the materialised set — equivalent to a
-# typed dedup because service_type is part of the dedup key. NULL service is
-# coalesced to '' where it must fit a NOT NULL column; the endpoints map it back.
+# The deduped fact slice is materialised per agency into a Postgres TEMP TABLE
+# (see analyze()), because the dedup is the expensive full-partition scan+sort
+# and every aggregate needs it. The dedup itself runs in ClickHouse
+# (build_dedup_ch_sql, the `updates` fact table's home) and its result is
+# bulk-loaded into the temp table every builder below reads; no builder ever
+# reads `updates` directly.
 #
-# As of the ClickHouse migration, the dedup itself runs in ClickHouse
-# (build_dedup_ch_sql, the `updates` fact table's new home) and the result is
-# bulk-loaded into this same-shaped Postgres TEMP TABLE — every builder below
-# is untouched, since it only ever read the materialised temp table, never
-# `updates` directly.
+# Two temp tables, because the builders want two different slices and
+# materialising their union means shipping the whole history for the sake of
+# the small part of it that genuinely needs it:
+#
+#   _analyze_deduped  — every column, only the dates being rebuilt. UNTYPED
+#     (keeps NULL-service rows — notably agency 9, 広島バス — which the reports
+#     and route-summary surface), plus raw captured_at (agg_route_daily needs a
+#     per-day last_seen_at) and arr_delay (agg_route_daily_dwell_run).
+#   _analyze_alltime  — the whole history, but only rows with a service_type,
+#     which is a small fraction of it. The aggregates spanning all of history
+#     (route_stats/hour/hour_dow) are keyed by service_type and so filter
+#     `service_type IS NOT NULL` anyway — pushing that filter into the load is
+#     equivalent to a typed dedup, because service_type is part of the dedup
+#     key.
+#
+# NULL service is coalesced to '' where it must fit a NOT NULL column; the
+# endpoints map it back.
 
 # Order matters only for log/diff determinism; FK independence means
 # DELETE order has no semantic effect.
@@ -142,8 +151,21 @@ _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 # binds two places that must agree — a listed table has BOTH its purge and its
 # build restricted — and requires that the staleness signal cover what the
 # table reads; see _dates_needing_rebuild for what that signal can and cannot
-# see.
-_INCREMENTAL_AGG_TABLES = frozenset({"agg_feed_health", "agg_route_headway_daily"})
+# see. Every listed table is keyed by `date`, which is what makes a date-scoped
+# purge able to express "these rows and no others".
+_INCREMENTAL_AGG_TABLES = frozenset(
+    {
+        "agg_daily_trend",
+        "agg_feed_health",
+        "agg_hour_daily",
+        "agg_route_daily",
+        "agg_route_daily_dist",
+        "agg_route_daily_dwell_run",
+        "agg_route_headway_daily",
+        "agg_route_stop_daily",
+        "agg_stop_daily",
+    }
+)
 # agg_static_version_summary is NOT in _AGG_TABLES_ORDERED: it is UPSERTed
 # (never wiped) so a past static-feed version's planned-trip-count/vehicle-km
 # survives `static_loader.load_static()` overwriting the raw static_* tables
@@ -283,11 +305,63 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn) -> N
     logger.info(f"  {table}: {len(rows)} rows")
 
 
-def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
-    """The service dates whose aggregates no longer match ClickHouse.
+# The static-schedule columns the per-date aggregates read, directly or through
+# an aggregate they read back. `static_stop_times` resolves which physical stop
+# a trip visit maps to (agg_stop_daily, agg_route_stop_daily) and its scheduled
+# arrival/departure (agg_route_daily_dwell_run); `static_trips`/`static_routes`
+# bridge RT route_code to the static schedule for agg_route_headway, whose
+# scheduled median agg_route_headway_daily thresholds its long gaps against.
+_STATIC_DEPENDENCY_COLUMNS: dict[str, tuple[str, ...]] = {
+    "static_stop_times": ("trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"),
+    "static_trips": ("trip_id", "route_id"),
+    "static_routes": ("route_id", "route_short_name"),
+}
 
-    ``None`` means every date, which is what a first run or a missing ledger
-    resolves to.
+
+def _static_fingerprint(agency_id: int, conn) -> str:
+    """A value that changes whenever the static schedule the aggregates read does.
+
+    The date ledger below sees rows arriving in ClickHouse and nothing else,
+    but several per-date aggregates also read the Postgres static schedule. A
+    static import replaces those rows wholesale for the agency (there is no
+    per-date static version), so a new schedule changes what EVERY past date
+    should aggregate to while leaving the ledger's per-date counts untouched.
+    Recording this with each build and comparing it on the next one is what
+    keeps an incremental result equal to a full rebuild across a static
+    reload: a changed fingerprint means every date is stale, not just the ones
+    that received rows.
+
+    An order-independent sum of per-row hashes plus a row count, not an ordered
+    digest: the sum is one sequential scan of tables holding at most a few
+    hundred thousand rows per agency, where an ordered digest would add a sort
+    of all of them to every run.
+
+    Columns are joined by the ASCII unit separator and NULL rendered as the
+    record separator, neither of which a GTFS text field can carry: a plain
+    join on a printable character would let a value containing it shift a
+    field boundary, and rendering NULL as the empty string would make a NULL
+    arrival time indistinguishable from an empty one, hiding a reload that
+    only flipped between them. NUL itself is not available — Postgres `text`
+    cannot hold it.
+    """
+    parts = []
+    with conn.cursor() as cur:
+        for table, columns in _STATIC_DEPENDENCY_COLUMNS.items():
+            rendered = " || E'\\x1f' || ".join(f"coalesce({c}::text, E'\\x1e')" for c in columns)
+            cur.execute(
+                f"SELECT count(*), coalesce(sum(hashtext({rendered})::bigint), 0) FROM {table} WHERE agency_id = %s",
+                (agency_id,),
+            )
+            n, digest = cur.fetchone()
+            parts.append(f"{table}:{n}:{digest}")
+    return "|".join(parts)
+
+
+def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: str) -> list | None:
+    """The service dates whose aggregates no longer match their sources.
+
+    ``None`` means every date, which is what a first run, a missing ledger, or
+    a static schedule that changed since the last build resolves to.
 
     A row's service date is ``toDate(captured_at, 'Asia/Tokyo')``, fixed by the
     observation itself, so a date's aggregates can only go stale when rows land
@@ -309,14 +383,28 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     ``agg_service_delivered_daily`` (cancellations and skipped stops) and
     ``agg_schedule_revision_daily`` (static_version_id) are not in
     :data:`_INCREMENTAL_AGG_TABLES`.
+
+    The static schedule is the other half of the signal, and the ledger cannot
+    see it at all — see :func:`_static_fingerprint`.
     """
-    # The ledger is read first so an absent one costs nothing: a first run has
-    # to rebuild everything regardless, and asking ClickHouse to prove it would
-    # add a full-history scan to exactly the run that can least afford one.
+    # Both Postgres-side reads come before the ClickHouse scan, so a run that
+    # already knows it must rebuild everything never pays for a full-history
+    # remote scan to be told so. A first run is exactly the run that can least
+    # afford one.
     with conn.cursor() as cur:
+        cur.execute(
+            "SELECT static_fingerprint FROM agg_meta WHERE agency_id = %s",
+            (agency_id,),
+        )
+        meta = cur.fetchone()
         cur.execute("SELECT date, raw_samples FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
         stored = dict(cur.fetchall())
     if not stored:
+        return None
+    # A missing record predates this column, so what the stored aggregates were
+    # built against is unknown — the same answer as "it changed".
+    if meta is None or meta[0] is None or meta[0] != static_fingerprint:
+        logger.info("  incremental: static schedule changed since the last build")
         return None
 
     live = _ch_query(
@@ -337,20 +425,30 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     return sorted(stale)
 
 
-def _date_filter(rebuild_dates: list | None, agency_id: int) -> tuple[str, dict]:
-    """A ClickHouse WHERE fragment restricting a builder to *rebuild_dates*.
+def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> str:
+    """A ClickHouse predicate restricting a builder to *rebuild_dates*.
 
-    ``None`` yields an empty fragment, so a full rebuild runs the query these
-    builders always ran. The fragment names the raw ``captured_at`` column
+    ``None`` yields an empty string, so a full rebuild runs the query these
+    builders always ran. The predicate names the raw ``captured_at`` column
     rather than a date alias: ClickHouse substitutes a SELECT-list alias into
     WHERE, which turns a filter over an aliased aggregate into an illegal one
-    (see ``build_dedup_ch_sql``'s docstring, which hit this).
+    (see ``build_dedup_ch_sql``'s docstring, which hit this). *column* exists
+    for the callers whose own query qualifies it with a table alias, for the
+    same reason.
     """
-    params: dict = {"agency_id": agency_id}
     if rebuild_dates is None:
+        return ""
+    return f"toDate({column}, 'Asia/Tokyo') IN {{rebuild_dates:Array(Date)}}"
+
+
+def _date_filter(rebuild_dates: list | None, agency_id: int) -> tuple[str, dict]:
+    """:func:`_date_predicate` as a WHERE suffix, with the parameters it needs."""
+    params: dict = {"agency_id": agency_id}
+    predicate = _date_predicate(rebuild_dates)
+    if not predicate:
         return "", params
     params["rebuild_dates"] = rebuild_dates
-    return " AND toDate(captured_at, 'Asia/Tokyo') IN {rebuild_dates:Array(Date)}", params
+    return f" AND {predicate}", params
 
 
 def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
@@ -362,6 +460,76 @@ def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
     ledger already established.
     """
     return rebuild_dates == [] and table in _INCREMENTAL_AGG_TABLES
+
+
+def _load_temp_table(
+    cur,
+    ch_client,
+    *,
+    table: str,
+    columns: str,
+    ch_sql: str,
+    parameters: dict,
+    label: str,
+    load: bool = True,
+) -> None:
+    """Materialise a deduped ClickHouse slice into a Postgres TEMP TABLE.
+
+    ON COMMIT DROP ties the table's lifetime to the caller's transaction,
+    which is safe for the per-agency analyze loop on one connection; ANALYZE
+    gives the planner stats for the downstream GROUP BYs, which it otherwise
+    sizes at a few thousand rows however many the table actually holds.
+
+    *columns* must list the table's columns in the order *ch_sql*'s SELECT list
+    projects them; see ``build_dedup_ch_sql``'s docstring for the order it
+    guarantees and which optional columns land where.
+
+    ``load=False`` creates the table and skips the scan, for the caller whose
+    filter it already knows selects nothing — the table still has to exist,
+    because the builders reading it are unconditional.
+    """
+    cur.execute(f"DROP TABLE IF EXISTS {table}")
+    cur.execute(f"CREATE TEMP TABLE {table} ({columns}) ON COMMIT DROP")
+    if load:
+        # `query_row_block_stream` (not `query`) so we never hold the whole
+        # dedup result in memory at once. `.query()` buffers the ENTIRE
+        # result as a Python list (`result_rows`) before returning it — one
+        # live copy of a set that scales with the agency's total row count.
+        # Streaming yields one block at a time, so peak memory is bounded by
+        # one block, and each block is written to Postgres before the next
+        # is fetched.
+        #
+        # COPY, not row-wise INSERT: this is the single largest step of a
+        # run, and bulk-loading the same rows measures several times faster.
+        # `_copy_field` owns the encoding, including the UTC offset that
+        # otherwise has to be put back on every timestamp before the driver
+        # sees it.
+        #
+        # The load is timed directly and the scan taken as the remainder,
+        # rather than timing both: the query runs inside the stream's own
+        # __enter__, so measuring only the time between yielded blocks
+        # would leave that — the bulk of a large agency's scan — out of
+        # the summary entirely. Deriving one from the whole elapsed span
+        # keeps the two labels summing to it exactly.
+        transfer_start = time.perf_counter()
+        load_ms = 0.0
+        with ch_client.query_row_block_stream(ch_sql, parameters=parameters) as stream:
+            for block in stream:
+                if not block:
+                    continue
+                t0 = time.perf_counter()
+                buf = io.StringIO()
+                for row in block:
+                    buf.write("\t".join(_copy_field(v) for v in row))
+                    buf.write("\n")
+                buf.seek(0)
+                cur.copy_expert(f"COPY {table} FROM STDIN", buf)
+                load_ms += (time.perf_counter() - t0) * 1000
+        transfer_ms = (time.perf_counter() - transfer_start) * 1000
+        _add_step(f"{label}: ClickHouse scan", transfer_ms - load_ms)
+        _add_step(f"{label}: COPY into TEMP", load_ms)
+    with _step(f"{label}: ANALYZE TEMP"):
+        cur.execute(f"ANALYZE {table}")
 
 
 def _ch_build_and_insert(
@@ -424,13 +592,21 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     # INSERTs if it fired mid-run. Hoisting the probe keeps analyze's
     # transactional shape clean.
     has_static = _static_loaded(conn, agency_id)
+    # Read before the txn, and reused for the record this run writes: the
+    # fingerprint has to describe the schedule the aggregates were actually
+    # built against, and reading it twice could straddle a concurrent static
+    # import (pipeline/locks.py explains why load_static is not under the
+    # lock). Reading once, first, can only err toward recording an older
+    # schedule than was built with — which makes the next run rebuild
+    # everything, the safe direction.
+    static_fingerprint = _static_fingerprint(agency_id, conn)
     # Resolved before the txn, like has_static: it reads the ledger this run is
     # about to overwrite, and a rollback must leave that ledger describing the
     # aggregates that actually survived — so the next run reaches the same
     # answer instead of skipping dates on the strength of a run that failed.
-    rebuild_dates = _dates_needing_rebuild(agency_id, conn, ch_client)
+    rebuild_dates = _dates_needing_rebuild(agency_id, conn, ch_client, static_fingerprint)
     if rebuild_dates is None:
-        logger.info("  incremental: every date (no prior ledger)")
+        logger.info("  incremental: every date")
     else:
         logger.info(f"  incremental: {len(rebuild_dates)} date(s) changed since the last run")
     date_where, date_params = _date_filter(rebuild_dates, agency_id)
@@ -444,75 +620,64 @@ def analyze(agency_id: int, conn, ch_client) -> None:
                 if rebuild_dates is None or tbl not in _INCREMENTAL_AGG_TABLES:
                     cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
                 elif rebuild_dates:
+                    # `date::date`, because agg_daily_trend stores its service
+                    # date as text while every other member stores a real
+                    # date, and one predicate has to fit both. On a date
+                    # column the cast is an identity the planner drops, so
+                    # this stays an index scan where it matters; on the text
+                    # one it does not, and that table is small enough
+                    # (bounded by days × routes) for it not to.
                     cur.execute(
-                        f"DELETE FROM {tbl} WHERE agency_id = %s AND date = ANY(%s)",
+                        f"DELETE FROM {tbl} WHERE agency_id = %s AND date::date = ANY(%s)",
                         (agency_id, rebuild_dates),
                     )
 
-        # ── Materialise the deduped fact slice ONCE ──────────────────────
-        # The dedup is a full-partition scan + sort; previously every
-        # aggregate re-derived it (9 scans/agency) against Postgres. `updates`
-        # now lives in ClickHouse, so the dedup runs there instead and the
-        # result is bulk-loaded into the same-shaped Postgres TEMP TABLE every
-        # builder below reads from — unchanged from before this migration.
-        # ON COMMIT DROP ties the temp table's lifetime to this txn (safe for
-        # the per-agency analyze loop on one connection); ANALYZE gives the
-        # planner stats for the downstream GROUP BYs.
-        ch_sql = build_dedup_ch_sql(include_captured_at=True, include_arr_delay=True)
-        # Column order must match build_dedup_ch_sql's SELECT list exactly:
-        # route_code, service_type, scheduled_time, trip_id, date, stop_sequence,
-        # dep_delay, last_captured_at, arr_delay (arr_delay is always last
-        # regardless of include_captured_at -- see build_dedup_ch_sql's docstring).
+        # ── Materialise the deduped fact slices ─────────────────────────
+        # See the module-level note above _AGG_TABLES_ORDERED for why there
+        # are two and what each one holds. Both slices come out of the same
+        # ClickHouse dedup; they differ only in which rows it is asked for.
         with conn.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS _analyze_deduped")
-            cur.execute(
-                """
-                CREATE TEMP TABLE _analyze_deduped (
-                    route_code text, service_type text, scheduled_time time,
-                    trip_id text, date date, stop_sequence int, dep_delay int,
-                    captured_at timestamptz, arr_delay int
-                ) ON COMMIT DROP
-                """
+            _load_temp_table(
+                cur,
+                ch_client,
+                table="_analyze_alltime",
+                # Column order matches build_dedup_ch_sql's SELECT list. Neither
+                # captured_at nor arr_delay is requested: no all-time aggregate
+                # reads them, and this is the slice that spans every date.
+                columns=(
+                    "route_code text, service_type text, scheduled_time time, "
+                    "trip_id text, date date, stop_sequence int, dep_delay int"
+                ),
+                ch_sql=build_dedup_ch_sql(extra_where="u.service_type IS NOT NULL"),
+                parameters={"agency_id": agency_id},
+                label="alltime",
             )
-            # `query_row_block_stream` (not `query`) so we never hold the whole
-            # dedup result in memory at once. `.query()` buffers the ENTIRE
-            # result as a Python list (`result_rows`) before returning it — one
-            # live copy of a set that scales with the agency's total row count.
-            # Streaming yields one block at a time, so peak memory is bounded by
-            # one block, and each block is written to Postgres before the next
-            # is fetched.
-            #
-            # COPY, not row-wise INSERT: this is the single largest step of a
-            # run, and bulk-loading the same rows measures several times faster.
-            # `_copy_field` owns the encoding, including the UTC offset that
-            # otherwise has to be put back on every timestamp before the driver
-            # sees it.
-            #
-            # The load is timed directly and the scan taken as the remainder,
-            # rather than timing both: the query runs inside the stream's own
-            # __enter__, so measuring only the time between yielded blocks
-            # would leave that — the bulk of a large agency's scan — out of
-            # the summary entirely. Deriving one from the whole elapsed span
-            # keeps the two labels summing to it exactly.
-            transfer_start = time.perf_counter()
-            load_ms = 0.0
-            with ch_client.query_row_block_stream(ch_sql, parameters={"agency_id": agency_id}) as stream:
-                for block in stream:
-                    if not block:
-                        continue
-                    t0 = time.perf_counter()
-                    buf = io.StringIO()
-                    for row in block:
-                        buf.write("\t".join(_copy_field(v) for v in row))
-                        buf.write("\n")
-                    buf.seek(0)
-                    cur.copy_expert("COPY _analyze_deduped FROM STDIN", buf)
-                    load_ms += (time.perf_counter() - t0) * 1000
-            transfer_ms = (time.perf_counter() - transfer_start) * 1000
-            _add_step("dedup: ClickHouse scan", transfer_ms - load_ms)
-            _add_step("dedup: COPY into TEMP", load_ms)
-            with _step("dedup: ANALYZE TEMP"):
-                cur.execute("ANALYZE _analyze_deduped")
+            _load_temp_table(
+                cur,
+                ch_client,
+                # Column order must match build_dedup_ch_sql's SELECT list exactly:
+                # route_code, service_type, scheduled_time, trip_id, date,
+                # stop_sequence, dep_delay, last_captured_at, arr_delay (arr_delay
+                # is always last regardless of include_captured_at -- see
+                # build_dedup_ch_sql's docstring).
+                table="_analyze_deduped",
+                columns=(
+                    "route_code text, service_type text, scheduled_time time, "
+                    "trip_id text, date date, stop_sequence int, dep_delay int, "
+                    "captured_at timestamptz, arr_delay int"
+                ),
+                ch_sql=build_dedup_ch_sql(
+                    include_captured_at=True,
+                    include_arr_delay=True,
+                    extra_where=_date_predicate(rebuild_dates, "u.captured_at"),
+                ),
+                parameters=date_params,
+                # An empty rebuild list selects no rows at all, so the scan is
+                # skipped rather than asked to prove it — the run where nothing
+                # changed is the common one.
+                load=rebuild_dates != [],
+                label="dedup",
+            )
 
         # ── agg_route_stats ──────────────────────────────────────────────
         # No minimum-sample HAVING here — see the module docstring's no-gate
@@ -529,7 +694,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
         late_thr = LEGACY_SEVERE_LATE_TOLERANCE_SEC
         sql = f"""
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
+            WITH deduped AS (SELECT * FROM _analyze_alltime),
             grouped AS (
                 SELECT
                     route_code, service_type,
@@ -594,7 +759,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
 
         # ── agg_route_hour ───────────────────────────────────────────────
         sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE service_type IS NOT NULL),
+            WITH deduped AS (SELECT * FROM _analyze_alltime),
             grouped AS (
                 SELECT
                     route_code, service_type, scheduled_time,
@@ -642,13 +807,12 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # the whole-agency analyze transaction. `EXTRACT(HOUR FROM scheduled_time)`
         # is always 0-23: an hour >= 24 (GTFS's after-midnight departure_time
         # notation, e.g. "25:30:00") is rejected at ingest time (see
-        # pipeline/strategies/_time.py) and never reaches `_analyze_deduped`, so
+        # pipeline/strategies/_time.py) and never reaches `_analyze_alltime`, so
         # a late-night continuation trip is absent from this aggregate rather
         # than folded into the early-morning bucket.
         sql = """
             WITH deduped AS (
-                SELECT * FROM _analyze_deduped
-                WHERE service_type IS NOT NULL AND scheduled_time IS NOT NULL
+                SELECT * FROM _analyze_alltime WHERE scheduled_time IS NOT NULL
             )
             SELECT
                 %(agency_id)s AS agency_id,
@@ -1597,22 +1761,26 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         else:
             logger.info("  agg_static_version_summary: 0 rows (no static schedule loaded)")
 
-        # ── agg_meta: audit record of this build (NOT load-bearing) ──────
+        # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
-        # The freshness gate derives staleness from the aggs themselves; this
-        # only answers "when was this agency last analyzed". `updates` now
-        # lives in ClickHouse, so this reuses the same max_captured_at helper
-        # Task 4 built and Task 5 already uses elsewhere (pipeline/freshness.py).
+        # `analyzed_at`/`max_updates_captured_at` are audit only: the freshness
+        # gate derives staleness from the aggs themselves, so they answer just
+        # "when was this agency last analyzed". `static_fingerprint` IS
+        # load-bearing — the next run compares it to decide whether rebuilding
+        # only the changed dates is still sound (see _static_fingerprint) — and
+        # it commits with the aggregates it describes, so a rolled-back run
+        # leaves the previous one's record standing.
         with _step("agg_meta: max_captured_at"):
             max_cap = ch_max_captured_at(ch_client, agency_id)
         with _step("agg_meta: upsert"), conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at) "
-                "VALUES (%s, now(), %s) "
+                "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at, static_fingerprint) "
+                "VALUES (%s, now(), %s, %s) "
                 "ON CONFLICT (agency_id) DO UPDATE SET "
                 "analyzed_at = EXCLUDED.analyzed_at, "
-                "max_updates_captured_at = EXCLUDED.max_updates_captured_at",
-                (agency_id, max_cap),
+                "max_updates_captured_at = EXCLUDED.max_updates_captured_at, "
+                "static_fingerprint = EXCLUDED.static_fingerprint",
+                (agency_id, max_cap, static_fingerprint),
             )
 
         conn.commit()
