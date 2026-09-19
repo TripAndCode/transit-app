@@ -9,7 +9,7 @@ aggregates, and application data live in Postgres/PostGIS.
 
 ### Requirements
 
-- Python 3.11+
+- Python 3.12
 - [Poetry](https://python-poetry.org/)
 - Docker Desktop
 - A Gemini API key for the optional Ask LLM fallback
@@ -104,14 +104,31 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make analyze-all` | Rebuild aggregates for all agencies |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline |
 | `make check-aggs` | Detect stale aggregate tables |
+| `make digest` | Generate the daily delay digest (Markdown, ja/en) |
+| `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
+| `make build-rag-index` | Build the Ask RAG index for all agencies |
+| `make ask-eval` | CI gate: verify Ask builder coverage against the gold question set |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
 | `make verify-secrets` | On-demand gitleaks scan of the full git history |
+| `make verify-secrets-all-branches` | Gitleaks scan across every branch and tag, not just HEAD |
+| `make geosql-up` | Start the optional local GeoSQL/Dekart spatial-SQL tool |
+| `make geosql-down` | Stop GeoSQL/Dekart |
+| `make oracle-tests` | Run the Oracle collector's shell test suite |
 | `make git-cleanup` | Preview stale local Git cleanup |
 | `make git-cleanup-apply` | Apply safe local Git cleanup |
 
 To remove local database data completely, use `docker compose down -v`. This is
 destructive and is not part of the normal reset flow.
+
+### GeoSQL / Dekart (optional)
+
+`make geosql-up` starts a local [Dekart](https://dekart.xyz/) instance for
+exploratory spatial SQL, local-only and never wired into `check`/`test`/
+`serve`. `tools/geosql/bootstrap.sh` prints the connection string to add; it
+points at the dev Postgres/PostGIS database, so the same read-only rule as
+any other dev-database access applies — see `CLAUDE.md`. `make geosql-down`
+stops it.
 
 ## Development
 
@@ -121,6 +138,12 @@ make lint
 make test
 make check
 ```
+
+`make check`/`make test` are gaining safer semantics on a separate branch:
+`check` will stop rewriting files (it checks formatting instead of
+reapplying it) and `test` will run through a safe test runner that refuses
+to touch the real dev database. Until that lands, the notes below still
+apply.
 
 Tests must use the throwaway Postgres instance on `:5544`, never the real dev
 database on `:5433`. ClickHouse integration tests require the test instance on
@@ -134,28 +157,18 @@ DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
   poetry run pytest tests/query/test_tool_queries.py -v
 ```
 
-That fixed `:5544`/`:8124` pair is shared — fine for one run at a time, but
-two runs against it at once (e.g. two worktrees on the same host) can
-interfere with each other's schema mid-test. `scripts/run_full_ci.sh` runs
-the same lint/type/test gate as CI against its own uniquely-named,
-uniquely-ported Postgres + ClickHouse pair instead, torn down again on
-exit, so any number of invocations can run concurrently without
-coordinating:
+That fixed `:5544`/`:8124` pair is shared, and a concurrent run against it can
+interfere with another's schema mid-test. When a run might overlap with
+another one on the same host, use `scripts/run_full_ci.sh` instead — its
+header explains why and describes the isolated Postgres/ClickHouse pair it
+uses instead:
 
 ```bash
 scripts/run_full_ci.sh
 ```
 
-Frontend checks:
-
-```bash
-npm run typecheck
-npm run test
-npm run lint
-npm run lint:i18n
-npm run lint:i18n-strings
-npm run build:bundle
-```
+Frontend checks: see `CLAUDE.md`'s Verification commands section for the
+full required list to run before opening a PR.
 
 The React Compiler is enabled. Do not add `useMemo`, `useCallback`, or
 `React.memo` as performance fixes. User-visible strings require matching `ja`
@@ -235,8 +248,12 @@ the Oracle-to-R2 archive path.
 api/                    FastAPI app, auth, routers, middleware
 pipeline/               ingest, static loading, aggregation, reports, Ask
 db/                     Postgres/PostGIS and ClickHouse schemas
+deploy/                 systemd units and VPS scripts for the loop and ops-monitoring services
 frontend/               React SPA and translations
+oracle_cloud/           Oracle VM collector agent (v3): archive fetch, R2 sync, health checks, alerting
 scripts/                operational tools and review helpers
+tests/                  pytest suites (api, pipeline, query, db, frontend, unit) and fixtures
+tools/                  optional local dev tools (GeoSQL/Dekart)
 docs/features/          feature-specific behavior guides
 .claude/                review and autonomous-loop workflows
 ```
@@ -252,7 +269,8 @@ Useful entry points:
 
 ## Safety Rules
 
-- Treat the dev databases as read-only; use throwaway test databases for writes.
+- Dev databases are read-only; see `CLAUDE.md`. Use the throwaway `:5544`/
+  `:8124` pair described above for writes.
 - Never push directly to `main`; use reviewed squash-merged PRs.
 - Commit messages carry `[skip ci]`, except the last push before a PR is
   readied: its tip must omit the trailer so CI runs and can be green, which
