@@ -62,6 +62,16 @@ jobs:
       - name: Entry-chunk checker unit tests
         run: npm run test:check-entry-chunk
 
+      # Fixture-based positive/negative controls for check-css-tokens.mjs
+      # itself, mirroring the entry-chunk checker's own tests above.
+      - name: CSS tokens checker unit tests
+        run: npm run test:check-css-tokens
+
+      # Static scan (no build needed): every var(--x) reference resolves
+      # (or has a fallback) and every z-index uses the shared ladder.
+      - name: CSS tokens check
+        run: npm run check:css-tokens
+
       # Typecheck already ran above (tsc -b), so this build step skips it
       # (build:bundle = vite build only) and just enforces CLAUDE.md's
       # "keep MapLibre out of the entry chunk" rule against the real bundle.

@@ -8,6 +8,7 @@
  * whenever the parent updates it externally (e.g., chip-swap resetting defaults).
  */
 import { useState, useRef, useEffect } from "react";
+import { Z_INDEX } from "../../styles/zIndex";
 
 /** Props for {@link LimitPill}. */
 type LimitPillProps = {
@@ -120,7 +121,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
             borderRadius: 8,
             padding: 8,
             boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            zIndex: 10,
+            zIndex: Z_INDEX.dropdown,
             display: "flex",
             gap: 6,
             alignItems: "center",

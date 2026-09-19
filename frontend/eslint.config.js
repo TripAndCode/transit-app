@@ -84,6 +84,16 @@ export default tseslint.config(
           message:
             'Do not use useMemo/useCallback/React.memo — the React Compiler handles memoization automatically. Inline the computation or use a plain function.',
         },
+        {
+          // A raw number (or any other literal) assigned to a `zIndex`
+          // object property bypasses the shared stacking-order ladder in
+          // src/styles/zIndex.ts — nothing else then tells you where it
+          // sits relative to every other overlay. `zIndex: Z_INDEX.foo` (a
+          // MemberExpression, not a Literal) is unaffected by this
+          // selector, as is a derived expression like `Z_INDEX.foo - 1`.
+          selector: 'Property[key.name="zIndex"][value.type="Literal"]',
+          message: "Do not hardcode zIndex — use a rung from Z_INDEX (src/styles/zIndex.ts) instead.",
+        },
       ],
       // Closes the aliased-import hole the syntax selectors above can't see
       // (e.g. `import { useMemo as m } from "react"`). Only matches *named*

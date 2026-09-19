@@ -24,6 +24,7 @@ import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { BandGrid, Legend } from "./charts/DowBandGrid";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
+import { Z_INDEX } from "../styles/zIndex";
 import {
   BAND_ORDER,
   bandOf,
@@ -65,7 +66,7 @@ function Tooltip({ tip }: { tip: Tip }) {
         position: "fixed",
         left: x,
         top: y,
-        zIndex: 90,
+        zIndex: Z_INDEX.tooltip,
         pointerEvents: "none",
         background: "var(--tooltip-bg)",
         color: "var(--tooltip-fg)",
@@ -289,7 +290,7 @@ function StatStrip({ stats }: { stats: { label: string; value: string }[] }) {
       {stats.map((s) => (
         <div key={s.label} style={{ flex: 1, minWidth: 110, background: "var(--bg-soft)", borderRadius: 8, padding: "9px 12px" }}>
           <b style={{ display: "block", fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{s.value}</b>
-          <small style={{ fontSize: 10, color: "var(--text-2, var(--text-secondary))" }}>{s.label}</small>
+          <small style={{ fontSize: 10, color: "var(--text-secondary)" }}>{s.label}</small>
         </div>
       ))}
     </div>

@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
+import { Z_INDEX } from "../styles/zIndex";
 import { useAgencies } from "../api/hooks";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 import { readWelcomeSeen, writeWelcomeSeen } from "../api/welcomeSeen";
@@ -117,7 +118,7 @@ export function OnboardingGate() {
         alignItems: "center",
         justifyContent: "center",
         padding: 40,
-        zIndex: 100,
+        zIndex: Z_INDEX.modal,
       }}
     >
       <div style={{ width: "100%", maxWidth: 640, textAlign: "center" }}>
