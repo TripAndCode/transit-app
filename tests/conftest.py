@@ -186,10 +186,10 @@ def _ch_schema() -> None:
 def ch_client(_ch_schema):
     """ClickHouse client against the throwaway `make ch-test` instance.
 
-    Hoisted here (from tests/pipeline/conftest.py, Task 5) because Task 6
-    (analyze()'s dedup materialization) needs it from tests/api/ and
-    tests/query/ too, not just tests/pipeline/ — a root conftest fixture is
-    visible to every subdirectory. Truncate (not drop+recreate) before each
+    Lives in the root conftest, not a subdirectory one, because it's needed
+    from tests/api/ and tests/query/ as well as tests/pipeline/ — a root
+    conftest fixture is visible to every subdirectory. Truncate (not
+    drop+recreate) before each
     test for isolation, since ClickHouse has no transactional rollback to
     lean on like the pg_conn fixture does — the schema itself never changes
     mid-session, so only `_ch_schema` needs to pay MergeTree's CREATE TABLE

@@ -5,11 +5,12 @@ from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("LLM_KEY_ENCRYPTION_KEY", "zJj1v3nq7v3rj0aWq2p8m9s4b6d5f7h9k1n3q5s7u9w=")
 
-import asyncpg
 import httpx
 import openai
 import pytest
 from httpx import ASGITransport
+
+from tests.conftest import _test_pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
 
@@ -38,7 +39,7 @@ async def _seed_user_and_session(conn, *, role="user"):
 async def me_client(apply_schema):
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
