@@ -26,7 +26,8 @@ Aggregation tables produced:
 - agg_schedule_revision_daily — per-day dominant static_version_id (schedule-revision boundary markers)
 - agg_static_version_summary — per-static-version planned trip count / vehicle-km (UPSERT-only; see its own
   section below for why it's exempt from the wipe-and-rewrite loop every other table here follows)
-- agg_meta             — audit row: last analyze() time per agency (forensic-only, not load-bearing)
+- agg_meta             — last analyze() time per agency (forensic), plus the static-schedule
+  fingerprint that decides whether the next run may rebuild only the dates that changed
 
 None of the builders below gate a group out at insert time by its sample
 count, however thin. Every row carries its own `samples` column instead, so a
@@ -495,6 +496,27 @@ def _date_filter(rebuild_dates: list | None, agency_id: int) -> tuple[str, dict]
     return f" AND {predicate}", params
 
 
+def _text_dated_tables(conn) -> frozenset[str]:
+    """Incremental tables storing ``date`` as text rather than as a date.
+
+    The per-date purge compares ``date`` against the rebuild list, and that
+    comparison has to be expressed in the column's own type: casting the
+    column instead costs it its index, and no index means the purge reads
+    every row the agency has in the table it was supposed to narrow.
+
+    Read from the catalog rather than listed here, so a column whose type
+    changes cannot quietly leave an unindexed purge behind.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT table_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND column_name = 'date' "
+            "AND data_type = 'text' AND table_name = ANY(%s)",
+            (sorted(_INCREMENTAL_AGG_TABLES),),
+        )
+        return frozenset(r[0] for r in cur.fetchall())
+
+
 def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
     """True when *table* is incremental and no date changed.
 
@@ -659,21 +681,21 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # Scoped for the incremental tables, whole for the rest. The scope must
         # match what each table's build below produces; see
         # _INCREMENTAL_AGG_TABLES for why the two cannot diverge.
+        text_dated = _text_dated_tables(conn) if rebuild_dates else frozenset()
         with _step("purge: DELETE prior rows"), conn.cursor() as cur:
             for tbl in _AGG_TABLES_ORDERED:
                 if rebuild_dates is None or tbl not in _INCREMENTAL_AGG_TABLES:
                     cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
                 elif rebuild_dates:
-                    # `date::date`, because agg_daily_trend stores its service
-                    # date as text while every other member stores a real
-                    # date, and one predicate has to fit both. On a date
-                    # column the cast is an identity the planner drops, so
-                    # this stays an index scan where it matters; on the text
-                    # one it does not, and that table is small enough
-                    # (bounded by days × routes) for it not to.
+                    # The comparison is made in the column's own type rather
+                    # than casting either side. A cast on the column throws
+                    # away the index — agg_daily_trend stores its service date
+                    # as text, and `date::date` there turns what should be an
+                    # index scan into a read of every row the agency has.
+                    dates = [d.isoformat() for d in rebuild_dates] if tbl in text_dated else rebuild_dates
                     cur.execute(
-                        f"DELETE FROM {tbl} WHERE agency_id = %s AND date::date = ANY(%s)",
-                        (agency_id, rebuild_dates),
+                        f"DELETE FROM {tbl} WHERE agency_id = %s AND date = ANY(%s)",
+                        (agency_id, dates),
                     )
 
         # ── Materialise the deduped fact slices ─────────────────────────

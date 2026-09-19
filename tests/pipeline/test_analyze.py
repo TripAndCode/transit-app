@@ -1777,6 +1777,39 @@ def test_every_incremental_table_is_keyed_by_date(pg_conn):
     assert keyed == set(_INCREMENTAL_AGG_TABLES)
 
 
+def test_every_incremental_table_can_purge_by_date_from_an_index(pg_conn):
+    """Having a `date` column is not the same as being able to find it.
+
+    The purge deletes by `(agency_id, date)` on every incremental run. Where
+    no index leads with those two columns, the planner narrows to the agency
+    and then reads all of it — which is the cost the incremental rebuild
+    exists to avoid, quietly reintroduced on the table it was added for. Two
+    members reached that state by different routes: one buried `date` behind
+    `route_code` in its primary key, the other behind `route_code` and
+    `stop_id`. Neither was visible from the column list alone.
+    """
+    from pipeline.analyze import _INCREMENTAL_AGG_TABLES
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT t.relname
+            FROM pg_index i
+            JOIN pg_class t ON t.oid = i.indrelid
+            JOIN pg_attribute a1 ON a1.attrelid = t.oid AND a1.attnum = i.indkey[0]
+            JOIN pg_attribute a2 ON a2.attrelid = t.oid AND a2.attnum = i.indkey[1]
+            WHERE t.relname = ANY(%s)
+              AND a1.attname = 'agency_id'
+              AND a2.attname = 'date'
+            """,
+            (sorted(_INCREMENTAL_AGG_TABLES),),
+        )
+        indexed = {r[0] for r in cur.fetchall()}
+    assert indexed == set(_INCREMENTAL_AGG_TABLES), (
+        f"no (agency_id, date)-leading index on: {sorted(set(_INCREMENTAL_AGG_TABLES) - indexed)}"
+    )
+
+
 def test_a_changed_static_schedule_needs_every_date(pg_conn, agency_id, ch_client):
     """The ledger counts ClickHouse rows, so it cannot see a static reload.
 

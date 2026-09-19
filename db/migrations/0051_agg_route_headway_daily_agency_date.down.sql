@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_agg_route_headway_daily_agency_date;
