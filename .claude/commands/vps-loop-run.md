@@ -98,10 +98,12 @@ cause's *class* (e.g. `review-scratch-leftover`, `git-stash-permission-denied`,
 `settings-drift`, `sensitive-file-no-approver`, `db-write-blocked`), not the
 specific instance (not the item number, not the exact file path) — the same
 class of problem recurring on different items must reuse the identical slug,
-or this mechanism can never detect the pattern. Three outcome-category slugs
-(`review-major-unresolved` for an unresolved review finding,
-`worker-blocked` for a Step 4b report, `tick-budget-exhausted` for a
-deliberate out-of-time stop) are generic buckets, not
+or this mechanism can never detect the pattern. Some slugs name an outcome
+category rather than a cause: `review-major-unresolved` for an unresolved
+review finding, `worker-blocked` for a Step 4b report, `tick-budget-exhausted`
+for a deliberate out-of-time stop, and Step 6.8's `ci-check-failed` and
+`ci-run-never-triggered`, where one failing check has nothing to do with the
+next. These are generic buckets, not
 necessarily a real recurring root cause on their own — before reusing one of
 these because the last 2 entries also used it, sanity-check that the
 underlying cause is actually the same, not just the same outcome shape; if
@@ -744,7 +746,16 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
      advanced" case, counting against the same 2-try cap (re-sync, re-review,
      restart from 6.5) rather than forcing through.
 
-     The two CI outcomes are not the same problem:
+     A run still in flight is none of these. An entry whose `status` is not
+     `COMPLETED`, or whose `conclusion` is `null`, has not finished — it is
+     not a failure, and 6.8 must not classify it as one. This is the normal
+     state right after a push, and the empty-rollup remedy below creates it
+     deliberately: nothing in this step waits, so a re-check seconds after
+     pushing will see a run that has barely started. Wait for every entry to
+     reach `COMPLETED` before judging, re-reading `statusCheckRollup` rather
+     than assuming; only then do the two outcomes below apply.
+
+     The two terminal CI outcomes are not the same problem:
      - **Rollup EMPTY** — no run exists, because the pushed tip carried the
        skip trailer. Append one new commit (`git commit --allow-empty`) whose
        message omits it and push normally — never amend the existing tip,
