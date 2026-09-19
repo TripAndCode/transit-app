@@ -4,6 +4,7 @@ import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout, useSession } from "../api/auth";
 import { apiDelete, apiGet, apiPut } from "../api/client";
+import { formatDateTime } from "../utils/format";
 
 type SessionRow = {
   sid_prefix: string;
@@ -95,7 +96,7 @@ function LlmKeySection() {
 
 /** Self-service profile + active sessions + logout. */
 export function AccountPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { data: session, isLoading } = useSession();
   const { data: sessions } = useQuery({
     queryKey: ["mySessions"],
@@ -128,7 +129,7 @@ export function AccountPage() {
                                             borderRadius: 4, marginBottom: 4, fontSize: 13 }}>
             <div>{s.user_agent ?? "(unknown UA)"}</div>
             <div style={{ color: "var(--text-tertiary)" }}>
-              {t("account.session_last_seen", { when: new Date(s.last_seen_at).toLocaleString(i18n.language) })}
+              {t("account.session_last_seen", { when: formatDateTime(s.last_seen_at) })}
             </div>
           </div>
         ))}

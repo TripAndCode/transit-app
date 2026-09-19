@@ -5,6 +5,7 @@ import { apiGet, formatApiError } from "../../api/client";
 import { usePatchUser, useDeleteUser } from "../../api/admin";
 import { useSession } from "../../api/auth";
 import { AdminButton } from "./adminControls";
+import { formatDateTime } from "../../utils/format";
 
 type Detail = {
   user_id: number;
@@ -27,7 +28,7 @@ type Detail = {
 
 /** Admin: detail view for a single user with identities, recent audit events, and inline role/suspend/delete actions. */
 export function AdminUserDetailPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { uid } = useParams<{ uid: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -112,7 +113,7 @@ export function AdminUserDetailPage() {
               {data.llm_approved ? t("admin.users.llm_approved.yes") : t("admin.users.llm_approved.no")}
             </div>
             <div>
-              {t("admin.user_detail.created_label")}: {new Date(data.created_at).toLocaleString(i18n.language)}
+              {t("admin.user_detail.created_label")}: {formatDateTime(data.created_at)}
             </div>
           </div>
           <section style={{ marginBottom: 24 }}>
@@ -132,7 +133,7 @@ export function AdminUserDetailPage() {
                                               borderRadius: 4, marginBottom: 4, fontSize: 13 }}>
                 <div>{e.kind} {e.provider ? `(${e.provider})` : ""}</div>
                 <div style={{ color: "var(--text-tertiary)" }}>
-                  {new Date(e.created_at).toLocaleString(i18n.language)}
+                  {formatDateTime(e.created_at)}
                 </div>
                 {e.meta && <pre style={{ margin: "4px 0", fontSize: 12 }}>{JSON.stringify(e.meta)}</pre>}
               </div>

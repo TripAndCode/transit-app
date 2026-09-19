@@ -12,6 +12,7 @@ import { PeriodChart } from "../components/analysis/PeriodChart";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
+import { FILTER_SEPARATOR } from "../utils/format";
 import "../styles/focusedAnalysis.css";
 
 const DAYS_CSV_HEADER = ["date", "mean_departure_delay_minutes", "observations"];
@@ -66,12 +67,12 @@ export function ReportsHomeTab() {
       </li>)}</ul>
     </section> : <>
       <TabFilterBar />
-      <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name} · {ctx.from} – {ctx.to}</h2>
+      <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name}{FILTER_SEPARATOR}{ctx.from} – {ctx.to}</h2>
       <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
         ...metadata, [], ["definition", JSON.stringify(trend.data?.definition)], [], ...daysToCsvRows(days),
       ])}>{t("csv")}</button></div></div>
       <AsyncSection loading={trend.isPending} error={trend.error} onRetry={() => void trend.refetch()} data={trend.data} hasContent={() => days.length > 0} empty={<EmptyState title={t("empty")} />}>
-        {() => <><p className="focus-muted">{t("mean")} · {t("coverage", { from: days[0]?.date, to: days.at(-1)?.date })}</p><PeriodChart days={days} /></>}
+        {() => <><p className="focus-muted">{t("mean")}{FILTER_SEPARATOR}{t("coverage", { from: days[0]?.date, to: days.at(-1)?.date })}</p><PeriodChart days={days} /></>}
       </AsyncSection></section>
       <section><div className="focus-header"><h2>{t("routesToCheck")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!rows.length || !!ranking.error || ranking.isFetching} onClick={() => downloadCsv(`patterns-${id}-${ctx.from}-${ctx.to}`, [
         ...metadata, [], ["definition", JSON.stringify(ranking.data?.definition)], [], ...rankingToCsvRows(rows),
@@ -84,7 +85,7 @@ export function ReportsHomeTab() {
         </tbody></table></div>}
       </AsyncSection></section>
       <p className="focus-muted">{t("reportNote")}</p>
-      <details><summary>{t("definitions")}</summary><p>{ctx.from} – {ctx.to} · {ctx.routes.join(", ") || t("allPatterns")}</p>
+      <details><summary>{t("definitions")}</summary><p>{ctx.from} – {ctx.to}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
         {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
         <Link to={`/agencies/${id}/analysis/trend?${queryString}`}>{t("advanced")} →</Link>
       </details>

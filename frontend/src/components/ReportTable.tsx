@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 import { delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { useParams } from "react-router-dom";
+import { formatNumber } from "../utils/format";
 
 type Schema = {
   /** Column index in the row tuple */
@@ -130,7 +131,7 @@ function fmtNum(v: unknown, _t: TFunction): string {
   if (v == null) return "—";
   const n = Number(v);
   if (!isFinite(n)) return "—";
-  return n.toLocaleString();
+  return formatNumber(n);
 }
 
 function fmtConfidence(v: unknown, t: TFunction): string {

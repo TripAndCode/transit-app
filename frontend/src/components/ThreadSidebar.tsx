@@ -5,6 +5,7 @@ import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
+import { FILTER_SEPARATOR } from "../utils/format";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
     if (label !== tbKey) parts.push(label);
   }
 
-  return parts.join(" ・ "); // i18n-ignore: locale-neutral separator
+  return parts.join(FILTER_SEPARATOR);
 }
 
 // ─── context menu ────────────────────────────────────────────────────────────
@@ -246,7 +247,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameBlur={commitRename}
                   onSelect={() => onSelect(conv.conversation_id)}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(" ・ ")} // i18n-ignore: locale-neutral separator
+                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(FILTER_SEPARATOR)}
                 />
               ))}
             </section>
@@ -330,7 +331,8 @@ function ConvItem({
   onContextMenu,
   filterSummaryText,
 }: ConvItemProps) {
-  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(" ・ "); // i18n-ignore: locale-neutral separator
+  const { t } = useTranslation();
+  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(FILTER_SEPARATOR);
 
   return (
     <div
@@ -433,7 +435,7 @@ function ConvItem({
           opacity: 0.6,
           marginTop: 1,
         }}
-        aria-label="More options"
+        aria-label={t("ask.sidebar.more_options_aria")}
       >
         ⋯
       </button>

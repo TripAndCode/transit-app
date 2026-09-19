@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Components } from "react-markdown";
 
 /** Lazily imported so `mermaid` (a sizeable rendering library, similar in
@@ -42,6 +43,7 @@ async function loadMermaid() {
  *  config, only allows setState from a callback reacting to the external
  *  `mermaid.render()` promise settling, not from the effect body itself). */
 function MermaidDiagram({ source }: { source: string }) {
+  const { t } = useTranslation();
   const reactId = useId();
   const diagramId = `mermaid-${reactId.replace(/[^a-zA-Z0-9]/g, "")}`;
   const [svg, setSvg] = useState<string | null>(null);
@@ -70,7 +72,7 @@ function MermaidDiagram({ source }: { source: string }) {
   // `react/no-danger` rule is configured in this repo's eslint.config.js to
   // suppress -- jsx-a11y doesn't ship an equivalent -- so no disable comment
   // is needed here.)
-  return <div role="img" aria-label="diagram" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <div role="img" aria-label={t("admin.architecture.diagram_aria")} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
 function isMermaidClassName(className: string | undefined): boolean {

@@ -7,6 +7,7 @@ import { Skeleton } from "../components/Skeleton";
 import { AsyncSection } from "../components/AsyncSection";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { delayColor } from "../styles/tokens";
+import { formatNumber } from "../utils/format";
 import type { NetworkAgencyRow } from "../api/types";
 
 const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
@@ -141,7 +142,7 @@ export function NetworkTab() {
               {a.vehicle_km_delivered_pct != null
                 ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
                 : a.planned_trip_count != null
-                  ? t("network.planned_trip_count_fallback", { count: a.planned_trip_count.toLocaleString() })
+                  ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
                   : "—"}
               </div>
             </div>
@@ -156,7 +157,7 @@ export function NetworkTab() {
               }}
             />
           </div>
-          <span style={samplesStyle}>{a.samples.toLocaleString()}</span>
+          <span style={samplesStyle}>{formatNumber(a.samples)}</span>
         </div>
         {(showFeedFlag || showFreshnessFlag) && (
           <div style={secondaryRow}>
