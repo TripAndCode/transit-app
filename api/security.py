@@ -11,13 +11,13 @@ import hashlib
 import hmac
 import os as _os
 import secrets
+import time as _time
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
-_PUBLIC_BASE_URL = _os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 _ALLOW_TEST_ORIGIN = _os.environ.get("ALLOW_TEST_ORIGIN") == "1"
 
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P, _SCRYPT_DKLEN = 2**14, 8, 1, 32
@@ -49,16 +49,11 @@ def verify_password(password: str, stored: str | None) -> bool:
 
 def cookie_secure() -> bool:
     """True when cookies should set ``Secure`` — i.e. the deployment is served
-    over HTTPS. Read live from the env (not the import-frozen ``_PUBLIC_BASE_URL``)
-    so a per-process config flip is honored. Local-dev over ``http://localhost``
+    over HTTPS. Read live from the env (not cached at import time) so a
+    per-process config flip is honored. Local-dev over ``http://localhost``
     returns False so the browser still sends the cookie and SSO works.
     """
     return _os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").startswith("https://")
-
-
-_CORS_ORIGINS = tuple(
-    o.strip() for o in _os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()
-)
 
 
 @dataclass(frozen=True)
@@ -153,12 +148,15 @@ def _has_origin_path(value: str) -> bool:
 
 
 def _build_allowed_origins() -> frozenset[str]:
-    """Compute the allow-list once at import; csrf_guard reads it per request."""
+    """Compute the allow-list from the current environment."""
     out: set[str] = set()
-    base_norm = _serialized_origin(_PUBLIC_BASE_URL)
+    base_norm = _serialized_origin(_os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"))
     if base_norm is not None:
         out.add(base_norm)
-    for o in _CORS_ORIGINS:
+    for o in _os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(","):
+        o = o.strip()
+        if not o:
+            continue
         n = _serialized_origin(o)
         if n is not None:
             out.add(n)
@@ -167,11 +165,26 @@ def _build_allowed_origins() -> frozenset[str]:
     return frozenset(out)
 
 
-# Frozen at import time — tests that monkeypatch `PUBLIC_BASE_URL` /
-# `CORS_ORIGINS` / `ALLOW_TEST_ORIGIN` after this point will not see the
-# change. Reload the module or call `_build_allowed_origins()` and
-# reassign in a fixture if you need a different allow-list per test.
-_ALLOWED_ORIGINS = _build_allowed_origins()
+_ORIGINS_CACHE_TTL_SEC = 30.0
+_origins_cache_value: frozenset[str] | None = None
+_origins_cache_expires_at: float = 0.0
+
+
+def _get_allowed_origins() -> frozenset[str]:
+    """Return the CSRF allow-list, rebuilding it from the environment at
+    most once per ``_ORIGINS_CACHE_TTL_SEC``. A previous version computed
+    this once at import time, so a live config flip (e.g. ``PUBLIC_BASE_URL``
+    changed by the deployment platform without a process restart) was never
+    honored; ``cookie_secure()`` already read its env var live for the same
+    reason. The short TTL keeps most requests from re-parsing the env
+    without reintroducing the import-time staleness.
+    """
+    global _origins_cache_value, _origins_cache_expires_at
+    now = _time.monotonic()
+    if _origins_cache_value is None or now >= _origins_cache_expires_at:
+        _origins_cache_value = _build_allowed_origins()
+        _origins_cache_expires_at = now + _ORIGINS_CACHE_TTL_SEC
+    return _origins_cache_value
 
 
 def csrf_guard(request: Request) -> None:
@@ -199,6 +212,6 @@ def csrf_guard(request: Request) -> None:
     incoming = _serialized_origin(raw)
     if incoming is None:
         raise HTTPException(status_code=403, detail="origin required")
-    if incoming in _ALLOWED_ORIGINS:
+    if incoming in _get_allowed_origins():
         return
     raise HTTPException(status_code=403, detail="cross-origin request denied")

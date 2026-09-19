@@ -90,6 +90,19 @@ async def list_sessions(user: User = Depends(require_user), conn=Depends(get_con
     ]
 
 
+def _is_valid_sid_prefix(sid_prefix: str) -> bool:
+    """True iff every character is one ``secrets.token_urlsafe()`` can emit,
+    so a caller-supplied prefix can never smuggle a SQL wildcard or other
+    special character into the lookup below."""
+    return all(c.isalnum() or c in "-_" for c in sid_prefix)
+
+
+# Exact-prefix comparison, not LIKE: a LIKE pattern treats an unescaped `_`
+# in sid_prefix as a single-character wildcard, letting a valid-looking
+# prefix match a session it isn't actually a prefix of.
+_SID_PREFIX_QUERY = "SELECT sid FROM sessions WHERE user_id=$1 AND left(sid, length($2)) = $2"
+
+
 @router.delete("/me/sessions/{sid_prefix}", status_code=204)
 async def revoke_session(
     sid_prefix: str,
@@ -106,15 +119,9 @@ async def revoke_session(
     csrf_guard(request)
     if len(sid_prefix) < 12:
         raise HTTPException(400, "prefix too short")
-    # secrets.token_urlsafe() only emits these characters; reject anything else
-    # so a path containing `%` or `_` can't become a LIKE wildcard.
-    if not all(c.isalnum() or c in "-_" for c in sid_prefix):
+    if not _is_valid_sid_prefix(sid_prefix):
         raise HTTPException(400, "invalid prefix")
-    rows = await conn.fetch(
-        "SELECT sid FROM sessions WHERE user_id=$1 AND sid LIKE $2",
-        user.user_id,
-        sid_prefix + "%",
-    )
+    rows = await conn.fetch(_SID_PREFIX_QUERY, user.user_id, sid_prefix)
     if len(rows) == 0:
         raise HTTPException(404, "session not found")
     if len(rows) > 1:

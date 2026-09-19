@@ -47,6 +47,21 @@ def _resolve_request_id(headers: list[tuple[bytes, bytes]]) -> str:
     return uuid.uuid4().hex
 
 
+def _escape_for_log(value: str) -> str:
+    """Quote and escape ``value`` for embedding as one field in the
+    space-delimited ``key=value`` access log line. The request path is
+    attacker-controlled (it's the percent-decoded URL), so logging it
+    unescaped would let a crafted path inject a literal ``"``, a space, or
+    a newline and forge extra fields or an entirely separate fake log
+    line. Backslash and ``"`` are backslash-escaped, other control
+    characters become ``\\xNN``, and the whole value is wrapped in
+    double quotes.
+    """
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = "".join(c if 0x20 <= ord(c) < 0x7F else f"\\x{ord(c):02x}" for c in escaped)
+    return f'"{escaped}"'
+
+
 def _safe_user_id(scope) -> str:
     """Read request.state.user.user_id without importing FastAPI types.
 
@@ -98,7 +113,7 @@ class RequestLogMiddleware:
         finally:
             duration_ms = int((time.perf_counter() - start) * 1000)
             user_id = _safe_user_id(scope)
-            path = scope.get("path", "?")
+            path = _escape_for_log(scope.get("path", "?"))
             method = scope.get("method", "?")
             # status=0 means the app raised before emitting http.response.start.
             # Render as "?" so the operator can tell it apart from a real 0.

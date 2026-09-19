@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from api.logging_config import REQUEST_ID_CTX, configure
-from api.middleware.request_log import RequestLogMiddleware, _resolve_request_id
+from api.middleware.request_log import RequestLogMiddleware, _escape_for_log, _resolve_request_id
 
 
 def test_request_id_filter_default_dash():
@@ -132,7 +132,7 @@ async def test_access_log_emitted_with_kv_fields(caplog):
     assert len(access) == 1
     msg = access[0].getMessage()
     assert "method=GET" in msg
-    assert "path=/ping" in msg
+    assert 'path="/ping"' in msg
     assert "status=200" in msg
     assert "duration_ms=" in msg
     assert "user_id=-" in msg
@@ -223,3 +223,54 @@ async def test_access_log_includes_user_id_when_authenticated(caplog):
     access = [r for r in caplog.records if r.name == "api.access"]
     assert len(access) == 1
     assert "user_id=42" in access[0].getMessage()
+
+
+def test_escape_for_log_quotes_a_plain_value():
+    assert _escape_for_log("/agencies/1/routes") == '"/agencies/1/routes"'
+
+
+def test_escape_for_log_escapes_embedded_quotes_and_backslashes():
+    assert _escape_for_log('/x"evil"') == '"/x\\"evil\\""'
+    assert _escape_for_log("/x\\evil") == '"/x\\\\evil"'
+
+
+def test_escape_for_log_escapes_control_characters():
+    assert _escape_for_log("/x\nevil") == '"/x\\x0aevil"'
+    assert _escape_for_log("/x\revil") == '"/x\\x0devil"'
+
+
+@pytest.mark.asyncio
+async def test_access_log_escapes_crafted_path_instead_of_forging_fields(caplog):
+    """The request path is attacker-controlled (it's the percent-decoded
+    URL). Logged unescaped inside the space-delimited `key=value` access
+    line, a path containing `"`, a space, and a newline could forge extra
+    fields or an entirely separate fake log line. Quoting and escaping it
+    keeps the crafted content inertly inside the one `path="..."` field."""
+    configure()
+    logging.getLogger().addHandler(caplog.handler)
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    sent: list = []
+
+    async def send(message):
+        sent.append(message)
+
+    middleware = RequestLogMiddleware(app)
+    crafted_path = '/x" status=999 fake_field="pwned\ninjected'
+    scope = {"type": "http", "method": "GET", "path": crafted_path, "headers": [], "state": {}}
+
+    with caplog.at_level(logging.INFO, logger="api.access"):
+        await middleware(scope, receive, send)
+
+    access = [r for r in caplog.records if r.name == "api.access"]
+    assert len(access) == 1
+    msg = access[0].getMessage()
+    assert "\n" not in msg
+    assert f"path={_escape_for_log(crafted_path)}" in msg
+    assert "status=200" in msg  # the real status, appended after the quoted path
