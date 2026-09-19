@@ -108,6 +108,32 @@ async def test_movers_reads_agg_daily_trend(movers_pool):
     assert by["R1"]["samples"] == 100
 
 
+async def test_movers_windows_ignore_a_wider_requested_range(movers_pool):
+    """A range wider than ``window_days`` must not widen either compared
+    window, and the two must share no day. The 2026-03-20 row falls inside
+    both halves of an overlapping shifted-range definition and inside neither
+    of the correct adjacent windows, so it can only leak into the result if
+    the windows are derived from the request range instead of its end date."""
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-14", "R1", "平日", 10.0, 100),
+            ("2026-04-05", "R1", "平日", 2.0, 100),
+            ("2026-03-20", "R1", "平日", 100.0, 100),
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 3, 16), to_date=date(2026, 4, 14))
+    async with pool.acquire() as c:
+        res = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=10)
+    by = {r["route_code"]: r for r in res.rows}
+    assert by["R1"]["current_avg"] == 10.0
+    assert by["R1"]["previous_avg"] == 2.0
+    assert by["R1"]["delta"] == 8.0
+    assert by["R1"]["samples"] == 100
+
+
 async def test_movers_routes_filter_fast_path(movers_pool):
     """routes filter on the agg path: only the requested route appears."""
     pool, agency_id = movers_pool
