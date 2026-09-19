@@ -73,7 +73,8 @@ the task needs them.
   executable process docs.
 - Open PRs as drafts. Mark ready only after the required `/review-branch` pass
   is clean. Once ready and GitHub reports the PR mergeable/clean (no conflicts)
-  AND `main` has not advanced since that pass ran, it may be squash-merged
+  AND CI is green on the PR's head AND `main` has not advanced since that pass
+  ran, it may be squash-merged
   — by an interactive session or by `/vps-loop-run` itself — then run
   `/cleanup-merged` to remove the now-stale branch/worktree. GitHub's
   `mergeable`/`mergeStateStatus` alone does NOT catch a `main` that moved on
@@ -83,8 +84,14 @@ the task needs them.
   fix: merge latest `main`, resolve any conflicts, and re-run the review pass
   on the result before readying or merging. Every PR body states `**Origin:**
   Interactive session` or `**Origin:** Autonomous VPS loop (item N)`.
-- CI is currently skipped: every commit message includes `[skip ci]` as its own
-  line/trailer. Local verification and the pre-push hook are therefore mandatory.
+- CI runs on a self-hosted runner and must be green on the PR's head before it
+  merges. Commit messages still carry `[skip ci]`, so a branch needs one push
+  whose tip omits it to produce the run the gate reads; `transit-app-gotchas`
+  owns that mechanism and its traps. The squash-merge commit keeps the trailer,
+  so `main` does not re-run what the branch already proved.
+- Local verification stays mandatory regardless: CI sees only the tip that
+  triggered it, and the pre-push hook's file-scoped checks cover only the pushed
+  worktree's changed Python — its own header states what it leaves uncovered.
 - For stacked PRs, retarget dependants to `main` before deleting their base branch;
   GitHub otherwise closes them.
 - After a PR merge, run `/cleanup-merged` in persistent local/VPS clones. Its

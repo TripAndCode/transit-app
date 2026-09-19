@@ -254,6 +254,9 @@ Useful entry points:
 
 - Treat the dev databases as read-only; use throwaway test databases for writes.
 - Never push directly to `main`; use reviewed squash-merged PRs.
-- Every commit must include `[skip ci]` as its own line or trailer in this repo.
+- Commit messages carry `[skip ci]`, except the last push before a PR is
+  readied: its tip must omit the trailer so CI runs and can be green, which
+  the merge gate requires. See `CLAUDE.md` for the rule and
+  `transit-app-gotchas` for how the trailer behaves.
 - Run the relevant checks before opening a PR, then run `make check` when the
   change affects backend behavior.
