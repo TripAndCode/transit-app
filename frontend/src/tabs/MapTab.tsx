@@ -121,6 +121,7 @@ export function MapTab() {
   const mapRef = useRef<MLMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
   const refreshMessageTimerRef = useRef<number | null>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
   const fittedRouteRef = useRef<string | null>(null);
   const firstStyleRunRef = useRef(true);
   const initialLanguageRef = useRef(i18n.language);
@@ -236,6 +237,10 @@ export function MapTab() {
 
   useEffect(() => () => {
     if (refreshMessageTimerRef.current != null) window.clearTimeout(refreshMessageTimerRef.current);
+    // Cancel a manual refresh's in-flight POST on unmount so it can't land
+    // (and setIsRefreshing/showRefreshMessage a now-unmounted component)
+    // after the user has navigated away.
+    refreshAbortRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -324,8 +329,14 @@ export function MapTab() {
     }
     setRefreshMessage(t("operations.refreshing"));
     setIsRefreshing(true);
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
     try {
-      const refreshResult = await apiPost<{ status: string; inserted: number }>(`/api/${id}/delays/refresh`, {});
+      const refreshResult = await apiPost<{ status: string; inserted: number }>(
+        `/api/${id}/delays/refresh`,
+        {},
+        { signal: controller.signal },
+      );
       const [liveResult, summaryResult, progressResult] = await Promise.all([
         liveQuery.refetch(),
         summaryQuery.refetch(),

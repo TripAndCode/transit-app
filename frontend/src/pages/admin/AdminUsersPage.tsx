@@ -1,34 +1,31 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAdminUsers, useDeleteUser, usePatchUser } from "../../api/admin";
 import { useSession } from "../../api/auth";
-import { formatApiError } from "../../api/client";
+import { ErrorBanner } from "../../components/ErrorBanner";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { pageItems } from "./pageItems";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
 
-/** Admin: searchable, filterable, paginated user list with inline role / suspend / delete controls. */
-export function AdminUsersPage() {
-  const { t } = useTranslation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const q = searchParams.get("q") ?? "";
-  const rawRole = searchParams.get("role") ?? "";
-  const role = rawRole === "user" || rawRole === "admin" ? rawRole : "";
-  const rawSuspended = searchParams.get("suspended") ?? "";
-  const suspended = rawSuspended === "true" || rawSuspended === "false" ? rawSuspended : "";
-  const pageParam = Number(searchParams.get("page") ?? "1");
-  const rawPage = Number.isFinite(pageParam) ? Math.max(1, Math.floor(pageParam)) : 1;
-
-  const { data: me } = useSession();
-
-  // The search box is debounced locally so the URL/query key (and therefore
-  // the backend ILIKE scan) doesn't change on every keystroke. Skipping when
-  // the trimmed input already matches the committed `q` is what keeps this
-  // effect from re-arming (and clobbering `page`) on every unrelated URL
-  // change — `setSearchParams`'s identity changes on any searchParams update.
+/** The search box's own local-edit + debounce-commit state, extracted so it
+ *  can be keyed on `q` (see below) -- remounting it resets `qInput` to the
+ *  current URL value whenever `q` changes for any reason, including a
+ *  browser back/forward that didn't come from this component's own commit.
+ *  Without that, `qInput`'s initial `useState(q)` only ever reflects `q` as
+ *  it was at first mount, so external navigation desyncs the displayed
+ *  value from the URL it's supposed to mirror. */
+function AdminUserSearchBox({
+  q,
+  setSearchParams,
+  placeholder,
+}: {
+  q: string;
+  setSearchParams: SetURLSearchParams;
+  placeholder: string;
+}) {
   const [qInput, setQInput] = useState(q);
   useEffect(() => {
     const trimmed = qInput.trim();
@@ -45,7 +42,24 @@ export function AdminUsersPage() {
     return () => clearTimeout(id);
   }, [qInput, q, setSearchParams]);
 
-  const { data, isLoading, isPlaceholderData, error } = useAdminUsers({
+  return <AdminSearchInput placeholder={placeholder} value={qInput} onChange={(e) => setQInput(e.target.value)} />;
+}
+
+/** Admin: searchable, filterable, paginated user list with inline role / suspend / delete controls. */
+export function AdminUsersPage() {
+  const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get("q") ?? "";
+  const rawRole = searchParams.get("role") ?? "";
+  const role = rawRole === "user" || rawRole === "admin" ? rawRole : "";
+  const rawSuspended = searchParams.get("suspended") ?? "";
+  const suspended = rawSuspended === "true" || rawSuspended === "false" ? rawSuspended : "";
+  const pageParam = Number(searchParams.get("page") ?? "1");
+  const rawPage = Number.isFinite(pageParam) ? Math.max(1, Math.floor(pageParam)) : 1;
+
+  const { data: me } = useSession();
+
+  const { data, isLoading, isPlaceholderData, error, refetch } = useAdminUsers({
     q,
     role,
     suspended,
@@ -121,10 +135,11 @@ export function AdminUsersPage() {
     <div style={{ padding: 24 }}>
       <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("admin.users.title")}</h1>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <AdminSearchInput
+        <AdminUserSearchBox
+          key={q}
+          q={q}
+          setSearchParams={setSearchParams}
           placeholder={t("admin.users.search_placeholder")}
-          value={qInput}
-          onChange={(e) => setQInput(e.target.value)}
         />
         <select
           aria-label={t("account.role_label")}
@@ -145,7 +160,7 @@ export function AdminUsersPage() {
           <option value="true">{t("admin.users.status.suspended")}</option>
         </select>
       </div>
-      {error && <div style={{ color: "var(--text-tertiary)" }}>{formatApiError(error)}</div>}
+      {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {isLoading && <div>{t("common.loading")}</div>}
       <table className="admin-table" style={{ opacity: isPlaceholderData ? 0.6 : 1 }}>
         <thead>
@@ -226,12 +241,7 @@ export function AdminUsersPage() {
           ))}
         </tbody>
       </table>
-      {(patch.error || del.error) && (
-        <div role="alert" style={{ marginTop: 8, padding: 8, background: "var(--surface-2)",
-                                    borderRadius: 4, fontSize: 13, color: "var(--text-tertiary)" }}>
-          {formatApiError(patch.error || del.error)}
-        </div>
-      )}
+      {(patch.error || del.error) && <ErrorBanner error={patch.error || del.error} />}
       <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
           {t("admin.users.total", { count: total })}

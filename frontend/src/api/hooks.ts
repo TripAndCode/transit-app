@@ -111,6 +111,11 @@ export function useReport(
     queryFn: ({ signal }) =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && !!reportType,
+    // Keep the prior report mounted while a new report type or filter change
+    // loads, so callers can gate their skeleton on `isPending` (first load
+    // only) instead of `isFetching` (every refetch), matching AnalysisTab's
+    // report-switch UX to useNetworkSummary/useForecastOverview's.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -218,7 +223,12 @@ export function usePeakHourBreakdown(
 
 export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary> {
   return useQuery({
-    queryKey: ["network-summary", ctx.from, ctx.to],
+    // The endpoint itself only reads from/to -- it ignores dow/time_band/
+    // service/routes -- but the key still spreads the full ctxKey(ctx)
+    // rather than hand-picking [ctx.from, ctx.to], so this doesn't silently
+    // drift out of sync with ctxKey if RangeCtx grows a new server-honored
+    // dimension later.
+    queryKey: ["network-summary", ...ctxKey(ctx)],
     queryFn: ({ signal }) =>
       apiGet<NetworkSummary>(`/api/network/summary?from=${ctx.from}&to=${ctx.to}`, { signal }),
     staleTime: 60 * 1000,
@@ -390,6 +400,7 @@ export function useConversations(agencyId: number): UseQueryResult<Conversation[
       // Anonymous: read from localStorage; shape-convert to Conversation
       return conversationsAnon.list(agencyId).map(toServerLikeConversation);
     },
+    enabled: agencyId > 0,
     staleTime: 5_000,
   });
 }
@@ -414,7 +425,7 @@ export function useConversation(
       if (!anon) return null;
       return { conversation: toServerLikeConversation(anon), messages: anon.messages };
     },
-    enabled: Boolean(conversationId),
+    enabled: agencyId > 0 && Boolean(conversationId),
   });
 }
 

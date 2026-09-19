@@ -21,51 +21,7 @@
 import { useEffect, useState } from "react";
 import { useIsMutating } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-
-/** Guards against duplicate <style> injection across Strict Mode double-invoke and HMR remounts. */
-let _stripStylesInjected = false;
-
-/** CSS injected once into the document head; scoped to [data-activity-strip]. */
-const STRIP_CSS = `
-  [data-activity-strip] .as-dot {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent, #5b6cad);
-    animation: as-pulse 1s ease-in-out infinite;
-    opacity: 0.25;
-  }
-  [data-activity-strip] .as-dot:nth-child(2) { animation-delay: 0.15s; }
-  [data-activity-strip] .as-dot:nth-child(3) { animation-delay: 0.30s; }
-  @keyframes as-pulse {
-    0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
-    40%           { opacity: 1;    transform: scale(1.1); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    [data-activity-strip] .as-dot {
-      animation: none;
-      opacity: 0.7;
-      transform: none;
-    }
-  }
-`;
-
-/**
- * Injects `STRIP_CSS` into the document `<head>` exactly once per module
- * lifetime. The module-level `_stripStylesInjected` flag survives React
- * Strict Mode's double-invocation of effects and Vite HMR remounts, both of
- * which would reset a `useRef`.
- */
-function useStripStyles(): void {
-  useEffect(() => {
-    if (_stripStylesInjected) return;
-    const el = document.createElement("style");
-    el.textContent = STRIP_CSS;
-    document.head.appendChild(el);
-    _stripStylesInjected = true;
-  }, []);
-}
+import "./ActivityStrip.css";
 
 /**
  * Horizontal activity strip that signals in-flight mutations to the user.
@@ -79,8 +35,6 @@ export function ActivityStrip() {
   const { t } = useTranslation();
   const busy = mutating > 0;
   const [visible, setVisible] = useState(false);
-
-  useStripStyles();
 
   // Show is debounced 80ms so sub-frame mutations never flash the strip;
   // hide goes through a 0ms timeout too, keeping the effect free of

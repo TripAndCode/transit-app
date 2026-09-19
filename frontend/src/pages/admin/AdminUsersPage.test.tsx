@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { AdminUsersPage } from "./AdminUsersPage";
+import { ApiError } from "../../api/client";
 
 const patchMutate = vi.fn();
 const patchReset = vi.fn();
@@ -13,11 +14,16 @@ const delMutate = vi.fn();
 const delReset = vi.fn();
 const useAdminUsersMock = vi.fn();
 const useSessionMock = vi.fn();
+// Mutable so a single test can inject a mutation error without needing a
+// fresh vi.mock factory per test (vi.mock's factory is hoisted and bound
+// once for the whole file's static `import { AdminUsersPage }` above).
+let patchMutationError: unknown = null;
+let delMutationError: unknown = null;
 
 vi.mock("../../api/admin", () => ({
   useAdminUsers: (params: unknown) => useAdminUsersMock(params),
-  usePatchUser: () => ({ mutate: patchMutate, reset: patchReset, error: null, isPending: false, variables: undefined }),
-  useDeleteUser: () => ({ mutate: delMutate, reset: delReset, error: null, isPending: false, variables: undefined }),
+  usePatchUser: () => ({ mutate: patchMutate, reset: patchReset, error: patchMutationError, isPending: false, variables: undefined }),
+  useDeleteUser: () => ({ mutate: delMutate, reset: delReset, error: delMutationError, isPending: false, variables: undefined }),
 }));
 
 // A signed-in admin who is not one of the two rendered users (user_id 999),
@@ -69,12 +75,40 @@ function wrap(initialEntries = ["/admin/users"]) {
   );
 }
 
+/** Same page, but with an in-app navigation button so a single mounted
+ *  instance can move to a different `?q=` the way browser back/forward would
+ *  -- i.e. a URL change AdminUsersPage did not itself just commit via its
+ *  own debounce -- without needing a real browser history stack. */
+function wrapWithExternalNav(initialEntries: string[]) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function Harness() {
+    const navigate = useNavigate();
+    return (
+      <>
+        <button onClick={() => navigate("/admin/users?q=bar")}>go-bar</button>
+        <AdminUsersPage />
+      </>
+    );
+  }
+  return render(
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={initialEntries}>
+          <Harness />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </I18nextProvider>
+  );
+}
+
 describe("AdminUsersPage", () => {
   beforeEach(() => {
     useAdminUsersMock.mockReset();
     useAdminUsersMock.mockReturnValue(twoUsers());
     useSessionMock.mockReset();
     useSessionMock.mockReturnValue({ data: { user_id: 999, role: "admin" } });
+    patchMutationError = null;
+    delMutationError = null;
     patchMutate.mockClear();
     patchReset.mockClear();
     delMutate.mockClear();
@@ -211,6 +245,33 @@ describe("AdminUsersPage", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("updates the displayed search value when the URL's q changes externally (e.g. browser back/forward)", () => {
+    wrapWithExternalNav(["/admin/users?q=foo"]);
+    expect(screen.getByPlaceholderText("Search by email / name")).toHaveValue("foo");
+    fireEvent.click(screen.getByText("go-bar"));
+    // A URL change that didn't come from this component's own debounce
+    // commit must still be reflected in the input -- otherwise the box shows
+    // a query that no longer matches the results underneath it.
+    expect(screen.getByPlaceholderText("Search by email / name")).toHaveValue("bar");
+  });
+
+  it("shows an ErrorBanner instead of a raw error string when the user list fails to load", () => {
+    useAdminUsersMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error("network down"), refetch: vi.fn() });
+    wrap();
+    // ErrorBanner's generic-network branch renders role="alert"; the old
+    // raw formatApiError(error) text node had no such role.
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
+  it("routes a mutation error through ErrorBanner's calm branches, not a raw formatApiError string", () => {
+    patchMutationError = new ApiError(403, JSON.stringify({ detail: "llm_not_approved" }));
+    wrap();
+    // ErrorBanner's admin-approval-required branch renders role="status" with
+    // its own calm copy -- the old raw formatApiError(error) rendering had no
+    // such special-casing, just the generic status-code text in a plain div.
+    expect(screen.getByRole("status")).toBeTruthy();
   });
 
   it("disables role/suspend/delete on the signed-in admin's own row, not on other rows", () => {

@@ -20,8 +20,8 @@ import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
-import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
 import { useRouteNames } from "../api/useRouteNames";
+import "./analysisTab.css";
 
 /** "This week" = the 7 days ending today, in the ctx's from/to string
  *  format. Used by the "no data" EmptyState's recovery action to jump to a
@@ -62,22 +62,6 @@ export function AnalysisTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <TabFilterBar />
-      {/* Below ~640px this row's 280px report list + flex:1 report body +
-          260px InsightPanel force a combined min-width the phone viewport
-          can't satisfy, pushing the whole page into horizontal scroll (the
-          tables inside are already self-contained via ReportTable's own
-          overflow-x:auto, so it's only this outer row that needs help).
-          This tab's dense multi-column reports stay desktop-oriented by
-          design -- the fix here is just to stack the three sections
-          vertically instead of side-by-side, not to redesign them for
-          touch. */}
-      <style>{`
-        @media (max-width: ${MOBILE_BREAKPOINT_PX}px) {
-          .analysis-body { flex-direction: column; }
-          .analysis-report-list { width: 100% !important; }
-          .analysis-insights { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border-subtle); }
-        }
-      `}</style>
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -172,7 +156,7 @@ export function AnalysisTab() {
         {reportType && reportType !== "route_forecast" && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
         )}
-        {reportType && reportType !== "route_forecast" && detail.isFetching && <Skeleton height={400} />}
+        {reportType && reportType !== "route_forecast" && detail.isPending && <Skeleton height={400} />}
         {reportType !== "route_forecast" && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>

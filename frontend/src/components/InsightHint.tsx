@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -28,7 +28,10 @@ export function InsightHint({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  useEffect(() => {
+  // Layout effect, not a plain effect: this measures the trigger's position
+  // to decide anchor side before the popover paints, so the popover never
+  // flashes on the wrong side for a frame.
+  useLayoutEffect(() => {
     if (!open || !ref.current) return;
     const rect = ref.current.getBoundingClientRect();
     const popoverWidth = 320;

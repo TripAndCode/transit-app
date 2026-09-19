@@ -323,6 +323,8 @@
       },
       "sso_disabled_title": "SSO 未設定",
       "sso_disabled_body": "このビルドでは SSO が無効です。匿名で閲覧できます。",
+      "config_error_title": "サインインオプションを読み込めませんでした",
+      "config_error_body": "サーバーへの接続で問題が発生しました。もう一度お試しください。",
       "back_to_top": "トップへ戻る",
       "welcome_back": "おかえりなさい",
       "choose_provider": "アカウントを選択してログイン",

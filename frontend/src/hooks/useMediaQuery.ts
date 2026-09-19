@@ -1,11 +1,12 @@
 import { useSyncExternalStore } from "react";
 
-/** Shared mobile/desktop breakpoint — the single source of truth consumed by
- *  every component that needs to know which layout it's in (ThreadSidebar's
- *  and Sidebar's conditional desktop/mobile split, plus any inline `<style>`
- *  media query that wants to stay in sync with it). Previously each
- *  component hardcoded its own "640px" literal independently. */
-export const MOBILE_BREAKPOINT_PX = 640;
+/** Shared mobile/desktop breakpoint — the single source of truth for
+ *  `MOBILE_BREAKPOINT_QUERY` below and for `useMediaQuery` callers like
+ *  ThreadSidebar's and Sidebar's conditional desktop/mobile split. A CSS
+ *  file can't import this constant, so a `@media` rule keeps its own
+ *  640px literal in sync with it by convention rather than by reference —
+ *  see e.g. tabs/analysisTab.css. */
+const MOBILE_BREAKPOINT_PX = 640;
 export const MOBILE_BREAKPOINT_QUERY = `(max-width: ${MOBILE_BREAKPOINT_PX}px)`;
 
 /**
