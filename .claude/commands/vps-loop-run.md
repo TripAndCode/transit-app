@@ -89,7 +89,8 @@ tool-error stop, Step 2b's branch-only-no-worktree stop, Step 3's
 OPEN-PR-resume worktree-missing stop, Step 3b's
 worktree-dirty/branch-without-worktree/still-Major-after-2-fix-iterations
 stop paths, Step 4b's
-worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops, the
+worker-couldn't-complete, Step 5/6's blocked-after-fix-iteration-cap stops,
+Step 6.8's `ci-run-never-triggered` and `ci-check-failed` stops, the
 non-interactive tick-budget stop described just above,
 and Boundaries' generic tool-call-errored stop — must end with its own
 line: `**Blocker-tag:** <kebab-case-slug>`. Pick the slug to name the root
@@ -743,17 +744,26 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
      advanced" case, counting against the same 2-try cap (re-sync, re-review,
      restart from 6.5) rather than forcing through.
 
-     The two CI outcomes end the tick differently, and neither is a re-sync:
-     `main` has not moved, so restarting from 6.5 would change nothing.
-     - **Rollup EMPTY** — no run was triggered, because the pushed tip carried
-       the skip trailer. Push one more commit on the branch whose message
-       omits it, wait for the run, and re-check 6.8 once. Count that as one
-       of the 2 tries; if the rollup is still empty, stop and log it, since
-       something other than the trailer is preventing the run.
+     The two CI outcomes are not the same problem:
+     - **Rollup EMPTY** — no run exists, because the pushed tip carried the
+       skip trailer. Append one new commit (`git commit --allow-empty`) whose
+       message omits it and push normally — never amend the existing tip,
+       which would need the force-push Boundaries forbids — then restart from
+       6.5, counted against the same 2-try cap. Restarting is what re-derives
+       `headRefOid` for 6.9; re-checking 6.8 alone would leave 6.9 pinned to
+       a SHA the new commit has superseded, and the merge would be refused.
+       If the rollup is still empty after the cap, something other than the
+       trailer is stopping the run: log it and stop, ending the entry with
+       `**Blocker-tag:** ci-run-never-triggered`.
      - **Rollup has a non-SUCCESS entry** — CI ran and found something. That
-       is a real failure in the branch, not a race to retry: stop, log which
-       check failed, and leave the PR open and unmerged for the next tick to
-       pick up as ordinary work.
+       is a defect in the branch, not a race, and no number of retries will
+       clear it: log which check failed and stop, ending the entry with
+       `**Blocker-tag:** ci-check-failed`. Leave the PR open. Be clear about
+       what follows: Step 3 resumes such a PR at 6.5, not at a worker, so
+       nothing here diagnoses the check — the next tick reaches 6.8 and stops
+       the same way. That repetition is the point. Three in a row is what
+       Step 0's circuit breaker counts, and pausing for a human is the right
+       outcome for a check the loop cannot fix.
 6.9. `gh pr merge <number> --squash --match-head-commit <headRefOid from 6.5>`.
      Pinning the merge to the exact head SHA closes the gap between 6.8's
      check and this call — if any commit lands on the branch in between, `gh`
