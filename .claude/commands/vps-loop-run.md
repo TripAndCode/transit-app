@@ -740,10 +740,22 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
      whenever the pushed tip carried the skip trailer — push a tip without it
      and wait, rather than merging something CI never saw. `main` carries no
      branch protection, so nothing else enforces this. Do
-     not merge through a `CONFLICTING`/`DIRTY` state — if either check fails
-     here despite 6.6 above, treat it the same as 6.6's "main advanced" case,
-     counting against the same 2-try cap (re-sync, re-review, restart from
-     6.5) rather than forcing through.
+     not merge through a `CONFLICTING`/`DIRTY` state — if the mergeability
+     check fails here despite 6.6 above, treat it the same as 6.6's "main
+     advanced" case, counting against the same 2-try cap (re-sync, re-review,
+     restart from 6.5) rather than forcing through.
+
+     The two CI outcomes end the tick differently, and neither is a re-sync:
+     `main` has not moved, so restarting from 6.5 would change nothing.
+     - **Rollup EMPTY** — no run was triggered, because the pushed tip carried
+       the skip trailer. Push one more commit on the branch whose message
+       omits it, wait for the run, and re-check 6.8 once. Count that as one
+       of the 2 tries; if the rollup is still empty, stop and log it, since
+       something other than the trailer is preventing the run.
+     - **Rollup has a non-SUCCESS entry** — CI ran and found something. That
+       is a real failure in the branch, not a race to retry: stop, log which
+       check failed, and leave the PR open and unmerged for the next tick to
+       pick up as ordinary work.
 6.9. `gh pr merge <number> --squash --match-head-commit <headRefOid from 6.5>`.
      Pinning the merge to the exact head SHA closes the gap between 6.8's
      check and this call — if any commit lands on the branch in between, `gh`
@@ -792,8 +804,8 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
   discard).
 - Marking a PR ready and merging it (Step 6.7/6.9) are authorized, but only after
   Step 5's `/review-branch` pass is clean, GitHub reports
-  the PR mergeable/clean, AND `main` hasn't advanced since that pass ran (Step
-  6.5/6.6/6.8). Never merge through a `CONFLICTING`/`DIRTY` state or a `main` that
+  the PR mergeable/clean, CI is green on the PR's head, AND `main` hasn't
+  advanced since that pass ran (Step 6.5/6.6/6.8). Never merge through a `CONFLICTING`/`DIRTY` state or a `main` that
   moved on, and never skip or shortcut the review gate to reach a merge.
 - If a step's tool call itself errors (a real tool/dispatch failure, not a Major
   finding), stop and log the error to the Status log with as much detail as available
