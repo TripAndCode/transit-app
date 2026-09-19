@@ -909,11 +909,18 @@ def analyze(agency_id: int, conn, ch_client) -> None:
         # column) so NULL and '' can't split into duplicate keys. Readers that
         # surface service_type map '' back to None; the service-split panels
         # naturally ignore '' (no 平日/土日祝 match).
+        # to_char, not date::text: this is the only aggregate whose `date`
+        # column is text, so what this projects IS the stored value, and its
+        # format is a contract — the per-date purge matches this column
+        # against an ISO string, and every reader parses it as one. Naming
+        # the format here states that contract where the value is produced
+        # instead of leaving it to `date::text`'s dependence on the session's
+        # DateStyle.
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped)
             SELECT
                 %(agency_id)s AS agency_id,
-                date::text, route_code,
+                to_char(date, 'YYYY-MM-DD') AS date, route_code,
                 COALESCE(service_type, '') AS service_type,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
                 COUNT(*) AS samples,

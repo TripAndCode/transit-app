@@ -1917,3 +1917,28 @@ def test_the_static_fingerprint_notices_a_recalendared_trip(pg_conn, agency_id):
     pg_conn.commit()
 
     assert _fingerprint(pg_conn, agency_id) != before
+
+
+def test_the_text_dated_aggregate_stores_iso_dates(pg_conn, agency_id, ch_client):
+    """agg_daily_trend stores its service date as text, and text has a format.
+
+    The per-date purge matches this column against an ISO string, and every
+    reader parses it as one, so the format is a contract rather than an
+    incidental rendering. Nothing else in the suite would notice it drifting:
+    the column is text, so a differently-formatted value stores and reads
+    back perfectly happily, and only the purge quietly stops matching.
+    """
+    _seed_updates(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT date FROM agg_daily_trend WHERE agency_id = %s", (agency_id,))
+        stored = [r[0] for r in cur.fetchall()]
+    assert stored, "fixture produced no rows, so this would pass vacuously"
+    for value in stored:
+        date.fromisoformat(value)
+
+    # A second run purges by that string and reinserts the same primary
+    # keys, which is where a mismatch would surface as a collision.
+    analyze(agency_id, pg_conn, ch_client)
+    assert _agg_snapshot(pg_conn, agency_id)["agg_daily_trend"]
