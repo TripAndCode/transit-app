@@ -1,11 +1,20 @@
 """Tests for module-level startup validators in ``api.main``."""
 
+import importlib
 import pathlib
 
 import pytest
 
+import api.main
 from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_llm_providers, _validate_session_signing_key
 from pipeline.query.llm_client import ProviderConfig
+
+
+def _reload_main():
+    """Reload ``api.main`` so module-level app construction re-reads env vars
+    that were changed after the initial import (e.g. by ``monkeypatch``)."""
+    importlib.reload(api.main)
+    return api.main.app
 
 
 def test_validate_cors_origins_rejects_wildcard_with_credentials():
@@ -68,6 +77,43 @@ def test_validate_llm_providers_rejects_empty_ladder():
 def test_validate_llm_providers_allows_nonempty_ladder():
     """At least one usable provider is the supported configuration — no error."""
     _validate_llm_providers([ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")])
+
+
+def test_openapi_docs_disabled_by_default_behind_https(monkeypatch):
+    """No explicit ``OPENAPI_DOCS_ENABLED`` and an HTTPS ``PUBLIC_BASE_URL``
+    (a real deployment, per ``cookie_secure()``) must not expose the docs."""
+    monkeypatch.delenv("OPENAPI_DOCS_ENABLED", raising=False)
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://transit.example.com")
+    app = _reload_main()
+    assert app.docs_url is None
+    assert app.redoc_url is None
+    assert app.openapi_url is None
+
+
+def test_openapi_docs_enabled_by_default_for_local_http(monkeypatch):
+    """No explicit flag and a plain-HTTP ``PUBLIC_BASE_URL`` (local dev) keeps
+    today's behavior: docs stay reachable."""
+    monkeypatch.delenv("OPENAPI_DOCS_ENABLED", raising=False)
+    monkeypatch.setenv("PUBLIC_BASE_URL", "http://localhost:8000")
+    app = _reload_main()
+    assert app.openapi_url == "/openapi.json"
+    assert any(getattr(route, "path", None) == "/docs" for route in app.routes)
+
+
+def test_openapi_docs_env_flag_can_force_enable_behind_https(monkeypatch):
+    """An explicit flag always wins over the HTTPS-based default."""
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://transit.example.com")
+    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", "1")
+    app = _reload_main()
+    assert app.openapi_url == "/openapi.json"
+
+
+def test_openapi_docs_env_flag_can_force_disable_for_local_http(monkeypatch):
+    """An explicit flag can also lock docs off for a local boot."""
+    monkeypatch.setenv("PUBLIC_BASE_URL", "http://localhost:8000")
+    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", "0")
+    app = _reload_main()
+    assert app.openapi_url is None
 
 
 def test_dockerfile_cmd_trusts_railway_proxy_headers():
