@@ -102,7 +102,7 @@ export function DashboardPreview() {
           border: "1px solid var(--border-subtle)",
           borderRadius: "var(--radius-lg)",
           overflow: "hidden",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+          boxShadow: "var(--el-2)",
         }}
       >
         <PreviewSidebar

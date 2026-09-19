@@ -202,7 +202,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [] }: Prop
             display: "flex",
             alignItems: "center",
             gap: 6,
-            fontSize: 10,
+            fontSize: "var(--text-xs)",
             color: "var(--text-tertiary)",
             marginTop: 4,
           }}
@@ -224,7 +224,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [] }: Prop
             borderRadius: 4,
             padding: "6px 10px",
             fontSize: 12,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+            boxShadow: "var(--el-2)",
           }}
         >
           <div>

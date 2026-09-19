@@ -27,11 +27,11 @@ const onTimeStyle: React.CSSProperties = { fontSize: 12, color: "var(--text-seco
 const barRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 };
 const barBg: React.CSSProperties = { flex: 1, height: 6, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" };
 const barFill: React.CSSProperties = { height: "100%", borderRadius: 3 };
-const samplesStyle: React.CSSProperties = { fontSize: 11, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
-const secondaryRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--text-tertiary)", marginBottom: 4 };
-const coverageStyle: React.CSSProperties = { fontSize: 11.5, color: "var(--text-tertiary)" };
+const samplesStyle: React.CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+const secondaryRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", marginBottom: 4 };
+const coverageStyle: React.CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-tertiary)" };
 const youBadgeStyle: React.CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   fontWeight: 600,
   letterSpacing: "0.06em",
   textTransform: "uppercase",
@@ -191,17 +191,17 @@ export function NetworkTab() {
         .network-card-metrics { display: grid; grid-template-columns: 1.35fr repeat(3, 1fr); gap: 8px; min-width: 0; margin: 14px 0 16px; }
         .network-card-metric { min-width: 0; padding: 10px 12px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); text-align: left; }
         .network-card-metric--delay { background: var(--accent-soft); border-color: var(--accent); }
-        .network-card-metric-label { display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+        .network-card-metric-label { display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: var(--text-xs); font-weight: 600; }
         .network-card-metric--delay > div { font-size: 28px !important; line-height: 1; }
         .network-card-metric--delay .network-card-metric-label { color: var(--text-primary); }
-        @media (max-width: 720px) { .network-card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        /* BP.sm */ @media (max-width: 640px) { .network-card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         .network-help { max-width: 640px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
         .network-howto { max-width: 680px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
         .network-howto summary { display: inline-flex; padding: 4px 0; font-size: 13px; font-weight: 600; }
         .network-howto-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
         .network-howto-list li { min-width: 0; padding: 9px 10px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); }
         .network-howto-list strong { display: block; margin-bottom: 2px; color: var(--text-primary); font-size: 12px; }
-        @media (max-width: 720px) { .network-howto-list { grid-template-columns: 1fr; } }
+        /* BP.sm */ @media (max-width: 640px) { .network-howto-list { grid-template-columns: 1fr; } }
       `}</style>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
         {t("network.eyebrow", { from: ctx.from, to: ctx.to })}

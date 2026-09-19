@@ -179,7 +179,7 @@ export function Sidebar() {
                   style={{
                     padding: "0 22px",
                     marginBottom: 6,
-                    fontSize: 10.5,
+                    fontSize: "var(--text-xs)",
                     fontWeight: 600,
                     letterSpacing: "0.07em",
                     textTransform: "uppercase",
@@ -300,7 +300,7 @@ export function Sidebar() {
           <span
             style={{
               fontFamily: "var(--font-display)",
-              fontSize: 10.5,
+              fontSize: "var(--text-xs)",
               color: "var(--text-tertiary)",
               marginTop: 2,
               letterSpacing: "0.04em",

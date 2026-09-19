@@ -85,7 +85,7 @@ export function RangeBadge() {
           alignItems: "center",
           gap: 8,
           cursor: "pointer",
-          boxShadow: active ? "0 1px 3px rgba(91,108,173,0.30)" : "none",
+          boxShadow: active ? "var(--el-1)" : "none",
           transition: "all var(--transition)",
         }}
       >
@@ -104,7 +104,7 @@ export function RangeBadge() {
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius-lg)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.10)",
+            boxShadow: "var(--el-2)",
             padding: 8,
             color: "var(--text-primary)",
           }}

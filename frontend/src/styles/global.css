@@ -55,7 +55,7 @@
   --delay-flag-soft: var(--bg-soft);
   --delay-flag-soft: color-mix(in srgb, var(--delay-flag) 10%, transparent);
   --card-border: #E4E7EC;
-  --card-radius: 10px;
+  --card-radius: var(--radius-lg);
   /* Tooltip is intentionally theme-invariant (always a dark chip with white
      text, in both light and dark mode) — NOT derived from --text-primary,
      which flips light-to-dark and would otherwise break tooltip contrast. */
@@ -109,7 +109,43 @@
   --space-6: 32px;
   --radius: 6px;
   --radius-lg: 10px;
-  --transition: 150ms ease-out;
+  --radius-xl: 14px;
+  /* Motion scale. --dur-1 is UI feedback (hover, focus, colour), --dur-2 a
+     panel or menu opening, --dur-3 a chart or bar drawing itself in, --dur-4
+     an ambient loop (skeleton pulse). --ease-out decelerates hard for things
+     entering; --ease-in-out is symmetric, for things that move and settle.
+     Every duration collapses to 0ms under the reduced-motion block below, so
+     naming a token here is also how a rule opts into that. */
+  --dur-1: 150ms;
+  --dur-2: 240ms;
+  --dur-3: 600ms;
+  --dur-4: 1200ms;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --transition: var(--dur-1) var(--ease-out);
+  /* Elevation scale: el-1 a resting card, el-2 something floating over the
+     page (menu, popover, tooltip, hover lift), el-3 a modal or full overlay.
+     On light surfaces depth reads as a soft drop shadow; the dark theme
+     overrides these with a hairline ring plus a top inset highlight, because
+     a black shadow is invisible on a near-black page and separation has to
+     come from the edge instead. Every tier carries the hairline ring, in both
+     themes: a surface that swaps tiers on hover would otherwise lose its own
+     edge at the moment it gains depth. */
+  --el-1: 0 1px 3px rgba(17, 24, 39, 0.05), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  --el-2: 0 4px 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  --el-3: 0 24px 60px rgba(17, 24, 39, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  /* Type scale. --text-xs (12px) is the floor for any DOM text: below it CJK
+     glyphs lose stroke separation and Japanese labels stop being readable.
+     SVG chart tick labels are the one exception and set their size as an
+     attribute, not through this scale. */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 17px;
+  --text-lg: 20px;
+  --text-xl: 26px;
+  --text-2xl: 34px;
+  --text-3xl: 46px;
   --font-display: "Noto Serif JP", "Times New Roman", serif;
   --font-body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
                "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
@@ -158,6 +194,36 @@
   /* Border, not text -- reuses the existing dark --border-subtle value
      rather than introducing a third near-identical border hue. */
   --card-border: var(--border-subtle);
+  /* Depth on a near-black page cannot come from a black shadow, so every
+     tier carries a hairline ring and a top inset highlight to draw its own
+     edge; only the floating tiers add a drop, and el-3 makes it deep enough
+     to darken the page visibly behind a modal. */
+  --el-1: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --el-2: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
+          0 8px 24px rgba(0, 0, 0, 0.40);
+  --el-3: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
+          0 24px 60px rgba(0, 0, 0, 0.60);
+}
+
+/* One global reduced-motion regime, so a stylesheet does not have to remember
+   to opt in: the duration tokens collapse, and the blanket rule catches
+   animations and transitions declared with literal durations (including
+   third-party CSS the app does not own). The near-zero -- rather than 0 --
+   duration keeps `animationend`/`transitionend` listeners firing, so a
+   component that advances state on one does not hang. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-4: 0ms;
+    --transition: 0s;
+  }
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
 
 /* Keep native date controls legible on both themes. Without an explicit
@@ -171,7 +237,7 @@ input[type="date"] { color-scheme: light; }
 .app-shell { --accent: #187b80; --accent-soft: #e1f1f1; }
 :root[data-theme="dark"] .app-shell { --accent: #43c5ba; --accent-soft: #183b3d; }
 .focus-data-status { position: relative; margin: 18px 14px; font-size: 12px; color: var(--text-secondary); }
-.focus-data-status > div { position: absolute; bottom: 30px; left: 0; padding: 16px; width: min(280px, 75vw); border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-surface); z-index: 410; }
+.focus-data-status > div { position: absolute; bottom: 30px; left: 0; padding: 16px; width: min(280px, 75vw); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-surface); z-index: 410; }
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -200,7 +266,8 @@ input[type="date"] { color-scheme: light; }
   border-radius: 50%;
   background: var(--accent);
 }
-@media (max-width: 720px) {
+/* BP.sm */
+@media (max-width: 640px) {
   .definition-meta { grid-template-columns: 1fr; max-width: 100%; }
 }
 html, body, #root { height: 100%; margin: 0; }
@@ -234,7 +301,7 @@ html, body, #root { height: 100%; margin: 0; }
 .app-notice-stack > *:not([data-activity-strip]) {
   margin: 0 16px;
   border: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .app-notice-stack > *:not([data-activity-strip]):first-child {
@@ -259,7 +326,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   background: var(--bg-surface);
   color: var(--accent-strong);
   border: 1px solid var(--card-border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 7px 13px;
   font-size: 12px;
   font-weight: 500;
@@ -295,15 +362,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   z-index: 60;
   max-width: 240px;
   padding: 5px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--tooltip-bg);
   color: var(--tooltip-fg);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
   line-height: 1.45;
   text-align: left;
   white-space: pre-line;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--el-2);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -338,15 +405,44 @@ input:focus, select:focus, textarea:focus {
 
 summary::-webkit-details-marker { display: none; }
 
+/* A still gradient fill is the whole placeholder; the pulse below is an
+   enhancement layered on top, so the skeleton still reads as "loading" when
+   motion is suppressed. A slow opacity breath replaces the sliding shimmer
+   that used to run here -- a band travelling across the screen draws the eye
+   away from whatever the user was reading, which a fade does not. */
 .skeleton {
   background: linear-gradient(90deg, var(--skeleton-a) 0%, var(--skeleton-b) 50%, var(--skeleton-a) 100%);
   background-size: 200% 100%;
-  animation: skeleton-shimmer 1.4s ease-in-out infinite;
   border-radius: var(--radius);
 }
-@keyframes skeleton-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.62; }
+  }
+  .skeleton { animation: skeleton-pulse calc(var(--dur-4) * 1.5) var(--ease-in-out) infinite; }
+}
+
+/* ---------- Shared entrance animations ----------
+   These live here rather than in a tab stylesheet so every route can use
+   them; a lazily-loaded tab sheet would otherwise define the same keyframes
+   again, and only for itself. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ov-fade-in {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes ov-grow-x {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
+  }
+  @keyframes ov-modal-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.99); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .ov-anim-fade   { animation: ov-fade-in var(--dur-3) var(--ease-out) forwards; }
+  .ov-anim-grow-x { animation: ov-grow-x var(--dur-3) var(--ease-out) var(--dur-2) backwards; }
+  .ov-modal       { animation: ov-modal-in var(--dur-2) var(--ease-out); }
 }
 
 /* MapLibre's popup override rules (.maplibregl-popup-content etc.) live in
@@ -409,7 +505,7 @@ summary::-webkit-details-marker { display: none; }
 }
 .user-manual-content img {
   max-width: 100%;
-  border-radius: 8px;
+  border-radius: var(--radius);
   border: 1px solid var(--border-soft);
   margin: 12px 0;
 }

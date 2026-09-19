@@ -79,7 +79,7 @@ export function AdminAvatar({ label }: { label: string }) {
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        fontSize: 11,
+        fontSize: "var(--text-xs)",
         fontWeight: 700,
         marginRight: 9,
         verticalAlign: "middle",

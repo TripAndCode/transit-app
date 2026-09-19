@@ -86,7 +86,7 @@ export function QuestionDock({
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
           borderRadius: 12,
           padding: "10px 12px",
-          boxShadow: composing ? "0 2px 10px rgba(0,0,0,0.04)" : "none",
+          boxShadow: composing ? "var(--el-1)" : "none",
           transition: "box-shadow 120ms ease",
         }}
       >
@@ -141,7 +141,7 @@ export function QuestionDock({
             {!composing && (
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--text-tertiary, #999)",
                   marginLeft: 6,
                 }}

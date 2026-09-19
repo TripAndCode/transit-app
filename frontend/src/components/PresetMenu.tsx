@@ -100,7 +100,7 @@ export function PresetMenu({
               fontWeight: 500,
               padding: "6px 18px",
               cursor: saveDisabled ? "not-allowed" : "pointer",
-              boxShadow: saveDisabled ? "none" : "0 1px 2px rgba(91,108,173,0.25)",
+              boxShadow: saveDisabled ? "none" : "var(--el-1)",
             }}
           >
             {t("common.save")}

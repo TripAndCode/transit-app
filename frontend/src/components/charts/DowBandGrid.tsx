@@ -8,7 +8,7 @@ const RAMP_STOPS = 5;
  * that uses one, so the legend reflects the encoding actually shown. */
 export function Legend({ min, max, unit, colorFor = delayColor }: { min: number; max: number; unit: string; colorFor?: (v: number) => string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, fontSize: 11, color: "var(--text-secondary)" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
       <span style={{ fontVariantNumeric: "tabular-nums" }}>{min.toFixed(1)}</span>
       <span style={{ display: "inline-flex", gap: 2 }}>
         {Array.from({ length: RAMP_STOPS }, (_, i) => (
@@ -47,14 +47,14 @@ export function BandGrid({
       <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
         <span />
         {BAND_ORDER.map((b) => (
-          <span key={b} style={{ fontSize: 11, color: "var(--text-tertiary)", textAlign: "center" }}>
+          <span key={b} style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center" }}>
             {bandLabel(b)}
           </span>
         ))}
         {Array.from({ length: 7 }, (_, di) => {
           const dow = di + 1;
           return [
-            <div key={`l${dow}`} style={{ fontSize: 11, color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+            <div key={`l${dow}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
               {dayLabel(dow)}
             </div>,
             ...BAND_ORDER.map((b) => {

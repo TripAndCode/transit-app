@@ -67,7 +67,7 @@ export function InsightHint({
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius-lg)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.10)",
+            boxShadow: "var(--el-2)",
             padding: "12px 14px",
             color: "var(--text-primary)",
             fontSize: 12,

@@ -16,7 +16,7 @@
    this is the same fact for a screen reader. */
 .focus-filters__pending { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .focus-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.focus-actions button, .focus-actions a { padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 5px; background: var(--bg-surface); color: var(--text-primary); text-decoration: none; font-size: 13px; }
+.focus-actions button, .focus-actions a { padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-surface); color: var(--text-primary); text-decoration: none; font-size: 13px; }
 /* Higher specificity than the generic rule above (two classes vs. one class
    + one type) so .btn-ghost buttons inside .focus-actions (CSV/share
    actions on the report and route-analysis pages) actually get the shared
@@ -24,7 +24,7 @@
    rule above still wins padding/border-radius/font-size ties against a
    plain .btn-ghost (0,1,0 < 0,1,1), so every property .btn-ghost sets needs
    restating here, not just the two that looked visibly wrong. */
-.focus-actions .btn-ghost { padding: 7px 13px; border-radius: 8px; font-size: 12px; font-weight: 500; border-color: var(--card-border); color: var(--accent-strong); }
+.focus-actions .btn-ghost { padding: 7px 13px; border-radius: var(--radius); font-size: 12px; font-weight: 500; border-color: var(--card-border); color: var(--accent-strong); }
 .focus-actions .btn-ghost:disabled { color: var(--text-tertiary); border-color: var(--border-subtle); }
 .focus-split { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; }
 .focus-tab-panel { margin-bottom: 16px; }
@@ -48,5 +48,6 @@
    next action (CSV / share link) instead of trailing off after the
    definitions accordion. */
 .focus-report-footer { margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; padding-bottom: 28px; }
+/* BP.md */
 @media (max-width: 900px) { .focus-split { grid-template-columns: 1fr; } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
 @media print { body { background: white; } .app-shell { display: block !important; height: auto !important; } .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack { display: none !important; } main { overflow: visible !important; } .focus-page { color: black; } .focus-page svg { break-inside: avoid; } }

@@ -86,7 +86,7 @@ export function PreviewAnalysisPanel() {
                   opacity: 0.35 + 0.65 * (delayMin / MAX_HOURLY),
                 }}
               />
-              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{hour}:00</span>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{hour}:00</span>
             </div>
           ))}
         </div>

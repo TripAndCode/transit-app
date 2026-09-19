@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
 import { DELAY_RAMP, delayColor, delayColorResolved, severeColorResolved, severityStepColors } from "./tokens";
 
@@ -91,5 +93,118 @@ describe("severityStepColors() (MapLibre step-expression stops)", () => {
       "#D4622A", 5,
       "#d92121", // severeColorResolved() jsdom fallback
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Design-token contract (global.css)
+//
+// These tokens are a shared vocabulary other stylesheets and components name
+// directly, so their presence and exact values are asserted against the
+// stylesheet source rather than a computed cascade (jsdom applies no author
+// CSS). Reading the file is the point: it is the single source of truth.
+// ---------------------------------------------------------------------------
+// `process.cwd()` is the `frontend/` package root under vitest; the module
+// URL is not a file: URL after vite's transform, so it cannot be used here.
+const globalCss = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8");
+
+/** Body of the first rule whose selector text starts at `selector`, with
+ *  braces balanced so nested at-rules/rules are included. */
+function ruleBody(css: string, selector: string): string {
+  const at = css.indexOf(selector);
+  if (at === -1) throw new Error(`selector not found: ${selector}`);
+  const open = css.indexOf("{", at + selector.length - 1);
+  let depth = 0;
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
+  }
+  throw new Error(`unbalanced braces after: ${selector}`);
+}
+
+/** Last declared value of `prop` in `body` (later declaration wins, matching
+ *  the cascade), with runs of whitespace collapsed. */
+function decl(body: string, prop: string): string | null {
+  const re = new RegExp(`(?:^|[;{\\s])${prop}\\s*:\\s*([^;]+);`, "g");
+  let last: string | null = null;
+  for (const m of body.matchAll(re)) last = m[1].replace(/\s+/g, " ").trim();
+  return last;
+}
+
+const rootBlock = ruleBody(globalCss, ":root {");
+const darkBlock = ruleBody(globalCss, ':root[data-theme="dark"] {');
+const reduceBlock = ruleBody(globalCss, "@media (prefers-reduced-motion: reduce)");
+
+describe("motion tokens", () => {
+  it.each([
+    ["--dur-1", "150ms"],
+    ["--dur-2", "240ms"],
+    ["--dur-3", "600ms"],
+    ["--dur-4", "1200ms"],
+    ["--ease-out", "cubic-bezier(.22, 1, .36, 1)"],
+    ["--ease-in-out", "cubic-bezier(.65, 0, .35, 1)"],
+  ])("%s is defined on the bare :root as %s", (prop, value) => {
+    expect(decl(rootBlock, prop)).toBe(value);
+  });
+
+  it("--transition is composed from the motion tokens, not a literal", () => {
+    expect(decl(rootBlock, "--transition")).toBe("var(--dur-1) var(--ease-out)");
+  });
+});
+
+describe("elevation tokens", () => {
+  it.each(["--el-1", "--el-2", "--el-3"])("%s is defined in both themes", (prop) => {
+    expect(decl(rootBlock, prop)).toBeTruthy();
+    expect(decl(darkBlock, prop)).toBeTruthy();
+  });
+
+  it("the dark elevations are the hairline/inset treatment, not the light drop shadows", () => {
+    for (const prop of ["--el-1", "--el-2", "--el-3"]) {
+      const dark = decl(darkBlock, prop)!;
+      expect(dark).toContain("inset");
+      expect(dark).not.toBe(decl(rootBlock, prop));
+    }
+    expect(decl(darkBlock, "--el-3")).toMatch(/rgba\(0, ?0, ?0, ?0?\.[5-9]\d*\)/);
+  });
+});
+
+describe("type scale tokens", () => {
+  it.each([
+    ["--text-xs", "12px"],
+    ["--text-sm", "13px"],
+    ["--text-base", "15px"],
+    ["--text-md", "17px"],
+    ["--text-lg", "20px"],
+    ["--text-xl", "26px"],
+    ["--text-2xl", "34px"],
+    ["--text-3xl", "46px"],
+  ])("%s is %s", (prop, value) => {
+    expect(decl(rootBlock, prop)).toBe(value);
+  });
+});
+
+describe("radius tokens", () => {
+  it.each([
+    ["--radius", "6px"],
+    ["--radius-lg", "10px"],
+    ["--radius-xl", "14px"],
+  ])("%s is %s", (prop, value) => {
+    expect(decl(rootBlock, prop)).toBe(value);
+  });
+});
+
+describe("global reduced-motion regime", () => {
+  it("collapses every duration token", () => {
+    for (const prop of ["--dur-1", "--dur-2", "--dur-3", "--dur-4"]) {
+      expect(decl(reduceBlock, prop)).toBe("0ms");
+    }
+    expect(decl(reduceBlock, "--transition")).toBe("0s");
+  });
+
+  it("neutralises animations and transitions app-wide", () => {
+    expect(reduceBlock).toMatch(/\*,\s*\*::before,\s*\*::after/);
+    expect(decl(reduceBlock, "animation-duration")).toBe(".01ms !important");
+    expect(decl(reduceBlock, "animation-iteration-count")).toBe("1 !important");
+    expect(decl(reduceBlock, "transition-duration")).toBe(".01ms !important");
   });
 });

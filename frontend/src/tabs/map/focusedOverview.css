@@ -36,4 +36,5 @@
 .focus-trip b { margin-left: auto; color: var(--color-danger); white-space: nowrap; }
 .focus-trip a { font-size: 12px; }
 .focus-live-queue details { margin-top: 20px; }
-@media (max-width: 1000px) { .focused-overview .ops-workspace { grid-template-columns: 1fr; max-height: none; } .focused-overview .ops-map { height: 50dvh; } .focus-live-queue { padding: 16px 0; } .ops-resizer { display: none; } }
+/* BP.md */
+@media (max-width: 900px) { .focused-overview .ops-workspace { grid-template-columns: 1fr; max-height: none; } .focused-overview .ops-map { height: 50dvh; } .focus-live-queue { padding: 16px 0; } .ops-resizer { display: none; } }

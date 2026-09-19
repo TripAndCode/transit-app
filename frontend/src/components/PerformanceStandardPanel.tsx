@@ -50,7 +50,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
         <h3 style={{ margin: 0, fontSize: 14 }}>{t("reports.performance_standard.title")}</h3>
         <span
           style={{
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             fontWeight: 500,
             color: "var(--text-secondary)",
             background: "var(--bg-soft)",
@@ -87,7 +87,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
                   <td style={td()}>
                     {t(`reports.performance_standard.metric_label.${r.metric_type}`)}
                     {r.metric_scope === "agency" && (
-                      <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)" }}>
+                      <span style={{ display: "block", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
                         {t("reports.performance_standard.scope_agency_note")}
                       </span>
                     )}
@@ -103,7 +103,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
         </div>
       )}
       {data && (
-        <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--text-tertiary)", fontStyle: "italic" }}>
+        <p style={{ margin: "12px 0 0", fontSize: "var(--text-xs)", color: "var(--text-tertiary)", fontStyle: "italic" }}>
           {data.disclaimer}
         </p>
       )}

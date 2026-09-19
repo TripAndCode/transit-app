@@ -77,7 +77,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: 8,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+            boxShadow: "var(--el-2)",
             padding: 6,
             zIndex: 10,
           }}
@@ -102,7 +102,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           </Link>
           <button type="button" role="menuitem" onClick={() => void i18n.changeLanguage(other)} style={popItemStyle}>
             <span>{t("common.language_aria")}</span>
-            <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{LOCALE_LABELS[current]}</span>
+            <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>{LOCALE_LABELS[current]}</span>
           </button>
           <button
             type="button"
@@ -158,7 +158,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             fontWeight: 700,
           }}
         >
@@ -168,13 +168,13 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {displayName}
           </div>
-          <div style={{ fontSize: 10, color: "var(--text-tertiary)" }}>{LOCALE_LABELS[current]}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{LOCALE_LABELS[current]}</div>
         </span>
         <span
           aria-hidden
           style={{
             color: "var(--text-tertiary)",
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             transform: open ? "rotate(180deg)" : "none",
             transition: "transform 160ms ease",
           }}

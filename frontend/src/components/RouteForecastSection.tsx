@@ -72,7 +72,7 @@ function Tooltip({ tip }: { tip: Tip }) {
         fontSize: 12,
         padding: "5px 9px",
         borderRadius: 6,
-        boxShadow: "0 4px 14px rgba(0,0,0,.18)",
+        boxShadow: "var(--el-2)",
         whiteSpace: "nowrap",
         fontVariantNumeric: "tabular-nums",
       }}
@@ -205,7 +205,7 @@ function HeatmapGrid({
                         position: "absolute",
                         top: 1,
                         right: 2,
-                        fontSize: 9,
+                        fontSize: "var(--text-xs)",
                         fontWeight: 800,
                         lineHeight: 1,
                         color: "var(--color-warning)",
@@ -225,7 +225,7 @@ function HeatmapGrid({
         <div style={{ display: "grid", gridTemplateColumns: cols, gap, marginTop: 5 }}>
           <span />
           {Array.from({ length: 24 }, (_, h) => (
-            <span key={h} style={{ fontSize: 10, color: "var(--text-tertiary)", textAlign: "center" }}>
+            <span key={h} style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center" }}>
               {h % 6 === 0 ? h : ""}
             </span>
           ))}
@@ -274,7 +274,7 @@ function MarginBars({
       </div>
       <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
         {labels.map((l, i) => (
-          <span key={i} style={{ flex: 1, textAlign: "center", fontSize: 10, color: "var(--text-tertiary)" }}>
+          <span key={i} style={{ flex: 1, textAlign: "center", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
             {sparse ? (i % 6 === 0 ? i : "") : l}
           </span>
         ))}
@@ -289,7 +289,7 @@ function StatStrip({ stats }: { stats: { label: string; value: string }[] }) {
       {stats.map((s) => (
         <div key={s.label} style={{ flex: 1, minWidth: 110, background: "var(--bg-soft)", borderRadius: 8, padding: "9px 12px" }}>
           <b style={{ display: "block", fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{s.value}</b>
-          <small style={{ fontSize: 10, color: "var(--text-2, var(--text-secondary))" }}>{s.label}</small>
+          <small style={{ fontSize: "var(--text-xs)", color: "var(--text-2, var(--text-secondary))" }}>{s.label}</small>
         </div>
       ))}
     </div>
@@ -311,7 +311,7 @@ function Card({ title, sublabel, action, testid, onOpen, children }: {
         <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span>
         {action}
       </div>
-      <p style={{ fontSize: 11, color: "var(--text-tertiary)", margin: "0 0 10px" }}>{sublabel}</p>
+      <p style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "0 0 10px" }}>{sublabel}</p>
       {children}
     </div>
   );
@@ -476,7 +476,7 @@ function AgencyLanding({
     <>
       {data.worst && (
         <div data-testid="worst-headline" style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)", letterSpacing: "0.04em", marginBottom: 2 }}>{worstLabel}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", letterSpacing: "0.04em", marginBottom: 2 }}>{worstLabel}</div>
           <div style={{ fontSize: 16, fontWeight: 600 }}>{worstPhrase(data.worst)}</div>
         </div>
       )}
@@ -495,7 +495,7 @@ function AgencyLanding({
       )}
 
       {data.disclaimer && (
-        <p style={{ color: "var(--text-tertiary)", fontSize: 11, lineHeight: 1.5, marginTop: 16 }}>{data.disclaimer}</p>
+        <p style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)", lineHeight: 1.5, marginTop: 16 }}>{data.disclaimer}</p>
       )}
     </>
   );
@@ -594,10 +594,10 @@ function RouteDetail({
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-        <Card title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
+        <Card title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
           <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
         </Card>
-        <Card title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
+        <Card title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
           <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
         </Card>
       </div>
@@ -617,7 +617,7 @@ function RouteDetail({
       )}
 
       {data.disclaimer && (
-        <p style={{ color: "var(--text-tertiary)", fontSize: 11, lineHeight: 1.5, marginTop: 16 }}>{data.disclaimer}</p>
+        <p style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)", lineHeight: 1.5, marginTop: 16 }}>{data.disclaimer}</p>
       )}
 
       {view && (
@@ -642,7 +642,7 @@ function RouteDetail({
             );
           })()}
           {data.disclaimer && (
-            <p style={{ color: "var(--text-tertiary)", fontSize: 11, lineHeight: 1.5, marginTop: 16, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
+            <p style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)", lineHeight: 1.5, marginTop: 16, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
               {data.disclaimer}
             </p>
           )}

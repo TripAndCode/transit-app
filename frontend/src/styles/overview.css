@@ -16,17 +16,15 @@
 /* ---------- Card surface (everything except hero) ---------- */
 .ov-card {
   background: var(--bg-surface);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   padding: 32px;
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.04),
-    0 0 0 1px var(--border-soft);
+  box-shadow: var(--el-1);
   margin-bottom: 32px;
   position: relative;
 }
 
 .ov-card-eyebrow {
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-tertiary);
@@ -60,7 +58,7 @@
   font-size: 13px;
   padding: 6px 8px;
   margin: 0 -8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   transition: background-color 200ms ease;
 }
 /* Plain fallback first: color-mix() has no built-in fallback, and an
@@ -80,13 +78,13 @@
 .ov-pareto-track {
   height: 8px;
   background: var(--track-bg);
-  border-radius: 4px;
+  border-radius: var(--radius);
   overflow: hidden;
   position: relative;
 }
 .ov-pareto-fill {
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--radius);
   outline: 1px solid var(--border-soft);
   outline-offset: -1px;
   transition: height 200ms ease;
@@ -109,7 +107,7 @@
 /* ---------- Routes-to-check list (dedicated — do NOT reuse .ov-pareto-*,
    which ConcentrationBar.tsx and PeakHourRibbon.tsx also depend on) ---------- */
 .ov-check-section-hd {
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -132,7 +130,7 @@
 }
 .ov-check-name-code {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .ov-check-row {
   display: flex;
@@ -141,7 +139,7 @@
   padding: 10px 14px;
   background: var(--bg-surface);
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: var(--radius);
   margin-bottom: 5px;
   cursor: pointer;
   transition: background var(--transition);
@@ -179,7 +177,7 @@
   flex-shrink: 0;
 }
 .ov-check-arrow {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   flex-shrink: 0;
 }
@@ -228,7 +226,7 @@
 .ov-svc-track {
   height: 8px;
   background: var(--track-bg);
-  border-radius: 4px;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 .ov-svc-fill {
@@ -239,7 +237,7 @@
      fixed at 8-16% alpha, far off this rule's intended 50%. */
   background: rgba(71, 85, 105, 0.5);
   background: color-mix(in srgb, var(--trend-neutral) 50%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius);
   transform-origin: left center;
 }
 .ov-svc-story {
@@ -260,13 +258,13 @@
   background: var(--tooltip-bg);
   color: var(--tooltip-fg);
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
   z-index: 50;
   white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--el-2);
   transform: translate(-50%, -100%) translateY(-8px);
   transition: opacity 100ms;
 }
@@ -281,19 +279,8 @@
   border-color: var(--tooltip-bg) transparent transparent;
 }
 
-/* ---------- Animations (gated by reduced-motion) ---------- */
-@media (prefers-reduced-motion: no-preference) {
-  @keyframes ov-fade-in {
-    from { opacity: 0; transform: translateY(2px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes ov-grow-x {
-    from { transform: scaleX(0); }
-    to   { transform: scaleX(1); }
-  }
-  .ov-anim-fade    { animation: ov-fade-in 400ms ease-out forwards; }
-  .ov-anim-grow-x  { animation: ov-grow-x 700ms ease-out 200ms backwards; }
-}
+/* Entrance animations (.ov-anim-*, .ov-modal) live in global.css so every
+   tab can use them, not only this sheet. */
 
 /* ---------- Click-to-expand modal ---------- */
 .ov-modal-backdrop {
@@ -308,21 +295,14 @@
   justify-content: center;
   padding: 32px;
 }
-@media (prefers-reduced-motion: no-preference) {
-  @keyframes ov-modal-in {
-    from { opacity: 0; transform: translateY(6px) scale(0.99); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  .ov-modal { animation: ov-modal-in 240ms cubic-bezier(0.22, 1, 0.36, 1); }
-}
 .ov-modal {
   background: var(--bg-surface);
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   width: min(900px, 100%);
   max-height: calc(100vh - 64px);
   display: flex;
   flex-direction: column;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--el-3);
 }
 .ov-modal-header {
   display: flex;
@@ -344,7 +324,7 @@
   color: var(--text-secondary);
   cursor: pointer;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   line-height: 1;
 }
 .ov-modal-close:hover {
@@ -364,13 +344,11 @@
 /* Card hover affordance for the clickable summary cards. */
 .ov-card.ov-clickable {
   cursor: pointer;
-  transition: transform 200ms ease, box-shadow 200ms ease;
+  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 .ov-card.ov-clickable:hover {
   transform: translateY(-1px);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.06),
-    0 0 0 1px var(--border-soft);
+  box-shadow: var(--el-2);
 }
 .ov-card.ov-clickable:focus-visible {
   outline: 2px solid var(--accent);
@@ -426,7 +404,8 @@
 }
 
 /* ---------- Mobile ---------- */
-@media (max-width: 600px) {
+/* BP.sm */
+@media (max-width: 640px) {
   .ov-page { padding: 24px 16px 60px; }
   .ov-card { padding: 22px; }
   .ov-pareto-row { grid-template-columns: 1fr 2fr 50px; gap: 6px; font-size: 12px; }
@@ -457,7 +436,7 @@
   background: var(--bg-surface);
 }
 .ov-kpi-label {
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;

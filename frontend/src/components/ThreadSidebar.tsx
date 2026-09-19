@@ -268,7 +268,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
         background: "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
         borderRadius: "var(--radius)",
-        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+        boxShadow: "var(--el-2)",
         minWidth: 160,
         padding: "var(--space-1) 0",
       }}
@@ -293,7 +293,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
 // ─── sub-components ───────────────────────────────────────────────────────────
 
 const groupHeaderStyle: CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   fontWeight: 600,
   textTransform: "uppercase",
   letterSpacing: "0.06em",
@@ -403,7 +403,7 @@ function ConvItem({
         {!isRenaming && subLine && (
           <div
             style={{
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               color: "var(--text-tertiary)",
               whiteSpace: "nowrap",
               overflow: "hidden",

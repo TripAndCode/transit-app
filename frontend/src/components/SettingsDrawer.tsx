@@ -54,6 +54,9 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
           width: 360,
           background: "var(--bg-surface)",
           padding: 24,
+          // Cast leftward, onto the page the drawer covers. The --el-*
+          // scale is downward-only, so an edge-anchored panel cannot use it
+          // without losing the direction that separates it from the content.
           boxShadow: "-4px 0 16px rgba(0,0,0,0.06)",
         }}
       >
@@ -69,7 +72,7 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
             placeholder={t("header.settings_api_key_placeholder")}
             style={{ width: "100%" }}
           />
-          <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
+          <div style={{ marginTop: 6, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", lineHeight: 1.5 }}>
             {t("header.settings_api_key_hint")}
           </div>
         </label>
