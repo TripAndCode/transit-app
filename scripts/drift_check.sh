@@ -4,7 +4,12 @@
 # problem. Intended for a scheduled run (systemd timer) on the DB/app host so
 # migration drift or stale aggregates fail loudly before they surface as a 500.
 # Read-only: both subcommands only SELECT.
+#
+# Usage: scripts/drift_check.sh
+#   No arguments; requires DATABASE_URL and CLICKHOUSE_USER/PASSWORD/DATABASE.
 set -uo pipefail
+# no set -e: exit codes are captured below
+case "${1:-}" in -h|--help) sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 if [ -z "${DATABASE_URL:-}" ]; then
   echo "drift_check: DATABASE_URL is not set; refusing to run (won't guess a DB)." >&2

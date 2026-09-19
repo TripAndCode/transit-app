@@ -35,6 +35,7 @@
 # Requires: docker, poetry (with `poetry install` already run in this
 # worktree's own virtualenv -- this script does not install dependencies).
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 cd "$(git rev-parse --show-toplevel)"
 

@@ -28,6 +28,7 @@
 #                    e2e test boots the full app (whose startup unconditionally
 #                    requires a key) but never reaches the Ask/LLM code path.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 # Force-set, not `${VAR:-default}` fallbacks: this script's whole point is
 # a safe, unattended entry point into the THROWAWAY stack, so an inherited
