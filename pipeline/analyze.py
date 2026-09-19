@@ -305,20 +305,33 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn) -> N
     logger.info(f"  {table}: {len(rows)} rows")
 
 
-# The static-schedule columns the per-date aggregates read, directly or through
-# an aggregate they read back. `static_stop_times` resolves which physical stop
-# a trip visit maps to (agg_stop_daily, agg_route_stop_daily) and its scheduled
-# arrival/departure (agg_route_daily_dwell_run); `static_trips`/`static_routes`
-# bridge RT route_code to the static schedule for agg_route_headway, whose
-# scheduled median agg_route_headway_daily thresholds its long gaps against.
+# Exactly the static-schedule columns the per-date aggregates read, directly or
+# through an aggregate they read back. Too narrow silently keeps stale rows;
+# too wide forces full rebuilds a reader would not have noticed, so the set
+# tracks actual reads rather than whole tables:
+#
+#   static_stop_times  which physical stop a trip visit maps to
+#     (agg_stop_daily, agg_route_stop_daily), its scheduled arrival/departure
+#     (agg_route_daily_dwell_run), and the departures agg_route_headway's
+#     scheduled median is built from.
+#   static_trips       the route_id bridge to that median, plus the service_id
+#     it picks each route's dominant calendar by — a reimport that only
+#     re-calendars existing trips moves the median without adding or removing
+#     a single row.
+#   static_routes      only route_id, which is where agg_route_headway's
+#     route_code comes from; route_short_name has no reader here.
+#
+# Reached transitively: agg_route_headway itself is rebuilt in full every run,
+# but agg_route_headway_daily is not, and it reads that median back to
+# threshold its long gaps — so the median's inputs have to be covered.
 _STATIC_DEPENDENCY_COLUMNS: dict[str, tuple[str, ...]] = {
     "static_stop_times": ("trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"),
-    "static_trips": ("trip_id", "route_id"),
-    "static_routes": ("route_id", "route_short_name"),
+    "static_trips": ("trip_id", "route_id", "service_id"),
+    "static_routes": ("route_id",),
 }
 
 
-def _static_fingerprint(agency_id: int, conn) -> str:
+def _static_fingerprint(agency_id: int, conn, has_static: bool) -> str:
     """A value that changes whenever the static schedule the aggregates read does.
 
     The date ledger below sees rows arriving in ClickHouse and nothing else,
@@ -336,6 +349,14 @@ def _static_fingerprint(agency_id: int, conn) -> str:
     hundred thousand rows per agency, where an ordered digest would add a sort
     of all of them to every run.
 
+    `md5` rather than `hashtext`, which measures the same on this data: this
+    value decides whether already-built aggregates are trusted, and
+    `hashtext` is an internal function Postgres does not promise to keep
+    stable across major versions — an upgrade would silently change every
+    fingerprint. Sixteen hex digits of the digest is 64 bits per row against
+    `hashtext`'s 32, and the count guards the one case a sum cannot see, rows
+    appearing or disappearing in offsetting pairs.
+
     Columns are joined by the ASCII unit separator and NULL rendered as the
     record separator, neither of which a GTFS text field can carry: a plain
     join on a printable character would let a value containing it shift a
@@ -343,13 +364,24 @@ def _static_fingerprint(agency_id: int, conn) -> str:
     arrival time indistinguishable from an empty one, hiding a reload that
     only flipped between them. NUL itself is not available — Postgres `text`
     cannot hold it.
+
+    Without a loaded schedule there is nothing to fingerprint: every
+    aggregate that reads the static tables is inside a ``has_static`` branch
+    of :func:`analyze`, so a schedule change has nothing to invalidate, and
+    querying those tables anyway would turn the missing-``static_*``-tables
+    case ``_static_loaded`` deliberately tolerates into a hard failure. The
+    empty string is still a distinct value, so an agency gaining or losing a
+    schedule crosses it in either direction and rebuilds in full.
     """
+    if not has_static:
+        return ""
     parts = []
     with conn.cursor() as cur:
         for table, columns in _STATIC_DEPENDENCY_COLUMNS.items():
             rendered = " || E'\\x1f' || ".join(f"coalesce({c}::text, E'\\x1e')" for c in columns)
+            row_hash = f"('x' || substr(md5({rendered}), 1, 16))::bit(64)::bigint"
             cur.execute(
-                f"SELECT count(*), coalesce(sum(hashtext({rendered})::bigint), 0) FROM {table} WHERE agency_id = %s",
+                f"SELECT count(*), coalesce(sum({row_hash}), 0) FROM {table} WHERE agency_id = %s",
                 (agency_id,),
             )
             n, digest = cur.fetchone()
@@ -386,6 +418,12 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
 
     The static schedule is the other half of the signal, and the ledger cannot
     see it at all — see :func:`_static_fingerprint`.
+
+    Neither half watches this module. Changing a builder's SQL, a bucket
+    width, or a threshold constant makes every already-built date wrong
+    without touching a row anywhere, so a logic change still calls for a
+    deliberate full rebuild (``make analyze-all``, with ``make check-aggs`` to
+    confirm) rather than waiting for a run to notice.
     """
     # Both Postgres-side reads come before the ClickHouse scan, so a run that
     # already knows it must rebuild everything never pays for a full-history
@@ -599,7 +637,7 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     # lock). Reading once, first, can only err toward recording an older
     # schedule than was built with — which makes the next run rebuild
     # everything, the safe direction.
-    static_fingerprint = _static_fingerprint(agency_id, conn)
+    static_fingerprint = _static_fingerprint(agency_id, conn, has_static)
     # Resolved before the txn, like has_static: it reads the ledger this run is
     # about to overwrite, and a rollback must leave that ledger describing the
     # aggregates that actually survived — so the next run reaches the same

@@ -1666,9 +1666,15 @@ def _agg_snapshot(pg_conn, agency_id):
 
 
 def _fingerprint(pg_conn, agency_id):
-    from pipeline.analyze import _static_fingerprint
+    """What analyze() would record for this agency right now.
 
-    return _static_fingerprint(agency_id, pg_conn)
+    Resolves `has_static` the same way analyze() does rather than asserting a
+    value for it, so a fixture with no static schedule exercises the same
+    branch production would.
+    """
+    from pipeline.analyze import _static_fingerprint, _static_loaded
+
+    return _static_fingerprint(agency_id, pg_conn, _static_loaded(pg_conn, agency_id))
 
 
 def _feed_health(pg_conn, agency_id):
@@ -1828,6 +1834,12 @@ def test_the_static_fingerprint_separates_null_from_empty(pg_conn, agency_id):
     other would skip the rebuild it needs.
     """
     with pg_conn.cursor() as cur:
+        # A static_stops row too: without one there is no loaded schedule to
+        # fingerprint, and the comparison below would hold vacuously.
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s,'s1','駅前')",
+            (agency_id,),
+        )
         cur.execute(
             "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time) "
             "VALUES (%s,'T',1,'s1',NULL)",
@@ -1835,9 +1847,40 @@ def test_the_static_fingerprint_separates_null_from_empty(pg_conn, agency_id):
         )
     pg_conn.commit()
     with_null = _fingerprint(pg_conn, agency_id)
+    assert with_null != ""
 
     with pg_conn.cursor() as cur:
         cur.execute("UPDATE static_stop_times SET arrival_time = '' WHERE agency_id = %s", (agency_id,))
     pg_conn.commit()
 
     assert _fingerprint(pg_conn, agency_id) != with_null
+
+
+def test_the_static_fingerprint_notices_a_recalendared_trip(pg_conn, agency_id):
+    """Re-calendaring a trip adds and removes no rows, but moves a median.
+
+    agg_route_headway derives each route's scheduled headway median from its
+    dominant calendar — the service_id with the most trips — and
+    agg_route_headway_daily reads that median back to threshold its long
+    gaps. A reimport that moves existing trips onto a different service_id
+    changes the median while leaving every trip_id, route_id and row count
+    exactly as it was, so a fingerprint over only those would miss it and
+    leave the two tables disagreeing.
+    """
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s,'s1','駅前')",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s,'T','R(1)','weekday')",
+            (agency_id,),
+        )
+    pg_conn.commit()
+    before = _fingerprint(pg_conn, agency_id)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE static_trips SET service_id = 'holiday' WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+
+    assert _fingerprint(pg_conn, agency_id) != before
