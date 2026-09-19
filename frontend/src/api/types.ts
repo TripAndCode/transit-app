@@ -29,44 +29,6 @@ export type RouteSummary = {
   late5_pct?: number | null;
 };
 
-export type RouteTrip = {
-  trip_id: string;
-  scheduled_time: string | null;
-  headsign: string | null;
-  avg_delay_sec: number;
-  samples: number;
-};
-
-export type RouteTripsResponse = {
-  date: string | null;
-  trips: RouteTrip[];
-};
-
-export type RouteStopProfileRow = {
-  stop_sequence: number;
-  stop_id?: string | null;
-  stop_name: string | null;
-  avg_delay_sec: number;
-  samples: number;
-  cohort_avg_delay_sec?: number | null;
-  cohort_route_count?: number;
-  /** Total observation count backing `cohort_avg_delay_sec` (pooled across
-   *  every route in the cohort) — distinct from `cohort_route_count`, which
-   *  only counts how many DISTINCT routes contributed. */
-  cohort_samples?: number;
-  /** True when `cohort_samples` is too thin to trust `cohort_avg_delay_sec`
-   *  (a lower floor than the route-level LOW_CONFIDENCE_SAMPLES — see
-   *  api.triage.COHORT_LOW_CONFIDENCE_SAMPLES). Independent of `is_outlier`,
-   *  which only gates on `cohort_route_count >= 2`. */
-  cohort_low_confidence?: boolean;
-  is_outlier?: boolean;
-};
-
-export type RouteStopProfileResponse = {
-  date: string | null;
-  stops: RouteStopProfileRow[];
-};
-
 export type RouteSummaryResponse = {
   latest_captured_at: string | null;
   date: string | null;
@@ -158,32 +120,6 @@ export type RouteShapeResponse = {
   /** Stops on the chosen shape with no delay observations yet. Optional
    *  for back-compat with cached responses. */
   unobserved_stops?: UnobservedStop[];
-};
-
-export type HeatmapProps = {
-  stop_id: string;
-  stop_name: string;
-  /** Optional GTFS stop_code (e.g. "②のりば"). Populated when the agency's // i18n-ignore: GTFS format example
-   *  static feed includes it; clustered stops yield a "/-joined" set. */
-  stop_code?: string;
-  /** Optional GTFS platform_code (pole number, e.g. "2"). */
-  platform_code?: string;
-  avg_delay_min: number;
-  p90_delay_min?: number | null;
-  samples: number;
-  /** Comma-joined list of route_codes contributing to this stop's avg.
-   *  Optional because clients with cached responses from before the
-   *  field was added will still parse correctly. */
-  route_codes?: string;
-  /** True when `samples` is too thin to trust `avg_delay_min`/`p90_delay_min`
-   *  at full visual weight (same LOW_CONFIDENCE_SAMPLES floor as the route
-   *  baselines elsewhere). Optional for the same cached-response reason as
-   *  `route_codes`. */
-  low_confidence?: boolean;
-};
-
-export type HeatmapCollection = GeoJSON.FeatureCollection<GeoJSON.Point, HeatmapProps> & {
-  ctx?: ResponseCtx;
 };
 
 export type PeakHourBreakdownRoute = {
