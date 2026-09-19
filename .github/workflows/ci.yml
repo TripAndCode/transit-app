@@ -109,14 +109,6 @@ jobs:
             /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
           df -h /
 
-      # TEMPORARY probe: sizing whether parallel test execution is worth
-      # building for this runner. Remove once the answer is recorded.
-      - name: Runner capacity
-        run: |
-          echo "cores: $(nproc)"
-          free -h || true
-          uptime
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
