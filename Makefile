@@ -4,7 +4,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt lint typecheck check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt lint typecheck check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply
 
 # Default target — first-run setup.
 all: bootstrap
@@ -110,6 +110,22 @@ git-cleanup-apply:
 
 test:
 	DATABASE_URL=$(DATABASE_URL) poetry run pytest
+
+# Runs every oracle_cloud/v3/tests/test_*.sh suite (each self-contained via
+# fake curl/aws shims — no real network or Oracle VM access needed) and
+# summarizes pass/fail. Exits non-zero if any suite fails, so it can gate CI.
+oracle-tests:
+	@fail=0; \
+	for t in oracle_cloud/v3/tests/test_*.sh; do \
+		echo "── $$t ──"; \
+		if bash "$$t"; then \
+			echo "PASS: $$t"; \
+		else \
+			echo "FAIL: $$t"; \
+			fail=1; \
+		fi; \
+	done; \
+	exit $$fail
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
