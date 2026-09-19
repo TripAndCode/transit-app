@@ -1,3 +1,5 @@
+name: transit
+
 services:
   db:
     build:
@@ -5,13 +7,13 @@ services:
       # the Dockerfile's COPY resolves the same way everywhere and the context
       # stays this directory rather than the whole repository.
       context: db
-    container_name: transit-pg
     environment:
       POSTGRES_USER: transit
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-transit}
       POSTGRES_DB: transit
     ports:
-      - "5433:5432"
+      # Loopback-bound for the same reason as ClickHouse's port below.
+      - "127.0.0.1:5433:5432"
     volumes:
       - transit_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +29,6 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:26.3
-    container_name: transit-ch
     environment:
       CLICKHOUSE_USER: transit
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-transit}
