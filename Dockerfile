@@ -1,5 +1,5 @@
 # ── Stage 1: build the frontend ──────────────────────────────────────────────
-FROM node:20-alpine AS frontend
+FROM node:22-alpine AS frontend
 WORKDIR /fe
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
@@ -34,7 +34,22 @@ RUN poetry config virtualenvs.create false \
 COPY . .
 COPY --from=frontend /fe/dist /app/api/static
 
+# Run as an unprivileged user: a container escape or dependency RCE then
+# lands with no write access outside /app and no root inside it.
+RUN adduser --system --group --no-create-home app \
+    && chown -R app:app /app
+USER app
+
 EXPOSE 8000
+
+# Poll the same liveness endpoint a load balancer would, on the same port
+# uvicorn actually binds (respects $PORT, matching the CMD below) — so a
+# hung/deadlocked process gets marked unhealthy instead of serving errors
+# indefinitely.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD python -c "\
+import os, sys, urllib.request; \
+port = os.environ.get('PORT', '8000'); \
+sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=4).status == 200 else 1)"
 
 # --proxy-headers + --forwarded-allow-ips='*': trust X-Forwarded-For so the
 # anon rate-limiter and audit/access logs see the real client IP, not Railway's
