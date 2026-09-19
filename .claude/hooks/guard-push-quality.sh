@@ -311,8 +311,12 @@ fi
 # The token is assembled rather than written out because this file's own
 # content would otherwise land in a commit message quoting it, and the match
 # is a plain substring.
+# Not for a deletion: `git push origin :branch` resolves no branch, so
+# $GATE_DIR fell back to whatever checkout the command ran from, and the tip
+# reported on would be that checkout's, unrelated to what is being deleted.
 SKIP_TOKEN="[skip"" ci]"
-tip_msg="$(git -C "$GATE_DIR" log -1 --format=%B 2>/dev/null)"
+tip_msg=""
+[ "$(read_parsed is_delete)" = "True" ] || tip_msg="$(git -C "$GATE_DIR" log -1 --format=%B 2>/dev/null)"
 case "$tip_msg" in
   *"$SKIP_TOKEN"*)
     echo "NOTE: this push's tip suppresses CI, so no run will appear for it." >&2

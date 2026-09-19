@@ -736,10 +736,8 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
 6.8. `gh pr view <number> --json mergeable,mergeStateStatus,statusCheckRollup`.
      Only proceed to 6.9 if `mergeable` is `MERGEABLE`, `mergeStateStatus` is
      `CLEAN`, and every entry in `statusCheckRollup` concluded `SUCCESS`. An
-     EMPTY rollup is not a pass: it means no run was triggered, which happens
-     whenever the pushed tip carried the skip trailer — push a tip without it
-     and wait, rather than merging something CI never saw. `main` carries no
-     branch protection, so nothing else enforces this. Do
+     EMPTY rollup is not a pass — see the two CI outcomes below. `main` carries
+     no branch protection, so nothing else enforces this. Do
      not merge through a `CONFLICTING`/`DIRTY` state — if the mergeability
      check fails here despite 6.6 above, treat it the same as 6.6's "main
      advanced" case, counting against the same 2-try cap (re-sync, re-review,
