@@ -17,7 +17,7 @@ def _redirect_to_test_db() -> None:
     so tests using ASGITransport (base_url=http://test) can pass csrf_guard
     without that origin being trusted in production.
 
-    Every test fixture in this suite TRUNCATEs the schema between tests.
+    Every test fixture in this suite empties the schema between tests.
     Sharing the dev DB meant every ``make test`` run nuked the operator's
     map heatmap data — a constant source of "the page is empty" bug
     reports. Redirect once at collection time so pytest never touches the
@@ -100,11 +100,64 @@ def apply_schema():
     conn.close()
 
 
+@pytest.fixture(scope="session")
+def reset_sql(apply_schema) -> str:
+    """One statement that empties every table the schema owns.
+
+    This runs between every test in the suite, so its fixed cost is paid
+    thousands of times per run. ``TRUNCATE`` is the wrong tool for that:
+    its cost is per-relation file work, flat in the tens of milliseconds
+    however few rows a table holds, where ``DELETE`` over the same tables
+    costs single-digit milliseconds at the row counts tests actually
+    create — and stays there, because tests seed small.
+
+    The list is read from the catalog rather than spelled out. A written
+    list drifts silently: the one this replaced named two dozen tables and
+    leaned on ``CASCADE`` to reach the rest through their references to
+    ``agencies`` and ``users``, which left any table holding neither
+    reference never reset between tests at all.
+
+    Extension-owned tables are excluded — PostGIS's ``spatial_ref_sys``
+    lives in this schema and is reference data, not test data.
+
+    FK triggers are off for the duration so the deletes need no
+    topological order, and back on before the statement ends, so no test
+    body ever runs with them disabled.
+    """
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.relname
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public'
+                  AND c.relkind = 'r'
+                  AND c.relname <> 'schema_migrations'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pg_depend d
+                      WHERE d.classid = 'pg_class'::regclass
+                        AND d.objid = c.oid
+                        AND d.deptype = 'e'
+                  )
+                ORDER BY c.relname
+                """
+            )
+            tables = [r[0] for r in cur.fetchall()]
+            if not tables:
+                raise RuntimeError("no tables found to reset — is the schema applied?")
+            deletes = "; ".join(f"DELETE FROM {sql.Identifier(t).as_string(conn)}" for t in tables)
+    finally:
+        conn.close()
+    return f"SET session_replication_role = replica; {deletes}; SET session_replication_role = origin"
+
+
 @pytest.fixture(autouse=True)
 def _clear_compute_caches():
     """Clear every async_lru_cache before each test.
 
-    Module-level caches outlive the per-test TRUNCATE: a test that seeds
+    Module-level caches outlive the per-test reset: a test that seeds
     different rows under the same (agency_id, ctx) key as an earlier test
     would otherwise read the earlier test's stale cached result. Agency-id
     churn usually hides this, but it is order-dependent — clear globally.
@@ -116,7 +169,7 @@ def _clear_compute_caches():
 
 
 @pytest.fixture
-def pg_conn(apply_schema):
+def pg_conn(apply_schema, reset_sql):
     conn = psycopg2.connect(DATABASE_URL)
     # Mirror api/main.py _init_connection (and the aconn fixture) so
     # `captured_at::date` casts in psycopg2-path tests use the same JST
@@ -128,14 +181,7 @@ def pg_conn(apply_schema):
     try:
         conn.rollback()
         with conn.cursor() as cur:
-            cur.execute("""
-                TRUNCATE agencies, updates, static_stops, static_stop_times,
-                static_trips, static_routes, static_calendar_dates, static_shapes,
-                agg_route_stats, agg_route_hour, agg_route_hour_dow,
-                agg_daily_trend, agg_stop_daily, agg_stop_routes,
-                agg_feed_health, agg_service_delivered_daily, agg_meta, rag_chunks, api_keys,
-                filter_presets, login_events, sessions, oauth_identities, users CASCADE
-            """)
+            cur.execute(reset_sql)
         conn.commit()
     finally:
         conn.close()
@@ -277,7 +323,7 @@ def mirror_updates_to_ch(ch_client, agency_id) -> None:
 
 
 @pytest.fixture
-async def aconn(apply_schema):
+async def aconn(apply_schema, reset_sql):
     import asyncpg
 
     conn = await asyncpg.connect(os.environ["DATABASE_URL"])
@@ -287,14 +333,7 @@ async def aconn(apply_schema):
     yield conn
     # clean up
     try:
-        await conn.execute("""
-            TRUNCATE agencies, updates, static_stops, static_stop_times,
-            static_trips, static_routes, static_calendar_dates, static_shapes,
-            agg_route_stats, agg_route_hour, agg_route_hour_dow,
-            agg_daily_trend, agg_stop_daily, agg_stop_routes,
-            agg_feed_health, agg_service_delivered_daily, agg_meta, rag_chunks, api_keys,
-            filter_presets, login_events, sessions, oauth_identities, users CASCADE
-        """)
+        await conn.execute(reset_sql)
     except Exception:
         pass
     await conn.close()
