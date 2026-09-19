@@ -750,10 +750,23 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
      `COMPLETED`, or whose `conclusion` is `null`, has not finished — it is
      not a failure, and 6.8 must not classify it as one. This is the normal
      state right after a push, and the empty-rollup remedy below creates it
-     deliberately: nothing in this step waits, so a re-check seconds after
-     pushing will see a run that has barely started. Wait for every entry to
-     reach `COMPLETED` before judging, re-reading `statusCheckRollup` rather
-     than assuming; only then do the two outcomes below apply.
+     deliberately: nothing else in this step waits, so a re-check seconds
+     after pushing will see a run that has barely started.
+
+     So poll `statusCheckRollup` every 30s until every entry is `COMPLETED`.
+     If the tick's budget runs out first, stop — but with NO `Blocker-tag`,
+     because nothing is lost: the run continues on GitHub's infrastructure
+     regardless of this session, and the next tick's Step 3 resumes this PR at
+     6.5 and reads the finished result. Tagging it would feed the circuit
+     breaker a delay that is working as intended.
+
+     A wait of minutes reopens what 6.6 settled: `main` can advance without a
+     textual conflict, which `mergeStateStatus` does not reflect, and the
+     value read at the top of this step predates the wait. So when the poll
+     finishes, re-run 6.6's comparison against `MAIN_SHA_AT_REVIEW` and
+     re-read `mergeable`/`mergeStateStatus` before judging the outcomes below.
+     If `main` moved, that is 6.6's "main advanced" case and takes 6.6's
+     path, not a CI outcome.
 
      The two terminal CI outcomes are not the same problem:
      - **Rollup EMPTY** — no run exists, because the pushed tip carried the
@@ -781,9 +794,9 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
      refuses instead of silently merging something unreviewed. This and 6.7
      are the exceptions to "never mark its own PR ready or merge" that used
      to apply here: both are authorized specifically because Step 5's
-     review gate is unconditional and 6.5/6.6/6.8 just re-confirmed nothing
-     slipped in since — not a general grant to skip review or force through a
-     bad state.
+     review gate is unconditional and 6.8 re-confirmed, after its poll rather
+     than before it, that neither the branch nor `main` moved — not a general
+     grant to skip review or force through a bad state.
 6.10. Run `/cleanup-merged` (this repo) to remove the now-merged local
       branch/worktree. `/cleanup-merged` is local-only by design (it never
       deletes GitHub branches — see its own file) and `gh pr merge` above
