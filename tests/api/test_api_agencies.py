@@ -251,6 +251,30 @@ async def test_patch_agency_name(agencies_client):
 
 
 @pytest.mark.asyncio
+async def test_patch_agency_empty_body_returns_unchanged_row(agencies_client):
+    """No fields set -> no UPDATE runs at all, so the response must reflect
+    the row exactly as it already was (the RETURNING-based write path is
+    skipped entirely for an empty patch)."""
+    client, sid = agencies_client
+    create_resp = await client.post(
+        "/api/agencies",
+        json={"agency_name": "NoOpPatch", "feed_url": "http://noop.example.com"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    aid = create_resp.json()["agency_id"]
+    resp = await client.patch(
+        f"/api/agencies/{aid}",
+        json={},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["agency_name"] == "NoOpPatch"
+    assert resp.json()["feed_url"] == "http://noop.example.com"
+
+
+@pytest.mark.asyncio
 async def test_soft_delete_and_restore(agencies_client):
     client, sid = agencies_client
     create_resp = await client.post(

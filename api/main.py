@@ -162,40 +162,47 @@ async def lifespan(app: FastAPI):
     # fan-out one slot short and serialized a stage on every cold request.
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
 
-    # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
-    # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
-    # heatmap, any time_band="all" report path reading agg_* tables) have
-    # nothing to do with ClickHouse and must keep working even if it's down
-    # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
-    # client that raises a clean 503 lazily, only if something actually
-    # tries to use it.
+    # Everything below reuses app.state.pool, so any failure here must close
+    # it before re-raising — this generator's own cleanup after `yield` never
+    # runs unless `yield` is actually reached, otherwise the pool leaks.
     try:
-        app.state.ch_client = await get_ch_client()
-    except KeyError as exc:
-        _log.warning(
-            "ClickHouse client not started — missing required env var %s. "
-            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
-            exc,
-        )
-        app.state.ch_client = None
+        # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
+        # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
+        # heatmap, any time_band="all" report path reading agg_* tables) have
+        # nothing to do with ClickHouse and must keep working even if it's down
+        # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
+        # client that raises a clean 503 lazily, only if something actually
+        # tries to use it.
+        try:
+            app.state.ch_client = await get_ch_client()
+        except KeyError as exc:
+            _log.warning(
+                "ClickHouse client not started — missing required env var %s. "
+                "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+                exc,
+            )
+            app.state.ch_client = None
+        except Exception:
+            _log.warning(
+                "ClickHouse client not started — connection failed. "
+                "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+                exc_info=True,
+            )
+            app.state.ch_client = None
+
+        # Break-glass local-admin account (independent of the OAuth env block
+        # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
+        # are both set. See api.routers.auth.seed_local_admin.
+        await seed_local_admin(app.state.pool)
+
+        from pipeline.query.embeddings import get_embedder
+
+        embedder = get_embedder()
+        if not embedder.available:
+            _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
     except Exception:
-        _log.warning(
-            "ClickHouse client not started — connection failed. "
-            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
-            exc_info=True,
-        )
-        app.state.ch_client = None
-
-    # Break-glass local-admin account (independent of the OAuth env block
-    # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
-    # are both set. See api.routers.auth.seed_local_admin.
-    await seed_local_admin(app.state.pool)
-
-    from pipeline.query.embeddings import get_embedder
-
-    embedder = get_embedder()
-    if not embedder.available:
-        _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
+        await app.state.pool.close()
+        raise
 
     yield
     if app.state.ch_client is not None:

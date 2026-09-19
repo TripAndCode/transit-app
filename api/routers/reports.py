@@ -7,6 +7,7 @@ moment the request was served. The ``snapshots`` table from v1 is gone.
 
 import csv
 import io
+import logging
 from datetime import datetime, timezone
 
 import asyncpg
@@ -57,6 +58,8 @@ from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.stats import annotate_on_time_pct_confidence
 from pipeline.weather import attribution as weather_attribution
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 
@@ -127,10 +130,8 @@ def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
 async def list_reports(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
 ):
     """Static list of report types. ``rendered_at`` is request time."""
-    del conn  # unused; keep for parity with get_report
     now = datetime.now(timezone.utc)
     return [{"report_type": rt, "rendered_at": now} for rt in _REPORT_TYPES]
 
@@ -556,6 +557,11 @@ async def forecast_overview(
     try:
         recent_daily_rows = await _fetch_recent_daily_rows(conn, agency_id)
     except Exception:
+        _log.warning(
+            "forecast_overview: recent-daily sparkline fetch failed for agency %s — degrading to no sparklines",
+            agency_id,
+            exc_info=True,
+        )
         recent_daily_rows = []
     return summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale)
 

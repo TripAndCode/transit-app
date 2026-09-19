@@ -21,6 +21,7 @@ provider sub creates a fresh user.
 """
 
 import json
+import logging
 import re
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -35,6 +36,8 @@ from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -353,7 +356,7 @@ async def admin_ops(
         ms = await migration_status(conn)
         mig = MigrationStatusOut(applied=ms.applied, latest=ms.latest, behind=ms.behind)
     except Exception:
-        pass  # mig stays None
+        _log.warning("admin_ops: migration_status failed — degrading to null", exc_info=True)
 
     agencies_out: list[AgencyFreshnessOut] = []
     agencies_ok = True
@@ -373,6 +376,7 @@ async def admin_ops(
                 )
             )
     except Exception:
+        _log.warning("admin_ops: aggregate_freshness failed — degrading to empty agencies list", exc_info=True)
         agencies_out = []
         agencies_ok = False
 

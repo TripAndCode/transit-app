@@ -1,9 +1,12 @@
 """Tests for module-level startup validators in ``api.main``."""
 
 import pathlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
+import api.main as main_mod
 from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_llm_providers, _validate_session_signing_key
 from pipeline.query.llm_client import ProviderConfig
 
@@ -78,3 +81,31 @@ def test_dockerfile_cmd_trusts_railway_proxy_headers():
     cmd = dockerfile.read_text()
     assert "--proxy-headers" in cmd
     assert "--forwarded-allow-ips" in cmd
+
+
+async def test_lifespan_closes_pool_when_post_pool_setup_fails(monkeypatch):
+    """``lifespan``'s except-clause after ``yield`` only runs once ``yield``
+    is reached -- a failure in post-pool startup (here, seed_local_admin)
+    raises before that point and must close the just-opened pool itself
+    instead of leaking it."""
+    for var in main_mod._AUTH_ENV:
+        monkeypatch.delenv(var, raising=False)
+
+    mock_pool = AsyncMock()
+    mock_ch_client = AsyncMock()
+
+    monkeypatch.setattr(main_mod.asyncpg, "create_pool", AsyncMock(return_value=mock_pool))
+    monkeypatch.setattr(main_mod, "get_ch_client", AsyncMock(return_value=mock_ch_client))
+    monkeypatch.setattr(main_mod, "seed_local_admin", AsyncMock(side_effect=RuntimeError("boom")))
+    monkeypatch.setattr(
+        "pipeline.query.llm_client._load_providers",
+        lambda: [ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")],
+    )
+
+    fake_app = SimpleNamespace(state=SimpleNamespace())
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async with main_mod.lifespan(fake_app):
+            pass
+
+    mock_pool.close.assert_awaited_once()

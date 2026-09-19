@@ -524,13 +524,13 @@ async def ask_suggest(
     try:
         qvec = await asyncio.to_thread(embedder.embed, q.strip(), mode="query")
     except Exception:
-        _log.debug("ask_suggest: embedding failed; returning no suggestions", exc_info=True)
+        _log.warning("ask_suggest: embedding failed; returning no suggestions", exc_info=True)
         return []
 
     try:
         matches = await rag_nearest(conn, agency_id, qvec, k=limit)
     except Exception:
-        _log.debug("ask_suggest: rag_nearest failed; returning no suggestions", exc_info=True)
+        _log.warning("ask_suggest: rag_nearest failed; returning no suggestions", exc_info=True)
         return []
 
     golden = _load_golden()
