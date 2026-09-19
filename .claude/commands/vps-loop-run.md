@@ -733,8 +733,13 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
 6.7. `gh pr ready <number>`. Step 5 already completed the required
      `/review-branch` pass clean, and 6.6 just confirmed `main` hasn't moved
      since — mark it ready rather than leaving it in draft.
-6.8. `gh pr view <number> --json mergeable,mergeStateStatus`. Only proceed to
-     6.9 if `mergeable` is `MERGEABLE` and `mergeStateStatus` is `CLEAN`. Do
+6.8. `gh pr view <number> --json mergeable,mergeStateStatus,statusCheckRollup`.
+     Only proceed to 6.9 if `mergeable` is `MERGEABLE`, `mergeStateStatus` is
+     `CLEAN`, and every entry in `statusCheckRollup` concluded `SUCCESS`. An
+     EMPTY rollup is not a pass: it means no run was triggered, which happens
+     whenever the pushed tip carried the skip trailer — push a tip without it
+     and wait, rather than merging something CI never saw. `main` carries no
+     branch protection, so nothing else enforces this. Do
      not merge through a `CONFLICTING`/`DIRTY` state — if either check fails
      here despite 6.6 above, treat it the same as 6.6's "main advanced" case,
      counting against the same 2-try cap (re-sync, re-review, restart from
@@ -777,8 +782,8 @@ dotted form, never a bare "step N", to avoid confusion with this section's own
       tick that dies between 6.9 and 6.11 — but doing it here directly keeps the
       file correct without waiting for that next tick.)
 6.12. Append: `- <UTC timestamp>: item N merged as PR #<number>;
-      /review-branch pass clean, mergeable/clean confirmed, squash-merged and
-      cleaned up.`
+      /review-branch pass clean, CI green, mergeable/clean confirmed,
+      squash-merged and cleaned up.`
 
 ## Boundaries
 

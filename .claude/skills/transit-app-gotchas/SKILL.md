@@ -157,21 +157,18 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   drop`/`clear`/`pop` against a stash you didn't create in the current
   session/tick; `vps-loop-run.md`'s Step 4 worker prompt says this
   explicitly.
-- `[skip ci]` must be on EVERY commit you might push as a branch's tip,
-  including intermediate fix-and-reverify commits mid-branch, not just the
-  first/last one. A multi-commit push where only some commits carry the
-  trailer can still trigger CI — GitHub's skip-ci check is evaluated
-  once per push event against that push's *tip* commit message, not
-  retroactively for every individual commit in a multi-commit push: if a
-  push's tip commit lacks the trailer, that push triggers CI regardless of
-  whether every other commit in it correctly has one (`on: push`/
-  `pull_request` isn't gated on the convention — `[skip ci]` only works
-  because GitHub itself skips a run when it's present in the *triggering
-  push's tip* commit message). A stray missing `[skip ci]` on whatever
-  ends up as a push's tip is the only thing standing between "CI is
-  dormant" and "CI actually runs," which could look like a real regression
-  if not checked, or fail for an unrelated infrastructure reason (e.g. a
-  billing/quota issue) that has nothing to do with the code.
+- Whether a push runs CI is decided by ONE commit: the tip of that push.
+  GitHub evaluates the skip trailer once per push event against that
+  message alone — not retroactively across the push's other commits — so a
+  multi-commit push whose tip omits it runs CI however many of the earlier
+  commits carry it, and a trailer-less commit buried mid-branch runs
+  nothing (`on: push`/`pull_request` is not gated on the convention; the
+  trailer is the whole mechanism). The match is a plain substring anywhere
+  in the message, quoting included, so a message that merely mentions the
+  trailer suppresses itself.
+  Root `CLAUDE.md` owns the policy this serves — when CI has to run and
+  when it must be green. This entry is only the mechanism, which is easy to
+  get wrong in either direction.
   The same gap shows up when resolving a conflict: running `git merge main`
   produces an auto-generated commit message
   ("Merge branch 'main' of ... into vps-loop/item-N") with no `[skip ci]`

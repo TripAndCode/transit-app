@@ -301,6 +301,26 @@ if [ "$GATE_DIR" != "$CLAUDE_PROJECT_DIR" ]; then
   echo "== push gate: files from $GATE_DIR, tools from $CLAUDE_PROJECT_DIR ==" >&2
 fi
 
+# A branch every one of whose commits suppresses CI produces no run at all, so
+# the PR has nothing for the merge gate to read. Only the tip of the push is
+# consulted, which is the part that is easy to get wrong: a trailer-less commit
+# buried earlier in the branch changes nothing. A warning, not a block —
+# suppressing CI on intermediate pushes is the normal case, and only the last
+# push before readying has to differ.
+#
+# The token is assembled rather than written out because this file's own
+# content would otherwise land in a commit message quoting it, and the match
+# is a plain substring.
+SKIP_TOKEN="[skip"" ci]"
+tip_msg="$(git -C "$GATE_DIR" log -1 --format=%B 2>/dev/null)"
+case "$tip_msg" in
+  *"$SKIP_TOKEN"*)
+    echo "NOTE: this push's tip suppresses CI, so no run will appear for it." >&2
+    echo "  Before marking the PR ready, push a tip whose message omits that" >&2
+    echo "  trailer — the merge gate needs a green run to read." >&2
+    ;;
+esac
+
 LOG="$(mktemp)"
 # run_with_timeout's fallback path (below) creates a marker temp file per
 # call; if this script's process receives a catchable termination (an
