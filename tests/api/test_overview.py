@@ -1468,6 +1468,36 @@ async def test_peak_hour_breakdown_excludes_low_samples(client, aconn, aagency_i
 
 
 @pytest.mark.asyncio
+async def test_peak_hour_breakdown_with_dow_pools_exact_sum_delay_sec(client, aconn, aagency_id):
+    """With a dow, peak_hour_breakdown must derive avg_min from
+    sum_delay_sec/samples exactly as the dow=None path does, not echo the
+    stored per-row avg_min -- the two paths answer the same question and must
+    not disagree on the arithmetic behind it. Seeds a stored avg_min that
+    contradicts the summed columns so only the derived value can pass."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "D1", "平日", 6, 16, 9.99, 100, sum_delay_sec=6000)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 16, "dow": 6})
+    assert r.status_code == 200
+    d1 = {x["route_code"]: x for x in r.json()["routes"]}["D1"]
+    assert d1["avg_min"] == pytest.approx(1.0, abs=1e-9)
+    assert d1["samples"] == 100
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_no_dow_floor_applies_to_the_pooled_total(client, aconn, aagency_id):
+    """The sample floor gates the pooled group, not the individual rows that
+    feed it: a route seen twice on each of two days clears three observations
+    once pooled, and dropping its rows first would both hide it and bias the
+    average left behind."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "P1", "平日", 1, 21, 4.0, 2)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "P1", "平日", 2, 21, 4.0, 2)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 21})
+    assert r.status_code == 200
+    p1 = {x["route_code"]: x for x in r.json()["routes"]}["P1"]
+    assert p1["samples"] == 4
+    assert p1["avg_min"] == pytest.approx(4.0, abs=1e-9)
+
+
+@pytest.mark.asyncio
 async def test_peak_hour_breakdown_no_dow_aggregates_all(client, aconn, aagency_id):
     # Without dow param: routes from any DOW at that hour should appear
     await _seed_agg_route_hour_dow(aconn, aagency_id, "Z1", "平日", 1, 12, 5.0, 10)

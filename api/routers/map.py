@@ -914,6 +914,10 @@ def _heatmap_features(rows) -> dict:
     platform_code, avg_delay_min, p90_delay_min, samples, route_codes,
     low_confidence).
 
+    ``avg_delay_min`` and ``p90_delay_min`` pass through as ``null`` rather
+    than a number when the cluster has no usable sample total to divide by, so
+    a consumer must treat them as "no average available", never as zero delay.
+
     ``low_confidence`` reuses the same sample-count floor as the route-level
     baselines (``LOW_CONFIDENCE_SAMPLES``) rather than the cohort-specific one:
     a heatmap cell pools the FULL requested date range (not a fixed 30-day
@@ -929,7 +933,7 @@ def _heatmap_features(rows) -> dict:
                 "stop_name": r["stop_name"],
                 "stop_code": r["stop_codes"] or "",
                 "platform_code": r["platform_codes"] or "",
-                "avg_delay_min": float(r["avg_delay_min"]),
+                "avg_delay_min": float(r["avg_delay_min"]) if r["avg_delay_min"] is not None else None,
                 "p90_delay_min": float(r["p90_delay_min"]) if r["p90_delay_min"] is not None else None,
                 "samples": r["samples"],
                 "route_codes": r["route_codes"] or "",
@@ -940,6 +944,48 @@ def _heatmap_features(rows) -> dict:
         if r["lon"] is not None and r["lat"] is not None
     ]
     return {"type": "FeatureCollection", "features": features}
+
+
+# Aggregates `joined` rows into one heatmap feature per (name_key, cluster_id).
+# Shared by both branches of the heatmap endpoint: each builds its own `joined`
+# CTE from a different aggregate table, aliasing its route column to the common
+# name `route_code_val` (a.route_code vs. r.route_codes) so this one projection
+# serves both.
+_HEATMAP_CLUSTER_PROJECTION_SQL = """
+        SELECT
+            AVG(ST_X(geom))::numeric AS lon,
+            AVG(ST_Y(geom))::numeric AS lat,
+            string_agg(DISTINCT stop_name, ' / ' ORDER BY stop_name) AS stop_name,
+            string_agg(DISTINCT stop_id, ',') AS stop_ids,
+            string_agg(DISTINCT NULLIF(platform_code, ''), ',' ORDER BY NULLIF(platform_code, ''))
+                AS platform_codes,
+            string_agg(DISTINCT NULLIF(stop_code, ''), ' / ' ORDER BY NULLIF(stop_code, ''))
+                AS stop_codes,
+            string_agg(DISTINCT route_code_val, ',' ORDER BY route_code_val) AS route_codes,
+            -- NULLIF guards the sample total: the aggregates constrain
+            -- `samples` to be present, not to be positive, so a cluster
+            -- summing to zero observations would otherwise divide by zero and
+            -- abort the whole request instead of reporting "no average
+            -- available" for that one dot.
+            ROUND(SUM(delay_sum)::numeric / NULLIF(SUM(samples), 0) / 60.0, 2) AS avg_delay_min,
+            -- p90_delay_min runs PERCENTILE_CONT(0.9) over the joined rows'
+            -- own per-row averages (delay_sum/samples for each pre-cluster
+            -- stop/date/time_band row), not over the underlying raw
+            -- per-observation delays -- the agg schema stores only a summed
+            -- delay and a sample count per row, never the raw distribution,
+            -- so an exact percentile of individual observations isn't
+            -- computable from it. This is a percentile of row-level
+            -- averages: a defensible approximation given the schema, but a
+            -- different statistic from a true p90 of raw delays.
+            ROUND(
+                PERCENTILE_CONT(0.9) WITHIN GROUP (
+                    ORDER BY delay_sum::float / NULLIF(samples, 0)
+                )::numeric / 60.0,
+            2) AS p90_delay_min,
+            SUM(samples) AS samples
+        FROM joined
+        GROUP BY name_key, cluster_id
+"""
 
 
 @router.get("/delays/heatmap")
@@ -1006,42 +1052,6 @@ async def delay_heatmap(
             ) named
         )
     """
-    # Shared by both branches below: aggregates `joined` rows into one heatmap
-    # feature per (name_key, cluster_id). `joined` aliases each branch's route
-    # column to the common name `route_code_val` (a.route_code vs. r.route_codes)
-    # so this one projection works for both — the only thing that actually
-    # differs between the branches is how `joined` is built (which agg
-    # table/filter feeds it).
-    cluster_projection_sql = """
-        SELECT
-            AVG(ST_X(geom))::numeric AS lon,
-            AVG(ST_Y(geom))::numeric AS lat,
-            string_agg(DISTINCT stop_name, ' / ' ORDER BY stop_name) AS stop_name,
-            string_agg(DISTINCT stop_id, ',') AS stop_ids,
-            string_agg(DISTINCT NULLIF(platform_code, ''), ',' ORDER BY NULLIF(platform_code, ''))
-                AS platform_codes,
-            string_agg(DISTINCT NULLIF(stop_code, ''), ' / ' ORDER BY NULLIF(stop_code, ''))
-                AS stop_codes,
-            string_agg(DISTINCT route_code_val, ',' ORDER BY route_code_val) AS route_codes,
-            ROUND(SUM(delay_sum)::numeric / SUM(samples) / 60.0, 2) AS avg_delay_min,
-            -- p90_delay_min runs PERCENTILE_CONT(0.9) over the joined rows'
-            -- own per-row averages (delay_sum/samples for each pre-cluster
-            -- stop/date/time_band row), not over the underlying raw
-            -- per-observation delays -- the agg schema stores only a summed
-            -- delay and a sample count per row, never the raw distribution,
-            -- so an exact percentile of individual observations isn't
-            -- computable from it. This is a percentile of row-level
-            -- averages: a defensible approximation given the schema, but a
-            -- different statistic from a true p90 of raw delays.
-            ROUND(
-                PERCENTILE_CONT(0.9) WITHIN GROUP (
-                    ORDER BY delay_sum::float / NULLIF(samples, 0)
-                )::numeric / 60.0,
-            2) AS p90_delay_min,
-            SUM(samples) AS samples
-        FROM joined
-        GROUP BY name_key, cluster_id
-    """
     if ctx.routes:
         # Route filter → aggregate path (agg_route_stop_daily is pre-split by route_code).
         # Mirrors the no-route branch's spatial grouping; adds a route_code = ANY($2)
@@ -1057,7 +1067,7 @@ async def delay_heatmap(
                 JOIN stop_clusters sc ON sc.stop_id = a.stop_id
                 WHERE a.agency_id = $1 AND a.route_code = ANY($2) AND {agg_where}
             )
-            {cluster_projection_sql}
+            {_HEATMAP_CLUSTER_PROJECTION_SQL}
             """,
             agency_id,
             list(ctx.routes),
@@ -1077,7 +1087,7 @@ async def delay_heatmap(
                 LEFT JOIN agg_stop_routes r ON r.agency_id = $1 AND r.stop_id = a.stop_id
                 WHERE a.agency_id = $1 AND {agg_where}
             )
-            {cluster_projection_sql}
+            {_HEATMAP_CLUSTER_PROJECTION_SQL}
             """,
             agency_id,
             *params,
