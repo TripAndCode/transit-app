@@ -161,6 +161,29 @@ async def test_movers_returns_delta(movers_pool):
     assert result.rows[0]["route_code"] == "R1"  # |+6| is largest
 
 
+async def test_movers_labels_filtered_to_returned_routes(movers_pool):
+    """Route-label lookup is filtered to the routes `top` actually keeps, not
+    every route static_routes has for the agency -- a query-shape change
+    only, so the label for a returned route must still resolve correctly
+    (mirrors the same filter in the `_build_heatmap` sibling above)."""
+    pool, agency_id = movers_pool
+    await _seed_trend(
+        pool,
+        agency_id,
+        [
+            ("2026-04-10", "R1", "平日", 9.0, 100),  # delta +6, kept by top=1
+            ("2026-04-03", "R1", "平日", 3.0, 100),
+            ("2026-04-10", "R2", "平日", 2.0, 100),  # delta 0, dropped by top=1
+            ("2026-04-03", "R2", "平日", 2.0, 100),
+        ],
+    )
+    ctx = RangeCtx(from_date=date(2026, 4, 8), to_date=date(2026, 4, 14))
+    async with pool.acquire() as c:
+        result = await movers(c, agency_id=agency_id, ctx=ctx, window_days=7, top=1)
+    assert [r["route_code"] for r in result.rows] == ["R1"]
+    assert result.rows[0]["label"] == "R1"
+
+
 async def test_anomalies_reads_agg_daily_trend(movers_pool):
     pool, agency_id = movers_pool
     await _seed_trend(

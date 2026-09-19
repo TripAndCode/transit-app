@@ -481,15 +481,14 @@ async def followup_endpoint(
         # Ownership check (also confirms the conversation exists).
         await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
-        # Fetch the context message (must belong to this conversation).
-        messages = await _conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id)
+        # Fetch the context message directly (must belong to this conversation).
+        try:
+            ctx_msg = await _conv.get_message(
+                conn, conversation_id, body.context_message_id, user_id=user.user_id, agency_id=agency_id
+            )
+        except (_conv.PermissionDenied, LookupError):
+            raise HTTPException(status_code=404, detail="context message not found") from None
 
-    ctx_msg = next(
-        (m for m in messages if m["message_id"] == body.context_message_id),
-        None,
-    )
-    if ctx_msg is None:
-        raise HTTPException(status_code=404, detail="context message not found")
     if ctx_msg.get("role") != "assistant":
         raise HTTPException(status_code=400, detail="context must be an assistant message")
 

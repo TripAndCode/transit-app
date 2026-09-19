@@ -404,6 +404,7 @@ _FEATURE_DOCS_DIR = Path(__file__).resolve().parents[2] / "docs" / "features"
 
 _DOC_H1_RE = re.compile(r"^#\s+(.+?)\s*$")
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_DOC_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 
 
 class ArchitectureDocSummary(BaseModel):
@@ -460,6 +461,23 @@ def _list_feature_docs() -> list[Path]:
     return [path for path, _ in _iter_feature_docs()]
 
 
+def _resolve_feature_doc_path(slug: str) -> Path | None:
+    """Resolve ``slug`` to a `docs/features/<slug>.md` path inside
+    ``_FEATURE_DOCS_DIR``, or ``None`` if the slug is malformed or would
+    escape that directory (a `..` segment, an absolute path, or a
+    symlink-following trick smuggled through the path param).
+
+    Existence is not checked here -- the caller (which also needs to 404 on
+    a real-but-empty file) does that with ``is_file()``.
+    """
+    if not _DOC_SLUG_RE.match(slug):
+        return None
+    candidate = (_FEATURE_DOCS_DIR / f"{slug}.md").resolve()
+    if not candidate.is_relative_to(_FEATURE_DOCS_DIR.resolve()):
+        return None
+    return candidate
+
+
 @router.get("/architecture/docs", response_model=list[ArchitectureDocSummary])
 async def list_architecture_docs(_admin: User = Depends(require_admin)):
     """List every `docs/features/*.md` file for the architecture page's
@@ -474,12 +492,15 @@ async def list_architecture_docs(_admin: User = Depends(require_admin)):
 async def get_architecture_doc(slug: str, _admin: User = Depends(require_admin)):
     """Serve one feature doc's raw Markdown by slug (filename minus `.md`).
 
-    ``slug`` is matched against the live enumeration from
-    ``_iter_feature_docs`` rather than joined directly into a filesystem
-    path, so a request can't escape `docs/features/` via `..`, an absolute
-    path, or a symlink-following trick smuggled through the path param.
+    ``slug`` is validated against a strict charset and resolved directly to
+    `docs/features/<slug>.md` (see ``_resolve_feature_doc_path``), so this
+    reads exactly the one file requested instead of scanning every doc in
+    the directory to find it by filename.
     """
-    for path, text in _iter_feature_docs():
-        if path.stem == slug:
-            return ArchitectureDocDetail(slug=slug, title=_feature_doc_title(text, slug), content=text)
-    raise HTTPException(404, "doc not found")
+    path = _resolve_feature_doc_path(slug)
+    if path is None or not path.is_file():
+        raise HTTPException(404, "doc not found")
+    text = path.read_text(encoding="utf-8")
+    if not _has_real_content(text):
+        raise HTTPException(404, "doc not found")
+    return ArchitectureDocDetail(slug=slug, title=_feature_doc_title(text, slug), content=text)

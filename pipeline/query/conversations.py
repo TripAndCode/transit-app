@@ -196,6 +196,37 @@ async def list_messages(
     return out
 
 
+async def get_message(
+    conn: asyncpg.Connection, conversation_id: Any, message_id: Any, *, user_id: int | None, agency_id: int
+) -> dict[str, Any]:
+    """Fetch one message by id, without loading the rest of its thread."""
+    owner_row = await conn.fetchrow(
+        "SELECT user_id, agency_id FROM ask_conversations WHERE conversation_id = $1", conversation_id
+    )
+    if owner_row is None:
+        raise LookupError(f"conversation {conversation_id} not found")
+    if owner_row["user_id"] != user_id or owner_row["agency_id"] != agency_id:
+        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id} in agency {agency_id}")
+    row = await conn.fetchrow(
+        """
+        SELECT message_id, conversation_id, role, chip_id, tool, args, signature_hash,
+               result, rendered_summary, created_at
+        FROM ask_conversation_messages
+        WHERE conversation_id = $1 AND message_id = $2
+        """,
+        conversation_id,
+        message_id,
+    )
+    if row is None:
+        raise LookupError(f"message {message_id} not found in conversation {conversation_id}")
+    d = dict(row)
+    if isinstance(d.get("args"), str):
+        d["args"] = json.loads(d["args"])
+    if isinstance(d.get("result"), str):
+        d["result"] = json.loads(d["result"])
+    return d
+
+
 async def migrate_anon_threads(
     conn: asyncpg.Connection,
     *,
