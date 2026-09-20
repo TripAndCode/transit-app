@@ -138,12 +138,20 @@ async def collector_update(agency_id: int, request: Request) -> dict:
     return {"status": "accepted", "inserted": inserted}
 
 
-def _run_ingest_and_analyze() -> None:
+def _run_ingest_and_analyze(only_agency_id: int | None = None) -> None:
     """Pull live GTFS-RT for every agency, then refresh aggregations.
 
     Uses the existing sync CLI helpers via psycopg2 — keeps this module
     thin. Failures inside the loop are logged but don't abort the whole
     run, so one broken agency doesn't starve the others.
+
+    *only_agency_id* narrows the run to a single agency, which is what the
+    admin drawer's per-agency re-analyze action uses: the same lock, the
+    same JST session pin, and the same post-run freshness check as a
+    scheduled poke, rather than a second implementation of them. A scoped
+    run skips the weather pass — observed weather is per station, not per
+    agency, so one agency's re-analyze has no reason to re-drive a
+    third-party fetch for the whole fleet.
     """
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 
@@ -190,10 +198,16 @@ def _run_ingest_and_analyze() -> None:
             _log.warning("cron: another ingest+analyze run is already in flight; skipping this poke")
             return
         with conn.cursor() as cur:
-            cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
+            if only_agency_id is None:
+                cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
+            else:
+                cur.execute(
+                    "SELECT agency_id FROM agencies WHERE deleted_at IS NULL AND agency_id = %s",
+                    (only_agency_id,),
+                )
             agency_ids = [r[0] for r in cur.fetchall()]
         if not agency_ids:
-            _log.warning("cron: no agencies seeded; nothing to ingest")
+            _log.warning("cron: no agencies to ingest (scope=%s)", only_agency_id or "all")
             return
 
         for aid in agency_ids:
@@ -250,11 +264,12 @@ def _run_ingest_and_analyze() -> None:
             if ch_client is not None:
                 ch_client.close()
 
-    # No guard needed here: a lock miss, an empty roster, or a setup failure
-    # each `return`/raise from inside the try above, which exits the whole
+    # No guard needed for the lock/roster/setup cases: each of those
+    # `return`s or raises from inside the try above, which exits the whole
     # function once `finally` runs -- execution only ever reaches this line
     # when the lock was held and agencies were found.
-    _run_weather_ingest(db_url)
+    if only_agency_id is None:
+        _run_weather_ingest(db_url)
 
 
 def _run_weather_ingest(db_url: str) -> None:
