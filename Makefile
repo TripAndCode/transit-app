@@ -1,19 +1,17 @@
 -include .env
+# `.env` is the only mechanism that puts configuration into the environment --
+# nothing in the app or the shell scripts loads it (no python-dotenv, no
+# pydantic-settings), they all read bare `os.environ` / `${VAR:?}`. So the
+# export must stay file-wide: narrowing it to an allowlist silently strips
+# `serve`'s OAuth/LLM/session config and hard-breaks `fetch`, `fetch-ingest`
+# and `sync-r2`, whose scripts require ORACLE_*/OBJECT_STORE_* with no default.
+# Keeping the real DATABASE_URL out of the test path is `test`'s job, not this
+# line's: it delegates to scripts/run_integration_tests.sh, which force-sets
+# its own :5544/:8124 block regardless of what the caller exports.
+export
 
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
-
-# Only the vars recipes actually reach for through the shell environment:
-# DATABASE_URL and the ClickHouse connection block, which `ch-bootstrap`'s
-# inline Python and the running app read via `os.environ` with no fallback.
-# Everything else `.env` may hold (LLM/OAuth/encryption keys, cron and ops
-# tokens, object-storage/Oracle credentials) has its own documented kill
-# switch or dev default and must not be exported into recipes -- lint,
-# formatting, git cleanup, hooks, the frontend build -- that never touch it.
-# Declared after the `?=` defaults above: `export VAR` implicitly defines an
-# as-yet-unset VAR as empty, which would make a later `?=` see it as already
-# set and skip the default.
-export DATABASE_URL PORT CLICKHOUSE_HOST CLICKHOUSE_PORT CLICKHOUSE_USER CLICKHOUSE_PASSWORD CLICKHOUSE_DATABASE CLICKHOUSE_SECURE
 
 .PHONY: all bootstrap doctor bake install test fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build
 

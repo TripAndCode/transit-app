@@ -5,9 +5,9 @@ content, so they belong under `tests/unit/` per CLAUDE.md's DB-fixture-bypass
 convention. They exist because a Makefile has no type system of its own --
 these invariants (a destructive target requires explicit confirmation, quality
 gates never silently reformat instead of checking, the test target never
-defaults to the real dev database, secrets are not exported into every
-recipe, and the template `.env.example` never ships a value that breaks the
-Makefile's own default) can only be caught by reading the text.
+defaults to the real dev database, `.env` still reaches recipes at all, and
+the template `.env.example` never ships a value that breaks the Makefile's
+own default) can only be caught by reading the text.
 """
 
 from __future__ import annotations
@@ -64,18 +64,17 @@ def test_fmt_check_target_exists_and_only_checks():
     assert "--check" in recipe
 
 
-def test_no_bare_export_directive():
+def test_export_is_file_wide():
+    """`.env` reaches recipes only through a bare, file-wide `export`.
+
+    Nothing else loads `.env` — the app and the fetch/sync scripts read bare
+    ``os.environ`` / ``${VAR:?}``. An allowlisted ``export VAR1 VAR2`` strips
+    every unlisted variable from every recipe's shell, which silently
+    unconfigures `serve` and hard-fails `fetch`/`fetch-ingest`/`sync-r2`.
+    Dev-database isolation is `test`'s responsibility, asserted separately.
+    """
     lines = [line.strip() for line in MAKEFILE.read_text().splitlines()]
-    assert "export" not in lines, "a bare `export` re-exports every .env-sourced variable into every recipe"
-
-
-def test_export_list_excludes_secrets():
-    export_lines = [line for line in MAKEFILE.read_text().splitlines() if line.strip().startswith("export ")]
-    assert export_lines, "expected an explicit `export VAR1 VAR2 ...` directive"
-    exported = " ".join(export_lines)
-    assert "DATABASE_URL" in exported
-    for secret in ("GEMINI_API_KEY", "SESSION_SIGNING_KEY", "LLM_KEY_ENCRYPTION_KEY"):
-        assert secret not in exported, f"{secret} must not be exported into every recipe"
+    assert "export" in lines, "`.env` no longer reaches recipes; see this test's docstring"
 
 
 def test_test_target_never_defaults_to_dev_database():
