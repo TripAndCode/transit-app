@@ -17,8 +17,7 @@ from fastapi.testclient import TestClient
 
 from api.deps import get_conn
 from api.routers import admin as admin_router
-from api.security import User, require_admin
-from pipeline.admin_users import hash_api_key
+from api.security import User, require_admin, token_hash
 
 _ADMIN = User(
     user_id=1,
@@ -39,7 +38,7 @@ class _FakeConn:
     exact queries written in ``api/routers/admin.py``."""
 
     def __init__(self, *, sessions=None, users=None, api_keys=None):
-        self.sessions = sessions or []  # list of dict(sid, user_id)
+        self.sessions = sessions or []  # list of dict(sid_hash, user_id)
         self.users = users if users is not None else {1: "admin@example.com"}
         self.api_keys = api_keys or []  # list of dict(id, owner_user_id, revoked_at)
         self._next_api_key_id = (max((k["id"] for k in self.api_keys), default=0)) + 1
@@ -49,12 +48,12 @@ class _FakeConn:
         if "FROM sessions WHERE user_id=$1" in sql:
             (uid,) = args
             return [
-                {"sid": s["sid"]} | {k: v for k, v in s.items() if k != "sid"}
+                {"sid_hash": s["sid_hash"]} | {k: v for k, v in s.items() if k != "sid_hash"}
                 for s in self.sessions
                 if s["user_id"] == uid
             ]
         if "FROM api_keys" in sql:
-            rows = [r for r in self.api_keys if r.get("key_hash") is not None]
+            rows = [r for r in self.api_keys if r.get("owner_user_id") is not None]
             if "owner_user_id=$1" in sql:
                 (owner,) = args
                 rows = [r for r in rows if r["owner_user_id"] == owner]
@@ -86,7 +85,7 @@ class _FakeConn:
         if "UPDATE api_keys SET revoked_at" in sql:
             (key_id,) = args
             for r in self.api_keys:
-                if r["id"] == key_id and r.get("key_hash") is not None and r["revoked_at"] is None:
+                if r["id"] == key_id and r.get("owner_user_id") is not None and r["revoked_at"] is None:
                     r["revoked_at"] = datetime.now(timezone.utc)
                     return {"id": r["id"], "owner_user_id": r["owner_user_id"]}
             return None
@@ -105,7 +104,7 @@ class _FakeConn:
     async def execute(self, sql, *args):
         if "DELETE FROM sessions" in sql:
             uid, prefix = args
-            self.sessions = [s for s in self.sessions if not (s["user_id"] == uid and s["sid"].startswith(prefix))]
+            self.sessions = [s for s in self.sessions if not (s["user_id"] == uid and s["sid_hash"].startswith(prefix))]
             return "DELETE 1"
         if "INSERT INTO login_events" in sql:
             self.events.append(args)
@@ -128,7 +127,7 @@ def test_list_sessions_never_returns_the_full_sid():
     conn = _FakeConn(
         sessions=[
             {
-                "sid": "abcdefghijklmnop",
+                "sid_hash": "abcdefghijklmnop",
                 "user_id": 7,
                 "created_at": None,
                 "last_seen_at": None,
@@ -143,19 +142,19 @@ def test_list_sessions_never_returns_the_full_sid():
     body = r.json()
     assert len(body) == 1
     assert body[0]["sid_prefix"] == "abcdefghijkl"
-    assert "sid" not in body[0]
+    assert "sid_hash" not in body[0]
     assert all("abcdefghijklmnop" != v for v in body[0].values())
 
 
 def test_revoke_session_by_unique_prefix_succeeds():
-    conn = _FakeConn(sessions=[{"sid": "abc123xxxxxx", "user_id": 7}])
+    conn = _FakeConn(sessions=[{"sid_hash": "abc123xxxxxx", "user_id": 7}])
     r = _client(conn).delete("/api/admin/users/7/sessions/abc123", headers=_ORIGIN)
     assert r.status_code == 204
     assert conn.sessions == []
 
 
 def test_revoke_session_unknown_prefix_404s():
-    conn = _FakeConn(sessions=[{"sid": "abc123xxxxxx", "user_id": 7}])
+    conn = _FakeConn(sessions=[{"sid_hash": "abc123xxxxxx", "user_id": 7}])
     r = _client(conn).delete("/api/admin/users/7/sessions/zzz", headers=_ORIGIN)
     assert r.status_code == 404
     assert conn.sessions  # untouched
@@ -164,8 +163,8 @@ def test_revoke_session_unknown_prefix_404s():
 def test_revoke_session_ambiguous_prefix_404s_and_deletes_nothing():
     conn = _FakeConn(
         sessions=[
-            {"sid": "abc111", "user_id": 7},
-            {"sid": "abc222", "user_id": 7},
+            {"sid_hash": "abc111", "user_id": 7},
+            {"sid_hash": "abc222", "user_id": 7},
         ]
     )
     r = _client(conn).delete("/api/admin/users/7/sessions/abc", headers=_ORIGIN)
@@ -174,7 +173,7 @@ def test_revoke_session_ambiguous_prefix_404s_and_deletes_nothing():
 
 
 def test_revoke_session_requires_csrf_origin():
-    conn = _FakeConn(sessions=[{"sid": "abc123", "user_id": 7}])
+    conn = _FakeConn(sessions=[{"sid_hash": "abc123", "user_id": 7}])
     r = _client(conn).delete("/api/admin/users/7/sessions/abc123")
     assert r.status_code == 403
     assert conn.sessions  # untouched
@@ -195,7 +194,7 @@ def test_issue_api_key_returns_raw_key_once_and_stores_only_hash():
     raw_key = body["key"]
     assert raw_key.startswith("sk_")
     stored = conn.api_keys[0]
-    assert stored["key_hash"] == hash_api_key(raw_key)
+    assert stored["key_hash"] == token_hash(raw_key)
     assert "key" not in stored or stored.get("key") != raw_key
 
 
@@ -226,6 +225,29 @@ def test_list_api_keys_never_includes_raw_key_or_hash():
     body = r.json()[0]
     assert "key" not in body
     assert "key_hash" not in body
+
+
+def test_list_api_keys_excludes_legacy_operator_inserted_rows():
+    """A legacy row has no ``owner_user_id`` even though 0053 backfills
+    ``key_hash`` for every row, admin-issued or not -- ``owner_user_id`` is
+    what now distinguishes an admin-managed key."""
+    conn = _FakeConn(
+        api_keys=[
+            {
+                "id": 1,
+                "owner_user_id": None,
+                "tier": "pro",
+                "label": None,
+                "created_at": None,
+                "expires_at": None,
+                "revoked_at": None,
+                "key_hash": "backfilled-legacy-hash",
+            }
+        ]
+    )
+    r = _client(conn).get("/api/admin/api-keys")
+    assert r.status_code == 200
+    assert r.json() == []
 
 
 def test_list_api_keys_filters_by_owner():

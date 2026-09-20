@@ -1,30 +1,19 @@
 """Pure-logic helpers behind the admin user drawer (sessions/api-keys/invites):
-hashing an issued API key, deriving a display-safe session prefix, picking a
-session by an admin-supplied prefix without ever pattern-matching a raw
-secret, and deciding whether a pending invite is still usable.
+deriving a display-safe session prefix, picking a session by an admin-supplied
+prefix without ever pattern-matching a raw secret, and deciding whether a
+pending invite is still usable.
+
+API key hashing itself is ``api.security.token_hash`` (shared with session id
+hashing) and is tested in ``tests/unit/test_token_hash.py``.
 """
 
 from datetime import datetime, timedelta, timezone
 
 from pipeline.admin_users import (
-    hash_api_key,
     invite_is_usable,
     session_id_prefix,
     unique_prefix_match,
 )
-
-
-def test_hash_api_key_is_deterministic():
-    assert hash_api_key("abc123") == hash_api_key("abc123")
-
-
-def test_hash_api_key_differs_for_different_input():
-    assert hash_api_key("abc123") != hash_api_key("abc124")
-
-
-def test_hash_api_key_never_returns_the_raw_key():
-    raw = "super-secret-raw-key"
-    assert raw not in hash_api_key(raw)
 
 
 def test_session_id_prefix_truncates():

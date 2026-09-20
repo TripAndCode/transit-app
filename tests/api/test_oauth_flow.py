@@ -163,7 +163,7 @@ async def test_pending_invite_preapproves_role_and_llm_on_first_login(auth_clien
         }
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "tok"})
     with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
@@ -205,7 +205,7 @@ async def test_expired_invite_is_not_honored(auth_client, aconn, monkeypatch):
         }
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "tok"})
     with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):

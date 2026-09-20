@@ -48,9 +48,9 @@ from api.admin_audit import record_admin_action
 from api.admin_board import board_alerts, board_freshness, board_window, collector_tiles
 from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
-from api.security import User, csrf_guard, require_admin
+from api.security import User, csrf_guard, require_admin, token_hash
 from api.sqlutil import escape_like
-from pipeline.admin_users import hash_api_key, session_id_prefix, unique_prefix_match
+from pipeline.admin_users import session_id_prefix, unique_prefix_match
 from pipeline.audit import record_event
 from pipeline.query import agencies as _agencies
 
@@ -540,8 +540,9 @@ async def delete_user(
 
 
 class SessionOut(BaseModel):
-    """One active session, identified only by a display-safe prefix -- the
-    full ``sid`` is a bearer credential and is never returned to the admin UI."""
+    """One active session, identified only by a display-safe prefix of its
+    ``sid_hash`` -- the raw session id is a bearer credential, is never
+    persisted, and is never returned to the admin UI."""
 
     sid_prefix: str
     created_at: Any
@@ -558,13 +559,13 @@ async def list_user_sessions(
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> list[SessionOut]:
     rows = await conn.fetch(
-        "SELECT sid, created_at, last_seen_at, expires_at, user_agent, ip::text AS ip "
+        "SELECT sid_hash, created_at, last_seen_at, expires_at, user_agent, ip::text AS ip "
         "FROM sessions WHERE user_id=$1 ORDER BY created_at DESC",
         uid,
     )
     return [
         SessionOut(
-            sid_prefix=session_id_prefix(r["sid"]),
+            sid_prefix=session_id_prefix(r["sid_hash"]),
             created_at=r["created_at"],
             last_seen_at=r["last_seen_at"],
             expires_at=r["expires_at"],
@@ -583,22 +584,23 @@ async def revoke_user_session(
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
-    """Revoke one session identified by an admin-visible prefix.
+    """Revoke one session identified by an admin-visible prefix of its
+    ``sid_hash``.
 
-    Looks up every session id for the user and picks the prefix match in
+    Looks up every session hash for the user and picks the prefix match in
     Python (:func:`pipeline.admin_users.unique_prefix_match`) rather than a
-    SQL ``LIKE $1 || '%'`` -- an exact ``left(sid, length($1)) = $1``
+    SQL ``LIKE $1 || '%'`` -- an exact ``left(sid_hash, length($1)) = $1``
     comparison, driven by that lookup, never treats a caller-supplied
     prefix as a wildcard pattern. A prefix that matches zero or more than
     one session (astronomically unlikely for random tokens, but never
     assumed) 404s instead of deleting the wrong -- or multiple -- sessions.
     """
     csrf_guard(request)
-    rows = await conn.fetch("SELECT sid FROM sessions WHERE user_id=$1", uid)
-    sid = unique_prefix_match([r["sid"] for r in rows], sid_prefix)
-    if sid is None:
+    rows = await conn.fetch("SELECT sid_hash FROM sessions WHERE user_id=$1", uid)
+    sid_hash = unique_prefix_match([r["sid_hash"] for r in rows], sid_prefix)
+    if sid_hash is None:
         raise HTTPException(404, "session not found")
-    await conn.execute("DELETE FROM sessions WHERE user_id=$1 AND left(sid, length($2)) = $2", uid, sid)
+    await conn.execute("DELETE FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2", uid, sid_hash)
     await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="session_revoked")
     await record_admin_action(
         conn,
@@ -645,18 +647,20 @@ async def list_api_keys(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> list[ApiKeyOut]:
-    """List admin-issued API keys (rows with a ``key_hash``) -- excludes
-    legacy operator-inserted rows that predate this table's hash columns."""
+    """List admin-issued API keys (rows with an ``owner_user_id``) -- excludes
+    legacy operator-inserted rows that predate this table's ownership/label
+    columns. ``key_hash`` no longer distinguishes the two: it is backfilled
+    for every row, admin-issued or legacy."""
     if owner_user_id is not None:
         rows = await conn.fetch(
             "SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at FROM api_keys "
-            "WHERE key_hash IS NOT NULL AND owner_user_id=$1 ORDER BY created_at DESC",
+            "WHERE owner_user_id IS NOT NULL AND owner_user_id=$1 ORDER BY created_at DESC",
             owner_user_id,
         )
     else:
         rows = await conn.fetch(
             "SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at FROM api_keys "
-            "WHERE key_hash IS NOT NULL ORDER BY created_at DESC"
+            "WHERE owner_user_id IS NOT NULL ORDER BY created_at DESC"
         )
     return [ApiKeyOut(**dict(r)) for r in rows]
 
@@ -669,19 +673,19 @@ async def issue_api_key(
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> ApiKeyIssued:
     """Generate a raw API key, store only its hash, and return the raw value
-    once. ``key`` (the table's legacy primary key column) is set to the same
-    hash -- never the raw secret -- since it predates this task's ``key_hash``
-    column and cannot be null."""
+    once. ``key_hash`` is ``api.security.token_hash`` of the raw key -- the
+    same digest the auth stack uses for sessions -- so this key validates
+    through the same ``key_hash`` lookup as any other row in the table."""
     csrf_guard(request)
     owner = await conn.fetchval("SELECT 1 FROM users WHERE user_id=$1", body.owner_user_id)
     if not owner:
         raise HTTPException(404, "owner user not found")
     raw_key = f"sk_{secrets.token_urlsafe(32)}"
-    digest = hash_api_key(raw_key)
+    digest = token_hash(raw_key)
     row = await conn.fetchrow(
         """
-        INSERT INTO api_keys (key, key_hash, owner_user_id, tier, label, expires_at, owner_email)
-        VALUES ($1, $1, $2, $3, $4, $5, (SELECT email FROM users WHERE user_id=$2))
+        INSERT INTO api_keys (key_hash, owner_user_id, tier, label, expires_at, owner_email)
+        VALUES ($1, $2, $3, $4, $5, (SELECT email FROM users WHERE user_id=$2))
         RETURNING id, owner_user_id, tier, label, created_at, expires_at, revoked_at
         """,
         digest,
@@ -714,7 +718,7 @@ async def revoke_api_key(
     csrf_guard(request)
     row = await conn.fetchrow(
         "UPDATE api_keys SET revoked_at = now() "
-        "WHERE id=$1 AND key_hash IS NOT NULL AND revoked_at IS NULL "
+        "WHERE id=$1 AND owner_user_id IS NOT NULL AND revoked_at IS NULL "
         "RETURNING id, owner_user_id",
         key_id,
     )

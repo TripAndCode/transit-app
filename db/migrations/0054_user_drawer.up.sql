@@ -1,22 +1,17 @@
--- Admin user drawer: hash-based API keys, revocation, and pre-approved invites.
+-- Admin user drawer: owned/labeled API keys and pre-approved invites.
 --
--- NOTE: task A7 (#521, not yet merged) hashes sessions/api_keys with a
--- different shape (hashed session ids). This migration is additive-only so
--- it can be reconciled with A7 without conflicting column definitions: it
--- adds the columns this task needs to the api_keys table as it exists today
--- (raw ``key`` as the primary key, per db/migrations/0003_api_keys.up.sql),
--- rather than assuming A7's hashed-session-id schema.
+-- 0053_hash_tokens already gave ``api_keys`` a ``key_hash`` primary key plus
+-- ``revoked_at``/``expires_at``. This migration only adds what that one
+-- didn't: a stable numeric ``id`` for admin UI references (the primary key
+-- is a credential hash, not something to put in a URL), an owning user, and
+-- a display label.
 
 ALTER TABLE api_keys
     ADD COLUMN IF NOT EXISTS id BIGSERIAL,
-    ADD COLUMN IF NOT EXISTS key_hash TEXT,
     ADD COLUMN IF NOT EXISTS owner_user_id INT REFERENCES users(user_id) ON DELETE SET NULL,
-    ADD COLUMN IF NOT EXISTS label TEXT,
-    ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+    ADD COLUMN IF NOT EXISTS label TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_id ON api_keys(id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash) WHERE key_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_api_keys_owner_user_id ON api_keys(owner_user_id) WHERE owner_user_id IS NOT NULL;
 
 -- Admin-issued invites, pre-approving a role and LLM access for an email

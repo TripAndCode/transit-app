@@ -11,13 +11,9 @@ ALTER TABLE login_events ADD CONSTRAINT login_events_kind_check CHECK (
 DROP TABLE IF EXISTS user_invites;
 
 DROP INDEX IF EXISTS idx_api_keys_owner_user_id;
-DROP INDEX IF EXISTS idx_api_keys_key_hash;
 DROP INDEX IF EXISTS idx_api_keys_id;
 
 ALTER TABLE api_keys
-    DROP COLUMN IF EXISTS expires_at,
-    DROP COLUMN IF EXISTS revoked_at,
     DROP COLUMN IF EXISTS label,
     DROP COLUMN IF EXISTS owner_user_id,
-    DROP COLUMN IF EXISTS key_hash,
     DROP COLUMN IF EXISTS id;
