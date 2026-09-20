@@ -7,6 +7,7 @@ import pytest
 from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
+from api.security import token_hash
 from tests.conftest import TEST_ORIGIN, _test_pool
 
 
@@ -122,7 +123,7 @@ async def test_login_with_correct_credentials_sets_session_cookie(local_client, 
     assert resp.status_code == 200
     assert "sid=" in resp.headers.get("set-cookie", "")
     uid = await aconn.fetchval("SELECT user_id FROM users WHERE email='root@local'")
-    s = await aconn.fetchrow("SELECT sid FROM sessions WHERE user_id=$1", uid)
+    s = await aconn.fetchrow("SELECT sid_hash FROM sessions WHERE user_id=$1", uid)
     assert s is not None
     kinds = [r["kind"] for r in await aconn.fetch("SELECT kind FROM login_events WHERE user_id=$1", uid)]
     assert "login" in kinds
@@ -151,9 +152,12 @@ async def test_login_event_and_session_fields_on_successful_login(local_client, 
     assert row["provider"] == "local"
     assert row["user_agent"] == "test-ua"
     assert row["meta"] is None
-    sid = await aconn.fetchval("SELECT sid FROM sessions WHERE user_id=$1", uid)
-    assert sid is not None
-    assert f"sid={sid}" in resp.headers.get("set-cookie", "")
+    stored = await aconn.fetchrow("SELECT sid, sid_hash FROM sessions WHERE user_id=$1", uid)
+    assert stored is not None
+    # The raw session id lives only in the cookie; the row keeps its digest.
+    assert stored["sid"] is None
+    cookie_sid = resp.headers["set-cookie"].split("sid=", 1)[1].split(";", 1)[0]
+    assert stored["sid_hash"] == token_hash(cookie_sid)
 
 
 @pytest.mark.asyncio

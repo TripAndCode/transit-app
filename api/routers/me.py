@@ -61,7 +61,12 @@ async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = 
 
 
 class SessionOut(BaseModel):
-    """One active session row exposed to the caller (sid truncated to a prefix)."""
+    """One active session row exposed to the caller.
+
+    ``sid_prefix`` is a prefix of the stored ``sid_hash``, not of the session
+    id itself — the server no longer holds the session id, and a handle the
+    client can echo back must be derivable from what is stored. It stays an
+    opaque display/lookup handle either way."""
 
     sid_prefix: str
     user_agent: str | None
@@ -76,13 +81,13 @@ async def list_sessions(
 ) -> list[SessionOut]:
     """List the caller's active sessions, ordered by most-recent activity."""
     rows = await conn.fetch(
-        "SELECT sid, user_agent, ip::text AS ip, created_at, last_seen_at "
+        "SELECT sid_hash, user_agent, ip::text AS ip, created_at, last_seen_at "
         "FROM sessions WHERE user_id=$1 ORDER BY last_seen_at DESC",
         user.user_id,
     )
     return [
         SessionOut(
-            sid_prefix=r["sid"][:12],
+            sid_prefix=r["sid_hash"][:12],
             user_agent=r["user_agent"],
             ip=r["ip"],
             created_at=r["created_at"],
@@ -93,16 +98,17 @@ async def list_sessions(
 
 
 def _is_valid_sid_prefix(sid_prefix: str) -> bool:
-    """True iff every character is one ``secrets.token_urlsafe()`` can emit,
-    so a caller-supplied prefix can never smuggle a SQL wildcard or other
-    special character into the lookup below."""
-    return all(c.isalnum() or c in "-_" for c in sid_prefix)
+    """True iff the prefix is lowercase hex, the only alphabet a stored
+    ``sid_hash`` can contain. Tighter than the session id's own alphabet was,
+    and it keeps `%` and `_` -- both LIKE wildcards -- out of the value."""
+    return all(c in "0123456789abcdef" for c in sid_prefix)
 
 
 # Exact-prefix comparison, not LIKE: a LIKE pattern treats an unescaped `_`
 # in sid_prefix as a single-character wildcard, letting a valid-looking
-# prefix match a session it isn't actually a prefix of.
-_SID_PREFIX_QUERY = "SELECT sid FROM sessions WHERE user_id=$1 AND left(sid, length($2)) = $2"
+# prefix match a session it isn't actually a prefix of. Belt and braces with
+# the hex check above, so neither alone is load-bearing.
+_SID_PREFIX_QUERY = "SELECT sid_hash FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2"
 
 
 @router.delete("/me/sessions/{sid_prefix}", status_code=204)
@@ -112,11 +118,14 @@ async def revoke_session(
     user: User = Depends(require_user),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
-    """Revoke the caller's session matching the given sid prefix.
+    """Revoke the caller's session matching the given ``sid_hash`` prefix.
 
     Rejects ambiguous prefixes with 409 — the UI passes the 12-char
-    display prefix, which is astronomically unlikely to collide for
-    opaque 32-byte tokens but the server refuses to guess if it does.
+    display prefix, which is astronomically unlikely to collide across one
+    user's sessions but the server refuses to guess if it does. Matching a
+    prefix of the digest is safe in a way matching a prefix of the session id
+    would not be: the digest is not a credential, so it can be echoed through
+    a URL path.
     """
     csrf_guard(request)
     if len(sid_prefix) < 12:
@@ -129,8 +138,8 @@ async def revoke_session(
     if len(rows) > 1:
         raise HTTPException(409, "prefix matches multiple sessions")
     await conn.execute(
-        "DELETE FROM sessions WHERE sid=$1 AND user_id=$2",
-        rows[0]["sid"],
+        "DELETE FROM sessions WHERE sid_hash=$1 AND user_id=$2",
+        rows[0]["sid_hash"],
         user.user_id,
     )
     return Response(status_code=204)

@@ -38,6 +38,7 @@ from api.security import (
     csrf_guard,
     current_user,
     hash_password,
+    token_hash,
     verify_local_login_password,
 )
 from pipeline.audit import record_event
@@ -354,11 +355,16 @@ async def _upsert_user(
 async def _create_session(conn: asyncpg.Connection, uid: int, ua: str | None, ip: str | None) -> str:
     """Insert a sessions row for ``uid`` and return the new ``sid``. Shared by
     the OAuth callback and the local-admin login — both mint a session the
-    same way once they've settled on a user_id."""
+    same way once they've settled on a user_id.
+
+    Only the digest is persisted; the raw ``sid`` is returned to be set as the
+    cookie and is then unrecoverable from the database. The legacy ``sid``
+    column is deliberately left NULL — a row that stored the raw value would
+    reintroduce exactly the exposure the hash exists to remove."""
     sid = secrets.token_urlsafe(32)
     await conn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",
+        token_hash(sid),
         uid,
         datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS),
         ua,
@@ -555,7 +561,7 @@ async def logout(
     csrf_guard(request)
     sid = request.cookies.get(SESSION_COOKIE_NAME)
     if sid and user:
-        await conn.execute("DELETE FROM sessions WHERE sid=$1 AND user_id=$2", sid, user.user_id)
+        await conn.execute("DELETE FROM sessions WHERE sid_hash=$1 AND user_id=$2", token_hash(sid), user.user_id)
         ua = request.headers.get("user-agent")
         ip = request.client.host if request.client else None
         await record_event(conn, user_id=user.user_id, actor_id=user.user_id, kind="logout", ip=ip, user_agent=ua)
