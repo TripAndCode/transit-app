@@ -122,9 +122,11 @@ make test
 make check
 ```
 
-Tests must use the throwaway Postgres instance on `:5544`, never the real dev
-database on `:5433`. ClickHouse integration tests require the test instance on
-`:8124` and `RUN_CH_INTEGRATION=1`.
+`make test` always runs against the throwaway Postgres/ClickHouse instances on
+`:5544`/`:8124` via `scripts/run_integration_tests.sh`, never the real dev
+database on `:5433`, regardless of this Makefile's own `DATABASE_URL` default.
+`make check` runs `fmt-check` (verifies formatting, doesn't rewrite files),
+`lint`, `typecheck`, then `test`.
 
 Example targeted test:
 
