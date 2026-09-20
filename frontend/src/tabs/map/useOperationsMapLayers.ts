@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import maplibregl, { type LayerSpecification, type Map as MLMap } from "maplibre-gl";
-import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse } from "../../api/types";
+import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
 import {
   DELAY_THRESHOLDS,
   accentColorResolved,
@@ -9,6 +9,7 @@ import {
   severityStepColors,
   surfaceColorResolved,
 } from "../../styles/tokens";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useThemeSignal } from "../../styles/theme";
 import { revealAgency } from "./cameraChoreography";
 import { whenStyleReady } from "./styleReady";
@@ -22,6 +23,7 @@ const LIVE_TRIPS_CLUSTER_COUNT_LAYER = "live-trip-cluster-count";
 const ACTIVE_ROUTE_SOURCE = "active-route";
 const ACTIVE_ROUTE_CASING_LAYER = "active-route-casing";
 const ACTIVE_ROUTE_LAYER = "active-route-line";
+export const ACTIVE_ROUTE_FLOW_LAYER = "active-route-flow";
 const TRIP_PROGRESS_SOURCE = "trip-progress";
 const TRIP_PROGRESS_LINE_LAYER = "trip-progress-line";
 const TRIP_PROGRESS_DIRECTION_LAYER = "trip-progress-direction";
@@ -30,6 +32,7 @@ const TRIP_PROGRESS_LABELS_LAYER = "trip-progress-labels";
 
 type CirclePaint = NonNullable<Extract<LayerSpecification, { type: "circle" }>["paint"]>;
 type SymbolPaint = NonNullable<Extract<LayerSpecification, { type: "symbol" }>["paint"]>;
+type LinePaint = NonNullable<Extract<LayerSpecification, { type: "line" }>["paint"]>;
 /** MapLibre's `ExpressionSpecification` is not re-exported from the bundle's
  *  public types, so it is recovered from a property that accepts one. */
 type NumericExpression = Extract<CirclePaint["circle-radius"], unknown[]>;
@@ -126,6 +129,67 @@ function delayLabel(seconds: number): string {
   return `${minutes > 0 ? "+" : "-"}${Math.abs(minutes)}`;
 }
 
+/** A `line-gradient` painting each stop's own delay along the selected
+ *  route, evenly spaced by stop order rather than by real arc length -- the
+ *  stop-profile response carries no per-stop position along the geometry,
+ *  only its sequence, so "along the route" here means "in order," which is
+ *  enough to show where along the trip delay accumulates without a second
+ *  geometry-matching step. `undefined` (no gradient) when there are fewer
+ *  than two usable stops: MapLibre's `interpolate` needs at least two, and a
+ *  single point says nothing about "along" anything. */
+export function buildRouteLineGradient(
+  stops: RouteStopProfileRow[] | undefined,
+): LinePaint["line-gradient"] {
+  if (!stops || stops.length < 2) return undefined;
+  const ordered = [...stops].sort((a, b) => a.stop_sequence - b.stop_sequence);
+  const expression: unknown[] = ["interpolate", ["linear"], ["line-progress"]];
+  ordered.forEach((stop, index) => {
+    expression.push(index / (ordered.length - 1), delayColorResolved(stop.avg_delay_sec / 60));
+  });
+  return expression as LinePaint["line-gradient"];
+}
+
+/** The selected route's own line paint: a per-stop gradient when a stop
+ *  profile is available, otherwise the previous flat colour for the whole
+ *  route's average delay. The two paint properties are mutually exclusive on
+ *  a MapLibre line layer, so exactly one of them is ever set. */
+export function activeRouteLinePaint(
+  selectedDelaySec: number,
+  stopProfile: RouteStopProfileRow[] | undefined,
+): Pick<LinePaint, "line-color" | "line-gradient"> {
+  const gradient = buildRouteLineGradient(stopProfile);
+  return gradient ? { "line-gradient": gradient } : { "line-color": delayColorResolved(selectedDelaySec / 60) };
+}
+
+/** The calm "flow" overlay's base [dash, gap] lengths (line-width multiples)
+ *  -- short dashes, a long gap, so the effect reads as a quiet suggestion of
+ *  direction rather than a busy marching-ants animation. */
+export const FLOW_DASH = { dash: 0.6, gap: 2 } as const;
+
+/** One full pattern-length traversal takes this long, independent of the
+ *  dash/gap lengths -- the loop always lines back up with where it started. */
+export const FLOW_CYCLE_MS = 3200;
+
+/** A MapLibre `line-dasharray` for the [dash, gap] pattern rotated by
+ *  `elapsedMs` around its own period. MapLibre has no dash-*offset* paint
+ *  property, so animating a flowing dash means re-describing the same
+ *  repeating pattern starting from a different point in its cycle each
+ *  frame -- this computes that rotated array. Pure and exported so the shape
+ *  can be asserted without a rAF loop or a map at all. */
+export function flowDashArrayAtPhase(
+  elapsedMs: number,
+  dash: number = FLOW_DASH.dash,
+  gap: number = FLOW_DASH.gap,
+  cycleMs: number = FLOW_CYCLE_MS,
+): number[] {
+  const period = dash + gap;
+  const cyclePos = ((elapsedMs % cycleMs) + cycleMs) % cycleMs;
+  const s = (cyclePos / cycleMs) * period;
+  if (s < dash) return [dash - s, gap, s];
+  const g = s - dash;
+  return [0, gap - g, dash, g];
+}
+
 export function useOperationsMapLayers(
   mapRef: React.MutableRefObject<MLMap | null>,
   live: LiveTripsResponse | undefined,
@@ -136,9 +200,11 @@ export function useOperationsMapLayers(
   styleEpoch: number,
   selectedTripId: string | null = null,
   progress?: LiveTripProgressResponse,
+  stopProfile?: RouteStopProfileRow[],
 ): void {
   const fittedAgencyRef = useRef<number | null>(null);
   const theme = useThemeSignal();
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
 
   useEffect(() => {
     const map = mapRef.current;
@@ -234,6 +300,7 @@ export function useOperationsMapLayers(
 
     return whenStyleReady(map, () => {
       if (!geometry || !selectedRoute) {
+        if (map.getLayer(ACTIVE_ROUTE_FLOW_LAYER)) map.removeLayer(ACTIVE_ROUTE_FLOW_LAYER);
         if (map.getLayer(ACTIVE_ROUTE_LAYER)) map.removeLayer(ACTIVE_ROUTE_LAYER);
         if (map.getLayer(ACTIVE_ROUTE_CASING_LAYER)) map.removeLayer(ACTIVE_ROUTE_CASING_LAYER);
         if (map.getSource(ACTIVE_ROUTE_SOURCE)) map.removeSource(ACTIVE_ROUTE_SOURCE);
@@ -245,13 +312,19 @@ export function useOperationsMapLayers(
         properties: {},
         geometry,
       };
+      const linePaint = activeRouteLinePaint(selectedDelaySec, stopProfile);
       const existing = map.getSource(ACTIVE_ROUTE_SOURCE) as maplibregl.GeoJSONSource | undefined;
       if (existing) {
         existing.setData(data);
-        map.setPaintProperty(ACTIVE_ROUTE_LAYER, "line-color", delayColorResolved(selectedDelaySec / 60));
+        // Only one of the two is ever defined (see activeRouteLinePaint) --
+        // the other is explicitly cleared so a route that gains/loses a
+        // usable stop profile between renders doesn't keep a stale gradient
+        // or a stale flat colour layered underneath the new one.
+        map.setPaintProperty(ACTIVE_ROUTE_LAYER, "line-gradient", linePaint["line-gradient"]);
+        map.setPaintProperty(ACTIVE_ROUTE_LAYER, "line-color", linePaint["line-color"]);
         return;
       }
-      map.addSource(ACTIVE_ROUTE_SOURCE, { type: "geojson", data });
+      map.addSource(ACTIVE_ROUTE_SOURCE, { type: "geojson", data, lineMetrics: true });
       const beforeId = map.getLayer(LIVE_TRIPS_LAYER) ? LIVE_TRIPS_LAYER : undefined;
       map.addLayer({
         id: ACTIVE_ROUTE_CASING_LAYER,
@@ -265,10 +338,46 @@ export function useOperationsMapLayers(
         type: "line",
         source: ACTIVE_ROUTE_SOURCE,
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": delayColorResolved(selectedDelaySec / 60), "line-width": 5 },
+        paint: { ...linePaint, "line-width": 5 },
+      }, beforeId);
+      // The calm flow overlay: same source, on top of the gradient/casing
+      // stack, animated by a separate rAF effect below (skipped entirely
+      // under reduced motion). The static dasharray here is exactly its
+      // phase-0 frame, so a reduced-motion viewer still sees a (motionless)
+      // dashed line rather than nothing.
+      map.addLayer({
+        id: ACTIVE_ROUTE_FLOW_LAYER,
+        type: "line",
+        source: ACTIVE_ROUTE_SOURCE,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": accentColorResolved(),
+          "line-width": 2,
+          "line-opacity": 0.7,
+          "line-dasharray": [FLOW_DASH.dash, FLOW_DASH.gap],
+        },
       }, beforeId);
     });
-  }, [mapRef, selectedDelaySec, selectedRoute, shape, styleEpoch, theme]);
+  }, [mapRef, selectedDelaySec, selectedRoute, shape, stopProfile, styleEpoch, theme]);
+
+  useEffect(() => {
+    const maybeMap = mapRef.current;
+    if (!maybeMap || !selectedRoute || !shape?.geometry || reducedMotion) return;
+    // Rebound to a definitely-non-null const: narrowing from the guard above
+    // doesn't extend into the `tick` function declaration below, which could
+    // in principle run after further reassignment of `maybeMap`.
+    const map: MLMap = maybeMap;
+
+    let frameId = 0;
+    const start = performance.now();
+    function tick(now: number) {
+      frameId = requestAnimationFrame(tick);
+      if (!map.getLayer(ACTIVE_ROUTE_FLOW_LAYER)) return;
+      map.setPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray", flowDashArrayAtPhase(now - start));
+    }
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [mapRef, reducedMotion, selectedRoute, shape, styleEpoch]);
 
   useEffect(() => {
     const map = mapRef.current;
