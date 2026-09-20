@@ -129,7 +129,11 @@ async def revoke_session(
     return Response(status_code=204)
 
 
-_MAX_PRESET_RANGE_CTX_BYTES = 4096
+# Sized against what the filter UI can legitimately build, not against today's
+# data: range_ctx carries a route list, and the picker can select every route an
+# agency has. A large network's full selection would exceed a few kilobytes, so
+# the cap sits well clear of it and only stops payloads no picker could produce.
+_MAX_PRESET_RANGE_CTX_BYTES = 64 * 1024
 
 
 class PresetIn(BaseModel):

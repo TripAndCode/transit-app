@@ -1,4 +1,4 @@
-"""api/routers/map.py request-shape bounds (B4, B9):
+"""api/routers/map.py request-shape bounds:
 
 - ``GET /delays/live``'s ``limit`` must reject 0/negative values -- it
   already capped the upper end at 500 but had no floor, so ``limit=0``

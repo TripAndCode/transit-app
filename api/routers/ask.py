@@ -11,6 +11,7 @@ user's chosen window without having to mention it in the prompt.
 """
 
 import asyncio
+import json
 import logging
 import os as _os
 from datetime import timedelta
@@ -20,7 +21,7 @@ import asyncpg
 import clickhouse_connect
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
@@ -64,10 +65,24 @@ class AskCtx(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+# Turns actually attached to the follow-up prompt. Anything the caller sends
+# beyond a small multiple of this is work the server will throw away.
+HISTORY_TURNS_USED = 3
+MAX_HISTORY_TURNS = 20
+_MAX_TURN_ARGS_BYTES = 8192
+
+
 class Turn(BaseModel):
     question: str = Field(max_length=MAX_QUESTION_CHARS)
     tool: str | None = None
     args: dict | None = None
+
+    @field_validator("args")
+    @classmethod
+    def _bounded_args(cls, v: dict | None) -> dict | None:
+        if v is not None and len(json.dumps(v).encode()) > _MAX_TURN_ARGS_BYTES:
+            raise ValueError(f"args exceeds {_MAX_TURN_ARGS_BYTES} bytes serialized")
+        return v
 
 
 # Kept in sync with the frontend's top-level tab routes (frontend/src/main.tsx)
@@ -86,7 +101,7 @@ class AskRequest(BaseModel):
     question: str = Field(max_length=MAX_QUESTION_CHARS)
     model: str | None = None
     ctx: AskCtx | None = None
-    history: list[Turn] = []
+    history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
     # Threaded through to chat_with_tools's system-prompt addendum only — never
     # consulted by the rules/embedding routing stage above.
     panel_ctx: PanelCtx | None = None
@@ -175,8 +190,9 @@ async def ask(
 
     # Follow-ups ("次の50件", "もっと") have no standalone tool mapping, so
     # they skip the stateless router and go straight to the LLM with the
-    # last few turns attached. History is capped at 3 turns.
-    history = [t.model_dump() for t in body.history][-3:] if history_enabled else []
+    # last few turns attached. Slice before dumping: the rest is discarded,
+    # so serializing it first is work spent on data that never leaves here.
+    history = [t.model_dump() for t in body.history[-HISTORY_TURNS_USED:]] if history_enabled else []
     follow_up = history_enabled and bool(history) and is_follow_up(body.question)
     # A forced tool call only makes sense when there is an actual prior tool
     # invocation to continue (e.g. re-paginating the same describe_data

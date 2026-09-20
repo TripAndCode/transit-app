@@ -19,7 +19,13 @@ from pipeline.query.user_llm_keys import get_user_llm_key
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["copilot"])
 
-_MAX_PAYLOAD_BYTES = 16384
+# A ceiling on abuse, not a tuning knob: CopilotPanel posts the whole
+# OverviewSummary unmodified, and two of its fields (service_split_daily,
+# sparkline_points) carry one entry per day of the selected range. At
+# MAX_RANGE_DAYS those two alone run to tens of kilobytes, so any cap near
+# their size rejects the application's own traffic on a wide-but-legal range.
+# Keep this far above whatever the Overview tab can produce.
+_MAX_PAYLOAD_BYTES = 256 * 1024
 
 
 class CopilotInsightRequest(BaseModel):

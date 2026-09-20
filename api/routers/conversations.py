@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -10,7 +11,7 @@ import asyncpg
 import clickhouse_connect
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
@@ -99,6 +100,12 @@ class AppendMessage(BaseModel):
             raise ValueError("One of chip_id or (tool + args) is required")
 
 
+# Mirrors the preset range_ctx ceiling: the same filter state, arriving by a
+# different route. Bounded per thread so a 100-thread migration cannot carry
+# an unbounded jsonb payload into Postgres.
+_MAX_FILTER_CTX_BYTES = 64 * 1024
+
+
 class AnonThread(BaseModel):
     client_id: str
     # The agency the thread belongs to; threads span agencies in localStorage,
@@ -106,6 +113,14 @@ class AnonThread(BaseModel):
     agency_id: int | None = None
     title: str = Field(max_length=200)
     filter_ctx: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("filter_ctx")
+    @classmethod
+    def _bounded_filter_ctx(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(v).encode()) > _MAX_FILTER_CTX_BYTES:
+            raise ValueError(f"filter_ctx exceeds {_MAX_FILTER_CTX_BYTES} bytes serialized")
+        return v
+
     pinned: bool = False
     created_at: str
     updated_at: str

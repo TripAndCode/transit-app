@@ -1,4 +1,4 @@
-"""GET /api/{agency_id}/reports/{report_type}'s ``limit`` query param (B1)
+"""GET /api/{agency_id}/reports/{report_type}'s ``limit`` query param
 must reject values above 500 at the FastAPI layer instead of letting an
 arbitrarily large ``limit`` reach ``compute_ranking``/etc.
 

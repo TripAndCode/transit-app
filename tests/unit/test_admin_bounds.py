@@ -1,4 +1,4 @@
-"""GET /api/admin/users request-shape bounds (findings B2, B3):
+"""GET /api/admin/users request-shape bounds:
 
 - ``offset`` must reject negative values at the FastAPI parameter layer
   instead of silently feeding a negative OFFSET to Postgres.
