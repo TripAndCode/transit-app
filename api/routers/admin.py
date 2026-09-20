@@ -35,6 +35,7 @@ from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
+from pipeline.query import agencies as _agencies
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -385,11 +386,7 @@ async def list_admin_agencies(
     conn: asyncpg.Connection = Depends(get_conn),
 ):
     """Admin list of ALL agencies including soft-deleted."""
-    rows = await conn.fetch(
-        "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
-        "FROM agencies ORDER BY agency_id"
-    )
-    return [dict(r) for r in rows]
+    return await _agencies.list_agencies(conn, include_deleted=True)
 
 
 # ── Architecture docs (developer/internal) endpoints ─────────────────────
