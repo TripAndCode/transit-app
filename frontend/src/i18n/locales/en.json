@@ -1107,15 +1107,8 @@
       "search_placeholder": "Search by name",
       "empty": "No agencies found.",
       "col_name": "Name",
-      "col_feed_url": "Feed URL",
-      "col_strategy": "Strategy",
-      "col_status": "Status",
-      "status_active": "Active",
       "status_deleted": "Deleted",
       "action_edit": "Edit",
-      "action_delete": "Delete",
-      "action_restore": "Restore",
-      "confirm_delete": "Delete \"{{name}}\"? It will be excluded from ingest and analysis.",
       "form_title_add": "Add agency",
       "form_title_edit": "Edit agency",
       "form_name": "Agency name",
@@ -1142,8 +1135,7 @@
       "view_rt_incomplete": "RT coverage gaps",
       "rt_summary": "{{present}}/{{total}} fields",
       "rt_unprobed": "Not probed",
-      "health_error": "Health data could not be loaded; showing the basic columns only.",
-      "action_details": "Details"
+      "health_error": "Health data could not be loaded; showing the basic columns only."
     },
     "agency_diag": {
       "drawer_label": "Agency details",

@@ -1107,15 +1107,8 @@
       "search_placeholder": "事業者名で検索",
       "empty": "該当する事業者がありません。",
       "col_name": "事業者名",
-      "col_feed_url": "フィードURL",
-      "col_strategy": "取得方式",
-      "col_status": "状態",
-      "status_active": "有効",
       "status_deleted": "削除済",
       "action_edit": "編集",
-      "action_delete": "削除",
-      "action_restore": "復元",
-      "confirm_delete": "「{{name}}」を削除しますか？取込・集計から除外されます。",
       "form_title_add": "事業者を追加",
       "form_title_edit": "事業者を編集",
       "form_name": "事業者名",
@@ -1142,8 +1135,7 @@
       "view_rt_incomplete": "RT 被覆に欠け",
       "rt_summary": "{{present}}/{{total}} 項目",
       "rt_unprobed": "未計測",
-      "health_error": "健全性の取得に失敗しました。基本情報のみ表示しています。",
-      "action_details": "詳細"
+      "health_error": "健全性の取得に失敗しました。基本情報のみ表示しています。"
     },
     "agency_diag": {
       "drawer_label": "事業者の詳細",
