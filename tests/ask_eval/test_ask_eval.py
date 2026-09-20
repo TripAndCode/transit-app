@@ -7,13 +7,8 @@ from pathlib import Path
 
 
 def test_ask_eval_passes():
-    # Run the script with the interpreter already running this suite, rather
-    # than re-resolving one through `poetry run`. Poetry picks its virtualenv
-    # from the current directory's identity, so from a git worktree it selects
-    # a *different* environment than the one pytest was launched from — one
-    # that has no project dependencies installed, making this fail with
-    # ModuleNotFoundError regardless of the code under test. sys.executable is
-    # by definition the environment the suite imports the project from.
+    # The interpreter already running this suite, not `poetry run`, which
+    # resolves its venv by cwd and so picks an unprovisioned one in a worktree.
     project_root = Path(__file__).parent.parent.parent
     r = subprocess.run(
         [sys.executable, "scripts/ask_eval.py"],

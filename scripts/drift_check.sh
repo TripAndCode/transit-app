@@ -33,14 +33,16 @@ echo "=== drift_check $(date -u +%Y-%m-%dT%H:%M:%SZ) DB=${db_safe} ==="
 # `poetry run` resolves its virtualenv from the current directory's identity,
 # so invoked from a git worktree it picks a different, unprovisioned
 # environment; the test suite passes its own sys.executable for that reason.
-PYTHON="${PYTHON:-poetry run python}"
+# Split into an array rather than expanded unquoted, so the multi-word default
+# still works while an override path containing a space stays one argument.
+read -ra _python_cmd <<<"${PYTHON:-poetry run python}"
 
 echo "--- check_migrations ---"
-$PYTHON gtfs_pipeline.py check_migrations
+"${_python_cmd[@]}" gtfs_pipeline.py check_migrations
 mig=$?
 
 echo "--- check_aggs ---"
-$PYTHON gtfs_pipeline.py check_aggs
+"${_python_cmd[@]}" gtfs_pipeline.py check_aggs
 agg=$?
 
 if [ "$mig" -ne 0 ] || [ "$agg" -ne 0 ]; then

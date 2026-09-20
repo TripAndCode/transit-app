@@ -86,6 +86,26 @@ def stale_agency(apply_schema):
         ch_client.close()
 
 
+def _script_env(**overrides: str) -> dict[str, str]:
+    """Environment for invoking drift_check.sh.
+
+    PYTHON is always set: the script defaults to `poetry run python`, which
+    resolves its virtualenv from the current directory and so picks a
+    different, unprovisioned one when the suite runs from a git worktree.
+    Built once rather than per test — a hand-copied env dict is how one of
+    these call sites previously kept the default and passed for the wrong
+    reason, its assertions satisfied by the resulting crash rather than by
+    the behaviour it names.
+    """
+    return {
+        **os.environ,
+        "DATABASE_URL": os.environ["DATABASE_URL"],
+        "PYTHON": sys.executable,
+        **_CH_TEST_ENV,
+        **overrides,
+    }
+
+
 @_ch_integration
 def test_exit0_and_reports_both_checks_on_current_db(apply_schema):
     # :5544 is freshly migrated with current aggregates -> both checks pass.
@@ -93,7 +113,7 @@ def test_exit0_and_reports_both_checks_on_current_db(apply_schema):
         ["bash", str(SCRIPT)],
         capture_output=True,
         text=True,
-        env={**os.environ, "DATABASE_URL": os.environ["DATABASE_URL"], "PYTHON": sys.executable, **_CH_TEST_ENV},
+        env=_script_env(),
     )
     out = r.stdout + r.stderr
     assert r.returncode == 0, out
@@ -109,7 +129,7 @@ def test_exit1_when_aggs_stale(stale_agency):
         ["bash", str(SCRIPT)],
         capture_output=True,
         text=True,
-        env={**os.environ, "DATABASE_URL": os.environ["DATABASE_URL"], **_CH_TEST_ENV},
+        env=_script_env(),
     )
     out = r.stdout + r.stderr
     assert r.returncode == 1, out
