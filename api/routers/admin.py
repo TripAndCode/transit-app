@@ -52,6 +52,7 @@ from api.security import User, csrf_guard, require_admin, token_hash
 from api.sqlutil import escape_like
 from pipeline.admin_users import session_id_prefix, unique_prefix_match
 from pipeline.audit import record_event
+from pipeline.query import admin_audit as _admin_audit
 from pipeline.query import agencies as _agencies
 
 _log = logging.getLogger(__name__)
@@ -262,7 +263,7 @@ async def bulk_patch_users(
     async with conn.transaction():
         rows = await conn.fetch(
             """
-            SELECT user_id, role, suspended_at, llm_approved FROM users
+            SELECT user_id, email, role, suspended_at, llm_approved FROM users
             WHERE user_id = ANY($1::int[]) OR (role='admin' AND suspended_at IS NULL)
             ORDER BY user_id
             FOR UPDATE
@@ -394,7 +395,7 @@ async def _lock_target_and_active_admins(conn: asyncpg.Connection, uid: int) -> 
     """
     rows = await conn.fetch(
         """
-        SELECT user_id, role, suspended_at, llm_approved FROM users
+        SELECT user_id, email, role, suspended_at, llm_approved FROM users
         WHERE user_id = $1 OR (role='admin' AND suspended_at IS NULL)
         ORDER BY user_id
         FOR UPDATE
@@ -473,6 +474,20 @@ async def patch_user(
                 meta={"old": old_llm_approved, "new": new_llm_approved},
             )
 
+        before_fields = {"role": old_role, "suspended": old_suspended, "llm_approved": old_llm_approved}
+        after_fields = {"role": new_role, "suspended": new_suspended, "llm_approved": new_llm_approved}
+        changed = {k for k in before_fields if before_fields[k] != after_fields[k]}
+        if changed:
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action="user.updated",
+                target_type="user",
+                target_id=str(uid),
+                before={k: before_fields[k] for k in changed},
+                after={k: after_fields[k] for k in changed},
+            )
+
         out = await conn.fetchrow(
             "SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at "
             "FROM users WHERE user_id=$1",
@@ -529,10 +544,16 @@ async def delete_user(
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
-            action="users.delete",
+            action="user.deleted",
             target_type="user",
             target_id=uid,
-            before={"role": row["role"], "suspended_at": row["suspended_at"], "llm_approved": row["llm_approved"]},
+            before={
+                "email": row["email"],
+                "role": row["role"],
+                "suspended_at": row["suspended_at"],
+                "llm_approved": row["llm_approved"],
+            },
+            after={"email": f"deleted-{uid}@local"},
         )
     return Response(status_code=204)
 
@@ -881,6 +902,156 @@ async def list_admin_agencies(
 ) -> list[dict[str, Any]]:
     """Admin list of ALL agencies including soft-deleted."""
     return await _agencies.list_agencies(conn, include_deleted=True)
+
+
+# ── Unified audit log ────────────────────────────────────────────────────
+
+
+class AuditRowOut(BaseModel):
+    """One row of the merged `admin_audit` + `login_events` timeline."""
+
+    at: Any  # datetime — kept Any to avoid asyncpg datetime serialization issues
+    actor_id: int | None
+    action: str
+    target_type: str
+    target_id: str | None
+    before: Any
+    after: Any
+    reason: str | None
+    ip: str | None
+
+
+class AuditPage(BaseModel):
+    items: list[AuditRowOut]
+    next_cursor: str | None
+
+
+@router.get("/audit", response_model=AuditPage)
+async def list_admin_audit(
+    actor: int | None = None,
+    target: str | None = None,
+    action: str | None = None,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> AuditPage:
+    """Paged, filterable admin-action timeline: `admin_audit` merged with the
+    `login`/`login_failed` events from `login_events` (mapped to
+    `login.ok`/`login.fail`) -- every other `login_events` kind is an admin
+    action already recorded directly into `admin_audit`.
+
+    `target` matches either `target_type` or `target_id` (exact). `cursor`
+    is opaque, from a previous page's `next_cursor`.
+    """
+    limit = max(1, min(200, limit))
+    try:
+        from_dt = _admin_audit.parse_bound(from_, end=False)
+        to_dt = _admin_audit.parse_bound(to, end=True)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+    cursor_row: dict[str, Any] | None = None
+    if cursor:
+        try:
+            cursor_row = _admin_audit.decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+    fetch_limit = limit + 1
+
+    a_where: list[str] = []
+    a_args: list[Any] = []
+    if actor is not None:
+        a_args.append(actor)
+        a_where.append(f"actor_id = ${len(a_args)}")
+    if target:
+        a_args.append(target)
+        a_where.append(f"(target_type = ${len(a_args)} OR target_id = ${len(a_args)})")
+    if action:
+        a_args.append(action)
+        a_where.append(f"action = ${len(a_args)}")
+    if from_dt is not None:
+        a_args.append(from_dt)
+        a_where.append(f"at >= ${len(a_args)}")
+    if to_dt is not None:
+        a_args.append(to_dt)
+        a_where.append(f"at <= ${len(a_args)}")
+    if cursor_row is not None:
+        a_args.append(cursor_row["at"])
+        a_where.append(f"at <= ${len(a_args)}")
+    a_where_sql = ("WHERE " + " AND ".join(a_where)) if a_where else ""
+    a_args.append(fetch_limit)
+    audit_raw = await conn.fetch(
+        f"""
+        SELECT id, at, actor_id, action, target_type, target_id,
+               before::text AS before, after::text AS after, reason, ip::text AS ip
+        FROM admin_audit
+        {a_where_sql}
+        ORDER BY at DESC, id DESC
+        LIMIT ${len(a_args)}
+        """,
+        *a_args,
+    )
+    audit_rows = [_admin_audit.normalize_admin_audit(dict(r)) for r in audit_raw]
+
+    # Only the login-derived kinds are part of this timeline; an `action`
+    # filter for something else (e.g. "user.updated") means login_events
+    # cannot contribute any row, so skip that query entirely.
+    login_kinds = [k for k, v in _admin_audit.LOGIN_ACTION_BY_KIND.items() if action is None or v == action]
+    login_rows: list[dict[str, Any]] = []
+    if login_kinds:
+        l_args: list[Any] = [login_kinds]
+        l_where = ["kind = ANY($1)"]
+        if actor is not None:
+            l_args.append(actor)
+            l_where.append(f"actor_id = ${len(l_args)}")
+        if target:
+            l_args.append(target)
+            l_where.append(f"(${len(l_args)} = 'user' OR user_id::text = ${len(l_args)})")
+        if from_dt is not None:
+            l_args.append(from_dt)
+            l_where.append(f"created_at >= ${len(l_args)}")
+        if to_dt is not None:
+            l_args.append(to_dt)
+            l_where.append(f"created_at <= ${len(l_args)}")
+        if cursor_row is not None:
+            l_args.append(cursor_row["at"])
+            l_where.append(f"created_at <= ${len(l_args)}")
+        l_args.append(fetch_limit)
+        login_raw = await conn.fetch(
+            f"""
+            SELECT event_id, created_at AS at, actor_id, user_id, kind, meta::text AS meta, ip::text AS ip
+            FROM login_events
+            WHERE {" AND ".join(l_where)}
+            ORDER BY created_at DESC, event_id DESC
+            LIMIT ${len(l_args)}
+            """,
+            *l_args,
+        )
+        login_rows = [_admin_audit.normalize_login_event(dict(r)) for r in login_raw]
+
+    page, next_cursor_row = _admin_audit.merge_audit_pages(audit_rows, login_rows, limit=limit, cursor=cursor_row)
+    next_cursor = _admin_audit.encode_cursor(next_cursor_row) if next_cursor_row else None
+    return AuditPage(
+        items=[
+            AuditRowOut(
+                at=r["at"],
+                actor_id=r["actor_id"],
+                action=r["action"],
+                target_type=r["target_type"],
+                target_id=r["target_id"],
+                before=r["before"],
+                after=r["after"],
+                reason=r["reason"],
+                ip=r["ip"],
+            )
+            for r in page
+        ],
+        next_cursor=next_cursor,
+    )
 
 
 # ── Architecture docs (developer/internal) endpoints ─────────────────────

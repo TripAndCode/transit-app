@@ -536,3 +536,68 @@ export function useCreateInvite() {
     mutationFn: (body: InviteCreateBody) => apiPost<AdminInvite>("/api/admin/invites", body),
   });
 }
+
+// ── Unified audit log ────────────────────────────────────────────────────
+
+export type AdminAuditFilters = {
+  actor?: string;
+  target?: string;
+  action?: string;
+  from?: string;
+  to?: string;
+};
+
+type AdminAuditItem = {
+  at: string;
+  actor_id: number | null;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  reason: string | null;
+  ip: string | null;
+};
+
+type AdminAuditPage = { items: AdminAuditItem[]; next_cursor: string | null };
+
+const AUDIT_PAGE_SIZE = 50;
+
+function auditQueryString(filters: AdminAuditFilters, cursor: string | null): string {
+  const qs = new URLSearchParams();
+  if (filters.actor) qs.set("actor", filters.actor);
+  if (filters.target) qs.set("target", filters.target);
+  if (filters.action) qs.set("action", filters.action);
+  if (filters.from) qs.set("from", filters.from);
+  if (filters.to) qs.set("to", filters.to);
+  qs.set("limit", String(AUDIT_PAGE_SIZE));
+  if (cursor) qs.set("cursor", cursor);
+  return qs.toString();
+}
+
+/** One page of the merged admin_audit + login_events timeline. */
+export function useAdminAudit(filters: AdminAuditFilters, cursor: string | null) {
+  return useQuery({
+    queryKey: ["adminAudit", filters, cursor],
+    queryFn: ({ signal }) => apiGet<AdminAuditPage>(`/api/admin/audit?${auditQueryString(filters, cursor)}`, { signal }),
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+  });
+}
+
+/** Fetches every page matching `filters` for CSV export, up to `maxPages`
+ * (an internal audit log can be very long; this keeps a click from firing
+ * an unbounded number of requests). */
+export async function fetchAllAdminAudit(filters: AdminAuditFilters, maxPages = 40): Promise<AdminAuditItem[]> {
+  const items: AdminAuditItem[] = [];
+  let cursor: string | null = null;
+  for (let i = 0; i < maxPages; i++) {
+    const result: AdminAuditPage = await apiGet<AdminAuditPage>(
+      `/api/admin/audit?${auditQueryString(filters, cursor)}`,
+    );
+    items.push(...result.items);
+    if (!result.next_cursor) break;
+    cursor = result.next_cursor;
+  }
+  return items;
+}

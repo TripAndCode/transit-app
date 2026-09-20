@@ -4,6 +4,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from api.admin_audit import record_admin_action
 from api.deps import get_conn
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
@@ -111,6 +112,20 @@ async def create_agency(
             kind="agency_created",
             meta={"agency_id": aid},
         )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="agency.created",
+            target_type="agency",
+            target_id=str(aid),
+            after={
+                "agency_name": body.agency_name,
+                "feed_url": body.feed_url,
+                "static_url": body.static_url,
+                "ingest_strategy": body.ingest_strategy,
+                "trip_id_pattern": body.trip_id_pattern,
+            },
+        )
     return dict(row)
 
 
@@ -169,6 +184,15 @@ async def patch_agency(
             kind="agency_updated",
             meta={"agency_id": agency_id, "fields": list(updates.keys())},
         )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="agency.updated",
+            target_type="agency",
+            target_id=agency_id,
+            before={col: row[col] for col in updates},
+            after=updates,
+        )
     return dict(out)
 
 
@@ -196,6 +220,15 @@ async def delete_agency(
                 actor_id=admin.user_id,
                 kind="agency_deleted",
                 meta={"agency_id": agency_id},
+            )
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action="agency.deleted",
+                target_type="agency",
+                target_id=str(agency_id),
+                before={"deleted": False},
+                after={"deleted": True},
             )
     return Response(status_code=204)
 
@@ -229,6 +262,15 @@ async def restore_agency(
                 actor_id=admin.user_id,
                 kind="agency_restored",
                 meta={"agency_id": agency_id},
+            )
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action="agency.restored",
+                target_type="agency",
+                target_id=agency_id,
+                before={"deleted": True},
+                after={"deleted": False},
             )
         else:
             # Already active, or gone. Either way this call restored nothing.

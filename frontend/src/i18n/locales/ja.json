@@ -1119,6 +1119,7 @@
       "users": "ユーザー管理",
       "ops": "運用状況",
       "architecture": "アーキテクチャ",
+"audit": "監査ログ",
       "board": "管制盤",
       "group": {
         "operations": "運行",
@@ -1248,6 +1249,34 @@
       "docs_title": "機能ドキュメント",
       "docs_nav_label": "機能ドキュメント一覧",
       "docs_empty": "機能ドキュメントが見つかりません。"
+    },
+    "audit": {
+      "title": "監査ログ",
+      "filter": {
+        "actor_placeholder": "実行者ID",
+        "target_placeholder": "対象の種別またはID",
+        "action_placeholder": "操作",
+        "from": "開始日",
+        "to": "終了日"
+      },
+      "col": {
+        "at": "日時",
+        "actor": "実行者",
+        "action": "操作",
+        "target": "対象",
+        "diff": "変更内容",
+        "reason": "理由",
+        "ip": "IP"
+      },
+      "empty": "該当する監査ログがありません。",
+      "pagination": {
+        "prev": "前へ",
+        "next": "次へ"
+      },
+      "export": {
+        "csv": "CSVエクスポート",
+        "loading": "エクスポート中…"
+      }
     },
     "table": {
       "saved_views": "保存された表示",

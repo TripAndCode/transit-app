@@ -1119,6 +1119,7 @@
       "users": "Users",
       "ops": "Ops",
       "architecture": "Architecture",
+"audit": "Audit log",
       "board": "Control board",
       "group": {
         "operations": "Operations",
@@ -1248,6 +1249,34 @@
       "docs_title": "Feature docs",
       "docs_nav_label": "Feature doc list",
       "docs_empty": "No feature docs found."
+    },
+    "audit": {
+      "title": "Audit log",
+      "filter": {
+        "actor_placeholder": "Actor ID",
+        "target_placeholder": "Target type or ID",
+        "action_placeholder": "Action",
+        "from": "From",
+        "to": "To"
+      },
+      "col": {
+        "at": "Time",
+        "actor": "Actor",
+        "action": "Action",
+        "target": "Target",
+        "diff": "Change",
+        "reason": "Reason",
+        "ip": "IP"
+      },
+      "empty": "No audit events found.",
+      "pagination": {
+        "prev": "Previous",
+        "next": "Next"
+      },
+      "export": {
+        "csv": "Export CSV",
+        "loading": "Exporting…"
+      }
     },
     "table": {
       "saved_views": "Saved views",
