@@ -24,8 +24,8 @@ async def reports_app(apply_schema):
 
     pool = await _test_pool()
     app.state.pool = pool
-    # get_report() now declares ch=Depends(get_ch) alongside conn (Task 8,
-    # compare_ranking's time_band-filtered live-fallback) — every report type
+    # get_report() declares ch=Depends(get_ch) alongside conn
+    # (compare_ranking's time_band-filtered live-fallback) — every report type
     # resolves the dependency regardless of whether it's used, so something
     # must be present at app.state.ch_client. None of this file's tests pass
     # a time_band filter (all exercise the agg-table fast path), so None is
