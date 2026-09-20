@@ -14,6 +14,7 @@ import { ChunkLoading } from "./components/RoutePlaceholders";
 import { RouteTransition } from "./components/RouteTransition";
 import { Sidebar } from "./components/Sidebar";
 import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
+import { CommandPalette } from "./components/CommandPalette";
 
 /**
  * Keep <title> in sync with the active locale. The static `<title>` in
@@ -42,6 +43,7 @@ export default function App() {
   useAnonymousFilterPersistence(agencyIdNum);
   return (
     <div className="app-shell" style={{ display: "flex", height: "100dvh" }}>
+      <CommandPalette />
       <Sidebar />
       <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
         {/* Scoped to the content area, not the whole app shell — these are

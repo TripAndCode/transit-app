@@ -27,6 +27,7 @@ import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { th, td } from "../components/tableStyles";
+import { buildReportTypeLabels } from "./reportTypes";
 import "./analysisTab.css";
 
 /** "This week" = the 7 days ending today, in the ctx's from/to string
@@ -51,20 +52,7 @@ export function AnalysisTab() {
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
 
-  const reportLabels: Record<string, string> = {
-    ranking: t("reports.type.ranking"),
-    ranking_best: t("reports.type.ranking_best"),
-    on_time: t("reports.type.on_time"),
-    worst_5min: t("reports.type.worst_5min"),
-    trend: t("reports.type.trend"),
-    compare_ranking: t("reports.type.compare_ranking"),
-    dow_weekday: t("reports.type.dow_weekday"),
-    dow_weekend: t("reports.type.dow_weekend"),
-    dwell_run: t("reports.type.dwell_run"),
-    route_forecast: t("reports.type.route_forecast"),
-    council_summary: t("reports.type.council_summary"),
-    delay_certificate: t("reports.type.delay_certificate"),
-  };
+  const reportLabels: Record<string, string> = buildReportTypeLabels(t);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>

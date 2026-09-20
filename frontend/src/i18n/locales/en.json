@@ -1082,5 +1082,42 @@
     "ask_step_back": "You're already in the full conversation here.",
     "followup_placeholder": "Ask a follow-up…",
     "followup_submit": "Ask"
+  },
+  "palette": {
+    "placeholder": "Search agencies, routes, reports, time bands, actions…",
+    "aria_label": "Command palette",
+    "no_results": "No matching items",
+    "nav_ask_sublabel": "Ask about routes, stops, and time bands",
+    "hint": "Command",
+    "hint_aria": "Open the command palette (⌘K)",
+    "group": {
+      "recent": "Recent",
+      "nav": "Go to",
+      "agency": "Agencies",
+      "route": "Routes",
+      "report": "Reports",
+      "timeband": "Time bands",
+      "action": "Actions"
+    },
+    "action": {
+      "toggle_theme": "Toggle theme",
+      "toggle_theme_sublabel": "System / light / dark",
+      "shortcuts": "Keyboard shortcuts"
+    },
+    "footer": {
+      "navigate": "Navigate",
+      "select": "Select",
+      "close": "Close"
+    },
+    "shortcuts": {
+      "title": "Keyboard shortcuts",
+      "open_palette": "Open the command palette",
+      "go_overview": "Go to Overview",
+      "go_route_analysis": "Go to Segment analysis",
+      "go_reports": "Go to Reports",
+      "go_ask": "Go to Ask",
+      "open_shortcuts": "Show this shortcut list",
+      "extend_brush": "Extend the daily chart's selected range"
+    }
   }
 }
