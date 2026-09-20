@@ -963,6 +963,27 @@
         "sample_count": "{{count}}件",
         "bar_aria": "{{label}}: {{value}}、{{count}}件"
       }
+    },
+    "group": {
+      "ranking": "順位",
+      "punctuality": "定時性",
+      "pattern": "傾向",
+      "forecast": "予測・証明",
+      "other": "その他"
+    },
+    "desc": {
+      "ranking": "遅れの大きい系統から順に並べます。",
+      "ranking_best": "時刻表どおりに運行できている系統を並べます。",
+      "on_time": "定時基準内に収まった出発の割合を系統別に見ます。",
+      "worst_5min": "5分以上の遅れが多い系統を抽出します。",
+      "trend": "日ごと・時間帯ごと・曜日ごとの遅れの推移を見ます。",
+      "compare_ranking": "同じ順位を前期と比べます。",
+      "dow_weekday": "平日の一日を時間帯別に見ます。",
+      "dow_weekend": "土日祝の一日を時間帯別に見ます。",
+      "dwell_run": "停留所での停車時間と走行時間の内訳を見ます。",
+      "route_forecast": "指定日の系統別の遅れを予測します。",
+      "council_summary": "議会・取締役会向けの期間まとめです。",
+      "delay_certificate": "特定の遅延便を証明する書類です。"
     }
   },
   "insight_panel": {

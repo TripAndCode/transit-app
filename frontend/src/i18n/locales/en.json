@@ -963,6 +963,27 @@
         "sample_count": "{{count}} samples",
         "bar_aria": "{{label}}: {{value}}, {{count}} samples"
       }
+    },
+    "group": {
+      "ranking": "Rankings",
+      "punctuality": "Punctuality",
+      "pattern": "Patterns over time",
+      "forecast": "Forecasts and evidence",
+      "other": "Other"
+    },
+    "desc": {
+      "ranking": "Which routes run latest, worst first.",
+      "ranking_best": "Which routes keep to the timetable best.",
+      "on_time": "Share of departures inside the on-time threshold, by route.",
+      "worst_5min": "Routes with the most departures five minutes or more late.",
+      "trend": "How delay moved day by day, by hour and by weekday.",
+      "compare_ranking": "The same ranking against the previous period.",
+      "dow_weekday": "How a typical weekday runs, band by band.",
+      "dow_weekend": "How a typical weekend or holiday runs, band by band.",
+      "dwell_run": "Where time goes: waiting at stops against running between them.",
+      "route_forecast": "Expected delay for a route on an upcoming day.",
+      "council_summary": "A period summary written for a council or board.",
+      "delay_certificate": "Proof of a specific late departure, for a passenger."
     }
   },
   "insight_panel": {

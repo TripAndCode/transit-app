@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
-import { ctxToQueryString, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
 import type { DwellRunPayload, TrendPayload } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
@@ -29,8 +29,17 @@ import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { th, td } from "../components/tableStyles";
-import { buildReportTypeLabels } from "./reportTypes";
+import { ReportList } from "../components/analysis/ReportList";
+import { REPORT_GROUPS, reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
+
+/** "This week" = the 7 days ending today, in the ctx's from/to string
+ *  format. Used by the "no data" EmptyState's recovery action to jump to a
+ *  window likely to have real data, rather than leaving the user stuck on
+ *  whatever empty range they'd filtered to. */
+function thisWeekRange(): { from: string; to: string } {
+  return { from: isoDaysAgo(6), to: todayISO() };
+}
 
 export function AnalysisTab() {
   const { t } = useTranslation();
@@ -47,7 +56,13 @@ export function AnalysisTab() {
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
 
-  const reportLabels: Record<string, string> = buildReportTypeLabels(t);
+  // `route_forecast` is served by its own endpoint, so the reports list never
+  // returns it -- it is appended here as list data rather than re-rendered as
+  // a second, hand-copied button underneath the list.
+  const listedTypes = [
+    ...(list.data ?? []).map((r) => r.report_type),
+    ...REPORT_GROUPS.forecast.filter((type) => type === "route_forecast"),
+  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -81,54 +96,13 @@ export function AnalysisTab() {
             hint={t("reports.empty.hint")}
           />
         )}
-        {list.data?.map((r) => {
-          const active = r.report_type === reportType;
-          return (
-            <button
-              key={r.report_type}
-              type="button"
-              onClick={() => navigate(`/agencies/${id}/analysis/${r.report_type}${filterSuffix}`)}
-              aria-pressed={active}
-              style={{
-                appearance: "none",
-                font: "inherit",
-                textAlign: "left",
-                color: "inherit",
-                display: "block",
-                width: "100%",
-                padding: "10px 12px",
-                marginBottom: 4,
-                background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-                border: "1px solid var(--border-soft)",
-                borderRadius: "var(--radius)",
-                cursor: "pointer",
-              }}
-            >
-              <div style={{ fontWeight: 500 }}>{reportLabels[r.report_type] ?? r.report_type}</div>
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => navigate(`/agencies/${id}/analysis/route_forecast${filterSuffix}`)}
-          aria-pressed={reportType === "route_forecast"}
-          style={{
-            appearance: "none",
-            font: "inherit",
-            textAlign: "left",
-            color: "inherit",
-            display: "block",
-            width: "100%",
-            padding: "10px 12px",
-            marginBottom: 4,
-            background: reportType === "route_forecast" ? "var(--accent-soft)" : "var(--bg-surface)",
-            border: "1px solid var(--border-soft)",
-            borderRadius: "var(--radius)",
-            cursor: "pointer",
-          }}
-        >
-          <div style={{ fontWeight: 500 }}>{reportLabels.route_forecast}</div>
-        </button>
+        {list.data && (
+          <ReportList
+            types={listedTypes}
+            active={reportType ?? null}
+            onSelect={(type) => navigate(`/agencies/${id}/analysis/${type}${filterSuffix}`)}
+          />
+        )}
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -137,7 +111,7 @@ export function AnalysisTab() {
         )}
         {reportType === "route_forecast" && id != null && (
           <div>
-            <h2 style={{ margin: "0 0 16px" }}>{reportLabels.route_forecast}</h2>
+            <h2 style={{ margin: "0 0 16px" }}>{reportLabel(t, "route_forecast")}</h2>
             <RouteForecastSection aid={id} />
           </div>
         )}
@@ -148,7 +122,7 @@ export function AnalysisTab() {
         {reportType !== "route_forecast" && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-              <h2 style={{ margin: 0 }}>{reportLabels[detail.data.report_type] ?? detail.data.report_type}</h2>
+              <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
               {detail.data.report_type !== "trend" && (
                 <a
                   href={`/api/${id}/reports/${detail.data.report_type}?${new URLSearchParams({
