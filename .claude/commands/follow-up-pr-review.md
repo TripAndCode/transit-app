@@ -152,7 +152,7 @@ and say so rather than quietly fanning out.
    prompt must carry, verbatim: "You are read-only: do not edit any file, do not run
    any `gh` write call, do not post or reply to any comment, never call the resolve
    mutation, do not commit or push. Any SQL is read-only SELECT/EXPLAIN against dev
-   Postgres :5433 or the dev ClickHouse (`transit-ch`) — never write to either. Read
+   Postgres :5433 or the dev ClickHouse (`docker compose exec clickhouse`) — never write to either. Read
    only within the worktree path given; never read another worktree. Report only."
 
 Produce a numbered table, one row per thread:

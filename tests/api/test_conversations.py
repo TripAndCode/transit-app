@@ -11,7 +11,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.conftest import DATABASE_URL, TEST_ORIGIN, _test_pool
+from tests.conftest import TEST_ORIGIN, _test_pool
 
 _CSRF = {"Origin": TEST_ORIGIN}
 
@@ -23,8 +23,8 @@ async def conv_app(apply_schema):
 
     pool = await _test_pool()
     app.state.pool = pool
-    # append_message_endpoint now declares ch=Depends(get_ch) alongside conn
-    # (Task 8); tests in this file mock dispatch so the real client is never
+    # append_message_endpoint declares ch=Depends(get_ch) alongside conn;
+    # tests in this file mock dispatch so the real client is never
     # touched, but FastAPI still resolves the dependency — None is fine here.
     app.state.ch_client = None
 
@@ -901,7 +901,7 @@ async def test_followup_holds_no_pool_connection_across_the_llm_call(conv_app, m
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", _probing_answer_followup)
 
-    single = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=1)
+    single = await _test_pool(min_size=1, max_size=1)
     original_pool = app.state.pool
     app.state.pool = single
     try:

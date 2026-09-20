@@ -8,13 +8,14 @@ from typing import Any
 
 import asyncpg
 import clickhouse_connect
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import DEFAULT_RANGE_DAYS, RangeCtx, jst_today
-from api.security import csrf_guard, require_llm_approved
+from api.security import User, csrf_guard, require_llm_approved
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
@@ -28,7 +29,7 @@ _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/{agency_id}", tags=["conversations"])
 
 
-async def _owned_or_404(coro):
+async def _owned_or_404(coro: Any) -> Any:
     """Await ``coro``, masking PermissionDenied/LookupError as a 404 so a
     caller can't distinguish "not owned" from "doesn't exist"."""
     try:
@@ -69,7 +70,9 @@ class UpdateConversation(BaseModel):
 
 
 class AppendMessage(BaseModel):
-    # chip_id is retained for API compatibility but triggers a 410 in the endpoint.
+    # Chip dispatch is gone; the only dispatch path is (tool + args). The field
+    # is still parsed so that a client still sending one gets the explicit 410
+    # below instead of a misleading "tool is required" 400.
     chip_id: str | None = None
     args_override: dict[str, Any] | None = None
     # Supported dispatch path: builder direct dispatch (tool + args)
@@ -82,10 +85,11 @@ class AppendMessage(BaseModel):
     user_summary: str | None = None
 
     def validate_dispatch(self) -> None:
-        """Validate that (tool + args) is supplied.
+        """Require exactly one dispatch path to be named.
 
-        chip_id is accepted at parse time but causes a 410 in the endpoint.
-        Providing both chip_id and tool+args is still a 400.
+        A lone ``chip_id`` passes here and is answered with a 410 by the
+        endpoint, so a retired client learns the path is gone rather than
+        that its arguments were malformed.
         """
         has_chip = bool(self.chip_id)
         has_tool_args = bool(self.tool) and self.args is not None
@@ -112,26 +116,26 @@ class MigrateAnon(BaseModel):
     threads: list[AnonThread] = Field(max_length=100)
 
 
-@router.get("/conversations")
+@router.get("/conversations", response_model=None)
 async def list_conversations(
     agency_id: int = Depends(get_agency),  # implicit auth scope
-    user=Depends(get_current_user),
-    conn=Depends(get_conn),
-):
+    user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[dict[str, Any]]:
     """Return the caller's 50 most recent conversations for this agency."""
     rows = await _conv.list_conversations(conn, user_id=user.user_id, agency_id=agency_id, limit=50)
     return rows
 
 
-@router.post("/conversations")
+@router.post("/conversations", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def create_conversation(
     request: Request,
     body: CreateConversation,
     agency_id: int = Depends(get_agency),  # implicit auth scope
-    user=Depends(get_current_user),
-    conn=Depends(get_conn),
-):
+    user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> dict[str, Any]:
     """Create a conversation owned by the caller with the given title + filter_ctx."""
     csrf_guard(request)
     return await _conv.create_conversation(
@@ -143,27 +147,27 @@ async def create_conversation(
     )
 
 
-@router.get("/conversations/{conversation_id}")
+@router.get("/conversations/{conversation_id}", response_model=None)
 async def get_conversation(
     conversation_id: str,
     agency_id: int = Depends(get_agency),  # implicit auth scope
-    user=Depends(get_current_user),
-    conn=Depends(get_conn),
-):
+    user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> dict[str, Any]:
     """Return one conversation with its messages; 404 unless the caller owns it."""
     return await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
 
-@router.patch("/conversations/{conversation_id}")
+@router.patch("/conversations/{conversation_id}", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def update_conversation(
     request: Request,
     conversation_id: str,
     body: UpdateConversation,
     agency_id: int = Depends(get_agency),  # implicit auth scope
-    user=Depends(get_current_user),
-    conn=Depends(get_conn),
-):
+    user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> dict[str, Any]:
     """Patch title / pinned / filter_ctx on a conversation the caller owns."""
     csrf_guard(request)
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
@@ -178,22 +182,22 @@ async def delete_conversation(
     request: Request,
     conversation_id: str,
     agency_id: int = Depends(get_agency),  # implicit auth scope
-    user=Depends(get_current_user),
-    conn=Depends(get_conn),
-):
+    user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> dict[str, bool]:
     """Delete a conversation the caller owns (messages cascade)."""
     csrf_guard(request)
     await _owned_or_404(_conv.delete_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
     return {"ok": True}
 
 
-@router.get("/conversations/{conversation_id}/messages")
+@router.get("/conversations/{conversation_id}/messages", response_model=None)
 async def list_messages(
     conversation_id: str,
     agency_id: int = Depends(get_agency),  # implicit auth scope
-    user=Depends(get_current_user),
-    conn=Depends(get_conn),
-):
+    user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[dict[str, Any]]:
     """Return all messages of a conversation the caller owns."""
     return await _owned_or_404(_conv.list_messages(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
@@ -204,9 +208,9 @@ async def migrate_anon_endpoint(
     request: Request,
     body: MigrateAnon,
     agency_id: int = Depends(get_agency),  # implicit auth scope
-    user=Depends(get_current_user),
-    conn=Depends(get_conn),
-):
+    user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> dict[str, int]:
     """Import anonymous localStorage threads into the caller's account."""
     csrf_guard(request)
     threads = [t.model_dump() for t in body.threads]
@@ -219,18 +223,18 @@ async def migrate_anon_endpoint(
     return {"inserted": inserted}
 
 
-@router.post("/conversations/{conversation_id}/messages")
+@router.post("/conversations/{conversation_id}/messages", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def append_message_endpoint(
     request: Request,
     conversation_id: str,
     body: AppendMessage,
     agency_id: int = Depends(get_agency),  # implicit auth scope
-    user=Depends(get_current_user),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    user: User = Depends(get_current_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, dict[str, Any]]:
     """Dispatch a {tool, args} question and persist user + assistant rows atomically."""
     csrf_guard(request)
     # Validate dispatch path before touching DB.
@@ -247,7 +251,6 @@ async def append_message_endpoint(
 
     # ── Resolve tool + args (builder-direct path only) ────────────────────────
     if body.chip_id is not None:
-        # chip dispatch was removed in Phase ③.5; use {tool, args} instead.
         raise HTTPException(
             status_code=410,
             detail="chip dispatch is no longer supported; use {tool, args} instead",
@@ -259,7 +262,6 @@ async def append_message_endpoint(
         raise HTTPException(status_code=400, detail="tool is required")
     resolved_tool = body.tool
     resolved_args = body.args or {}
-    resolved_chip_id: str | None = None
     # Prefer the client-supplied localized summary; fall back to a generic
     # label that does NOT expose raw key=value pairs (those leak English/
     # identifier noise into the JA chat bubble).
@@ -288,7 +290,6 @@ async def append_message_endpoint(
             conn,
             conversation_id,
             role="user",
-            chip_id=resolved_chip_id,
             tool=None,
             args=None,
             signature_hash=None,
@@ -331,7 +332,6 @@ async def append_message_endpoint(
                 conn,
                 conversation_id,
                 role="assistant",
-                chip_id=resolved_chip_id,
                 tool=resolved_tool,
                 args=can_args,
                 signature_hash=sig_hash,
@@ -346,7 +346,6 @@ async def append_message_endpoint(
                 conn,
                 conversation_id,
                 role="assistant",
-                chip_id=resolved_chip_id,
                 tool=resolved_tool,
                 args=can_args,
                 signature_hash=sig_hash,
@@ -379,7 +378,6 @@ async def append_message_endpoint(
                 conn,
                 conversation_id,
                 role="assistant",
-                chip_id=resolved_chip_id,
                 tool=resolved_tool,
                 args=can_args,
                 signature_hash=sig_hash,
@@ -401,7 +399,6 @@ async def append_message_endpoint(
             conn,
             conversation_id,
             role="assistant",
-            chip_id=resolved_chip_id,
             tool=resolved_tool,
             args=can_args,
             signature_hash=sig_hash,
@@ -431,16 +428,16 @@ class FollowupBody(BaseModel):
     context_row_index: int | None = Field(default=None, ge=0, strict=True)
 
 
-@router.post("/conversations/{conversation_id}/followup")
+@router.post("/conversations/{conversation_id}/followup", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def followup_endpoint(
     request: Request,
     conversation_id: str,
     body: FollowupBody,
     agency_id: int = Depends(get_agency),  # implicit auth scope
-    user=Depends(get_current_user_optional),
+    user: User | None = Depends(get_current_user_optional),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, dict[str, Any]]:
     """LLM-grounded follow-up on a prior assistant result.
 
     Disabled by default; flip ``ASK_FOLLOWUP_ENABLED=true`` to enable. The
@@ -511,7 +508,6 @@ async def followup_endpoint(
                 conn,
                 conversation_id,
                 role="user",
-                chip_id=None,
                 tool=None,
                 args=None,
                 signature_hash=None,
@@ -522,7 +518,6 @@ async def followup_endpoint(
                 conn,
                 conversation_id,
                 role="assistant",
-                chip_id=None,
                 tool=None,
                 args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
                 signature_hash=None,
@@ -532,10 +527,10 @@ async def followup_endpoint(
     return {"user": user_msg, "assistant": assistant_msg}
 
 
-@router.get("/ask/followup-enabled")
+@router.get("/ask/followup-enabled", response_model=None)
 async def followup_enabled_endpoint(
     agency_id: int = Depends(get_agency),  # implicit auth scope
-):
+) -> dict[str, Any]:
     """Public flag check so the frontend knows whether to render the input.
 
     Also exposes ``max_question_chars`` so the client's input cap can't drift
