@@ -14,7 +14,9 @@ type AdminUser = {
 
 type AdminUserList = { users: AdminUser[]; total: number };
 
-/** Paginated/filterable admin user list (q, role, suspended, limit/offset). */
+export type UserPatchBody = { role?: string; suspended?: boolean; llm_approved?: boolean };
+
+/** Paginated/filterable admin user list (q, role, suspended, llmApproved, limit/offset). */
 export function useAdminUsers(params: {
   q?: string;
   role?: string;
@@ -38,7 +40,7 @@ export function useAdminUsers(params: {
   });
 }
 
-async function patchUser(uid: number, body: { role?: string; suspended?: boolean; llm_approved?: boolean }) {
+async function patchUser(uid: number, body: UserPatchBody) {
   return apiPatch<AdminUser>(`/api/admin/users/${uid}`, body);
 }
 
@@ -46,18 +48,34 @@ async function deleteUser(uid: number) {
   await apiDelete(`/api/admin/users/${uid}`);
 }
 
+async function bulkPatchUsers(ids: number[], patch: UserPatchBody) {
+  return apiPatch<AdminUser[]>("/api/admin/users/bulk", { ids, patch });
+}
+
 /** Mutation: PATCH a user's role/suspended flag; invalidates the user list and detail queries on success. */
 export function usePatchUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (
-      { uid, body }: { uid: number; body: { role?: string; suspended?: boolean; llm_approved?: boolean } },
-    ) => patchUser(uid, body),
+    mutationFn: ({ uid, body }: { uid: number; body: UserPatchBody }) => patchUser(uid, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminUsers"] });
       // Prefix match — at most one detail query is ever mounted, so this is
       // cheap, and it doesn't depend on the detail page's uid key staying a
       // string (unlike reconstructing ["adminUser", String(uid)] here).
+      qc.invalidateQueries({ queryKey: ["adminUser"] });
+    },
+  });
+}
+
+/** Mutation: PATCH one patch across many users in a single transaction;
+ * invalidates the user list and detail queries on success. The undo flow
+ * (AdminUsersPage) re-invokes this with the inverse patch over the same ids. */
+export function useBulkPatchUsers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, patch }: { ids: number[]; patch: UserPatchBody }) => bulkPatchUsers(ids, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminUsers"] });
       qc.invalidateQueries({ queryKey: ["adminUser"] });
     },
   });

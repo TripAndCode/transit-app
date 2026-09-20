@@ -1051,6 +1051,27 @@
       "pagination": {
         "prev": "Previous",
         "next": "Next"
+      },
+      "saved_views": "Saved views",
+      "view": {
+        "all": "All",
+        "pending": "Pending approval",
+        "admin": "Admins",
+        "suspended": "Suspended"
+      },
+      "select_all": "Select all users",
+      "select_row": "Select {{email}}",
+      "bulk": {
+        "selected_count": "{{count}} selected",
+        "clear": "Clear selection",
+        "undo": "Undo",
+        "role_label": "Change role",
+        "toast": {
+          "approved": "Approved AI access for {{count}}",
+          "suspended": "Suspended {{count}}",
+          "promoted": "Made {{count}} admin",
+          "demoted": "Changed {{count}} to standard user"
+        }
       }
     },
     "user_detail": {
