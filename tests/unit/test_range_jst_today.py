@@ -93,3 +93,21 @@ def test_get_range_ctx_future_to_date_with_earlier_from_clamps_and_keeps_order(m
     )
     assert ctx.from_date == date(2025, 12, 1)
     assert ctx.to_date == date(2026, 1, 2)
+
+
+def test_get_range_ctx_rejects_a_malformed_date_instead_of_defaulting():
+    """A typo'd `from` used to fall through to the default 30-day window and
+    return a confident answer for a period the caller never asked for."""
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        range_mod.get_range_ctx(from_="2026-99-99", to=None, dow="all", time_band="all", service="all", routes=None)
+    assert exc.value.status_code == 422
+
+
+def test_get_range_ctx_dedupes_and_caps_routes():
+    ctx = range_mod.get_range_ctx(
+        from_=None, to=None, dow="all", time_band="all", service="all", routes=" R2 ,R1,R2,,R3"
+    )
+    assert ctx.routes == ("R2", "R1", "R3")

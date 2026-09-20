@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, timedelta
 from typing import Any
 
 import asyncpg
@@ -15,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import DEFAULT_RANGE_DAYS, RangeCtx, jst_today
+from api.range import RangeCtx, clamp_range_ctx
 from api.security import User, csrf_guard, require_llm_approved
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
@@ -37,6 +36,29 @@ async def _owned_or_404(coro: Any) -> Any:
         return await coro
     except (_conv.PermissionDenied, LookupError):
         raise HTTPException(status_code=404, detail="not found") from None
+
+
+def _ctx_from_stored_filters(filter_ctx: dict | None) -> RangeCtx:
+    """Rebuild a conversation's saved filters into a validated RangeCtx.
+
+    ``filter_ctx`` is client input that happens to have been persisted: the
+    client chose every value in it, and the row can be replayed long after
+    the code that wrote it changed. It therefore gets the same validation as
+    a live query string (422 on a malformed date or an unknown enum) instead
+    of being trusted — feeding it straight into ``RangeCtx`` turned a bad
+    stored date into an unhandled ValueError (500) and let an arbitrary
+    ``dow``/``time_band``/``service`` string reach the SQL builders, where an
+    unbounded or unrecognised filter means a full scan rather than an error.
+    """
+    fc = filter_ctx or {}
+    return clamp_range_ctx(
+        from_=fc.get("from_date"),
+        to=fc.get("to_date"),
+        dow=fc.get("dow") or "all",
+        time_band=fc.get("time_band") or "all",
+        service=fc.get("service") or "all",
+        routes=fc.get("routes") or (),
+    )
 
 
 def _raise_for_followup_error(err: str | None) -> None:
@@ -282,19 +304,7 @@ async def append_message_endpoint(
     # identifier noise into the JA chat bubble).
     user_summary = body.user_summary or f"🛠 {resolved_tool}"
 
-    # Build a RangeCtx from the conversation's filter_ctx
-    fc = conv["filter_ctx"] or {}
-    today = jst_today()
-    ctx_obj = RangeCtx(
-        from_date=date.fromisoformat(fc["from_date"])
-        if fc.get("from_date")
-        else today - timedelta(days=DEFAULT_RANGE_DAYS - 1),
-        to_date=date.fromisoformat(fc["to_date"]) if fc.get("to_date") else today,
-        dow=fc.get("dow", "all"),
-        time_band=fc.get("time_band", "all"),
-        service=fc.get("service", "all"),
-        routes=tuple(fc.get("routes") or ()),
-    )
+    ctx_obj = _ctx_from_stored_filters(conv["filter_ctx"])
     ctx_dict = {"from_date": ctx_obj.from_date, "to_date": ctx_obj.to_date}
 
     # Wrap user-msg + cache upsert + dispatch + assistant-msg in one transaction.

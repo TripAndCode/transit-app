@@ -14,8 +14,7 @@ import asyncio
 import json
 import logging
 import os as _os
-from datetime import timedelta
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import asyncpg
 import clickhouse_connect
@@ -26,15 +25,9 @@ from pydantic import BaseModel, Field, field_validator
 from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import (
-    DEFAULT_RANGE_DAYS,
-    MAX_RANGE_DAYS,
-    DowFilter,
     RangeCtx,
-    ServiceType,
-    TimeBand,
+    clamp_range_ctx,
     ctx_payload,
-    jst_today,
-    parse_iso_date,
 )
 from api.security import User, csrf_guard
 from pipeline.query import intent_cache as _intent_cache
@@ -128,31 +121,22 @@ class AskResponse(BaseModel):
 
 
 def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
-    """Build a clamped RangeCtx from the request body, defaulting invalid enums to 'all'."""
-    today = jst_today()
+    """Build a validated, clamped RangeCtx from the request body.
+
+    An omitted ``ctx`` means "no opinion" and gets the default window;
+    anything the client did send goes through the same validation as a query
+    string (:func:`api.range.clamp_range_ctx`), so a malformed date or an
+    unrecognised enum is a 422 rather than a silently different answer.
+    """
     if body_ctx is None:
-        return RangeCtx(from_date=today - timedelta(days=DEFAULT_RANGE_DAYS - 1), to_date=today)
-
-    to_date = parse_iso_date(body_ctx.to_date) or today
-    from_date = parse_iso_date(body_ctx.from_date) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
-    if from_date > to_date:
-        from_date, to_date = to_date, from_date
-    if (to_date - from_date).days >= MAX_RANGE_DAYS:
-        from_date = to_date - timedelta(days=MAX_RANGE_DAYS - 1)
-
-    dow = cast(DowFilter, body_ctx.dow if body_ctx.dow in ("all", "weekday", "weekend") else "all")
-    valid_bands = {"all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"}
-    tb = cast(TimeBand, body_ctx.time_band if body_ctx.time_band in valid_bands else "all")
-    svc = cast(ServiceType, body_ctx.service if body_ctx.service in ("all", "平日", "土日祝") else "all")
-    routes = tuple(r for r in (body_ctx.routes or []) if r)[:100]
-
-    return RangeCtx(
-        from_date=from_date,
-        to_date=to_date,
-        dow=dow,
-        time_band=tb,
-        service=svc,
-        routes=routes,
+        return clamp_range_ctx(from_=None, to=None)
+    return clamp_range_ctx(
+        from_=body_ctx.from_date,
+        to=body_ctx.to_date,
+        dow=body_ctx.dow,
+        time_band=body_ctx.time_band,
+        service=body_ctx.service,
+        routes=body_ctx.routes or (),
     )
 
 
