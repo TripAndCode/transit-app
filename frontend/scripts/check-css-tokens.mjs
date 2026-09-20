@@ -58,6 +58,18 @@ function walk(dir, out = []) {
 // itself contain parens (e.g. `var(--accent-soft, rgba(91, 108, 173,
 // 0.14))`) — a regex anchored on the first `)` would truncate that
 // fallback and misreport it as the whole match.
+// Comments are removed before scanning. Prose explaining a token routinely
+// writes `var(--x)` to name it, and a comment naming a property that is set
+// per-instance at runtime would otherwise be reported as an unresolvable
+// reference -- a failure with nothing to fix, since adding a fallback to a
+// sentence is meaningless. Strings are left alone: a `var()` inside one is a
+// real reference the browser will resolve.
+function stripComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+}
+
 function findVarRefs(text) {
   const refs = [];
   let i = 0;
@@ -114,7 +126,7 @@ for (const file of files) {
   const text = readFileSync(file, "utf8");
   const relPath = file.slice(SRC_DIR.length + 1);
 
-  for (const { name, hasFallback } of findVarRefs(text)) {
+  for (const { name, hasFallback } of findVarRefs(stripComments(text))) {
     if (hasFallback) continue;
     if (!definedVars.has(name)) {
       console.error(
@@ -127,7 +139,7 @@ for (const file of files) {
   }
 
   if (extname(file) === ".css") {
-    for (const match of text.matchAll(Z_INDEX_DECLARATION_RE)) {
+    for (const match of stripComments(text).matchAll(Z_INDEX_DECLARATION_RE)) {
       const value = match[1].trim();
       if (!VALID_Z_INDEX_VALUE_RE.test(value)) {
         console.error(

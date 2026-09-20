@@ -517,6 +517,32 @@ summary::-webkit-details-marker { display: none; }
   /* Every route change fades its content in over the outgoing tab, which
      startTransition keeps painted until the next chunk resolves. */
   .route-enter    { animation: ov-fade-in var(--dur-2) var(--ease-out); }
+
+  /* ChartEnter.tsx's useDrawOn(): the element's own JS-measured length
+     (getTotalLength()) is written to --len, and .chart-draw-on--active is
+     added a frame later so the transition below has an "undrawn" state to
+     animate away from. */
+  .chart-draw-on {
+    stroke-dasharray: var(--len, 9999);
+    stroke-dashoffset: var(--len, 9999);
+    transition: stroke-dashoffset var(--dur-4) var(--ease-out);
+  }
+  .chart-draw-on.chart-draw-on--active {
+    stroke-dashoffset: 0;
+  }
+
+  /* ChartEnter.tsx's staggerDelay(): a heatmap/grid cell fades in from
+     opacity 0 to its own target opacity (--cell-opacity, set inline by the
+     caller -- often itself data-driven, e.g. a sample-density encoding, so
+     this can't just animate to a flat 1), each with its own transitionDelay
+     also set inline. */
+  .chart-cell-enter {
+    opacity: 0;
+    transition: opacity var(--dur-3) var(--ease-out);
+  }
+  .chart-cell-enter.chart-cell-enter--in {
+    opacity: var(--cell-opacity, 1);
+  }
 }
 
 /* MapLibre's popup override rules (.maplibregl-popup-content etc.) live in

@@ -1,5 +1,6 @@
 // frontend/src/components/InlineSparkline.tsx
-import type { CSSProperties } from "react";
+import { useRef, type CSSProperties } from "react";
+import { useDrawOn } from "./charts/ChartEnter";
 
 type Props = {
   points: number[];
@@ -23,6 +24,11 @@ export function InlineSparkline({
   showLabels = true,
   style,
 }: Props) {
+  // Called unconditionally, ahead of the early return below -- hooks can't
+  // themselves be conditional on `points.length`.
+  const lineRef = useRef<SVGPolylineElement | null>(null);
+  useDrawOn(lineRef);
+
   if (!points || points.length < 2) {
     return null;
   }
@@ -76,6 +82,7 @@ export function InlineSparkline({
     >
       <path d={area_path} style={{ fill: stroke, fillOpacity: 0.12 }} stroke="none" />
       <polyline
+        ref={lineRef}
         fill="none"
         style={{ stroke }}
         strokeWidth="1.5"

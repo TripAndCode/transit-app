@@ -1,5 +1,8 @@
+import type { CSSProperties } from "react";
 import { delayColor } from "../../styles/tokens";
 import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
+import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
+import { staggerDelay } from "./ChartEnter";
 
 const RAMP_STOPS = 5;
 
@@ -42,6 +45,8 @@ export function BandGrid({
 }) {
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
   const cols = `34px repeat(${BAND_ORDER.length}, 1fr)`;
+  const entered = useEnteredOnMount();
+  const cellClass = `chart-cell-enter${entered ? " chart-cell-enter--in" : ""}`;
   return (
     <div onMouseLeave={onLeave}>
       <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
@@ -57,18 +62,32 @@ export function BandGrid({
             <div key={`l${dow}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
               {dayLabel(dow)}
             </div>,
-            ...BAND_ORDER.map((b) => {
+            ...BAND_ORDER.map((b, bi) => {
               const c = byKey.get(`${dow}-${b}`);
               const v = c?.expected_avg_min ?? null;
               const tipText = `${dayLabel(dow)} ${bandLabel(b)} · ${v == null ? "—" : `${v.toFixed(1)}${axisMin}`}`;
+              // The dimming for a low-confidence cell (--cell-opacity) has to
+              // come from a CSS custom property, not a plain inline
+              // `opacity` -- an inline style always wins over the
+              // .chart-cell-enter class's own opacity rule, which would
+              // permanently pin every cell at its final value and leave
+              // nothing for the fade-in to animate from.
+              const targetOpacity = c?.low_confidence ? 0.5 : 1;
+              const staggerStyle = { ...staggerDelay(di * BAND_ORDER.length + bi), "--cell-opacity": targetOpacity } as CSSProperties;
               if (v == null) {
                 return (
                   <div
                     key={b}
                     data-testid="ov-band-cell"
+                    className={cellClass}
                     onMouseEnter={(e) => onTip(e, tipText)}
                     onMouseMove={(e) => onTip(e, tipText)}
-                    style={{ height: 30, borderRadius: 3, background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)" }}
+                    style={{
+                      height: 30,
+                      borderRadius: 3,
+                      background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)",
+                      ...staggerStyle,
+                    }}
                   />
                 );
               }
@@ -76,9 +95,10 @@ export function BandGrid({
                 <div
                   key={b}
                   data-testid="ov-band-cell"
+                  className={cellClass}
                   onMouseEnter={(e) => onTip(e, tipText)}
                   onMouseMove={(e) => onTip(e, tipText)}
-                  style={{ height: 30, borderRadius: 3, background: colorFor(v), opacity: c?.low_confidence ? 0.5 : 1 }}
+                  style={{ height: 30, borderRadius: 3, background: colorFor(v), ...staggerStyle }}
                 />
               );
             }),

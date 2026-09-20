@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { delayColor } from "../../styles/tokens";
 import { formatNumber } from "../../utils/format";
+import { useDrawOn } from "./ChartEnter";
 import type { RevisionBoundaries, TrendDay } from "../../api/types";
 
 type Props = { days: TrendDay[]; height?: number; revisionBoundaries?: RevisionBoundaries };
@@ -9,6 +10,8 @@ type Props = { days: TrendDay[]; height?: number; revisionBoundaries?: RevisionB
 export function DailyChart({ days, height = 240, revisionBoundaries = [] }: Props) {
   const { t } = useTranslation();
   const [rawHover, setHover] = useState<number | null>(null);
+  const lineRef = useRef<SVGPolylineElement | null>(null);
+  useDrawOn(lineRef);
 
   // If the data shrinks (filter narrowed), a stale hover index would
   // dereference out-of-bounds — clamp during render instead of an effect.
@@ -145,6 +148,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [] }: Prop
         )}
         {/* Line */}
         <polyline
+          ref={lineRef}
           points={linePts.map((p) => p.join(",")).join(" ")}
           fill="none"
           stroke="var(--accent)"

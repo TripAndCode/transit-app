@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import type { OverviewHeadline } from "../api/types";
 import { delayColor } from "../styles/tokens";
+import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
 import { STALE_THRESHOLD_HOURS } from "./DataStalenessBanner";
@@ -60,6 +61,12 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId, sparklinePoi
   }
 
   const avgMinColor = headline.avg_min != null ? delayColor(headline.avg_min) : undefined;
+  // Called unconditionally (hooks can't branch on headline.avg_min's
+  // nullability) -- the "—" fallback below still renders in place of it when
+  // there is nothing to display. Never animates on first mount, only when
+  // avg_min changes afterward (an agency switch, a live refresh).
+  const avgMinDisplay = useCountUp(headline.avg_min ?? 0, { decimals: 1 });
+  const delayedCountDisplay = useCountUp(delayedCount, { decimals: 0 });
 
   return (
     <div className="ov-kpi-row">
@@ -67,7 +74,7 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId, sparklinePoi
         <div className="ov-kpi-label">{t("overview.hero_row.avg_delay_label")}</div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div className="ov-kpi-value" style={{ color: avgMinColor }}>
-            {headline.avg_min != null ? headline.avg_min.toFixed(1) : "—"}
+            {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
           </div>
           <InlineSparkline points={sparklinePoints.slice(-7)} width={72} height={22} showLabels={false} showEndDot={false} />
         </div>
@@ -84,7 +91,7 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId, sparklinePoi
       <div className="ov-kpi-tile">
         <div className="ov-kpi-label">{t("overview.hero_row.delayed_count_label")}</div>
         <div className="ov-kpi-value" style={{ color: avgMinColor }}>
-          {t("overview.hero_row.delayed_count_value", { count: delayedCount, total: totalRoutes })}
+          {t("overview.hero_row.delayed_count_value", { count: delayedCountDisplay, total: totalRoutes })}
         </div>
       </div>
       <div className="ov-kpi-tile">

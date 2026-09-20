@@ -58,4 +58,18 @@ describe("DailyChart", () => {
     );
     expect(screen.queryByText(i18n.t("reports.daily.revision_boundary_label"))).not.toBeInTheDocument();
   });
+
+  it("draws the line in via ChartEnter's useDrawOn", () => {
+    // jsdom implements no SVG geometry interfaces -- every SVG element it
+    // creates is a plain SVGElement, so the mock goes on that prototype.
+    (SVGElement.prototype as unknown as { getTotalLength: () => number }).getTotalLength = () => 842;
+    const { container } = renderWithProviders(
+      <DailyChart days={[day({ date: "2026-05-18" }), day({ date: "2026-05-19" })]} />,
+    );
+    const polylines = container.querySelectorAll("polyline");
+    const line = polylines[polylines.length - 1]; // the raw-average line, always last
+    expect(line.classList.contains("chart-draw-on")).toBe(true);
+    expect(Number(line.style.getPropertyValue("--len"))).toBe(842);
+    delete (SVGElement.prototype as unknown as { getTotalLength?: () => number }).getTotalLength;
+  });
 });

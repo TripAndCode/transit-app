@@ -493,9 +493,9 @@ export function MapTab() {
               two agreed instead of reading either; staleness likewise reads
               once, from the header's freshness dot. */}
           <div className="focus-summary-strip">
-            <StatTile label={td("observedLabel")} value={String(liveRows.length)} />
-            <StatTile label={td("delayedLabel")} value={String(delayedRows.length)} flagged={delayedRows.length > 0} />
-            {onTimePct != null && <StatTile label={td("onTimePct")} value={`${onTimePct}%`} />}
+            <StatTile label={td("observedLabel")} value={liveRows.length} />
+            <StatTile label={td("delayedLabel")} value={delayedRows.length} flagged={delayedRows.length > 0} />
+            {onTimePct != null && <StatTile label={td("onTimePct")} value={onTimePct} suffix="%" />}
           </div>
           {/* Directly under the tiles, because the CSV is exactly the rows
               they count -- and above the delay list, so a long list can't
