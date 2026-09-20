@@ -29,6 +29,7 @@ from api.range import (
     RangeCtx,
     ServiceType,
     TimeBand,
+    ctx_payload,
     jst_today,
     parse_iso_date,
 )
@@ -163,14 +164,7 @@ async def ask(
         raise HTTPException(status_code=400, detail="question must not be empty")
     ctx = _resolve_ctx(body.ctx)
 
-    ctx_dict = {
-        "from": ctx.from_date.isoformat(),
-        "to": ctx.to_date.isoformat(),
-        "dow": ctx.dow,
-        "time_band": ctx.time_band,
-        "service": ctx.service,
-        "routes": list(ctx.routes),
-    }
+    ctx_dict = ctx_payload(ctx)
 
     history_enabled = _os.environ.get("ASK_HISTORY_ENABLED", "true").lower() != "false"
     log_enabled = _os.environ.get("ASK_QUERY_LOG_ENABLED", "true").lower() != "false"
@@ -464,7 +458,32 @@ async def ask_build_schema(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/ask/suggest")
+class AskSuggestion(BaseModel):
+    """One autocomplete candidate: the stored question plus the tool call it
+    maps to. ``distance`` is the cosine distance from the typed query, or
+    ``None`` for the starter set (which is ranked by hit count, not similarity)."""
+
+    question: str
+    tool: str
+    args: dict[str, Any]
+    distance: float | None
+
+
+class AskSuggestResponse(BaseModel):
+    """Envelope for ``GET /ask/suggest`` — an object, so the endpoint can later
+    say *why* it has nothing to offer instead of returning a bare empty array."""
+
+    rows: list[AskSuggestion] = []
+
+
+def _ask_suggestion(golden: dict, chunk_id: str, question: str, distance: float | None) -> AskSuggestion:
+    """Pair a RAG chunk with the golden-set tool call it stands for; a chunk
+    with no golden entry still shows up, with an empty tool call."""
+    tool, args = golden.get(chunk_id, ("", {}))
+    return AskSuggestion(question=question, tool=tool, args=dict(args), distance=distance)
+
+
+@router.get("/ask/suggest", response_model=AskSuggestResponse)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def ask_suggest(
     request: Request,
@@ -502,50 +521,27 @@ async def ask_suggest(
             limit,
         )
         golden = _load_golden()
-        result = []
-        for row in rows:
-            cid = row["chunk_id"]
-            tool, args = golden.get(cid, ("", {}))
-            result.append(
-                {
-                    "question": row["content"],
-                    "tool": tool,
-                    "args": dict(args),
-                    "distance": None,
-                }
-            )
-        return result
+        return AskSuggestResponse(rows=[_ask_suggestion(golden, row["chunk_id"], row["content"], None) for row in rows])
 
     # Non-empty query: embed + NN search.
     embedder = get_embedder()
     if not getattr(embedder, "available", False):
-        return []
+        return AskSuggestResponse()
 
     try:
         qvec = await asyncio.to_thread(embedder.embed, q.strip(), mode="query")
     except Exception:
         _log.debug("ask_suggest: embedding failed; returning no suggestions", exc_info=True)
-        return []
+        return AskSuggestResponse()
 
     try:
         matches = await rag_nearest(conn, agency_id, qvec, k=limit)
     except Exception:
         _log.debug("ask_suggest: rag_nearest failed; returning no suggestions", exc_info=True)
-        return []
+        return AskSuggestResponse()
 
     golden = _load_golden()
-    result = []
-    for m in matches:
-        tool, args = golden.get(m.chunk_id, ("", {}))
-        result.append(
-            {
-                "question": m.content,
-                "tool": tool,
-                "args": dict(args),
-                "distance": m.distance,
-            }
-        )
-    return result
+    return AskSuggestResponse(rows=[_ask_suggestion(golden, m.chunk_id, m.content, m.distance) for m in matches])
 
 
 # ---------------------------------------------------------------------------
