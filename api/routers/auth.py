@@ -14,6 +14,8 @@ sticky server-side state between login start and callback. Starlette's
 ``request.session`` defensively; we just don't rely on it for security.
 """
 
+import hashlib
+import hmac
 import logging
 import os
 import secrets
@@ -122,10 +124,15 @@ async def seed_local_admin(pool: asyncpg.Pool) -> None:
             )
 
 
-_signer = URLSafeTimedSerializer(
-    os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret"),
-    salt="oauth-tx",
-)
+def _get_signer() -> URLSafeTimedSerializer:
+    """Build the oauth_tx signer on each use rather than at import time, so
+    it reads ``SESSION_SIGNING_KEY`` after ``api.main``'s startup validation
+    has had a chance to reject a missing key in production, instead of
+    baking in the dev-only fallback key permanently at module import."""
+    return URLSafeTimedSerializer(
+        os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret"),
+        salt="oauth-tx",
+    )
 
 
 def _require_sso_configured() -> None:
@@ -188,7 +195,9 @@ async def login(provider: str, request: Request, next: str = "/") -> RedirectRes
     client = oauth.create_client(provider)
     state = secrets.token_urlsafe(24)
     code_verifier = secrets.token_urlsafe(48)
-    tx_payload = _signer.dumps({"state": state, "verifier": code_verifier, "next": safe_next, "provider": provider})
+    tx_payload = _get_signer().dumps(
+        {"state": state, "verifier": code_verifier, "next": safe_next, "provider": provider}
+    )
     auth_url_resp = await client.authorize_redirect(
         request,
         redirect_uri,
@@ -410,7 +419,7 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
     if not tx_raw:
         return await _fail_login(conn, request, provider, "state")
     try:
-        tx = _signer.loads(tx_raw, max_age=TX_TTL_SEC)
+        tx = _get_signer().loads(tx_raw, max_age=TX_TTL_SEC)
     except BadSignature:
         return await _fail_login(conn, request, provider, "state")
     if tx.get("provider") != provider:
@@ -462,6 +471,24 @@ class LocalLoginBody(BaseModel):
     password: str
 
 
+def _username_fingerprint(username: str) -> str:
+    """Keyed fingerprint of an attempted username for the failed-login audit
+    trail, so repeated attempts on one account still correlate.
+
+    The username field is a common target for a mistyped password (autofill,
+    muscle memory, a password manager filling the wrong field), so this value
+    must be assumed to sometimes *be* a password; storing it verbatim would
+    retain that secret in ``login_events.meta`` indefinitely. Keyed with
+    SESSION_SIGNING_KEY rather than a bare digest for exactly that case: a
+    plain hash of a human-chosen password is recovered by running a wordlist
+    through the same hash, so it would not protect the input it exists to
+    protect. Lowercased first so one account fingerprints identically
+    regardless of case.
+    """
+    key = os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret").encode()
+    return hmac.new(key, username.lower().encode(), hashlib.sha256).hexdigest()[:16]
+
+
 @router.post("/local/login")
 @limiter.limit("5/minute")
 async def local_login(
@@ -501,7 +528,7 @@ async def local_login(
             provider="local",
             ip=ip,
             user_agent=ua,
-            meta={"reason": "bad_credentials", "username": body.username},
+            meta={"reason": "bad_credentials", "username_hash": _username_fingerprint(body.username)},
         )
         return JSONResponse(status_code=401, content={"error": "invalid_credentials"})
 

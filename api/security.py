@@ -17,9 +17,6 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
-_PUBLIC_BASE_URL = _os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
-_ALLOW_TEST_ORIGIN = _os.environ.get("ALLOW_TEST_ORIGIN") == "1"
-
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P, _SCRYPT_DKLEN = 2**14, 8, 1, 32
 
 
@@ -70,16 +67,11 @@ def verify_local_login_password(password: str, stored: str | None) -> bool:
 
 def cookie_secure() -> bool:
     """True when cookies should set ``Secure`` — i.e. the deployment is served
-    over HTTPS. Read live from the env (not the import-frozen ``_PUBLIC_BASE_URL``)
-    so a per-process config flip is honored. Local-dev over ``http://localhost``
+    over HTTPS. Read live from the env (not cached at import time) so a
+    per-process config flip is honored. Local-dev over ``http://localhost``
     returns False so the browser still sends the cookie and SSO works.
     """
     return _os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").startswith("https://")
-
-
-_CORS_ORIGINS = tuple(
-    o.strip() for o in _os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()
-)
 
 
 @dataclass(frozen=True)
@@ -174,25 +166,30 @@ def _has_origin_path(value: str) -> bool:
 
 
 def _build_allowed_origins() -> frozenset[str]:
-    """Compute the allow-list once at import; csrf_guard reads it per request."""
+    """Compute the allow-list from the current environment, on every call.
+
+    Not cached. The only realistic reason this changes on a running process
+    is an operator removing a compromised or retired origin, and any cache
+    would keep honouring it for the cache's lifetime — the wrong direction to
+    be wrong in for a revocation. Rebuilding is a few env reads and string
+    splits with no I/O, immaterial beside the database work in the request
+    it guards, and it matches cookie_secure() above, which reads live for the
+    same reason.
+    """
     out: set[str] = set()
-    base_norm = _serialized_origin(_PUBLIC_BASE_URL)
+    base_norm = _serialized_origin(_os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"))
     if base_norm is not None:
         out.add(base_norm)
-    for o in _CORS_ORIGINS:
+    for o in _os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(","):
+        o = o.strip()
+        if not o:
+            continue
         n = _serialized_origin(o)
         if n is not None:
             out.add(n)
-    if _ALLOW_TEST_ORIGIN:
+    if _os.environ.get("ALLOW_TEST_ORIGIN") == "1":
         out.add("http://test")
     return frozenset(out)
-
-
-# Frozen at import time — tests that monkeypatch `PUBLIC_BASE_URL` /
-# `CORS_ORIGINS` / `ALLOW_TEST_ORIGIN` after this point will not see the
-# change. Reload the module or call `_build_allowed_origins()` and
-# reassign in a fixture if you need a different allow-list per test.
-_ALLOWED_ORIGINS = _build_allowed_origins()
 
 
 def csrf_guard(request: Request) -> None:
@@ -220,6 +217,6 @@ def csrf_guard(request: Request) -> None:
     incoming = _serialized_origin(raw)
     if incoming is None:
         raise HTTPException(status_code=403, detail="origin required")
-    if incoming in _ALLOWED_ORIGINS:
+    if incoming in _build_allowed_origins():
         return
     raise HTTPException(status_code=403, detail="cross-origin request denied")
