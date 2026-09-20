@@ -485,7 +485,11 @@ async def local_login(
         body.username,
     )
     password_hash = row["password_hash"] if row is not None else None
-    if row is None or not verify_local_login_password(body.password, password_hash):
+    # Evaluated before the branch, never inside it: `or` short-circuits, so
+    # testing `row is None` first would skip the verification entirely for an
+    # unknown username and reintroduce the timing side channel this closes.
+    password_ok = verify_local_login_password(body.password, password_hash)
+    if row is None or not password_ok:
         await record_event(
             conn,
             user_id=None,

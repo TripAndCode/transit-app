@@ -188,6 +188,35 @@ async def test_login_with_unknown_username_gets_the_same_generic_error(local_cli
 
 
 @pytest.mark.asyncio
+async def test_login_with_unknown_username_still_verifies_a_password(local_client, monkeypatch):
+    """The unknown-username path must reach verify_local_login_password.
+
+    Guards the endpoint against re-acquiring the timing side channel: if the
+    ``row is None`` test is ever moved back in front of the verification,
+    ``or`` short-circuits past it and an unknown username answers without
+    paying for a scrypt derivation.
+    """
+    from api.routers import auth as auth_router
+
+    calls = []
+    real = auth_router.verify_local_login_password
+    monkeypatch.setattr(
+        auth_router,
+        "verify_local_login_password",
+        lambda pw, stored: calls.append((pw, stored)) or real(pw, stored),
+    )
+
+    await _seed(local_client)
+    resp = await local_client.post(
+        "/api/auth/local/login",
+        json={"username": "nobody@nowhere", "password": "whatever"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 401
+    assert calls == [("whatever", None)]
+
+
+@pytest.mark.asyncio
 async def test_login_rejects_cross_origin_request(local_client, aconn):
     """A cross-origin POST is rejected by csrf_guard (403), matching every
     other mutating auth route, and never reaches credential checking."""

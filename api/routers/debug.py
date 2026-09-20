@@ -6,9 +6,13 @@ and return 404 when ``PERF_DEBUG_ENABLED`` is not set to a truthy value
 
 **Disabled by default.** Set ``PERF_DEBUG_ENABLED=true`` in your dev ``.env``
 to enable. The reset endpoint wipes all caches, which is a cheap DoS lever
-if exposed, so it requires an authenticated admin and is CSRF-guarded; the
-read-only snapshot has no user dependency, matching sibling read-routers
-(reports, overview, ask_dashboard) — the env gate is its only access control.
+if exposed, so it additionally requires an authenticated admin and is
+CSRF-guarded; the read-only snapshot has no user dependency, matching sibling
+read-routers (reports, overview, ask_dashboard).
+
+The env gate is a router-level dependency so it runs ahead of the per-route
+auth dependency. A disabled surface must answer 404 to every caller — an
+anonymous 401 would tell a prober the route exists.
 
 Routes
 ------
@@ -25,8 +29,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from api.security import User, csrf_guard, require_admin
 from pipeline import cache, perf
 
-router = APIRouter(prefix="/api/debug", tags=["debug"], include_in_schema=False)
-
 
 def _require_enabled() -> None:
     """Raise HTTP 404 when the debug surface is disabled.
@@ -41,6 +43,14 @@ def _require_enabled() -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
+router = APIRouter(
+    prefix="/api/debug",
+    tags=["debug"],
+    include_in_schema=False,
+    dependencies=[Depends(_require_enabled)],
+)
+
+
 @router.get("/perf")
 async def perf_snapshot(request: Request) -> dict[str, Any]:
     """Return a JSON snapshot of the in-process perf registry plus pool stats.
@@ -53,7 +63,6 @@ async def perf_snapshot(request: Request) -> dict[str, Any]:
           "pool":   { "size": <int>, "idle": <int> }
         }
     """
-    _require_enabled()
     snap = perf.snapshot()
     pool = request.app.state.pool
     snap["pool"] = {"size": pool.get_size(), "idle": pool.get_idle_size()}
@@ -69,7 +78,6 @@ async def perf_reset(request: Request, admin: User = Depends(require_admin)) -> 
     Mutating and cache-wiping, so it requires an authenticated admin
     (``require_admin``) and is CSRF-guarded like other mutating routes.
     """
-    _require_enabled()
     csrf_guard(request)
     perf.reset()
     cache.clear_all()

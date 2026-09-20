@@ -6,10 +6,12 @@ Contract:
    subsequent GET shows ops == {}.
 3. POST /api/debug/perf/reset requires an authenticated admin and is
    CSRF-guarded: anonymous -> 401, non-admin -> 403, cross-origin admin -> 403.
-4. PERF_DEBUG_ENABLED=false -> 404 on GET; POST still enforces auth first
-   (401/403) since ``require_admin`` is a dependency that runs before the
-   handler body's env-gate check.
-5. No env var set (default) -> 404 on GET (fail-closed); POST as above.
+4. PERF_DEBUG_ENABLED=false -> 404 on both endpoints, for every caller.
+5. No env var set (default) -> 404 on both endpoints (fail-closed).
+
+The env gate outranks the auth gate: a disabled surface answers 404 even to
+an anonymous caller, so a prober cannot tell the route apart from one that
+does not exist.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -141,16 +143,16 @@ async def test_perf_reset_rejects_cross_origin(debug_client, aconn):
 
 @pytest.mark.asyncio
 async def test_perf_disabled(monkeypatch, debug_client):
-    """GET returns 404 when PERF_DEBUG_ENABLED=false. POST still requires
-    admin auth first (401 here, anonymous) since that dependency runs before
-    the handler body's env-gate check."""
+    """Both endpoints return 404 when PERF_DEBUG_ENABLED=false, including for
+    an anonymous POST — the env gate runs ahead of the auth dependency, so a
+    disabled surface never answers 401 and never advertises its existence."""
     monkeypatch.setenv("PERF_DEBUG_ENABLED", "false")
 
     get_resp = await debug_client.get("/api/debug/perf")
     assert get_resp.status_code == 404
 
     post_resp = await debug_client.post("/api/debug/perf/reset", headers={"Origin": TEST_ORIGIN})
-    assert post_resp.status_code == 401
+    assert post_resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -169,11 +171,12 @@ async def test_perf_disabled_404s_an_authenticated_admin_too(monkeypatch, debug_
 
 @pytest.mark.asyncio
 async def test_perf_default_is_closed(apply_schema, monkeypatch):
-    """With no PERF_DEBUG_ENABLED env var set, GET returns 404 (fail-closed
-    default: the surface must be explicitly enabled in dev; it must never be
-    reachable on a fresh/production deploy that hasn't set the env var).
-    POST as an anonymous caller is rejected at the auth dependency (401)
-    before that env-gate is ever reached.
+    """With no PERF_DEBUG_ENABLED env var set, both endpoints return 404.
+
+    This verifies the fail-closed default: the surface must be explicitly
+    enabled in dev; it must never be reachable on a fresh/production deploy
+    that hasn't set the env var, and must not distinguish itself from a
+    nonexistent route by answering 401 to an anonymous caller.
     """
     monkeypatch.delenv("PERF_DEBUG_ENABLED", raising=False)
 
@@ -187,6 +190,6 @@ async def test_perf_default_is_closed(apply_schema, monkeypatch):
             assert get_resp.status_code == 404
 
             post_resp = await client.post("/api/debug/perf/reset", headers={"Origin": TEST_ORIGIN})
-            assert post_resp.status_code == 401
+            assert post_resp.status_code == 404
     finally:
         await pool.close()

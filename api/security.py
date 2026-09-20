@@ -57,9 +57,10 @@ def verify_local_login_password(password: str, stored: str | None) -> bool:
 
     An unknown username has no row to check ``stored`` against; returning
     `False` straight away in that case would let a caller distinguish "no
-    such user" from "wrong password" by response time (microseconds vs.
-    the ~100ms an actual scrypt hash costs). Verifying against a fixed
-    dummy hash instead keeps both paths the same cost.
+    such user" from "wrong password" by response time, since a real
+    verification costs a deliberately expensive scrypt derivation and an
+    early return costs nothing. Verifying against a fixed dummy hash
+    instead makes both paths perform the same computation.
     """
     if stored is None:
         verify_password(password, _DUMMY_PASSWORD_HASH)
