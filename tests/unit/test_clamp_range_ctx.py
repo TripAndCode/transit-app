@@ -139,3 +139,69 @@ def test_routes_are_capped_at_100(frozen_today):
 def test_routes_accepts_a_comma_free_iterable_of_any_kind(frozen_today):
     ctx = _call(routes=iter(["R1", "R1", "R2"]))
     assert ctx.routes == ("R1", "R2")
+
+
+def test_tool_date_overrides_cannot_escape_the_future_bound():
+    """Tool args are client input on the builder-direct dispatch path, so the
+    RangeCtx they derive has to obey the same future-date bound as every other
+    entry point -- otherwise a window reaching years ahead reaches the tool SQL
+    while every other caller is clamped."""
+    from pipeline.query.tools import _apply_date_overrides
+
+    base = range_mod.clamp_range_ctx(from_=None, to=None)
+    today = range_mod.jst_today()
+
+    for args in ({"from": "2099-01-01", "to": "2099-12-31"}, {"to": "2099-12-31"}):
+        ctx = _apply_date_overrides(base, args)
+        assert ctx.to_date <= today, args
+        assert ctx.from_date <= today, args
+
+
+def test_tool_date_overrides_keep_the_non_date_filters():
+    """Delegating to the shared clamp must carry the rest of the context
+    through, not reset it to defaults."""
+    from pipeline.query.tools import _apply_date_overrides
+
+    base = range_mod.clamp_range_ctx(from_=None, to=None, dow="weekday", routes=["R1"])
+    ctx = _apply_date_overrides(base, {"days_back": 7})
+    assert (ctx.dow, ctx.routes) == ("weekday", ("R1",))
+
+
+def test_tool_date_overrides_still_tolerate_an_unparseable_date():
+    """A model can emit a malformed date; that must fall back to the default
+    window rather than 422 the request, unlike the query-param path."""
+    from pipeline.query.tools import _apply_date_overrides
+
+    base = range_mod.clamp_range_ctx(from_=None, to=None)
+    ctx = _apply_date_overrides(base, {"from": "not-a-date"})
+    assert ctx.to_date == range_mod.jst_today()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"from_": 123, "to": None},
+        {"from_": None, "to": ["2026-01-01"]},
+        {"from_": None, "to": None, "routes": 123},
+        {"from_": None, "to": None, "routes": [1, 2]},
+        {"from_": None, "to": None, "routes": {1: "x"}.keys()},
+    ],
+    ids=["int-from", "list-to", "int-routes", "non-string-items", "non-string-keys-view"],
+)
+def test_type_confused_values_are_422_not_500(kwargs):
+    """A stored ``filter_ctx`` is arbitrary client JSON, validated only by a
+    byte-size cap, so these boundaries can arrive as numbers or lists. They
+    have to be rejected as client errors rather than reaching ``.strip()``
+    and surfacing as an unhandled 500 on the replay path.
+    """
+    with pytest.raises(HTTPException) as exc:
+        clamp_range_ctx(**kwargs)
+    assert exc.value.status_code == 422
+
+
+def test_a_bare_string_is_not_treated_as_a_route_list():
+    """Iterating a string yields characters, which would silently turn one
+    mistyped value into a filter on single-character route codes."""
+    with pytest.raises(HTTPException) as exc:
+        clamp_range_ctx(from_=None, to=None, routes="R1")
+    assert exc.value.status_code == 422

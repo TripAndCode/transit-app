@@ -113,11 +113,17 @@ def _coerce_date(value: str | date | None, field: str) -> date | None:
     ISO-8601 date: a malformed value is a client error (422), never a silent
     fall-through to the default window, which would return a confident answer
     for a period nobody asked about.
+
+    A value of the wrong type is a 422 for the same reason. A stored
+    ``filter_ctx`` is arbitrary client JSON, so this boundary can arrive as a
+    number or a list; those must not reach ``.strip()`` and surface as a 500.
     """
     if value is None:
         return None
     if isinstance(value, date):
         return value
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=f"invalid {field}: expected YYYY-MM-DD")
     if not value.strip():
         return None
     try:
@@ -171,9 +177,16 @@ def clamp_range_ctx(
     if (to_date - from_date).days >= MAX_RANGE_DAYS:
         from_date = to_date - timedelta(days=MAX_RANGE_DAYS - 1)
 
+    # Same reasoning as _coerce_date's type check: `routes` reaches here from
+    # stored filter_ctx JSON, so it can be a non-iterable or hold non-strings.
+    if isinstance(routes, (str, bytes)) or not isinstance(routes, Iterable):
+        raise HTTPException(status_code=422, detail="invalid routes: expected a list of route codes")
+
     seen: set[str] = set()
     cleaned: list[str] = []
     for raw in routes:
+        if not isinstance(raw, str):
+            raise HTTPException(status_code=422, detail="invalid routes: expected a list of route codes")
         r = raw.strip()
         if r and r not in seen:
             seen.add(r)

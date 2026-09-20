@@ -73,14 +73,16 @@ def test_time_band_clause_ch_all_is_noop():
 
 def test_time_band_clause_ch_morning_band():
     frag, params = time_band_clause_ch(_ctx(time_band="morning"))
-    # Compares a normalized 5-char "HH:MM" prefix, not the raw scheduled_time
-    # string — agency 1 (aomori_regex ingest strategy) writes 5-char
-    # "HH:MM" values with no seconds, while every other agency
-    # (static_join) writes 8-char "HH:MM:SS". A raw lexicographic compare
-    # of "09:00" against an 8-char bound like "09:00:00" is wrong (the
-    # 5-char form sorts as "less than" its own 8-char equivalent), so both
-    # sides must be normalized to 5 chars for the comparison to be exact
-    # regardless of which ingest strategy wrote the row.
+    # Compares a normalized "HH:MM", not the raw scheduled_time string —
+    # agency 1 (aomori_regex ingest strategy) writes 5-char "HH:MM" values
+    # with no seconds, while every other agency (static_join) writes 8-char
+    # "HH:MM:SS". A raw lexicographic compare of "09:00" against an 8-char
+    # bound like "09:00:00" is wrong (the 5-char form sorts as "less than"
+    # its own 8-char equivalent), so both sides must be normalized for the
+    # comparison to be exact regardless of which strategy wrote the row.
+    # The hour and minute are asserted separately because normalization
+    # splits them: the hour is taken modulo 24 so an extended-service
+    # "25:10" lands in the same band as "01:10" (see the next test).
     assert "substring(scheduled_time, 1, 2)" in frag
     assert "substring(scheduled_time, 3, 3)" in frag
     assert params["ch_tb_start"] == "05:00"
