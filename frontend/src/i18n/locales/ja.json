@@ -10,7 +10,14 @@
     "prototype_section_label": "プロトタイプ",
     "prototype_onboarding": "初回ログイン画面",
     "prototype_stale_feed": "フィード遅延状態",
-    "prototype_no_data": "データなし状態"
+    "prototype_no_data": "データなし状態",
+    "mobile_tabbar_label": "メインナビゲーション",
+    "more": "その他",
+    "more_menu_label": "その他のメニュー",
+    "close_menu": "メニューを閉じる"
+  },
+  "sheet": {
+    "handle": "シートの持ち手"
   },
   "onboarding": {
     "subtitle": "あなたの事業者を選んでください",

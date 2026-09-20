@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
@@ -229,15 +229,17 @@ describe("Sidebar", () => {
       expect(screen.getAllByRole("link", { name: /Overview/ }).length).toBe(1);
     });
 
-    it("renders only the mobile rail (no desktop nav) on a narrow viewport", () => {
+    it("renders the bottom tab bar (no desktop rail) on a narrow viewport", () => {
       mockMatchMedia(true);
       renderSidebar();
-      expect(screen.getByRole("button", { name: "Open menu" })).toBeTruthy();
-      expect(screen.queryByText("Overview")).toBeNull();
+      expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeTruthy();
+      // The desktop rail's own collapse toggle is the clearest sign the
+      // desktop variant isn't also mounted underneath.
+      expect(screen.queryByRole("button", { name: "Collapse sidebar" })).toBeNull();
     });
   });
 
-  describe("mobile drawer", () => {
+  describe("mobile tab bar", () => {
     beforeEach(() => {
       mockMatchMedia(true);
     });
@@ -246,49 +248,98 @@ describe("Sidebar", () => {
       vi.restoreAllMocks();
     });
 
-    it("renders the hamburger trigger without mounting the nav until opened", () => {
+    it("renders the four destinations (three tabs plus Ask) as labelled links", () => {
       renderSidebar();
-      expect(screen.getByRole("button", { name: "Open menu" })).toBeTruthy();
-      // No Overview link should exist yet — the drawer body is lazily mounted
-      // on open, and (unlike the old always-mounted-desktop-plus-CSS-hidden
-      // pattern) the desktop nav isn't rendered at all on a narrow viewport,
-      // so the common (closed) case has zero nav links in the DOM.
-      expect(screen.queryAllByRole("link", { name: /Overview/ }).length).toBe(0);
+      const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+      expect(within(nav).getByRole("link", { name: /Overview/ })).toBeTruthy();
+      expect(within(nav).getByRole("link", { name: /Segment analysis/ })).toBeTruthy();
+      expect(within(nav).getByRole("link", { name: /Reports/ })).toBeTruthy();
+      expect(within(nav).getByRole("link", { name: /Ask/ })).toBeTruthy();
     });
 
-    it("mounts the nav links once the hamburger is clicked", async () => {
-      const user = userEvent.setup();
-      renderSidebar();
-      await user.click(screen.getByRole("button", { name: "Open menu" }));
-      expect(screen.getAllByRole("link", { name: /Overview/ }).length).toBe(1);
+    it("marks the active tab", () => {
+      // `operations` is where Overview lives; `/overview` only redirects
+      // there, so a tab never matches it.
+      renderSidebar("/agencies/1/operations");
+      const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+      expect(within(nav).getByRole("link", { name: /Overview/ })).toHaveAttribute("aria-current", "page");
     });
 
-    it("closes the drawer (unmounting the nav) when a nav link inside it is clicked", async () => {
-      const user = userEvent.setup();
-      renderSidebar();
-      await user.click(screen.getByRole("button", { name: "Open menu" }));
-      const mapLinks = screen.getAllByRole("link", { name: /Overview/ });
-      expect(mapLinks.length).toBe(1);
-      await user.click(mapLinks[0]);
-      expect(screen.queryAllByRole("link", { name: /Overview/ }).length).toBe(0);
+    it("does not render the four destinations outside any agency context", () => {
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <I18nextProvider i18n={i18n}>
+            <MemoryRouter initialEntries={["/"]}>
+              <Sidebar />
+            </MemoryRouter>
+          </I18nextProvider>
+        </QueryClientProvider>
+      );
+      expect(screen.queryByRole("link", { name: /Overview/ })).toBeNull();
+      expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
     });
 
-    it("closes the drawer when the close button inside it is clicked", async () => {
-      const user = userEvent.setup();
+    it("renders a More trigger that does not mount the agency picker until opened", () => {
       renderSidebar();
-      await user.click(screen.getByRole("button", { name: "Open menu" }));
-      expect(screen.getAllByRole("link", { name: /Overview/ }).length).toBe(1);
-      await user.click(screen.getByRole("button", { name: "Close" }));
-      expect(screen.queryAllByRole("link", { name: /Overview/ }).length).toBe(0);
+      expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
+  describe("mobile more sheet", () => {
+    beforeEach(() => {
+      mockMatchMedia(true);
     });
 
-    it("closes the drawer when the backdrop is clicked", async () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("opens a dialog with the brand block and account menu, but not the four tab destinations again", async () => {
       const user = userEvent.setup();
       renderSidebar();
-      await user.click(screen.getByRole("button", { name: "Open menu" }));
-      expect(screen.getAllByRole("link", { name: /Overview/ }).length).toBe(1);
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByText("Delay Dashboard")).toBeTruthy();
+      expect(await within(dialog).findByRole("button", { name: "Account menu" })).toBeTruthy();
+      // The nav destinations already live in the tab bar underneath; the
+      // sheet must not repeat them.
+      expect(within(dialog).queryByRole("link", { name: /Overview/ })).toBeNull();
+    });
+
+    it("closes when the close button inside it is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Close menu" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("closes when the backdrop is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("dialog")).toBeTruthy();
       await user.click(screen.getByRole("presentation"));
-      expect(screen.queryAllByRole("link", { name: /Overview/ }).length).toBe(0);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("closes when Escape is pressed", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("closes when a nav link inside it (e.g. the onboarding prototype link) is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getByText("First-time login screen"));
+      expect(screen.queryByRole("dialog")).toBeNull();
     });
   });
 });

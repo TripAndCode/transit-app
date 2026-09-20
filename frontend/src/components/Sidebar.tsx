@@ -1,4 +1,4 @@
-import { useState, type ReactElement, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   HelpCircle,
@@ -7,7 +7,8 @@ import {
   SquareDashed,
   ChevronLeft,
   ChevronRight,
-  PanelLeft,
+  MoreHorizontal,
+  X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
@@ -18,7 +19,8 @@ import { SettingsDrawer } from "./SettingsDrawer";
 import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { Tooltip } from "./Tooltip";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
-import { Modal } from "./Modal";
+import { useFocusTrap } from "../hooks/useFocusTrap";
+import { Z_INDEX } from "../styles/zIndex";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
 import { openCommandPalette } from "./commandPaletteEvents";
 
@@ -30,6 +32,14 @@ type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
+
+/** The bottom tab bar's fixed height below `BP.sm`. `global.css`'s
+ *  `.app-main` rule reserves the identical 56px as bottom padding under the
+ *  routed content, so the tab bar's fixed positioning sits below the last
+ *  row of whatever the active tab renders instead of on top of it -- kept
+ *  in sync by that rule's comment pointing back here, since a plain
+ *  TS constant has no way to reach a separate stylesheet. */
+const MOBILE_TABBAR_HEIGHT_PX = 56;
 
 /** Read the persisted collapse preference. No-ops to `false` (expanded) if
  *  localStorage is unavailable or unset — matches theme.ts's fail-open shape. */
@@ -70,6 +80,63 @@ function RailTooltip({
   );
 }
 
+/** The mobile "…" destination: a bottom sheet holding the agency picker and
+ *  the account/settings controls that don't fit as one of the four tab bar
+ *  slots. Traps focus and closes on Escape or a backdrop click.
+ *
+ *  Not the shared `Modal`: its two variants are a centred card and a
+ *  full-height side drawer, and this is anchored to the bottom edge above
+ *  the tab bar. It shares the dialog semantics through `useFocusTrap`
+ *  rather than re-implementing them. */
+function MoreSheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(true, panelRef, onClose);
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        role="presentation"
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: Z_INDEX.drawerBackdrop }}
+      />
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className="more-sheet ov-modal"
+        style={{
+          position: "fixed",
+          right: 0,
+          bottom: MOBILE_TABBAR_HEIGHT_PX,
+          left: 0,
+          zIndex: Z_INDEX.drawer,
+          maxHeight: "70vh",
+          background: "var(--bg-surface)",
+          borderRadius: "var(--radius-xl) var(--radius-xl) 0 0",
+          boxShadow: "var(--el-3)",
+          display: "flex",
+          flexDirection: "column",
+          overflowY: "auto",
+          padding: "16px 0",
+          outline: "none",
+        }}
+      >
+        {children}
+      </div>
+    </>
+  );
+}
+
 export function Sidebar() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
@@ -93,7 +160,11 @@ export function Sidebar() {
   // duplicate every nav label/link in the DOM and break single-match
   // queries in tests or a11y tooling.
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  // Below BP.sm the rail's nav links move into a persistent bottom tab bar
+  // (thumb-reachable, and it gives the tab content back the width the rail
+  // used to take); this sheet holds what doesn't fit in four tab slots --
+  // the agency picker and the settings/account controls -- behind "…".
+  const [moreOpen, setMoreOpen] = useState(false);
 
   function toggleCollapsed() {
     setCollapsed((c) => {
@@ -105,15 +176,18 @@ export function Sidebar() {
 
   function openSettings() {
     setSettingsOpen(true);
-    setMobileOpen(false);
+    setMoreOpen(false);
   }
 
   // Nav links, the Ask CTA, the dev-only prototype section, and the account
   // menu — everything below the brand block. Shared by the desktop rail
   // (collapsedFlag reflects the persisted rail preference) and the mobile
-  // drawer (always rendered expanded; onNavigate closes the drawer after a
-  // link is followed, mirroring ThreadSidebar's onSelect-closes-drawer UX).
-  function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void) {
+  // "more" sheet (always rendered expanded; onNavigate closes the sheet
+  // after a link is followed, mirroring ThreadSidebar's onSelect-closes-
+  // drawer UX). `includeNav` is false for the mobile sheet: those
+  // destinations already live in the bottom tab bar, so repeating them here
+  // would be the same four links twice on screen at once.
+  function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void, includeNav = true) {
     return (
       <>
         {!collapsedFlag && (
@@ -121,7 +195,7 @@ export function Sidebar() {
             <AgencyPicker />
           </div>
         )}
-        {agencyId && (
+        {includeNav && agencyId && (
           <nav style={{ display: "flex", flexDirection: "column" }}>
             {ITEMS.map((item) => (
               <RailTooltip key={item.to} collapsed={collapsedFlag} label={t(item.labelKey)}>
@@ -160,7 +234,10 @@ export function Sidebar() {
           <>
             {/* Distinct CTA below the uniform nav list, matching the artifact
                 mockup's dashed-border Ask button — Ask is deliberately not in the
-                ITEMS loop above so it reads as an action, not a peer tab. */}
+                ITEMS loop above so it reads as an action, not a peer tab. Also
+                skipped on the mobile sheet: Ask is one of the four bottom tabs
+                there. */}
+            {includeNav && (
             <RailTooltip collapsed={collapsedFlag} label={t("nav.ask")}>
               <NavLink
                 to={`/agencies/${agencyId}/ask${suffix}`}
@@ -188,6 +265,7 @@ export function Sidebar() {
                 {!collapsedFlag && t("nav.ask")}
               </NavLink>
             </RailTooltip>
+            )}
             {!collapsedFlag && import.meta.env.DEV && (
               <div style={{ marginTop: 12 }}>
                 {/* Visually quarantined from the real account controls below
@@ -381,71 +459,83 @@ export function Sidebar() {
   );
 
   if (isMobile) {
+    const tabItemStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 3,
+      flex: 1,
+      minWidth: 0,
+      padding: "6px 2px 2px",
+      color: isActive ? "var(--accent)" : "var(--text-secondary)",
+      fontSize: "var(--text-xs)",
+      textDecoration: "none",
+      transition: "color var(--transition)",
+    });
+
     return (
       <>
-        {/* Narrow-viewport nav: a slim persistent rail (not a floating fixed
-            button) holding just the trigger, plus a slide-in drawer for the
-            rest — same drawer pattern as ThreadSidebar's mobile thread list.
-            A genuine flex-row sibling of <main> (36px wide, same idea as the
-            desktop rail just narrower) rather than position:fixed keeps the
-            trigger from floating on top of the sticky GuestPrompt banner or
-            the Data-staleness/Feed-health banners that stack above the
-            padded content in App.tsx — those already claim the page's
-            actual top-left corner on some agencies/states. */}
-        <div
-          className="app-sidebar-mobile"
+        {/* Bottom tab bar: thumb-reachable and gives tab content back the
+            width the 36px rail used to take. Fixed, not a flex sibling of
+            <main> — App.tsx's content column already reserves space for it
+            via .app-shell's bottom padding at this breakpoint, so it can
+            float over everything the way a native app's tab bar does. */}
+        <nav
+          className="app-tabbar"
+          aria-label={t("nav.mobile_tabbar_label")}
           style={{
-            width: 36,
-            height: "100%",
-            flexShrink: 0,
+            position: "fixed",
+            right: 0,
+            bottom: 0,
+            left: 0,
+            zIndex: Z_INDEX.drawer,
+            height: MOBILE_TABBAR_HEIGHT_PX,
             display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            paddingTop: 12,
+            alignItems: "stretch",
             background: "var(--bg-surface)",
-            borderRight: "1px solid var(--border-soft)",
+            borderTop: "1px solid var(--border-soft)",
+            paddingBottom: "env(safe-area-inset-bottom)",
           }}
         >
+          {agencyId &&
+            ITEMS.map((item) => (
+              <NavLink
+                key={item.to}
+                to={`/agencies/${agencyId}/${item.to}${suffix}`}
+                onMouseEnter={() => prefetchRouteChunk(item.to)}
+                onFocus={() => prefetchRouteChunk(item.to)}
+                style={tabItemStyle}
+              >
+                <item.Icon size={20} strokeWidth={1.5} aria-hidden="true" />
+                <span>{t(item.labelKey)}</span>
+              </NavLink>
+            ))}
+          {agencyId && (
+            <NavLink
+              to={`/agencies/${agencyId}/ask${suffix}`}
+              onMouseEnter={() => prefetchRouteChunk("ask")}
+              onFocus={() => prefetchRouteChunk("ask")}
+              style={tabItemStyle}
+            >
+              <HelpCircle size={20} strokeWidth={1.5} aria-hidden="true" />
+              <span>{t("nav.ask")}</span>
+            </NavLink>
+          )}
           <button
             type="button"
-            onClick={() => setMobileOpen(true)}
-            aria-label={t("nav.open_menu")}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 32,
-              height: 32,
-            }}
+            style={{ ...tabItemStyle({ isActive: false }), background: "transparent", border: "none", cursor: "pointer", font: "inherit" }}
+            aria-haspopup="dialog"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen(true)}
           >
-            {/* A distinct icon from ThreadSidebar's labeled "Conversations"
-                trigger — on the Ask tab at mobile widths both this app-nav
-                trigger and ThreadSidebar's thread-list trigger are on screen
-                at once, and two similar-looking unlabeled hamburgers opening
-                different drawers (app navigation vs. conversation list) was
-                confusing. */}
-            <PanelLeft size={18} strokeWidth={1.5} aria-hidden="true" />
+            <MoreHorizontal size={20} strokeWidth={1.5} aria-hidden="true" />
+            <span>{t("nav.more")}</span>
           </button>
+        </nav>
 
-          <Modal
-            open={mobileOpen}
-            onClose={() => setMobileOpen(false)}
-            ariaLabel={t("nav.mobile_menu_title")}
-            variant="drawer"
-            style={{
-              left: 0,
-              width: 260,
-              borderRight: "1px solid var(--border-soft)",
-              display: "flex",
-              flexDirection: "column",
-              overflowY: "auto",
-              padding: "16px 0",
-            }}
-          >
+        {moreOpen && (
+          <MoreSheet onClose={() => setMoreOpen(false)} title={t("nav.more_menu_label")}>
             <div
               style={{
                 display: "flex",
@@ -458,8 +548,8 @@ export function Sidebar() {
               {brandBlock(false)}
               <button
                 type="button"
-                aria-label={t("common.close")}
-                onClick={() => setMobileOpen(false)}
+                aria-label={t("nav.close_menu")}
+                onClick={() => setMoreOpen(false)}
                 style={{
                   background: "transparent",
                   border: "none",
@@ -468,16 +558,14 @@ export function Sidebar() {
                   display: "flex",
                   padding: 4,
                   flexShrink: 0,
-                  fontSize: 18,
-                  lineHeight: 1,
                 }}
               >
-                ×
+                <X size={18} strokeWidth={1.5} aria-hidden="true" />
               </button>
             </div>
-            {renderNavAndFooter(false, () => setMobileOpen(false))}
-          </Modal>
-        </div>
+            {renderNavAndFooter(false, () => setMoreOpen(false), false)}
+          </MoreSheet>
+        )}
 
         <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </>

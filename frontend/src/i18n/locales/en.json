@@ -10,7 +10,14 @@
     "prototype_section_label": "PROTOTYPE",
     "prototype_onboarding": "First-time login screen",
     "prototype_stale_feed": "Feed-stale state",
-    "prototype_no_data": "No-data state"
+    "prototype_no_data": "No-data state",
+    "mobile_tabbar_label": "Primary navigation",
+    "more": "More",
+    "more_menu_label": "More options",
+    "close_menu": "Close menu"
+  },
+  "sheet": {
+    "handle": "Sheet handle"
   },
   "onboarding": {
     "subtitle": "Select your transit agency",

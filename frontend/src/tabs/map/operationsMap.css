@@ -354,3 +354,45 @@
   .ops-playback { left: 8px; right: 8px; bottom: 8px; gap: 8px; }
   .ops-playback__clock { order: -1; }
 }
+
+/* BP.sm phone shell: the map fills the remaining height below the tab bar,
+   the legend collapses to one scrollable row instead of wrapping over the
+   map, and the queue/inspect/timeline content that the desktop grid gives a
+   side column moves into a bottom sheet layered over the map instead. */
+@media (max-width: 640px) {
+  .focused-overview.operations-page { height: 100%; }
+  .focused-overview .ops-workspace { display: block; height: 100%; max-height: none; position: relative; }
+  .focused-overview .ops-map { position: absolute; inset: 0; height: 100%; }
+  .ops-resizer { display: none; }
+  .ops-map-ref__legend { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+
+/* Layered over the map rather than a sibling column: the map already fills
+   the workspace's full box above, so the sheet has to overlay it, not push
+   it, to stay reachable at every snap point. Safe-area padding keeps the
+   handle and the first row clear of a phone's home-indicator gesture bar. */
+.bottom-sheet {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  /* Map chrome like the dock and the legend, so it takes their rung; the
+     two never overlap (one hugs the top edge, this the bottom). */
+  z-index: var(--z-map-overlay);
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: var(--el-3);
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bottom-sheet { background: var(--bg-surface); }
+}
+.bottom-sheet__handle { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 100%; height: 28px; padding: 0; border: 0; color: var(--text-tertiary); background: transparent; touch-action: none; cursor: grab; }
+.bottom-sheet__handle:active { cursor: grabbing; }
+.bottom-sheet__body { min-height: 0; padding: 0 20px 12px; overflow-y: auto; }
