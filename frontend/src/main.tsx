@@ -71,6 +71,9 @@ const AdminArchitecturePage = lazy(() =>
 const AdminAuditPage = lazy(() =>
   import("./pages/admin/AdminAuditPage").then((m) => ({ default: m.AdminAuditPage }))
 );
+const AdminAskOpsPage = lazy(() =>
+  import("./pages/admin/AdminAskOpsPage").then((m) => ({ default: m.AdminAskOpsPage }))
+);
 
 /** Wrap a lazy route element in its own Suspense fallback. Only the two
  *  routes that render outside <App /> need this — everything under "/"
@@ -151,6 +154,7 @@ const router = createBrowserRouter([
             children: [{ path: ":uid", element: <AdminUserDetailPage /> }],
           },
           { path: "ops", element: <AdminOpsPage /> },
+          { path: "ask", element: <AdminAskOpsPage /> },
           { path: "architecture", element: <AdminArchitecturePage /> },
           { path: "audit", element: <AdminAuditPage /> },
           { path: "flags", element: <AdminFlagsPage /> },

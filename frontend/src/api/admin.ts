@@ -639,3 +639,94 @@ export function usePatchFeatureFlag() {
     },
   });
 }
+// ── Ask ops (query log, route funnel, promote-to-intent-cache, eval) ─────
+//
+// "route" here is the Ask pipeline stage that answered a question (rules ->
+// nn (embedding nearest-neighbour) -> rag (Stage-3 LLM)), matching
+// CLAUDE.md's architecture naming, not a transit route/line. `no_history` is
+// the router's own early-exit case (a follow-up with nothing to continue).
+// See api/routers/admin_ask.py's module docstring for why there is no
+// "user" field and why `providers` below is always null: ask_query_log
+// carries neither identity nor a per-query provider/latency column.
+
+export type AskRoute = "rules" | "nn" | "rag" | "no_history";
+type AskStatus = "ok" | "error";
+
+type AskQueryLogRow = {
+  id: number;
+  agency_id: number;
+  agency_name: string;
+  question: string;
+  route: AskRoute;
+  tool: string | null;
+  status: AskStatus;
+  cache_outcome: string | null;
+  numeric_guard_triggered: boolean | null;
+  created_at: string;
+  promotable: boolean;
+};
+
+type AskQueryLogPage = { rows: AskQueryLogRow[]; next_cursor: string | null };
+
+export function useAdminAskQueries(params: {
+  route?: string;
+  status?: string;
+  agencyId?: number;
+  from?: string;
+  to?: string;
+  cursor?: string | null;
+}) {
+  const qs = new URLSearchParams();
+  if (params.route) qs.set("route", params.route);
+  if (params.status) qs.set("status", params.status);
+  if (params.agencyId != null) qs.set("agency_id", String(params.agencyId));
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.cursor) qs.set("cursor", params.cursor);
+  return useQuery({
+    queryKey: ["adminAskQueries", params],
+    queryFn: ({ signal }) => apiGet<AskQueryLogPage>(`/api/admin/ask/queries?${qs}`, { signal }),
+    placeholderData: keepPreviousData,
+  });
+}
+
+type AskFunnelRoute = { route: AskRoute; count: number; success_count: number };
+type AskFunnel = { by_route: AskFunnelRoute[]; total: number; providers: null };
+
+export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to?: string }) {
+  const qs = new URLSearchParams();
+  if (params.agencyId != null) qs.set("agency_id", String(params.agencyId));
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  return useQuery({
+    queryKey: ["adminAskFunnel", params],
+    queryFn: ({ signal }) => apiGet<AskFunnel>(`/api/admin/ask/funnel?${qs}`, { signal }),
+  });
+}
+
+type PromoteResult = { promoted: boolean; reason: string | null; chunk_id: string | null };
+
+/** Mutation: promote one ask_query_log row's cached intent into rag_chunks.
+ * Invalidates the query list so the row's promoted state refreshes. */
+export function usePromoteAskQuery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (queryLogId: number) => apiPost<PromoteResult>("/api/admin/ask/promote", { query_log_id: queryLogId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminAskQueries"] });
+    },
+  });
+}
+
+type AskEvalResult = { generated_at: string | null; score: number | null } | null;
+
+/** Latest local weekly eval result, or null when none has been produced yet
+ * (rendered as "not run" rather than an error — see the backend endpoint's
+ * docstring for why null is the common case today). */
+export function useAdminAskEval() {
+  return useQuery({
+    queryKey: ["adminAskEval"],
+    queryFn: ({ signal }) => apiGet<AskEvalResult>("/api/admin/ask/eval", { signal }),
+    staleTime: 60_000,
+  });
+}
