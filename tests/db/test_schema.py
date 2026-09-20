@@ -84,7 +84,7 @@ def test_api_keys_columns(pg_conn):
 
 
 def test_api_keys_are_keyed_by_hash(pg_conn):
-    """0052 moves the primary key onto the digest and lets the raw key go NULL,
+    """0053 moves the primary key onto the digest and lets the raw key go NULL,
     so a row can exist that holds no replayable credential."""
     with pg_conn.cursor() as cur:
         cur.execute("""
@@ -103,7 +103,7 @@ def test_api_keys_are_keyed_by_hash(pg_conn):
 
 
 def test_sessions_are_keyed_by_hash(pg_conn):
-    """The session id itself is only ever in the cookie after 0052."""
+    """The session id itself is only ever in the cookie after 0053."""
     with pg_conn.cursor() as cur:
         cur.execute("""
             SELECT a.attname
