@@ -185,7 +185,7 @@ async def _latest_route_observation(
     return _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
 
 
-@router.get("/delays/live")
+@router.get("/delays/live", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def live_delays(
     request: Request,
@@ -304,7 +304,7 @@ async def live_delays(
     }
 
 
-@router.post("/delays/refresh")
+@router.post("/delays/refresh", response_model=None)
 @limiter.limit("5/minute")
 async def refresh_live_delays(
     request: Request,
@@ -322,7 +322,7 @@ async def refresh_live_delays(
     return {"status": "updated", "inserted": inserted}
 
 
-@router.get("/delays/live-progress")
+@router.get("/delays/live-progress", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def live_trip_progress(
     request: Request,
@@ -447,7 +447,7 @@ async def live_trip_progress(
     }
 
 
-@router.get("/route-shape")
+@router.get("/route-shape", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_shape(
     request: Request,
@@ -472,7 +472,7 @@ async def route_shape(
     return await compute_route_shape(conn, ch, agency_id, str(route), ctx)
 
 
-@router.get("/today/route-summary")
+@router.get("/today/route-summary", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def today_route_summary(
     request: Request,
@@ -668,7 +668,7 @@ async def today_route_summary(
     }
 
 
-@router.get("/today/route/{route_code}/trips")
+@router.get("/today/route/{route_code}/trips", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_trips(
     request: Request,
@@ -798,7 +798,7 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
     }
 
 
-@router.get("/today/route/{route_code}/stop-profile")
+@router.get("/today/route/{route_code}/stop-profile", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_stop_profile(
     request: Request,
@@ -952,7 +952,7 @@ def _heatmap_features(rows: Any) -> dict[str, Any]:
     return {"type": "FeatureCollection", "features": features}
 
 
-@router.get("/delays/heatmap")
+@router.get("/delays/heatmap", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def delay_heatmap(
     request: Request,

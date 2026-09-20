@@ -382,7 +382,7 @@ async def get_suggestion(
     ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
     exclude: list[str] = Query(default=[]),
-) -> dict[str, Any] | None:
+) -> SuggestionEnvelope:
     """One rule-based 'go look at this' suggestion for the Analysis tab's
     Insight Panel. ``exclude`` entries are ``"report_type:route_code"``
     pairs the frontend has already shown this session (sessionStorage-backed,

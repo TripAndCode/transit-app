@@ -150,7 +150,7 @@ def reset_sql(apply_schema) -> str:
     topological order, and back on before the statement ends, so no test
     body ever runs with them disabled.
     """
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     try:
         with conn.cursor() as cur:
             cur.execute(

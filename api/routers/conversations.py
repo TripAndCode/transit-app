@@ -116,7 +116,7 @@ class MigrateAnon(BaseModel):
     threads: list[AnonThread]
 
 
-@router.get("/conversations")
+@router.get("/conversations", response_model=None)
 async def list_conversations(
     agency_id: int = Depends(get_agency),  # implicit auth scope
     user: User = Depends(get_current_user),
@@ -127,7 +127,7 @@ async def list_conversations(
     return rows
 
 
-@router.post("/conversations")
+@router.post("/conversations", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def create_conversation(
     request: Request,
@@ -147,7 +147,7 @@ async def create_conversation(
     )
 
 
-@router.get("/conversations/{conversation_id}")
+@router.get("/conversations/{conversation_id}", response_model=None)
 async def get_conversation(
     conversation_id: str,
     agency_id: int = Depends(get_agency),  # implicit auth scope
@@ -158,7 +158,7 @@ async def get_conversation(
     return await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
 
 
-@router.patch("/conversations/{conversation_id}")
+@router.patch("/conversations/{conversation_id}", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def update_conversation(
     request: Request,
@@ -191,7 +191,7 @@ async def delete_conversation(
     return {"ok": True}
 
 
-@router.get("/conversations/{conversation_id}/messages")
+@router.get("/conversations/{conversation_id}/messages", response_model=None)
 async def list_messages(
     conversation_id: str,
     agency_id: int = Depends(get_agency),  # implicit auth scope
@@ -223,7 +223,7 @@ async def migrate_anon_endpoint(
     return {"inserted": inserted}
 
 
-@router.post("/conversations/{conversation_id}/messages")
+@router.post("/conversations/{conversation_id}/messages", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def append_message_endpoint(
     request: Request,
@@ -428,7 +428,7 @@ class FollowupBody(BaseModel):
     context_row_index: int | None = Field(default=None, ge=0, strict=True)
 
 
-@router.post("/conversations/{conversation_id}/followup")
+@router.post("/conversations/{conversation_id}/followup", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def followup_endpoint(
     request: Request,
@@ -527,7 +527,7 @@ async def followup_endpoint(
     return {"user": user_msg, "assistant": assistant_msg}
 
 
-@router.get("/ask/followup-enabled")
+@router.get("/ask/followup-enabled", response_model=None)
 async def followup_enabled_endpoint(
     agency_id: int = Depends(get_agency),  # implicit auth scope
 ) -> dict[str, Any]:

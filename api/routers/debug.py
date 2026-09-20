@@ -51,7 +51,7 @@ router = APIRouter(
 )
 
 
-@router.get("/perf")
+@router.get("/perf", response_model=None)
 async def perf_snapshot(request: Request) -> dict[str, Any]:
     """Return a JSON snapshot of the in-process perf registry plus pool stats.
 

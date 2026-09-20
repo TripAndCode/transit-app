@@ -4,12 +4,11 @@ Pure function — no Postgres, no ClickHouse — lives under ``tests/unit`` per
 CLAUDE.md's "Put pure logic tests under tests/unit/" convention (see
 ``tests/unit/test_ask_eval_numeric_helper.py`` for the same rationale).
 
-Covers the case where a stop_sequence has zero delay samples (``route_avg_sec
-is None``, from ``route_stop_profile``'s ``_round_half_up_int(...) if
-a["delays"] else None`` conditional) while its cohort still qualifies for the
-outlier comparison — that used to crash with ``TypeError: '>' not supported
-between instances of 'NoneType' and 'float'`` instead of just reporting "not
-an outlier".
+``route_avg_sec`` is ``None`` for a stop_sequence with zero delay samples
+(``route_stop_profile`` yields ``_round_half_up_int(...) if a["delays"] else
+None``). A stop with nothing measured is not an outlier, so ``is_outlier``
+must stay ``False`` there however the cohort compares — the absent value can
+never take part in the magnitude comparison.
 """
 
 from __future__ import annotations

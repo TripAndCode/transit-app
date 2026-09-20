@@ -430,7 +430,7 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
 }
 
 
-@router.get("/ask/build-schema")
+@router.get("/ask/build-schema", response_model=None)
 async def ask_build_schema(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -493,7 +493,7 @@ async def ask_suggest(
     conn: asyncpg.Connection = Depends(get_conn),
     q: str = Query(default=""),
     limit: int = Query(default=8),
-) -> list[dict[str, Any]]:
+) -> AskSuggestResponse:
     """Live autocomplete for the Ask input.
 
     With a non-empty ``q``: e5-embed the query, nearest-neighbour against

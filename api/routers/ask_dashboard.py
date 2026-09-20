@@ -56,7 +56,7 @@ def _resolve_ctx(
     )
 
 
-@router.get("/heatmap")
+@router.get("/heatmap", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def heatmap_endpoint(
     request: Request,
@@ -78,7 +78,7 @@ async def heatmap_endpoint(
     return asdict(result)
 
 
-@router.get("/anomalies")
+@router.get("/anomalies", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def anomalies_endpoint(
     request: Request,
@@ -98,7 +98,7 @@ async def anomalies_endpoint(
     return asdict(result)
 
 
-@router.get("/movers")
+@router.get("/movers", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def movers_endpoint(
     request: Request,
