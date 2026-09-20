@@ -75,8 +75,10 @@ async def test_heatmap_returns_p90_delay_min(hmap_client):
 @pytest.mark.asyncio
 async def test_heatmap_p90_null_when_no_data(hmap_client):
     client, aid = hmap_client
-    # Request a future date range with no data
-    r = await client.get(f"/api/{aid}/delays/heatmap?from=2099-01-01&to=2099-01-07")
+    # A historical range with no data. Not a FUTURE range: both range
+    # boundaries are clamped to jst_today() (api.range.clamp_range_ctx), so a
+    # far-future window collapses onto today — which this fixture does seed.
+    r = await client.get(f"/api/{aid}/delays/heatmap?from=2020-01-01&to=2020-01-07")
     assert r.status_code == 200
     # No features expected (no data in that range)
     assert r.json()["features"] == []

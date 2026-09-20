@@ -5,6 +5,8 @@ Returns the full magazine payload in a single locale-aware round-trip.
 
 from __future__ import annotations
 
+import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
@@ -178,7 +180,7 @@ class PeakHourBreakdown(BaseModel):
 async def peak_hour_breakdown(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     hour: int = Query(ge=0, le=23),
     dow: int | None = Query(default=None, ge=1, le=7),
 ) -> PeakHourBreakdown:
@@ -215,8 +217,8 @@ async def peak_hour_breakdown(
 async def overview_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
 ) -> OverviewSummary:

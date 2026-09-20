@@ -1,5 +1,7 @@
 """Cross-agency network summary endpoint (not scoped to a single agency)."""
 
+import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
@@ -69,10 +71,10 @@ class NetworkSummary(BaseModel):
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def network_summary(
     request: Request,
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
-):
+) -> NetworkSummary:
     """Per-agency network health board over [from, to], ranked worst-avg-delay first.
 
     Honors the date range only; service/time_band/dow/routes are not applied

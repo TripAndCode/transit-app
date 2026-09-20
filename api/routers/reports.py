@@ -8,15 +8,17 @@ moment the request was served. The ``snapshots`` table from v1 is gone.
 import csv
 import io
 from datetime import datetime, timezone
+from typing import Any
 
 import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import RangeCtx, get_range_ctx
+from api.range import RangeCtx, ctx_payload, get_range_ctx
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
     format_council_summary_text,
@@ -97,14 +99,17 @@ class ReportMeta(BaseModel):
 
 
 class ReportCtx(BaseModel):
-    """Echoed back to clients with the frontend's preferred ``from``/``to`` keys."""
+    """Typed mirror of :func:`api.range.ctx_payload` — the range echo every
+    endpoint returns, with the wire-level ``from``/``to`` key names."""
 
-    from_: str = Field(serialization_alias="from")
+    from_: str = Field(alias="from")
     to: str
     dow: str
     time_band: str
     service: str = "all"
     routes: list[str] = []
+
+    model_config = {"populate_by_name": True}
 
 
 class ReportResponse(BaseModel):
@@ -123,16 +128,9 @@ class ReportResponse(BaseModel):
     definition: DefinitionMeta
 
 
-def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
-    """Project the internal ``RangeCtx`` into the client-facing ``ReportCtx``."""
-    return ReportCtx(
-        from_=ctx.from_date.isoformat(),
-        to=ctx.to_date.isoformat(),
-        dow=ctx.dow,
-        time_band=ctx.time_band,
-        service=ctx.service,
-        routes=list(ctx.routes),
-    )
+def _report_ctx(ctx: RangeCtx) -> ReportCtx:
+    """Typed wrapper over the shared echo so these responses keep a schema."""
+    return ReportCtx.model_validate(ctx_payload(ctx))
 
 
 @router.get("/reports", response_model=list[ReportMeta])
@@ -140,8 +138,8 @@ def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
 async def list_reports(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[dict[str, Any]]:
     """Static list of report types. ``rendered_at`` is request time."""
     del conn  # unused; keep for parity with get_report
     now = datetime.now(timezone.utc)
@@ -183,9 +181,9 @@ class HeadwayQualityResponse(BaseModel):
 async def get_headway_quality(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
-):
+) -> HeadwayQualityResponse:
     """Excess Waiting Time / CoV / long-gap rate, high-frequency routes only.
 
     Not part of the generic ``/reports/{report_type}`` dispatcher above
@@ -194,7 +192,7 @@ async def get_headway_quality(
     chose) — a dedicated endpoint, like ``/forecast/overview`` above.
     """
     rows = await compute_headway_quality(agency_id, ctx, conn)
-    return HeadwayQualityResponse(rows=[HeadwayQualityRow(**r) for r in rows], ctx=_ctx_payload(ctx))
+    return HeadwayQualityResponse(rows=[HeadwayQualityRow(**r) for r in rows], ctx=_report_ctx(ctx))
 
 
 class PerformanceStandardRow(BaseModel):
@@ -242,10 +240,10 @@ class PerformanceStandardsResponse(BaseModel):
 async def get_performance_standards(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
-):
+) -> PerformanceStandardsResponse:
     """Per-route minimum-performance-standard achievement rate and
     estimated bonus/deduction -- an internal simulation only (see
     `PerformanceStandardsResponse.disclaimer`), never a real invoice.
@@ -258,7 +256,7 @@ async def get_performance_standards(
     rows = await compute_performance_standards(agency_id, ctx, conn)
     return PerformanceStandardsResponse(
         rows=[PerformanceStandardRow(**r) for r in rows],
-        ctx=_ctx_payload(ctx),
+        ctx=_report_ctx(ctx),
         disclaimer=simulation_disclaimer(locale),
     )
 
@@ -340,10 +338,10 @@ class WeatherDelayResponse(BaseModel):
 async def get_weather_delay(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
-):
+) -> WeatherDelayResponse:
     """Average delay on observed-rainy service days vs non-rainy ones.
 
     Like `/headway_quality` and `/performance_standards`, a dedicated endpoint
@@ -354,7 +352,7 @@ async def get_weather_delay(
     result = await compute_rain_delay(agency_id, ctx, conn)
     return WeatherDelayResponse(
         **result,
-        ctx=_ctx_payload(ctx),
+        ctx=_report_ctx(ctx),
         disclaimer=observation_disclaimer(locale),
         attribution=weather_attribution(locale),
     )
@@ -377,28 +375,39 @@ class SuggestionResponse(BaseModel):
     to_date: str
 
 
-@router.get("/reports/suggest", response_model=SuggestionResponse | None)
+class SuggestionEnvelope(BaseModel):
+    """Payload for GET /reports/suggest.
+
+    ``suggestion`` is ``null`` when no rule produced a pick. The envelope
+    exists so that "no signal" stays a described 200 body a client can read
+    fields off, rather than a bare ``null`` with nowhere to say why.
+    """
+
+    suggestion: SuggestionResponse | None = None
+
+
+@router.get("/reports/suggest", response_model=SuggestionEnvelope)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def get_suggestion(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
     exclude: list[str] = Query(default=[]),
-):
+) -> SuggestionEnvelope:
     """One rule-based 'go look at this' suggestion for the Analysis tab's
     Insight Panel. ``exclude`` entries are ``"report_type:route_code"``
     pairs the frontend has already shown this session (sessionStorage-backed,
-    stateless here). Returns ``null`` when every rule's candidates are
-    excluded or the agency has no data at all -- the frontend renders its
-    own calm 'no signal' copy for that case, not this endpoint.
+    stateless here). Returns ``{"suggestion": null}`` when every rule's
+    candidates are excluded or the agency has no data at all -- the frontend
+    renders its own calm 'no signal' copy for that case, not this endpoint.
     """
     exclude_set: frozenset[tuple[str, str]] = frozenset(
         (report_type, route_code) for item in exclude if ":" in item for report_type, route_code in [item.split(":", 1)]
     )
     result = await compute_suggestion(agency_id, conn, ch, exclude=exclude_set, locale=locale)
-    return result
+    return SuggestionEnvelope(suggestion=SuggestionResponse(**result) if result else None)
 
 
 class ForecastHeatmapCell(BaseModel):
@@ -425,9 +434,9 @@ async def forecast_heatmap(
     request: Request,
     route: str = Query(..., min_length=1),
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, Any]:
     """Expected delay by day-of-week (ISODOW 1=Mon..7=Sun) × hour (0..23) for a
     route, pooled across service types (sample-weighted = exact pooled mean).
     Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
@@ -515,9 +524,9 @@ async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> 
 async def forecast_overview(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, Any]:
     """Agency-wide expected delay: a 7-day × time-band grid (pooled across all
     routes), the worst window, and a delay-ranked route list. Seasonal-naive
     baseline, NOT a prediction; carries a disclaimer. Re-pools agg_route_hour_dow
@@ -658,7 +667,7 @@ def _csv_response(
 async def get_report(
     request: Request,
     report_type: str,
-    limit: int | None = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1, le=500),
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     preset: str | None = Query(
         default=None,
@@ -686,11 +695,11 @@ async def get_report(
         "pipeline.reports.council.DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC.",
     ),
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
-):
+) -> ReportResponse | StreamingResponse:
     """Compute the named report live and render it."""
     if report_type not in _REPORT_TYPES:
         raise HTTPException(status_code=404, detail=f"Unknown report type '{report_type}'")
@@ -781,7 +790,7 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=[{"days": days, "hourly": hourly, "dow_band": dow_band, "revision_boundaries": revision_boundaries}],
-            ctx=_ctx_payload(ctx),
+            ctx=_report_ctx(ctx),
             definition=definition,
         )
     elif report_type == "dwell_run":
@@ -801,7 +810,7 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=[payload],
-            ctx=_ctx_payload(ctx),
+            ctx=_report_ctx(ctx),
             definition=definition,
         )
     elif report_type == "council_summary":
@@ -836,7 +845,7 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=[row],
-            ctx=_ctx_payload(ctx),
+            ctx=_report_ctx(ctx),
             definition=definition,
         )
     elif report_type == "delay_certificate":
@@ -853,7 +862,7 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=rows,
-            ctx=_ctx_payload(ctx),
+            ctx=_report_ctx(ctx),
             definition=definition,
         )
     else:
@@ -868,6 +877,6 @@ async def get_report(
         rendered_at=datetime.now(timezone.utc),
         text=text,
         rows=rows,
-        ctx=_ctx_payload(ctx),
+        ctx=_report_ctx(ctx),
         definition=definition,
     )
