@@ -6,6 +6,7 @@ import { useArchitectureDoc, useArchitectureDocs } from "../../api/admin";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { mermaidMarkdownComponents } from "../../components/MarkdownMermaid";
 import { SidebarNavList } from "../../components/SidebarNavList";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 // Rendered as a Mermaid flowchart rather than prose so it matches the
 // approved mockup's data-flow box. This is a MANUAL-SYNC reminder, not an
@@ -48,7 +49,7 @@ export function AdminArchitecturePage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.architecture.title")}</h1>
+      <PageHeader title={t("admin.architecture.title")} />
 
       <section style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 16, marginBottom: 12 }}>{t("admin.architecture.diagram_title")}</h2>

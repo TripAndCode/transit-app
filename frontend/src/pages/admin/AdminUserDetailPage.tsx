@@ -6,6 +6,7 @@ import { usePatchUser, useDeleteUser } from "../../api/admin";
 import { useSession } from "../../api/auth";
 import { AdminButton } from "./adminControls";
 import { formatDateTime } from "../../utils/format";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 type Detail = {
   user_id: number;
@@ -93,7 +94,7 @@ export function AdminUserDetailPage() {
   return (
     <div style={{ padding: 24, maxWidth: 920 }}>
       {backLink}
-      <h1 style={{ fontSize: 22, margin: "12px 0 16px" }}>{data.email}</h1>
+      <PageHeader title={data.email} />
       {error && (
         <div role="alert" style={{ marginBottom: 16, padding: 8, background: "var(--surface-2)",
                                     borderRadius: 4, fontSize: 13, color: "var(--text-tertiary)" }}>
