@@ -26,3 +26,11 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     dispatchEvent: () => false,
   }) as unknown as MediaQueryList;
 }
+
+// jsdom doesn't implement Element.scrollTo (used by components that keep a
+// scroll container pinned to the top on new content, e.g. AskTab's message
+// list) — without a stub, mounting such a component throws "scrollTo is not
+// a function" for every test, not just ones about scroll position.
+if (typeof Element !== "undefined" && !Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = () => {};
+}
