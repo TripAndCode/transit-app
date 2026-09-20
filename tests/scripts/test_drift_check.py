@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -92,7 +93,7 @@ def test_exit0_and_reports_both_checks_on_current_db(apply_schema):
         ["bash", str(SCRIPT)],
         capture_output=True,
         text=True,
-        env={**os.environ, "DATABASE_URL": os.environ["DATABASE_URL"], **_CH_TEST_ENV},
+        env={**os.environ, "DATABASE_URL": os.environ["DATABASE_URL"], "PYTHON": sys.executable, **_CH_TEST_ENV},
     )
     out = r.stdout + r.stderr
     assert r.returncode == 0, out

@@ -29,12 +29,18 @@ cd "$(dirname "$0")/.." || exit 3
 db_safe="$(printf '%s' "$DATABASE_URL" | sed -E 's#://[^@/]*@#://***@#; s#\?.*$##')"
 echo "=== drift_check $(date -u +%Y-%m-%dT%H:%M:%SZ) DB=${db_safe} ==="
 
+# Overridable so a caller that already has the right interpreter can pass it.
+# `poetry run` resolves its virtualenv from the current directory's identity,
+# so invoked from a git worktree it picks a different, unprovisioned
+# environment; the test suite passes its own sys.executable for that reason.
+PYTHON="${PYTHON:-poetry run python}"
+
 echo "--- check_migrations ---"
-poetry run python gtfs_pipeline.py check_migrations
+$PYTHON gtfs_pipeline.py check_migrations
 mig=$?
 
 echo "--- check_aggs ---"
-poetry run python gtfs_pipeline.py check_aggs
+$PYTHON gtfs_pipeline.py check_aggs
 agg=$?
 
 if [ "$mig" -ne 0 ] || [ "$agg" -ne 0 ]; then
