@@ -33,14 +33,23 @@ from zoneinfo import ZoneInfo
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from pydantic import BaseModel
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import RangeCtx, build_agg_stop_filter, ctx_payload, get_range_ctx
+from api.range import (
+    RangeCtx,
+    build_agg_stop_filter,
+    ctx_payload,
+    get_range_ctx,
+    jst_today,
+    parse_iso_date,
+)
 from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.reports.map import compute_route_shape, route_exists
+from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline
 
 _log = logging.getLogger(__name__)
 
@@ -1106,3 +1115,78 @@ async def delay_heatmap(
     fc = _heatmap_features(rows)
     fc["ctx"] = ctx_payload(ctx)
     return fc
+
+
+class TimelinePoint(BaseModel):
+    """One stop's pooled delay inside one playback frame.
+
+    ``samples`` is an observation count over the deduped set (one per trip-stop
+    event), so it counts trip visits to this stop in the bucket, not feed polls.
+    """
+
+    stop_id: str
+    stop_name: str | None
+    lon: float
+    lat: float
+    avg_delay_min: float
+    samples: int
+
+
+class TimelineFrame(BaseModel):
+    """One time bucket of the service day.
+
+    ``mean_delay_min`` is the sample-weighted mean across ``points`` — the
+    value the rail's load bar is coloured by — and is ``None`` exactly when
+    ``points`` is empty. Frames are dense over the window, so an empty frame
+    is a real statement (nothing ran, or nothing cleared the sample floor)
+    rather than a gap in the list.
+    """
+
+    t: str
+    points: list[TimelinePoint]
+    mean_delay_min: float | None
+    samples: int
+
+
+class DelayTimelineResponse(BaseModel):
+    date: str
+    step_minutes: int
+    frames: list[TimelineFrame]
+
+
+@router.get("/delays/timeline", response_model=DelayTimelineResponse)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def delay_timeline(
+    request: Request,
+    date_: str | None = Query(default=None, alias="date"),
+    step: int = Query(default=60),
+    agency_id: int = Depends(get_agency),
+    conn=Depends(get_conn),
+    ch=Depends(get_ch),
+):
+    """Positioned per-stop delays for every time bucket of one service day.
+
+    Backs the map's day-playback rail. ``date`` omitted resolves to the
+    agency's latest observed JST day, so a caller with no prior knowledge of
+    the agency's coverage still gets a day with data in it rather than an
+    empty rail for today-so-far.
+
+    Read-only, and served from ClickHouse `updates` joined against the static
+    schedule for positions — not from the `agg_*` tables, whose finest
+    time grain is the seven-band `time_band` column, far coarser than the
+    hour (or quarter hour) the rail steps through.
+    """
+    if step not in ALLOWED_STEP_MINUTES:
+        raise HTTPException(status_code=400, detail=f"step must be one of {list(ALLOWED_STEP_MINUTES)}")
+
+    if date_ is None:
+        latest = await max_captured_at(ch, agency_id)
+        day = latest.astimezone(ZoneInfo("Asia/Tokyo")).date() if latest is not None else jst_today()
+    else:
+        parsed = parse_iso_date(date_)
+        if parsed is None:
+            raise HTTPException(status_code=400, detail="date must be an ISO-8601 calendar date (YYYY-MM-DD)")
+        day = parsed
+
+    frames = await compute_delay_timeline(agency_id, day, step, conn, ch)
+    return DelayTimelineResponse(date=day.isoformat(), step_minutes=step, frames=frames)

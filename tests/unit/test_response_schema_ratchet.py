@@ -63,6 +63,15 @@ PENDING = {
     "POST /api/auth/local/login",
 }
 
+# Endpoints whose typed response is load-bearing and must stay typed. Shrinking
+# PENDING is the ratchet's one direction; this is its counterweight — an
+# endpoint listed here fails the suite the moment it loses its response model,
+# instead of quietly rejoining the undescribed set PENDING is allowed to hold.
+# Grow this whenever an endpoint is promoted out of PENDING.
+TYPED = {
+    "GET /api/{agency_id}/delays/timeline",
+}
+
 
 def _schema_routes() -> list[tuple[str, APIRoute]]:
     out = []
@@ -111,3 +120,13 @@ def test_permanently_exempt_endpoints_all_exist():
     """A renamed or deleted route must not leave a silent hole in the exemptions."""
     known = {name for name, _ in _schema_routes()}
     assert not (PERMANENTLY_EXEMPT - known), f"Unknown routes exempted: {sorted(PERMANENTLY_EXEMPT - known)}"
+
+
+def test_typed_endpoints_still_declare_a_response_model():
+    regressed = TYPED & _undescribed()
+    assert not regressed, f"These lost their response model: {sorted(regressed)}"
+
+
+def test_typed_endpoints_all_exist():
+    known = {name for name, _ in _schema_routes()}
+    assert not (TYPED - known), f"Unknown routes listed as typed: {sorted(TYPED - known)}"
