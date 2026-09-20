@@ -200,6 +200,9 @@ Copy `.env.example` and set only what your environment needs. Important groups:
 - `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
 - `ASK_FOLLOWUP_ENABLED`, `COPILOT_INSIGHT_ENABLED`, `WEATHER_INGEST_ENABLED`:
   feature kill switches.
+- `OPENAPI_DOCS_ENABLED`: gates `/docs`, `/redoc`, and `/openapi.json`. Off
+  unless set, so a deployment publishes no schema by default. `.env.example`
+  turns it on for local dev.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
 - `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
   `PUBLIC_BASE_URL`, `ADMIN_EMAILS`: optional authentication and admin setup.
