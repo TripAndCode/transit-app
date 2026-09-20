@@ -128,7 +128,10 @@
     "col_vehicle_km_delivered": "走行キロ達成率",
     "help_vehicle_km_delivered": "現行ダイヤの計画走行キロのうち実際に運行された割合です。shapes.txtが未読み込みの場合や運休を報告しないフィードでは「—」と表示されます（「運行達成率」も参照）。",
     "planned_trip_count_fallback": "計画本数 {{count}} 本（走行キロは算出不可）",
-    "schedule_version_title": "静的ダイヤバージョン: {{version}}"
+    "schedule_version_title": "静的ダイヤバージョン: {{version}}",
+    "col_agency": "事業者",
+    "axis_caption": "共通軸 · 0〜{{max}} 分",
+    "definition_disclosure": "集計条件を見る"
   },
   "definitionMeta": {
     "tolerance_line": "定時判定: {{preset}}（早着許容 ≤ {{early}}、遅延許容 ≤ {{late}}）",

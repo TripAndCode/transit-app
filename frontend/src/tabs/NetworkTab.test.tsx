@@ -43,7 +43,7 @@ function renderTab(agencyId = "1") {
 describe("NetworkTab", () => {
   beforeEach(async () => await i18n.changeLanguage("en"));
 
-  it("renders agency cards in given order with stale badge, no-data dash, clamp % dot", () => {
+  it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07", definition,
@@ -58,9 +58,7 @@ describe("NetworkTab", () => {
     renderTab();
     const names = screen.getAllByText(/Hiroden|HiroBus|Aomori/).map((n) => n.textContent);
     expect(names).toEqual(["Hiroden", "HiroBus", "Aomori"]);
-    expect(screen.getByText("#1")).toBeInTheDocument();
-    expect(screen.getByText("#2")).toBeInTheDocument();
-    expect(screen.getByText("#3")).toBeInTheDocument();
+    expect(screen.getAllByTestId("network-row")).toHaveLength(3);
     expect(screen.getByText(/\+10\.0/)).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument(); // Hiroden's on-time %
     expect(screen.getByText("10.00%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
@@ -89,8 +87,10 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    expect(screen.getByText("96.7%")).toBeInTheDocument();
-    const aomoriCard = screen.getByText("Aomori").closest(".network-card");
+    // The secondary figures now carry their own label in the row's meta
+    // line, so the value is no longer an element's whole text.
+    expect(screen.getByText(/96\.7%/)).toBeInTheDocument();
+    const aomoriCard = screen.getByText("Aomori").closest(".network-row");
     expect(aomoriCard).toHaveTextContent("—");
   });
 
@@ -123,10 +123,10 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    expect(screen.getByText("91.2%")).toBeInTheDocument();
-    const hiroBusCard = screen.getByText("HiroBus").closest(".network-card");
+    expect(screen.getByText(/91\.2%/)).toBeInTheDocument();
+    const hiroBusCard = screen.getByText("HiroBus").closest(".network-row");
     expect(hiroBusCard).toHaveTextContent("150");
-    const aomoriCard2 = screen.getByText("Aomori").closest(".network-card");
+    const aomoriCard2 = screen.getByText("Aomori").closest(".network-row");
     expect(aomoriCard2).toHaveTextContent("—");
   });
 
@@ -205,7 +205,7 @@ describe("NetworkTab", () => {
     const badges = screen.getAllByTestId("you-badge");
     expect(badges).toHaveLength(1);
     // the badge sits inside HiroBus's card, not Hiroden's
-    const hiroBusCard = screen.getByText("HiroBus").closest(".network-card");
+    const hiroBusCard = screen.getByText("HiroBus").closest(".network-row");
     expect(hiroBusCard).toContainElement(badges[0]);
   });
 
@@ -238,7 +238,7 @@ describe("NetworkTab", () => {
     expect(screen.getByText("2026-04-01 〜 2026-04-02")).toBeInTheDocument();
   });
 
-  it("renders the always-visible definition metadata block from the API response", () => {
+  it("keeps the definition metadata behind the aggregation-conditions disclosure", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07", definition,
@@ -247,7 +247,13 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
+    // Behind "How these are calculated": still one click away, no longer
+    // competing with the comparison it annotates.
+    const disclosure = screen.getByText("How these are calculated").closest("details");
+    expect(disclosure).not.toBeNull();
+    expect(disclosure).not.toHaveAttribute("open");
     const block = screen.getByTestId("definition-meta");
+    expect(disclosure).toContainElement(block);
     expect(block).toHaveTextContent("legacy_60s");
     expect(block).toHaveTextContent("unbounded");
   });
@@ -286,6 +292,78 @@ describe("NetworkTab", () => {
 
     expect(screen.getByText("82.7% (weighted)")).toBeInTheDocument();
     expect(screen.getByText("88.0%")).toBeInTheDocument(); // HiroBus unchanged: not configured
+  });
+
+
+  it("sorts rows worst-delay-first regardless of the order the API returned, nulls last", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Mild", avg_delay_min: 1.2 }),
+          row({ agency_id: 2, agency_name: "Unknown", avg_delay_min: null }),
+          row({ agency_id: 3, agency_name: "Worst", avg_delay_min: 4.8 }),
+          row({ agency_id: 4, agency_name: "Middle", avg_delay_min: 3.1 }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const names = screen.getAllByTestId("network-row").map((r) => r.querySelector("a")?.textContent);
+    expect(names).toEqual(["Worst", "Middle", "Mild", "Unknown"]);
+  });
+
+  it("draws every bar against the same 0-6 minute axis, not against the largest value", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          // 12 min is past the top of the axis: it fills it, and the exact
+          // figure stays in the value column.
+          row({ agency_id: 1, agency_name: "Over", avg_delay_min: 12 }),
+          row({ agency_id: 2, agency_name: "Half", avg_delay_min: 3 }),
+          row({ agency_id: 3, agency_name: "None", avg_delay_min: null }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const widths = screen.getAllByTestId("network-axis-fill").map((el) => el.style.width);
+    expect(widths).toEqual(["100%", "50%", "0%"]);
+  });
+
+  it("shows the observation count as text, with no bar encoding it", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden", avg_delay_min: 3, samples: 233148 }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.getByText(/233,148/)).toBeInTheDocument();
+    // One bar per row, and its length is the delay (3 of 6 minutes), never
+    // the sample count.
+    const fills = screen.getAllByTestId("network-axis-fill");
+    expect(fills).toHaveLength(1);
+    expect(fills[0].style.width).toBe("50%");
+  });
+
+  it("gives each row a stable flip key so a re-sort moves nodes instead of remounting them", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: [
+          row({ agency_id: 7, agency_name: "Hiroden", avg_delay_min: 4 }),
+          row({ agency_id: 9, agency_name: "HiroBus", avg_delay_min: 2 }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.getAllByTestId("network-row").map((r) => r.dataset.flipKey)).toEqual(["7", "9"]);
   });
 
   it("sets both range date inputs' lang attribute to the active UI language", () => {

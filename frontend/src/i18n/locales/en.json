@@ -128,7 +128,10 @@
     "col_vehicle_km_delivered": "Vehicle-km delivered %",
     "help_vehicle_km_delivered": "Share of the current schedule's planned vehicle-kilometers actually run — shows \"—\" when this agency has no shapes.txt loaded or doesn't report cancellations (see Service delivered).",
     "planned_trip_count_fallback": "{{count}} planned trips (vehicle-km not available)",
-    "schedule_version_title": "Static schedule version: {{version}}"
+    "schedule_version_title": "Static schedule version: {{version}}",
+    "col_agency": "Agency",
+    "axis_caption": "Shared axis · 0–{{max}} min",
+    "definition_disclosure": "How these are calculated"
   },
   "definitionMeta": {
     "tolerance_line": "On-time definition: {{preset}} (early ≤ {{early}}, late ≤ {{late}})",
