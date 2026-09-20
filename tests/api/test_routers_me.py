@@ -122,7 +122,8 @@ async def test_sessions_listed_then_revoked(me_client, aconn):
     rows = r.json()
     assert len(rows) == 1
     prefix = rows[0]["sid_prefix"]
-    assert len(prefix) >= 12
+    # The handle is a prefix of the stored digest, never of the session id.
+    assert prefix == token_hash(sid)[:12]
     r2 = await me_client.delete(
         f"/api/me/sessions/{prefix}",
         cookies={"sid": sid},
