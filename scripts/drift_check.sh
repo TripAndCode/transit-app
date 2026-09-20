@@ -33,9 +33,15 @@ echo "=== drift_check $(date -u +%Y-%m-%dT%H:%M:%SZ) DB=${db_safe} ==="
 # `poetry run` resolves its virtualenv from the current directory's identity,
 # so invoked from a git worktree it picks a different, unprovisioned
 # environment; the test suite passes its own sys.executable for that reason.
-# Split into an array rather than expanded unquoted, so the multi-word default
-# still works while an override path containing a space stays one argument.
-read -ra _python_cmd <<<"${PYTHON:-poetry run python}"
+# Branch on set-ness rather than splitting one string: the default is genuinely
+# multi-word and must split, while an override is a single path that must not --
+# word-splitting both from one value would break any interpreter path containing
+# a space, and report it as drift rather than as the config error it is.
+if [ -n "${PYTHON:-}" ]; then
+  _python_cmd=("$PYTHON")
+else
+  _python_cmd=(poetry run python)
+fi
 
 echo "--- check_migrations ---"
 "${_python_cmd[@]}" gtfs_pipeline.py check_migrations

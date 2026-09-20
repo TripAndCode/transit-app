@@ -141,3 +141,29 @@ def test_exit2_when_database_url_unset():
     r = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env)
     assert r.returncode == 2
     assert "DATABASE_URL" in (r.stdout + r.stderr)
+
+
+@_ch_integration
+def test_python_override_with_a_space_in_the_path_is_one_argument(tmp_path, apply_schema):
+    """An interpreter path containing a space must reach the script whole.
+
+    Word-splitting it would run its first segment as the command, and the
+    wrapper folds any non-zero status into "PROBLEM (migrations=...)" — so a
+    broken override would be reported as schema drift rather than as the
+    configuration error it is.
+    """
+    spaced_dir = tmp_path / "dir with space"
+    spaced_dir.mkdir()
+    shim = spaced_dir / "python"
+    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    shim.chmod(0o755)
+
+    r = subprocess.run(
+        ["bash", str(SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=_script_env(PYTHON=str(shim)),
+    )
+    out = r.stdout + r.stderr
+    assert r.returncode == 0, out
+    assert "not found" not in out
