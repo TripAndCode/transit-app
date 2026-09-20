@@ -67,8 +67,8 @@ router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
 # sample count with no delay sum behind it, so the numerator, the denominator
 # AND the reported count are all FILTERed to the same row population: such a
 # row must neither inflate the denominator nor be counted as evidence behind
-# `avg_min` (same rationale as pipeline/reports/rankings.py). One definition
-# reused at every call site, so the two figures cannot drift apart.
+# `avg_min`. One definition reused at every call site, so the two figures
+# cannot drift apart.
 _POOLED_DELAY_PROJECTION_SQL = (
     "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
     "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "

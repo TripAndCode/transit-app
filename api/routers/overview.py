@@ -40,11 +40,11 @@ def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
         SELECT route_code, service_type,
                (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
                    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
-               SUM(samples) AS samples
+               SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS samples
         FROM agg_route_hour_dow
         WHERE agency_id = $1 AND hour = $2 {dow_clause}
         GROUP BY route_code, service_type
-        HAVING SUM(samples) >= {_PEAK_HOUR_MIN_SAMPLES}
+        HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) >= {_PEAK_HOUR_MIN_SAMPLES}
         ORDER BY avg_min DESC NULLS LAST
         LIMIT 20
     """

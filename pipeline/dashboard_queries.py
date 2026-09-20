@@ -303,7 +303,7 @@ async def _movers_from_agg(
             SELECT route_code,
                    (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
                        / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
-                   SUM(samples) AS n
+                   COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) AS n
             FROM agg_daily_trend
             WHERE agency_id = $1 AND {cur_frag} {routes_clause}
             GROUP BY route_code

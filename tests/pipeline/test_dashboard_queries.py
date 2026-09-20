@@ -408,3 +408,8 @@ async def test_movers_current_window_null_reports_none_not_zero(movers_pool):
     assert by["R1"]["current_avg"] is None
     assert by["R1"]["delta"] is None
     assert by["R1"]["delta_pct"] is None
+    # The count is the evidence behind current_avg, and there is none: the only
+    # current-window row carries samples with no delay sum behind it. Reporting
+    # its 100 would claim a hundred observations support an average that does
+    # not exist.
+    assert by["R1"]["samples"] == 0

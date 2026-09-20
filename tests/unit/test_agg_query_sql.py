@@ -58,7 +58,7 @@ def test_peak_hour_sql_derives_avg_from_sums_in_both_branches():
         assert "SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)" in sql
         assert "NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0)" in sql
         assert "GROUP BY route_code, service_type" in sql
-        assert "HAVING SUM(samples) >= 3" in sql
+        assert "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) >= 3" in sql
 
 
 def test_peak_hour_sql_applies_the_sample_floor_only_to_the_group():
@@ -77,3 +77,37 @@ def test_peak_hour_sql_never_selects_the_stored_avg_min():
         select_list = _peak_hour_breakdown_sql(by_dow=by_dow).split("FROM agg_route_hour_dow")[0]
         assert select_list.count("avg_min") == 1
         assert "/ 60.0) AS avg_min" in select_list
+
+
+def test_peak_hour_sql_counts_only_the_averaged_population():
+    """`samples` is the evidence behind `avg_min`, so it has to exclude rows
+    the average itself excluded. A row can carry a sample count with no delay
+    sum behind it, and counting those would overstate how much observation the
+    displayed figure rests on -- and let a route clear the floor on rows that
+    contributed nothing to its average."""
+    for by_dow in (True, False):
+        sql = _peak_hour_breakdown_sql(by_dow=by_dow)
+        assert "SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS samples" in sql
+        assert "SUM(samples) AS samples" not in sql
+
+
+def test_movers_counts_only_the_averaged_population():
+    """The movers card shows `samples` as the evidence behind its current
+    average, so it must exclude rows that average excluded."""
+    import pipeline.dashboard_queries as dq
+
+    src = inspect.getsource(dq)
+    assert "COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) AS n" in src
+    assert "SUM(samples) AS n" not in src
+
+
+def test_route_hour_dow_pattern_counts_only_the_averaged_population():
+    """Same rule for the Ask tool's time-pattern query, including its floor:
+    a group must not clear the threshold on rows that contributed nothing to
+    the average it is shown beside."""
+    import pipeline.query.tool_queries as tq
+
+    src = inspect.getsource(tq)
+    assert "SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples" in src
+    assert "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 5" in src
+    assert "SUM(samples)::int AS samples" not in src
