@@ -47,6 +47,27 @@ def verify_password(password: str, stored: str | None) -> bool:
     return hmac.compare_digest(dk.hex(), hash_hex)
 
 
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_hex(32))
+
+
+def verify_local_login_password(password: str, stored: str | None) -> bool:
+    """Verify a login attempt's password, always performing one scrypt
+    verification regardless of whether ``stored`` (the looked-up user's
+    hash) exists.
+
+    An unknown username has no row to check ``stored`` against; returning
+    `False` straight away in that case would let a caller distinguish "no
+    such user" from "wrong password" by response time, since a real
+    verification costs a deliberately expensive scrypt derivation and an
+    early return costs nothing. Verifying against a fixed dummy hash
+    instead makes both paths perform the same computation.
+    """
+    if stored is None:
+        verify_password(password, _DUMMY_PASSWORD_HASH)
+        return False
+    return verify_password(password, stored)
+
+
 def cookie_secure() -> bool:
     """True when cookies should set ``Secure`` — i.e. the deployment is served
     over HTTPS. Read live from the env (not the import-frozen ``_PUBLIC_BASE_URL``)

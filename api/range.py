@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import Query
@@ -90,12 +90,16 @@ def get_range_ctx(
 ) -> RangeCtx:
     """FastAPI dependency: parse query params into a :class:`RangeCtx`.
 
-    Missing dates fall back to ``today - 30d`` / ``today``. Ranges wider than
-    :data:`MAX_RANGE_DAYS` are clamped at the start (newer end stays as given)
-    so the most recent data is preserved.
+    Missing dates fall back to ``today - 30d`` / ``today``. A ``to`` in the
+    future is clamped to today, since no agg_*/analyze query is ever bucketed
+    past the current JST civil date. Ranges wider than :data:`MAX_RANGE_DAYS`
+    are clamped at the start (newer end stays as given) so the most recent
+    data is preserved.
     """
     today = jst_today()
     to_date = parse_iso_date(to) or today
+    if to_date > today:
+        to_date = today
     from_date = parse_iso_date(from_) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
 
     if from_date > to_date:
@@ -126,6 +130,26 @@ def get_range_ctx(
         service=service,
         routes=route_tuple,
     )
+
+
+def ctx_payload(ctx: RangeCtx) -> dict[str, Any]:
+    """The client-facing JSON projection of a :class:`RangeCtx`.
+
+    Every endpoint that echoes the resolved range back to the caller emits
+    exactly these keys, so one frontend reader parses the echo from any of
+    them. The dates are the wire-level ``from``/``to`` names, not the
+    internal ``from_date``/``to_date`` attributes; ``routes`` is a fresh
+    list so a caller can hand the payload to an encoder that mutates it
+    without reaching into the frozen context.
+    """
+    return {
+        "from": ctx.from_date.isoformat(),
+        "to": ctx.to_date.isoformat(),
+        "dow": ctx.dow,
+        "time_band": ctx.time_band,
+        "service": ctx.service,
+        "routes": list(ctx.routes),
+    }
 
 
 def parse_iso_date(s: str | None) -> date | None:
