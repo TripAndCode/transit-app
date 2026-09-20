@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from api.deps import get_conn
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
+from pipeline.query import agencies as _agencies
 from pipeline.strategies.static_join import invalidate_field_coverage_probes
 from pipeline.url_guard import FeedURLError, validate_feed_url
 
@@ -40,10 +41,8 @@ class AgencyOut(BaseModel):
     # ISO date string (YYYY-MM-DD) of the latest date with real aggregated
     # data for this agency, or None if it has none yet. Powers the frontend's
     # smart-default-range redirect. Same table/freshness signal as
-    # pipeline/health.py's _AGG_MAX_SQL, but computed as a per-agency
-    # correlated subquery rather than a bare GROUP BY over agg_route_daily —
-    # this endpoint is public and frequently hit, so it needs the
-    # index-backed backward scan per agency rather than a full-table scan.
+    # pipeline/health.py's _AGG_MAX_SQL; the query lives in
+    # pipeline/query/agencies.py.
     latest_data_date: str | None = None
 
 
@@ -57,27 +56,9 @@ class AdminAgencyOut(BaseModel):
     deleted_at: Any  # datetime | None — Any avoids asyncpg datetime serialization issues
 
 
-def _agency_row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
-    """asyncpg returns a raw datetime.date for latest_data_date (or None) —
-    convert explicitly to an ISO string, matching this codebase's existing
-    convention (e.g. pipeline/reports/overview.py's window_from/window_to
-    both call .isoformat() explicitly rather than relying on Pydantic to
-    auto-coerce a date onto a str-typed field)."""
-    d = dict(row)
-    if d.get("latest_data_date") is not None:
-        d["latest_data_date"] = d["latest_data_date"].isoformat()
-    return d
-
-
 @router.get("", response_model=list[AgencyOut])
 async def list_agencies(conn: asyncpg.Connection = Depends(get_conn)) -> list[dict[str, Any]]:
-    rows = await conn.fetch(
-        "SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, "
-        "  (SELECT MAX(date) FROM agg_route_daily r WHERE r.agency_id = a.agency_id) AS latest_data_date "
-        "FROM agencies a "
-        "WHERE a.deleted_at IS NULL ORDER BY a.agency_id"
-    )
-    return [_agency_row_to_dict(r) for r in rows]
+    return await _agencies.list_agencies(conn, include_deleted=False)
 
 
 @router.get("/{agency_id}", response_model=AgencyOut)
@@ -91,7 +72,7 @@ async def get_agency(agency_id: int, conn: asyncpg.Connection = Depends(get_conn
     )
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-    return _agency_row_to_dict(row)
+    return _agencies.agency_row_to_dict(row)
 
 
 @router.post("", response_model=AgencyOut, status_code=201)
