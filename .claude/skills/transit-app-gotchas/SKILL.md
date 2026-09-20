@@ -107,6 +107,16 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   separately in that worktree's own `frontend/`. If a symlink happens to
   exist, treat it as a possibly-deliberate, worktree-specific setup detail,
   not a repo-wide guarantee to rely on going forward.
+- The same cwd-keyed resolution bites a *test or script that shells out*:
+  a child invoked as `poetry run python ...` re-resolves the virtualenv from
+  wherever it runs, so a suite launched from a worktree hands its subprocess a
+  different, unprovisioned environment and the test fails with
+  `ModuleNotFoundError` no matter what the code under test does. Pass the
+  running interpreter explicitly instead — `sys.executable` from Python, or an
+  interpreter-override env var for a bash wrapper — rather than letting the
+  child resolve poetry itself. Watch for the failure that *passes*: a test
+  asserting only a non-zero exit code is satisfied by the crash and silently
+  stops checking its actual subject.
 - **What actually works**: an interactive session (not a dispatched
   worker) usually has broader Bash permissions and CAN run `poetry
   install`/`npm install` for real, closing the gap after the fact. Fetch
