@@ -135,3 +135,77 @@ async def test_happy_path_calls_ingest_once(client):
     assert args[0] == 1
     assert args[1] == b"protobuf-bytes"
     assert args[3] == "oracle/20260919/TripUpdate_120000.pb"
+
+
+async def _raw_asgi_post(headers: dict[str, str], body_chunks: list[bytes]) -> int:
+    """Drive the app at the ASGI layer and return the response status.
+
+    The two cases below need a Content-Length that disagrees with the bytes
+    actually sent, which an HTTP client will not produce -- it recomputes the
+    header. Speaking ASGI directly is the only way to pin these paths.
+    """
+    app = _build_app()
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.1"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/internal/collector/updates/1",
+        "raw_path": b"/internal/collector/updates/1",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+    }
+    pending = list(body_chunks)
+
+    async def receive():
+        if pending:
+            return {"type": "http.request", "body": pending.pop(0), "more_body": bool(pending)}
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    status = {}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            status["code"] = message["status"]
+
+    await app(scope, receive, send)
+    return status["code"]
+
+
+async def test_non_numeric_content_length_still_bounded_by_the_stream():
+    """A Content-Length that isn't a number falls through to the streaming
+    cap rather than skipping the check."""
+    oversize = b"x" * (_MAX_COLLECTOR_PAYLOAD + 1)
+    code = await _raw_asgi_post(
+        {**VALID_HEADERS, "content-length": "not-a-number"},
+        [oversize],
+    )
+    assert code == 413
+
+
+async def test_understated_content_length_still_bounded_by_the_stream():
+    """A header that understates the body must not license an unbounded read:
+    the per-chunk check is what actually holds here."""
+    chunk = b"x" * (1024 * 1024)
+    chunks = [chunk] * ((_MAX_COLLECTOR_PAYLOAD // len(chunk)) + 2)
+    code = await _raw_asgi_post(
+        {**VALID_HEADERS, "content-length": "100"},
+        chunks,
+    )
+    assert code == 413
+
+
+async def test_honest_small_content_length_is_accepted():
+    """The negative control for the two above: the same raw path accepts a
+    normal collector request, so a 413 there means the cap fired, not that
+    the request was malformed."""
+    with patch("api.routers.internal._ingest_collector_payload", return_value=1):
+        code = await _raw_asgi_post(
+            {**VALID_HEADERS, "content-length": "14"},
+            [b"protobuf-bytes"],
+        )
+    assert code == 200
