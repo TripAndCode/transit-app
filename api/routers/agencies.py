@@ -57,12 +57,12 @@ class AdminAgencyOut(BaseModel):
 
 
 @router.get("", response_model=list[AgencyOut])
-async def list_agencies(conn=Depends(get_conn)):
+async def list_agencies(conn: asyncpg.Connection = Depends(get_conn)) -> list[dict[str, Any]]:
     return await _agencies.list_agencies(conn, include_deleted=False)
 
 
 @router.get("/{agency_id}", response_model=AgencyOut)
-async def get_agency(agency_id: int, conn=Depends(get_conn)):
+async def get_agency(agency_id: int, conn: asyncpg.Connection = Depends(get_conn)) -> dict[str, Any]:
     row = await conn.fetchrow(
         "SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, "
         "  (SELECT MAX(date) FROM agg_route_daily r WHERE r.agency_id = a.agency_id) AS latest_data_date "
@@ -81,7 +81,7 @@ async def create_agency(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),
     admin: User = Depends(require_admin),
-):
+) -> dict[str, Any]:
     """Create an agency. Admin-only (feed_url is a server-side fetch sink). Validates feed_url."""
     csrf_guard(request)
     if body.ingest_strategy is not None and body.ingest_strategy not in VALID_INGEST_STRATEGIES:
@@ -121,7 +121,7 @@ async def patch_agency(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),
     admin: User = Depends(require_admin),
-):
+) -> dict[str, Any]:
     """Partial update. Only provided fields change. Validates feed_url if present."""
     csrf_guard(request)
     if "agency_name" in body.model_fields_set and body.agency_name is None:
@@ -177,7 +177,7 @@ async def delete_agency(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),
     admin: User = Depends(require_admin),
-):
+) -> Response:
     """Soft-delete: sets deleted_at. Idempotent — re-deleting a deleted agency is 204."""
     csrf_guard(request)
     row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1", agency_id)
@@ -205,7 +205,7 @@ async def restore_agency(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),
     admin: User = Depends(require_admin),
-):
+) -> dict[str, Any]:
     """Clear deleted_at, making the agency active again. Idempotent — restoring
     an already-active agency is a no-op, mirroring delete_agency's guard so a
     double-click (or a re-restore) doesn't write a duplicate audit row."""

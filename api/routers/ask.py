@@ -16,7 +16,9 @@ import os as _os
 from datetime import timedelta
 from typing import Any, Literal, cast
 
+import asyncpg
 import clickhouse_connect
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
@@ -33,7 +35,7 @@ from api.range import (
     jst_today,
     parse_iso_date,
 )
-from api.security import csrf_guard
+from api.security import User, csrf_guard
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
@@ -144,11 +146,11 @@ async def ask(
     request: Request,
     body: AskRequest,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
-    user=Depends(get_current_user_optional),
-):
+    user: User | None = Depends(get_current_user_optional),
+) -> AskResponse:
     """Answer a natural-language question via tool-use.
 
     Cross-origin POSTs are rejected by ``csrf_guard`` before the LLM call
@@ -428,12 +430,12 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
 }
 
 
-@router.get("/ask/build-schema")
+@router.get("/ask/build-schema", response_model=None)
 async def ask_build_schema(
     request: Request,
     agency_id: int = Depends(get_agency),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, Any]:
     """Return tool-form metadata for the frontend's guided build mode.
 
     Driven by ``_BUILD_TOOL_META``. The ``capabilities`` and ``route_meta``
@@ -488,10 +490,10 @@ def _ask_suggestion(golden: dict, chunk_id: str, question: str, distance: float 
 async def ask_suggest(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     q: str = Query(default=""),
     limit: int = Query(default=8),
-):
+) -> AskSuggestResponse:
     """Live autocomplete for the Ask input.
 
     With a non-empty ``q``: e5-embed the query, nearest-neighbour against
@@ -560,8 +562,8 @@ async def ask_edit_action(
     request: Request,
     body: EditActionRequest,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> dict[str, bool]:
     """Record the user's verdict on a cached interpretation.
 
     Body: ``{"signature_hash": str, "action": "confirmed"|"edited"}``

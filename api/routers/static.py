@@ -1,3 +1,4 @@
+import asyncpg
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
@@ -40,8 +41,8 @@ class StaticStopsResponse(BaseModel):
 async def list_routes(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> StaticRoutesResponse:
     """List of static routes plus the numeric ``route_code`` used by updates.
 
     For Aomori (``aomori_regex`` ingest) the trip-id-derived ``route_code``
@@ -78,8 +79,8 @@ async def list_routes(
 async def list_stops(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> StaticStopsResponse:
     rows = await conn.fetch(
         "SELECT stop_id, stop_name, stop_lat, stop_lon FROM static_stops WHERE agency_id=$1 ORDER BY stop_id",
         agency_id,

@@ -8,8 +8,10 @@ moment the request was served. The ``snapshots`` table from v1 is gone.
 import csv
 import io
 from datetime import datetime, timezone
+from typing import Any
 
 import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -123,8 +125,8 @@ def _report_ctx(ctx: RangeCtx) -> ReportCtx:
 async def list_reports(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[dict[str, Any]]:
     """Static list of report types. ``rendered_at`` is request time."""
     del conn  # unused; keep for parity with get_report
     now = datetime.now(timezone.utc)
@@ -166,9 +168,9 @@ class HeadwayQualityResponse(BaseModel):
 async def get_headway_quality(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
-):
+) -> HeadwayQualityResponse:
     """Excess Waiting Time / CoV / long-gap rate, high-frequency routes only.
 
     Not part of the generic ``/reports/{report_type}`` dispatcher above
@@ -225,10 +227,10 @@ class PerformanceStandardsResponse(BaseModel):
 async def get_performance_standards(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
-):
+) -> PerformanceStandardsResponse:
     """Per-route minimum-performance-standard achievement rate and
     estimated bonus/deduction -- an internal simulation only (see
     `PerformanceStandardsResponse.disclaimer`), never a real invoice.
@@ -323,10 +325,10 @@ class WeatherDelayResponse(BaseModel):
 async def get_weather_delay(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
-):
+) -> WeatherDelayResponse:
     """Average delay on observed-rainy service days vs non-rainy ones.
 
     Like `/headway_quality` and `/performance_standards`, a dedicated endpoint
@@ -376,11 +378,11 @@ class SuggestionEnvelope(BaseModel):
 async def get_suggestion(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
     exclude: list[str] = Query(default=[]),
-):
+) -> SuggestionEnvelope:
     """One rule-based 'go look at this' suggestion for the Analysis tab's
     Insight Panel. ``exclude`` entries are ``"report_type:route_code"``
     pairs the frontend has already shown this session (sessionStorage-backed,
@@ -419,9 +421,9 @@ async def forecast_heatmap(
     request: Request,
     route: str = Query(..., min_length=1),
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, Any]:
     """Expected delay by day-of-week (ISODOW 1=Mon..7=Sun) × hour (0..23) for a
     route, pooled across service types (sample-weighted = exact pooled mean).
     Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
@@ -517,9 +519,9 @@ async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> 
 async def forecast_overview(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, Any]:
     """Agency-wide expected delay: a 7-day × time-band grid (pooled across all
     routes), the worst window, and a delay-ranked route list. Seasonal-naive
     baseline, NOT a prediction; carries a disclaimer. Re-pools agg_route_hour_dow
@@ -698,11 +700,11 @@ async def get_report(
         "pipeline.reports.council.DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC.",
     ),
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
-):
+) -> ReportResponse | StreamingResponse:
     """Compute the named report live and render it."""
     if report_type not in _REPORT_TYPES:
         raise HTTPException(status_code=404, detail=f"Unknown report type '{report_type}'")

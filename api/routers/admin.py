@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
@@ -69,7 +70,7 @@ async def list_users(
     offset: int = 0,
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> UserList:
     """List users with optional filters.
 
     - ``q``: substring match on email OR name (ILIKE).
@@ -120,7 +121,7 @@ async def user_detail(
     uid: int,
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> UserDetail:
     """Return a user plus their linked OAuth identities and last 20 audit
     events. ``meta`` is stored as jsonb but cast to text and re-parsed here
     so the JSON shape is preserved in the response without asyncpg's
@@ -205,7 +206,7 @@ async def patch_user(
     request: Request,
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> UserRow:
     """Update role and/or suspended flag.
 
     On suspend transition: kill all sessions for the target so the next
@@ -277,7 +278,7 @@ async def delete_user(
     request: Request,
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> Response:
     """Soft-delete: anonymize PII, suspend, drop sessions + identities,
     keep ``login_events`` intact for audit.
 
@@ -344,8 +345,8 @@ class OpsHealth(BaseModel):
 async def admin_ops(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-    ch=Depends(get_ch),
-):
+    ch: AsyncClient = Depends(get_ch),
+) -> OpsHealth:
     """Read-only ops health snapshot. Graceful degradation: failing sub-checks return null."""
     from pipeline.health import aggregate_freshness, migration_status
 
@@ -384,7 +385,7 @@ async def admin_ops(
 async def list_admin_agencies(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> list[dict[str, Any]]:
     """Admin list of ALL agencies including soft-deleted."""
     return await _agencies.list_agencies(conn, include_deleted=True)
 
@@ -458,7 +459,7 @@ def _list_feature_docs() -> list[Path]:
 
 
 @router.get("/architecture/docs", response_model=list[ArchitectureDocSummary])
-async def list_architecture_docs(_admin: User = Depends(require_admin)):
+async def list_architecture_docs(_admin: User = Depends(require_admin)) -> list[ArchitectureDocSummary]:
     """List every `docs/features/*.md` file for the architecture page's
     sidebar. Read-only and filesystem-only -- no DB round trip."""
     return [
@@ -468,7 +469,7 @@ async def list_architecture_docs(_admin: User = Depends(require_admin)):
 
 
 @router.get("/architecture/docs/{slug}", response_model=ArchitectureDocDetail)
-async def get_architecture_doc(slug: str, _admin: User = Depends(require_admin)):
+async def get_architecture_doc(slug: str, _admin: User = Depends(require_admin)) -> ArchitectureDocDetail:
     """Serve one feature doc's raw Markdown by slug (filename minus `.md`).
 
     ``slug`` is matched against the live enumeration from
