@@ -102,13 +102,15 @@ export function OverviewHeroRow({
         </div>
       </div>
       <div>
-        <p className="ov-hero-story">
+        {/* A div, not a <p>: InsightHint's root is a div, and a div is not
+            valid phrasing content inside a <p>. */}
+        <div className="ov-hero-story">
           {story}
           <InsightHint
             title={t("overview.hero_row.baseline_hint_title")}
             body={t("overview.hero_row.baseline_hint_body")}
           />
-        </p>
+        </div>
         <div className="ov-hero-sub">
           <div className="ov-hero-sub-item">
             <span className="ov-hero-sub-value">
