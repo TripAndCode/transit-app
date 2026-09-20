@@ -301,3 +301,56 @@
    filters: narrowing the view and taking the data away are different actions,
    and the CSV is exactly the rows those tiles count. */
 .ops-queue__export { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 16px; padding: 7px 11px; font-size: 12px; }
+
+/* ── Day playback ──────────────────────────────────────────────────────────
+   The rail spans the map's bottom edge rather than floating in a corner: it
+   is a transport for the whole map, and its scrubber has to be long enough
+   that one hour of a nineteen-hour day is a comfortable target.
+
+   Glass chrome matching .ops-dock above (same mix ratio, blur, border and
+   elevation), so the map's controls read as one family. */
+.ops-playback { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--card-border); border-radius: var(--radius-xl); background: color-mix(in srgb, var(--bg-surface) 82%, transparent); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3); box-shadow: var(--el-2); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ops-playback { background: var(--bg-surface); }
+}
+
+.ops-playback__transport { display: flex; gap: 4px; }
+.ops-playback__button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 32px; height: 32px; padding: 0 8px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-secondary); cursor: pointer; transition: background var(--transition), color var(--transition); }
+.ops-playback__button:hover:not(:disabled) { background: var(--hover-tint); color: var(--text-primary); }
+.ops-playback__button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ops-playback__button:disabled { opacity: .45; cursor: default; }
+.ops-playback__button--primary { color: var(--on-accent); background: var(--accent); }
+.ops-playback__button--primary:hover:not(:disabled) { color: var(--on-accent); background: var(--accent-strong); }
+.ops-playback__speed { font-size: var(--text-xs); font-weight: 600; }
+
+/* The load bar IS the scrubber's track: one band per frame, coloured by that
+   frame's own mean delay, so the shape of the day is readable before anything
+   is played. The native track is made transparent and the input laid over the
+   bands rather than beside them — two parallel strips would invite reading
+   them as two different quantities. */
+.ops-playback__track { position: relative; flex: 1 1 220px; min-width: 0; height: 22px; display: flex; align-items: center; }
+.ops-playback__load { position: absolute; inset: 7px 0; display: flex; gap: 1px; overflow: hidden; border-radius: 4px; }
+.ops-playback__load span { flex: 1 1 0; }
+.ops-playback__scrub { position: relative; width: 100%; height: 22px; margin: 0; background: transparent; appearance: none; -webkit-appearance: none; cursor: pointer; }
+.ops-playback__scrub::-webkit-slider-runnable-track { height: 8px; background: transparent; }
+.ops-playback__scrub::-moz-range-track { height: 8px; background: transparent; }
+.ops-playback__scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 4px; height: 20px; margin-top: -6px; border: 1px solid var(--bg-surface); border-radius: 2px; background: var(--text-primary); }
+.ops-playback__scrub::-moz-range-thumb { width: 4px; height: 20px; border: 1px solid var(--bg-surface); border-radius: 2px; background: var(--text-primary); }
+.ops-playback__scrub:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--radius); }
+
+.ops-playback__clock { display: flex; flex-direction: column; margin: 0; line-height: 1.15; }
+.ops-playback__clock b { font-size: var(--text-md); color: var(--text-primary); }
+.ops-playback__clock small { font-size: var(--text-xs); color: var(--text-tertiary); }
+.ops-playback__status { flex: 1 1 200px; margin: 0; font-size: var(--text-sm); color: var(--text-tertiary); }
+
+.ops-dock__playback { display: inline-flex; align-items: center; gap: 5px; align-self: center; margin-right: 10px; padding: 5px 10px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-size: var(--text-xs); font-weight: 600; white-space: nowrap; cursor: pointer; transition: background var(--transition), color var(--transition); }
+.ops-dock__playback:hover { background: var(--hover-tint); color: var(--text-primary); }
+.ops-dock__playback:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ops-dock__playback--on { color: var(--on-accent); background: var(--accent); }
+.ops-dock__playback--on:hover { color: var(--on-accent); background: var(--accent-strong); }
+
+/* BP.sm */
+@media (max-width: 640px) {
+  .ops-playback { left: 8px; right: 8px; bottom: 8px; gap: 8px; }
+  .ops-playback__clock { order: -1; }
+}

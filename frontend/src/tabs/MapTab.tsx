@@ -38,6 +38,9 @@ import {
   useOperationsMapLayers,
 } from "./map/useOperationsMapLayers";
 import { buildCurrentRouteSummaries } from "./map/currentRouteStatus";
+import { PlaybackRail } from "./map/PlaybackRail";
+import { useDayPlayback } from "./map/useDayPlayback";
+import { useTimelineLayers } from "./map/useTimelineLayers";
 import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
@@ -108,6 +111,7 @@ export function MapTab() {
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [hoveredTripId, setHoveredTripId] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [playbackOn, setPlaybackOn] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -311,6 +315,8 @@ export function MapTab() {
     fittedRouteRef.current = effectiveRoute;
   }, [effectiveRoute, shapeQuery.data]);
 
+  const playback = useDayPlayback(id, playbackOn);
+
   useBasemapDim(mapRef, styleEpoch, true, dimAmount);
   useOperationsMapLayers(
     mapRef,
@@ -324,6 +330,10 @@ export function MapTab() {
     progressQuery.data,
     stopProfileQuery.data?.stops,
   );
+  // Declared after useOperationsMapLayers: effects run in declaration order,
+  // so on a style reload (which wipes every imperatively-added layer) the live
+  // layers are re-added before playback hides them again.
+  useTimelineLayers(mapRef, styleEpoch, playback.frames, playback.index, playbackOn, playback.steppingOnly, playback.pause);
 
   function focusRoute(routeCode: string) {
     setRouteSelection({ agencyId: id, route: routeCode });
@@ -496,7 +506,15 @@ export function MapTab() {
             onApply={(routes) => {
               updateCtx({ routes }); setRouteSelection({ agencyId: id, route: null }); setSelectedTripId(null); setSelectedDirectionKey(null);
             }}
+            playback={{ active: playbackOn, onToggle: () => setPlaybackOn(!playbackOn) }}
           />
+          {playbackOn && (
+            <PlaybackRail
+              controller={playback}
+              onExit={() => { playback.pause(); setPlaybackOn(false); }}
+              t={t}
+            />
+          )}
           {/* Disabled rather than silently doing nothing when there is
               nothing to frame: fitBounds only moves the camera, so with no
               located trip a press is indistinguishable from a broken button.

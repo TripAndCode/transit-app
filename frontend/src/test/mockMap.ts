@@ -16,11 +16,13 @@ export function makeMockMap(
   const layers: MockLayer[] = [...initialLayers];
   const sources: Record<string, unknown> = {};
   const paint: Record<string, unknown> = {};
+  const layout: Record<string, unknown> = {};
   let styleLoadedFlag = styleLoaded;
   const map = {
     layers,
     sources,
     paint,
+    layout,
     getLayer: (id: string) => layers.find((l) => l.id === id),
     removeLayer: (id: string) => {
       const i = layers.findIndex((l) => l.id === id);
@@ -46,6 +48,10 @@ export function makeMockMap(
       paint[`${layerId}|${prop}`] = value;
     },
     getPaintProperty: (layerId: string, prop: string) => paint[`${layerId}|${prop}`],
+    setLayoutProperty: (layerId: string, prop: string, value: unknown) => {
+      layout[`${layerId}|${prop}`] = value;
+    },
+    getLayoutProperty: (layerId: string, prop: string) => layout[`${layerId}|${prop}`],
     getStyle: () => ({ layers }),
     isStyleLoaded: () => styleLoadedFlag,
     // No-op recorder: the code under test calls map.once("style.load", …);

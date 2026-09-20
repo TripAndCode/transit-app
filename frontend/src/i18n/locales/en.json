@@ -480,6 +480,21 @@
     "empty": {
       "title": "No current trips to display",
       "hint": "Waiting for the latest TripUpdate. New reports appear automatically."
+    },
+    "playback": {
+      "aria_label": "Day playback",
+      "play": "Play",
+      "pause": "Pause",
+      "step_back": "Previous time bucket",
+      "step_forward": "Next time bucket",
+      "scrubber": "Choose a time bucket",
+      "speed": "Playback speed {{speed}}x",
+      "speed_label": "{{speed}}×",
+      "exit": "Leave playback and return to current observations",
+      "loading": "Loading the day",
+      "empty": "No observations for this day",
+      "toggle_on": "Play the day",
+      "toggle_off": "Back to current observations"
     }
   },
   "map": {

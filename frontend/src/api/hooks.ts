@@ -16,6 +16,7 @@ import type {
   AskResponse,
   ConvMessage,
   Conversation,
+  DelayTimelineResponse,
   FilterCtx,
   ForecastHeatmap,
   ForecastOverview,
@@ -318,6 +319,21 @@ export function useLiveTrips(
     queryFn: ({ signal }) => apiGet<LiveTripsResponse>(`/api/${agencyId}/delays/live`, { signal }),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
+  });
+}
+
+/** One service day of playback frames. The server resolves the day (its
+ *  latest observed JST date) so the client never has to guess which day has
+ *  coverage; `staleTime` is generous because a finished day never changes. */
+export function useTimeline(
+  agencyId: number | null,
+  enabled: boolean,
+): UseQueryResult<DelayTimelineResponse> {
+  return useQuery({
+    queryKey: ["delay_timeline", agencyId],
+    queryFn: ({ signal }) => apiGet<DelayTimelineResponse>(`/api/${agencyId}/delays/timeline`, { signal }),
+    enabled: agencyId != null && enabled,
+    staleTime: 10 * 60 * 1000,
   });
 }
 

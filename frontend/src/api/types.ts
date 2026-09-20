@@ -75,6 +75,33 @@ export type LiveTripProgressResponse = {
   stops: LiveTripProgressStop[];
 };
 
+/** One stop's pooled delay inside one day-playback frame. `samples` counts
+ *  observed trip visits to this stop in the bucket, not feed polls. */
+export type TimelinePoint = {
+  stop_id: string;
+  stop_name: string | null;
+  lon: number;
+  lat: number;
+  avg_delay_min: number;
+  samples: number;
+};
+
+/** One time bucket of the service day. Frames are dense over 05:00–24:00, so
+ *  an empty `points` is a statement about that hour, not a gap in the list;
+ *  `mean_delay_min` is null exactly then. */
+export type TimelineFrame = {
+  t: string;
+  points: TimelinePoint[];
+  mean_delay_min: number | null;
+  samples: number;
+};
+
+export type DelayTimelineResponse = {
+  date: string;
+  step_minutes: number;
+  frames: TimelineFrame[];
+};
+
 export type LiveTripsResponse = {
   latest_captured_at: string | null;
   rows: LiveTrip[];
