@@ -6,7 +6,7 @@ from typing import Any
 import asyncpg
 import openai
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
@@ -43,7 +43,7 @@ class MeOut(BaseModel):
 
 
 @router.get("/me", response_model=MeOut)
-async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)):
+async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)) -> MeOut:
     """Return the current user's profile and linked OAuth identities."""
     rows = await conn.fetch(
         "SELECT provider, email_at_link FROM oauth_identities WHERE user_id=$1",
@@ -71,7 +71,9 @@ class SessionOut(BaseModel):
 
 
 @router.get("/me/sessions", response_model=list[SessionOut])
-async def list_sessions(user: User = Depends(require_user), conn=Depends(get_conn)):
+async def list_sessions(
+    user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)
+) -> list[SessionOut]:
     """List the caller's active sessions, ordered by most-recent activity."""
     rows = await conn.fetch(
         "SELECT sid, user_agent, ip::text AS ip, created_at, last_seen_at "
@@ -108,8 +110,8 @@ async def revoke_session(
     sid_prefix: str,
     request: Request,
     user: User = Depends(require_user),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> Response:
     """Revoke the caller's session matching the given sid prefix.
 
     Rejects ambiguous prefixes with 409 — the UI passes the 12-char
@@ -134,12 +136,27 @@ async def revoke_session(
     return Response(status_code=204)
 
 
+# Sized against what the filter UI can legitimately build, not against today's
+# data: range_ctx carries a route list, and the picker can select every route an
+# agency has. A large network's full selection would exceed a few kilobytes, so
+# the cap sits well clear of it and only stops payloads no picker could produce.
+_MAX_PRESET_RANGE_CTX_BYTES = 64 * 1024
+
+
 class PresetIn(BaseModel):
     """Body for creating a saved filter preset."""
 
     agency_id: int
-    name: str
+    name: str = Field(max_length=120)
     range_ctx: dict[str, Any]
+
+    @field_validator("range_ctx")
+    @classmethod
+    def _range_ctx_bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
+        size = len(json.dumps(v).encode())
+        if size > _MAX_PRESET_RANGE_CTX_BYTES:
+            raise ValueError(f"range_ctx exceeds {_MAX_PRESET_RANGE_CTX_BYTES} bytes serialized")
+        return v
 
 
 class PresetOut(BaseModel):
@@ -152,7 +169,9 @@ class PresetOut(BaseModel):
 
 
 @router.get("/me/presets", response_model=list[PresetOut])
-async def list_presets(agency_id: int, user: User = Depends(require_user), conn=Depends(get_conn)):
+async def list_presets(
+    agency_id: int, user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)
+) -> list[PresetOut]:
     """List the caller's saved filter presets for ``agency_id``."""
     rows = await conn.fetch(
         "SELECT preset_id, agency_id, name, range_ctx::text AS range_ctx_text "
@@ -176,8 +195,8 @@ async def create_preset(
     body: PresetIn,
     request: Request,
     user: User = Depends(require_user),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> PresetOut:
     """Save a filter preset; 409 if the name is already in use."""
     csrf_guard(request)
     try:
@@ -207,8 +226,8 @@ async def delete_preset(
     preset_id: int,
     request: Request,
     user: User = Depends(require_user),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> Response:
     """Delete one of the caller's filter presets."""
     csrf_guard(request)
     result = await conn.execute(
@@ -237,7 +256,7 @@ class LLMKeyPut(BaseModel):
 
 
 @router.get("/me/llm-key", response_model=LLMKeyStatus)
-async def get_llm_key(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)):
+async def get_llm_key(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)) -> LLMKeyStatus:
     """Return whether the caller has a BYOK LLM key configured, and its masked suffix."""
     key = await get_user_llm_key(conn, user.user_id)
     if key is None:
@@ -251,7 +270,7 @@ async def put_llm_key(
     body: LLMKeyPut,
     request: Request,
     user: User = Depends(require_user),
-):
+) -> LLMKeyStatus:
     """Validate then store the caller's BYOK LLM key.
 
     Validation runs before ``save_user_llm_key`` is ever called, so a bad key
@@ -283,7 +302,7 @@ async def delete_llm_key(
     request: Request,
     user: User = Depends(require_user),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> Response:
     """Delete the caller's stored BYOK LLM key, if any."""
     csrf_guard(request)
     await delete_user_llm_key(conn, user.user_id)

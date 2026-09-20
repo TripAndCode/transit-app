@@ -19,6 +19,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import asyncpg
@@ -30,7 +31,14 @@ from pydantic import BaseModel
 from api.deps import get_conn
 from api.middleware.ratelimit import limiter
 from api.oauth import oauth
-from api.security import User, cookie_secure, csrf_guard, current_user, hash_password, verify_password
+from api.security import (
+    User,
+    cookie_secure,
+    csrf_guard,
+    current_user,
+    hash_password,
+    verify_local_login_password,
+)
 from pipeline.audit import record_event
 
 _log = logging.getLogger(__name__)
@@ -174,7 +182,7 @@ def sanitize_next(value: str | None) -> str:
 
 
 @router.get("/{provider}/login")
-async def login(provider: str, request: Request, next: str = "/"):
+async def login(provider: str, request: Request, next: str = "/") -> RedirectResponse:
     """Redirect the browser to ``provider`` OAuth. Stashes state + PKCE verifier
     + sanitized next URL in a signed short-lived cookie that the callback verifies.
     """
@@ -207,7 +215,7 @@ async def login(provider: str, request: Request, next: str = "/"):
     return auth_url_resp
 
 
-async def _fetch_userinfo(client, token, provider: str) -> dict:
+async def _fetch_userinfo(client: Any, token: dict[str, Any], provider: str) -> dict[str, Any]:
     """Normalize provider userinfo to {sub, email, email_verified, name, avatar_url}."""
     if provider == "google":
         info = token.get("userinfo")
@@ -250,9 +258,9 @@ class LocalAccountConflict(Exception):
 
 
 async def _upsert_user(
-    conn,
+    conn: asyncpg.Connection,
     provider: str,
-    info: dict,
+    info: dict[str, Any],
     *,
     ip: str | None = None,
     user_agent: str | None = None,
@@ -342,7 +350,7 @@ async def _upsert_user(
     return uid, role
 
 
-async def _create_session(conn, uid: int, ua: str | None, ip: str | None) -> str:
+async def _create_session(conn: asyncpg.Connection, uid: int, ua: str | None, ip: str | None) -> str:
     """Insert a sessions row for ``uid`` and return the new ``sid``. Shared by
     the OAuth callback and the local-admin login — both mint a session the
     same way once they've settled on a user_id."""
@@ -358,7 +366,9 @@ async def _create_session(conn, uid: int, ua: str | None, ip: str | None) -> str
     return sid
 
 
-async def _mint_session_and_log_login(conn, uid: int, ua: str | None, ip: str | None, provider: str) -> str:
+async def _mint_session_and_log_login(
+    conn: asyncpg.Connection, uid: int, ua: str | None, ip: str | None, provider: str
+) -> str:
     """Session-row-insert + login-event sequence shared by the OAuth callback
     and local_login — both mint a session and audit a ``kind="login"`` event
     identically once they've settled on a user_id, differing only in which
@@ -368,7 +378,7 @@ async def _mint_session_and_log_login(conn, uid: int, ua: str | None, ip: str | 
     return sid
 
 
-def _set_session_cookie(resp, sid: str) -> None:
+def _set_session_cookie(resp: Response, sid: str) -> None:
     resp.set_cookie(
         SESSION_COOKIE_NAME,
         sid,
@@ -380,7 +390,7 @@ def _set_session_cookie(resp, sid: str) -> None:
     )
 
 
-async def _fail_login(conn, request: Request, provider: str, reason: str) -> RedirectResponse:
+async def _fail_login(conn: asyncpg.Connection, request: Request, provider: str, reason: str) -> RedirectResponse:
     """Audit + redirect helper for OAuth callback failure paths."""
     await record_event(
         conn,
@@ -396,7 +406,7 @@ async def _fail_login(conn, request: Request, provider: str, reason: str) -> Red
 
 
 @router.get("/{provider}/callback")
-async def callback(provider: str, request: Request, conn: asyncpg.Connection = Depends(get_conn)):
+async def callback(provider: str, request: Request, conn: asyncpg.Connection = Depends(get_conn)) -> RedirectResponse:
     """OAuth provider redirects here with ``code`` and ``state``. Validate against
     the signed ``oauth_tx`` cookie, exchange the code, upsert user + session,
     set the ``sid`` cookie, and redirect to the sanitized next URL.
@@ -476,14 +486,16 @@ async def local_login(
     request: Request,
     body: LocalLoginBody,
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> JSONResponse:
     """Password login for the single break-glass admin account (seeded at
     startup from DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD — see
     api.main's lifespan). Exists so there's always a way into /admin that
     doesn't depend on OAuth being configured or reachable. Rate-limited
     per IP; every attempt (success or failure) is audited to login_events
-    the same way OAuth failures already are.
+    the same way OAuth failures already are. CSRF-guarded like every other
+    mutating route.
     """
+    csrf_guard(request)
     if not local_admin_enabled():
         raise HTTPException(status_code=503, detail="local admin login not configured")
 
@@ -493,7 +505,12 @@ async def local_login(
         "SELECT user_id, password_hash FROM users WHERE email=$1",
         body.username,
     )
-    if row is None or not verify_password(body.password, row["password_hash"]):
+    password_hash = row["password_hash"] if row is not None else None
+    # Evaluated before the branch, never inside it: `or` short-circuits, so
+    # testing `row is None` first would skip the verification entirely for an
+    # unknown username and reintroduce the timing side channel this closes.
+    password_ok = verify_local_login_password(body.password, password_hash)
+    if row is None or not password_ok:
         await record_event(
             conn,
             user_id=None,
@@ -520,7 +537,7 @@ async def logout(
     request: Request,
     user: User | None = Depends(current_user),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> Response:
     """Delete the session row and clear the ``sid`` cookie. CSRF-guarded.
 
     Idempotent: succeeds with 204 even if no session is present, so a
