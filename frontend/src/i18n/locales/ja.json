@@ -1099,6 +1099,9 @@
       "api_key_copied": "コピーしました",
       "danger_zone_title": "危険な操作"
     },
+    "drawer": {
+      "close": "閉じる"
+    },
     "invite": {
       "trigger": "＋ 招待",
       "dialog_title": "ユーザーを招待",

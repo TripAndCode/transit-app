@@ -1099,6 +1099,9 @@
       "api_key_copied": "Copied",
       "danger_zone_title": "Danger zone"
     },
+    "drawer": {
+      "close": "Close"
+    },
     "invite": {
       "trigger": "+ Invite",
       "dialog_title": "Invite a user",
