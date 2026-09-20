@@ -31,13 +31,19 @@ COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
     && poetry install --only main --no-root --no-interaction
 
-COPY . .
-COPY --from=frontend /fe/dist /app/api/static
-
 # Run as an unprivileged user: a container escape or dependency RCE then
-# lands with no write access outside /app and no root inside it.
+# lands with no write access outside /app and no root inside it. The user is
+# created before the COPYs so they can set ownership directly: a later
+# `chown -R` would instead rewrite every copied path into a new layer, and
+# because layer diffs are file-granular that duplicates the whole tree's bytes
+# in the image for a metadata-only change. /app itself is chowned too, so the
+# ingest strategies can still create their per-agency directories under it.
 RUN adduser --system --group --no-create-home app \
-    && chown -R app:app /app
+    && chown app:app /app
+
+COPY --chown=app:app . .
+COPY --from=frontend --chown=app:app /fe/dist /app/api/static
+
 USER app
 
 EXPOSE 8000

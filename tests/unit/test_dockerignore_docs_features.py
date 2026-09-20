@@ -8,6 +8,7 @@ silently empty in production. These assertions parse the two files directly
 enforced without needing an actual image build to notice a regression.
 """
 
+import re
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +40,21 @@ def test_dockerfile_declares_a_healthcheck():
     assert "HEALTHCHECK " in text
 
 
-def test_dockerfile_does_not_pin_node_20():
-    text = (_REPO_ROOT / "Dockerfile").read_text()
-    assert "node:20" not in text, "frontend build stage must match CI's Node version"
+def test_dockerfile_node_major_matches_ci():
+    """The image's frontend build stage must use the Node major CI builds with.
+
+    Asserted against the workflow rather than against a specific version, so
+    the two move together instead of the check rotting into a guard against
+    one particular stale pin.
+    """
+    dockerfile = (_REPO_ROOT / "Dockerfile").read_text()
+    workflow = (_REPO_ROOT / ".github/workflows/ci.yml").read_text()
+
+    image_major = re.search(r"^FROM node:(\d+)", dockerfile, re.MULTILINE)
+    ci_major = re.search(r"""node-version:\s*["']?(\d+)""", workflow)
+    assert image_major, "Dockerfile has no `FROM node:<major>` build stage"
+    assert ci_major, "ci.yml no longer declares a node-version"
+    assert image_major.group(1) == ci_major.group(1), (
+        f"Dockerfile builds the frontend on Node {image_major.group(1)} but CI "
+        f"uses Node {ci_major.group(1)}; the image would ship a bundle no CI run tested"
+    )
