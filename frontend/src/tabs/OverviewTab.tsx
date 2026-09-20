@@ -4,10 +4,12 @@ import { useTranslation } from "react-i18next";
 
 import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
+import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
 import { useRangeContext } from "../api/rangeContext";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
+import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { AsyncSection } from "../components/AsyncSection";
 import { OverviewHeroRow } from "../components/OverviewHeroRow";
 import { OverviewModal } from "../components/OverviewModal";
@@ -26,7 +28,8 @@ type OpenCard = "concentration" | "peak_hour" | "service_split" | null;
 export function OverviewTab() {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
-  const [ctx] = useRangeContext();
+  const [ctx, update] = useRangeContext();
+  const jumpToLatestData = useJumpToLatestDataRange(agencyId);
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
@@ -82,7 +85,19 @@ export function OverviewTab() {
           onRetry={() => refetch()}
           data={data}
           hasContent={hasAnyData}
-          empty={<EmptyState title={t("overview.empty")} />}
+          empty={
+            <EmptyState
+              title={t("overview.empty")}
+              reasons={buildFilterCtxReasons(ctx, t)}
+              recoveries={buildFilterCtxRecoveries({
+                ctx,
+                onClearRoutes: () => update({ routes: null }),
+                onResetService: () => update({ service: "all" }),
+                jumpToLatestData,
+                t,
+              })}
+            />
+          }
           skeleton={
             <>
               <SkeletonKpiRow />

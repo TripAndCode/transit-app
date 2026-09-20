@@ -6,6 +6,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
+import { ApiError } from "../api/client";
 import type { DefinitionMeta, NetworkAgencyRow } from "../api/types";
 
 function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
@@ -179,8 +180,11 @@ describe("NetworkTab", () => {
   });
 
   it("shows the error banner with a retry on error", () => {
+    // A non-transient class (server 5xx) so the banner (and its retry
+    // button) shows immediately -- a plain network/timeout error auto-
+    // retries quietly first (AsyncSection's useAutoRetry).
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
-      data: undefined, isPending: false, error: new Error("boom"), refetch: vi.fn(),
+      data: undefined, isPending: false, error: new ApiError(500, "boom"), refetch: vi.fn(),
     } as never);
     renderTab();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();

@@ -559,7 +559,34 @@
       "samples": "{{count}} observations",
       "unit": "Minutes · bars below zero indicate early departures",
       "caveat": "Grouped by stop sequence; names are representative. These aggregates do not establish the cause of delay.",
-      "recorded": "View returned data and recorded arguments"
+      "recorded": "View returned data and recorded arguments",
+      "tool_label": {
+        "route_stop_patterns": "Stop-by-stop pattern",
+        "segment_hotspots": "Stop delay hotspots",
+        "on_time_rate": "On-time rate ranking"
+      },
+      "window_range": "{{from}} – {{to}}",
+      "conditions_all": "No conditions (all)",
+      "chip": {
+        "morning_peak": "View morning peak only",
+        "view_map": "View on the map",
+        "compare_previous": "Compare with two weeks ago",
+        "export_png": "Save as PNG"
+      },
+      "badge": {
+        "sql": "SQL only",
+        "llm": "LLM"
+      },
+      "disclosure_title": "Where this answer comes from",
+      "disclosure_route": "Route",
+      "disclosure_conditions": "Conditions",
+      "disclosure_aggregation": "Aggregation",
+      "disclosure_confidence": "Confidence",
+      "confidence": {
+        "sql": "Exact (computed directly from the aggregate)",
+        "llm": "LLM-generated summary (grounded only in the already-fetched result)"
+      },
+      "sample_count": "{{count}} observations"
     },
     "workspace": {
       "investigations": "Your investigations",
@@ -755,8 +782,8 @@
       }
     },
     "landing": {
-      "header_title": "Route Intelligence",
-      "header_subtitle": "Answers via a 3-stage pipeline: rules → embedding search → RAG",
+      "header_title": "Ask about a delay",
+      "header_subtitle": "Pick a route or stop and get an answer right away",
       "cards_title": "You can ask things like",
       "pills_title": "More questions"
     }
@@ -828,8 +855,7 @@
     },
     "no_data": {
       "title": "No matching data",
-      "hint": "Try a different range or filters",
-      "reset_action": "View this week"
+      "hint": "Try a different range or filters"
     },
     "heatmap": {
       "empty": "No time-band data.",
@@ -951,6 +977,7 @@
     "aggregate_not_ready": "Data for this view isn't ready in this environment yet. It will appear once the data has been prepared.",
     "generic_status": "Failed to load ({{status}})",
     "network": "Connection dropped for a moment. Please retry.",
+    "timeout": "The request timed out. Please try again.",
     "generic": "Failed to load.",
     "followup_too_long": "That question is too long. Please shorten it and try again.",
     "followup_rate_limit": "High traffic right now. Please wait a moment and retry.",
@@ -1115,6 +1142,14 @@
       "go_to": "Go to {{target}}",
       "open_shortcuts": "Show this shortcut list",
       "extend_brush": "Extend the daily chart's selected range"
+    }
+  },
+  "empty_state": {
+    "reason_format": "{{label}}: {{value}}",
+    "recovery": {
+      "clear_routes": "Clear the route filter",
+      "reset_service": "Reset service type to all",
+      "jump_latest_data": "Jump to the latest data"
     }
   }
 }

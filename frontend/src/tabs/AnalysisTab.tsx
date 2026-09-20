@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
+import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
 import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
-import type { DwellRunPayload, TrendPayload } from "../api/types";
+import type { DwellRunPayload, RevisionBoundaries, TrendDay, TrendPayload } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
+import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
 import { InsightPanel } from "../components/InsightPanel";
@@ -30,20 +32,13 @@ import { th, td } from "../components/tableStyles";
 import { buildReportTypeLabels } from "./reportTypes";
 import "./analysisTab.css";
 
-/** "This week" = the 7 days ending today, in the ctx's from/to string
- *  format. Used by the "no data" EmptyState's recovery action to jump to a
- *  window likely to have real data, rather than leaving the user stuck on
- *  whatever empty range they'd filtered to. */
-function thisWeekRange(): { from: string; to: string } {
-  return { from: isoDaysAgo(6), to: todayISO() };
-}
-
 export function AnalysisTab() {
   const { t } = useTranslation();
   const { reportType } = useParams();
   const id = useAgencyId();
   const navigate = useNavigate();
   const [ctx, update] = useRangeContext();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
   // Build the filter querystring from ctx so navigating between reports
   // carries only the filter dimensions — not unrelated keys like ?admin=1.
   const filterQS = ctxToQueryString(ctx);
@@ -199,7 +194,14 @@ export function AnalysisTab() {
               <EmptyState
                 title={t("reports.no_data.title")}
                 hint={t("reports.no_data.hint")}
-                action={{ label: t("reports.no_data.reset_action"), onClick: () => update(thisWeekRange()) }}
+                reasons={buildFilterCtxReasons(ctx, t)}
+                recoveries={buildFilterCtxRecoveries({
+                  ctx,
+                  onClearRoutes: () => update({ routes: null }),
+                  onResetService: () => update({ service: "all" }),
+                  jumpToLatestData,
+                  t,
+                })}
               />
             )}
             {/* Second, narrower metric panel (item 94) -- high-frequency
@@ -303,6 +305,8 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   const id = useAgencyId();
   const { format: formatRoute } = useRouteNames(id);
   const cappedRoutes = useCappedList(payload?.routes ?? [], 200, payload);
+  const [ctx, update] = useRangeContext();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
 
   if (!payload || !payload.available) {
     return <EmptyState title={t("reports.dwell_run.not_available")} />;
@@ -315,6 +319,14 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
       <EmptyState
         title={t("reports.no_data.title")}
         hint={t("reports.no_data.hint")}
+        reasons={buildFilterCtxReasons(ctx, t)}
+        recoveries={buildFilterCtxRecoveries({
+          ctx,
+          onClearRoutes: () => update({ routes: null }),
+          onResetService: () => update({ service: "all" }),
+          jumpToLatestData,
+          t,
+        })}
       />
     );
   }

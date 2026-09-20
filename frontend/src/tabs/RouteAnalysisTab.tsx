@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
+import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
 import { useRangeContext, isoDaysBefore } from "../api/rangeContext";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
@@ -17,13 +18,15 @@ import { saveAnalysis } from "../components/analysis/savedAnalyses";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
+import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
 
 export function RouteAnalysisTab() {
   const id = useAgencyId();
   const { t } = useTranslation("design");
-  const [ctx] = useRangeContext();
+  const [ctx, update] = useRangeContext();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
   const [params, setParams] = useSearchParams();
   const compare = params.get("compare") === "1";
   const route = ctx.routes.length === 1 ? ctx.routes[0] : null;
@@ -79,7 +82,16 @@ export function RouteAnalysisTab() {
     </div></header>
     {notice && <span role="status">{notice}</span>}
     <AnalysisFilters agencyId={id} />
-    {!route ? <EmptyState title={t("choose")} hint={t("filterNote")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")} />}>
+    {!route ? <EmptyState title={t("choose")} hint={t("filterNote")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
+      reasons={buildFilterCtxReasons(ctx, t)}
+      recoveries={buildFilterCtxRecoveries({
+        ctx,
+        onClearRoutes: () => update({ routes: null }),
+        onResetService: () => update({ service: "all" }),
+        jumpToLatestData,
+        t,
+      })}
+    />}>
       {() => <>
         <div className="focus-header"><div><h2>{t("stopDelay")}</h2><span className="focus-muted">{names.format(route)} · {t("mean")}</span></div>
           <label><input type="checkbox" checked={compare} onChange={(e) => setParams((old) => { const next = new URLSearchParams(old); if (e.target.checked) next.set("compare", "1"); else next.delete("compare"); return next; })} /> {t("compare")}</label>
