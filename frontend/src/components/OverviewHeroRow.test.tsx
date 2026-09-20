@@ -3,7 +3,7 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewHeroRow } from "./OverviewHeroRow";
 import * as hooks from "../api/hooks";
-import type { OverviewHeadline } from "../api/types";
+import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
 
 function headline(partial: Partial<OverviewHeadline> = {}): OverviewHeadline {
   return {
@@ -17,6 +17,13 @@ function headline(partial: Partial<OverviewHeadline> = {}): OverviewHeadline {
     ...partial,
   };
 }
+
+const peakHour: OverviewPeakHour = { by_hour: [], peak_hour: 17, peak_avg_min: 4.8 };
+const concentration: OverviewConcentration = {
+  top_routes: [{ route_code: "42", route_short_name: null, share_pct: 60 }],
+  rest_share_pct: 40,
+};
+const emptyConcentration: OverviewConcentration = { top_routes: [], rest_share_pct: 0 };
 
 function mockHooks(routeCount: number, feedAgeHours: number | null) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({
@@ -37,95 +44,116 @@ function mockHooks(routeCount: number, feedAgeHours: number | null) {
   } as never);
 }
 
+function renderHero(overrides: {
+  headline?: OverviewHeadline;
+  delayedCount?: number;
+  sparklinePoints?: number[];
+  peakHour?: OverviewPeakHour | null;
+  concentration?: OverviewConcentration;
+} = {}) {
+  return renderWithProviders(
+    <OverviewHeroRow
+      headline={overrides.headline ?? headline()}
+      delayedCount={overrides.delayedCount ?? 3}
+      agencyId={1}
+      sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
+      peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
+      concentration={overrides.concentration ?? concentration}
+    />,
+  );
+}
+
 describe("OverviewHeroRow", () => {
-  it("renders the network avg delay with a positive delta", () => {
+  it("renders the eyebrow label and the primary avg-delay value", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
+    renderHero();
     expect(screen.getByText("Network avg delay")).toBeInTheDocument();
     expect(screen.getByText(/3\.3/)).toBeInTheDocument();
-    expect(screen.getByText(/\+0\.5 min vs\. last week/)).toBeInTheDocument();
   });
 
   it("renders the delayed-route count over the total from useRoutes", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
+    renderHero();
     expect(screen.getByText("3 / 38 routes")).toBeInTheDocument();
   });
 
-  it("renders a negative delta with a minus sign, not indistinguishable from a positive one", () => {
+  it("renders the behind-schedule story sentence with the delta, peak hour, and concentration share", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(
-      <OverviewHeroRow
-        headline={headline({ baseline_avg_min: 3.8, delta_min: -0.5, delta_pct: -13.2 })}
-        delayedCount={3}
-        agencyId={1}
-        sparklinePoints={[2.1, 2.8, 3.3]}
-      />,
-    );
-    expect(screen.getByText(/-0\.5 min vs\. last week/)).toBeInTheDocument();
-    expect(screen.queryByText(/\+0\.5 min vs\. last week/)).not.toBeInTheDocument();
+    renderHero({ headline: headline({ delta_min: 0.9 }) });
+    expect(
+      screen.getByText(/Running 0\.9 min behind last week; the 17:00 hour is heaviest\. 60% of delay sits in the top 1 routes\./),
+    ).toBeInTheDocument();
   });
 
-  it("shows 'no comparison data' when baseline_avg_min is null", () => {
+  it("renders the ahead-of-schedule story sentence for a negative delta", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(
-      <OverviewHeroRow
-        headline={headline({ baseline_avg_min: null, delta_min: null, delta_pct: null })}
-        delayedCount={3}
-        agencyId={1}
-        sparklinePoints={[2.1, 2.8, 3.3]}
-      />,
-    );
+    renderHero({
+      headline: headline({ baseline_avg_min: 3.8, delta_min: -1.2, delta_pct: -13.2 }),
+    });
+    expect(screen.getByText(/Running 1\.2 min ahead of last week/)).toBeInTheDocument();
+  });
+
+  it("falls back to the short story template when peak-hour data is missing", () => {
+    mockHooks(38, 0.1);
+    renderHero({ headline: headline({ delta_min: 0.9 }), peakHour: null });
+    expect(screen.getByText("Running 0.9 min behind last week.")).toBeInTheDocument();
+  });
+
+  it("falls back to the short story template when concentration has no top routes", () => {
+    mockHooks(38, 0.1);
+    renderHero({ headline: headline({ delta_min: 0.9 }), concentration: emptyConcentration });
+    expect(screen.getByText("Running 0.9 min behind last week.")).toBeInTheDocument();
+  });
+
+  it("shows 'no comparison data' instead of a story sentence when baseline_avg_min is null", () => {
+    mockHooks(38, 0.1);
+    renderHero({
+      headline: headline({ baseline_avg_min: null, delta_min: null, delta_pct: null }),
+    });
     expect(screen.getByText("No comparison data")).toBeInTheDocument();
   });
 
   it("shows the feed's last-updated age", () => {
     mockHooks(38, 2);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
+    renderHero();
     expect(screen.getByText(/Last updated/)).toBeInTheDocument();
   });
 
-  it("renders an inline info hint next to the baseline comparison", () => {
+  it("renders an inline info hint next to the story sentence", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
+    renderHero();
     expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
   });
 
   it("shows a stale-feed label instead of 'Running normally' when the feed is stale", () => {
     mockHooks(38, 30 * 24); // 30 days old — well past the 24h threshold
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
+    renderHero();
     expect(screen.getByText("Data delayed")).toBeInTheDocument();
     expect(screen.queryByText("Running normally")).not.toBeInTheDocument();
   });
 
   it("keeps 'Running normally' when the feed is fresh", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(<OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />);
+    renderHero();
     expect(screen.getByText("Running normally")).toBeInTheDocument();
     expect(screen.queryByText("Data delayed")).not.toBeInTheDocument();
   });
 
-  it("renders a trend sparkline when there are at least 2 points", () => {
+  it("renders a full-bleed trend sparkline when there are at least 2 points", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(
-      <OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />,
-    );
+    renderHero();
     expect(screen.getByRole("img", { hidden: true })).toBeInTheDocument();
   });
 
   it("renders no sparkline when there are fewer than 2 points", () => {
     mockHooks(38, 0.1);
-    renderWithProviders(
-      <OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[3.3]} />,
-    );
+    renderHero({ sparklinePoints: [3.3] });
     expect(screen.queryByRole("img", { hidden: true })).not.toBeInTheDocument();
   });
 
   it("keeps the hero delay value on proportional figures, not tabular-nums", () => {
     mockHooks(38, 0.1);
-    const { container } = renderWithProviders(
-      <OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />,
-    );
+    const { container } = renderHero();
     const value = container.querySelector(".ov-kpi-value");
     expect(value).not.toBeNull();
     expect(value!.className.split(/\s+/)).not.toContain("num");

@@ -175,7 +175,6 @@
       "avg_delay_label": "ネットワーク平均遅延",
       "baseline_hint_title": "先週比について",
       "baseline_hint_body": "選択した期間の平均遅延を、その直前の同じ日数分の期間と比較しています。",
-      "avg_delay_compared": "先週比 {{sign}}{{min}}分",
       "avg_delay_no_baseline": "比較データなし",
       "delayed_count_label": "遅延中の路線",
       "delayed_count_value": "{{count}} / {{total}}路線",
@@ -184,11 +183,18 @@
       "feed_status_stale": "データ遅延あり",
       "feed_status_updated": "最終更新 {{when}}"
     },
+    "story": {
+      "behind": "先週より{{delta}}分遅く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{n}}路線に集中しています。",
+      "behind_short": "先週より{{delta}}分遅くなっています。",
+      "ahead": "先週より{{delta}}分早く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{n}}路線に集中しています。",
+      "ahead_short": "先週より{{delta}}分早くなっています。",
+      "flat": "遅延は先週とほぼ同じ水準で、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{n}}路線に集中しています。",
+      "flat_short": "遅延は先週とほぼ同じ水準です。"
+    },
     "routes_to_check": {
       "title": "今すぐ確認すべき路線",
       "empty": "確認が必要な路線はありません"
     },
-    "details_toggle": "詳細を表示",
     "concentration": {
       "single_route": "{{name}} が全体の 100% を占めています (観測は1路線のみ)。",
       "lorenz_label": "ローレンツ曲線 — 遅延の累積構成比",

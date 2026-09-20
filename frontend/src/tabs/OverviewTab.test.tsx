@@ -66,4 +66,21 @@ describe("OverviewTab", () => {
     expect(document.querySelector(".maplibregl-map")).not.toBeInTheDocument();
     expect(document.querySelector("canvas")).not.toBeInTheDocument();
   });
+
+  it("renders peak-hour, concentration, and service-split content inline, with nothing to disclose", () => {
+    renderOverview(
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
+        peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
+        service_split: { "平日": 3.1, "土日祝": 2.0 },
+      }),
+    );
+    expect(screen.getByText("Delay concentration")).toBeInTheDocument();
+    expect(screen.getByText("Worst hour of day")).toBeInTheDocument();
+    expect(screen.getByText("By service day")).toBeInTheDocument();
+    // Progressively revealed, not gated behind a disclosure widget.
+    expect(document.querySelector("details")).not.toBeInTheDocument();
+    expect(document.querySelector("summary")).not.toBeInTheDocument();
+  });
 });

@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
-import type { OverviewHeadline } from "../api/types";
+import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
 import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
+import { storySentence } from "./overview/storySentence";
 import { STALE_THRESHOLD_HOURS } from "./DataStalenessBanner";
 
 type Props = {
@@ -12,6 +13,8 @@ type Props = {
   delayedCount: number;
   agencyId: number;
   sparklinePoints: number[];
+  peakHour: OverviewPeakHour | null;
+  concentration: OverviewConcentration;
 };
 
 // Same shape as DataStalenessBanner.tsx's relativeAgeHours() — including
@@ -28,17 +31,20 @@ function relativeAgeHours(iso: string): number {
   return (Date.now() - captured) / (1000 * 60 * 60);
 }
 
-export function OverviewHeroRow({ headline, delayedCount, agencyId, sparklinePoints }: Props) {
+export function OverviewHeroRow({
+  headline,
+  delayedCount,
+  agencyId,
+  sparklinePoints,
+  peakHour,
+  concentration,
+}: Props) {
   const { t } = useTranslation();
   const { data: routes } = useRoutes(agencyId);
   const totalRoutes = (routes ?? []).filter((r) => r.route_code != null).length;
   const { data: feedSummary } = useTodayRouteSummary(agencyId, { autoRefresh: false });
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
-  // Always render an explicit sign — the displayed magnitude is
-  // Math.abs(delta_min), so without this a delay improvement and a
-  // worsening of the same magnitude would render identically.
-  const sign = hasBaseline && headline.delta_min! >= 0 ? "+" : "-";
 
   // Mirrors DataStalenessBanner.tsx's days/hours label branching exactly
   // (that component does not have a sub-1-hour "minutes" case, despite
@@ -68,40 +74,55 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId, sparklinePoi
   const avgMinDisplay = useCountUp(headline.avg_min ?? 0, { decimals: 1 });
   const delayedCountDisplay = useCountUp(delayedCount, { decimals: 0 });
 
+  // storySentence needs a real delta to pick a direction -- with no
+  // baseline at all there's nothing to compare against, so this keeps the
+  // plain "no comparison data" text rather than feeding it a fabricated
+  // delta_min: null and letting the sentence's own "flat" fallback claim
+  // the period is "about the same" (a specific claim this case cannot back).
+  const story = hasBaseline
+    ? storySentence(headline, peakHour, concentration, t)
+    : t("overview.hero_row.avg_delay_no_baseline");
+
   return (
-    <div className="ov-kpi-row">
-      <div className="ov-kpi-tile">
-        <div className="ov-kpi-label">{t("overview.hero_row.avg_delay_label")}</div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div className="ov-kpi-value" style={{ color: avgMinColor }}>
-            {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
-          </div>
-          <InlineSparkline points={sparklinePoints.slice(-7)} width={72} height={22} showLabels={false} showEndDot={false} />
+    <div className="ov-hero">
+      <div className="ov-hero-figure">
+        <InlineSparkline
+          points={sparklinePoints}
+          width={400}
+          height={190}
+          preserveAspectRatio="none"
+          showLabels={false}
+          showEndDot={false}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+        />
+        <div className="ov-hero-label">{t("overview.hero_row.avg_delay_label")}</div>
+        <div className="ov-kpi-value" style={{ color: avgMinColor }}>
+          {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
+          <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
         </div>
-        <div className="ov-kpi-context">
-          {hasBaseline
-            ? t("overview.hero_row.avg_delay_compared", { sign, min: Math.abs(headline.delta_min!).toFixed(1) })
-            : t("overview.hero_row.avg_delay_no_baseline")}
+      </div>
+      <div>
+        <p className="ov-hero-story">
+          {story}
           <InsightHint
             title={t("overview.hero_row.baseline_hint_title")}
             body={t("overview.hero_row.baseline_hint_body")}
           />
+        </p>
+        <div className="ov-hero-sub">
+          <div className="ov-hero-sub-item">
+            <span className="ov-hero-sub-value">
+              {t("overview.hero_row.delayed_count_value", { count: delayedCountDisplay, total: totalRoutes })}
+            </span>
+            {t("overview.hero_row.delayed_count_label")}
+          </div>
+          <div className="ov-hero-sub-item">
+            <span className="ov-hero-sub-value">
+              {t(feedIsStale ? "overview.hero_row.feed_status_stale" : "overview.hero_row.feed_status_ok")}
+            </span>
+            {ageLabel ? t("overview.hero_row.feed_status_updated", { when: ageLabel }) : t("overview.hero_row.feed_status_label")}
+          </div>
         </div>
-      </div>
-      <div className="ov-kpi-tile">
-        <div className="ov-kpi-label">{t("overview.hero_row.delayed_count_label")}</div>
-        <div className="ov-kpi-value" style={{ color: avgMinColor }}>
-          {t("overview.hero_row.delayed_count_value", { count: delayedCountDisplay, total: totalRoutes })}
-        </div>
-      </div>
-      <div className="ov-kpi-tile">
-        <div className="ov-kpi-label">{t("overview.hero_row.feed_status_label")}</div>
-        <div className="ov-kpi-value ov-kpi-value-small">
-          {t(feedIsStale ? "overview.hero_row.feed_status_stale" : "overview.hero_row.feed_status_ok")}
-        </div>
-        {ageLabel && (
-          <div className="ov-kpi-context">{t("overview.hero_row.feed_status_updated", { when: ageLabel })}</div>
-        )}
       </div>
     </div>
   );

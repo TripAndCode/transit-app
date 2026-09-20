@@ -12,6 +12,12 @@ type Props = {
   showEndDot?: boolean;
   showLabels?: boolean;
   style?: CSSProperties;
+  /** Passed straight to the `<svg>`. Set to `"none"` when the element is
+   *  stretched via CSS (e.g. `position: absolute; inset: 0`) to fill a box
+   *  whose aspect ratio doesn't match `width`/`height` -- a full-bleed
+   *  background sparkline -- so it fills edge-to-edge instead of
+   *  letterboxing under the default `xMidYMid meet`. */
+  preserveAspectRatio?: string;
 };
 
 export function InlineSparkline({
@@ -23,6 +29,7 @@ export function InlineSparkline({
   showEndDot = true,
   showLabels = true,
   style,
+  preserveAspectRatio,
 }: Props) {
   // Called unconditionally, ahead of the early return below -- hooks can't
   // themselves be conditional on `points.length`.
@@ -76,6 +83,7 @@ export function InlineSparkline({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio={preserveAspectRatio}
       style={{ display: "inline-block", verticalAlign: "-2px", ...style }}
       role="img"
       aria-hidden
