@@ -168,7 +168,7 @@ export type HeatmapProps = {
   stop_code?: string;
   /** Optional GTFS platform_code (pole number, e.g. "2"). */
   platform_code?: string;
-  avg_delay_min: number;
+  avg_delay_min: number | null;
   p90_delay_min?: number | null;
   samples: number;
   /** Comma-joined list of route_codes contributing to this stop's avg.

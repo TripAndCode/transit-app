@@ -17,6 +17,38 @@ from pipeline.reports import compute_overview_summary
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["overview"])
 
+# Minimum observations behind a route's peak-hour figure before it is shown.
+_PEAK_HOUR_MIN_SAMPLES = 3
+
+
+def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
+    """Top-20 routes by pooled average delay for one hour of ``agg_route_hour_dow``.
+
+    ``avg_min`` is always re-derived from ``sum_delay_sec``/``samples`` over the
+    grouped rows, never read from the stored per-row ``avg_min``, so the
+    single-DOW and the all-DOW answer are the same statistic computed the same
+    way. The sample floor is applied to the group total alone: a route whose
+    observations are spread thinly across the rows being pooled is still
+    well-evidenced once pooled, and dropping its rows first would both hide it
+    and bias the average that remains.
+
+    ``by_dow`` selects the parameter shape: ``$1`` agency, ``$2`` hour, and
+    ``$3`` day-of-week only when scoping to one DOW.
+    """
+    dow_clause = "AND dow = $3 " if by_dow else ""
+    return f"""
+        SELECT route_code, service_type,
+               (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
+                   / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
+               SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS samples
+        FROM agg_route_hour_dow
+        WHERE agency_id = $1 AND hour = $2 {dow_clause}
+        GROUP BY route_code, service_type
+        HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) >= {_PEAK_HOUR_MIN_SAMPLES}
+        ORDER BY avg_min DESC NULLS LAST
+        LIMIT 20
+    """
+
 
 class Headline(BaseModel):
     """Last-7-day avg + prior-7-day baseline + signed delta.
@@ -155,40 +187,15 @@ async def peak_hour_breakdown(
     """Top routes by average delay for a given hour (and optionally day-of-week).
 
     Reads from ``agg_route_hour_dow``. When ``dow`` is omitted, pools all DOWs
-    for the requested hour. Routes with fewer than 3 samples are excluded to
-    suppress noise from infrequent service patterns. Returns at most 20 routes
-    ordered worst-first.
+    for the requested hour; either way the average is pooled from the summed
+    delay and sample columns. A route whose pooled observations for the hour
+    number fewer than ``_PEAK_HOUR_MIN_SAMPLES`` is excluded to suppress noise
+    from infrequent service patterns. Returns at most 20 routes worst-first.
     """
+    params: list[object] = [agency_id, hour]
     if dow is not None:
-        rows = await conn.fetch(
-            """
-            SELECT route_code, service_type, avg_min, samples
-            FROM agg_route_hour_dow
-            WHERE agency_id = $1 AND dow = $2 AND hour = $3 AND samples >= 3
-            ORDER BY avg_min DESC
-            LIMIT 20
-            """,
-            agency_id,
-            dow,
-            hour,
-        )
-    else:
-        rows = await conn.fetch(
-            """
-            SELECT route_code, service_type,
-                   (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
-                       / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
-                   SUM(samples) AS samples
-            FROM agg_route_hour_dow
-            WHERE agency_id = $1 AND hour = $2 AND samples >= 3
-            GROUP BY route_code, service_type
-            HAVING SUM(samples) >= 3
-            ORDER BY avg_min DESC NULLS LAST
-            LIMIT 20
-            """,
-            agency_id,
-            hour,
-        )
+        params.append(dow)
+    rows = await conn.fetch(_peak_hour_breakdown_sql(by_dow=dow is not None), *params)
     return PeakHourBreakdown(
         hour=hour,
         dow=dow,
