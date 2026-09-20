@@ -71,12 +71,9 @@ doctor:
 		if [ "$$n" = "3" ]; then echo "  CLICKHOUSE env: all 3 set"; \
 		else echo "  CLICKHOUSE env: PARTIAL ($$n/3) — \`make ch-bootstrap\` will fail"; fi
 	@echo "── db ──"
-	@docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -q '^transit-pg' \
-		&& docker ps --format '  {{.Names}}: {{.Status}}' | grep transit-pg \
-		|| echo "  transit-pg NOT running — \`make db\`"
-	@docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -q '^transit-ch' \
-		&& docker ps --format '  {{.Names}}: {{.Status}}' | grep transit-ch \
-		|| echo "  transit-ch NOT running — \`make db\`"
+	@running=$$(docker compose ps --services --filter status=running 2>/dev/null); \
+		echo "$$running" | grep -qx db && echo "  db: running" || echo "  db NOT running — \`make db\`"; \
+		echo "$$running" | grep -qx clickhouse && echo "  clickhouse: running" || echo "  clickhouse NOT running — \`make db\`"
 	@echo "── port 8000 ──"
 	@pid=$$(lsof -ti :8000 2>/dev/null | tr '\n' ' ' || true); \
 		if [ -n "$$pid" ]; then echo "  in use by PID(s) $${pid}— kill before \`make serve\`"; \

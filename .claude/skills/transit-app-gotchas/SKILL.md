@@ -17,7 +17,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   agency + a few days via read-only
   `\copy (SELECT … WHERE agency_id=… AND captured_at::date IN (…)) TO …` into a
   throwaway DB on a spare port, then migrate + analyze there.
-- Same read-only rule for dev ClickHouse (`transit-ch`, hundreds of millions
+- Same read-only rule for dev ClickHouse (`docker compose exec clickhouse`, hundreds of millions
   of real rows across 4 agencies): no manual `INSERT`/`ALTER`/`DROP`. The one
   sanctioned exception is
   `make ch-bootstrap`'s documented one-time column-type `ALTER TABLE` (see
