@@ -257,6 +257,23 @@ describe("AdminUsersPage", () => {
     expect(screen.getByPlaceholderText("Search by email / name")).toHaveValue("bar");
   });
 
+  it("keeps focus on the search input once its own debounce commits the typed value", async () => {
+    vi.useFakeTimers();
+    try {
+      wrap();
+      const input = screen.getByPlaceholderText("Search by email / name") as HTMLInputElement;
+      input.focus();
+      fireEvent.change(input, { target: { value: "foo" } });
+      await vi.advanceTimersByTimeAsync(500); // > SEARCH_DEBOUNCE_MS (300ms, not exported)
+      // A fix that resyncs the input to the URL by remounting it (e.g.
+      // `key={q}`) would recreate the DOM node here and drop focus the
+      // moment its own debounce commits -- not just on external navigation.
+      expect(document.activeElement).toBe(screen.getByPlaceholderText("Search by email / name"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows an ErrorBanner instead of a raw error string when the user list fails to load", () => {
     useAdminUsersMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error("network down"), refetch: vi.fn() });
     wrap();

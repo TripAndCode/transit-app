@@ -10,13 +10,17 @@ import { pageItems } from "./pageItems";
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
 
-/** The search box's own local-edit + debounce-commit state, extracted so it
- *  can be keyed on `q` (see below) -- remounting it resets `qInput` to the
- *  current URL value whenever `q` changes for any reason, including a
- *  browser back/forward that didn't come from this component's own commit.
- *  Without that, `qInput`'s initial `useState(q)` only ever reflects `q` as
- *  it was at first mount, so external navigation desyncs the displayed
- *  value from the URL it's supposed to mirror. */
+/** The search box's own local-edit + debounce-commit state, extracted so the
+ *  displayed value can track `q` for any reason it changes -- including a
+ *  browser back/forward, not just this component's own debounce commit --
+ *  without losing focus. `qOverride` is the in-progress local edit (`null`
+ *  when there isn't one); the displayed value is `qOverride ?? q`. A `q`
+ *  change from any source discards a stale override during render (React's
+ *  documented "adjusting state when a prop changes" pattern comparing
+ *  against `committedQ`, not an effect, so this never causes a remount that
+ *  would drop focus the way keying this component on `q` would). Without
+ *  this reset, `qOverride` would keep echoing back whatever was last typed
+ *  even after external navigation changed `q` to something else. */
 function AdminUserSearchBox({
   q,
   setSearchParams,
@@ -26,9 +30,17 @@ function AdminUserSearchBox({
   setSearchParams: SetURLSearchParams;
   placeholder: string;
 }) {
-  const [qInput, setQInput] = useState(q);
+  const [committedQ, setCommittedQ] = useState(q);
+  const [qOverride, setQOverride] = useState<string | null>(null);
+  if (q !== committedQ) {
+    setCommittedQ(q);
+    setQOverride(null);
+  }
+  const qInput = qOverride ?? q;
+
   useEffect(() => {
-    const trimmed = qInput.trim();
+    if (qOverride == null) return;
+    const trimmed = qOverride.trim();
     if (trimmed === q) return;
     const id = setTimeout(() => {
       setSearchParams((prev) => {
@@ -40,9 +52,9 @@ function AdminUserSearchBox({
       }, { replace: true });
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(id);
-  }, [qInput, q, setSearchParams]);
+  }, [qOverride, q, setSearchParams]);
 
-  return <AdminSearchInput placeholder={placeholder} value={qInput} onChange={(e) => setQInput(e.target.value)} />;
+  return <AdminSearchInput placeholder={placeholder} value={qInput} onChange={(e) => setQOverride(e.target.value)} />;
 }
 
 /** Admin: searchable, filterable, paginated user list with inline role / suspend / delete controls. */
@@ -136,7 +148,6 @@ export function AdminUsersPage() {
       <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("admin.users.title")}</h1>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <AdminUserSearchBox
-          key={q}
           q={q}
           setSearchParams={setSearchParams}
           placeholder={t("admin.users.search_placeholder")}
