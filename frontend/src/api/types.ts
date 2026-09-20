@@ -206,8 +206,26 @@ export type ResponseCtx = {
   time_band: string;
 };
 
+/** Every report `GET /api/{agency_id}/reports/{report_type}` serves --
+ *  api/routers/reports.py's `_REPORT_TYPES` is the single source of truth,
+ *  and the endpoint 404s on anything outside it. The Analysis tab lists
+ *  `route_forecast` alongside these, but that one is served by /forecast and
+ *  is deliberately not a member here. */
+export type ReportType =
+  | "ranking"
+  | "ranking_best"
+  | "on_time"
+  | "worst_5min"
+  | "trend"
+  | "compare_ranking"
+  | "dow_weekend"
+  | "dow_weekday"
+  | "dwell_run"
+  | "council_summary"
+  | "delay_certificate";
+
 export type ReportMeta = {
-  report_type: string;
+  report_type: ReportType;
   rendered_at: string;
 };
 
@@ -226,12 +244,146 @@ export type DefinitionMeta = {
   dedup_rule: string;
 };
 
-export type ReportResponse = ReportMeta & {
+/** A report cell the backend computes as a Python `Decimal` (chosen so its
+ *  rounding matches Postgres `ROUND`'s half-up behaviour). `ReportResponse.
+ *  rows` is an untyped `list` on the Python side, so a bare `Decimal` is
+ *  serialised as a JSON *string* while the plain `int` columns beside it stay
+ *  JSON numbers. Coerce with `Number()` before arithmetic or formatting. */
+export type DecimalCell = number | string;
+
+/** `ranking` and `ranking_best` -- same columns, opposite sort order.
+ *  `p50_min`/`p90_min` are null when the merged histogram can't resolve a
+ *  percentile; `avg_min` always resolves (the >20-sample gate). */
+export type RankingRow = [
+  route_code: string,
+  service_type: string | null,
+  avg_min: DecimalCell,
+  p50_min: DecimalCell | null,
+  p90_min: DecimalCell | null,
+  samples: number,
+];
+
+/** `on_time`. The trailing `low_confidence` flag is appended by
+ *  pipeline/stats.py's annotate_on_time_pct_confidence as a display-layer
+ *  caveat (95% Wilson interval too wide to trust `on_time_pct`). */
+export type OnTimeRow = [
+  route_code: string,
+  service_type: string | null,
+  on_time_pct: DecimalCell,
+  avg_min: DecimalCell,
+  samples: number,
+  low_confidence: boolean,
+];
+
+/** `worst_5min` -- routes ranked by count of severely-late observations. */
+export type Worst5MinRow = [
+  route_code: string,
+  service_type: string | null,
+  late5_count: number,
+  avg_min: DecimalCell,
+  samples: number,
+];
+
+/** `compare_ranking` -- per-route weekday-vs-weekend delay, sorted by the
+ *  absolute difference. Carries no service_type: the comparison drops the
+ *  service filter on purpose (a weekday-schedule service never runs on a
+ *  weekend, so the pairing would always be empty). */
+export type CompareRankingRow = [
+  route_code: string,
+  weekday_avg_min: DecimalCell,
+  weekend_avg_min: DecimalCell,
+  abs_delta_min: DecimalCell,
+  signed_delta_min: DecimalCell,
+];
+
+/** `dow_weekday` and `dow_weekend`. `dow_label` is the backend's own
+ *  Japanese group label for the half the rows were restricted to. */
+export type DowRankingRow = [
+  route_code: string,
+  service_type: string | null,
+  dow_label: string,
+  avg_min: DecimalCell,
+  samples: number,
+];
+
+/** `council_summary` -- exactly one agency-wide row.
+ *  `on_time_pct`/`avg_delay_min` are null together when nothing matched the
+ *  range; `executed_trips`/`service_delivered_pct` are null together when the
+ *  delivered ratio isn't computable, which is never the same as zero. */
+export type CouncilSummaryRow = [
+  on_time_pct: number | null,
+  avg_delay_min: number | null,
+  samples: number,
+  planned_trips: number,
+  executed_trips: number | null,
+  service_delivered_pct: number | null,
+];
+
+/** `delay_certificate` -- one row per physical trip-run exceeding the
+ *  threshold. `actual_time` is `scheduled_time` shifted by `dep_delay_sec`,
+ *  and may carry a day-boundary suffix rather than being a bare clock time. */
+export type DelayCertificateRow = [
+  agency_name: string,
+  route_code: string,
+  service_type: string | null,
+  date: string,
+  scheduled_time: string,
+  actual_time: string,
+  dep_delay_sec: number,
+];
+
+/** One hour-of-day × date cell of the trend heatmap. `sum_delay_sec` is the
+ *  cell's exact raw-seconds total, null until the aggregate row has been
+ *  rebuilt since the column was introduced -- only a caller pooling several
+ *  cells needs it. */
+export type TrendHourlyCell = {
+  date: string;
+  hour: number;
+  avg_min: number | null;
+  samples: number;
+  sum_delay_sec?: number | null;
+};
+
+/** The dow × band grid the trend report reuses from the forecast summariser,
+ *  minus the forecast-specific route ranking and disclaimer. */
+export type TrendDowBand = {
+  grid: ForecastOverviewGridCell[];
+  worst: ForecastOverviewWorst | null;
+};
+
+/** The `trend` report's single structured row -- unlike every other report,
+ *  `rows` here is one object, not a list of tuples. */
+export type TrendPayload = {
+  days: TrendDay[];
+  hourly: TrendHourlyCell[];
+  dow_band: TrendDowBand;
+  /** Optional for back-compat with responses cached before the field existed;
+   *  the endpoint always sends it (empty when the agency has no coverage). */
+  revision_boundaries?: RevisionBoundaries;
+};
+
+type ReportEnvelope<T extends ReportType, Row> = {
+  report_type: T;
+  rendered_at: string;
   text: string;
-  rows: unknown[];
+  rows: Row[];
   ctx?: ResponseCtx;
   definition: DefinitionMeta;
 };
+
+/** Discriminated on `report_type`: each report's `rows` element type is
+ *  derived from what api/routers/reports.py actually returns for it, so a
+ *  consumer narrows on `report_type` instead of casting `rows` blind. */
+export type ReportResponse =
+  | ReportEnvelope<"ranking" | "ranking_best", RankingRow>
+  | ReportEnvelope<"on_time", OnTimeRow>
+  | ReportEnvelope<"worst_5min", Worst5MinRow>
+  | ReportEnvelope<"compare_ranking", CompareRankingRow>
+  | ReportEnvelope<"dow_weekday" | "dow_weekend", DowRankingRow>
+  | ReportEnvelope<"trend", TrendPayload>
+  | ReportEnvelope<"dwell_run", DwellRunPayload>
+  | ReportEnvelope<"council_summary", CouncilSummaryRow>
+  | ReportEnvelope<"delay_certificate", DelayCertificateRow>;
 
 /** One high-frequency route's pooled Excess Waiting Time / coefficient of
  *  variation / long-gap rate over the request's range (item 94) -- see
