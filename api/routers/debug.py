@@ -1,8 +1,9 @@
-"""Perf debug surface. Internal-only: env-gated, out of the OpenAPI schema.
+"""Perf debug surface. Internal-only: flag-gated, out of the OpenAPI schema.
 
 Both endpoints are hidden from the OpenAPI schema (``include_in_schema=False``)
-and return 404 when ``PERF_DEBUG_ENABLED`` is not set to a truthy value
-(``1``, ``true``, or ``yes``).
+and return 404 unless the ``perf_debug_enabled`` flag resolves truthy --
+either a ``feature_flags`` override, or its ``PERF_DEBUG_ENABLED`` env var
+when there is none (see ``pipeline.flags``).
 
 **Disabled by default.** Set ``PERF_DEBUG_ENABLED=true`` in your dev ``.env``
 to enable. The reset endpoint wipes all caches, which is a cheap DoS lever
@@ -10,7 +11,7 @@ if exposed, so it additionally requires an authenticated admin and is
 CSRF-guarded; the read-only snapshot has no user dependency, matching sibling
 read-routers (reports, overview, ask_dashboard).
 
-The env gate is a router-level dependency so it runs ahead of the per-route
+The flag gate is a router-level dependency so it runs ahead of the per-route
 auth dependency. A disabled surface must answer 404 to every caller — an
 anonymous 401 would tell a prober the route exists.
 
@@ -21,25 +22,25 @@ POST /api/debug/perf/reset  -- clear perf registry AND all async_lru_caches
                                (cold-run benchmarking); admin + CSRF guarded.
 """
 
-import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api.security import User, csrf_guard, require_admin
 from pipeline import cache, perf
+from pipeline.flags import flag
 
 
 def _require_enabled() -> None:
     """Raise HTTP 404 when the debug surface is disabled.
 
-    Reads the environment variable on every call so runtime config changes
-    and test monkeypatching take effect without restarting the process.
-    Uses 404 rather than 403 so that the surface appears non-existent when
-    disabled, rather than advertising itself as forbidden.
+    Reads the flag on every call (DB override, else the env var) so a
+    runtime toggle and test monkeypatching both take effect without
+    restarting the process. Uses 404 rather than 403 so that the surface
+    appears non-existent when disabled, rather than advertising itself as
+    forbidden.
     """
-    enabled = os.environ.get("PERF_DEBUG_ENABLED", "false").lower() in ("1", "true", "yes")
-    if not enabled:
+    if not flag("perf_debug_enabled", False):
         raise HTTPException(status_code=404, detail="Not found")
 
 

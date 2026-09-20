@@ -605,3 +605,37 @@ export async function fetchAllAdminAudit(filters: AdminAuditFilters, maxPages = 
   }
   return items;
 }
+
+// ── Feature flags ────────────────────────────────────────────────────────
+
+export type FeatureFlag = {
+  key: string;
+  label_key: string;
+  value: boolean;
+  source: "env" | "override";
+  env_default: boolean;
+  updated_by: number | null;
+  updated_at: string | null;
+  reason: string | null;
+};
+
+/** Every registered kill switch, resolved (DB override, else env). */
+export function useFeatureFlags() {
+  return useQuery({
+    queryKey: ["adminFlags"],
+    queryFn: ({ signal }) => apiGet<FeatureFlag[]>("/api/admin/flags", { signal }),
+  });
+}
+
+/** Mutation: PATCH one flag's override. `reason` is mandatory server-side —
+ * see `AdminFlagsPage`'s reason dialog, the only caller. */
+export function usePatchFeatureFlag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, value, reason }: { key: string; value: boolean; reason: string }) =>
+      apiPatch<FeatureFlag>(`/api/admin/flags/${key}`, { value, reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminFlags"] });
+    },
+  });
+}
