@@ -565,13 +565,11 @@ async def compute_dow_ranking(
     sql = (
         # NULLIF maps the '' NULL-service sentinel back to None, matching the live path.
         f"SELECT route_code, NULLIF(service_type, '') AS service_type, '{label}' AS dow,\n"
-        # A count reported beside a sum_delay_sec-derived average counts the
-        # rows that average covers, so all three FILTER alike. (A count that is
-        # the population of a proportion, as in compute_on_time's
-        # on_time_count/samples, stays the unfiltered total — that ratio does
-        # not condition on sum_delay_sec.) Here the live fallback computes
-        # count(*) over raw observations, each carrying a delay, so only the
-        # filtered figure is the same statistic whichever path answered.
+        # A count beside a sum_delay_sec-derived average counts that average's
+        # rows, so all three FILTER alike — matching _dow_ranking_live, whose
+        # count(*) covers exactly the rows its own average does.
+        # compute_on_time's on_time_count/samples stays unfiltered: that ratio
+        # does not condition on sum_delay_sec.
         "       ROUND((SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
         "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0), 2) AS avg_min,\n"
         "       COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0)::int AS samples\n"

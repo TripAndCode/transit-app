@@ -394,19 +394,21 @@ async def _per_route_avg(
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT route_code,\n"
-            # See _route_weekly_history's identical FILTER rationale: match
-            # avg_min's numerator/denominator to the same sum_delay_sec
-            # IS NOT NULL row population. The returned `samples` column below
-            # stays the TRUE total (unfiltered) sample count — a distinct,
-            # legitimate "how much data backs this route" figure independent
-            # of whether sum_delay_sec has been backfilled yet.
+            # The count sits beside a sum_delay_sec-derived average, so it
+            # counts that average's rows and FILTERs with it. Two reasons it
+            # cannot be the unfiltered total here: the slow path below sums a
+            # ClickHouse row count where every row carries a dep_delay, so an
+            # unfiltered fast path would answer differently for the same
+            # route; and _movers gates MIN_SAMPLES on this number, which would
+            # otherwise admit a route whose average rests on far fewer rows
+            # than the floor implies.
             "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
             "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,\n"
-            "       SUM(samples)::int AS samples\n"
+            "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "HAVING SUM(samples) > 0 AND SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0"
+            "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0"
         )
         rows = await conn.fetch(sql, agency_id, *params)
         return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
