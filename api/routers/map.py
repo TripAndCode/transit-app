@@ -35,7 +35,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import RangeCtx, build_agg_stop_filter, get_range_ctx
+from api.range import RangeCtx, build_agg_stop_filter, ctx_payload, get_range_ctx
 from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.reports.map import compute_route_shape, route_exists
@@ -1084,12 +1084,5 @@ async def delay_heatmap(
         )
 
     fc = _heatmap_features(rows)
-    fc["ctx"] = {
-        "from": ctx.from_date.isoformat(),
-        "to": ctx.to_date.isoformat(),
-        "dow": ctx.dow,
-        "time_band": ctx.time_band,
-        "service": ctx.service,
-        "routes": list(ctx.routes),
-    }
+    fc["ctx"] = ctx_payload(ctx)
     return fc
