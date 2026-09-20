@@ -485,7 +485,8 @@
       "pale": "淡色",
       "std": "標準",
       "photo": "航空写真",
-      "layers": "レイヤー"
+      "layers": "レイヤー",
+      "dim_label": "地図の暗さ"
     },
     "heatmapMode": {
       "avg": "平均遅延",

@@ -81,19 +81,14 @@
      which flips light-to-dark and would otherwise break tooltip contrast. */
   --tooltip-bg: #2a2a2a;
   --tooltip-fg: #ffffff;
-  /* Same theme-invariant reasoning as --tooltip-bg/--tooltip-fg above, for
-     map overlay chrome that hardcodes a white pill background (so it reads
-     over any basemap, including dark aerial imagery) instead of using
-     --bg-surface: MapStyleControl. Pairing that fixed
-     white with --text-primary/--text-secondary/--accent broke contrast in
-     dark mode (those tokens assume a dark surface) — e.g. dark --text-primary
-     (#DDD9F3) on white computed to 1.37:1. These values equal the light
-     theme's --text-primary/--text-secondary/--accent and are defined once,
-     not overridden in the dark block, so both themes render the same
-     dark-on-white chip regardless of app theme. */
-  --chip-text-primary: #2a2a2a;
-  --chip-text-secondary: #6a6a6a;
-  --chip-accent: #187b80;
+  /* Floating map chrome (filter dock, legend, basemap switcher, fit-all
+     button): a translucent, blurred fill so the control reads as sitting on
+     the map rather than punched through it, on any basemap including dark
+     aerial imagery. Derived from --bg-surface/--card-border (not a fixed
+     white, which is what these replaced) so the chrome follows the app
+     theme instead of always rendering a light-mode pill in a dark app. */
+  --glass: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  --glass-line: var(--card-border);
   /* Severe-delay tone (DELAY_RAMP.severe / delayColor(>=5)) — the deep end of
      the warm ramp, not an alarm red: it is the loudest colour in the product
      and still has to sit in a calm interface.
@@ -250,6 +245,13 @@
           0 8px 24px rgba(0, 0, 0, 0.40);
   --el-3: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
           0 24px 60px rgba(0, 0, 0, 0.60);
+  /* More translucent than the light value: a near-black --bg-surface mixed
+     at the same 82% reads as a near-opaque card rather than glass, which
+     defeats the point over a bright basemap (aerial photo, GSI std). The
+     hairline needs its own lighter line for the same reason --card-border
+     (a light-grey literal) does not read on a dark surface. */
+  --glass: color-mix(in srgb, var(--bg-surface) 62%, transparent);
+  --glass-line: rgba(255, 255, 255, 0.16);
 }
 
 /* One global reduced-motion regime, so a stylesheet does not have to remember
