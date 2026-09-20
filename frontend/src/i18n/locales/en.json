@@ -837,13 +837,12 @@
       "subtitle": "Y: hour (0–23) · X: date · click to filter",
       "legend_aria": "Show legend",
       "delay_label": "Delay:",
-      "band_lt": "< {{min}} min",
-      "band_range": "{{min}}–{{max}} min",
-      "band_gt": "> {{min}} min",
-      "legend_explainer": "· opacity = samples · rows → time band · columns → date",
+      "legend_explainer": "· rows → time band · columns → date",
       "svg_aria": "Time-band delay heatmap",
       "tooltip_hour": "{{hour}}:00 · avg",
-      "tooltip_metrics": "{{min}} min · {{count}} obs."
+      "tooltip_metrics": "{{min}} min · {{count}} obs.",
+      "ramp_max": "{{min}} min and over",
+      "severe_outline": "outlined = {{min}} min and over"
     },
     "dow_band": {
       "title": "Usual delay pattern",
@@ -859,7 +858,13 @@
       "worst_label": "Worst:",
       "offender": "Route {{code}} ({{min}} min)",
       "revision_boundary_label": "Schedule change",
-      "revision_boundary_aria": "Static schedule revision took effect on {{date}}"
+      "revision_boundary_aria": "Static schedule revision took effect on {{date}}",
+      "brush_hint": "Drag across the chart to narrow the period",
+      "brush_reset": "Reset period",
+      "brush_aria": "Daily chart period brush. Arrow keys move the cursor, Shift+arrows extend the selection, Enter applies it.",
+      "brush_range": "{{from}} to {{to}}",
+      "severe_band_label": "Severe ({{min}} min and over)",
+      "worst_day_label": "Worst day"
     },
     "dwell_run": {
       "not_available": "This agency's feed doesn't report arrival delay, so dwell/running time decomposition isn't available.",

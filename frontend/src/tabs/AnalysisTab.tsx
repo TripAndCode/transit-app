@@ -13,7 +13,8 @@ import { SkeletonChart, SkeletonTable } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
 import { BandGrid, Legend } from "../components/charts/DowBandGrid";
-import { delayColor } from "../styles/tokens";
+import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
+import { accentRampColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
@@ -296,12 +297,16 @@ function TrendBlock({
     1,
     Math.round((new Date(ctx.to).getTime() - new Date(ctx.from).getTime()) / 86400000) + 1,
   );
+  // One provider over all three charts: hovering a mark in any of them dims
+  // the marks in the others that don't share its day, weekday or hour.
   return (
-    <div>
-      <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
-      <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
-      <HourlyHeatmap cells={payload.hourly} />
-    </div>
+    <TrendFocusProvider>
+      <div>
+        <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
+        <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
+        <HourlyHeatmap cells={payload.hourly} />
+      </div>
+    </TrendFocusProvider>
   );
 }
 
@@ -413,11 +418,11 @@ function DowBandHeatmapCard({
             bandLabel={bandLabel}
             dayLabel={dayLabel}
             axisMin={axisMin}
-            colorFor={delayColor}
+            colorFor={accentRampColor}
             onTip={() => {}}
             onLeave={() => {}}
           />
-          <Legend min={min} max={max} unit={axisMin} colorFor={delayColor} />
+          <Legend min={min} max={max} unit={axisMin} colorFor={accentRampColor} />
         </>
       )}
     </div>

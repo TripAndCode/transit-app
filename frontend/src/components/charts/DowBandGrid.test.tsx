@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { BandGrid, Legend } from "./DowBandGrid";
 import { BAND_ORDER, type ForecastOverviewGridCell } from "../../api/types";
+import { DELAY_THRESHOLDS } from "../../styles/tokens";
 
 function fullGrid(populate: { dow: number; band: string; v: number; n?: number }[] = []): ForecastOverviewGridCell[] {
   const set = new Map(populate.map((p) => [`${p.dow}-${p.band}`, p]));
@@ -84,5 +85,44 @@ describe("Legend", () => {
     expect(screen.getByText("3.3")).toBeTruthy();
     expect(screen.getByText("min")).toBeTruthy();
     expect(container.querySelectorAll("span[style*='width: 14px']")).toHaveLength(5);
+  });
+});
+
+describe("BandGrid severity outline", () => {
+  it("outlines a cell at or above the severe threshold instead of recolouring it", () => {
+    render(
+      <BandGrid
+        grid={fullGrid([
+          { dow: 1, band: "midday", v: DELAY_THRESHOLDS.severe + 1 },
+          { dow: 2, band: "midday", v: 1.0 },
+        ])}
+        bandLabel={(b) => b}
+        dayLabel={(d) => String(d)}
+        axisMin="min"
+        colorFor={() => "#000"}
+        onTip={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+    const outlined = screen
+      .getAllByTestId("ov-band-cell")
+      .filter((c) => (c as HTMLElement).style.boxShadow.includes("--delay-severe"));
+    expect(outlined).toHaveLength(1);
+  });
+
+  it("tags every cell with the weekday it belongs to, for the crossfilter", () => {
+    render(
+      <BandGrid
+        grid={fullGrid()}
+        bandLabel={(b) => b}
+        dayLabel={(d) => String(d)}
+        axisMin="min"
+        colorFor={() => "#000"}
+        onTip={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+    const dows = new Set(screen.getAllByTestId("ov-band-cell").map((c) => c.getAttribute("data-dow")));
+    expect(dows).toEqual(new Set(["1", "2", "3", "4", "5", "6", "7"]));
   });
 });
