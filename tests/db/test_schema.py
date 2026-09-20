@@ -80,7 +80,44 @@ def test_api_keys_columns(pg_conn):
             ORDER BY column_name
         """)
         cols = {r[0] for r in cur.fetchall()}
-    assert {"key", "owner_email", "tier", "created_at"} <= cols
+    assert {"key", "owner_email", "tier", "created_at", "key_hash", "revoked_at", "expires_at"} <= cols
+
+
+def test_api_keys_are_keyed_by_hash(pg_conn):
+    """0052 moves the primary key onto the digest and lets the raw key go NULL,
+    so a row can exist that holds no replayable credential."""
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            SELECT a.attname
+            FROM pg_index i
+            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE i.indrelid = 'api_keys'::regclass AND i.indisprimary
+        """)
+        assert {r[0] for r in cur.fetchall()} == {"key_hash"}
+        cur.execute("""
+            SELECT column_name, is_nullable FROM information_schema.columns
+            WHERE table_name = 'api_keys' AND column_name IN ('key', 'key_hash')
+            ORDER BY column_name
+        """)
+        assert cur.fetchall() == [("key", "YES"), ("key_hash", "NO")]
+
+
+def test_sessions_are_keyed_by_hash(pg_conn):
+    """The session id itself is only ever in the cookie after 0052."""
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            SELECT a.attname
+            FROM pg_index i
+            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE i.indrelid = 'sessions'::regclass AND i.indisprimary
+        """)
+        assert {r[0] for r in cur.fetchall()} == {"sid_hash"}
+        cur.execute("""
+            SELECT column_name, is_nullable FROM information_schema.columns
+            WHERE table_name = 'sessions' AND column_name IN ('sid', 'sid_hash')
+            ORDER BY column_name
+        """)
+        assert cur.fetchall() == [("sid", "YES"), ("sid_hash", "NO")]
 
 
 def test_static_shapes_table_exists(pg_conn):

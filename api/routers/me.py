@@ -61,7 +61,12 @@ async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = 
 
 
 class SessionOut(BaseModel):
-    """One active session row exposed to the caller (sid truncated to a prefix)."""
+    """One active session row exposed to the caller.
+
+    ``sid_prefix`` is a prefix of the stored ``sid_hash``, not of the session
+    id itself — the server no longer holds the session id, and a handle the
+    client can echo back must be derivable from what is stored. It stays an
+    opaque display/lookup handle either way."""
 
     sid_prefix: str
     user_agent: str | None
@@ -74,13 +79,13 @@ class SessionOut(BaseModel):
 async def list_sessions(user: User = Depends(require_user), conn=Depends(get_conn)):
     """List the caller's active sessions, ordered by most-recent activity."""
     rows = await conn.fetch(
-        "SELECT sid, user_agent, ip::text AS ip, created_at, last_seen_at "
+        "SELECT sid_hash, user_agent, ip::text AS ip, created_at, last_seen_at "
         "FROM sessions WHERE user_id=$1 ORDER BY last_seen_at DESC",
         user.user_id,
     )
     return [
         SessionOut(
-            sid_prefix=r["sid"][:12],
+            sid_prefix=r["sid_hash"][:12],
             user_agent=r["user_agent"],
             ip=r["ip"],
             created_at=r["created_at"],
@@ -97,21 +102,24 @@ async def revoke_session(
     user: User = Depends(require_user),
     conn=Depends(get_conn),
 ):
-    """Revoke the caller's session matching the given sid prefix.
+    """Revoke the caller's session matching the given ``sid_hash`` prefix.
 
     Rejects ambiguous prefixes with 409 — the UI passes the 12-char
-    display prefix, which is astronomically unlikely to collide for
-    opaque 32-byte tokens but the server refuses to guess if it does.
+    display prefix, which is astronomically unlikely to collide across one
+    user's sessions but the server refuses to guess if it does. Matching a
+    prefix of the digest is safe in a way matching a prefix of the session id
+    would not be: the digest is not a credential, so it can be echoed through
+    a URL path.
     """
     csrf_guard(request)
     if len(sid_prefix) < 12:
         raise HTTPException(400, "prefix too short")
-    # secrets.token_urlsafe() only emits these characters; reject anything else
-    # so a path containing `%` or `_` can't become a LIKE wildcard.
-    if not all(c.isalnum() or c in "-_" for c in sid_prefix):
+    # sid_hash is lowercase SHA-256 hex; restricting to that alphabet also
+    # keeps `%` and `_` — both LIKE wildcards — out of the pattern.
+    if not all(c in "0123456789abcdef" for c in sid_prefix):
         raise HTTPException(400, "invalid prefix")
     rows = await conn.fetch(
-        "SELECT sid FROM sessions WHERE user_id=$1 AND sid LIKE $2",
+        "SELECT sid_hash FROM sessions WHERE user_id=$1 AND sid_hash LIKE $2",
         user.user_id,
         sid_prefix + "%",
     )
@@ -120,8 +128,8 @@ async def revoke_session(
     if len(rows) > 1:
         raise HTTPException(409, "prefix matches multiple sessions")
     await conn.execute(
-        "DELETE FROM sessions WHERE sid=$1 AND user_id=$2",
-        rows[0]["sid"],
+        "DELETE FROM sessions WHERE sid_hash=$1 AND user_id=$2",
+        rows[0]["sid_hash"],
         user.user_id,
     )
     return Response(status_code=204)

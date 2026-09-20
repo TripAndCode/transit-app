@@ -14,6 +14,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.security import token_hash
 from tests.conftest import _test_pool
 
 
@@ -130,7 +131,7 @@ async def test_callback_creates_user_and_session(auth_client, aconn, monkeypatch
     row = await aconn.fetchrow("SELECT user_id, email, role FROM users WHERE email='yo@x'")
     assert row is not None
     assert row["role"] == "user"
-    s = await aconn.fetchrow("SELECT sid FROM sessions WHERE user_id=$1", row["user_id"])
+    s = await aconn.fetchrow("SELECT sid_hash FROM sessions WHERE user_id=$1", row["user_id"])
     assert s is not None
 
 
@@ -289,9 +290,12 @@ async def test_login_event_and_session_fields_on_successful_callback(auth_client
     assert row["provider"] == "google"
     assert row["user_agent"] == "test-ua"
     assert row["meta"] is None
-    sid = await aconn.fetchval("SELECT sid FROM sessions WHERE user_id=$1", uid)
-    assert sid is not None
-    assert f"sid={sid}" in resp.headers.get("set-cookie", "")
+    stored = await aconn.fetchrow("SELECT sid, sid_hash FROM sessions WHERE user_id=$1", uid)
+    assert stored is not None
+    # The raw session id lives only in the cookie; the row keeps its digest.
+    assert stored["sid"] is None
+    cookie_sid = resp.headers["set-cookie"].split("sid=", 1)[1].split(";", 1)[0]
+    assert stored["sid_hash"] == token_hash(cookie_sid)
 
 
 @pytest.mark.asyncio
@@ -384,8 +388,8 @@ async def test_logout_deletes_session(auth_client, aconn):
     uid = (await aconn.fetchrow("INSERT INTO users (email) VALUES ('x@x') RETURNING user_id"))["user_id"]
     sid = "test-sid"
     await aconn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at) VALUES ($1, $2, $3)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+        token_hash(sid),
         uid,
         datetime.now(tz.utc) + timedelta(days=30),
     )
@@ -395,7 +399,7 @@ async def test_logout_deletes_session(auth_client, aconn):
         headers={"Origin": "http://test"},
     )
     assert resp.status_code == 204
-    n = await aconn.fetchval("SELECT count(*) FROM sessions WHERE sid=$1", sid)
+    n = await aconn.fetchval("SELECT count(*) FROM sessions WHERE sid_hash=$1", token_hash(sid))
     assert n == 0
 
 

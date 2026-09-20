@@ -47,6 +47,22 @@ def verify_password(password: str, stored: str | None) -> bool:
     return hmac.compare_digest(dk.hex(), hash_hex)
 
 
+def token_hash(raw: str) -> str:
+    """SHA-256 hex digest of an opaque bearer credential (session id, API key).
+
+    Session ids and API keys are high-entropy random strings, so a plain
+    digest -- not a slow password KDF -- is the right primitive: there is no
+    guessable pre-image to defend against, and this runs on every request.
+    Storing only the digest means a copy of the database cannot be replayed
+    as a login.
+
+    UTF-8 is pinned explicitly so the value is reproducible in SQL as
+    ``encode(sha256(convert_to(<column>, 'UTF8')), 'hex')``; a backfill and
+    the application must agree byte for byte.
+    """
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def cookie_secure() -> bool:
     """True when cookies should set ``Secure`` — i.e. the deployment is served
     over HTTPS. Read live from the env (not the import-frozen ``_PUBLIC_BASE_URL``)

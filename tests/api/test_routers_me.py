@@ -6,6 +6,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.security import token_hash
 from tests.conftest import _test_pool
 
 
@@ -20,8 +21,8 @@ async def _seed_user_and_session(conn, *, role="user"):
     )["user_id"]
     sid = f"sid-{uid:0>30}"
     await conn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
+        token_hash(sid),
         uid,
         datetime.now(timezone.utc) + timedelta(days=30),
         "test-ua",
