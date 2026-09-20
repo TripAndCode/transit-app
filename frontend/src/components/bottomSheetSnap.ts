@@ -1,12 +1,25 @@
 export type SnapPoint = "peek" | "half" | "full";
 
 export const SNAP_ORDER: readonly SnapPoint[] = ["peek", "half", "full"];
-export const SNAP_RATIO: Record<SnapPoint, number> = { peek: 0, half: 0.5, full: 1 };
 
 /** How much of the sheet's own height each snap point reveals -- kept in one
  *  place so the drag math (`BottomSheet`'s `ratioFromClientY`) and the
- *  resting CSS heights agree with each other. */
+ *  resting CSS heights agree with each other. Not an even 14/51/88 split:
+ *  "half" sits closer to "peek" than the mockup's midpoint suggests, so the
+ *  queue's first few rows are readable without giving up much map. */
 export const SNAP_HEIGHT_VH: Record<SnapPoint, number> = { peek: 14, half: 45, full: 88 };
+
+/** `position`'s 0..1 scale (see `nextSnap`) is normalized against this same
+ *  peek-to-full range, not evenly spaced by index -- derived from
+ *  `SNAP_HEIGHT_VH` rather than hardcoded so a drag that starts exactly at
+ *  rest (`BottomSheet` seeds `dragRatio` from this table) reproduces that
+ *  same resting height instead of jumping to an evenly-spaced one. */
+export const SNAP_RATIO: Record<SnapPoint, number> = Object.fromEntries(
+  SNAP_ORDER.map((point) => [
+    point,
+    (SNAP_HEIGHT_VH[point] - SNAP_HEIGHT_VH.peek) / (SNAP_HEIGHT_VH.full - SNAP_HEIGHT_VH.peek),
+  ]),
+) as Record<SnapPoint, number>;
 
 /** A fast flick, in the drag's own normalized ratio-per-millisecond units,
  *  strong enough to move the sheet one snap point regardless of where the
