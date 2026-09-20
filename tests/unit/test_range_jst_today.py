@@ -57,10 +57,30 @@ def test_apply_date_overrides_default_window_uses_jst_today(monkeypatch):
     assert derived.to_date == date(2026, 1, 2)
 
 
-def test_get_range_ctx_clamps_a_future_to_date_to_today(monkeypatch):
-    """`to` is client input; a future end date can only widen the scan
-    without adding rows, since no aggregate holds tomorrow's data."""
-    fixed_utc = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)
+def test_get_range_ctx_clamps_future_to_date_to_jst_today(monkeypatch):
+    """A caller-supplied ``to`` in the future (clock skew, or a deliberately
+    crafted request) must never push the window past "today" -- every
+    agg_*/analyze query is bucketed up to the current JST civil date, so a
+    future ``to_date`` would just return empty rows for the tail while still
+    reporting a misleading date range."""
+    fixed_utc = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)  # JST today = 2026-01-02
+
+    class FakeDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_utc.astimezone(tz) if tz else fixed_utc
+
+    monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
+    ctx = range_mod.get_range_ctx(from_=None, to="2099-12-31", dow="all", time_band="all", service="all", routes=None)
+    assert ctx.to_date == date(2026, 1, 2)
+
+
+def test_get_range_ctx_future_to_date_with_earlier_from_clamps_and_keeps_order(monkeypatch):
+    """After clamping a future ``to_date`` to today, an explicit ``from``
+    that is still before that clamped today must NOT be swapped -- only a
+    ``from_date`` that ends up strictly after the clamped ``to_date``
+    triggers the existing swap logic."""
+    fixed_utc = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)  # JST today = 2026-01-02
 
     class FakeDateTime(datetime):
         @classmethod
@@ -69,8 +89,9 @@ def test_get_range_ctx_clamps_a_future_to_date_to_today(monkeypatch):
 
     monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
     ctx = range_mod.get_range_ctx(
-        from_="2025-12-01", to="2099-01-01", dow="all", time_band="all", service="all", routes=None
+        from_="2025-12-01", to="2099-12-31", dow="all", time_band="all", service="all", routes=None
     )
+    assert ctx.from_date == date(2025, 12, 1)
     assert ctx.to_date == date(2026, 1, 2)
 
 

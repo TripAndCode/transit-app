@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Literal, cast, get_args
+from typing import Any, Literal, cast, get_args
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Query
@@ -189,6 +189,26 @@ def clamp_range_ctx(
         service=cast(ServiceType, _coerce_enum(service, get_args(ServiceType), "service")),
         routes=tuple(cleaned),
     )
+
+
+def ctx_payload(ctx: RangeCtx) -> dict[str, Any]:
+    """The client-facing JSON projection of a :class:`RangeCtx`.
+
+    Every endpoint that echoes the resolved range back to the caller emits
+    exactly these keys, so one frontend reader parses the echo from any of
+    them. The dates are the wire-level ``from``/``to`` names, not the
+    internal ``from_date``/``to_date`` attributes; ``routes`` is a fresh
+    list so a caller can hand the payload to an encoder that mutates it
+    without reaching into the frozen context.
+    """
+    return {
+        "from": ctx.from_date.isoformat(),
+        "to": ctx.to_date.isoformat(),
+        "dow": ctx.dow,
+        "time_band": ctx.time_band,
+        "service": ctx.service,
+        "routes": list(ctx.routes),
+    }
 
 
 def get_range_ctx(
