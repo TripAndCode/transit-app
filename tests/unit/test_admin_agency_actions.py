@@ -72,7 +72,9 @@ def queued(monkeypatch) -> list[int]:
     unit test."""
     calls: list[int] = []
     monkeypatch.setattr(
-        "api.routers.internal._run_ingest_and_analyze", lambda agency_id: calls.append(agency_id), raising=False
+        "api.routers.internal._run_ingest_and_analyze",
+        lambda **kwargs: calls.extend(kwargs["agency_ids"]),
+        raising=False,
     )
     return calls
 

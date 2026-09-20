@@ -36,9 +36,25 @@ may read a static schedule version that is about to be superseded mid-run,
 not table corruption.
 """
 
+import time
+
 # Arbitrary, fixed -- only needs to be distinct from any other advisory
 # lock this codebase takes, and there are none as of this writing.
 INGEST_ANALYZE_LOCK_KEY = 72710001
+
+
+def try_lock_ingest_analyze_timed(conn) -> tuple[bool, int]:
+    """:func:`try_lock_ingest_analyze`, plus what the attempt cost in ms.
+
+    The acquire is non-blocking, so this is the round trip to Postgres and
+    NOT time spent queueing behind the holder -- there is no queue. It is
+    stored on the pipeline_runs row of a displaced job (pipeline/runs.py) so a
+    run that did no work still records what finding that out cost; reading it
+    as "how long this job waited for the lock" would overstate it.
+    """
+    started = time.monotonic()
+    got = try_lock_ingest_analyze(conn)
+    return got, round((time.monotonic() - started) * 1000)
 
 
 def try_lock_ingest_analyze(conn) -> bool:

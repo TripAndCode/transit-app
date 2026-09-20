@@ -1,8 +1,16 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 import { formatDateTime } from "../../utils/format";
-import { useAdminBoard, type BoardAlert, type BoardCollector, type BoardFreshnessDay } from "../../api/admin";
+import {
+  useAdminBoard,
+  useTriggerRun,
+  type BoardAlert,
+  type BoardCollector,
+  type BoardFreshnessDay,
+} from "../../api/admin";
+import { RunTimeline } from "./RunTimeline";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
 
@@ -22,6 +30,18 @@ const STATUS_COLORS: Record<BoardCollector["status"], string> = {
   down: "var(--color-danger, #c0392b)",
   unknown: "var(--text-tertiary)",
 };
+
+/** Midnight of the current JST day, as an absolute instant.
+ *
+ *  The timeline's axis is a JST civil day because the pipeline buckets on one
+ *  and the server returns one; deriving it from the viewer's own timezone
+ *  would slide every bar for an operator abroad. */
+function jstDayStart(now: Date): Date {
+  const jstNow = new Date(now.getTime() + JST_OFFSET_MS);
+  return new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate()) - JST_OFFSET_MS);
+}
+
+const JST_OFFSET_MS = 9 * 3_600_000;
 
 function collectorLabel(t: TFunction, collector: BoardCollector): string {
   return t(`admin.board.collector.${collector.key}`, { defaultValue: collector.label });
@@ -101,10 +121,19 @@ function CollectorTile({ collector }: { collector: BoardCollector }) {
 export function AdminBoardPage() {
   const { t } = useTranslation();
   const { data, error, isPending } = useAdminBoard();
+  const trigger = useTriggerRun();
+  const [confirming, setConfirming] = useState(false);
+
+  // Read once per render rather than held in state: the board re-renders on
+  // every poll, so the marker and any open run's bar advance on their own
+  // without a timer of this page's making.
+  const now = new Date();
+  const dayStart = jstDayStart(now);
 
   const collectors = data?.collectors ?? [];
   const freshness = data?.freshness ?? [];
   const alerts = data?.alerts ?? [];
+  const runs = data?.runs ?? [];
   const dayCount = freshness[0]?.days.length ?? 0;
 
   return (
@@ -115,8 +144,8 @@ export function AdminBoardPage() {
         <span style={{ flex: 1 }} />
         <button
           type="button"
-          disabled
-          title={t("admin.board.reanalyze_unavailable")}
+          onClick={() => setConfirming(true)}
+          disabled={trigger.isPending}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -128,13 +157,88 @@ export function AdminBoardPage() {
             border: "1px solid var(--border-subtle)",
             background: "transparent",
             color: "var(--text-primary)",
-            opacity: 0.5,
+            cursor: trigger.isPending ? "default" : "pointer",
+            opacity: trigger.isPending ? 0.5 : 1,
           }}
         >
           <RefreshCw size={14} strokeWidth={1.8} aria-hidden="true" />
           {t("admin.board.reanalyze")}
         </button>
       </header>
+
+      {confirming && (
+        <div
+          role="dialog"
+          aria-label={t("admin.board.reanalyze_confirm_title")}
+          style={{
+            display: "grid",
+            gap: 8,
+            padding: "12px 14px",
+            borderRadius: "var(--radius-md, 10px)",
+            border: "1px solid var(--border-subtle)",
+            background: "var(--surface-1)",
+          }}
+        >
+          <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.reanalyze_confirm_title")}</h2>
+          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)" }}>
+            {t("admin.board.reanalyze_confirm_body")}
+          </p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              // Focused on open so the keyboard path does not need a trap:
+              // there are two buttons, and Tab reaches the other one.
+              ref={(el) => {
+                el?.focus();
+              }}
+              onClick={() => {
+                setConfirming(false);
+                trigger.mutate({ kind: "ingest" });
+              }}
+              style={{
+                fontSize: 12.5,
+                fontFamily: "inherit",
+                padding: "5px 12px",
+                borderRadius: 6,
+                border: "1px solid var(--accent)",
+                background: "var(--accent)",
+                color: "var(--on-accent, #fff)",
+                cursor: "pointer",
+              }}
+            >
+              {t("admin.board.reanalyze_confirm")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              style={{
+                fontSize: 12.5,
+                fontFamily: "inherit",
+                padding: "5px 12px",
+                borderRadius: 6,
+                border: "1px solid var(--border-subtle)",
+                background: "transparent",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+              }}
+            >
+              {t("admin.board.reanalyze_cancel")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {trigger.error != null && (
+        <p role="alert" style={{ margin: 0, fontSize: 12.5, color: "var(--color-warning, #C99A2E)" }}>
+          {t("admin.board.reanalyze_error")}
+        </p>
+      )}
+
+      {trigger.isSuccess && (
+        <p role="status" style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)" }}>
+          {t("admin.board.reanalyze_started")}
+        </p>
+      )}
 
       {error != null && (
         <p
@@ -244,6 +348,24 @@ export function AdminBoardPage() {
             </div>
           </div>
         )}
+      </section>
+
+      <section
+        aria-label={t("admin.board.runs_title")}
+        style={{
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius-md, 10px)",
+          background: "var(--surface-1)",
+          padding: "12px 14px",
+        }}
+      >
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 8 }}
+        >
+          <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.runs_title")}</h2>
+          <p style={{ margin: 0, fontSize: 11, color: "var(--text-tertiary)" }}>{t("admin.board.runs_legend")}</p>
+        </div>
+        <RunTimeline runs={runs} dayStart={dayStart} now={now} />
       </section>
 
       <section

@@ -41,11 +41,20 @@ from zoneinfo import ZoneInfo
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from api.admin_audit import record_admin_action
 from api.admin_board import board_alerts, board_freshness, board_window, collector_tiles
+from api.admin_runs import (
+    INSERT_MANUAL_RUN_SQL,
+    LIVE_AGENCY_SQL,
+    RUNS_FOR_DAY_SQL,
+    TRIGGERABLE_KINDS,
+    runs_day_bounds,
+    shape_run,
+    today_jst,
+)
 from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin, token_hash
@@ -1225,6 +1234,30 @@ class BoardAlertOut(BaseModel):
     href: str | None
 
 
+class PipelineRunOut(BaseModel):
+    run_id: int
+    kind: str  # ingest | analyze | weather | static
+    agency_id: int | None
+    #: None for a fleet-wide run, and for one displaced before it resolved
+    #: which agency it was for.
+    agency_name: str | None
+    started_at: str
+    #: None while `status` is `running`.
+    finished_at: str | None
+    status: str  # running | ok | skipped | error
+    rows: int | None
+    lock_wait_ms: int | None
+    error: str | None
+    requested_by: int | None
+
+
+class AdminRuns(BaseModel):
+    #: Echoed back so the client can tell which day the rows describe without
+    #: re-deriving the server's idea of "today".
+    date: str
+    runs: list[PipelineRunOut]
+
+
 class AdminBoard(BaseModel):
     collectors: list[CollectorTileOut]
     freshness: list[AgencyFreshnessRowOut]
@@ -1232,6 +1265,11 @@ class AdminBoard(BaseModel):
     #: a genuine "0 behind", the same way `/admin/ops` already reports it.
     migrations: MigrationStatusOut | None
     alerts: list[BoardAlertOut]
+    #: Today's (JST) pipeline runs, carried here so the board's single poll
+    #: covers the whole page. Empty both when nothing ran and when the table
+    #: is unavailable — like every other section, an unreadable source costs
+    #: its own panel, never the request.
+    runs: list[PipelineRunOut]
 
 
 def _collect_all() -> list[dict[str, Any]]:
@@ -1269,6 +1307,7 @@ def _collector_reasons(documents: list[dict[str, Any]]) -> dict[str, str]:
     except Exception:
         _log.warning("board: collector reasons unavailable", exc_info=True)
         return {}
+
 
 
 async def _collect_documents() -> list[dict[str, Any]]:
@@ -1317,6 +1356,121 @@ async def _freshness_rows(conn: asyncpg.Connection, window_start: date) -> list[
     return []
 
 
+async def _runs_for_day(conn: asyncpg.Connection, day: date) -> list[dict[str, Any]]:
+    """The day's runs, or `[]` when `pipeline_runs` cannot be read — an
+    environment whose schema predates the table still gets a board."""
+    start, end = runs_day_bounds(day)
+    try:
+        rows = await conn.fetch(RUNS_FOR_DAY_SQL, start, end)
+    except Exception:
+        return []
+    return [shape_run(row) for row in rows]
+
+
+@router.get("/runs", response_model=AdminRuns)
+async def list_runs(
+    date_: str | None = Query(None, alias="date"),
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> AdminRuns:
+    """One JST civil day of pipeline runs, oldest first.
+
+    Defaults to today rather than the last N runs: the timeline is an hour
+    axis, so the unit the caller and the chart both work in is a day.
+    """
+    if date_ is None:
+        day = today_jst(datetime.now(timezone.utc))
+    else:
+        try:
+            day = date.fromisoformat(date_)
+        except ValueError:
+            raise HTTPException(400, "date must be YYYY-MM-DD") from None
+    return AdminRuns(
+        date=day.isoformat(),
+        runs=[PipelineRunOut(**run) for run in await _runs_for_day(conn, day)],
+    )
+
+
+class RunRequest(BaseModel):
+    """What the board's "re-aggregate now" button sends."""
+
+    kind: str = "ingest"
+    #: Restrict the sweep to one agency; omitted, it covers every live agency.
+    agency_id: int | None = None
+
+
+@router.post("/runs", response_model=AdminRuns, status_code=202)
+async def trigger_run(
+    body: RunRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> AdminRuns:
+    """Start the cron ingest+analyze sweep on an operator's behalf.
+
+    The same code path as `POST /internal/cron/ingest`, gated by admin auth
+    instead of the cron secret. The run row is opened here, before the
+    response, so the 202 carries a real `run_id` and the operator's bar
+    appears on the timeline at once instead of at the next poll; the
+    background sweep closes that row when it finishes, is displaced by the
+    advisory lock, or fails.
+    """
+    csrf_guard(request)
+    if body.kind not in TRIGGERABLE_KINDS:
+        raise HTTPException(400, f"kind must be one of {', '.join(TRIGGERABLE_KINDS)}")
+    if body.agency_id is not None and await conn.fetchval(LIVE_AGENCY_SQL, body.agency_id) is None:
+        raise HTTPException(404, "agency not found")
+
+    row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, body.kind, body.agency_id, admin.user_id)
+    if row is None:
+        raise HTTPException(503, "pipeline runs are not recordable in this environment")
+    run = shape_run(row)
+
+    await record_admin_action(
+        conn,
+        actor_id=admin.user_id,
+        action="pipeline.run",
+        target_type="agency" if body.agency_id is not None else "system",
+        target_id=str(body.agency_id) if body.agency_id is not None else None,
+        after={"kind": body.kind, "run_id": run["run_id"]},
+    )
+    _start_manual_run(
+        background_tasks=background_tasks,
+        kind=body.kind,
+        agency_ids=[body.agency_id] if body.agency_id is not None else None,
+        requested_by=admin.user_id,
+        run_id=run["run_id"],
+    )
+    return AdminRuns(date=today_jst(datetime.now(timezone.utc)).isoformat(), runs=[PipelineRunOut(**run)])
+
+
+def _start_manual_run(
+    *,
+    background_tasks: BackgroundTasks,
+    kind: str,
+    agency_ids: list[int] | None,
+    requested_by: int,
+    run_id: int,
+) -> None:
+    """Queue the cron sweep behind the response.
+
+    A named seam, not ceremony: it is the one place the admin surface reaches
+    into the cron module, so a test can observe what was scheduled without
+    running a pipeline, and the import stays lazy — `api.routers.internal`
+    pulls in the whole pipeline import graph.
+    """
+    from api.routers.internal import _run_ingest_and_analyze
+
+    background_tasks.add_task(
+        _run_ingest_and_analyze,
+        kind=kind,
+        agency_ids=agency_ids,
+        requested_by=requested_by,
+        run_id=run_id,
+    )
+
+
 @router.get("/board", response_model=AdminBoard)
 async def admin_board(
     _admin: User = Depends(require_admin),
@@ -1353,4 +1507,5 @@ async def admin_board(
         freshness=[AgencyFreshnessRowOut(**row) for row in freshness],
         migrations=mig,
         alerts=[BoardAlertOut(**alert) for alert in alerts],
+        runs=[PipelineRunOut(**run) for run in await _runs_for_day(conn, today)],
     )

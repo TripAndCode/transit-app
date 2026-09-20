@@ -490,5 +490,5 @@ async def reanalyze_agency(
         target_type="agency",
         target_id=agency_id,
     )
-    background_tasks.add_task(_run_ingest_and_analyze, agency_id)
+    background_tasks.add_task(_run_ingest_and_analyze, agency_ids=[agency_id], requested_by=admin.user_id)
     return {"status": "started"}
