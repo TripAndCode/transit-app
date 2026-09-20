@@ -10,11 +10,26 @@ from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_llm_pro
 from pipeline.query.llm_client import ProviderConfig
 
 
-def _reload_main():
-    """Reload ``api.main`` so module-level app construction re-reads env vars
-    that were changed after the initial import (e.g. by ``monkeypatch``)."""
+@pytest.fixture
+def rebuilt_app(monkeypatch):
+    """Rebuild ``api.main`` under the current env, then put the module back.
+
+    ``api.main.app`` is a process-wide singleton that several fixtures
+    re-import at call time, so a reload left in place hands every later test
+    an app built from this test's environment. Teardown undoes the env changes
+    and reloads once more, so the module is rebuilt from the session's real
+    environment -- a different object than before, necessarily, but one
+    configured identically. Reloads that were never retired have bitten this
+    suite before; see the historical note in ``tests/api/test_oauth_flow.py``.
+    """
+
+    def _rebuild():
+        importlib.reload(api.main)
+        return api.main.app
+
+    yield _rebuild
+    monkeypatch.undo()
     importlib.reload(api.main)
-    return api.main.app
 
 
 def test_validate_cors_origins_rejects_wildcard_with_credentials():
@@ -79,41 +94,47 @@ def test_validate_llm_providers_allows_nonempty_ladder():
     _validate_llm_providers([ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")])
 
 
-def test_openapi_docs_disabled_by_default_behind_https(monkeypatch):
-    """No explicit ``OPENAPI_DOCS_ENABLED`` and an HTTPS ``PUBLIC_BASE_URL``
-    (a real deployment, per ``cookie_secure()``) must not expose the docs."""
+def test_openapi_docs_off_when_unset(monkeypatch):
+    """The closed default. `PUBLIC_BASE_URL` is deliberately not consulted: it
+    is only set when SSO is configured, so a live HTTPS deployment without SSO
+    leaves it at its localhost default and would read as local dev."""
     monkeypatch.delenv("OPENAPI_DOCS_ENABLED", raising=False)
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://transit.example.com")
-    app = _reload_main()
-    assert app.docs_url is None
-    assert app.redoc_url is None
-    assert app.openapi_url is None
+    assert api.main._openapi_docs_enabled() is False
 
-
-def test_openapi_docs_enabled_by_default_for_local_http(monkeypatch):
-    """No explicit flag and a plain-HTTP ``PUBLIC_BASE_URL`` (local dev) keeps
-    today's behavior: docs stay reachable."""
-    monkeypatch.delenv("OPENAPI_DOCS_ENABLED", raising=False)
     monkeypatch.setenv("PUBLIC_BASE_URL", "http://localhost:8000")
-    app = _reload_main()
-    assert app.openapi_url == "/openapi.json"
-    assert any(getattr(route, "path", None) == "/docs" for route in app.routes)
+    assert api.main._openapi_docs_enabled() is False
 
 
-def test_openapi_docs_env_flag_can_force_enable_behind_https(monkeypatch):
-    """An explicit flag always wins over the HTTPS-based default."""
-    monkeypatch.setenv("PUBLIC_BASE_URL", "https://transit.example.com")
-    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", "1")
-    app = _reload_main()
-    assert app.openapi_url == "/openapi.json"
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", " true "])
+def test_openapi_docs_on_for_truthy_flag(monkeypatch, value):
+    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", value)
+    assert api.main._openapi_docs_enabled() is True
 
 
-def test_openapi_docs_env_flag_can_force_disable_for_local_http(monkeypatch):
-    """An explicit flag can also lock docs off for a local boot."""
-    monkeypatch.setenv("PUBLIC_BASE_URL", "http://localhost:8000")
-    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", "0")
-    app = _reload_main()
-    assert app.openapi_url is None
+@pytest.mark.parametrize("value", ["0", "false", "no", "", "maybe"])
+def test_openapi_docs_off_for_anything_else(monkeypatch, value):
+    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", value)
+    assert api.main._openapi_docs_enabled() is False
+
+
+def test_env_example_enables_docs_for_local_dev():
+    """Local dev keeps its docs: the template every developer copies opts in,
+    while a deployment setting its variables directly inherits the closed
+    default."""
+    env_example = (pathlib.Path(__file__).resolve().parents[2] / ".env.example").read_text()
+    assert "\nOPENAPI_DOCS_ENABLED=true" in env_example
+
+
+def test_app_wires_the_gate_into_every_docs_url(rebuilt_app, monkeypatch):
+    """The resolver is only useful if all three URLs actually follow it."""
+    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", "false")
+    app = rebuilt_app()
+    assert (app.docs_url, app.redoc_url, app.openapi_url) == (None, None, None)
+
+    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", "true")
+    app = rebuilt_app()
+    assert (app.docs_url, app.redoc_url, app.openapi_url) == ("/docs", "/redoc", "/openapi.json")
 
 
 def test_dockerfile_cmd_trusts_railway_proxy_headers():

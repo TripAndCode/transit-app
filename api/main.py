@@ -126,16 +126,17 @@ def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> Non
 def _openapi_docs_enabled() -> bool:
     """Whether ``/docs``, ``/redoc`` and ``/openapi.json`` should be exposed.
 
-    ``OPENAPI_DOCS_ENABLED`` always wins when set. Otherwise the default
-    follows the same HTTPS signal ``cookie_secure()`` uses to tell a real
-    deployment from a local boot: docs stay reachable for a plain-HTTP local
-    boot and are off once ``PUBLIC_BASE_URL`` points at HTTPS, so a
-    deployment doesn't silently expose its schema until ops opts in.
+    Off unless ``OPENAPI_DOCS_ENABLED`` says otherwise, matching
+    ``PERF_DEBUG_ENABLED``: a deployment that configures nothing publishes no
+    schema. The HTTPS signal behind ``cookie_secure()`` cannot stand in for
+    "is this production" here, because ``PUBLIC_BASE_URL`` is only set when
+    SSO is configured — a live HTTPS deployment without SSO leaves it at its
+    localhost default, which would read as local dev and expose the schema.
+
+    Local dev gets the docs from ``.env.example``, which turns them on and is
+    only ever copied into a developer's own ``.env``.
     """
-    override = os.environ.get("OPENAPI_DOCS_ENABLED")
-    if override is not None:
-        return override.strip().lower() in ("1", "true", "yes")
-    return not cookie_secure()
+    return os.environ.get("OPENAPI_DOCS_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
 
 def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
