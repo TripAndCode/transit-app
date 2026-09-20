@@ -32,7 +32,7 @@ const STRIP_CSS = `
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--accent, #5b6cad);
+    background: var(--accent);
     animation: as-pulse 1s ease-in-out infinite;
     opacity: 0.25;
   }
@@ -108,7 +108,7 @@ export function ActivityStrip() {
         gap: 10,
         padding: "0 16px",
         fontSize: 12,
-        color: "var(--accent, #5b6cad)",
+        color: "var(--accent)",
         opacity: visible ? 1 : 0,
         transition:
           "opacity 200ms ease-out, background 200ms ease-out, border-color 200ms ease-out",

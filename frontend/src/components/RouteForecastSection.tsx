@@ -174,7 +174,7 @@ function HeatmapGrid({
                     key={key}
                     onMouseEnter={(e) => onTip(e, `${dayLabel(dow)} ${h}:00 · —`)}
                     onMouseMove={(e) => onTip(e, `${dayLabel(dow)} ${h}:00 · —`)}
-                    style={{ height: cellH, borderRadius: 2, background: "repeating-linear-gradient(45deg,#f0eee9,#f0eee9 3px,#f6f4ef 3px,#f6f4ef 6px)" }}
+                    style={{ height: cellH, borderRadius: 2, background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)" }}
                   />
                 );
               }

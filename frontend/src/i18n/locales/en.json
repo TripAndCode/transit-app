@@ -270,8 +270,10 @@
     "rel_seconds_ago": "{{count}}s ago",
     "range_separator": "–",
     "language_aria": "Language",
-    "theme_toggle_to_dark": "Switch to dark mode",
-    "theme_toggle_to_light": "Switch to light mode",
+    "theme_aria": "Appearance",
+    "theme_dark": "Dark",
+    "theme_light": "Light",
+    "theme_system": "System",
     "service_value": {
       "平日": "Weekday",
       "土日祝": "Weekend/Holiday"

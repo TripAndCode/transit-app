@@ -4,9 +4,17 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { useConfig } from "../api/config";
 import { useTheme } from "../styles/useTheme";
+import type { Theme } from "../styles/theme";
 import { SUPPORTED_LOCALES, type Locale } from "../i18n";
 
 const LOCALE_LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
+
+const THEME_OPTIONS = ["system", "light", "dark"] as const satisfies readonly Theme[];
+const THEME_OPTION_LABEL_KEYS: Record<(typeof THEME_OPTIONS)[number], string> = {
+  system: "common.theme_system",
+  light: "common.theme_light",
+  dark: "common.theme_dark",
+};
 
 const popItemStyle: CSSProperties = {
   display: "flex",
@@ -23,6 +31,15 @@ const popItemStyle: CSSProperties = {
   cursor: "pointer",
   font: "inherit",
   textAlign: "left",
+};
+
+/** The chosen appearance reads as chosen, not just as aria-checked: a tinted
+ *  row is the only cue a sighted user gets that "system" is active when it
+ *  currently resolves to the same theme they could pick explicitly. */
+const selectedItemStyle: CSSProperties = {
+  ...popItemStyle,
+  color: "var(--accent)",
+  background: "var(--accent-soft)",
 };
 
 /** Sidebar footer control: collapses what used to be five separate header
@@ -104,14 +121,24 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             <span>{t("common.language_aria")}</span>
             <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>{LOCALE_LABELS[current]}</span>
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            style={popItemStyle}
-          >
-            <span>{theme === "dark" ? t("common.theme_toggle_to_light") : t("common.theme_toggle_to_dark")}</span>
-          </button>
+          {/* Three states, not a two-way toggle: "system" has to be reachable
+              and distinguishable from whichever theme it currently resolves
+              to. menuitemradio (not radio) because these live inside a menu,
+              where radio is not a permitted child role. */}
+          <div role="group" aria-label={t("common.theme_aria")}>
+            {THEME_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={theme === option}
+                onClick={() => setTheme(option)}
+                style={theme === option ? selectedItemStyle : popItemStyle}
+              >
+                <span>{t(THEME_OPTION_LABEL_KEYS[option])}</span>
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             role="menuitem"

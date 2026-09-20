@@ -63,12 +63,12 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
           (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
         }}
         style={{
-          background: "var(--bg-soft, rgba(0,0,0,0.04))",
+          background: "var(--bg-soft)",
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
           borderRadius: 6,
           padding: "3px 8px",
           fontSize: 12,
-          color: "var(--text-primary, #1a1a1a)",
+          color: "var(--text-primary)",
           cursor: disabled ? "not-allowed" : "pointer",
           display: "inline-flex",
           alignItems: "center",
@@ -112,7 +112,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
                 display: "block",
                 width: "100%",
                 background: opt.value === value ? "var(--accent-soft, rgba(74,138,170,0.12))" : "transparent",
-                color: opt.value === value ? "var(--accent, #5b6cad)" : "var(--text-primary, #1a1a1a)",
+                color: opt.value === value ? "var(--accent)" : "var(--text-primary)",
                 border: "none",
                 borderRadius: 4,
                 padding: "5px 10px",

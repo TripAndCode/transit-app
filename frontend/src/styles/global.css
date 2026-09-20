@@ -10,9 +10,20 @@
      text. Retuned to clear 4.5:1 against every background this token is
      actually used on (--bg-surface and the slightly-lighter --bg-soft). */
   --text-tertiary: #6E6E6E;
-  --accent: #5b6cad;
-  --accent-soft: #e8ebf4;
+  /* One accent for the whole product, light and dark: the shell teal. It used
+     to be declared here as a blue-purple and then overridden inside
+     `.app-shell`, so signed-in and pre-auth surfaces carried two different
+     brands. Any scoped redefinition of --accent re-opens that split and is
+     asserted against in tokens.test.ts. */
+  --accent: #187b80;
+  --accent-soft: #e1f1f1;
   --on-accent: #ffffff;
+  /* The former accent, kept as a separate identity rather than a second one:
+     it marks a route (the operations route badge) and the pre-auth wordmark,
+     and nothing else. --on-brand is theme-split because the dark brand is
+     light enough that white text on it falls below AA. */
+  --brand: #5b6cad;
+  --on-brand: #ffffff;
   --error-bg: #fdf6e3;
   --error-fg: #8a6f1c;
   /* Derived from --bg-surface (not a hand-copied literal per theme) so it
@@ -43,8 +54,11 @@
   --color-warning: #C99A2E;
   --color-danger: #c0392b;
   /* Deepened variant of --accent for primary buttons/active states -- more
-     confident at button weight than --accent reads on its own. */
-  --accent-strong: #3E5C9A;
+     confident at button weight than --accent reads on its own. Same hue
+     family as --accent by contract (tokens.test.ts): a different family here
+     would give the app two accents again, one per weight. Clears 4.5:1 as
+     text on both --bg-surface and --bg-soft. */
+  --accent-strong: #115E62;
   /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
      distinct from --delay-severe/--color-danger, which stay the map's own
      per-point severity ramp; this is specifically for aggregate counts. */
@@ -73,16 +87,23 @@
      dark-on-white chip regardless of app theme. */
   --chip-text-primary: #2a2a2a;
   --chip-text-secondary: #6a6a6a;
-  --chip-accent: #5b6cad;
-  /* Severe-delay red (DELAY_RAMP.severe / delayColor(>5)). Theme-dependent:
-     this light value (#d92121) passes WCAG AA on the light background but
-     fails on the dark surfaces — see the dark block below, whose #A83A1A
-     (the artifact mockup's literal severe-red) only reaches ~2.95:1 there,
-     a deliberately accepted tradeoff for design parity, not an oversight.
+  --chip-accent: #187b80;
+  /* Severe-delay tone (DELAY_RAMP.severe / delayColor(>=5)) — the deep end of
+     the warm ramp, not an alarm red: it is the loudest colour in the product
+     and still has to sit in a calm interface.
+
+     Invariant, enforced by tokens.test.ts: each theme's value clears WCAG AA
+     (4.5:1) as text on that theme's own --bg-surface. The token is split per
+     theme because no single hex can do both — dark enough to read on white is
+     too dark to read on a near-black page, and the reverse. The test also
+     asserts the cross-theme pairs FAIL, so the split can be retired the day
+     that stops being true rather than outliving its reason.
+
      tokens.ts reads this via getComputedStyle so both CSS (var(--delay-severe))
      and JS consumers (MapLibre style expressions) resolve the same source
-     of truth. */
-  --delay-severe: #d92121;
+     of truth; its SEVERE_FALLBACK mirrors this light value by hand and is
+     held to it by the same test. */
+  --delay-severe: #A8391F;
   /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
      ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
@@ -165,18 +186,21 @@
      family as --text-primary/--text-secondary (blended toward --text-secondary
      rather than desaturating to neutral grey). */
   --text-tertiary: #C9CBDA;
-  /* Teal accent, matching the artifact mockup (docs/superpowers/specs/2026-07-11-artifact-design-parity-design.md).
-     Light theme keeps the original blue-purple accent — this is a dark-theme-only change. */
-  --accent: #27B596;
-  --accent-soft: rgba(39, 181, 150, 0.18);
+  /* Dark counterpart of the single teal accent. */
+  --accent: #43c5ba;
+  --accent-soft: #183b3d;
   --on-accent: #071a16;
+  --brand: #7E8CD0;
+  /* Dark ink, not white: the dark brand is light enough that white on it
+     lands around 3.2:1. */
+  --on-brand: #0F1119;
   --error-bg: #2A1F14;
   --error-fg: #E0B45C;
   --color-danger: #E0685B;
-  /* Mockup's literal severe red — fails WCAG AA contrast against --bg-page (2.95:1,
-     confirmed and deliberately accepted; see the design-parity spec). Do not
-     "fix" this by substituting a brighter red. */
-  --delay-severe: #A83A1A;
+  /* Dark-theme severe tone. Same warm family as the light value, lifted until
+     it clears 4.5:1 on this theme's --bg-surface — see the invariant on the
+     light declaration. */
+  --delay-severe: #F0837A;
   --trend-good: #4ade80;
   --trend-bad: #fbbf24;
   --trend-neutral: #94a3b8;
@@ -186,8 +210,9 @@
   --skeleton-a: #202642;
   --skeleton-b: #30385A;
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
-     --bg-soft -- re-check contrast if this color or those tokens change. */
-  --accent-strong: #7C96D9;
+     --bg-soft -- re-check contrast if this color or those tokens change.
+     Stays in --accent's hue family; see the light declaration. */
+  --accent-strong: #6FD8CC;
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
      --bg-soft -- re-check contrast if this color or those tokens change. */
   --delay-flag: #E08A54;
@@ -234,8 +259,6 @@ input[type="date"] { color-scheme: light; }
 /* App.tsx's root wrapper and the sidebar's data-status disclosure are always
    mounted, regardless of route, so their styling lives here rather than in a
    route-lazy-loaded stylesheet. */
-.app-shell { --accent: #187b80; --accent-soft: #e1f1f1; }
-:root[data-theme="dark"] .app-shell { --accent: #43c5ba; --accent-soft: #183b3d; }
 .focus-data-status { position: relative; margin: 18px 14px; font-size: 12px; color: var(--text-secondary); }
 .focus-data-status > div { position: absolute; bottom: 30px; left: 0; padding: 16px; width: min(280px, 75vw); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-surface); z-index: 410; }
 

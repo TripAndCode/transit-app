@@ -1,7 +1,14 @@
 import { useEffect, useRef } from "react";
-import maplibregl, { type Map as MLMap } from "maplibre-gl";
+import maplibregl, { type LayerSpecification, type Map as MLMap } from "maplibre-gl";
 import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse } from "../../api/types";
-import { delayColorResolved, severityStepColors } from "../../styles/tokens";
+import {
+  DELAY_THRESHOLDS,
+  accentColorResolved,
+  delayColorResolved,
+  readableInkOn,
+  severityStepColors,
+  surfaceColorResolved,
+} from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
 import { whenStyleReady } from "./styleReady";
 
@@ -9,7 +16,6 @@ export const LIVE_TRIPS_SOURCE = "live-trips";
 export const LIVE_TRIPS_LAYER = "live-trip-markers";
 export const LIVE_TRIPS_LABEL_LAYER = "live-trip-labels";
 export const LIVE_TRIPS_CLUSTER_LAYER = "live-trip-clusters";
-const LIVE_TRIPS_CASING_LAYER = "live-trip-casing";
 const LIVE_TRIPS_CLUSTER_COUNT_LAYER = "live-trip-cluster-count";
 const ACTIVE_ROUTE_SOURCE = "active-route";
 const ACTIVE_ROUTE_CASING_LAYER = "active-route-casing";
@@ -19,6 +25,94 @@ const TRIP_PROGRESS_LINE_LAYER = "trip-progress-line";
 const TRIP_PROGRESS_DIRECTION_LAYER = "trip-progress-direction";
 const TRIP_PROGRESS_STOPS_LAYER = "trip-progress-stops";
 const TRIP_PROGRESS_LABELS_LAYER = "trip-progress-labels";
+
+type CirclePaint = NonNullable<Extract<LayerSpecification, { type: "circle" }>["paint"]>;
+type SymbolPaint = NonNullable<Extract<LayerSpecification, { type: "symbol" }>["paint"]>;
+/** MapLibre's `ExpressionSpecification` is not re-exported from the bundle's
+ *  public types, so it is recovered from a property that accepts one. */
+type NumericExpression = Extract<CirclePaint["circle-radius"], unknown[]>;
+
+/** MapLibre aggregates cluster properties additively only, so a cluster's mean
+ *  delay is the summed member delay divided by point_count, evaluated at paint
+ *  time. In minutes, to match the ramp's thresholds. */
+function clusterMeanDelayMin(): NumericExpression {
+  return ["/", ["/", ["get", "delay_sum"], ["get", "point_count"]], 60];
+}
+
+/** Aggregation the live-trips source has to carry for a cluster to know
+ *  anything about its members' delay. Without it a cluster can only be sized,
+ *  not coloured, and 30 identical pucks say nothing about where to look. */
+export const LIVE_TRIPS_CLUSTER_PROPERTIES = { delay_sum: ["+", ["get", "delay_sec"]] } as const;
+
+/** One vehicle is one reading, not a headline: the mark is small enough that a
+ *  screenful of them reads as a field rather than a wall of alarms, and only
+ *  the severe tier and the selected trip earn extra area. Size therefore
+ *  encodes severity, never volume. */
+export const VEHICLE_RADIUS = { base: 6, severe: 9, selected: 11 } as const;
+
+/** Clusters are sized by how many readings they stand for — that is the one
+ *  place on this map where count IS the quantity being shown. */
+export const CLUSTER_RADIUS = { small: 12, medium: 16, large: 22 } as const;
+
+const MARK_STROKE_WIDTH = 1.5;
+
+export function vehicleCirclePaint(): CirclePaint {
+  return {
+    "circle-radius": [
+      "case",
+      ["boolean", ["get", "selected"], false], VEHICLE_RADIUS.selected,
+      [">=", ["/", ["get", "delay_sec"], 60], DELAY_THRESHOLDS.severe], VEHICLE_RADIUS.severe,
+      VEHICLE_RADIUS.base,
+    ],
+    "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
+    // A hairline in the page's own surface colour, rather than a heavy dark
+    // casing ring: enough to separate a mark from the basemap in either theme
+    // without giving every reading the weight of an incident.
+    "circle-stroke-color": surfaceColorResolved(),
+    "circle-stroke-width": MARK_STROKE_WIDTH,
+  };
+}
+
+export function clusterCirclePaint(): CirclePaint {
+  return {
+    "circle-radius": [
+      "step", ["get", "point_count"],
+      CLUSTER_RADIUS.small,
+      10, CLUSTER_RADIUS.medium,
+      50, CLUSTER_RADIUS.large,
+    ],
+    "circle-color": ["step", clusterMeanDelayMin(), ...severityStepColors()],
+    "circle-stroke-color": surfaceColorResolved(),
+    "circle-stroke-width": MARK_STROKE_WIDTH,
+  };
+}
+
+export function clusterCountPaint(): SymbolPaint {
+  const stops = severityStepColors();
+  // The count sits on the cluster's own fill, which is a ramp colour rather
+  // than a theme surface — so the ink is chosen per band, not per theme.
+  return {
+    "text-color": [
+      "step", clusterMeanDelayMin(),
+      readableInkOn(stops[0]),
+      stops[1], readableInkOn(stops[2]),
+      stops[3], readableInkOn(stops[4]),
+      stops[5], readableInkOn(stops[6]),
+    ],
+  };
+}
+
+/** Marker labels sit on the basemap, not on a mark, so they take the theme's
+ *  own ink and halo rather than a fixed white — the heavy dark casing that
+ *  used to back them is gone. */
+export function labelPaint(): SymbolPaint {
+  const surface = surfaceColorResolved();
+  return {
+    "text-color": readableInkOn(surface),
+    "text-halo-color": surface,
+    "text-halo-width": 1.2,
+  };
+}
 
 function delayLabel(seconds: number): string {
   const minutes = Math.round(seconds / 60);
@@ -66,18 +160,20 @@ export function useOperationsMapLayers(
       if (existing) {
         existing.setData(collection);
       } else {
-        map.addSource(LIVE_TRIPS_SOURCE, { type: "geojson", data: collection, cluster: true, clusterMaxZoom: 15, clusterRadius: 28 });
+        map.addSource(LIVE_TRIPS_SOURCE, {
+          type: "geojson",
+          data: collection,
+          cluster: true,
+          clusterMaxZoom: 15,
+          clusterRadius: 28,
+          clusterProperties: LIVE_TRIPS_CLUSTER_PROPERTIES,
+        });
         map.addLayer({
           id: LIVE_TRIPS_CLUSTER_LAYER,
           type: "circle",
           source: LIVE_TRIPS_SOURCE,
           filter: ["has", "point_count"],
-          paint: {
-            "circle-radius": 24,
-            "circle-color": "#2bc5aa",
-            "circle-stroke-color": "#f4fffd",
-            "circle-stroke-width": 3,
-          },
+          paint: clusterCirclePaint(),
         });
         map.addLayer({
           id: LIVE_TRIPS_CLUSTER_COUNT_LAYER,
@@ -85,31 +181,14 @@ export function useOperationsMapLayers(
           source: LIVE_TRIPS_SOURCE,
           filter: ["has", "point_count"],
           layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11 },
-          paint: { "text-color": "#071916" },
-        });
-        map.addLayer({
-          id: LIVE_TRIPS_CASING_LAYER,
-          type: "circle",
-          source: LIVE_TRIPS_SOURCE,
-          filter: ["!", ["has", "point_count"]],
-          paint: {
-            "circle-radius": ["case", ["boolean", ["get", "selected"], false], 18, 14],
-            "circle-color": "rgba(0,0,0,0)",
-            "circle-stroke-color": "rgba(15,17,25,0.68)",
-            "circle-stroke-width": 6,
-          },
+          paint: clusterCountPaint(),
         });
         map.addLayer({
           id: LIVE_TRIPS_LAYER,
           type: "circle",
           source: LIVE_TRIPS_SOURCE,
           filter: ["!", ["has", "point_count"]],
-          paint: {
-            "circle-radius": ["case", ["boolean", ["get", "selected"], false], 18, 14],
-            "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": ["case", ["boolean", ["get", "selected"], false], 3, 2],
-          },
+          paint: vehicleCirclePaint(),
         });
         map.addLayer({
           id: LIVE_TRIPS_LABEL_LAYER,
@@ -120,17 +199,16 @@ export function useOperationsMapLayers(
             "text-field": ["get", "trip_label"],
             "text-font": ["Noto Sans Regular"],
             "text-size": ["case", ["boolean", ["get", "selected"], false], 12, 10],
-            "text-offset": [0, 2.1],
+            // Ems, against a mark that is now a third of its old radius: a
+            // larger offset leaves the label floating free of the dot it
+            // names.
+            "text-offset": [0, 1.1],
             "text-anchor": "top",
             "text-allow-overlap": false,
             "text-optional": true,
             "symbol-sort-key": ["case", ["boolean", ["get", "selected"], false], 0, 1],
           },
-          paint: {
-            "text-color": "#ffffff",
-            "text-halo-color": "rgba(0,0,0,0.2)",
-            "text-halo-width": 0.5,
-          },
+          paint: labelPaint(),
         });
       }
 
@@ -168,7 +246,7 @@ export function useOperationsMapLayers(
         return;
       }
       map.addSource(ACTIVE_ROUTE_SOURCE, { type: "geojson", data });
-      const beforeId = map.getLayer(LIVE_TRIPS_CASING_LAYER) ? LIVE_TRIPS_CASING_LAYER : undefined;
+      const beforeId = map.getLayer(LIVE_TRIPS_LAYER) ? LIVE_TRIPS_LAYER : undefined;
       map.addLayer({
         id: ACTIVE_ROUTE_CASING_LAYER,
         type: "line",
@@ -215,14 +293,14 @@ export function useOperationsMapLayers(
         return;
       }
       map.addSource(TRIP_PROGRESS_SOURCE, { type: "geojson", data: collection });
-      const beforeId = map.getLayer(LIVE_TRIPS_CASING_LAYER) ? LIVE_TRIPS_CASING_LAYER : undefined;
+      const beforeId = map.getLayer(LIVE_TRIPS_LAYER) ? LIVE_TRIPS_LAYER : undefined;
       map.addLayer({
         id: TRIP_PROGRESS_LINE_LAYER,
         type: "line",
         source: TRIP_PROGRESS_SOURCE,
         filter: ["==", ["geometry-type"], "LineString"],
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#2bc5aa", "line-width": 6, "line-opacity": 0.9 },
+        paint: { "line-color": accentColorResolved(), "line-width": 6, "line-opacity": 0.9 },
       }, beforeId);
       map.addLayer({
         id: TRIP_PROGRESS_DIRECTION_LAYER,
@@ -238,7 +316,11 @@ export function useOperationsMapLayers(
           "text-keep-upright": false,
           "text-rotation-alignment": "map",
         },
-        paint: { "text-color": "#071916", "text-halo-color": "#dffbf5", "text-halo-width": 1 },
+        paint: {
+          "text-color": readableInkOn(accentColorResolved()),
+          "text-halo-color": accentColorResolved(),
+          "text-halo-width": 1,
+        },
       }, beforeId);
       map.addLayer({
         id: TRIP_PROGRESS_STOPS_LAYER,
@@ -248,7 +330,7 @@ export function useOperationsMapLayers(
         paint: {
           "circle-radius": ["case", ["boolean", ["get", "latest"], false], 10, 6],
           "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
-          "circle-stroke-color": "#ffffff",
+          "circle-stroke-color": surfaceColorResolved(),
           "circle-stroke-width": ["case", ["boolean", ["get", "latest"], false], 3, 2],
         },
       }, beforeId);

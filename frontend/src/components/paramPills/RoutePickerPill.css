@@ -16,7 +16,7 @@
   max-width: 260px;
   padding: 6px 10px;
   font-size: 13px;
-  color: var(--text-primary, #1a1a1a);
+  color: var(--text-primary);
   background: var(--bg-surface, #fff);
   border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.14));
   border-radius: var(--radius);
@@ -33,7 +33,7 @@
 .rp-trigger:focus-visible,
 .rp-trigger.is-open {
   outline: none;
-  border-color: var(--accent, #5b6cad);
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft, rgba(91, 108, 173, 0.15));
 }
 .rp-trigger:disabled {
@@ -100,14 +100,14 @@
   width: 100%;
   padding: 7px 9px 7px 30px;
   font-size: 13px;
-  color: var(--text-primary, #1a1a1a);
-  background: var(--bg-soft, rgba(0, 0, 0, 0.03));
+  color: var(--text-primary);
+  background: var(--bg-soft);
   border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.1));
   border-radius: var(--radius);
 }
 .rp-search:focus-visible {
   outline: none;
-  border-color: var(--accent, #5b6cad);
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft, rgba(91, 108, 173, 0.15));
 }
 
@@ -139,20 +139,20 @@
 .rp-opt:hover,
 .rp-opt:focus-visible {
   outline: none;
-  background: var(--bg-soft, rgba(0, 0, 0, 0.05));
+  background: var(--bg-soft);
 }
 .rp-opt[aria-selected="true"] {
   background: var(--accent-soft, rgba(91, 108, 173, 0.14));
 }
 .rp-opt-name {
   font-size: 13px;
-  color: var(--text-primary, #1a1a1a);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .rp-opt[aria-selected="true"] .rp-opt-name {
-  color: var(--accent, #5b6cad);
+  color: var(--accent);
   font-weight: 600;
 }
 .rp-opt-code {

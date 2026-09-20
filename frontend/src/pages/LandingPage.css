@@ -70,12 +70,15 @@
   padding: 0 6vw;
 }
 
+/* The pre-auth wordmark is the other place --brand survives: it is the
+   product's name, not an accent, and it sits over the hero scene rather than
+   in the signed-in shell. */
 .landing-hero__brand {
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 18px;
   letter-spacing: 0.02em;
-  color: var(--text-primary);
+  color: var(--brand);
 }
 
 .landing-hero__eyebrow {
