@@ -362,8 +362,17 @@ _CH_SAME_DAY_HHMM = (
 
 
 def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
+    """:func:`time_band_clause_ch_for` for the band named by ``ctx``."""
+    return time_band_clause_ch_for(ctx.time_band)
+
+
+def time_band_clause_ch_for(band: TimeBand) -> tuple[str, dict]:
     """Return a WHERE fragment filtering ClickHouse's ``updates.scheduled_time``
-    to the range named by ``ctx.time_band``.
+    to the range named by ``band``.
+
+    Takes the band alone rather than a whole :class:`RangeCtx`, so an endpoint
+    that accepts a bare ``?time_band=`` without the rest of the range contract
+    shares exactly this filter instead of re-deriving the clock bounds.
 
     ClickHouse's `updates.scheduled_time` is a plain ``Nullable(String)``
     (GTFS ``"HH:MM:SS"`` text — see the migration design doc), not a native
@@ -394,9 +403,9 @@ def time_band_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     be rebuilt from stored client state, and a filter that can't be honoured
     must not turn a read into a 500.
     """
-    if ctx.time_band not in TIME_BAND_RANGES:
+    if band not in TIME_BAND_RANGES:
         return "1", {}
-    start, end = TIME_BAND_RANGES[ctx.time_band]
+    start, end = TIME_BAND_RANGES[band]
     return (
         f"({_CH_SAME_DAY_HHMM} >= {{ch_tb_start:String}} AND {_CH_SAME_DAY_HHMM} < {{ch_tb_end:String}})",
         {"ch_tb_start": start, "ch_tb_end": end},

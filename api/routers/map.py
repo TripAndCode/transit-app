@@ -25,6 +25,8 @@ import re
 import subprocess
 import tempfile
 from collections import defaultdict
+from collections.abc import Iterable
+from datetime import date as CalendarDate
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -33,18 +35,20 @@ from zoneinfo import ZoneInfo
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import (
     RangeCtx,
+    TimeBand,
     build_agg_stop_filter,
     ctx_payload,
     get_range_ctx,
     jst_today,
     parse_iso_date,
+    time_band_clause_ch_for,
 )
 from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
@@ -52,6 +56,8 @@ from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
 
 _log = logging.getLogger(__name__)
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
 
@@ -109,7 +115,7 @@ def _ingest_live_agency(agency_id: int) -> int:
             ).stdout.strip()
             try:
                 mtime_text, latest = latest_record.split(" ", 1)
-                captured_at = datetime.fromtimestamp(float(mtime_text), timezone.utc).astimezone(ZoneInfo("Asia/Tokyo"))
+                captured_at = datetime.fromtimestamp(float(mtime_text), timezone.utc).astimezone(_JST)
             except (ValueError, TypeError, OverflowError) as exc:
                 raise RuntimeError("Oracle collector returned an invalid live-file timestamp") from exc
             match = re.fullmatch(r".*/(\d{8})/(TripUpdate_\d{6}\.pb)", latest)
@@ -677,20 +683,186 @@ async def today_route_summary(
     }
 
 
-@router.get("/today/route/{route_code}/trips", response_model=None)
+MAX_ROUTE_TRIPS = 400
+ROUTE_TRIPS_DATE_WINDOW_DAYS = 30
+
+_CLOCK_RE = re.compile(r"^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$")
+
+
+def clock_to_sec(text: str | None) -> int | None:
+    """Seconds since the service day's 00:00 for a GTFS ``HH:MM[:SS]`` clock.
+
+    Fallback for rows whose ``scheduled_sec`` is NULL: the `aomori_regex`
+    ingest strategy writes a 5-char ``"HH:MM"`` with no seconds, while
+    static_join agencies write 8 chars. An hour past 24 is a real GTFS
+    post-midnight continuation and stays unwrapped, so a trip that crosses
+    midnight keeps a monotonically increasing position on a time axis.
+    """
+    if not text:
+        return None
+    m = _CLOCK_RE.match(text)
+    if m is None:
+        return None
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3) or 0)
+
+
+class RouteTripStop(BaseModel):
+    """One observed stop of one trip, as a point on a time-distance diagram."""
+
+    stop_id: str | None
+    stop_sequence: int
+    scheduled_sec: int | None = Field(
+        description=(
+            "Seconds since the service day's 00:00. Not a clock string: a GTFS "
+            "post-midnight continuation (25:30) has no same-day 'HH:MM' form, and a "
+            "time axis needs a number anyway. NULL when the row carries no usable "
+            "scheduled time."
+        )
+    )
+    observed_sec: int | None = Field(description="``scheduled_sec + delay_sec``; NULL whenever ``scheduled_sec`` is.")
+    delay_sec: int
+
+
+class RouteTripRow(BaseModel):
+    """One trip: its summary figures plus the stops a polyline is drawn through."""
+
+    trip_id: str
+    scheduled_time: str | None = Field(description='Representative departure clock, "HH:MM".')
+    headsign: str | None
+    avg_delay_sec: int | None
+    samples: int
+    stops: list[RouteTripStop]
+
+
+class RouteTripsResponse(BaseModel):
+    date: str | None = Field(description="The JST calendar day drawn, or NULL when there is nothing to draw.")
+    time_band: TimeBand
+    truncated: bool = Field(
+        description=(
+            f"True when the route ran more than {MAX_ROUTE_TRIPS} trips that day and the "
+            "least-delayed tail was dropped."
+        )
+    )
+    trips: list[RouteTripRow]
+
+
+def resolve_route_trips_date(requested: CalendarDate | None, latest_observed: CalendarDate) -> CalendarDate | None:
+    """The JST day to draw, or None when the request names a day worth refusing.
+
+    A day later than anything observed has nothing behind it. A day older than
+    the probe's own bound is refused rather than answered, because reaching it
+    means scanning outside the window that keeps this anonymous, reachable
+    endpoint's ClickHouse cost bounded.
+    """
+    if requested is None:
+        return latest_observed
+    if requested > latest_observed or requested < latest_observed - timedelta(days=ROUTE_TRIPS_DATE_WINDOW_DAYS):
+        return None
+    return requested
+
+
+def build_route_trips_sql(time_band: TimeBand) -> tuple[str, dict]:
+    """Rendered per-stop dedup query for one route on one JST day, plus its band params.
+
+    argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring).
+    The four non-key columns are read off the SAME winning row via ONE
+    tuple-argMax rather than one argMax per column -- per-column argMax on a
+    captured_at tie could silently mix a scheduled time from one physical row
+    with a delay from another. They are unpacked by position in the outer
+    SELECT, which is also the order `build_route_trips` unpacks each row in.
+    """
+    band_frag, band_params = time_band_clause_ch_for(time_band)
+    band_clause = "" if band_frag == "1" else f"\n              AND {band_frag}"
+    sql = f"""
+        SELECT trip_id, stop_sequence, winner.1 AS scheduled_time, winner.2 AS dep_delay,
+            winner.3 AS stop_id, winner.4 AS scheduled_sec
+        FROM (
+            SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
+                argMax(tuple(u.scheduled_time, u.dep_delay, u.stop_id, u.scheduled_sec),
+                    (u.captured_at, u.file_name)) AS winner
+            FROM updates AS u
+            WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
+              AND u.dep_delay IS NOT NULL
+              AND toDate(u.captured_at, 'Asia/Tokyo') = {{target_date:Date}}{band_clause}
+            GROUP BY u.trip_id, u.stop_sequence
+        ) AS grouped
+        ORDER BY trip_id, stop_sequence
+    """
+    return sql, band_params
+
+
+def build_route_trips(
+    rows: Iterable[tuple],
+    headsigns: dict[str, str | None],
+    limit: int = MAX_ROUTE_TRIPS,
+) -> tuple[list[RouteTripRow], bool]:
+    """Group `build_route_trips_sql`'s rows into trips, worst-delayed first.
+
+    Each row is ``(trip_id, stop_sequence, scheduled_time, dep_delay, stop_id,
+    scheduled_sec)``. Rows must already arrive in stop_sequence order within a
+    trip -- the query's ORDER BY provides that, and a trip's ``stops`` list is
+    the drawing order of its polyline, so it is preserved as given rather than
+    re-derived.
+
+    Returns the capped list and whether anything was dropped. The cap falls on
+    the least-delayed tail because the list is already promised worst-first, so
+    a truncated answer still leads with what the reader came for.
+    """
+    per_trip: dict[str, dict] = defaultdict(lambda: {"clocks": [], "stops": []})
+    for trip_id, stop_sequence, scheduled_time, dep_delay, stop_id, scheduled_sec in rows:
+        t = per_trip[trip_id]
+        if scheduled_time is not None:
+            t["clocks"].append(scheduled_time)
+        sched = scheduled_sec if scheduled_sec is not None else clock_to_sec(scheduled_time)
+        delay = int(dep_delay)
+        t["stops"].append(
+            RouteTripStop(
+                stop_id=stop_id,
+                stop_sequence=int(stop_sequence),
+                scheduled_sec=sched,
+                observed_sec=None if sched is None else sched + delay,
+                delay_sec=delay,
+            )
+        )
+
+    trips: list[RouteTripRow] = []
+    for trip_id, t in per_trip.items():
+        stops: list[RouteTripStop] = t["stops"]
+        delays = [s.delay_sec for s in stops]
+        clock = min(t["clocks"]) if t["clocks"] else None
+        trips.append(
+            RouteTripRow(
+                trip_id=trip_id,
+                scheduled_time=clock[:5] if clock else None,
+                headsign=headsigns.get(trip_id),
+                avg_delay_sec=_round_half_up_int(sum(delays) / len(delays)) if delays else None,
+                samples=len(delays),
+                stops=stops,
+            )
+        )
+    trips.sort(key=lambda t: (t.avg_delay_sec is None, -(t.avg_delay_sec or 0)))
+    return trips[:limit], len(trips) > limit
+
+
+@router.get("/today/route/{route_code}/trips", response_model=RouteTripsResponse)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_trips(
     request: Request,
     route_code: str = Path(min_length=1, max_length=300),
+    date: CalendarDate | None = Query(
+        default=None,
+        description="JST calendar day to read. Defaults to the route's latest observed day.",
+    ),
+    time_band: TimeBand = Query(default="all"),
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
-) -> dict[str, Any]:
-    """Per-trip delay for one route on the latest observation date.
+) -> RouteTripsResponse:
+    """Per-trip, per-stop delay for one route on one day.
 
-    One row per trip_id: representative scheduled departure (HH:MM), headsign
-    (from static_trips), and the trip's average dep_delay across its stops.
-    Sorted worst-first — answers "which buses were late". Read-only.
+    Answers both "which buses were late" (the worst-first trip list with its
+    summary figures) and "where did each one lose time" (each trip's ordered
+    stops, which a time-distance diagram draws as one polyline). Read-only.
     """
     # Cheap existence precheck + 30-day-bounded latest-observation probe FIRST,
     # before any further ClickHouse work: a fabricated/nonexistent route_code
@@ -700,45 +872,30 @@ async def route_trips(
     # window). See `_latest_route_observation` for the full existence-check
     # and bound rationale.
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
+    empty = RouteTripsResponse(date=None, time_band=time_band, truncated=False, trips=[])
     if latest_ts is None:
-        return {"date": None, "trips": []}
+        return empty
+    # The JST calendar day, not the UTC one: the query buckets captured_at in
+    # JST, so a UTC date would name a different day than the rows it returns
+    # for anything observed between 00:00 and 09:00 JST.
+    target_date = resolve_route_trips_date(date, latest_ts.astimezone(_JST).date())
+    if target_date is None:
+        return empty
 
-    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring).
-    # Two non-key columns (scheduled_time, dep_delay) are read off the SAME
-    # winning row, so they're packed into ONE tuple-argMax rather than one
-    # argMax per column — per-column argMax on a captured_at tie could
-    # silently mix columns from two different physical rows. Unpacked by
-    # position in the outer SELECT to keep the result's column order exactly
-    # `trip_id, stop_sequence, scheduled_time, dep_delay` (this function
-    # unpacks each row by position below). `ORDER BY trip_id` on the outer
-    # select restores the deterministic row order the old sort-based form got
-    # for free from its own ORDER BY — a bare GROUP BY has no defined output
-    # order, and one route's single-day rows sort cheaply.
+    sql, band_params = build_route_trips_sql(time_band)
     dedup_result = await ch.query(
-        """
-        SELECT trip_id, stop_sequence, winner.1 AS scheduled_time, winner.2 AS dep_delay
-        FROM (
-            SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
-                argMax(tuple(u.scheduled_time, u.dep_delay), (u.captured_at, u.file_name)) AS winner
-            FROM updates AS u
-            WHERE u.agency_id = {agency_id:UInt16} AND u.route_code = {route:String}
-              AND u.dep_delay IS NOT NULL
-              AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
-            GROUP BY u.trip_id, u.stop_sequence
-        ) AS grouped
-        ORDER BY trip_id
-        """,
-        parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
+        sql,
+        parameters={
+            "agency_id": agency_id,
+            "route": route_code,
+            "target_date": target_date,
+            **band_params,
+        },
     )
-    per_trip: dict[str, dict] = defaultdict(lambda: {"scheduled_times": [], "delays": []})
-    for trip_id, _stop_sequence, scheduled_time, dep_delay in dedup_result.result_rows:
-        t = per_trip[trip_id]
-        if scheduled_time is not None:
-            t["scheduled_times"].append(scheduled_time)
-        t["delays"].append(dep_delay)
+    rows = dedup_result.result_rows
 
-    trip_ids = list(per_trip.keys())
     headsigns: dict[str, str | None] = {}
+    trip_ids = sorted({r[0] for r in rows})
     if trip_ids:
         headsign_rows = await conn.fetch(
             "SELECT trip_id, trip_headsign FROM static_trips WHERE agency_id = $1 AND trip_id = ANY($2)",
@@ -748,25 +905,13 @@ async def route_trips(
         for r in headsign_rows:
             headsigns[r["trip_id"]] = r["trip_headsign"]
 
-    trips: list[dict[str, Any]] = []
-    for trip_id, t in per_trip.items():
-        delays = t["delays"]
-        avg_delay_sec = _round_half_up_int(sum(delays) / len(delays)) if delays else None
-        sched = min(t["scheduled_times"]) if t["scheduled_times"] else None
-        trips.append(
-            {
-                "trip_id": trip_id,
-                "scheduled_time": sched[:5] if sched else None,
-                "headsign": headsigns.get(trip_id),
-                "avg_delay_sec": avg_delay_sec,
-                "samples": len(delays),
-            }
-        )
-    trips.sort(key=lambda t: (t["avg_delay_sec"] is None, -(t["avg_delay_sec"] or 0)))
-    return {
-        "date": latest_ts.date().isoformat(),
-        "trips": trips,
-    }
+    trips, truncated = build_route_trips(rows, headsigns)
+    return RouteTripsResponse(
+        date=target_date.isoformat(),
+        time_band=time_band,
+        truncated=truncated,
+        trips=trips,
+    )
 
 
 def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[str, dict[str, Any]]) -> dict[str, Any]:
