@@ -672,7 +672,7 @@ def _csv_response(
 async def get_report(
     request: Request,
     report_type: str,
-    limit: int | None = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1, le=500),
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     preset: str | None = Query(
         default=None,

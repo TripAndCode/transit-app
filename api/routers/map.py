@@ -32,7 +32,7 @@ from zoneinfo import ZoneInfo
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
@@ -192,7 +192,7 @@ async def live_delays(
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
-    limit: int = Query(default=500, le=500),
+    limit: int = Query(default=500, ge=1, le=500),
 ) -> dict[str, Any]:
     """Latest reported stop and delay for trips in the current feed window."""
     latest_ts = await max_captured_at(ch, agency_id)
@@ -451,7 +451,7 @@ async def live_trip_progress(
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_shape(
     request: Request,
-    route: str,
+    route: str = Query(min_length=1, max_length=300),
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
@@ -672,7 +672,7 @@ async def today_route_summary(
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_trips(
     request: Request,
-    route_code: str,
+    route_code: str = Path(min_length=1, max_length=300),
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
@@ -802,7 +802,7 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_stop_profile(
     request: Request,
-    route_code: str,
+    route_code: str = Path(min_length=1, max_length=300),
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),

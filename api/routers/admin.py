@@ -29,12 +29,13 @@ from typing import Any
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin
+from api.sqlutil import escape_like
 from pipeline.audit import record_event
 from pipeline.query import agencies as _agencies
 
@@ -67,7 +68,7 @@ async def list_users(
     role: str | None = None,
     suspended: bool | None = None,
     limit: int = 50,
-    offset: int = 0,
+    offset: int = Query(0, ge=0),
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> UserList:
@@ -83,8 +84,8 @@ async def list_users(
     where = []
     args: list[Any] = []
     if q:
-        args.append(f"%{q}%")
-        where.append(f"(email ILIKE ${len(args)} OR name ILIKE ${len(args)})")
+        args.append(f"%{escape_like(q)}%")
+        where.append(f"(email ILIKE ${len(args)} ESCAPE '\\' OR name ILIKE ${len(args)} ESCAPE '\\')")
     if role in ("user", "admin"):
         args.append(role)
         where.append(f"role = ${len(args)}")

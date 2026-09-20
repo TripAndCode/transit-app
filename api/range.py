@@ -90,12 +90,16 @@ def get_range_ctx(
 ) -> RangeCtx:
     """FastAPI dependency: parse query params into a :class:`RangeCtx`.
 
-    Missing dates fall back to ``today - 30d`` / ``today``. Ranges wider than
-    :data:`MAX_RANGE_DAYS` are clamped at the start (newer end stays as given)
-    so the most recent data is preserved.
+    Missing dates fall back to ``today - 30d`` / ``today``. A ``to`` in the
+    future is clamped to today, since no agg_*/analyze query is ever bucketed
+    past the current JST civil date. Ranges wider than :data:`MAX_RANGE_DAYS`
+    are clamped at the start (newer end stays as given) so the most recent
+    data is preserved.
     """
     today = jst_today()
     to_date = parse_iso_date(to) or today
+    if to_date > today:
+        to_date = today
     from_date = parse_iso_date(from_) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
 
     if from_date > to_date:
