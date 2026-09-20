@@ -8,7 +8,7 @@ from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
 from api.security import token_hash
-from tests.conftest import _test_pool
+from tests.conftest import TEST_ORIGIN, _test_pool
 
 
 @pytest.fixture(autouse=True)
@@ -118,6 +118,7 @@ async def test_login_with_correct_credentials_sets_session_cookie(local_client, 
     resp = await local_client.post(
         "/api/auth/local/login",
         json={"username": "root@local", "password": "correct-horse-battery-staple"},
+        headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200
     assert "sid=" in resp.headers.get("set-cookie", "")
@@ -136,7 +137,7 @@ async def test_login_event_and_session_fields_on_successful_login(local_client, 
     resp = await local_client.post(
         "/api/auth/local/login",
         json={"username": "root@local", "password": "correct-horse-battery-staple"},
-        headers={"user-agent": "test-ua"},
+        headers={"user-agent": "test-ua", "Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200
     uid = await aconn.fetchval("SELECT user_id FROM users WHERE email='root@local'")
@@ -165,6 +166,7 @@ async def test_login_with_wrong_password_is_rejected_and_audited(local_client, a
     resp = await local_client.post(
         "/api/auth/local/login",
         json={"username": "root@local", "password": "not-the-password"},
+        headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 401
     assert "set-cookie" not in resp.headers
@@ -183,9 +185,55 @@ async def test_login_with_unknown_username_gets_the_same_generic_error(local_cli
     resp = await local_client.post(
         "/api/auth/local/login",
         json={"username": "nobody@nowhere", "password": "whatever"},
+        headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 401
     assert resp.json() == {"error": "invalid_credentials"}
+
+
+@pytest.mark.asyncio
+async def test_login_with_unknown_username_still_verifies_a_password(local_client, monkeypatch):
+    """The unknown-username path must reach verify_local_login_password.
+
+    Guards the endpoint against re-acquiring the timing side channel: if the
+    ``row is None`` test is ever moved back in front of the verification,
+    ``or`` short-circuits past it and an unknown username answers without
+    paying for a scrypt derivation.
+    """
+    from api.routers import auth as auth_router
+
+    calls = []
+    real = auth_router.verify_local_login_password
+    monkeypatch.setattr(
+        auth_router,
+        "verify_local_login_password",
+        lambda pw, stored: calls.append((pw, stored)) or real(pw, stored),
+    )
+
+    await _seed(local_client)
+    resp = await local_client.post(
+        "/api/auth/local/login",
+        json={"username": "nobody@nowhere", "password": "whatever"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 401
+    assert calls == [("whatever", None)]
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_cross_origin_request(local_client, aconn):
+    """A cross-origin POST is rejected by csrf_guard (403), matching every
+    other mutating auth route, and never reaches credential checking."""
+    await _seed(local_client)
+    resp = await local_client.post(
+        "/api/auth/local/login",
+        json={"username": "root@local", "password": "correct-horse-battery-staple"},
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert resp.status_code == 403
+    uid = await aconn.fetchval("SELECT user_id FROM users WHERE email='root@local'")
+    s = await aconn.fetchrow("SELECT sid FROM sessions WHERE user_id=$1", uid)
+    assert s is None
 
 
 @pytest.mark.asyncio
@@ -195,6 +243,7 @@ async def test_login_returns_503_when_not_configured(local_client, monkeypatch):
     resp = await local_client.post(
         "/api/auth/local/login",
         json={"username": "root@local", "password": "correct-horse-battery-staple"},
+        headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 503
 
@@ -211,6 +260,7 @@ async def test_login_is_rate_limited_after_repeated_attempts(local_client):
         resp = await local_client.post(
             "/api/auth/local/login",
             json={"username": "root@local", "password": "wrong"},
+            headers={"Origin": TEST_ORIGIN},
         )
         statuses.append(resp.status_code)
         if resp.status_code == 429:
