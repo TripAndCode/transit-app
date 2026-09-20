@@ -352,15 +352,16 @@ async def _headline_stats(
         where, params, _ = _agg_filter(ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
         sql = (
-            # sum_delay_sec is nullable (unlike samples); FILTER both sides of
-            # avg_min's division to the same row population — see
-            # _route_weekly_history's identical rationale. The returned
-            # `samples` column below stays the TRUE total (unfiltered) count.
+            # The count sits beside a sum_delay_sec-derived average, so it
+            # counts the rows that average covers and FILTERs with it. The
+            # ClickHouse path below returns an exact count of its own average's
+            # rows, so only the filtered figure is the same statistic whichever
+            # path answered.
             "SELECT CASE WHEN SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0\n"
             "            THEN ROUND((SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
             "                / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0), 2)\n"
             "            ELSE NULL END AS avg_min,\n"
-            "       COALESCE(SUM(samples), 0)::int AS samples\n"
+            "       COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}"
         )

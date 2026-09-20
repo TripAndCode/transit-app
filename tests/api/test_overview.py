@@ -310,17 +310,22 @@ async def test_headline_pools_exact_sum_delay_sec_not_rounded_avg_min(aconn, aag
 
 
 @pytest.mark.asyncio
-async def test_headline_excludes_null_sum_delay_sec_row_from_avg_but_not_samples(aconn, aagency_id):
+async def test_headline_excludes_a_null_sum_delay_sec_row_from_both_avg_and_samples(aconn, aagency_id):
     """A row with ``samples`` set but ``sum_delay_sec`` still NULL (migration
     0028's column is nullable on every table — any ``agg_daily_trend`` row
     analyze() hasn't rewritten since that migration can be in this state)
     must be excluded from BOTH avg_min's numerator AND denominator, not just
     silently dropped from the numerator while still counted in the
-    denominator (which would bias avg_min down). The returned ``samples``
-    count, by contrast, stays the TRUE total across every row regardless of
-    whether sum_delay_sec is populated — a distinct "how much data backs
-    this figure" count, per pipeline/reports/overview.py's _per_route_avg
-    docstring convention.
+    denominator (which would bias avg_min down) — and from the reported
+    ``samples`` too, because that count sits beside the average and so counts
+    the rows the average covers. The ClickHouse path this endpoint falls back
+    to returns an exact count of its own average's rows, so an unfiltered
+    total here would make the same headline report a different number
+    depending on which path answered.
+
+    This is narrower than "always filter": a count that is the population of
+    a proportion, such as compute_on_time's on_time_count/samples, stays the
+    unfiltered total, since that ratio does not condition on sum_delay_sec.
 
     Day 1 (5 samples, sum_delay_sec NULL) must contribute 0 to avg_min's
     pooling; day 2 (5 samples, raw-seconds sum 300 -> exact avg 1.0 min) is
@@ -353,7 +358,7 @@ async def test_headline_excludes_null_sum_delay_sec_row_from_avg_but_not_samples
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
     avg, samples_out = await _headline_stats(aagency_id, ctx, aconn)
-    assert samples_out == 10  # true total across both rows
+    assert samples_out == 5  # only the row the average was computed from
     assert avg == 1.0  # NOT the buggy 0.5 from counting the NULL row's samples
 
 
