@@ -1,5 +1,9 @@
-name: transit
-
+# No top-level `name:` on purpose. Compose then derives the project name from
+# each checkout's directory, so two worktrees get distinct container, network
+# and volume names. A literal name here would pin every checkout to one project
+# and make the second `docker compose up` silently attach to the first's
+# containers and its data volume -- the same collision `container_name` caused,
+# one level up.
 services:
   db:
     build:

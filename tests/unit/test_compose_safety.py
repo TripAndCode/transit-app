@@ -1,12 +1,13 @@
 """Guards the local dev-infra safety properties `compose.yml` and
-`.env.example` must keep (findings C6, E6, E7, E8 in the docs audit).
+`.env.example` must keep.
 
 `compose.yml`'s Postgres port must stay loopback-bound like the ClickHouse
 port next to it -- publishing 5433 on all interfaces exposes a
-default-password Postgres to the whole LAN/VPN. `container_name` pins a
-global Docker name, so two worktrees running `docker compose up` at once
-collide on it; dropping it (and setting a top-level project `name` instead)
-lets Compose derive per-project container names automatically.
+default-password Postgres to the whole LAN/VPN. Neither `container_name` nor
+a top-level `name:` may pin a fixed identity: both put every checkout in one
+Docker project, so two worktrees running `docker compose up` share containers
+and, worse, the same named data volumes. Left unpinned, Compose derives the
+project from the checkout's own directory and the stacks stay separate.
 
 Line-based rather than a YAML parse: PyYAML isn't a declared dependency of
 this project (only pulled in transitively), and this file's structure is
@@ -42,12 +43,16 @@ def test_compose_has_no_container_name():
     assert not offending, f"container_name pins a global name that blocks parallel worktree stacks: {offending}"
 
 
-def test_compose_declares_top_level_project_name():
-    lines = _compose_lines()
-    assert any(re.match(r"name:\s*\S+", line) for line in lines), (
-        "compose.yml should declare a top-level `name:` so container/network names stay "
-        "predictable without pinning them individually"
-    )
+def test_compose_does_not_hardcode_a_project_name():
+    """A static top-level `name:` defeats the isolation dropping `container_name` buys.
+
+    Compose derives the project name from the checkout's directory unless the
+    file pins one. Pinning it puts every worktree in the same project, so they
+    share container names, the network, and — the damaging part — the named
+    data volumes.
+    """
+    offending = [line for line in _compose_lines() if re.match(r"name:\s*\S+", line)]
+    assert not offending, f"a fixed project name re-collides every worktree's stack and volumes: {offending}"
 
 
 def test_env_example_has_no_bare_ipv4_literal():
