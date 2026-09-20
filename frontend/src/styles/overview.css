@@ -7,10 +7,7 @@
   max-width: 880px;
   margin: 0 auto;
   padding: 40px 24px 80px;
-  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
-               "Helvetica Neue", sans-serif;
   color: var(--text-primary);
-  font-feature-settings: "tnum";
 }
 
 /* ---------- Card surface (everything except hero) ---------- */
@@ -449,7 +446,6 @@
   letter-spacing: -0.03em;
   line-height: 1;
   color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
 }
 .ov-kpi-value-small {
   font-size: 18px;
