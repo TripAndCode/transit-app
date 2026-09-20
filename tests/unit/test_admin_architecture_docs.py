@@ -5,6 +5,11 @@
 "pure logic tests bypass DB fixtures" convention -- `tests/unit/conftest.py`
 overrides the session-scoped `apply_schema` autouse fixture so these don't
 need a reachable Postgres at all.
+
+Also covers `_resolve_feature_doc_path` (E9 audit finding E3): the
+single-file slug resolver used by `get_architecture_doc` to read one doc
+directly instead of scanning the whole directory, with traversal
+protection (charset validation + `Path.is_relative_to`).
 """
 
 from __future__ import annotations
@@ -12,7 +17,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from api.routers import admin
-from api.routers.admin import _feature_doc_title, _has_real_content, _list_feature_docs
+from api.routers.admin import (
+    _feature_doc_title,
+    _has_real_content,
+    _list_feature_docs,
+    _resolve_feature_doc_path,
+)
 
 
 def test_feature_doc_title_uses_leading_h1():
@@ -72,3 +82,54 @@ def test_has_real_content_false_for_empty_or_whitespace():
 
 def test_has_real_content_true_when_comment_plus_real_text():
     assert _has_real_content("<!-- note -->\n# Title\nBody\n") is True
+
+
+def test_resolve_feature_doc_path_accepts_valid_slug(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "_FEATURE_DOCS_DIR", Path(tmp_path))
+    (tmp_path / "ask-tab.md").write_text("# Ask tab\n")
+    resolved = _resolve_feature_doc_path("ask-tab")
+    assert resolved == (tmp_path / "ask-tab.md").resolve()
+
+
+def test_resolve_feature_doc_path_rejects_uppercase():
+    assert _resolve_feature_doc_path("Ask-Tab") is None
+
+
+def test_resolve_feature_doc_path_rejects_underscore_and_dot():
+    assert _resolve_feature_doc_path("ask_tab") is None
+    assert _resolve_feature_doc_path("ask.tab") is None
+
+
+def test_resolve_feature_doc_path_rejects_parent_traversal(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "_FEATURE_DOCS_DIR", Path(tmp_path))
+    assert _resolve_feature_doc_path("..") is None
+    assert _resolve_feature_doc_path("../secrets") is None
+
+
+def test_resolve_feature_doc_path_rejects_encoded_traversal_segment(tmp_path, monkeypatch):
+    """A literal '%2e%2e' slug (as a path param would look after any upstream
+    percent-decoding collapses it to '..') must still be rejected by the
+    charset check -- '.' and '%' are both outside `[a-z0-9-]`."""
+    monkeypatch.setattr(admin, "_FEATURE_DOCS_DIR", Path(tmp_path))
+    assert _resolve_feature_doc_path("%2e%2e") is None
+    assert _resolve_feature_doc_path("%2e%2efoo") is None
+
+
+def test_resolve_feature_doc_path_rejects_absolute_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "_FEATURE_DOCS_DIR", Path(tmp_path))
+    assert _resolve_feature_doc_path("/etc/passwd") is None
+
+
+def test_resolve_feature_doc_path_rejects_slug_with_slash(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "_FEATURE_DOCS_DIR", Path(tmp_path))
+    assert _resolve_feature_doc_path("sub/dir") is None
+
+
+def test_resolve_feature_doc_path_returns_path_even_when_file_missing(tmp_path, monkeypatch):
+    """Charset-valid slug that simply has no matching file still resolves to
+    a path inside the docs dir -- existence is the caller's job (`is_file()`),
+    so a missing doc 404s instead of raising."""
+    monkeypatch.setattr(admin, "_FEATURE_DOCS_DIR", Path(tmp_path))
+    resolved = _resolve_feature_doc_path("no-such-doc")
+    assert resolved == (tmp_path / "no-such-doc.md").resolve()
+    assert not resolved.is_file()

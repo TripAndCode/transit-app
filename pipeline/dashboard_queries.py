@@ -352,11 +352,14 @@ async def movers(
     delta between them to mean anything.
     """
     rows = await _movers_from_agg(conn, agency_id, ctx, window_days, top)
+    route_codes = [r["route_code"] for r in rows]
     label_rows = await conn.fetch(
         # Derive the digit-only route_code so labels match the aggregates' keys.
         "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code, route_short_name "
-        "FROM static_routes WHERE agency_id = $1",
+        "FROM static_routes WHERE agency_id = $1 "
+        "AND regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') = ANY($2::text[])",
         agency_id,
+        route_codes,
     )
     labels = {r["route_code"]: (r["route_short_name"] or r["route_code"]) for r in label_rows}
     out_rows = []

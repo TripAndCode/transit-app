@@ -10,6 +10,7 @@ from pipeline.query.conversations import (
     create_conversation,
     delete_conversation,
     get_conversation,
+    get_message,
     list_conversations,
     list_messages,
     migrate_anon_threads,
@@ -157,6 +158,68 @@ async def test_append_and_list_messages(pool_with_users):
     assert [m["role"] for m in msgs] == ["user", "assistant"]
     assert msgs[1]["tool"] == "top_n"
     assert msgs[1]["args"] == {"metric": "avg_delay", "n": 10}
+
+
+@pytest.mark.asyncio
+async def test_get_message_returns_the_requested_message(pool_with_users):
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        await append_message(
+            c,
+            conv["conversation_id"],
+            role="user",
+            chip_id="rank-delay-top",
+            tool=None,
+            args=None,
+            signature_hash=None,
+            result=None,
+            rendered_summary=None,
+        )
+        assistant = await append_message(
+            c,
+            conv["conversation_id"],
+            role="assistant",
+            chip_id="rank-delay-top",
+            tool="top_n",
+            args={"metric": "avg_delay", "n": 10},
+            signature_hash="abcdef0123456789",
+            result={"kind": "table"},
+            rendered_summary="遅延ランキングTOP10: ...",
+        )
+        msg = await get_message(c, conv["conversation_id"], assistant["message_id"], user_id=u1, agency_id=agency)
+    assert msg["role"] == "assistant"
+    assert msg["tool"] == "top_n"
+    assert msg["args"] == {"metric": "avg_delay", "n": 10}
+
+
+@pytest.mark.asyncio
+async def test_get_message_raises_lookup_error_for_missing_message(pool_with_users):
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        with pytest.raises(LookupError):
+            await get_message(c, conv["conversation_id"], 999999, user_id=u1, agency_id=agency)
+
+
+@pytest.mark.asyncio
+async def test_get_message_raises_permission_denied_for_wrong_owner(pool_with_users):
+    pool, agency, u1, u2 = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        msg = await append_message(
+            c,
+            conv["conversation_id"],
+            role="user",
+            chip_id="rank-delay-top",
+            tool=None,
+            args=None,
+            signature_hash=None,
+            result=None,
+            rendered_summary=None,
+        )
+        with pytest.raises(PermissionDenied):
+            await get_message(c, conv["conversation_id"], msg["message_id"], user_id=u2, agency_id=agency)
 
 
 @pytest.mark.asyncio
