@@ -59,10 +59,7 @@ export function AnalysisTab() {
   // `route_forecast` is served by its own endpoint, so the reports list never
   // returns it -- it is appended here as list data rather than re-rendered as
   // a second, hand-copied button underneath the list.
-  const listedTypes = [
-    ...(list.data ?? []).map((r) => r.report_type),
-    ...REPORT_GROUPS.forecast.filter((type) => type === "route_forecast"),
-  ];
+  const listedTypes = [...(list.data ?? []).map((r) => r.report_type), "route_forecast"];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>

@@ -143,7 +143,7 @@ function AgencyRow({
       </span>
 
       <div className="network-row__meta">
-        <span aria-label={t("network.col_delivered")}>
+        <span>
           {t("network.col_delivered")}{" "}
           {a.service_delivered_pct == null ? "—" : `${a.service_delivered_pct.toFixed(1)}%`}
         </span>
@@ -154,7 +154,7 @@ function AgencyRow({
               : null
           }
         >
-          <span aria-label={t("network.col_vehicle_km_delivered")}>
+          <span>
             {t("network.col_vehicle_km_delivered")}{" "}
             {a.vehicle_km_delivered_pct != null
               ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
@@ -165,7 +165,7 @@ function AgencyRow({
                 : "—"}
           </span>
         </ScheduleVersionTooltip>
-        <span aria-label={t("network.col_samples")}>
+        <span>
           {t("network.col_samples")} {a.samples.toLocaleString()}
         </span>
         {a.clamp_pct != null && a.clamp_pct > CLAMP_NOTABLE_PCT && (

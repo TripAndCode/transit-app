@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Toolbar } from "./Toolbar";
 import "./ui.css";
 
 /** A titled block within a page: eyebrow, `<h2>`, optional one-line
@@ -25,7 +26,7 @@ export function Section({
           {eyebrow != null && <span className="ui-section__eyebrow">{eyebrow}</span>}
           <h2 className="ui-section__title">{title}</h2>
         </div>
-        {actions != null && <div className="ui-toolbar ui-toolbar--end">{actions}</div>}
+        {actions != null && <Toolbar align="end">{actions}</Toolbar>}
       </div>
       {description != null && <p className="ui-section__description">{description}</p>}
       <div className="ui-section__body">{children}</div>
