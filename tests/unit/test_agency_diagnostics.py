@@ -396,3 +396,13 @@ def test_agency_health_never_mixes_two_agencies_rows():
     assert all(d["clamp_pct"] is None for d in first["clamp_history"])
     assert second["rt_coverage"]["present_count"] == 1
     assert second["static_version"]["version"] == "v2"
+
+
+def test_standard_edits_reject_a_non_finite_threshold():
+    # DOUBLE PRECISION stores NaN/Infinity happily, and every figure derived
+    # from the threshold afterwards would be NaN.
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="threshold_value"):
+            ad.validate_standard_edits(
+                [{"route_code": "42", "metric_type": "ewt_sec", "threshold_value": bad, "bonus_malus_rate": 0.0}]
+            )

@@ -15,6 +15,7 @@ cannot answer for.
 
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timedelta
 from typing import Any, Mapping, Sequence
 
@@ -359,9 +360,14 @@ def validate_standard_edits(items: Sequence[Mapping[str, Any]]) -> None:
         metric_type = item.get("metric_type")
         if metric_type not in METRIC_TYPES:
             raise ValueError(f"metric_type must be one of {', '.join(METRIC_TYPES)}")
+        threshold = item.get("threshold_value")
+        # DOUBLE PRECISION accepts NaN and Infinity, and every bonus/malus
+        # figure derived from such a threshold would silently be NaN.
+        if threshold is None or not math.isfinite(float(threshold)):
+            raise ValueError("threshold_value must be a finite number")
         rate = item.get("bonus_malus_rate")
-        if rate is None or float(rate) < 0:
-            raise ValueError("bonus_malus_rate must be zero or positive")
+        if rate is None or not math.isfinite(float(rate)) or float(rate) < 0:
+            raise ValueError("bonus_malus_rate must be a finite, non-negative number")
         key = (route_code, str(metric_type))
         if key in seen:
             raise ValueError(f"duplicate standard for route {route_code} / {metric_type}")
