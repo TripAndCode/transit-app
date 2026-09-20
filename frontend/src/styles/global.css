@@ -460,6 +460,72 @@ summary:focus-visible,
   box-shadow: var(--el-2);
   pointer-events: none;
 }
+/* `ExportMenu` (components/ExportMenu.tsx). A plain dropdown anchored to its
+   trigger -- there is exactly one open at a time per page, so it needs no
+   portal (unlike `Tooltip`, which can sit inside a clipping map overlay). */
+.export-menu {
+  position: relative;
+  display: inline-flex;
+}
+.export-menu__panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 40;
+  margin-top: 6px;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--el-2);
+}
+.export-menu__panel button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.export-menu__panel button:hover {
+  background: var(--hover-tint);
+}
+.export-menu__status {
+  margin-left: 8px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.export-menu__fallback {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 40;
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--el-2);
+}
+.export-menu__fallback label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.export-menu__fallback input {
+  min-width: 260px;
+}
+
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
@@ -649,4 +715,18 @@ summary::-webkit-details-marker { display: none; }
 }
 .user-manual-content a {
   color: var(--accent);
+}
+
+/* Shared print stylesheet: strips the app chrome so `window.print()` (from
+   `ExportMenu`) prints just the tab's content, on any page -- not only the
+   `.focus-page` tabs this originally shipped with. Declared once, here,
+   because it targets the app shell and generic control classes that exist
+   app-wide, not anything page-specific. */
+@media print {
+  body { background: white; }
+  .app-shell { display: block !important; height: auto !important; }
+  .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack, .export-menu { display: none !important; }
+  main { overflow: visible !important; }
+  .focus-page { color: black; }
+  .focus-page svg { break-inside: avoid; }
 }

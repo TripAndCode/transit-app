@@ -29,6 +29,8 @@ export const design = {
     coverage: "表示データ：{{from}} ～ {{to}}", definitions: "集計条件・定義を見る", advanced: "詳細レポート",
     remove: "削除", open: "分析を開く →", compareUnavailable: "比較期間のデータはありません",
     filterNote: "路線は系統番号を除いた路線名でまとめています。系統番号は配信元の識別子です。",
+    exportMenu: "エクスポート", downloadPng: "PNG画像をダウンロード",
+    copyLinkFallback: "このリンクを選択してコピーしてください", pngFailed: "画像を作成できませんでした",
   },
   en: {
     overview: "Overview", period_overview: "Period overview", analysis: "Segment analysis", reports: "Reports", live: "Current observations",
@@ -60,5 +62,7 @@ export const design = {
     coverage: "Displayed data: {{from}} – {{to}}", definitions: "View filters and definitions", advanced: "Detailed reports",
     remove: "Delete", open: "Open analysis →", compareUnavailable: "No comparison data available",
     filterNote: "Routes are grouped by name with the pattern number removed. Pattern codes are the source identifiers.",
+    exportMenu: "Export", downloadPng: "Download PNG",
+    copyLinkFallback: "Select this link to copy it", pngFailed: "Could not create the image",
   },
 };

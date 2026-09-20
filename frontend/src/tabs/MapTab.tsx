@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Download, Maximize2, RefreshCw } from "lucide-react";
 import { FilterDock } from "./map/FilterDock";
-import { downloadCsv } from "../components/analysis/csv";
+import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { Tooltip } from "../components/Tooltip";
 import "../styles/focusedAnalysis.css";
 import "./map/focusedOverview.css";
@@ -12,6 +12,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useTodayRouteSummary } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
+import { useUrlState } from "../api/useUrlState";
 import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
@@ -101,14 +102,46 @@ export function MapTab() {
   const { t: td } = useTranslation("design");
   const [ctx, updateCtx] = useRangeContext();
   const [now, setNow] = useState(Date.now);
-  const [styleId, setStyleId] = useMapStylePref();
+  // The URL is the source of truth for the *current* view (so copy-link
+  // reproduces it), but localStorage stays the source of truth for a fresh
+  // visit's *default* -- `useUrlState`'s default is this render's persisted
+  // value, so a URL with no `style` param falls back to it, and setting a
+  // new style writes both, so the next fresh visit (no URL override) picks
+  // it up too.
+  const [persistedStyleId, setPersistedStyleId] = useMapStylePref();
+  const [styleId, setStyleIdParam] = useUrlState("style", persistedStyleId);
+  function setStyleId(next: typeof persistedStyleId) {
+    setPersistedStyleId(next);
+    setStyleIdParam(next);
+  }
   const [dimAmount, setDimAmountState] = useState(readMapDimPref);
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
-  const [routeSelection, setRouteSelection] = useState<RouteSelection>({ agencyId: id, route: null });
+  // `route_focus_agency` guards against a stale `route_focus` value matching
+  // a different agency's route code after an agency switch, the same way
+  // the old `RouteSelection.agencyId` field did.
+  const [routeFocusAgencyParam, setRouteFocusAgencyParam] = useUrlState<string>("route_focus_agency", "");
+  const [routeFocusParam, setRouteFocusParam] = useUrlState<string>("route_focus", "");
+  const routeSelection: RouteSelection = {
+    agencyId: routeFocusAgencyParam ? Number(routeFocusAgencyParam) : null,
+    route: routeFocusParam || null,
+  };
+  function setRouteSelection(next: RouteSelection) {
+    setRouteFocusAgencyParam(next.agencyId != null ? String(next.agencyId) : "");
+    setRouteFocusParam(next.route ?? "");
+  }
   const [queueWidth, setQueueWidth] = useState(readQueueWidth);
-  const [selectedDirectionKey, setSelectedDirectionKey] = useState<string | null>(null);
-  const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+  const [selectedDirectionKeyParam, setSelectedDirectionKeyParam] = useUrlState<string>("direction", "");
+  const selectedDirectionKey = selectedDirectionKeyParam || null;
+  function setSelectedDirectionKey(next: string | null) {
+    setSelectedDirectionKeyParam(next ?? "");
+  }
+  const [selectedTripIdParam, setSelectedTripIdParam] = useUrlState<string>("trip", "");
+  const selectedTripId = selectedTripIdParam || null;
+  function setSelectedTripId(next: string | null) {
+    setSelectedTripIdParam(next ?? "");
+  }
+  // Hover is pointer state, not a view worth reproducing from a link.
   const [hoveredTripId, setHoveredTripId] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [playbackOn, setPlaybackOn] = useState(false);
@@ -148,6 +181,16 @@ export function MapTab() {
   const summaryQuery = useTodayRouteSummary(id);
   const routeNames = useRouteNames(id);
   const liveRows = filterLiveRows(liveQuery.data?.rows ?? [], now, ctx.routes);
+  const liveCsvColumns: CsvColumn<LiveTrip>[] = [
+    { header: "agency_id", value: () => id },
+    { header: "route_code", value: (r) => r.route_code },
+    { header: "trip_id", value: (r) => r.trip_id },
+    { header: "headsign", value: (r) => r.headsign },
+    { header: "stop_id", value: (r) => r.stop_id },
+    { header: "stop_name", value: (r) => r.stop_name },
+    { header: "departure_delay_seconds", value: (r) => r.dep_delay },
+    { header: "captured_at", value: (r) => r.captured_at },
+  ];
   const activeRouteCodes = new Set(liveRows.flatMap((trip) => trip.route_code ? [trip.route_code] : []));
   const activeSummaries = buildCurrentRouteSummaries(liveRows, summaryQuery.data?.routes ?? []);
   const requestedRoute = (routeSelection.agencyId === id ? routeSelection.route : null) ?? (ctx.routes.length === 1 ? ctx.routes[0] : null);
@@ -548,10 +591,7 @@ export function MapTab() {
           {/* Directly under the tiles, because the CSV is exactly the rows
               they count -- and above the delay list, so a long list can't
               push the export below the panel's scroll. */}
-          <button type="button" className="btn-ghost ops-queue__export" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, [
-            ["agency_id", "route_code", "trip_id", "headsign", "stop_id", "stop_name", "departure_delay_seconds", "captured_at"],
-            ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
-          ])}><Download size={13} aria-hidden="true" />{td("csv")}</button>
+          <button type="button" className="btn-ghost ops-queue__export" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
           {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
           {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { if (trip.route_code) focusRoute(trip.route_code); setSelectedDirectionKey(directionKey(trip)); setSelectedTripId(trip.trip_id); }}>
