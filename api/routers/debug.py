@@ -5,28 +5,29 @@ and return 404 when ``PERF_DEBUG_ENABLED`` is not set to a truthy value
 (``1``, ``true``, or ``yes``).
 
 **Disabled by default.** Set ``PERF_DEBUG_ENABLED=true`` in your dev ``.env``
-to enable. The surface is unauthenticated when enabled — never enable on an
-internet-reachable deploy. The reset endpoint wipes all caches, which is a
-cheap DoS lever if exposed.
+to enable. The reset endpoint wipes all caches, which is a cheap DoS lever
+if exposed, so it additionally requires an authenticated admin and is
+CSRF-guarded; the read-only snapshot has no user dependency, matching sibling
+read-routers (reports, overview, ask_dashboard).
 
-No user dependency — matches sibling read-routers (reports, overview,
-ask_dashboard). The env gate is the access control.
+The env gate is a router-level dependency so it runs ahead of the per-route
+auth dependency. A disabled surface must answer 404 to every caller — an
+anonymous 401 would tell a prober the route exists.
 
 Routes
 ------
 GET  /api/debug/perf        -- pipeline.perf snapshot + pool utilization.
 POST /api/debug/perf/reset  -- clear perf registry AND all async_lru_caches
-                               (cold-run benchmarking).
+                               (cold-run benchmarking); admin + CSRF guarded.
 """
 
 import os
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from api.security import User, csrf_guard, require_admin
 from pipeline import cache, perf
-
-router = APIRouter(prefix="/api/debug", tags=["debug"], include_in_schema=False)
 
 
 def _require_enabled() -> None:
@@ -42,7 +43,15 @@ def _require_enabled() -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
-@router.get("/perf")
+router = APIRouter(
+    prefix="/api/debug",
+    tags=["debug"],
+    include_in_schema=False,
+    dependencies=[Depends(_require_enabled)],
+)
+
+
+@router.get("/perf", response_model=None)
 async def perf_snapshot(request: Request) -> dict[str, Any]:
     """Return a JSON snapshot of the in-process perf registry plus pool stats.
 
@@ -54,7 +63,6 @@ async def perf_snapshot(request: Request) -> dict[str, Any]:
           "pool":   { "size": <int>, "idle": <int> }
         }
     """
-    _require_enabled()
     snap = perf.snapshot()
     pool = request.app.state.pool
     snap["pool"] = {"size": pool.get_size(), "idle": pool.get_idle_size()}
@@ -62,13 +70,15 @@ async def perf_snapshot(request: Request) -> dict[str, Any]:
 
 
 @router.post("/perf/reset")
-async def perf_reset() -> dict[str, str]:
+async def perf_reset(request: Request, admin: User = Depends(require_admin)) -> dict[str, str]:
     """Clear the perf registry and all async_lru_caches.
 
     Intended for cold-run benchmarking: call this before a bench run to
     ensure no warm-cache or accumulated-stat bias in the next snapshot.
+    Mutating and cache-wiping, so it requires an authenticated admin
+    (``require_admin``) and is CSRF-guarded like other mutating routes.
     """
-    _require_enabled()
+    csrf_guard(request)
     perf.reset()
     cache.clear_all()
     return {"status": "reset"}

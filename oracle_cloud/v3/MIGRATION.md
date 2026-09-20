@@ -20,7 +20,7 @@ static IS collected on the VM via `direct_url` curl.
 
 ## 1. Install tree (no impact on running v1)
     # from workstation repo root:
-    KEY=oracle_cloud/ssh-key-2026-03-28.key; VM=opc@64.110.114.101
+    KEY=~/.ssh/<key>; VM=opc@<oci-public-ip>
     ssh -i $KEY $VM 'mkdir -p /home/opc/collector/{etc,bin,data}'
     scp -i $KEY oracle_cloud/v3/bin/* $VM:/home/opc/collector/bin/
     scp -i $KEY oracle_cloud/v3/etc/agencies.tsv.example $VM:/home/opc/collector/etc/agencies.tsv

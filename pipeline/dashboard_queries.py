@@ -7,6 +7,8 @@
 All three are all-time/all-service overview cards served entirely from the
 precomputed aggregates. They honor date-range + dow + routes; service and
 time_band are NOT applied (the aggregates are untyped / have no band column).
+The exception is `movers`, which takes only the range's end date and sizes both
+of its compared windows itself — see `movers_windows`.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass, field
 from dataclasses import replace as dc_replace
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 import asyncpg
@@ -254,6 +256,23 @@ async def anomaly_timeline(
     return AnomalyTimeline(series=series, mean=round(mean, 3), std=round(std, 3), anomalies=anomalies)
 
 
+def movers_windows(to_date: date, window_days: int) -> tuple[tuple[date, date], tuple[date, date]]:
+    """The current and prior comparison windows, as inclusive ``(from, to)`` pairs.
+
+    Both windows are exactly ``window_days`` long and share no day: the current
+    one ends on ``to_date``, the prior one ends the day before the current one
+    starts. They are derived from ``to_date`` and ``window_days`` alone — never
+    from the requested range's own width — because a delta only means
+    "changed since" when the two sides cover equal, disjoint stretches of time.
+    """
+    if window_days < 1:
+        raise ValueError("window_days must be >= 1")
+    span = timedelta(days=window_days - 1)
+    cur_from = to_date - span
+    prv_to = cur_from - timedelta(days=1)
+    return (cur_from, to_date), (prv_to - span, prv_to)
+
+
 async def _movers_from_agg(
     conn: asyncpg.Connection,
     agency_id: int,
@@ -261,11 +280,13 @@ async def _movers_from_agg(
     window_days: int,
     top: int,
 ) -> list[asyncpg.Record]:
-    """Read deduped agg_daily_trend. Honors date+dow (+routes)."""
-    prv_ctx = dc_replace(
-        ctx, from_date=ctx.from_date - timedelta(days=window_days), to_date=ctx.to_date - timedelta(days=window_days)
-    )
-    cur_frag, cur_params, next_n = build_agg_daily_trend_filter(ctx, next_param=2)
+    """Read deduped agg_daily_trend. Honors dow (+routes); dates come from
+    :func:`movers_windows`, which overrides the request range so the two
+    compared windows stay equal-length and disjoint."""
+    (cur_from, cur_to), (prv_from, prv_to) = movers_windows(ctx.to_date, window_days)
+    cur_ctx = dc_replace(ctx, from_date=cur_from, to_date=cur_to)
+    prv_ctx = dc_replace(ctx, from_date=prv_from, to_date=prv_to)
+    cur_frag, cur_params, next_n = build_agg_daily_trend_filter(cur_ctx, next_param=2)
     prv_frag, prv_params, n2 = build_agg_daily_trend_filter(prv_ctx, next_param=next_n)
     # routes filter (agg_daily_trend has route_code; the helper doesn't add it).
     # The same ${n2} placeholder is referenced in BOTH CTEs and bound once
@@ -282,7 +303,7 @@ async def _movers_from_agg(
             SELECT route_code,
                    (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
                        / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
-                   SUM(samples) AS n
+                   COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) AS n
             FROM agg_daily_trend
             WHERE agency_id = $1 AND {cur_frag} {routes_clause}
             GROUP BY route_code
@@ -320,8 +341,15 @@ async def movers(
     """Top N routes by |Δ avg-delay (min)|: current window vs prior equal-length window.
 
     All-time/all-service overview card served from agg_daily_trend (deduped).
-    Honors date-range + dow + routes; service and time_band are not applied
-    (agg_daily_trend is untyped / has no band column).
+    Honors dow + routes; service and time_band are not applied (agg_daily_trend
+    is untyped / has no band column).
+
+    Only ``ctx.to_date`` is taken from the requested range: the compared
+    windows are the ``window_days`` days ending there and the ``window_days``
+    days immediately before those (see :func:`movers_windows`). A wider
+    requested range therefore moves this card's anchor date without widening
+    either side — the two windows must stay equal-length and disjoint for a
+    delta between them to mean anything.
     """
     rows = await _movers_from_agg(conn, agency_id, ctx, window_days, top)
     route_codes = [r["route_code"] for r in rows]

@@ -21,6 +21,7 @@ provider sub creates a fresh user.
 """
 
 import json
+import logging
 import re
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -28,13 +29,18 @@ from pathlib import Path
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from clickhouse_connect.driver.asyncclient import AsyncClient
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin
+from api.sqlutil import escape_like
 from pipeline.audit import record_event
+from pipeline.query import agencies as _agencies
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -65,10 +71,10 @@ async def list_users(
     role: str | None = None,
     suspended: bool | None = None,
     limit: int = 50,
-    offset: int = 0,
+    offset: int = Query(0, ge=0),
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> UserList:
     """List users with optional filters.
 
     - ``q``: substring match on email OR name (ILIKE).
@@ -81,8 +87,8 @@ async def list_users(
     where = []
     args: list[Any] = []
     if q:
-        args.append(f"%{q}%")
-        where.append(f"(email ILIKE ${len(args)} OR name ILIKE ${len(args)})")
+        args.append(f"%{escape_like(q)}%")
+        where.append(f"(email ILIKE ${len(args)} ESCAPE '\\' OR name ILIKE ${len(args)} ESCAPE '\\')")
     if role in ("user", "admin"):
         args.append(role)
         where.append(f"role = ${len(args)}")
@@ -119,7 +125,7 @@ async def user_detail(
     uid: int,
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> UserDetail:
     """Return a user plus their linked OAuth identities and last 20 audit
     events. ``meta`` is stored as jsonb but cast to text and re-parsed here
     so the JSON shape is preserved in the response without asyncpg's
@@ -204,7 +210,7 @@ async def patch_user(
     request: Request,
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> UserRow:
     """Update role and/or suspended flag.
 
     On suspend transition: kill all sessions for the target so the next
@@ -276,7 +282,7 @@ async def delete_user(
     request: Request,
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> Response:
     """Soft-delete: anonymize PII, suspend, drop sessions + identities,
     keep ``login_events`` intact for audit.
 
@@ -343,8 +349,8 @@ class OpsHealth(BaseModel):
 async def admin_ops(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-    ch=Depends(get_ch),
-):
+    ch: AsyncClient = Depends(get_ch),
+) -> OpsHealth:
     """Read-only ops health snapshot. Graceful degradation: failing sub-checks return null."""
     from pipeline.health import aggregate_freshness, migration_status
 
@@ -353,7 +359,7 @@ async def admin_ops(
         ms = await migration_status(conn)
         mig = MigrationStatusOut(applied=ms.applied, latest=ms.latest, behind=ms.behind)
     except Exception:
-        pass  # mig stays None
+        _log.warning("admin_ops: migration_status failed — degrading to null", exc_info=True)
 
     agencies_out: list[AgencyFreshnessOut] = []
     agencies_ok = True
@@ -373,6 +379,7 @@ async def admin_ops(
                 )
             )
     except Exception:
+        _log.warning("admin_ops: aggregate_freshness failed — degrading to empty agencies list", exc_info=True)
         agencies_out = []
         agencies_ok = False
 
@@ -383,13 +390,9 @@ async def admin_ops(
 async def list_admin_agencies(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> list[dict[str, Any]]:
     """Admin list of ALL agencies including soft-deleted."""
-    rows = await conn.fetch(
-        "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
-        "FROM agencies ORDER BY agency_id"
-    )
-    return [dict(r) for r in rows]
+    return await _agencies.list_agencies(conn, include_deleted=True)
 
 
 # ── Architecture docs (developer/internal) endpoints ─────────────────────
@@ -479,7 +482,7 @@ def _resolve_feature_doc_path(slug: str) -> Path | None:
 
 
 @router.get("/architecture/docs", response_model=list[ArchitectureDocSummary])
-async def list_architecture_docs(_admin: User = Depends(require_admin)):
+async def list_architecture_docs(_admin: User = Depends(require_admin)) -> list[ArchitectureDocSummary]:
     """List every `docs/features/*.md` file for the architecture page's
     sidebar. Read-only and filesystem-only -- no DB round trip."""
     return [
@@ -489,7 +492,7 @@ async def list_architecture_docs(_admin: User = Depends(require_admin)):
 
 
 @router.get("/architecture/docs/{slug}", response_model=ArchitectureDocDetail)
-async def get_architecture_doc(slug: str, _admin: User = Depends(require_admin)):
+async def get_architecture_doc(slug: str, _admin: User = Depends(require_admin)) -> ArchitectureDocDetail:
     """Serve one feature doc's raw Markdown by slug (filename minus `.md`).
 
     ``slug`` is validated against a strict charset and resolved directly to
