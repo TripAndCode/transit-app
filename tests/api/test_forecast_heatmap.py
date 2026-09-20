@@ -40,6 +40,10 @@ async def heatmap_client(apply_schema):
             # would instead give (1.61*3 + 2.0*1000)/1003 ~= 1.9988 -> 2.0.
             (aid, "R1", "A", 3, 10, 1.61, 3, 290),
             (aid, "R1", "B", 3, 10, 2.0, 1000, 100000),
+            # (dow5, h11): one row carries no delay sum at all. It must be
+            # absent from BOTH the average and the sample count backing it.
+            (aid, "R1", "平日", 5, 11, 3.0, 10, int(3.0 * 60 * 10)),
+            (aid, "R1", "祝日", 5, 11, 50.0, 90, None),
         ],
     )
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -62,6 +66,19 @@ async def test_heatmap_pools_and_grids(heatmap_client):
     assert by[(2, 0)]["expected_avg_min"] is None and by[(2, 0)]["samples"] == 0
     assert body["route"] == "R1"
     assert body["disclaimer"]
+
+
+async def test_heatmap_sample_count_matches_the_averaged_population(heatmap_client):
+    """(dow5, h11) pools one row with a delay sum and one without. The reported
+    sample count must describe the rows the average was actually computed from,
+    or the cell claims more evidence than it has (and its low_confidence flag
+    reads off the wrong population)."""
+    client, aid = heatmap_client
+    r = await client.get(f"/api/{aid}/forecast/heatmap", params={"route": "R1"})
+    assert r.status_code == 200
+    cell = {(c["dow"], c["hour"]): c for c in r.json()["cells"]}[(5, 11)]
+    assert cell["samples"] == 10
+    assert cell["expected_avg_min"] == 3.0
 
 
 async def test_heatmap_pools_exact_sum_delay_sec_not_reweighted_avg(heatmap_client):

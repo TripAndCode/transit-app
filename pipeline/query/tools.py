@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 
 import clickhouse_connect
 
-from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType, jst_today
+from api.range import RangeCtx, ServiceType, clamp_range_ctx, jst_today
 from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
@@ -701,11 +701,20 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
         new_to = today
         new_from = today - timedelta(days=n - 1)
 
-    if new_from > new_to:
-        new_from, new_to = new_to, new_from
-    if (new_to - new_from).days >= MAX_RANGE_DAYS:
-        new_from = new_to - timedelta(days=MAX_RANGE_DAYS - 1)
-    return replace(ctx, from_date=new_from, to_date=new_to)
+    # Hand back to the shared clamp rather than re-deriving its rules here.
+    # Parsing stays local and lenient on purpose -- an unparseable date from a
+    # model should fall back to the default window, not 422 the request -- but
+    # once the dates exist, the future-date bound, the reversed-range swap and
+    # the width cap are clamp_range_ctx's to enforce, as they are for every
+    # other entry point. Passing date objects skips its stricter parse.
+    return clamp_range_ctx(
+        from_=new_from,
+        to=new_to,
+        dow=ctx.dow,
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+    )
 
 
 async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None) -> bool:

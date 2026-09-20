@@ -1,4 +1,4 @@
-"""Unit tests for ask_suggest's swallowed-failure logging (finding D3).
+"""Unit tests for ask_suggest's swallowed-failure logging.
 
 ask_suggest is autocomplete: a failed embed or nearest-neighbour lookup must
 still degrade to an empty suggestion list (never a 500 on every keystroke),
@@ -22,7 +22,7 @@ async def test_ask_suggest_logs_embedding_failure_at_warning(caplog, monkeypatch
     with caplog.at_level(logging.WARNING, logger="api.routers.ask"):
         result = await endpoint(request=None, agency_id=1, conn=None, q="delay", limit=8)
 
-    assert result == []
+    assert result.rows == [], "a failed lookup must still degrade to an empty suggestion envelope"
     records = [r for r in caplog.records if r.name == "api.routers.ask"]
     assert records, "expected a warning log from ask_suggest on embedding failure"
     assert any(r.exc_info for r in records), "expected exc_info=True so the traceback is captured"
@@ -37,7 +37,7 @@ async def test_ask_suggest_logs_rag_nearest_failure_at_warning(caplog, monkeypat
     with caplog.at_level(logging.WARNING, logger="api.routers.ask"):
         result = await endpoint(request=None, agency_id=1, conn=None, q="delay", limit=8)
 
-    assert result == []
+    assert result.rows == [], "a failed lookup must still degrade to an empty suggestion envelope"
     records = [r for r in caplog.records if r.name == "api.routers.ask"]
     assert records, "expected a warning log from ask_suggest on rag_nearest failure"
     assert any(r.exc_info for r in records), "expected exc_info=True so the traceback is captured"

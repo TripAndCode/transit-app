@@ -123,6 +123,22 @@ def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> Non
         )
 
 
+def _openapi_docs_enabled() -> bool:
+    """Whether ``/docs``, ``/redoc`` and ``/openapi.json`` should be exposed.
+
+    Off unless ``OPENAPI_DOCS_ENABLED`` says otherwise, matching
+    ``PERF_DEBUG_ENABLED``: a deployment that configures nothing publishes no
+    schema. The HTTPS signal behind ``cookie_secure()`` cannot stand in for
+    "is this production" here, because ``PUBLIC_BASE_URL`` is only set when
+    SSO is configured — a live HTTPS deployment without SSO leaves it at its
+    localhost default, which would read as local dev and expose the schema.
+
+    Local dev gets the docs from ``.env.example``, which turns them on and is
+    only ever copied into a developer's own ``.env``.
+    """
+    return os.environ.get("OPENAPI_DOCS_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
 def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
     """Refuse to boot with zero usable LLM providers configured.
 
@@ -214,7 +230,14 @@ _CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://local
 
 configure_logging()
 
-app = FastAPI(title="Transit Delay API", lifespan=lifespan)
+_docs_enabled = _openapi_docs_enabled()
+app = FastAPI(
+    title="Transit Delay API",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
+)
 app.state.limiter = limiter
 # slowapi's handler is typed against its own exception class, not Starlette's
 # broader (Request, Exception) signature — runtime contract is fine.

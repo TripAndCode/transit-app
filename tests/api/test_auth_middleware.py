@@ -6,6 +6,9 @@ from starlette.requests import Request
 
 from api.middleware.auth import APIKeyMiddleware
 
+# Revocation, expiry, and hash-not-raw lookup are covered without a database in
+# tests/unit/test_credential_middleware.py.
+
 
 def _make_app(fetchrow_result):
     app = FastAPI()
@@ -30,7 +33,7 @@ def test_no_api_key_allows_request():
 
 
 def test_valid_api_key_allows_request():
-    mock_row = {"tier": "pro"}
+    mock_row = {"tier": "pro", "revoked_at": None, "expires_at": None}
     app = _make_app(fetchrow_result=mock_row)
     client = TestClient(app)
     response = client.get("/test", headers={"X-API-Key": "valid-key"})

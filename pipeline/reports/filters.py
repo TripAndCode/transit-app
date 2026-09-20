@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from api.range import RangeCtx, build_agg_daily_trend_filter, build_updates_filter_ch, dow_clause
+from api.range import (
+    TIME_BAND_RANGES,
+    RangeCtx,
+    build_agg_daily_trend_filter,
+    build_updates_filter_ch,
+    dow_clause,
+)
 from pipeline.db import build_dedup_ch_sql
 
 # 2-dp minutes, matching the live ROUND(..., 2). Shared by every reports
@@ -129,19 +135,6 @@ def _dist_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
     return " AND ".join(parts), params, n
 
 
-# Mirrors api/range._TIME_BAND_RANGES. Duplicated locally so this module
-# doesn't reach into a private name in another package.
-_TIME_BAND_RANGES: dict[str, tuple[str, str]] = {
-    "morning": ("05:00", "09:00"),
-    "forenoon": ("09:00", "12:00"),
-    "noon": ("12:00", "14:00"),
-    "afternoon": ("14:00", "17:00"),
-    "evening": ("17:00", "20:00"),
-    "night": ("20:00", "24:00"),
-    "late_night": ("00:00", "05:00"),
-}
-
-
 def _time_band_sql_on(column: str, time_band: str, next_param: int) -> tuple[str, list, int]:
     """Optional WHERE fragment filtering ``column`` (a TIME column) to a
     named time-band window.
@@ -150,11 +143,16 @@ def _time_band_sql_on(column: str, time_band: str, next_param: int) -> tuple[str
     unknown band name. Matches the asyncpg ``::text)::time`` cast pattern
     used elsewhere in this module (e.g. :func:`_agg_filter`'s siblings) for
     Postgres TIME columns.
+
+    Unlike the ClickHouse builder (:func:`api.range.time_band_clause_ch`),
+    the hour needs no modulo-24 wrap: the columns filtered here are Postgres
+    TIME, and GTFS's extended hours (>= 24, a trip continuing past midnight)
+    are resolved to NULL at ingest — see
+    :func:`pipeline.strategies._time.parse_departure_time` — so a value
+    outside ``00:00``–``23:59`` can never reach this predicate.
     """
-    if time_band == "all":
+    if time_band not in TIME_BAND_RANGES:
         return "", [], next_param
-    if time_band not in _TIME_BAND_RANGES:
-        return "", [], next_param
-    start, end = _TIME_BAND_RANGES[time_band]
+    start, end = TIME_BAND_RANGES[time_band]
     frag = f"{column}::time >= (${next_param}::text)::time AND {column}::time < (${next_param + 1}::text)::time"
     return frag, [start, end], next_param + 2
