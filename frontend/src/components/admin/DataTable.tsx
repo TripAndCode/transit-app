@@ -39,6 +39,9 @@ type DataTableProps<Row> = {
   /** URL search param the saved-view chips read and write. */
   savedViewParam?: string;
   emptyLabel?: string;
+  /** The row a detail surface is currently open on, marked so an operator
+   *  scanning the list can still see which one they opened. */
+  activeRowKey?: string | null;
 };
 
 const EMPTY_SELECTION: ReadonlySet<string> = new Set();
@@ -74,6 +77,7 @@ export function DataTable<Row>({
   savedViews,
   savedViewParam = "view",
   emptyLabel,
+  activeRowKey = null,
 }: DataTableProps<Row>) {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
@@ -183,16 +187,24 @@ export function DataTable<Row>({
               {rows.map((row) => {
                 const id = rowKey(row);
                 const selected = selectedIds.has(id);
+                const active = id === activeRowKey;
                 return (
                   <tr
                     key={id}
                     tabIndex={0}
                     aria-selected={selectable ? selected : undefined}
+                    aria-current={active ? "true" : undefined}
                     onKeyDown={(event) => onRowKeyDown(event, row)}
                     onClick={() => onOpen?.(row)}
                     style={{
                       cursor: onOpen ? "pointer" : "default",
-                      background: selected ? "var(--accent-soft)" : "transparent",
+                      // Selection wins the background: a bulk action needs to
+                      // show its whole set, and only one row is ever active.
+                      background: selected
+                        ? "var(--accent-soft)"
+                        : active
+                          ? "var(--hover-tint)"
+                          : "transparent",
                     }}
                   >
                     {selectable && (
