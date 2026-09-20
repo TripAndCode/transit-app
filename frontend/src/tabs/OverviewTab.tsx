@@ -14,7 +14,7 @@ import { PeakHourModal } from "../components/PeakHourModal";
 import { PeakHourRibbon } from "../components/PeakHourRibbon";
 import { RoutesToCheckList } from "../components/RoutesToCheckList";
 import { ServiceSplit } from "../components/ServiceSplit";
-import { Skeleton } from "../components/Skeleton";
+import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
 
 import "../styles/overview.css";
@@ -71,7 +71,12 @@ export function OverviewTab() {
           data={data}
           hasContent={hasAnyData}
           empty={<EmptyState title={t("overview.empty")} />}
-          skeleton={<Skeleton height={400} />}
+          skeleton={
+            <>
+              <SkeletonKpiRow />
+              <SkeletonTable rows={5} />
+            </>
+          }
         >
           {(data) => (
           <>

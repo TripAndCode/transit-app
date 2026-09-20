@@ -423,28 +423,27 @@ summary:focus-visible,
   cursor: not-allowed;
 }
 
-/* Hover/focus tooltip for controls whose label can't carry the whole
-   explanation -- icon-only buttons, or a short label with a caveat worth
-   stating. Opt in with `className="tip" data-tip={t("...")}`: no wrapper
-   component and no JS state, and it appears on keyboard focus as well as
-   hover.
+/* The wrapper `Tooltip` (components/Tooltip.tsx) puts around its trigger. It
+   generates no box of its own, so the trigger keeps whatever containing block
+   it already had -- wrapping an absolutely-positioned map control in a
+   Tooltip cannot move it. */
+.tooltip-anchor {
+  display: contents;
+}
 
-   The tooltip is visual reinforcement only. The control keeps its own
-   accessible name (its text, or an aria-label), so a screen reader never
-   depends on `content: attr()`, which assistive tech is not required to
-   announce.
+/* The bubble itself. Fixed-position and portalled to <body>, so it is never
+   clipped by, or positioned relative to, the overflow container its trigger
+   sits in -- the normal case here, since the controls that need a tooltip are
+   icon-only ones inside map overlays and the collapsed nav rail.
 
-   `:where()` gives the positioning zero specificity, so a host that is
-   already positioned -- an absolutely-placed map control, say -- keeps its
-   own `position` regardless of stylesheet order, while a statically-placed
-   host still gets the containing block this needs. */
-:where(.tip) { position: relative; }
-.tip::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+   The component measures this element and writes `left`/`top` before paint;
+   the coordinates below are only the pre-measurement resting place. The
+   tooltip is visual reinforcement only -- the control keeps its own
+   accessible name, and this element is wired as its `aria-describedby`. */
+.tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
   z-index: var(--z-tooltip);
   max-width: 240px;
   padding: 5px 9px;
@@ -457,20 +456,7 @@ summary:focus-visible,
   text-align: left;
   white-space: pre-line;
   box-shadow: var(--el-2);
-  opacity: 0;
-  visibility: hidden;
   pointer-events: none;
-  transition: opacity 120ms;
-}
-.tip:hover::after,
-.tip:focus-visible::after {
-  opacity: 1;
-  visibility: visible;
-}
-/* For a control near the top edge, where an upward tooltip would be clipped. */
-.tip--below::after {
-  top: calc(100% + 8px);
-  bottom: auto;
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -528,6 +514,9 @@ summary::-webkit-details-marker { display: none; }
   .ov-anim-fade   { animation: ov-fade-in var(--dur-3) var(--ease-out) forwards; }
   .ov-anim-grow-x { animation: ov-grow-x var(--dur-3) var(--ease-out) var(--dur-2) backwards; }
   .ov-modal       { animation: ov-modal-in var(--dur-2) var(--ease-out); }
+  /* Every route change fades its content in over the outgoing tab, which
+     startTransition keeps painted until the next chunk resolves. */
+  .route-enter    { animation: ov-fade-in var(--dur-2) var(--ease-out); }
 }
 
 /* MapLibre's popup override rules (.maplibregl-popup-content etc.) live in

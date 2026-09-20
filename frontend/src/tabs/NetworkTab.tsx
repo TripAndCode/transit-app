@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
@@ -6,6 +6,7 @@ import { useNetworkSummary } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { Skeleton } from "../components/Skeleton";
 import { AsyncSection } from "../components/AsyncSection";
+import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { delayColor } from "../styles/tokens";
 import { formatNumber } from "../utils/format";
@@ -49,6 +50,24 @@ const youBadgeStyle: React.CSSProperties = {
   marginLeft: 8,
   flexShrink: 0,
 };
+
+/** The schedule version is only known for some agencies; with none there is
+ *  nothing to describe, so the value renders bare rather than behind an empty
+ *  bubble.
+ *
+ *  Pointer-only, like the `title` it replaces: the value is a metric, not a
+ *  control, and giving a non-interactive element a tab stop to reach a
+ *  tooltip trades one accessibility problem for another. */
+function ScheduleVersionTooltip({
+  label,
+  children,
+}: {
+  label: string | null;
+  children: ReactElement;
+}) {
+  if (label == null) return children;
+  return <Tooltip label={label}>{children}</Tooltip>;
+}
 
 export function NetworkTab() {
   const { t, i18n } = useTranslation();
@@ -94,13 +113,14 @@ export function NetworkTab() {
       >
           <div className="network-card-top" style={cardTop}>
           <span style={rankStyle}>#{index + 1}</span>
-          <Link
-            to={`/agencies/${a.agency_id}/operations${suffix}`}
-            title={t("network.view_agency", { name: a.agency_name })}
-            style={{ ...agencyNameStyle, color: "var(--accent)", textDecoration: "none" }}
-          >
-            {a.agency_name}
-          </Link>
+          <Tooltip label={t("network.view_agency", { name: a.agency_name })}>
+            <Link
+              to={`/agencies/${a.agency_id}/operations${suffix}`}
+              style={{ ...agencyNameStyle, color: "var(--accent)", textDecoration: "none" }}
+            >
+              {a.agency_name}
+            </Link>
+          </Tooltip>
           {isCurrent && <span data-testid="you-badge" style={youBadgeStyle}>{t("network.you_badge")}</span>}
         </div>
           <div className="network-card-metrics">
@@ -137,17 +157,19 @@ export function NetworkTab() {
             </div>
             <div className="network-card-metric">
               <span className="network-card-metric-label">{t("network.col_vehicle_km_delivered")}</span>
-              <div
-              style={onTimeStyle}
-              aria-label={t("network.col_vehicle_km_delivered")}
-              title={a.static_version_id ? t("network.schedule_version_title", { version: a.static_version_id }) : undefined}
-            >
-              {a.vehicle_km_delivered_pct != null
-                ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
-                : a.planned_trip_count != null
-                  ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
-                  : "—"}
-              </div>
+              <ScheduleVersionTooltip label={
+                a.static_version_id
+                  ? t("network.schedule_version_title", { version: a.static_version_id })
+                  : null
+              }>
+                <div style={onTimeStyle} aria-label={t("network.col_vehicle_km_delivered")}>
+                  {a.vehicle_km_delivered_pct != null
+                    ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
+                    : a.planned_trip_count != null
+                      ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
+                      : "—"}
+                </div>
+              </ScheduleVersionTooltip>
             </div>
           </div>
           <div className="network-card-bar" style={barRow}>

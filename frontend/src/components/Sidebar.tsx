@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   FileText,
@@ -21,8 +21,10 @@ import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { CompactDataStatus } from "./analysis/CompactDataStatus";
+import { Tooltip } from "./Tooltip";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Modal } from "./Modal";
+import { prefetchRouteChunk } from "../routes/lazyTabs";
 
 /** The sidebar's real nav destinations -- exported so the landing page's
  *  preview mockups (`pages/landing/PreviewSidebar.tsx`, and
@@ -59,6 +61,27 @@ function writeCollapsedPref(collapsed: boolean): void {
   } catch {
     /* ignore */
   }
+}
+
+/** Nav links only carry a tooltip while the rail is collapsed -- expanded,
+ *  the label is already on screen and a bubble repeating it is noise. The
+ *  same collapse also strips the visible text, so the link takes an
+ *  `aria-label` there: the tooltip describes a control, it never names one. */
+function RailTooltip({
+  collapsed,
+  label,
+  children,
+}: {
+  collapsed: boolean;
+  label: string;
+  children: ReactElement;
+}) {
+  if (!collapsed) return children;
+  return (
+    <Tooltip label={label} placement="right">
+      {children}
+    </Tooltip>
+  );
 }
 
 export function Sidebar() {
@@ -115,31 +138,34 @@ export function Sidebar() {
         {agencyId && (
           <nav style={{ display: "flex", flexDirection: "column" }}>
             {ITEMS.map((item) => (
-              <NavLink
-                key={item.to}
-                to={`/agencies/${agencyId}/${item.to}${suffix}`}
-                title={collapsedFlag ? t(item.labelKey) : undefined}
-                onClick={() => onNavigate?.()}
-                style={({ isActive }) => ({
-                  display: "flex",
-                  alignItems: collapsedFlag ? "center" : "flex-start",
-                  justifyContent: collapsedFlag ? "center" : "flex-start",
-                  gap: 12,
-                  padding: collapsedFlag ? "12px 0" : "12px 22px",
-                  color: isActive ? "var(--accent)" : "var(--text-primary)",
-                  background: isActive ? "var(--accent-soft)" : "transparent",
-                  borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
-                  textDecoration: "none",
-                  transition: "background var(--transition)",
-                })}
-              >
-                <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
-                {!collapsedFlag && (
-                  <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    <span>{t(item.labelKey)}</span>
-                  </span>
-                )}
-              </NavLink>
+              <RailTooltip key={item.to} collapsed={collapsedFlag} label={t(item.labelKey)}>
+                <NavLink
+                  to={`/agencies/${agencyId}/${item.to}${suffix}`}
+                  aria-label={collapsedFlag ? t(item.labelKey) : undefined}
+                  onMouseEnter={() => prefetchRouteChunk(item.to)}
+                  onFocus={() => prefetchRouteChunk(item.to)}
+                  onClick={() => onNavigate?.()}
+                  style={({ isActive }) => ({
+                    display: "flex",
+                    alignItems: collapsedFlag ? "center" : "flex-start",
+                    justifyContent: collapsedFlag ? "center" : "flex-start",
+                    gap: 12,
+                    padding: collapsedFlag ? "12px 0" : "12px 22px",
+                    color: isActive ? "var(--accent)" : "var(--text-primary)",
+                    background: isActive ? "var(--accent-soft)" : "transparent",
+                    borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
+                    textDecoration: "none",
+                    transition: "background var(--transition)",
+                  })}
+                >
+                  <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
+                  {!collapsedFlag && (
+                    <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span>{t(item.labelKey)}</span>
+                    </span>
+                  )}
+                </NavLink>
+              </RailTooltip>
             ))}
           </nav>
         )}
@@ -149,28 +175,32 @@ export function Sidebar() {
             {/* Distinct CTA below the uniform nav list, matching the artifact
                 mockup's dashed-border Ask button — Ask is deliberately not in the
                 ITEMS loop above so it reads as an action, not a peer tab. */}
-            <NavLink
-              to={`/agencies/${agencyId}/ask${suffix}`}
-              title={collapsedFlag ? t("nav.ask") : undefined}
-              onClick={() => onNavigate?.()}
-              style={({ isActive }) => ({
-                margin: "8px 12px 0",
-                padding: collapsedFlag ? "10px 0" : "10px 12px",
-                borderRadius: 7,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: collapsedFlag ? "center" : "flex-start",
-                gap: 9,
-                color: isActive ? "var(--accent)" : "var(--text-secondary)",
-                fontSize: 13,
-                border: `1px dashed ${isActive ? "var(--accent)" : "var(--border-soft)"}`,
-                textDecoration: "none",
-                transition: "all var(--transition)",
-              })}
-            >
-              <HelpCircle size={16} strokeWidth={1.5} aria-hidden="true" />
-              {!collapsedFlag && t("nav.ask")}
-            </NavLink>
+            <RailTooltip collapsed={collapsedFlag} label={t("nav.ask")}>
+              <NavLink
+                to={`/agencies/${agencyId}/ask${suffix}`}
+                aria-label={collapsedFlag ? t("nav.ask") : undefined}
+                onMouseEnter={() => prefetchRouteChunk("ask")}
+                onFocus={() => prefetchRouteChunk("ask")}
+                onClick={() => onNavigate?.()}
+                style={({ isActive }) => ({
+                  margin: "8px 12px 0",
+                  padding: collapsedFlag ? "10px 0" : "10px 12px",
+                  borderRadius: 7,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: collapsedFlag ? "center" : "flex-start",
+                  gap: 9,
+                  color: isActive ? "var(--accent)" : "var(--text-secondary)",
+                  fontSize: 13,
+                  border: `1px dashed ${isActive ? "var(--accent)" : "var(--border-soft)"}`,
+                  textDecoration: "none",
+                  transition: "all var(--transition)",
+                })}
+              >
+                <HelpCircle size={16} strokeWidth={1.5} aria-hidden="true" />
+                {!collapsedFlag && t("nav.ask")}
+              </NavLink>
+            </RailTooltip>
             {!collapsedFlag && import.meta.env.DEV && (
               <div style={{ marginTop: 12 }}>
                 {/* Visually quarantined from the real account controls below

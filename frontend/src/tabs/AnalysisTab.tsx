@@ -9,7 +9,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
 import { InsightPanel } from "../components/InsightPanel";
-import { Skeleton } from "../components/Skeleton";
+import { SkeletonChart, SkeletonTable } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
 import { BandGrid, Legend } from "../components/charts/DowBandGrid";
@@ -90,9 +90,7 @@ export function AnalysisTab() {
           />
         </h3>
         {list.error && <ErrorBanner error={list.error} onRetry={() => list.refetch()} />}
-        {list.isLoading && [...Array(6)].map((_, i) => (
-          <Skeleton key={i} height={48} style={{ marginBottom: 6 }} />
-        ))}
+        {list.isLoading && <SkeletonTable rows={6} rowHeight={48} />}
         {list.data && list.data.length === 0 && (
           <EmptyState
             title={t("reports.empty.title")}
@@ -162,7 +160,7 @@ export function AnalysisTab() {
         {reportType && reportType !== "route_forecast" && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
         )}
-        {reportType && reportType !== "route_forecast" && detail.isPending && <Skeleton height={400} />}
+        {reportType && reportType !== "route_forecast" && detail.isFetching && <SkeletonChart height={360} />}
         {reportType !== "route_forecast" && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>

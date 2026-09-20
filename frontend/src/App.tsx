@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { Outlet, useMatch, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
@@ -10,6 +10,8 @@ import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
 import { HelpHint } from "./components/HelpHint";
+import { ChunkLoading } from "./components/RoutePlaceholders";
+import { RouteTransition } from "./components/RouteTransition";
 import { Sidebar } from "./components/Sidebar";
 
 /** Tabs that own their whole viewport: the banners, HelpHint and CopilotPanel
@@ -82,9 +84,18 @@ export default function App() {
             a percentage here would overflow main's box; flex: 1 fills
             exactly what's left, same trick the outer app shell used before
             this block moved inside main. */}
-        <div style={{ display: "flex", flexDirection: "column", padding: 24, flex: 1, minHeight: 0, boxSizing: "border-box" }}>
-          <Outlet key={agencyId ?? "root"} />
-        </div>
+        {/* One Suspense boundary for every routed tab, kept above the Outlet
+            rather than wrapped around each route element. A per-route
+            boundary is newly mounted on arrival and therefore always shows
+            its fallback; this one already holds the outgoing tab, so the
+            router's startTransition (main.tsx) can leave that painted until
+            the incoming chunk resolves. RouteTransition then fades the new
+            content in without remounting this wrapper. */}
+        <RouteTransition style={{ display: "flex", flexDirection: "column", padding: 24, flex: 1, minHeight: 0, boxSizing: "border-box" }}>
+          <Suspense fallback={<ChunkLoading />}>
+            <Outlet key={agencyId ?? "root"} />
+          </Suspense>
+        </RouteTransition>
       </main>
       {!focused && <CopilotPanel />}
     </div>
