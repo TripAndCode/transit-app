@@ -421,9 +421,6 @@
     "loading": "Loading the latest operations...",
     "map": {
       "aria_label": "Map of latest reported stops and delays",
-      "delay": "Delay {{delay}}",
-      "reported_stop": "Reported stop: {{stop}}",
-      "updated": "Updated {{when}}",
       "disclosure": "{{located}} of {{total}} trips · last reported stop, not GPS",
       "legend_label": "Map legend",
       "legend_current": "Latest report",
@@ -434,6 +431,17 @@
       "reference_show": "Show legend and note",
       "reference_hide": "Hide legend and note",
       "fit_all_hint": "Moves the map to frame every trip in the current filter. Which trips are shown does not change."
+    },
+    "inspect": {
+      "label": "Selected trip detail",
+      "pin": "Pin this trip",
+      "unpin": "Unpin this trip",
+      "delay_unit": "min · delay now",
+      "hourly_trend": "Mean delay by hour",
+      "worst_segment": "Worst segment",
+      "segment": "{{from}} → {{to}}",
+      "vehicles_label": "Vehicles running",
+      "vehicles": "{{vehicles}}"
     },
     "trip_panel": {
       "aria_label": "Operations by direction and trip",

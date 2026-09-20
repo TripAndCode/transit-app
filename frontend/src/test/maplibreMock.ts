@@ -45,6 +45,12 @@ export class MockMap {
   setStyle() {}
   fitBounds() {}
   easeTo() {}
+  // jsdom has no projection, so there is no meaningful camera to compute.
+  // Returning undefined matches what MapLibre itself does for bounds it
+  // cannot fit, and is the branch revealAgency() already handles.
+  cameraForBounds() {
+    return undefined;
+  }
   getZoom() {
     return 11;
   }

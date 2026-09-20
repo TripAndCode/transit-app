@@ -7,9 +7,8 @@ import { downloadCsv } from "../components/analysis/csv";
 import { Tooltip } from "../components/Tooltip";
 import "../styles/focusedAnalysis.css";
 import "./map/focusedOverview.css";
-import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
+import maplibregl, { Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import "./map/mapOverrides.css";
 import "./map/operationsMap.css";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useTodayRouteSummary } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
@@ -50,6 +49,13 @@ const DELAYED_TRIPS_CAP = 200;
 // sooner (e.g. an idle map with no live rows, or a system clock jump) --
 // scheduling only ever exact boundaries would otherwise never re-check.
 const STALENESS_SAFETY_TICK_MS = 60_000;
+import { fitAll, focusRoute as frameRoute, inspectTrip } from "./map/cameraChoreography";
+import { InspectCard } from "./map/InspectCard";
+
+/** Clusters stop expanding here: past it MapLibre's own clusterMaxZoom has
+ *  already broken them into individual vehicles, so a further step would move
+ *  the camera for nothing. */
+const CLUSTER_STEP_MAX_ZOOM = 16;
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
@@ -86,30 +92,6 @@ function freshnessFor(timestamp: string | null | undefined): Freshness {
   return "stale";
 }
 
-function popupNode(trip: LiveTrip, routeName: string, t: ReturnType<typeof useTranslation>["t"]): HTMLDivElement {
-  const root = document.createElement("div");
-  root.className = "ops-map-popup";
-
-  const route = document.createElement("strong");
-  route.textContent = routeName;
-  root.append(route);
-
-  const delay = document.createElement("b");
-  delay.textContent = t("operations.map.delay", { delay: signedMin(trip.dep_delay, t) });
-  root.append(delay);
-
-  const stop = document.createElement("span");
-  stop.textContent = trip.stop_name
-    ? t("operations.map.reported_stop", { stop: trip.stop_name })
-    : t("operations.queue.location_unavailable");
-  root.append(stop);
-
-  const updated = document.createElement("small");
-  updated.textContent = t("operations.map.updated", { when: relativeTime(trip.captured_at) });
-  root.append(updated);
-  return root;
-}
-
 export function MapTab() {
   const id = useAgencyId();
   const { t, i18n } = useTranslation();
@@ -123,11 +105,11 @@ export function MapTab() {
   const [queueWidth, setQueueWidth] = useState(readQueueWidth);
   const [selectedDirectionKey, setSelectedDirectionKey] = useState<string | null>(null);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+  const [hoveredTripId, setHoveredTripId] = useState<string | null>(null);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
-  const popupRef = useRef<Popup | null>(null);
   const refreshMessageTimerRef = useRef<number | null>(null);
   const refreshAbortRef = useRef<AbortController | null>(null);
   const fittedRouteRef = useRef<string | null>(null);
@@ -202,21 +184,29 @@ export function MapTab() {
     if (trip.route_code) setRouteSelection({ agencyId: id, route: trip.route_code });
     setSelectedDirectionKey(directionKey(trip));
     setSelectedTripId(trip.trip_id);
-    popupRef.current?.remove();
-    popupRef.current = new Popup({ closeButton: true, closeOnClick: true, offset: 20 })
-      .setLngLat([trip.stop_lon, trip.stop_lat])
-      .setDOMContent(popupNode(trip, routeNames.format(trip.route_code), t))
-      .addTo(mapRef.current!);
+    setHoveredTripId(null);
+    if (mapRef.current) inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat]);
   });
+
+  const onTripHover = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
+    const tripId = event.features?.[0]?.properties?.trip_id;
+    setHoveredTripId(typeof tripId === "string" ? tripId : null);
+  });
+
+  const onTripHoverEnd = useEffectEvent(() => setHoveredTripId(null));
 
   const onClusterClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
     const coordinates = event.features?.[0]?.geometry;
     if (!mapRef.current || coordinates?.type !== "Point") return;
-    mapRef.current.easeTo({
-      center: coordinates.coordinates as [number, number],
-      zoom: Math.min(mapRef.current.getZoom() + 2, 16),
-      duration: 400,
-    });
+    // A cluster steps in by a fixed amount rather than to the trip-inspect
+    // floor: the operator is asking "what is inside this puck", and jumping
+    // straight to street level would lose the surrounding clusters they are
+    // comparing it against.
+    inspectTrip(
+      mapRef.current,
+      coordinates.coordinates as [number, number],
+      Math.min(mapRef.current.getZoom() + 2, CLUSTER_STEP_MAX_ZOOM),
+    );
   });
 
   useEffect(() => {
@@ -247,10 +237,15 @@ export function MapTab() {
     map.on("mouseleave", LIVE_TRIPS_LAYER, onLeave);
     map.on("mouseleave", LIVE_TRIPS_LABEL_LAYER, onLeave);
     map.on("mouseleave", LIVE_TRIPS_CLUSTER_LAYER, onLeave);
+    // mousemove, not mouseenter: crossing from one vehicle straight onto
+    // another inside the same layer fires no new enter, so the card would
+    // keep previewing the vehicle the pointer already left.
+    map.on("mousemove", LIVE_TRIPS_LAYER, onTripHover);
+    map.on("mousemove", LIVE_TRIPS_LABEL_LAYER, onTripHover);
+    map.on("mouseleave", LIVE_TRIPS_LAYER, onTripHoverEnd);
+    map.on("mouseleave", LIVE_TRIPS_LABEL_LAYER, onTripHoverEnd);
     mapRef.current = map;
     return () => {
-      popupRef.current?.remove();
-      popupRef.current = null;
       map.off("click", LIVE_TRIPS_LAYER, onTripClick);
       map.off("click", LIVE_TRIPS_LABEL_LAYER, onTripClick);
       map.off("click", LIVE_TRIPS_CLUSTER_LAYER, onClusterClick);
@@ -260,6 +255,10 @@ export function MapTab() {
       map.off("mouseleave", LIVE_TRIPS_LAYER, onLeave);
       map.off("mouseleave", LIVE_TRIPS_LABEL_LAYER, onLeave);
       map.off("mouseleave", LIVE_TRIPS_CLUSTER_LAYER, onLeave);
+      map.off("mousemove", LIVE_TRIPS_LAYER, onTripHover);
+      map.off("mousemove", LIVE_TRIPS_LABEL_LAYER, onTripHover);
+      map.off("mouseleave", LIVE_TRIPS_LAYER, onTripHoverEnd);
+      map.off("mouseleave", LIVE_TRIPS_LABEL_LAYER, onTripHoverEnd);
       map.remove();
       mapRef.current = null;
       firstStyleRunRef.current = true;
@@ -291,18 +290,9 @@ export function MapTab() {
       return;
     }
     if (getMapStyleOverride()) return;
-    popupRef.current?.remove();
     map.setStyle(buildStyle(styleId, i18n.language), { diff: false });
     map.once("style.load", () => setStyleEpoch((epoch) => epoch + 1));
   }, [i18n.language, styleId]);
-
-  useEffect(() => {
-    // A popup anchored to one trip renders a static snapshot (delay, stop,
-    // "updated X ago") captured at click time. Once the 30-second live
-    // refetch lands, that trip's data may already be stale or gone from the
-    // feed, so any open popup must close rather than keep showing it.
-    popupRef.current?.remove();
-  }, [liveQuery.data]);
 
   useEffect(() => {
     if (!effectiveRoute) {
@@ -315,7 +305,7 @@ export function MapTab() {
     if (coordinates.length === 0) return;
     const bounds = new maplibregl.LngLatBounds();
     for (const coordinate of coordinates) bounds.extend(coordinate as [number, number]);
-    mapRef.current.fitBounds(bounds, { padding: 65, maxZoom: 13, duration: 500 });
+    frameRoute(mapRef.current, bounds);
     fittedRouteRef.current = effectiveRoute;
   }, [effectiveRoute, shapeQuery.data]);
 
@@ -340,7 +330,7 @@ export function MapTab() {
       .filter((row) => row.route_code === routeCode && row.stop_lon != null && row.stop_lat != null)
       .sort((a, b) => b.dep_delay - a.dep_delay)[0];
     if (trip && mapRef.current) {
-      mapRef.current.easeTo({ center: [trip.stop_lon!, trip.stop_lat!], zoom: Math.max(mapRef.current.getZoom(), 13), duration: 500 });
+      inspectTrip(mapRef.current, [trip.stop_lon!, trip.stop_lat!]);
     }
   }
 
@@ -349,7 +339,7 @@ export function MapTab() {
     if (!mapRef.current || located.length === 0) return;
     const bounds = new maplibregl.LngLatBounds();
     for (const trip of located) bounds.extend([trip.stop_lon!, trip.stop_lat!]);
-    mapRef.current.fitBounds(bounds, { padding: 70, maxZoom: 14, duration: 500 });
+    fitAll(mapRef.current, bounds);
   }
 
   async function refreshOperations() {
@@ -408,6 +398,16 @@ export function MapTab() {
   const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
   const cappedDelayedRows = useCappedList(delayedRows, DELAYED_TRIPS_CAP, liveRows);
 
+  // A hovered vehicle always wins the card: the pointer is the more recent
+  // intent. Dropping the hover restores whatever was pinned, so a preview
+  // never costs the operator the trip they were watching.
+  const hoveredTrip = hoveredTripId ? liveRows.find((trip) => trip.trip_id === hoveredTripId) ?? null : null;
+  const pinnedTrip = selectedTripId ? effectiveTrip : null;
+  const inspected = hoveredTrip ?? pinnedTrip;
+  const inspectedVehicles = inspected?.route_code
+    ? liveRows.filter((trip) => trip.route_code === inspected.route_code).length
+    : 0;
+
   return (
     <div className="operations-page focused-overview">
       <header className="ops-header">
@@ -455,6 +455,23 @@ export function MapTab() {
             <div className="ops-map__empty">
               <EmptyState title={t("operations.empty.title")} hint={t("operations.empty.hint")} />
             </div>
+          )}
+          {inspected && (
+            <InspectCard
+              trip={inspected}
+              routeName={routeNames.format(inspected.route_code)}
+              vehicles={inspectedVehicles}
+              progress={inspected.trip_id === effectiveTrip?.trip_id ? progressQuery.data : undefined}
+              pinned={hoveredTrip == null && pinnedTrip != null}
+              onPin={() => {
+                if (inspected.route_code) setRouteSelection({ agencyId: id, route: inspected.route_code });
+                setSelectedDirectionKey(directionKey(inspected));
+                setSelectedTripId(inspected.trip_id);
+                setHoveredTripId(null);
+              }}
+              onUnpin={() => setSelectedTripId(null)}
+              t={t}
+            />
           )}
           <MapReference located={locatedTrips} total={liveRows.length} t={t} />
           {/* Rendered after the overlays that cover this corner
@@ -530,8 +547,8 @@ export function MapTab() {
           onSelectRoute={focusRoute}
           onSelectTrip={(trip) => {
             setSelectedTripId(trip.trip_id);
-            if (trip.stop_lon != null && trip.stop_lat != null) {
-              mapRef.current?.easeTo({ center: [trip.stop_lon, trip.stop_lat], zoom: Math.max(mapRef.current.getZoom(), 13), duration: 500 });
+            if (trip.stop_lon != null && trip.stop_lat != null && mapRef.current) {
+              inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat]);
             }
           }}
           t={t}

@@ -421,9 +421,6 @@
     "loading": "最新の運行状況を取得中...",
     "map": {
       "aria_label": "最新報告停留所と遅延の地図",
-      "delay": "遅延 {{delay}}",
-      "reported_stop": "報告停留所: {{stop}}",
-      "updated": "更新 {{when}}",
       "disclosure": "{{located}}/{{total}}便 · 最新報告停留所の位置（GPSではありません）",
       "legend_label": "地図の凡例",
       "legend_current": "最新報告",
@@ -434,6 +431,17 @@
       "reference_show": "凡例と注記を表示",
       "reference_hide": "凡例と注記を隠す",
       "fit_all_hint": "絞り込み中の便すべてが入る範囲に地図を動かします。表示する便は変わりません。"
+    },
+    "inspect": {
+      "label": "選択中の便の詳細",
+      "pin": "この便を固定表示",
+      "unpin": "固定表示を解除",
+      "delay_unit": "分 · 現在の遅れ",
+      "hourly_trend": "時間帯ごとの平均遅れ",
+      "worst_segment": "最も遅れた区間",
+      "segment": "{{from}} → {{to}}",
+      "vehicles_label": "運行中の車両",
+      "vehicles": "{{vehicles}} 台"
     },
     "trip_panel": {
       "aria_label": "方面と便別の運行状況",

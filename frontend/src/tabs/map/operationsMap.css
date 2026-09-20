@@ -158,12 +158,6 @@
 .ops-other-trips button small { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
 .ops-other-trips button b { color: var(--color-warning); font-size: var(--text-xs); }
 
-.ops-map-popup { display: flex; min-width: 190px; flex-direction: column; gap: 3px; color: var(--text-primary); }
-.ops-map-popup strong { padding-right: 18px; font-size: 13px; }
-.ops-map-popup b { color: var(--color-danger); font-size: 18px; }
-.ops-map-popup span { color: var(--text-secondary); font-size: 12px; }
-.ops-map-popup small { color: var(--text-tertiary); }
-
 /* Filter dock: a floating control on the map's top-left, in the same idiom as
    the legend and the style picker, rather than a card above the map. The
    translucent fill keeps the map legible underneath so the dock reads as

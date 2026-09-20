@@ -10,6 +10,7 @@ import {
   surfaceColorResolved,
 } from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
+import { revealAgency } from "./cameraChoreography";
 import { whenStyleReady } from "./styleReady";
 import { hhmm } from "./format";
 
@@ -220,7 +221,7 @@ export function useOperationsMapLayers(
       if (agencyId != null && fittedAgencyRef.current !== agencyId && features.length > 0) {
         const bounds = new maplibregl.LngLatBounds();
         for (const feature of features) bounds.extend(feature.geometry.coordinates as [number, number]);
-        map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 0 });
+        revealAgency(map, bounds);
         fittedAgencyRef.current = agencyId;
       }
     });
