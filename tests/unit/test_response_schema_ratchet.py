@@ -30,7 +30,6 @@ PERMANENTLY_EXEMPT = {
 # added here.
 PENDING = {
     "GET /api/{agency_id}/ask/build-schema",
-    "GET /api/{agency_id}/ask/suggest",
     "POST /api/{agency_id}/ask/edit-action",
     "GET /api/{agency_id}/ask/dashboard/heatmap",
     "GET /api/{agency_id}/ask/dashboard/anomalies",

@@ -1357,7 +1357,7 @@ async def test_suggest_returns_on_time_fallback_when_no_anomaly(reports_client, 
 
     resp = await client.get(f"/api/{agency_id}/reports/suggest")
     assert resp.status_code == 200
-    body = resp.json()
+    body = resp.json()["suggestion"]
     assert body["report_type"] == "on_time"
     assert body["route_code"] == "BAD"
     assert body.get("reason_text")
@@ -1381,7 +1381,7 @@ async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_clien
     # keeps entries it can split into (report_type, route_code).
     resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY&exclude=garbage")
     assert resp.status_code == 200
-    assert resp.json() is None
+    assert resp.json() == {"suggestion": None}
 
 
 def _run_analyze_from_ch(agency_id, ch_client):
