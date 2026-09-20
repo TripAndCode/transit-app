@@ -220,3 +220,56 @@ export function useArchitectureDoc(slug: string | null) {
     staleTime: 30_000,
   });
 }
+
+// ── Control board ────────────────────────────────────────────────────────
+
+export type BoardCollector = {
+  key: string;
+  /** Server-side fallback name, used when the UI has no translation for `key`. */
+  label: string;
+  status: "ok" | "warn" | "down" | "unknown";
+  last_success_at: string | null;
+  detail: string | null;
+  /** 24 hourly cells, oldest first: 1 where the collector was still known good. */
+  history: number[];
+};
+
+export type BoardFreshnessDay = {
+  date: string;
+  state: "fresh" | "stale" | "missing";
+  clamp_pct: number | null;
+};
+
+export type BoardFreshnessRow = {
+  agency_id: number;
+  agency_name: string;
+  days: BoardFreshnessDay[];
+};
+
+export type BoardAlert = {
+  level: "warn" | "info";
+  /** Translated as `admin.board.alert.<code>`; `text` is the untranslated
+   *  server summary, rendered as-is for a code this build doesn't know. */
+  code: string;
+  params: Record<string, unknown>;
+  text: string;
+  href: string | null;
+};
+
+export type AdminBoard = {
+  collectors: BoardCollector[];
+  freshness: BoardFreshnessRow[];
+  migrations: { applied: string | null; latest: string | null; behind: number } | null;
+  alerts: BoardAlert[];
+};
+
+/** The `/admin` entry page's single snapshot. Polled rather than pushed: the
+ *  underlying collectors are themselves cached snapshots, so a short poll is
+ *  as fresh as the data can be. */
+export function useAdminBoard() {
+  return useQuery({
+    queryKey: ["adminBoard"],
+    queryFn: ({ signal }) => apiGet<AdminBoard>("/api/admin/board", { signal }),
+    refetchInterval: 10_000,
+  });
+}

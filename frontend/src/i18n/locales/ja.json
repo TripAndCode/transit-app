@@ -1064,7 +1064,14 @@
       "agencies": "事業者管理",
       "users": "ユーザー管理",
       "ops": "運用状況",
-      "architecture": "アーキテクチャ"
+      "architecture": "アーキテクチャ",
+      "board": "管制盤",
+      "group": {
+        "operations": "運行",
+        "people": "人",
+        "governance": "統制",
+        "reference": "参照"
+      }
     },
     "ops": {
       "title": "運用状況",
@@ -1123,6 +1130,59 @@
       "docs_title": "機能ドキュメント",
       "docs_nav_label": "機能ドキュメント一覧",
       "docs_empty": "機能ドキュメントが見つかりません。"
+    },
+    "table": {
+      "empty": "該当する行がありません。",
+      "select_all": "すべて選択",
+      "select_row": "{{label}} を選択"
+    },
+    "drawer": {
+      "close": "閉じる"
+    },
+    "board": {
+      "title": "管制盤",
+      "poll_note": "10 秒ごとに更新",
+      "load_error": "管制盤の取得に失敗しました。取得できた分のみ表示しています。",
+      "reanalyze": "いま再集計",
+      "reanalyze_unavailable": "再集計の実行はまだ有効になっていません。",
+      "collectors_title": "収集器",
+      "collector": {
+        "oracle_crawler": "Oracle クローラ",
+        "r2": "R2 同期",
+        "vps_loop": "VPS ループ",
+        "github": "CI (GitHub)"
+      },
+      "status": {
+        "ok": "正常",
+        "warn": "遅延",
+        "down": "停止",
+        "unknown": "不明"
+      },
+      "last_success": "最終成功 {{when}}",
+      "never": "成功の記録なし",
+      "sparkline_label": "直近 24 時間のうち {{ok}} 時間で稼働を確認",
+      "freshness_title": "集計の鮮度 · 事業者 × 直近 14 日",
+      "freshness_empty": "事業者が登録されていません。",
+      "agency_column": "事業者",
+      "legend_fresh": "集計済み",
+      "legend_stale": "遅れ",
+      "legend_missing": "欠測",
+      "state": {
+        "fresh": "集計済み",
+        "stale": "遅れ",
+        "missing": "欠測"
+      },
+      "cell_tooltip": "{{agency}} · {{date}} · {{state}}",
+      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · クランプ {{pct}}%",
+      "alerts_title": "警告",
+      "alerts_none": "対応が必要な項目はありません。",
+      "alert_open": "開く",
+      "alert": {
+        "agency_stale": "{{agency}}：集計が {{days}} 日遅れ",
+        "clamp_high": "{{agency}}：{{date}} のサンプルの {{pct}}% を異常値として除外",
+        "migrations_behind": "スキーマが {{count}} 件遅れています",
+        "llm_approvals_pending": "AI 利用の承認待ち {{count}} 名"
+      }
     }
   },
   "copilot": {
