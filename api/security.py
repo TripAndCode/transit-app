@@ -11,14 +11,11 @@ import hashlib
 import hmac
 import os as _os
 import secrets
-import time as _time
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
-
-_ALLOW_TEST_ORIGIN = _os.environ.get("ALLOW_TEST_ORIGIN") == "1"
 
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P, _SCRYPT_DKLEN = 2**14, 8, 1, 32
 
@@ -169,7 +166,16 @@ def _has_origin_path(value: str) -> bool:
 
 
 def _build_allowed_origins() -> frozenset[str]:
-    """Compute the allow-list from the current environment."""
+    """Compute the allow-list from the current environment, on every call.
+
+    Not cached. The only realistic reason this changes on a running process
+    is an operator removing a compromised or retired origin, and any cache
+    would keep honouring it for the cache's lifetime — the wrong direction to
+    be wrong in for a revocation. Rebuilding is a few env reads and string
+    splits with no I/O, immaterial beside the database work in the request
+    it guards, and it matches cookie_secure() above, which reads live for the
+    same reason.
+    """
     out: set[str] = set()
     base_norm = _serialized_origin(_os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"))
     if base_norm is not None:
@@ -181,31 +187,9 @@ def _build_allowed_origins() -> frozenset[str]:
         n = _serialized_origin(o)
         if n is not None:
             out.add(n)
-    if _ALLOW_TEST_ORIGIN:
+    if _os.environ.get("ALLOW_TEST_ORIGIN") == "1":
         out.add("http://test")
     return frozenset(out)
-
-
-_ORIGINS_CACHE_TTL_SEC = 30.0
-_origins_cache_value: frozenset[str] | None = None
-_origins_cache_expires_at: float = 0.0
-
-
-def _get_allowed_origins() -> frozenset[str]:
-    """Return the CSRF allow-list, rebuilding it from the environment at
-    most once per ``_ORIGINS_CACHE_TTL_SEC``. A previous version computed
-    this once at import time, so a live config flip (e.g. ``PUBLIC_BASE_URL``
-    changed by the deployment platform without a process restart) was never
-    honored; ``cookie_secure()`` already read its env var live for the same
-    reason. The short TTL keeps most requests from re-parsing the env
-    without reintroducing the import-time staleness.
-    """
-    global _origins_cache_value, _origins_cache_expires_at
-    now = _time.monotonic()
-    if _origins_cache_value is None or now >= _origins_cache_expires_at:
-        _origins_cache_value = _build_allowed_origins()
-        _origins_cache_expires_at = now + _ORIGINS_CACHE_TTL_SEC
-    return _origins_cache_value
 
 
 def csrf_guard(request: Request) -> None:
@@ -233,6 +217,6 @@ def csrf_guard(request: Request) -> None:
     incoming = _serialized_origin(raw)
     if incoming is None:
         raise HTTPException(status_code=403, detail="origin required")
-    if incoming in _get_allowed_origins():
+    if incoming in _build_allowed_origins():
         return
     raise HTTPException(status_code=403, detail="cross-origin request denied")

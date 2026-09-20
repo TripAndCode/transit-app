@@ -47,3 +47,28 @@ def test_username_fingerprint_is_16_hex_chars():
     fp = _username_fingerprint("someone@example.com")
     assert len(fp) == 16
     int(fp, 16)  # raises ValueError if not hex
+
+
+def test_username_fingerprint_is_keyed_not_a_bare_digest(monkeypatch):
+    """The fingerprint must not be recoverable by hashing a wordlist.
+
+    This value is sometimes a password — the username field is where a
+    mistyped one lands — so a bare digest would leave exactly that input
+    open to an offline dictionary attack on the audit table, which is the
+    thing the fingerprint exists to prevent.
+    """
+    import hashlib
+
+    monkeypatch.setenv("SESSION_SIGNING_KEY", "key-one")
+    fp = _username_fingerprint("Root@Local")
+    assert fp != hashlib.sha256(b"root@local").hexdigest()[:16]
+
+    # Same input under a different deployment key gives a different value.
+    monkeypatch.setenv("SESSION_SIGNING_KEY", "key-two")
+    assert _username_fingerprint("Root@Local") != fp
+
+
+def test_username_fingerprint_is_case_insensitive_and_stable(monkeypatch):
+    """Repeated attempts on one account still correlate in the audit trail."""
+    monkeypatch.setenv("SESSION_SIGNING_KEY", "key-one")
+    assert _username_fingerprint("Root@Local") == _username_fingerprint("root@local")

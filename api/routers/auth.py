@@ -15,6 +15,7 @@ sticky server-side state between login start and callback. Starlette's
 """
 
 import hashlib
+import hmac
 import logging
 import os
 import secrets
@@ -471,13 +472,21 @@ class LocalLoginBody(BaseModel):
 
 
 def _username_fingerprint(username: str) -> str:
-    """Non-reversible fingerprint of an attempted username for the failed-
-    login audit trail. The username field is a common target for a
-    mistyped password (autofill, muscle memory, a password manager
-    filling the wrong field); storing it verbatim would retain that
-    secret in ``login_events.meta`` indefinitely. Lowercased first so the
-    same account is fingerprinted identically regardless of case."""
-    return hashlib.sha256(username.lower().encode()).hexdigest()[:16]
+    """Keyed fingerprint of an attempted username for the failed-login audit
+    trail, so repeated attempts on one account still correlate.
+
+    The username field is a common target for a mistyped password (autofill,
+    muscle memory, a password manager filling the wrong field), so this value
+    must be assumed to sometimes *be* a password; storing it verbatim would
+    retain that secret in ``login_events.meta`` indefinitely. Keyed with
+    SESSION_SIGNING_KEY rather than a bare digest for exactly that case: a
+    plain hash of a human-chosen password is recovered by running a wordlist
+    through the same hash, so it would not protect the input it exists to
+    protect. Lowercased first so one account fingerprints identically
+    regardless of case.
+    """
+    key = os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret").encode()
+    return hmac.new(key, username.lower().encode(), hashlib.sha256).hexdigest()[:16]
 
 
 @router.post("/local/login")

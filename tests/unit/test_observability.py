@@ -274,3 +274,20 @@ async def test_access_log_escapes_crafted_path_instead_of_forging_fields(caplog)
     assert "\n" not in msg
     assert f"path={_escape_for_log(crafted_path)}" in msg
     assert "status=200" in msg  # the real status, appended after the quoted path
+
+
+def test_escape_for_log_keeps_japanese_readable():
+    """Routes here legitimately carry Japanese, and escaping every non-ASCII
+    character would render an ordinary path unreadable in the access log —
+    as ``\\xNNNN`` at that, since a CJK codepoint doesn't fit the two hex
+    digits the format implies. Nothing above U+00A0 can close the quoted
+    field or start a new line, so there is nothing to defend against."""
+    assert _escape_for_log("/api/1/青森") == '"/api/1/青森"'
+
+
+def test_escape_for_log_still_neutralises_control_characters():
+    """The injection guard itself: a newline must not be able to end the
+    field and forge a second log line."""
+    assert _escape_for_log("/x\nstatus=200") == '"/x\\x0astatus=200"'
+    assert _escape_for_log("/x\tsep") == '"/x\\x09sep"'
+    assert _escape_for_log("/x\x85next") == '"/x\\x85next"'

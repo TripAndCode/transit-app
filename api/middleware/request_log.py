@@ -56,9 +56,16 @@ def _escape_for_log(value: str) -> str:
     line. Backslash and ``"`` are backslash-escaped, other control
     characters become ``\\xNN``, and the whole value is wrapped in
     double quotes.
+
+    Only control characters are escaped, not every non-ASCII byte: a path
+    here is the percent-decoded URL, and this deployment's routes legitimately
+    carry Japanese. Escaping those too would render a normal path unreadable
+    (and as ``\\xNNNN``, since a CJK codepoint does not fit the two hex digits
+    the format implies) while adding nothing — no character above U+00A0 can
+    close the quoted field or start a new log line.
     """
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    escaped = "".join(c if 0x20 <= ord(c) < 0x7F else f"\\x{ord(c):02x}" for c in escaped)
+    escaped = "".join(c if not (ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F) else f"\\x{ord(c):02x}" for c in escaped)
     return f'"{escaped}"'
 
 

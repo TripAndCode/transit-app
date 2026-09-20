@@ -32,48 +32,43 @@ def _post_from(origin: str | None) -> Request:
     return Request(scope)
 
 
-def _reset_origins_cache(monkeypatch, fake_now):
-    """Point the module's clock at a controllable fake and clear any
-    allow-list cached by an earlier test before exercising the TTL."""
-    monkeypatch.setattr(security, "_origins_cache_value", None)
-    monkeypatch.setattr(security, "_origins_cache_expires_at", 0.0)
-    monkeypatch.setattr(security._time, "monotonic", lambda: fake_now[0])
-
-
-def test_csrf_guard_honors_public_base_url_change_only_after_ttl(monkeypatch):
-    """`_ALLOWED_ORIGINS` used to be frozen at import, so a live config flip
-    (PUBLIC_BASE_URL) was never honored without a process restart. The
-    replacement TTL cache must pick it up -- but only once the TTL elapses,
-    not on every request (that would defeat the point of caching)."""
-    fake_now = [1_000.0]
-    _reset_origins_cache(monkeypatch, fake_now)
+def test_csrf_guard_honors_a_public_base_url_change_immediately(monkeypatch):
+    """The allow-list used to be frozen at import, so a live config flip was
+    never honored without a process restart. It is read per call now, so the
+    change takes effect at once -- and, more to the point, an origin *removed*
+    from the configuration stops being accepted at once, which is the
+    direction that matters for a revocation."""
     monkeypatch.setenv("CORS_ORIGINS", "")
     monkeypatch.delenv("ALLOW_TEST_ORIGIN", raising=False)
 
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://old.example.com")
-    security.csrf_guard(_post_from("https://old.example.com"))  # populates the cache
+    security.csrf_guard(_post_from("https://old.example.com"))
 
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://new.example.com")
-    fake_now[0] += 1.0  # still well inside the TTL window
-    with pytest.raises(HTTPException):
-        security.csrf_guard(_post_from("https://new.example.com"))
-    security.csrf_guard(_post_from("https://old.example.com"))  # stale value still honored
-
-    fake_now[0] += security._ORIGINS_CACHE_TTL_SEC  # TTL elapses
-    security.csrf_guard(_post_from("https://new.example.com"))  # now honored
+    security.csrf_guard(_post_from("https://new.example.com"))
     with pytest.raises(HTTPException):
         security.csrf_guard(_post_from("https://old.example.com"))
 
 
-def test_get_allowed_origins_rebuilds_from_live_cors_origins_after_ttl(monkeypatch):
-    fake_now = [2_000.0]
-    _reset_origins_cache(monkeypatch, fake_now)
+def test_allowed_origins_reads_cors_origins_per_call(monkeypatch):
     monkeypatch.setenv("PUBLIC_BASE_URL", "http://localhost:8000")
-    monkeypatch.setattr(security, "_ALLOW_TEST_ORIGIN", False)
+    monkeypatch.delenv("ALLOW_TEST_ORIGIN", raising=False)
 
     monkeypatch.setenv("CORS_ORIGINS", "https://a.example.com")
-    assert security._get_allowed_origins() == {"https://a.example.com", "http://localhost:8000"}
+    assert security._build_allowed_origins() == {"https://a.example.com", "http://localhost:8000"}
 
     monkeypatch.setenv("CORS_ORIGINS", "https://b.example.com")
-    fake_now[0] += security._ORIGINS_CACHE_TTL_SEC
-    assert security._get_allowed_origins() == {"https://b.example.com", "http://localhost:8000"}
+    assert security._build_allowed_origins() == {"https://b.example.com", "http://localhost:8000"}
+
+
+def test_allow_test_origin_is_read_per_call_like_the_others(monkeypatch):
+    """All three inputs behave the same way; this one used to stay frozen at
+    import while the other two were re-read, so a change to it did nothing."""
+    monkeypatch.setenv("PUBLIC_BASE_URL", "http://localhost:8000")
+    monkeypatch.setenv("CORS_ORIGINS", "")
+
+    monkeypatch.delenv("ALLOW_TEST_ORIGIN", raising=False)
+    assert "http://test" not in security._build_allowed_origins()
+
+    monkeypatch.setenv("ALLOW_TEST_ORIGIN", "1")
+    assert "http://test" in security._build_allowed_origins()
