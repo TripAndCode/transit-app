@@ -41,6 +41,7 @@ from api.security import (
     token_hash,
     verify_local_login_password,
 )
+from pipeline.admin_users import invite_is_usable
 from pipeline.audit import record_event
 
 _log = logging.getLogger(__name__)
@@ -259,6 +260,45 @@ class LocalAccountConflict(Exception):
     """
 
 
+async def _consume_pending_invite(conn: asyncpg.Connection, uid: int, email: str) -> None:
+    """Apply the most recent still-usable ``user_invites`` row for ``email``
+    (admin-created via ``POST /api/admin/invites``) onto the just-created
+    user, then mark it consumed. Caller owns the transaction; the row is
+    locked with ``FOR UPDATE`` so two first-time logins racing on the same
+    email can't both consume it.
+
+    A no-op when there is no pending invite, or the newest one has already
+    expired -- an expired invite is left un-consumed (never applied, but
+    also never silently marked used).
+    """
+    invite = await conn.fetchrow(
+        "SELECT invite_id, role, llm_approved, consumed_at, expires_at FROM user_invites "
+        "WHERE lower(email) = lower($1) AND consumed_at IS NULL "
+        "ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
+        email,
+    )
+    if invite is None or not invite_is_usable(invite["consumed_at"], invite["expires_at"], datetime.now(timezone.utc)):
+        return
+    await conn.execute(
+        "UPDATE users SET role=$1, llm_approved=$2 WHERE user_id=$3",
+        invite["role"],
+        invite["llm_approved"],
+        uid,
+    )
+    await conn.execute(
+        "UPDATE user_invites SET consumed_at=now(), consumed_user_id=$1 WHERE invite_id=$2",
+        uid,
+        invite["invite_id"],
+    )
+    await record_event(
+        conn,
+        user_id=uid,
+        actor_id=uid,
+        kind="invite_consumed",
+        meta={"invite_id": invite["invite_id"], "role": invite["role"], "llm_approved": invite["llm_approved"]},
+    )
+
+
 async def _upsert_user(
     conn: asyncpg.Connection,
     provider: str,
@@ -319,6 +359,7 @@ async def _upsert_user(
                 ip=ip,
                 user_agent=user_agent,
             )
+            await _consume_pending_invite(conn, uid, email)
         await conn.execute(
             "INSERT INTO oauth_identities (provider, provider_sub, user_id, email_at_link) "
             "VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",

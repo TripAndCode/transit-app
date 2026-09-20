@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams, type SetURLSearchParams } from "react-router-dom";
+=======
+import { useEffect, useState } from "react";
+import { Link, Outlet, useSearchParams } from "react-router-dom";
+>>>>>>> 8a2999c (feat(admin): user drawer with sessions, API keys, login history, invites)
 import { useTranslation } from "react-i18next";
 import {
   useAdminUsers,
@@ -14,15 +19,34 @@ import { ErrorBanner } from "../../components/ErrorBanner";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Z_INDEX } from "../../styles/zIndex";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
+<<<<<<< HEAD
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
+=======
+import { InviteDialog } from "./InviteDialog";
+>>>>>>> 8a2999c (feat(admin): user drawer with sessions, API keys, login history, invites)
 import { pageItems } from "./pageItems";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
 const UNDO_WINDOW_MS = 8000;
 
+<<<<<<< HEAD
 type SavedView = "all" | "pending" | "admin" | "suspended";
 const SAVED_VIEWS: SavedView[] = ["all", "pending", "admin", "suspended"];
+=======
+/** Admin: searchable, filterable, paginated user list with inline role / suspend / delete controls. */
+export function AdminUsersPage() {
+  const { t } = useTranslation();
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get("q") ?? "";
+  const rawRole = searchParams.get("role") ?? "";
+  const role = rawRole === "user" || rawRole === "admin" ? rawRole : "";
+  const rawSuspended = searchParams.get("suspended") ?? "";
+  const suspended = rawSuspended === "true" || rawSuspended === "false" ? rawSuspended : "";
+  const pageParam = Number(searchParams.get("page") ?? "1");
+  const rawPage = Number.isFinite(pageParam) ? Math.max(1, Math.floor(pageParam)) : 1;
+>>>>>>> 8a2999c (feat(admin): user drawer with sessions, API keys, login history, invites)
 
 type BulkAction = "approve" | "suspend" | "promote" | "demote";
 
@@ -447,8 +471,21 @@ export function AdminUsersPage() {
   ];
 
   return (
+<<<<<<< HEAD
     <div style={{ padding: 24 }}>
       <PageHeader title={t("admin.users.title")} />
+=======
+    // position: relative bounds the user-detail Drawer (rendered via the
+    // nested users/:uid route below) to this page's content area, so it
+    // docks inside the admin main area rather than covering the sidebar.
+    <div style={{ padding: 24, position: "relative" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, margin: 0 }}>{t("admin.users.title")}</h1>
+        <AdminButton variant="primary" onClick={() => setInviteOpen(true)}>
+          {t("admin.invite.trigger")}
+        </AdminButton>
+      </div>
+>>>>>>> 8a2999c (feat(admin): user drawer with sessions, API keys, login history, invites)
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <AdminUserSearchBox
           q={q}
@@ -523,6 +560,7 @@ export function AdminUsersPage() {
           </div>
         )}
       </div>
+<<<<<<< HEAD
       {selected.size > 0 && (
         <div
           data-testid="admin-users-bulk-bar"
@@ -614,6 +652,10 @@ export function AdminUsersPage() {
           </button>
         </div>
       )}
+=======
+      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <Outlet />
+>>>>>>> 8a2999c (feat(admin): user drawer with sessions, API keys, login history, invites)
     </div>
   );
 }
