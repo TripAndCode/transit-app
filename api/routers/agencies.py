@@ -148,26 +148,27 @@ async def patch_agency(
     # new feed and must not cost the agency its verified coverage.
     repointed = "feed_url" in updates and updates["feed_url"] != row["feed_url"]
 
-    if updates:
-        set_clauses = [f"{col}=${i + 2}" for i, col in enumerate(updates)]
-        sql = f"UPDATE agencies SET {', '.join(set_clauses)} WHERE agency_id=$1"
-        async with conn.transaction():
-            await conn.execute(sql, agency_id, *updates.values())
-            if repointed:
-                await invalidate_field_coverage_probes(conn, agency_id)
-            await record_event(
-                conn,
-                user_id=None,
-                actor_id=admin.user_id,
-                kind="agency_updated",
-                meta={"agency_id": agency_id, "fields": list(updates.keys())},
-            )
+    if not updates:
+        return dict(row)
 
-    out = await conn.fetchrow(
-        "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
-        "FROM agencies WHERE agency_id=$1",
-        agency_id,
+    set_clauses = [f"{col}=${i + 2}" for i, col in enumerate(updates)]
+    sql = (
+        f"UPDATE agencies SET {', '.join(set_clauses)} WHERE agency_id=$1 "
+        "RETURNING agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at"
     )
+    async with conn.transaction():
+        out = await conn.fetchrow(sql, agency_id, *updates.values())
+        if not out:
+            raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
+        if repointed:
+            await invalidate_field_coverage_probes(conn, agency_id)
+        await record_event(
+            conn,
+            user_id=None,
+            actor_id=admin.user_id,
+            kind="agency_updated",
+            meta={"agency_id": agency_id, "fields": list(updates.keys())},
+        )
     return dict(out)
 
 
@@ -210,15 +211,18 @@ async def restore_agency(
     an already-active agency is a no-op, mirroring delete_agency's guard so a
     double-click (or a re-restore) doesn't write a duplicate audit row."""
     csrf_guard(request)
-    row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1", agency_id)
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
+    _COLS = "agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at"
     async with conn.transaction():
-        tag = await conn.execute(
-            "UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 AND deleted_at IS NOT NULL",
+        # The `deleted_at IS NOT NULL` guard stays part of the write rather
+        # than a preceding read: exactly one concurrent caller can match a
+        # deleted row and get a RETURNING row back, so exactly one writes the
+        # audit event. Deciding that from a separate SELECT would let two
+        # simultaneous restores both observe "was deleted" and both record it.
+        out = await conn.fetchrow(
+            f"UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 AND deleted_at IS NOT NULL RETURNING {_COLS}",
             agency_id,
         )
-        if tag == "UPDATE 1":
+        if out is not None:
             await record_event(
                 conn,
                 user_id=None,
@@ -226,9 +230,9 @@ async def restore_agency(
                 kind="agency_restored",
                 meta={"agency_id": agency_id},
             )
-    out = await conn.fetchrow(
-        "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
-        "FROM agencies WHERE agency_id=$1",
-        agency_id,
-    )
+        else:
+            # Already active, or gone. Either way this call restored nothing.
+            out = await conn.fetchrow(f"SELECT {_COLS} FROM agencies WHERE agency_id=$1", agency_id)
+            if out is None:
+                raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
     return dict(out)

@@ -2,6 +2,8 @@
 
 import importlib
 import pathlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -145,3 +147,63 @@ def test_dockerfile_cmd_trusts_railway_proxy_headers():
     cmd = dockerfile.read_text()
     assert "--proxy-headers" in cmd
     assert "--forwarded-allow-ips" in cmd
+
+
+async def test_lifespan_closes_pool_when_post_pool_setup_fails(monkeypatch):
+    """``lifespan``'s cleanup after ``yield`` only runs once ``yield`` is
+    reached -- a failure in post-pool startup (here, seed_local_admin) raises
+    before that point and must close what startup already opened itself
+    instead of leaking it. That includes the ClickHouse client: it is opened
+    inside the same guarded block, so closing only the pool leaks its HTTP
+    session on every failed boot."""
+    for var in api.main._AUTH_ENV:
+        monkeypatch.delenv(var, raising=False)
+
+    mock_pool = AsyncMock()
+    mock_ch_client = AsyncMock()
+
+    monkeypatch.setattr(api.main.asyncpg, "create_pool", AsyncMock(return_value=mock_pool))
+    monkeypatch.setattr(api.main, "get_ch_client", AsyncMock(return_value=mock_ch_client))
+    monkeypatch.setattr(api.main, "seed_local_admin", AsyncMock(side_effect=RuntimeError("boom")))
+    monkeypatch.setattr(
+        "pipeline.query.llm_client._load_providers",
+        lambda: [ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")],
+    )
+
+    fake_app = SimpleNamespace(state=SimpleNamespace())
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async with api.main.lifespan(fake_app):
+            pass
+
+    mock_pool.close.assert_awaited_once()
+    mock_ch_client.close.assert_awaited_once()
+
+
+async def test_lifespan_failure_reports_the_startup_error_not_a_cleanup_error(monkeypatch):
+    """A failing close() must not replace the error that caused the shutdown.
+
+    The startup exception is the actionable one; surfacing a secondary
+    close() failure in its place would send an operator after the wrong
+    thing."""
+    for var in api.main._AUTH_ENV:
+        monkeypatch.delenv(var, raising=False)
+
+    mock_pool = AsyncMock()
+    mock_pool.close = AsyncMock(side_effect=RuntimeError("close exploded"))
+    mock_ch_client = AsyncMock()
+    mock_ch_client.close = AsyncMock(side_effect=RuntimeError("ch close exploded"))
+
+    monkeypatch.setattr(api.main.asyncpg, "create_pool", AsyncMock(return_value=mock_pool))
+    monkeypatch.setattr(api.main, "get_ch_client", AsyncMock(return_value=mock_ch_client))
+    monkeypatch.setattr(api.main, "seed_local_admin", AsyncMock(side_effect=RuntimeError("boom")))
+    monkeypatch.setattr(
+        "pipeline.query.llm_client._load_providers",
+        lambda: [ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")],
+    )
+
+    fake_app = SimpleNamespace(state=SimpleNamespace())
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async with api.main.lifespan(fake_app):
+            pass

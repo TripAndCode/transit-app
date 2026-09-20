@@ -486,6 +486,24 @@ def _ask_suggestion(golden: dict, chunk_id: str, question: str, distance: float 
     return AskSuggestion(question=question, tool=tool, args=dict(args), distance=distance)
 
 
+# Autocomplete runs per keystroke, so a persistently broken embedder or vector
+# index would emit a traceback per request and bury every other warning in the
+# log. The first failure of each kind is a warning with its traceback — the
+# signal an operator needs — and the repeats that follow are debug until the
+# path succeeds again, which clears the state so a later outage is announced
+# afresh. Losing the failure entirely to `debug`, as this used to, is the other
+# way to get this wrong.
+_SUGGEST_FAILING: set[str] = set()
+
+
+def _log_suggest_failure(stage: str) -> None:
+    if stage in _SUGGEST_FAILING:
+        _log.debug("ask_suggest: %s still failing; returning no suggestions", stage, exc_info=True)
+        return
+    _SUGGEST_FAILING.add(stage)
+    _log.warning("ask_suggest: %s failed; returning no suggestions", stage, exc_info=True)
+
+
 @router.get("/ask/suggest", response_model=AskSuggestResponse)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def ask_suggest(
@@ -534,14 +552,15 @@ async def ask_suggest(
     try:
         qvec = await asyncio.to_thread(embedder.embed, q.strip(), mode="query")
     except Exception:
-        _log.debug("ask_suggest: embedding failed; returning no suggestions", exc_info=True)
+        _log_suggest_failure("embedding")
         return AskSuggestResponse()
 
     try:
         matches = await rag_nearest(conn, agency_id, qvec, k=limit)
     except Exception:
-        _log.debug("ask_suggest: rag_nearest failed; returning no suggestions", exc_info=True)
+        _log_suggest_failure("rag_nearest")
         return AskSuggestResponse()
+    _SUGGEST_FAILING.clear()
 
     golden = _load_golden()
     return AskSuggestResponse(rows=[_ask_suggestion(golden, m.chunk_id, m.content, m.distance) for m in matches])
