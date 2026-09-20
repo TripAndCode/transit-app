@@ -18,6 +18,10 @@ raw_archives_static/
 # --cache-file default), keyed by component name -- a resilience aid for a single
 # checkout, never repo content.
 .cache/ops-status-*.json
+# Local ask-eval artifact(s), read by GET /api/admin/ask/eval when present
+# (see pipeline/query/ask_ops.py find_latest_eval_result) -- not produced by
+# any committed script yet, and never repo content when it is.
+.cache/ask-eval-*.json
 # Claude Code — commit shared tools, ignore personal/runtime/docs
 .claude/*
 !.claude/commands/
