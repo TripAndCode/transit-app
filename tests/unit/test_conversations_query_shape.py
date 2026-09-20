@@ -1,4 +1,4 @@
-"""Pure query-shape test for `pipeline.query.conversations.get_message` (E2):
+"""Pure query-shape test for `pipeline.query.conversations.get_message`:
 asserts it issues a single-row lookup (`WHERE conversation_id = $1 AND
 message_id = $2`) rather than fetching the whole thread and filtering in
 Python. No DB needed -- inspects the function's own source text.

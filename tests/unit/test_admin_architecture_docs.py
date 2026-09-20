@@ -6,7 +6,7 @@
 overrides the session-scoped `apply_schema` autouse fixture so these don't
 need a reachable Postgres at all.
 
-Also covers `_resolve_feature_doc_path` (E9 audit finding E3): the
+Also covers `_resolve_feature_doc_path`: the
 single-file slug resolver used by `get_architecture_doc` to read one doc
 directly instead of scanning the whole directory, with traversal
 protection (charset validation + `Path.is_relative_to`).

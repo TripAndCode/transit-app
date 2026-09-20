@@ -67,14 +67,27 @@ async def list_conversations(
     agency_id: int,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    rows = await conn.fetch(
-        f"SELECT {_CONV_COLS} FROM ask_conversations "
-        f"WHERE user_id IS NOT DISTINCT FROM $1 AND agency_id = $2 "
-        f"ORDER BY pinned DESC, updated_at DESC LIMIT $3",
-        user_id,
-        agency_id,
-        int(limit),
-    )
+    # Two spellings rather than `user_id IS NOT DISTINCT FROM $1`: that form is
+    # not sargable, so the planner ignores every index on user_id and falls back
+    # to a sequential scan plus a sort. `= $1` and `IS NULL` both drive the
+    # (user_id, agency_id, pinned, updated_at) index instead.
+    if user_id is None:
+        rows = await conn.fetch(
+            f"SELECT {_CONV_COLS} FROM ask_conversations "
+            f"WHERE user_id IS NULL AND agency_id = $1 "
+            f"ORDER BY pinned DESC, updated_at DESC LIMIT $2",
+            agency_id,
+            int(limit),
+        )
+    else:
+        rows = await conn.fetch(
+            f"SELECT {_CONV_COLS} FROM ask_conversations "
+            f"WHERE user_id = $1 AND agency_id = $2 "
+            f"ORDER BY pinned DESC, updated_at DESC LIMIT $3",
+            user_id,
+            agency_id,
+            int(limit),
+        )
     return [_row_to_conv(r) for r in rows]
 
 
