@@ -154,6 +154,24 @@ def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
         )
 
 
+async def _close_startup_resources(app: FastAPI) -> None:
+    """Close the ClickHouse client and the connection pool, tolerating either
+    being absent or already failed. Shared by the startup-failure path and
+    the normal shutdown so the two cannot drift."""
+    client = getattr(app.state, "ch_client", None)
+    if client is not None:
+        try:
+            await client.close()
+        except Exception:
+            _log.warning("ClickHouse client failed to close cleanly", exc_info=True)
+    pool = getattr(app.state, "pool", None)
+    if pool is not None:
+        try:
+            await pool.close()
+        except Exception:
+            _log.warning("Connection pool failed to close cleanly", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
@@ -217,13 +235,17 @@ async def lifespan(app: FastAPI):
         if not embedder.available:
             _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
     except Exception:
-        await app.state.pool.close()
+        # Close what startup already opened, in the same order the shutdown
+        # path below uses. The ClickHouse client is opened inside this same
+        # try, so a failure after it leaks its HTTP session otherwise.
+        # Cleanup failures are logged, never raised: the startup error is the
+        # one worth reporting, and letting a close() failure replace it would
+        # hide the actual cause.
+        await _close_startup_resources(app)
         raise
 
     yield
-    if app.state.ch_client is not None:
-        await app.state.ch_client.close()
-    await app.state.pool.close()
+    await _close_startup_resources(app)
 
 
 _CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]

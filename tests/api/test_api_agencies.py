@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
@@ -404,6 +405,43 @@ async def test_soft_delete_idempotent(agencies_client):
     # The guard (tag == "UPDATE 1") must stop the second delete from writing
     # a duplicate audit row — this is the behavior the idempotency is for.
     assert await _audit_count(aid, "agency_deleted") == 1
+
+
+@pytest.mark.asyncio
+async def test_only_one_concurrent_restore_matches_the_deleted_row(agencies_client):
+    """Exactly one of two overlapping restores may observe the transition.
+
+    Driven at the connection level, not through two HTTP calls: those do not
+    reliably interleave, so an HTTP-level version of this test passes even
+    against the racy implementation and proves nothing. Here both statements
+    are in flight before either commits, which is the situation the audit
+    write has to be correct under. The guard living inside the UPDATE is what
+    makes it so -- deciding from a preceding SELECT would let both callers
+    see a deleted row and both record a restore.
+    """
+    client, sid = agencies_client
+    create_resp = await client.post(
+        "/api/agencies",
+        json={"agency_name": "RestoreRace", "feed_url": "http://rr.example.com"},
+        headers={"Origin": TEST_ORIGIN},
+        cookies={"sid": sid},
+    )
+    aid = create_resp.json()["agency_id"]
+    await client.delete(f"/api/agencies/{aid}", headers={"Origin": TEST_ORIGIN}, cookies={"sid": sid})
+
+    sql = "UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 AND deleted_at IS NOT NULL RETURNING agency_id"
+    pool = await _test_pool()
+    async with pool.acquire() as c1, pool.acquire() as c2:
+
+        async def attempt(conn):
+            async with conn.transaction():
+                return await conn.fetchrow(sql, aid)
+
+        results = await asyncio.gather(attempt(c1), attempt(c2))
+
+    assert sum(r is not None for r in results) == 1, (
+        "both transactions matched the deleted row; the audit event would be written twice"
+    )
 
 
 @pytest.mark.asyncio

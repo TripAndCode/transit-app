@@ -211,19 +211,18 @@ async def restore_agency(
     an already-active agency is a no-op, mirroring delete_agency's guard so a
     double-click (or a re-restore) doesn't write a duplicate audit row."""
     csrf_guard(request)
-    row = await conn.fetchrow("SELECT agency_id, deleted_at FROM agencies WHERE agency_id=$1", agency_id)
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-    was_deleted = row["deleted_at"] is not None
+    _COLS = "agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at"
     async with conn.transaction():
+        # The `deleted_at IS NOT NULL` guard stays part of the write rather
+        # than a preceding read: exactly one concurrent caller can match a
+        # deleted row and get a RETURNING row back, so exactly one writes the
+        # audit event. Deciding that from a separate SELECT would let two
+        # simultaneous restores both observe "was deleted" and both record it.
         out = await conn.fetchrow(
-            "UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 "
-            "RETURNING agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at",
+            f"UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 AND deleted_at IS NOT NULL RETURNING {_COLS}",
             agency_id,
         )
-        if not out:
-            raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-        if was_deleted:
+        if out is not None:
             await record_event(
                 conn,
                 user_id=None,
@@ -231,4 +230,9 @@ async def restore_agency(
                 kind="agency_restored",
                 meta={"agency_id": agency_id},
             )
+        else:
+            # Already active, or gone. Either way this call restored nothing.
+            out = await conn.fetchrow(f"SELECT {_COLS} FROM agencies WHERE agency_id=$1", agency_id)
+            if out is None:
+                raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
     return dict(out)
