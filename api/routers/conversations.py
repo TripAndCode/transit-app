@@ -69,7 +69,9 @@ class UpdateConversation(BaseModel):
 
 
 class AppendMessage(BaseModel):
-    # chip_id is retained for API compatibility but triggers a 410 in the endpoint.
+    # Chip dispatch is gone; the only dispatch path is (tool + args). The field
+    # is still parsed so that a client still sending one gets the explicit 410
+    # below instead of a misleading "tool is required" 400.
     chip_id: str | None = None
     args_override: dict[str, Any] | None = None
     # Supported dispatch path: builder direct dispatch (tool + args)
@@ -82,10 +84,11 @@ class AppendMessage(BaseModel):
     user_summary: str | None = None
 
     def validate_dispatch(self) -> None:
-        """Validate that (tool + args) is supplied.
+        """Require exactly one dispatch path to be named.
 
-        chip_id is accepted at parse time but causes a 410 in the endpoint.
-        Providing both chip_id and tool+args is still a 400.
+        A lone ``chip_id`` passes here and is answered with a 410 by the
+        endpoint, so a retired client learns the path is gone rather than
+        that its arguments were malformed.
         """
         has_chip = bool(self.chip_id)
         has_tool_args = bool(self.tool) and self.args is not None
@@ -247,7 +250,6 @@ async def append_message_endpoint(
 
     # ── Resolve tool + args (builder-direct path only) ────────────────────────
     if body.chip_id is not None:
-        # chip dispatch was removed in Phase ③.5; use {tool, args} instead.
         raise HTTPException(
             status_code=410,
             detail="chip dispatch is no longer supported; use {tool, args} instead",
@@ -259,7 +261,6 @@ async def append_message_endpoint(
         raise HTTPException(status_code=400, detail="tool is required")
     resolved_tool = body.tool
     resolved_args = body.args or {}
-    resolved_chip_id: str | None = None
     # Prefer the client-supplied localized summary; fall back to a generic
     # label that does NOT expose raw key=value pairs (those leak English/
     # identifier noise into the JA chat bubble).
@@ -288,7 +289,6 @@ async def append_message_endpoint(
             conn,
             conversation_id,
             role="user",
-            chip_id=resolved_chip_id,
             tool=None,
             args=None,
             signature_hash=None,
@@ -331,7 +331,6 @@ async def append_message_endpoint(
                 conn,
                 conversation_id,
                 role="assistant",
-                chip_id=resolved_chip_id,
                 tool=resolved_tool,
                 args=can_args,
                 signature_hash=sig_hash,
@@ -346,7 +345,6 @@ async def append_message_endpoint(
                 conn,
                 conversation_id,
                 role="assistant",
-                chip_id=resolved_chip_id,
                 tool=resolved_tool,
                 args=can_args,
                 signature_hash=sig_hash,
@@ -379,7 +377,6 @@ async def append_message_endpoint(
                 conn,
                 conversation_id,
                 role="assistant",
-                chip_id=resolved_chip_id,
                 tool=resolved_tool,
                 args=can_args,
                 signature_hash=sig_hash,
@@ -401,7 +398,6 @@ async def append_message_endpoint(
             conn,
             conversation_id,
             role="assistant",
-            chip_id=resolved_chip_id,
             tool=resolved_tool,
             args=can_args,
             signature_hash=sig_hash,
@@ -511,7 +507,6 @@ async def followup_endpoint(
                 conn,
                 conversation_id,
                 role="user",
-                chip_id=None,
                 tool=None,
                 args=None,
                 signature_hash=None,
@@ -522,7 +517,6 @@ async def followup_endpoint(
                 conn,
                 conversation_id,
                 role="assistant",
-                chip_id=None,
                 tool=None,
                 args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
                 signature_hash=None,
