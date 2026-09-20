@@ -25,7 +25,7 @@ import re
 import subprocess
 import tempfile
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date as CalendarDate
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -792,7 +792,9 @@ def build_route_trips_sql(time_band: TimeBand) -> tuple[str, dict]:
 
 
 def build_route_trips(
-    rows: Iterable[tuple],
+    # Sequence, not tuple: the driver types `result_rows` as sequences and
+    # this only ever unpacks them by position.
+    rows: Iterable[Sequence[Any]],
     headsigns: dict[str, str | None],
     limit: int = MAX_ROUTE_TRIPS,
 ) -> tuple[list[RouteTripRow], bool]:

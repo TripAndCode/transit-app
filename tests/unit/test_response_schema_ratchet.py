@@ -51,7 +51,6 @@ PENDING = {
     "GET /api/{agency_id}/route-shape",
     "GET /api/{agency_id}/today/route-summary",
     "GET /api/{agency_id}/today/route/{route_code}/stop-profile",
-    "GET /api/{agency_id}/today/route/{route_code}/trips",
     "PATCH /api/{agency_id}/conversations/{conversation_id}",
     "POST /api/{agency_id}/conversations",
     "POST /api/{agency_id}/conversations/{conversation_id}/followup",
@@ -70,6 +69,7 @@ PENDING = {
 # Grow this whenever an endpoint is promoted out of PENDING.
 TYPED = {
     "GET /api/{agency_id}/delays/timeline",
+    "GET /api/{agency_id}/today/route/{route_code}/trips",
 }
 
 

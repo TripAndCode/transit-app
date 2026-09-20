@@ -7,7 +7,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
-import { ctxToQueryString, type RangeCtx } from "./rangeContext";
+import { ctxToQueryString, type RangeCtx, type TimeBand } from "./rangeContext";
 import { conversationsAnon } from "./conversationsAnon";
 import type {
   Agency,
@@ -260,17 +260,30 @@ export function useRouteShape(
   });
 }
 
+/** Per-trip, per-stop delay for one route on one day.
+ *
+ *  `date` defaults to the route's own latest observed day, which is what the
+ *  Marey diagram anchors on: the range filter's end date is often a day the
+ *  route did not run, and an empty diagram teaches nothing.
+ */
 export function useRouteTrips(
   agencyId: number | null,
   routeCode: string | null,
+  options: { date?: string | null; timeBand?: TimeBand } = {},
 ): UseQueryResult<RouteTripsResponse> {
+  const { date = null, timeBand = "all" } = options;
   return useQuery({
-    queryKey: ["route_trips", agencyId, routeCode],
-    queryFn: ({ signal }) =>
-      apiGet<RouteTripsResponse>(
-        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips`,
+    queryKey: ["route_trips", agencyId, routeCode, date, timeBand],
+    queryFn: ({ signal }) => {
+      const qs = new URLSearchParams();
+      if (date) qs.set("date", date);
+      if (timeBand !== "all") qs.set("time_band", timeBand);
+      const query = qs.toString();
+      return apiGet<RouteTripsResponse>(
+        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips${query ? `?${query}` : ""}`,
         { signal },
-      ),
+      );
+    },
     enabled: agencyId != null && !!routeCode,
     staleTime: 60 * 1000,
   });
