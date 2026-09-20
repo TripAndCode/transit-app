@@ -29,7 +29,14 @@ from pydantic import BaseModel
 from api.deps import get_conn
 from api.middleware.ratelimit import limiter
 from api.oauth import oauth
-from api.security import User, cookie_secure, csrf_guard, current_user, hash_password, verify_password
+from api.security import (
+    User,
+    cookie_secure,
+    csrf_guard,
+    current_user,
+    hash_password,
+    verify_local_login_password,
+)
 from pipeline.audit import record_event
 
 _log = logging.getLogger(__name__)
@@ -464,8 +471,10 @@ async def local_login(
     api.main's lifespan). Exists so there's always a way into /admin that
     doesn't depend on OAuth being configured or reachable. Rate-limited
     per IP; every attempt (success or failure) is audited to login_events
-    the same way OAuth failures already are.
+    the same way OAuth failures already are. CSRF-guarded like every other
+    mutating route.
     """
+    csrf_guard(request)
     if not local_admin_enabled():
         raise HTTPException(status_code=503, detail="local admin login not configured")
 
@@ -475,7 +484,12 @@ async def local_login(
         "SELECT user_id, password_hash FROM users WHERE email=$1",
         body.username,
     )
-    if row is None or not verify_password(body.password, row["password_hash"]):
+    password_hash = row["password_hash"] if row is not None else None
+    # Evaluated before the branch, never inside it: `or` short-circuits, so
+    # testing `row is None` first would skip the verification entirely for an
+    # unknown username and reintroduce the timing side channel this closes.
+    password_ok = verify_local_login_password(body.password, password_hash)
+    if row is None or not password_ok:
         await record_event(
             conn,
             user_id=None,
