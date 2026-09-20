@@ -52,8 +52,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   for everyday local use. Two runs against that same pair at once —
   e.g. an interactive verification pass and a concurrent `/vps-loop-run`
   worker's, in two different worktrees on the same VPS — race on
-  `tests/conftest.py`'s per-test Postgres `TRUNCATE ... CASCADE` and
-  ClickHouse `DROP TABLE`/`CREATE TABLE`, producing spurious failures with
+  `tests/conftest.py`'s per-test Postgres reset and ClickHouse
+  `DROP TABLE`/`CREATE TABLE`, producing spurious failures with
   no connection to either diff. For any run that might overlap with another one on the
   same host, use `scripts/run_full_ci.sh` instead: it builds and starts its
   own uniquely-named Postgres + ClickHouse pair on two free ports, applies
@@ -64,13 +64,12 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `scripts/run_integration_tests.sh` itself also accepts `TEST_PG_PORT`/
   `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
   for a caller that starts its own containers by some other means.
-- `run_full_ci.sh` measures coverage by default, because it exists to
-  reproduce CI's `test` job and that job measures it. Pass `COVERAGE=0` when
-  the run is only a pass/fail gate — a pre-merge re-check after a review
-  fix, say — and the coverage report will never be read. The
-  instrumentation is minutes per run on a VPS sharing CPU with a concurrent
-  `/vps-loop-run` tick, and this gate is often paid more than once per
-  branch. Keep coverage on whenever the number itself matters.
+- `run_full_ci.sh` does NOT measure coverage by default, and neither does
+  the CI run that gates a PR: `ci.yml` measures it on `main` only, since
+  nothing gates on the number. Pass `COVERAGE=1` when the number itself is
+  what you want. The instrumentation is minutes per run on a VPS sharing
+  CPU with a concurrent `/vps-loop-run` tick, and this gate is often paid
+  more than once per branch.
 
 ## Frontend dev proxy — two config files
 - `frontend/` ships BOTH `vite.config.ts` (tracked) and a gitignored
