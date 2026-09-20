@@ -165,6 +165,7 @@ export function Sidebar() {
               <NavLink
                 to={`/agencies/${agencyId}/ask${suffix}`}
                 aria-label={collapsedFlag ? t("nav.ask") : undefined}
+                data-tour="ask-nav"
                 onMouseEnter={() => prefetchRouteChunk("ask")}
                 onFocus={() => prefetchRouteChunk("ask")}
                 onClick={() => onNavigate?.()}

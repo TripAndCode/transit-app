@@ -8,9 +8,13 @@
   color: var(--text-primary);
 }
 
+/* Height comes from the content column below (padding + text + CTA), not a
+   fixed 100vh -- a tall viewport no longer strands the hero in mostly-empty
+   space, and a short one can't push the sign-in CTA past the first frame.
+   `min-height` is only a floor so the tilted scene still has room to read as
+   a scene on a very short viewport. */
 .landing-hero {
   position: relative;
-  height: 100vh;
   min-height: 560px;
   overflow: hidden;
   background: var(--bg-page);
@@ -59,15 +63,16 @@
   pointer-events: none;
 }
 
+/* No `height: 100%`/`justify-content: center` -- the hero's box is now sized
+   BY this content (see `.landing-hero` above), so centering within it would
+   be a no-op; vertical padding sets the rhythm instead. */
 .landing-hero__content {
   position: relative;
-  height: 100%;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 6px;
   max-width: 560px;
-  padding: 0 6vw;
+  padding: 96px 6vw;
 }
 
 /* The pre-auth wordmark is the other place --brand survives: it is the

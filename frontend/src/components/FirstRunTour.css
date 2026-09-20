@@ -1,0 +1,92 @@
+/* FirstRunTour.tsx -- the three-step first-run coach mark. Portalled to
+   document.body at position: fixed, positioned by FirstRunTour.tsx itself
+   (the same computeTooltipPosition() Tooltip.tsx uses), not by this
+   stylesheet. */
+.first-run-tour {
+  position: fixed;
+  /* Above .tooltip's z-index: 60 -- a coach mark must never be occluded by
+     an incidental hover tooltip on the element it's pointing at. */
+  z-index: 70;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--card-radius);
+  box-shadow: var(--el-2);
+  padding: 16px 18px;
+}
+
+.first-run-tour__close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius);
+  transition: background var(--transition);
+}
+.first-run-tour__close:hover { background: var(--bg-page); }
+.first-run-tour__close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.first-run-tour__step {
+  margin: 0 0 4px;
+  font-size: var(--text-xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.first-run-tour__title {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.first-run-tour__body {
+  margin: 0 0 14px;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.first-run-tour__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.first-run-tour__later {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  padding: 6px 4px;
+}
+.first-run-tour__later:hover { color: var(--text-primary); }
+
+.first-run-tour__next {
+  border: none;
+  background: var(--accent-strong);
+  color: var(--on-accent);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: opacity var(--transition);
+}
+.first-run-tour__next:hover { opacity: 0.9; }
+.first-run-tour__next:focus-visible,
+.first-run-tour__later:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

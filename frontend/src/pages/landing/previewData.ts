@@ -1,85 +1,63 @@
-// Static, deterministic mock data for the pre-login dashboard-preview shell
-// (`DashboardPreview` and its panels). None of this is fetched -- the
-// preview renders before sign-in, with no agency/session context to query
-// real aggregates for, so every figure here is illustrative example data,
-// not a snapshot of anything real. Kept in one module so every panel reads
-// from the same fixed numbers instead of each inventing its own.
+// Static, deterministic fixtures for the landing page's scroll narrative
+// (`ScrollNarrative.tsx`). None of this is fetched -- the narrative renders
+// before sign-in, with no agency/session context to query real aggregates
+// for, so every figure here is illustrative example data feeding the real
+// chart components, not a snapshot of anything real.
 
-export type PreviewAgencyKey = "riverside" | "harborline" | "hillcrest";
+import type { RouteShapeStop, TrendDay } from "../../api/types";
+import type { StopEvidence } from "../../tabs/ask/stopEvidence";
 
-type PreviewAgency = {
-  key: PreviewAgencyKey;
-  /** i18n key for the display name -- kept as translated copy (not a raw
-   *  string in source) purely for consistency with every other user-facing
-   *  label on this page, even though the name itself is invented. */
-  nameKey: string;
-  avgDelayMin: number;
-  onTimePct: number;
-};
-
-export const PREVIEW_AGENCIES: PreviewAgency[] = [
-  { key: "riverside", nameKey: "landing.preview.agency.riverside", avgDelayMin: 1.6, onTimePct: 92 },
-  { key: "harborline", nameKey: "landing.preview.agency.harborline", avgDelayMin: 2.4, onTimePct: 85 },
-  { key: "hillcrest", nameKey: "landing.preview.agency.hillcrest", avgDelayMin: 3.9, onTimePct: 78 },
+// "Delay builds along a route" -- fed to the real `StopChart`. Delay climbs
+// stop-by-stop toward the end of the line; the previous-period comparison
+// stays comparatively flat, so the two lines visibly diverge as the route
+// runs on, the same shape a real degrading route produces.
+export const PREVIEW_ROUTE_STOPS: RouteShapeStop[] = [
+  { stop_sequence: 1, stop_name: "Riverside Sta.", stop_id: "S1", lon: 139.70, lat: 35.66, avg_min: 0.3, samples: 240 },
+  { stop_sequence: 2, stop_name: "Market St.", stop_id: "S2", lon: 139.706, lat: 35.663, avg_min: 0.6, samples: 238 },
+  { stop_sequence: 3, stop_name: "City Hall", stop_id: "S3", lon: 139.712, lat: 35.667, avg_min: 1.4, samples: 231 },
+  { stop_sequence: 4, stop_name: "University", stop_id: "S4", lon: 139.719, lat: 35.671, avg_min: 2.1, samples: 226 },
+  { stop_sequence: 5, stop_name: "Harborview", stop_id: "S5", lon: 139.726, lat: 35.675, avg_min: 3.0, samples: 219 },
+  { stop_sequence: 6, stop_name: "Pier Terminal", stop_id: "S6", lon: 139.733, lat: 35.679, avg_min: 3.9, samples: 214 },
 ];
 
-type PreviewRoute = { code: string; delayMin: number; onTime: boolean };
+export const PREVIEW_ROUTE_STOPS_PREVIOUS: RouteShapeStop[] = [
+  { stop_sequence: 1, stop_name: "Riverside Sta.", stop_id: "S1", lon: 139.70, lat: 35.66, avg_min: 1.0, samples: 231 },
+  { stop_sequence: 2, stop_name: "Market St.", stop_id: "S2", lon: 139.706, lat: 35.663, avg_min: 1.1, samples: 229 },
+  { stop_sequence: 3, stop_name: "City Hall", stop_id: "S3", lon: 139.712, lat: 35.667, avg_min: 1.0, samples: 225 },
+  { stop_sequence: 4, stop_name: "University", stop_id: "S4", lon: 139.719, lat: 35.671, avg_min: 1.2, samples: 220 },
+  { stop_sequence: 5, stop_name: "Harborview", stop_id: "S5", lon: 139.726, lat: 35.675, avg_min: 1.1, samples: 213 },
+  { stop_sequence: 6, stop_name: "Pier Terminal", stop_id: "S6", lon: 139.733, lat: 35.679, avg_min: 1.3, samples: 208 },
+];
 
-// One route pair per agency (on-time/at-risk) so the Overview panel's filter
-// chips ("all" / "on-time" / "delayed") always have at least one match in
-// either sub-filter, whichever agency is selected.
-export const PREVIEW_ROUTES: Record<PreviewAgencyKey, PreviewRoute[]> = {
-  riverside: [
-    { code: "R1", delayMin: 0.6, onTime: true },
-    { code: "R4", delayMin: 1.2, onTime: true },
-    { code: "R7", delayMin: 3.8, onTime: false },
-  ],
-  harborline: [
-    { code: "H2", delayMin: 1.0, onTime: true },
-    { code: "H5", delayMin: 2.9, onTime: false },
-    { code: "H9", delayMin: 4.4, onTime: false },
-  ],
-  hillcrest: [
-    { code: "C3", delayMin: 1.4, onTime: true },
-    { code: "C6", delayMin: 3.3, onTime: false },
-    { code: "C8", delayMin: 5.1, onTime: false },
-  ],
-};
+// "Every day, compared" -- fed to the real `DailyChart` (the same component
+// Reports uses). A couple of rough days against a calmer trailing average,
+// so the raw-vs-smoothed lines both have something to show.
+export const PREVIEW_DAILY_TREND: TrendDay[] = [
+  { date: "2026-08-25", avg_min: 1.8, avg_min_smoothed: 2.0, samples: 412, top_offenders: [] },
+  { date: "2026-08-26", avg_min: 2.4, avg_min_smoothed: 2.1, samples: 405, top_offenders: [] },
+  { date: "2026-08-27", avg_min: 1.6, avg_min_smoothed: 2.0, samples: 398, top_offenders: [] },
+  { date: "2026-08-28", avg_min: 3.1, avg_min_smoothed: 2.2, samples: 420, top_offenders: [] },
+  { date: "2026-08-29", avg_min: 2.9, avg_min_smoothed: 2.3, samples: 431, top_offenders: [] },
+  { date: "2026-08-30", avg_min: 1.2, avg_min_smoothed: 2.1, samples: 260, top_offenders: [] },
+  { date: "2026-08-31", avg_min: 1.0, avg_min_smoothed: 1.9, samples: 245, top_offenders: [] },
+  { date: "2026-09-01", avg_min: 2.0, avg_min_smoothed: 1.9, samples: 400, top_offenders: [] },
+  { date: "2026-09-02", avg_min: 2.6, avg_min_smoothed: 2.0, samples: 411, top_offenders: [] },
+  { date: "2026-09-03", avg_min: 4.2, avg_min_smoothed: 2.4, samples: 418, top_offenders: [] },
+  { date: "2026-09-04", avg_min: 3.0, avg_min_smoothed: 2.6, samples: 407, top_offenders: [] },
+  { date: "2026-09-05", avg_min: 1.7, avg_min_smoothed: 2.4, samples: 397, top_offenders: [] },
+  { date: "2026-09-06", avg_min: 1.1, avg_min_smoothed: 2.1, samples: 250, top_offenders: [] },
+  { date: "2026-09-07", avg_min: 1.3, avg_min_smoothed: 1.9, samples: 244, top_offenders: [] },
+];
 
-// Average delay (minutes) by day of week, Mon-Sun -- paired with the
-// existing `forecast.dow_*` translation keys so the trend view needs no new
-// day-label strings.
-export const PREVIEW_TREND_BY_DOW: readonly number[] = [1.1, 1.4, 2.0, 1.8, 2.6, 0.9, 0.7];
-export const DOW_KEYS = [
-  "forecast.dow_mon",
-  "forecast.dow_tue",
-  "forecast.dow_wed",
-  "forecast.dow_thu",
-  "forecast.dow_fri",
-  "forecast.dow_sat",
-  "forecast.dow_sun",
-] as const;
-
-// A handful of representative hours (not all 24) -- enough to read as a
-// day's shape at a glance without the panel needing a real scrubber.
-export const PREVIEW_HOURLY = [
-  { hour: 6, delayMin: 0.8 },
-  { hour: 9, delayMin: 2.1 },
-  { hour: 12, delayMin: 1.5 },
-  { hour: 15, delayMin: 3.4 },
-  { hour: 18, delayMin: 4.2 },
-  { hour: 21, delayMin: 1.0 },
-] as const;
-
-type PreviewAskExchange = { questionKey: string; answerKey: string };
-
-// Canned question/answer pairs for the Ask preview's suggestion chips. Real
-// Ask routing (rules -> embedding nearest-neighbour -> RAG LLM, per
-// CLAUDE.md) needs a signed-in session and a real agency; this preview
-// exists specifically so a prospective user can see the *shape* of an Ask
-// conversation before either of those exist.
-export const PREVIEW_ASK_EXCHANGES: PreviewAskExchange[] = [
-  { questionKey: "landing.preview.ask.q1", answerKey: "landing.preview.ask.a1" },
-  { questionKey: "landing.preview.ask.q2", answerKey: "landing.preview.ask.a2" },
-  { questionKey: "landing.preview.ask.q3", answerKey: "landing.preview.ask.a3" },
+// "Ask, get evidence" -- fed to the real `StopEvidenceChart`, the same
+// evidence view a live Ask answer renders. One stop with no observations
+// (`minutes: null`) so the fixture exercises the same missing-data path
+// real data hits.
+export const PREVIEW_ASK_EVIDENCE: StopEvidence[] = [
+  { sequence: 1, name: "Riverside Sta.", minutes: 0.4, samples: 240 },
+  { sequence: 2, name: "Market St.", minutes: 0.7, samples: 238 },
+  { sequence: 3, name: "City Hall", minutes: 1.5, samples: 231 },
+  { sequence: 4, name: "University", minutes: null, samples: 0 },
+  { sequence: 5, name: "Harborview", minutes: 2.8, samples: 219 },
+  { sequence: 6, name: "Pier Terminal", minutes: 3.6, samples: 214 },
 ];
