@@ -30,11 +30,13 @@ import type {
   ReportMeta,
   ReportResponse,
   Route,
+  RoutesResponse,
   RouteShapeResponse,
   RouteStopProfileResponse,
   RouteSummaryResponse,
   RouteTripsResponse,
   Suggestion,
+  SuggestionEnvelope,
   WeatherDelayResponse,
 } from "./types";
 import { useSession } from "./auth";
@@ -68,7 +70,8 @@ export function useForecastOverview(
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
   return useQuery({
     queryKey: ["routes", agencyId],
-    queryFn: ({ signal }) => apiGet<Route[]>(`/api/${agencyId}/routes`, { signal }),
+    queryFn: ({ signal }) =>
+      apiGet<RoutesResponse>(`/api/${agencyId}/routes`, { signal }).then((r) => r.rows),
     enabled: agencyId != null,
     // Routes are quarterly-static, but a 1-hour staleTime froze empty
     // arrays (returned during a fresh deploy's initial ingest) for an
@@ -177,7 +180,9 @@ export function useSuggestion(
     queryKey: ["reports-suggest", agencyId, excludeKey],
     queryFn: ({ signal }) => {
       const qs = exclude.map((e) => `exclude=${encodeURIComponent(e)}`).join("&");
-      return apiGet<Suggestion | null>(`/api/${agencyId}/reports/suggest${qs ? `?${qs}` : ""}`, { signal });
+      return apiGet<SuggestionEnvelope>(`/api/${agencyId}/reports/suggest${qs ? `?${qs}` : ""}`, {
+        signal,
+      }).then((r) => r.suggestion);
     },
     enabled: agencyId != null,
     staleTime: 60 * 1000,

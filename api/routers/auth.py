@@ -14,10 +14,13 @@ sticky server-side state between login start and callback. Starlette's
 ``request.session`` defensively; we just don't rely on it for security.
 """
 
+import hashlib
+import hmac
 import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import asyncpg
@@ -29,7 +32,15 @@ from pydantic import BaseModel
 from api.deps import get_conn
 from api.middleware.ratelimit import limiter
 from api.oauth import oauth
-from api.security import User, cookie_secure, csrf_guard, current_user, hash_password, verify_password
+from api.security import (
+    User,
+    cookie_secure,
+    csrf_guard,
+    current_user,
+    hash_password,
+    token_hash,
+    verify_local_login_password,
+)
 from pipeline.audit import record_event
 
 _log = logging.getLogger(__name__)
@@ -114,10 +125,15 @@ async def seed_local_admin(pool: asyncpg.Pool) -> None:
             )
 
 
-_signer = URLSafeTimedSerializer(
-    os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret"),
-    salt="oauth-tx",
-)
+def _get_signer() -> URLSafeTimedSerializer:
+    """Build the oauth_tx signer on each use rather than at import time, so
+    it reads ``SESSION_SIGNING_KEY`` after ``api.main``'s startup validation
+    has had a chance to reject a missing key in production, instead of
+    baking in the dev-only fallback key permanently at module import."""
+    return URLSafeTimedSerializer(
+        os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret"),
+        salt="oauth-tx",
+    )
 
 
 def _require_sso_configured() -> None:
@@ -168,7 +184,7 @@ def sanitize_next(value: str | None) -> str:
 
 
 @router.get("/{provider}/login")
-async def login(provider: str, request: Request, next: str = "/"):
+async def login(provider: str, request: Request, next: str = "/") -> RedirectResponse:
     """Redirect the browser to ``provider`` OAuth. Stashes state + PKCE verifier
     + sanitized next URL in a signed short-lived cookie that the callback verifies.
     """
@@ -180,7 +196,9 @@ async def login(provider: str, request: Request, next: str = "/"):
     client = oauth.create_client(provider)
     state = secrets.token_urlsafe(24)
     code_verifier = secrets.token_urlsafe(48)
-    tx_payload = _signer.dumps({"state": state, "verifier": code_verifier, "next": safe_next, "provider": provider})
+    tx_payload = _get_signer().dumps(
+        {"state": state, "verifier": code_verifier, "next": safe_next, "provider": provider}
+    )
     auth_url_resp = await client.authorize_redirect(
         request,
         redirect_uri,
@@ -199,7 +217,7 @@ async def login(provider: str, request: Request, next: str = "/"):
     return auth_url_resp
 
 
-async def _fetch_userinfo(client, token, provider: str) -> dict:
+async def _fetch_userinfo(client: Any, token: dict[str, Any], provider: str) -> dict[str, Any]:
     """Normalize provider userinfo to {sub, email, email_verified, name, avatar_url}."""
     if provider == "google":
         info = token.get("userinfo")
@@ -242,9 +260,9 @@ class LocalAccountConflict(Exception):
 
 
 async def _upsert_user(
-    conn,
+    conn: asyncpg.Connection,
     provider: str,
-    info: dict,
+    info: dict[str, Any],
     *,
     ip: str | None = None,
     user_agent: str | None = None,
@@ -334,14 +352,19 @@ async def _upsert_user(
     return uid, role
 
 
-async def _create_session(conn, uid: int, ua: str | None, ip: str | None) -> str:
+async def _create_session(conn: asyncpg.Connection, uid: int, ua: str | None, ip: str | None) -> str:
     """Insert a sessions row for ``uid`` and return the new ``sid``. Shared by
     the OAuth callback and the local-admin login — both mint a session the
-    same way once they've settled on a user_id."""
+    same way once they've settled on a user_id.
+
+    Only the digest is persisted; the raw ``sid`` is returned to be set as the
+    cookie and is then unrecoverable from the database. The legacy ``sid``
+    column is deliberately left NULL — a row that stored the raw value would
+    reintroduce exactly the exposure the hash exists to remove."""
     sid = secrets.token_urlsafe(32)
     await conn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)",
+        token_hash(sid),
         uid,
         datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS),
         ua,
@@ -350,7 +373,9 @@ async def _create_session(conn, uid: int, ua: str | None, ip: str | None) -> str
     return sid
 
 
-async def _mint_session_and_log_login(conn, uid: int, ua: str | None, ip: str | None, provider: str) -> str:
+async def _mint_session_and_log_login(
+    conn: asyncpg.Connection, uid: int, ua: str | None, ip: str | None, provider: str
+) -> str:
     """Session-row-insert + login-event sequence shared by the OAuth callback
     and local_login — both mint a session and audit a ``kind="login"`` event
     identically once they've settled on a user_id, differing only in which
@@ -360,7 +385,7 @@ async def _mint_session_and_log_login(conn, uid: int, ua: str | None, ip: str | 
     return sid
 
 
-def _set_session_cookie(resp, sid: str) -> None:
+def _set_session_cookie(resp: Response, sid: str) -> None:
     resp.set_cookie(
         SESSION_COOKIE_NAME,
         sid,
@@ -372,7 +397,7 @@ def _set_session_cookie(resp, sid: str) -> None:
     )
 
 
-async def _fail_login(conn, request: Request, provider: str, reason: str) -> RedirectResponse:
+async def _fail_login(conn: asyncpg.Connection, request: Request, provider: str, reason: str) -> RedirectResponse:
     """Audit + redirect helper for OAuth callback failure paths."""
     await record_event(
         conn,
@@ -388,7 +413,7 @@ async def _fail_login(conn, request: Request, provider: str, reason: str) -> Red
 
 
 @router.get("/{provider}/callback")
-async def callback(provider: str, request: Request, conn: asyncpg.Connection = Depends(get_conn)):
+async def callback(provider: str, request: Request, conn: asyncpg.Connection = Depends(get_conn)) -> RedirectResponse:
     """OAuth provider redirects here with ``code`` and ``state``. Validate against
     the signed ``oauth_tx`` cookie, exchange the code, upsert user + session,
     set the ``sid`` cookie, and redirect to the sanitized next URL.
@@ -400,7 +425,7 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
     if not tx_raw:
         return await _fail_login(conn, request, provider, "state")
     try:
-        tx = _signer.loads(tx_raw, max_age=TX_TTL_SEC)
+        tx = _get_signer().loads(tx_raw, max_age=TX_TTL_SEC)
     except BadSignature:
         return await _fail_login(conn, request, provider, "state")
     if tx.get("provider") != provider:
@@ -452,20 +477,40 @@ class LocalLoginBody(BaseModel):
     password: str
 
 
+def _username_fingerprint(username: str) -> str:
+    """Keyed fingerprint of an attempted username for the failed-login audit
+    trail, so repeated attempts on one account still correlate.
+
+    The username field is a common target for a mistyped password (autofill,
+    muscle memory, a password manager filling the wrong field), so this value
+    must be assumed to sometimes *be* a password; storing it verbatim would
+    retain that secret in ``login_events.meta`` indefinitely. Keyed with
+    SESSION_SIGNING_KEY rather than a bare digest for exactly that case: a
+    plain hash of a human-chosen password is recovered by running a wordlist
+    through the same hash, so it would not protect the input it exists to
+    protect. Lowercased first so one account fingerprints identically
+    regardless of case.
+    """
+    key = os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret").encode()
+    return hmac.new(key, username.lower().encode(), hashlib.sha256).hexdigest()[:16]
+
+
 @router.post("/local/login")
 @limiter.limit("5/minute")
 async def local_login(
     request: Request,
     body: LocalLoginBody,
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> JSONResponse:
     """Password login for the single break-glass admin account (seeded at
     startup from DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD — see
     api.main's lifespan). Exists so there's always a way into /admin that
     doesn't depend on OAuth being configured or reachable. Rate-limited
     per IP; every attempt (success or failure) is audited to login_events
-    the same way OAuth failures already are.
+    the same way OAuth failures already are. CSRF-guarded like every other
+    mutating route.
     """
+    csrf_guard(request)
     if not local_admin_enabled():
         raise HTTPException(status_code=503, detail="local admin login not configured")
 
@@ -475,7 +520,12 @@ async def local_login(
         "SELECT user_id, password_hash FROM users WHERE email=$1",
         body.username,
     )
-    if row is None or not verify_password(body.password, row["password_hash"]):
+    password_hash = row["password_hash"] if row is not None else None
+    # Evaluated before the branch, never inside it: `or` short-circuits, so
+    # testing `row is None` first would skip the verification entirely for an
+    # unknown username and reintroduce the timing side channel this closes.
+    password_ok = verify_local_login_password(body.password, password_hash)
+    if row is None or not password_ok:
         await record_event(
             conn,
             user_id=None,
@@ -484,7 +534,7 @@ async def local_login(
             provider="local",
             ip=ip,
             user_agent=ua,
-            meta={"reason": "bad_credentials", "username": body.username},
+            meta={"reason": "bad_credentials", "username_hash": _username_fingerprint(body.username)},
         )
         return JSONResponse(status_code=401, content={"error": "invalid_credentials"})
 
@@ -502,7 +552,7 @@ async def logout(
     request: Request,
     user: User | None = Depends(current_user),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> Response:
     """Delete the session row and clear the ``sid`` cookie. CSRF-guarded.
 
     Idempotent: succeeds with 204 even if no session is present, so a
@@ -511,7 +561,7 @@ async def logout(
     csrf_guard(request)
     sid = request.cookies.get(SESSION_COOKIE_NAME)
     if sid and user:
-        await conn.execute("DELETE FROM sessions WHERE sid=$1 AND user_id=$2", sid, user.user_id)
+        await conn.execute("DELETE FROM sessions WHERE sid_hash=$1 AND user_id=$2", token_hash(sid), user.user_id)
         ua = request.headers.get("user-agent")
         ip = request.client.host if request.client else None
         await record_event(conn, user_id=user.user_id, actor_id=user.user_id, kind="logout", ip=ip, user_agent=ua)

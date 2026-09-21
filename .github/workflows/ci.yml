@@ -1,13 +1,32 @@
 name: CI
+
+# `pull_request` is what the merge gate reads, and it already covers every
+# branch headed anywhere. Listening on `push` for all branches as well meant
+# every push to an open PR ran the whole suite twice over the same tree — on
+# a single self-hosted runner that is double the queue for no extra signal.
+# `push` stays for `main` alone, so a commit landing there outside a PR is
+# still checked. Mirrors `secrets-scan.yml`.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
-    branches: ["**"]
+
+# One in-flight run per pull request: a new push supersedes the previous run
+# instead of queueing behind it, which on one runner is the difference
+# between the current head being tested now and being tested after every
+# head before it. Pull requests only — a `main` run records what that commit
+# did rather than previewing it, so nothing should cancel it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   frontend:
     runs-on: [self-hosted, vps]
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: frontend
@@ -31,6 +50,17 @@ jobs:
       # as errors rather than warnings.
       - name: Lint
         run: npm run lint
+
+      # Key-parity gate: every visible string's t() key must exist in both
+      # frontend/src/i18n/locales/ja.json and en.json.
+      - name: i18n key parity
+        run: npm run lint:i18n
+
+      # Exact-string gate for server-rendered strings the frontend can't see
+      # through t(): shells out to `python3 scripts/lint-i18n-strings.py`,
+      # which the self-hosted VPS runner has on PATH.
+      - name: i18n exact-string check
+        run: npm run lint:i18n-strings
 
       # Knip dead-code check: exits non-zero on any unused file/export, which
       # now gates the build to keep the tree free of dead code.
@@ -57,6 +87,7 @@ jobs:
 
   test:
     runs-on: [self-hosted, vps]
+    timeout-minutes: 45
 
     services:
       clickhouse:
@@ -80,20 +111,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Only meaningful on GitHub-hosted VMs, whose shared root filesystem
-      # comes pre-loaded with tooling this job never uses (Android SDK,
-      # .NET, GHC, etc.) and has tipped into intermittent `DiskFull` mid-run.
-      # A persistent self-hosted runner doesn't carry that preinstalled
-      # bulk and the cleanup commands need sudo, which this runner's user
-      # intentionally does not have.
-      - name: Free disk space on the runner
-        if: runner.environment == 'github-hosted'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
-            /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
-          df -h /
-
+      # setup-python first: this self-hosted runner has no system `pip`, so
+      # the Poetry install below depends on the interpreter this step puts on
+      # PATH. That rules out `cache: poetry`, which needs Poetry to already be
+      # installed when setup-python runs -- the two requirements are mutually
+      # exclusive here, and a working gate matters more than the cache.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -105,6 +127,7 @@ jobs:
         run: poetry install
 
       - name: Start Postgres from db/Dockerfile
+        id: postgres
         uses: ./.github/actions/start-test-postgres
         with:
           container-name: transit-ci-db
@@ -112,7 +135,7 @@ jobs:
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up
         env:
-          DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
+          DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
 
       # Equivalent of `make ch-bootstrap`. The service container above isn't
       # started via docker compose/the Makefile, so this creates the
@@ -164,7 +187,7 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
+          DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
           GEMINI_API_KEY: test-key
           CLICKHOUSE_HOST: localhost
           # tests/conftest.py's ch_client/ch_async_client fixtures (and a
@@ -178,5 +201,18 @@ jobs:
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
-        run: poetry run pytest --cov=api --cov=pipeline --cov=db --cov-report=term
+          # Coverage instruments every line the suite executes and nothing
+          # gates on the number it prints, so a pull request pays for a
+          # report no check reads. `main` still produces one, which is where
+          # the figure is worth having: it describes what landed.
+          COV_ARGS: ${{ github.event_name == 'push' && '--cov=api --cov=pipeline --cov=db --cov-report=term' || '' }}
+        run: poetry run pytest $COV_ARGS
+
+      # A persistent self-hosted runner keeps its Docker state between runs,
+      # so a leftover transit-ci-db container (its name, volume, and port
+      # binding) would otherwise collide with the next run even after this
+      # job fails or is cancelled.
+      - name: Stop and remove the Postgres container
+        if: always()
+        run: docker rm -f -v transit-ci-db 2>/dev/null || true
 
