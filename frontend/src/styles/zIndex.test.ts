@@ -21,4 +21,18 @@ describe("Z_INDEX / global.css mirror", () => {
       expect(Number(match![1])).toBe(value);
     });
   }
+
+  // The loop above only walks Z_INDEX, so it sees a rung missing from CSS
+  // but never a rung that outlives its TS key. An orphaned `--z-*` stays
+  // resolvable -- check-css-tokens is satisfied by anything declared in
+  // global.css -- so a CSS file can keep stacking against a rung the
+  // ladder no longer has, with both gates green.
+  test("global.css declares no --z-* rung that Z_INDEX has dropped", () => {
+    const declared = [...globalCss.matchAll(/(--z-[a-z0-9-]+)\s*:/g)].map((m) => m[1]);
+    const expected = new Set(
+      Object.keys(Z_INDEX).map((name) => `--z-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`),
+    );
+    const orphans = declared.filter((name) => !expected.has(name));
+    expect(orphans, "these --z-* rungs have no Z_INDEX key").toEqual([]);
+  });
 });
