@@ -2,7 +2,13 @@ import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
-import { RedirectReportsToAnalysis, RedirectForecastToAnalysis, RedirectLiveToOperations } from "./routes/legacyRedirects";
+import {
+  RedirectReportsToAnalysis,
+  RedirectForecastToAnalysis,
+  RedirectLiveToOperations,
+  RedirectOverviewToOperations,
+  RedirectMapToOperations,
+} from "./routes/legacyRedirects";
 import { RedirectNetworkToAgencyNetwork } from "./routes/networkRedirect";
 import "./i18n";
 import App from "./App";
@@ -74,13 +80,19 @@ const router = createBrowserRouter([
     errorElement: <RouteError />,
     children: [
       // Index has no static target — OnboardingGate owns the redirect once
-      // agencies load. Sending Navigate to="overview" here loops with the
-      // catch-all because /overview is not a registered route.
+      // agencies load. Sending Navigate to="operations" here loops with the
+      // catch-all because /operations is not a registered route.
       { index: true, element: <OnboardingGate /> },
-      { path: "agencies/:agencyId", element: <Navigate to="overview" replace /> },
-      { path: "agencies/:agencyId/overview", element: el(<MapTab />) },
+      { path: "agencies/:agencyId", element: <Navigate to="operations" replace /> },
+      // The single canonical mount point for MapTab -- MapLibre owns
+      // expensive GL context/tile state that must not be torn down and
+      // rebuilt by navigating between sibling routes that both rendered it.
+      { path: "agencies/:agencyId/operations", element: el(<MapTab />) },
       { path: "agencies/:agencyId/period-overview", element: el(<OverviewTab />) },
-      { path: "agencies/:agencyId/map", element: el(<MapTab />) },
+      // Pre-rename URLs redirect to the single mount point above rather than
+      // rendering MapTab a second time.
+      { path: "agencies/:agencyId/overview", element: <RedirectOverviewToOperations /> },
+      { path: "agencies/:agencyId/map", element: <RedirectMapToOperations /> },
       { path: "agencies/:agencyId/ask", element: el(<AskTab />) },
       { path: "agencies/:agencyId/live", element: <RedirectLiveToOperations /> },
       { path: "agencies/:agencyId/analysis", element: el(<AnalysisTab />) },
