@@ -111,16 +111,24 @@ def test_no_github_hosted_only_guard_remains() -> None:
     assert "github-hosted" not in text
 
 
-def test_python_setup_caches_poetry() -> None:
+def test_poetry_is_installed_after_setup_python() -> None:
+    """The runner supplies no system `pip`, so Poetry can only be installed
+    once setup-python has put an interpreter on PATH.
+
+    This forecloses `cache: poetry`, which requires the opposite order —
+    Poetry present before setup-python runs. Inverting the steps to gain the
+    cache fails the job outright with `pip: command not found`, so the order
+    is pinned here rather than left to look like an arbitrary preference.
+    """
     workflow = _workflow_yaml()
     steps = workflow["jobs"]["test"]["steps"]
     setup_python = next(s for s in steps if s.get("uses", "").startswith("actions/setup-python"))
-    assert setup_python.get("with", {}).get("cache") == "poetry"
-    # Poetry must already be on PATH by the time setup-python's cache step
-    # runs, or there's nothing for it to key the cache against.
     setup_index = steps.index(setup_python)
-    poetry_install_index = next(i for i, s in enumerate(steps) if "install poetry" in s.get("name", "").lower())
-    assert poetry_install_index < setup_index, "Poetry must be installed before actions/setup-python's cache step runs"
+    poetry_index = next(i for i, s in enumerate(steps) if "install poetry" in s.get("name", "").lower())
+    assert setup_index < poetry_index, "setup-python must run first; without it there is no pip to install Poetry with"
+    assert setup_python.get("with", {}).get("cache") != "poetry", (
+        "cache: poetry needs Poetry installed before this step, which this runner cannot do"
+    )
 
 
 def test_postgres_container_is_torn_down_unconditionally() -> None:

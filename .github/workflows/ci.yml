@@ -111,16 +111,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Poetry must be on PATH before actions/setup-python's own step below,
-      # since that step's `cache: poetry` keys and restores the cache by
-      # shelling out to the `poetry` command itself.
-      - name: Install Poetry
-        run: pip install poetry==1.8.5
-
+      # setup-python first: this self-hosted runner has no system `pip`, so
+      # the Poetry install below depends on the interpreter this step puts on
+      # PATH. That rules out `cache: poetry`, which needs Poetry to already be
+      # installed when setup-python runs -- the two requirements are mutually
+      # exclusive here, and a working gate matters more than the cache.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: poetry
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.5
 
       - name: Install dependencies
         run: poetry install
