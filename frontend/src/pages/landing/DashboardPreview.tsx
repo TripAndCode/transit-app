@@ -4,17 +4,25 @@ import { PreviewSidebar, type PreviewTabKey } from "./PreviewSidebar";
 import { PreviewMapPanel } from "./PreviewMapPanel";
 import { PreviewAnalysisPanel } from "./PreviewAnalysisPanel";
 import { PreviewReportsPanel } from "./PreviewReportsPanel";
+import { PreviewNetworkPanel } from "./PreviewNetworkPanel";
+import { PreviewPeriodOverviewPanel } from "./PreviewPeriodOverviewPanel";
 import { PreviewAskPanel } from "./PreviewAskPanel";
 import { PreviewHelpHint } from "./PreviewHelpHint";
 import type { PreviewAgencyKey } from "./previewData";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { SIDEBAR_NAV_ITEMS } from "../../components/Sidebar";
 
-// The tabs the living-demo timer cycles through, in the same order as the
-// real sidebar's nav list (`SIDEBAR_NAV_ITEMS`, shared with `PreviewSidebar`).
-// "ask" is deliberately excluded -- it's a CTA the visitor opts into, not a
-// peer tab, matching how `PreviewSidebar` itself treats it.
-const AUTO_ADVANCE_ORDER: PreviewTabKey[] = SIDEBAR_NAV_ITEMS.map((item) => item.to);
+// The living-demo timer spotlights only the three headline tabs, in the same
+// order the real sidebar lists them first (`SIDEBAR_NAV_ITEMS`, shared with
+// `PreviewSidebar`) -- Period overview and Network are still real, clickable
+// tabs below (so the nav can't drift from the signed-in app), just not part
+// of the unattended auto-cycle. "ask" is excluded for a different reason --
+// it's a CTA the visitor opts into, not a peer tab, matching how
+// `PreviewSidebar` itself treats it.
+const AUTO_ADVANCE_TABS = new Set<PreviewTabKey>(["operations", "route-analysis", "reports"]);
+const AUTO_ADVANCE_ORDER: PreviewTabKey[] = SIDEBAR_NAV_ITEMS.map((item) => item.to).filter((to) =>
+  AUTO_ADVANCE_TABS.has(to),
+);
 
 // A visitor who never touches the preview should still see the whole cycle
 // play out like a demo video would; one tab change every few seconds reads
@@ -55,7 +63,7 @@ function nextAutoAdvanceTab(current: PreviewTabKey): PreviewTabKey {
  *  `prefers-reduced-motion`. */
 export function DashboardPreview() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<PreviewTabKey>("overview");
+  const [activeTab, setActiveTab] = useState<PreviewTabKey>("operations");
   const [agencyKey, setAgencyKey] = useState<PreviewAgencyKey>("riverside");
   const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const hoveredRef = useRef(false);
@@ -112,11 +120,13 @@ export function DashboardPreview() {
           onSelectAgency={setAgencyKey}
         />
         <main style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-          <div style={{ position: "absolute", inset: 0, overflowY: activeTab === "overview" ? "hidden" : "auto" }}>
-            {/* "overview" renders the live-map mock -- the real sidebar's
+          <div style={{ position: "absolute", inset: 0, overflowY: activeTab === "operations" ? "hidden" : "auto" }}>
+            {/* "operations" renders the live-map mock -- the real sidebar's
                 Overview nav item routes to `MapTab`, not a KPI dashboard. */}
-            {activeTab === "overview" && <PreviewMapPanel />}
+            {activeTab === "operations" && <PreviewMapPanel />}
+            {activeTab === "period-overview" && <PreviewPeriodOverviewPanel agencyKey={agencyKey} />}
             {activeTab === "route-analysis" && <PreviewAnalysisPanel />}
+            {activeTab === "network" && <PreviewNetworkPanel />}
             {activeTab === "reports" && <PreviewReportsPanel agencyKey={agencyKey} />}
             {activeTab === "ask" && <PreviewAskPanel />}
           </div>

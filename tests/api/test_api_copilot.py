@@ -4,14 +4,12 @@ from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("LLM_KEY_ENCRYPTION_KEY", "zJj1v3nq7v3rj0aWq2p8m9s4b6d5f7h9k1n3q5s7u9w=")
 
-import asyncpg
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.conftest import TEST_ORIGIN
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transit")
+from api.security import token_hash
+from tests.conftest import TEST_ORIGIN, _test_pool
 
 
 async def _seed_user_and_session(conn, *, role="user", llm_approved=False):
@@ -26,8 +24,8 @@ async def _seed_user_and_session(conn, *, role="user", llm_approved=False):
     )["user_id"]
     sid = f"sid-{uid:0>30}"
     await conn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
+        token_hash(sid),
         uid,
         datetime.now(timezone.utc) + timedelta(days=30),
         "test-ua",
@@ -42,7 +40,7 @@ async def copilot_app(apply_schema):
     """
     from api.main import app
 
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    pool = await _test_pool()
     app.state.pool = pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
@@ -151,7 +149,7 @@ async def test_copilot_insight_holds_no_pool_connection_across_the_llm_call(copi
 
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", probing_insight)
 
-    single = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=1)
+    single = await _test_pool(min_size=1, max_size=1)
     original_pool = app.state.pool
     app.state.pool = single
     try:

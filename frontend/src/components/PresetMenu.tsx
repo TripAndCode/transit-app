@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { apiGet, apiPost, formatApiError } from "../api/client";
 import type { RangeCtx } from "../api/rangeContext";
+import { Z_INDEX } from "../styles/zIndex";
 
 type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: RangeCtx };
 
@@ -79,7 +80,7 @@ export function PresetMenu({
       {open && (
         <div style={{ position: "absolute", top: "100%", left: 0, padding: 12,
                        background: "var(--surface-1)", border: "1px solid var(--surface-2)",
-                       borderRadius: 4, zIndex: 10 }}>
+                       borderRadius: 4, zIndex: Z_INDEX.dropdown }}>
           <input
             // eslint-disable-next-line jsx-a11y/no-autofocus -- name field of a just-opened "save preset" popover; focusing it is the expected UX
             autoFocus

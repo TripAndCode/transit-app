@@ -5,6 +5,7 @@ import { useSession } from "../api/auth";
 import { useConfig } from "../api/config";
 import { useTheme } from "../styles/useTheme";
 import { SUPPORTED_LOCALES, type Locale } from "../i18n";
+import { Z_INDEX } from "../styles/zIndex";
 
 const LOCALE_LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
 
@@ -79,7 +80,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             borderRadius: 8,
             boxShadow: "var(--el-2)",
             padding: 6,
-            zIndex: 10,
+            zIndex: Z_INDEX.dropdown,
           }}
         >
           {config?.auth_enabled &&

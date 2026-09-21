@@ -1,14 +1,61 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAdminUsers, useDeleteUser, usePatchUser } from "../../api/admin";
 import { useSession } from "../../api/auth";
-import { formatApiError } from "../../api/client";
+import { ErrorBanner } from "../../components/ErrorBanner";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { pageItems } from "./pageItems";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
+
+/** The search box's own local-edit + debounce-commit state, extracted so the
+ *  displayed value can track `q` for any reason it changes -- including a
+ *  browser back/forward, not just this component's own debounce commit --
+ *  without losing focus. `qOverride` is the in-progress local edit (`null`
+ *  when there isn't one); the displayed value is `qOverride ?? q`. A `q`
+ *  change from any source discards a stale override during render (React's
+ *  documented "adjusting state when a prop changes" pattern comparing
+ *  against `committedQ`, not an effect, so this never causes a remount that
+ *  would drop focus the way keying this component on `q` would). Without
+ *  this reset, `qOverride` would keep echoing back whatever was last typed
+ *  even after external navigation changed `q` to something else. */
+function AdminUserSearchBox({
+  q,
+  setSearchParams,
+  placeholder,
+}: {
+  q: string;
+  setSearchParams: SetURLSearchParams;
+  placeholder: string;
+}) {
+  const [committedQ, setCommittedQ] = useState(q);
+  const [qOverride, setQOverride] = useState<string | null>(null);
+  if (q !== committedQ) {
+    setCommittedQ(q);
+    setQOverride(null);
+  }
+  const qInput = qOverride ?? q;
+
+  useEffect(() => {
+    if (qOverride == null) return;
+    const trimmed = qOverride.trim();
+    if (trimmed === q) return;
+    const id = setTimeout(() => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (trimmed) next.set("q", trimmed);
+        else next.delete("q");
+        next.delete("page");
+        return next;
+      }, { replace: true });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [qOverride, q, setSearchParams]);
+
+  return <AdminSearchInput placeholder={placeholder} value={qInput} onChange={(e) => setQOverride(e.target.value)} />;
+}
 
 /** Admin: searchable, filterable, paginated user list with inline role / suspend / delete controls. */
 export function AdminUsersPage() {
@@ -24,28 +71,7 @@ export function AdminUsersPage() {
 
   const { data: me } = useSession();
 
-  // The search box is debounced locally so the URL/query key (and therefore
-  // the backend ILIKE scan) doesn't change on every keystroke. Skipping when
-  // the trimmed input already matches the committed `q` is what keeps this
-  // effect from re-arming (and clobbering `page`) on every unrelated URL
-  // change — `setSearchParams`'s identity changes on any searchParams update.
-  const [qInput, setQInput] = useState(q);
-  useEffect(() => {
-    const trimmed = qInput.trim();
-    if (trimmed === q) return;
-    const id = setTimeout(() => {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        if (trimmed) next.set("q", trimmed);
-        else next.delete("q");
-        next.delete("page");
-        return next;
-      }, { replace: true });
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [qInput, q, setSearchParams]);
-
-  const { data, isLoading, isPlaceholderData, error } = useAdminUsers({
+  const { data, isLoading, isPlaceholderData, error, refetch } = useAdminUsers({
     q,
     role,
     suspended,
@@ -121,10 +147,10 @@ export function AdminUsersPage() {
     <div style={{ padding: 24 }}>
       <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("admin.users.title")}</h1>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <AdminSearchInput
+        <AdminUserSearchBox
+          q={q}
+          setSearchParams={setSearchParams}
           placeholder={t("admin.users.search_placeholder")}
-          value={qInput}
-          onChange={(e) => setQInput(e.target.value)}
         />
         <select
           aria-label={t("account.role_label")}
@@ -145,7 +171,7 @@ export function AdminUsersPage() {
           <option value="true">{t("admin.users.status.suspended")}</option>
         </select>
       </div>
-      {error && <div style={{ color: "var(--text-tertiary)" }}>{formatApiError(error)}</div>}
+      {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {isLoading && <div>{t("common.loading")}</div>}
       <table className="admin-table" style={{ opacity: isPlaceholderData ? 0.6 : 1 }}>
         <thead>
@@ -226,12 +252,7 @@ export function AdminUsersPage() {
           ))}
         </tbody>
       </table>
-      {(patch.error || del.error) && (
-        <div role="alert" style={{ marginTop: 8, padding: 8, background: "var(--surface-2)",
-                                    borderRadius: 4, fontSize: 13, color: "var(--text-tertiary)" }}>
-          {formatApiError(patch.error || del.error)}
-        </div>
-      )}
+      {(patch.error || del.error) && <ErrorBanner error={patch.error || del.error} />}
       <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
           {t("admin.users.total", { count: total })}

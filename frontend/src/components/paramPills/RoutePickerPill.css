@@ -73,7 +73,7 @@
   border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.12));
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
-  z-index: 20;
+  z-index: var(--z-dropdown);
 }
 
 /* Flipped upward when there isn't enough room below the trigger (e.g. this

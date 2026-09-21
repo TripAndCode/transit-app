@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useNetworkSummary } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import { Skeleton } from "../components/Skeleton";
 import { AsyncSection } from "../components/AsyncSection";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { delayColor } from "../styles/tokens";
+import { formatNumber } from "../utils/format";
 import type { NetworkAgencyRow } from "../api/types";
+import { useCappedList } from "../hooks/useCappedList";
+import "./networkTab.css";
 
 const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
 
@@ -48,11 +52,11 @@ const youBadgeStyle: React.CSSProperties = {
 
 export function NetworkTab() {
   const { t, i18n } = useTranslation();
-  const { agencyId } = useParams();
-  const currentAgencyId = agencyId ? Number(agencyId) : null;
+  const currentAgencyId = useAgencyId();
   const [ctx, update] = useRangeContext();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
   const [showRidershipWeighted, setShowRidershipWeighted] = useState(false);
+  const cappedAgencies = useCappedList(data?.agencies ?? [], 200, data?.agencies);
 
   // Absent (not just unchecked) whenever NO agency in the current list has a
   // manually-configured ridership weight -- a toggle that flips to a view
@@ -91,7 +95,7 @@ export function NetworkTab() {
           <div className="network-card-top" style={cardTop}>
           <span style={rankStyle}>#{index + 1}</span>
           <Link
-            to={`/agencies/${a.agency_id}/overview${suffix}`}
+            to={`/agencies/${a.agency_id}/operations${suffix}`}
             title={t("network.view_agency", { name: a.agency_name })}
             style={{ ...agencyNameStyle, color: "var(--accent)", textDecoration: "none" }}
           >
@@ -141,7 +145,7 @@ export function NetworkTab() {
               {a.vehicle_km_delivered_pct != null
                 ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
                 : a.planned_trip_count != null
-                  ? t("network.planned_trip_count_fallback", { count: a.planned_trip_count.toLocaleString() })
+                  ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
                   : "—"}
               </div>
             </div>
@@ -156,7 +160,7 @@ export function NetworkTab() {
               }}
             />
           </div>
-          <span style={samplesStyle}>{a.samples.toLocaleString()}</span>
+          <span style={samplesStyle}>{formatNumber(a.samples)}</span>
         </div>
         {(showFeedFlag || showFreshnessFlag) && (
           <div style={secondaryRow}>
@@ -182,27 +186,6 @@ export function NetworkTab() {
 
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <style>{`
-        .network-card { transition: background var(--transition); }
-        .network-card:hover { background: var(--bg-soft); }
-        .network-card a:hover { text-decoration: underline; }
-        .network-card-top > div { min-width: 0; }
-        .network-card-bar { min-width: 0; }
-        .network-card-metrics { display: grid; grid-template-columns: 1.35fr repeat(3, 1fr); gap: 8px; min-width: 0; margin: 14px 0 16px; }
-        .network-card-metric { min-width: 0; padding: 10px 12px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); text-align: left; }
-        .network-card-metric--delay { background: var(--accent-soft); border-color: var(--accent); }
-        .network-card-metric-label { display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: var(--text-xs); font-weight: 600; }
-        .network-card-metric--delay > div { font-size: 28px !important; line-height: 1; }
-        .network-card-metric--delay .network-card-metric-label { color: var(--text-primary); }
-        /* BP.sm */ @media (max-width: 640px) { .network-card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-        .network-help { max-width: 640px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
-        .network-howto { max-width: 680px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-        .network-howto summary { display: inline-flex; padding: 4px 0; font-size: 13px; font-weight: 600; }
-        .network-howto-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
-        .network-howto-list li { min-width: 0; padding: 9px 10px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); }
-        .network-howto-list strong { display: block; margin-bottom: 2px; color: var(--text-primary); font-size: 12px; }
-        /* BP.sm */ @media (max-width: 640px) { .network-howto-list { grid-template-columns: 1fr; } }
-      `}</style>
       <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
         {t("network.eyebrow", { from: ctx.from, to: ctx.to })}
       </div>
@@ -262,9 +245,14 @@ export function NetworkTab() {
         empty={<p style={{ color: "var(--text-secondary)" }}>{t("network.empty")}</p>}
         skeleton={<Skeleton height={320} />}
       >
-        {(summary) => (
+        {() => (
           <div data-testid="network-card-list">
-            {summary.agencies.map((a, i) => renderCard(a, i))}
+            {cappedAgencies.visible.map((a, i) => renderCard(a, i))}
+            {cappedAgencies.remaining > 0 && (
+              <button type="button" className="btn-ghost" onClick={cappedAgencies.showMore}>
+                {t("common.show_more", { count: cappedAgencies.remaining })}
+              </button>
+            )}
           </div>
         )}
       </AsyncSection>

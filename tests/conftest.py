@@ -82,7 +82,6 @@ def _redirect_to_test_db() -> None:
 
 
 _redirect_to_test_db()
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 # Origin that ASGITransport's default `base_url="http://test"` emits when tests
 # set it. csrf_guard's ALLOW_TEST_ORIGIN path trusts this exact value when
@@ -91,11 +90,38 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 TEST_ORIGIN = "http://test"
 
 
+def _database_url() -> str:
+    """Read ``DATABASE_URL`` lazily, only when a DB fixture is actually used.
+
+    This module is imported (as pytest's parent conftest) for every test
+    under ``tests/``, including ``tests/unit``, which has no DB dependency
+    and overrides the fixtures below to no-ops (see ``tests/unit/conftest.py``).
+    Reading the env var eagerly at import time would make ``pytest tests/unit``
+    crash with ``DATABASE_URL`` unset even though nothing here ever uses it.
+    """
+    try:
+        return os.environ["DATABASE_URL"]
+    except KeyError:
+        raise RuntimeError(
+            "DATABASE_URL is not set. Tests that touch Postgres require it; "
+            "tests/unit does not (see tests/unit/conftest.py)."
+        ) from None
+
+
+def __getattr__(name: str) -> str:
+    """Lazy module attribute for backward-compatible ``from tests.conftest
+    import DATABASE_URL`` in test files that need the resolved (possibly
+    ``_test``-redirected) URL directly."""
+    if name == "DATABASE_URL":
+        return _database_url()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema():
     from db.migrate import migrate_up
 
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     migrate_up(conn)
     conn.close()
 
@@ -124,7 +150,7 @@ def reset_sql(apply_schema) -> str:
     topological order, and back on before the statement ends, so no test
     body ever runs with them disabled.
     """
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -170,7 +196,7 @@ def _clear_compute_caches():
 
 @pytest.fixture
 def pg_conn(apply_schema, reset_sql):
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     # Mirror api/main.py _init_connection (and the aconn fixture) so
     # `captured_at::date` casts in psycopg2-path tests use the same JST
     # civil calendar as production. Without this, tests that depend on
@@ -232,11 +258,11 @@ def _ch_schema() -> None:
 def ch_client(_ch_schema):
     """ClickHouse client against the throwaway `make ch-test` instance.
 
-    Hoisted here (from tests/pipeline/conftest.py, Task 5) because Task 6
-    (analyze()'s dedup materialization) needs it from tests/api/ and
-    tests/query/ too, not just tests/pipeline/ — a root conftest fixture is
-    visible to every subdirectory. Truncate (not drop+recreate) before each
-    test for isolation, since ClickHouse has no transactional rollback to
+    Lives in the root conftest, not a subdirectory one, because analyze()'s
+    dedup materialization means tests/api/ and tests/query/ need a ClickHouse
+    client too, not just tests/pipeline/ — a root conftest fixture is visible
+    to every subdirectory. Truncate (not drop+recreate) before each test for
+    isolation, since ClickHouse has no transactional rollback to
     lean on like the pg_conn fixture does — the schema itself never changes
     mid-session, so only `_ch_schema` needs to pay MergeTree's CREATE TABLE
     cost, once. The skip (rather than a file-level pytestmark) lives here so
@@ -255,9 +281,9 @@ def ch_client(_ch_schema):
 @pytest.fixture
 async def ch_async_client(ch_client):
     """Async ClickHouse client for wiring into a test FastAPI app's
-    ``app.state.ch_client`` (Task 8 — the async counterpart of `ch_client`,
-    for endpoints/tool-layer functions that now read live `updates` via the
-    async `get_ch` dependency instead of Postgres).
+    ``app.state.ch_client`` — the async counterpart of `ch_client`, for the
+    endpoints and tool-layer functions that read live `updates` through the
+    async `get_ch` dependency rather than Postgres.
 
     Depends on `ch_client` (not a duplicate schema drop/apply of its own) so
     schema setup happens exactly once and ordering is deterministic: the sync
@@ -292,7 +318,7 @@ def mirror_updates_to_ch(ch_client, agency_id) -> None:
     """
     from pipeline.clickhouse import insert_updates
 
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     try:
         with conn.cursor() as cur:
             cur.execute(

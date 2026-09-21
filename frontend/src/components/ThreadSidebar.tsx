@@ -1,10 +1,20 @@
-import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
+import { Z_INDEX } from "../styles/zIndex";
+import { FILTER_SEPARATOR } from "../utils/format";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -42,7 +52,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
     if (label !== tbKey) parts.push(label);
   }
 
-  return parts.join(" ・ "); // i18n-ignore: locale-neutral separator
+  return parts.join(FILTER_SEPARATOR);
 }
 
 // ─── context menu ────────────────────────────────────────────────────────────
@@ -87,6 +97,32 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     return () => document.removeEventListener("mousedown", handleClick);
   }, [menu]);
 
+  // Close menu on Escape.
+  useEffect(() => {
+    if (!menu) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenu(null);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [menu]);
+
+  // Clamp the menu to the viewport once its real size is known -- its
+  // anchor point (the kebab button's own position) can put a wide/tall menu
+  // partway or fully off-screen for rows near the right or bottom edge.
+  // Written directly to the node's style (not React state) since this is a
+  // one-off post-layout measurement of an external system (the rendered
+  // menu's own box), not state to synchronize back into a render.
+  useLayoutEffect(() => {
+    const node = menuRef.current;
+    if (!menu || !node) return;
+    const margin = 8;
+    const left = Math.max(margin, Math.min(menu.x, window.innerWidth - node.offsetWidth - margin));
+    const top = Math.max(margin, Math.min(menu.y, window.innerHeight - node.offsetHeight - margin));
+    node.style.left = `${left}px`;
+    node.style.top = `${top}px`;
+  }, [menu]);
+
   // Focus rename input when opened
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -95,8 +131,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     }
   }, [renamingId]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function openMenu(e: any, convId: string) {
+  function openMenu(e: ReactMouseEvent<HTMLElement>, convId: string) {
     e.preventDefault();
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -246,7 +281,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameBlur={commitRename}
                   onSelect={() => onSelect(conv.conversation_id)}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(" ・ ")} // i18n-ignore: locale-neutral separator
+                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(FILTER_SEPARATOR)}
                 />
               ))}
             </section>
@@ -264,11 +299,14 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
         position: "fixed",
         top: menu.y,
         left: menu.x,
-        zIndex: 500,
+        // Deliberately above modal/modalBackdrop: this menu can be opened
+        // from inside a modal-hosted sidebar, and a menu opened from within
+        // a surface must render above that surface.
+        zIndex: Z_INDEX.contextMenu,
         background: "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
         borderRadius: "var(--radius)",
-        boxShadow: "var(--el-2)",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
         minWidth: 160,
         padding: "var(--space-1) 0",
       }}
@@ -312,8 +350,7 @@ type ConvItemProps = {
   onRenameCommit: (id: string) => void;
   onRenameBlur: (id: string) => void;
   onSelect: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onContextMenu: (e: any) => void;
+  onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
   filterSummaryText: string;
 };
 
@@ -330,21 +367,17 @@ function ConvItem({
   onContextMenu,
   filterSummaryText,
 }: ConvItemProps) {
-  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(" ・ "); // i18n-ignore: locale-neutral separator
+  const { t } = useTranslation();
+  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(FILTER_SEPARATOR);
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
       onContextMenu={onContextMenu}
       style={{
         display: "flex",
         alignItems: "flex-start",
         gap: "var(--space-2)",
         padding: "8px var(--space-3)",
-        cursor: "pointer",
         background: isActive ? "var(--accent-soft)" : "transparent",
         borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
         transition: "background var(--transition)",
@@ -358,64 +391,90 @@ function ConvItem({
         if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "transparent";
       }}
     >
-      {/* Emoji */}
-      <span style={{ fontSize: 16, lineHeight: 1.5, flexShrink: 0 }}>💬</span>
-
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {isRenaming ? (
-          <input
-            ref={renameInputRef}
-            value={renameValue}
-            onChange={(e) => onRenameChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") onRenameCommit(conv.conversation_id);
-              if (e.key === "Escape") onRenameBlur(conv.conversation_id);
-              e.stopPropagation();
-            }}
-            onBlur={() => onRenameBlur(conv.conversation_id)}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "100%",
-              fontSize: 13,
-              padding: "2px 6px",
-              borderRadius: "var(--radius)",
-              border: "1px solid var(--accent)",
-              background: "var(--bg-surface)",
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: isActive ? 600 : 400,
-              color: "var(--text-primary)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              lineHeight: 1.4,
-            }}
-          >
-            {conv.title}
+      {isRenaming ? (
+        <>
+          {/* Emoji */}
+          <span style={{ fontSize: 16, lineHeight: 1.5, flexShrink: 0 }}>💬</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={(e) => onRenameChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onRenameCommit(conv.conversation_id);
+                if (e.key === "Escape") onRenameBlur(conv.conversation_id);
+                e.stopPropagation();
+              }}
+              onBlur={() => onRenameBlur(conv.conversation_id)}
+              style={{
+                width: "100%",
+                fontSize: 13,
+                padding: "2px 6px",
+                borderRadius: "var(--radius)",
+                border: "1px solid var(--accent)",
+                background: "var(--bg-surface)",
+              }}
+            />
           </div>
-        )}
+        </>
+      ) : (
+        // A real <button> (not a div carrying role="button") so it can't
+        // validly nest the kebab, which is a sibling instead -- it also
+        // gets native keyboard activation and the shared :focus-visible
+        // outline for free.
+        <button
+          type="button"
+          onClick={onSelect}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "var(--space-2)",
+            background: "none",
+            border: "none",
+            padding: 0,
+            margin: 0,
+            font: "inherit",
+            color: "inherit",
+            textAlign: "left",
+            cursor: "pointer",
+          }}
+        >
+          <span style={{ fontSize: 16, lineHeight: 1.5, flexShrink: 0 }}>💬</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: isActive ? 600 : 400,
+                color: "var(--text-primary)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                lineHeight: 1.4,
+              }}
+            >
+              {conv.title}
+            </div>
 
-        {!isRenaming && subLine && (
-          <div
-            style={{
-              fontSize: "var(--text-xs)",
-              color: "var(--text-tertiary)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              marginTop: 2,
-              lineHeight: 1.3,
-            }}
-          >
-            {subLine}
+            {subLine && (
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--text-tertiary)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  marginTop: 2,
+                  lineHeight: 1.3,
+                }}
+              >
+                {subLine}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </button>
+      )}
 
       {/* Kebab / more button */}
       <button
@@ -433,7 +492,7 @@ function ConvItem({
           opacity: 0.6,
           marginTop: 1,
         }}
-        aria-label="More options"
+        aria-label={t("ask.sidebar.more_options_aria")}
       >
         ⋯
       </button>

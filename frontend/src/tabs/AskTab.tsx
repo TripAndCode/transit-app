@@ -11,7 +11,6 @@
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
 import { useState, useRef, useEffect } from "react";
-import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   useConversation,
@@ -26,6 +25,7 @@ import {
 } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
+import { useAgencyId } from "../api/useAgencyId";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
@@ -42,8 +42,7 @@ import { useInvestigationLocation } from "./ask/useInvestigationLocation";
 
 export function AskTab() {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const [rangeCtx] = useRangeContext();
   const routeNames = useRouteNames(id);
 

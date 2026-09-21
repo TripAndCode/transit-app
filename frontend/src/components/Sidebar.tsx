@@ -4,6 +4,8 @@ import {
   FileText,
   BarChart3,
   LayoutDashboard,
+  CalendarRange,
+  GitCompare,
   HelpCircle,
   Clock,
   CircleSlash,
@@ -20,7 +22,7 @@ import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
-import { Z_INDEX } from "../styles/zIndex";
+import { Modal } from "./Modal";
 
 /** The sidebar's real nav destinations -- exported so the landing page's
  *  preview mockups (`pages/landing/PreviewSidebar.tsx`, and
@@ -28,8 +30,10 @@ import { Z_INDEX } from "../styles/zIndex";
  *  instead of maintaining their own copy, so the marketing preview's tab
  *  set/labels cannot drift from the real, signed-in nav. */
 export const SIDEBAR_NAV_ITEMS = [
-  { to: "overview", labelKey: "design:overview", Icon: LayoutDashboard },
+  { to: "operations", labelKey: "design:overview", Icon: LayoutDashboard },
+  { to: "period-overview", labelKey: "design:period_overview", Icon: CalendarRange },
   { to: "route-analysis", labelKey: "design:analysis", Icon: BarChart3 },
+  { to: "network", labelKey: "network.title", Icon: GitCompare },
   { to: "reports", labelKey: "design:reports", Icon: FileText },
 ] as const;
 
@@ -213,7 +217,7 @@ export function Sidebar() {
                   {t("nav.prototype_onboarding")}
                 </button>
                 <NavLink
-                  to={`/agencies/${agencyId}/overview${suffix}`}
+                  to={`/agencies/${agencyId}/operations${suffix}`}
                   onClick={() => onNavigate?.()}
                   style={{
                     display: "flex",
@@ -364,62 +368,52 @@ export function Sidebar() {
             <PanelLeft size={18} strokeWidth={1.5} aria-hidden="true" />
           </button>
 
-          {mobileOpen && (
-            <>
-              <div
+          <Modal
+            open={mobileOpen}
+            onClose={() => setMobileOpen(false)}
+            ariaLabel={t("nav.mobile_menu_title")}
+            variant="drawer"
+            style={{
+              left: 0,
+              width: 260,
+              borderRight: "1px solid var(--border-soft)",
+              display: "flex",
+              flexDirection: "column",
+              overflowY: "auto",
+              padding: "16px 0",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 4,
+                padding: "0 12px 16px 22px",
+              }}
+            >
+              {brandBlock(false)}
+              <button
+                type="button"
+                aria-label={t("common.close")}
                 onClick={() => setMobileOpen(false)}
-                role="presentation"
-                style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: Z_INDEX.drawerBackdrop }}
-              />
-              <aside
                 style={{
-                  position: "fixed",
-                  top: 0,
-                  left: 0,
-                  bottom: 0,
-                  width: 260,
-                  zIndex: Z_INDEX.drawer,
-                  background: "var(--bg-surface)",
-                  borderRight: "1px solid var(--border-soft)",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-tertiary)",
+                  cursor: "pointer",
                   display: "flex",
-                  flexDirection: "column",
-                  overflowY: "auto",
-                  padding: "16px 0",
+                  padding: 4,
+                  flexShrink: 0,
+                  fontSize: 18,
+                  lineHeight: 1,
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 4,
-                    padding: "0 12px 16px 22px",
-                  }}
-                >
-                  {brandBlock(false)}
-                  <button
-                    type="button"
-                    aria-label={t("common.close")}
-                    onClick={() => setMobileOpen(false)}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      color: "var(--text-tertiary)",
-                      cursor: "pointer",
-                      display: "flex",
-                      padding: 4,
-                      flexShrink: 0,
-                      fontSize: 18,
-                      lineHeight: 1,
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-                {renderNavAndFooter(false, () => setMobileOpen(false))}
-              </aside>
-            </>
-          )}
+                ×
+              </button>
+            </div>
+            {renderNavAndFooter(false, () => setMobileOpen(false))}
+          </Modal>
         </div>
 
         <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />

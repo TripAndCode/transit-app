@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import { routeDisplayName } from "../api/routeDisplayName";
 import {
   useRangeContext,
@@ -13,27 +13,9 @@ import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
+import { pill, groupLabel } from "./pillStyles";
+import { Z_INDEX } from "../styles/zIndex";
 
-const pill = (active: boolean): CSSProperties => ({
-  background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-  color: active ? "var(--accent)" : "var(--text-secondary)",
-  border: `1px solid ${active ? "var(--accent)" : "var(--border-soft)"}`,
-  borderRadius: 999,
-  padding: "5px 12px",
-  fontSize: 12,
-  fontWeight: active ? 600 : 400,
-  cursor: "pointer",
-  transition: "all var(--transition)",
-});
-
-const groupLabel: CSSProperties = {
-  fontSize: "var(--text-xs)",
-  color: "var(--text-tertiary)",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  marginBottom: 6,
-  display: "block",
-};
 
 type Draft = {
   dow: DowFilter;
@@ -304,7 +286,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
             position: "absolute",
             top: "calc(100% + 6px)",
             left: 0,
-            zIndex: 50,
+            zIndex: Z_INDEX.popover,
             width: 480,
             maxWidth: "calc(100vw - 48px)",
             background: "var(--bg-surface)",
@@ -409,11 +391,6 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
       )}
     </div>
   );
-}
-
-function useAgencyId(): number | null {
-  const { agencyId } = useParams();
-  return agencyId ? Number(agencyId) : null;
 }
 
 function dowLabel(d: DowFilter, t: (key: string) => string): string {

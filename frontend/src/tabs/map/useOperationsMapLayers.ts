@@ -4,6 +4,7 @@ import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse } 
 import { delayColorResolved, severityStepColors } from "../../styles/tokens";
 import { useThemeSignal } from "../../styles/theme";
 import { whenStyleReady } from "./styleReady";
+import { hhmm } from "./format";
 
 export const LIVE_TRIPS_SOURCE = "live-trips";
 export const LIVE_TRIPS_LAYER = "live-trip-markers";
@@ -20,6 +21,10 @@ const TRIP_PROGRESS_DIRECTION_LAYER = "trip-progress-direction";
 const TRIP_PROGRESS_STOPS_LAYER = "trip-progress-stops";
 const TRIP_PROGRESS_LABELS_LAYER = "trip-progress-labels";
 
+// Not `signedMin` (used elsewhere for the same +/-minutes shape): this
+// label feeds a MapLibre GeoJSON feature property rendered by a style
+// expression, which can't call `t()`, so it can't go through the
+// translated formatter.
 function delayLabel(seconds: number): string {
   const minutes = Math.round(seconds / 60);
   if (Math.abs(minutes) < 1) return "0";
@@ -54,7 +59,7 @@ export function useOperationsMapLayers(
           route_code: trip.route_code ?? "",
           delay_sec: trip.dep_delay,
           delay_label: delayLabel(trip.dep_delay),
-          trip_label: `${trip.scheduled_time?.slice(0, 5) ?? "--:--"}  ${delayLabel(trip.dep_delay)}`,
+          trip_label: `${hhmm(trip)}  ${delayLabel(trip.dep_delay)}`,
           route_selected: trip.route_code != null && trip.route_code === selectedRoute,
           selected: selectedTripId ? trip.trip_id === selectedTripId : trip.route_code != null && trip.route_code === selectedRoute,
         },

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ThreadSidebar } from "./ThreadSidebar";
 import * as hooks from "../api/hooks";
@@ -91,5 +92,90 @@ describe("ThreadSidebar", () => {
     mockConversations([]);
     render();
     expect(screen.getByText("New conversation")).toBeInTheDocument();
+  });
+
+  describe("row semantics", () => {
+    it("exposes the main row action as a real, independently reachable button, not a role=button wrapper around the kebab", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const rowButton = screen.getByRole("button", { name: /Morning delays/ });
+      expect(rowButton.tagName.toLowerCase()).toBe("button");
+      const kebab = screen.getByRole("button", { name: "More options" });
+      // The kebab must be a sibling, not a descendant of the row button --
+      // a real <button> cannot validly contain another interactive control.
+      expect(rowButton.contains(kebab)).toBe(false);
+    });
+
+    it("selects the conversation when the row button is activated by keyboard", async () => {
+      const onSelect = vi.fn();
+      mockConversations([conv({ title: "Morning delays" })]);
+      renderWithProviders(
+        <ThreadSidebar agencyId={9} activeId={null} onSelect={onSelect} onNewThread={vi.fn()} />,
+      );
+      await userEvent.tab(); // New-thread button
+      await userEvent.tab(); // search input
+      await userEvent.tab(); // row button
+      const rowButton = screen.getByRole("button", { name: /Morning delays/ });
+      expect(rowButton).toHaveFocus();
+      await userEvent.keyboard("{Enter}");
+      expect(onSelect).toHaveBeenCalledWith("c1");
+    });
+
+    it("still opens the context menu on right-click of the row container", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const rowButton = screen.getByRole("button", { name: /Morning delays/ });
+      fireEvent.contextMenu(rowButton);
+      expect(screen.getByText("Rename")).toBeInTheDocument();
+    });
+  });
+
+  describe("context menu", () => {
+    it("closes on Escape", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      fireEvent.contextMenu(screen.getByRole("button", { name: /Morning delays/ }));
+      expect(screen.getByText("Rename")).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByText("Rename")).not.toBeInTheDocument();
+    });
+
+    it("clamps its position so it never renders past the right/bottom viewport edge", () => {
+      const originalInnerWidth = window.innerWidth;
+      const originalInnerHeight = window.innerHeight;
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 400 });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 300 });
+      const offsetWidthSpy = vi
+        .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+        .mockReturnValue(200);
+      const offsetHeightSpy = vi
+        .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+        .mockReturnValue(150);
+
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      vi.spyOn(kebab, "getBoundingClientRect").mockReturnValue({
+        right: 395,
+        top: 290,
+        left: 350,
+        bottom: 300,
+        width: 24,
+        height: 24,
+        x: 350,
+        y: 290,
+        toJSON() {},
+      } as DOMRect);
+      fireEvent.click(kebab);
+
+      const menu = screen.getByText("Rename").closest("div") as HTMLElement;
+      expect(parseFloat(menu.style.left)).toBeLessThanOrEqual(400 - 200 - 1);
+      expect(parseFloat(menu.style.top)).toBeLessThanOrEqual(300 - 150 - 1);
+
+      offsetWidthSpy.mockRestore();
+      offsetHeightSpy.mockRestore();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+    });
   });
 });
