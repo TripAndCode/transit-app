@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useMatch, useNavigate, useParams } from "react-router-dom";
+import { useMatch, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import type { Agency } from "../api/types";
 import { onActivateKey } from "../utils/a11y";
 import { Z_INDEX } from "../styles/zIndex";
@@ -19,14 +20,13 @@ function filterAgencies(agencies: Agency[] | undefined, filter: string): Agency[
 export function AgencyPicker() {
   const { t } = useTranslation();
   const { data: agencies, isLoading } = useAgencies();
-  const { agencyId } = useParams();
   const navigate = useNavigate();
   const tabMatch = useMatch("/agencies/:agencyId/:tab/*");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
-  const currentId = agencyId ? Number(agencyId) : null;
+  const currentId = useAgencyId();
   const current = agencies?.find((a) => a.agency_id === currentId);
 
   // close on outside click

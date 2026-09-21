@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteShape } from "../api/hooks";
 import { useRangeContext, isoDaysBefore } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
+import { useAgencyId } from "../api/useAgencyId";
 import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
@@ -16,8 +17,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
 
 export function RouteAnalysisTab() {
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const { t } = useTranslation("design");
   const [ctx] = useRangeContext();
   const [params, setParams] = useSearchParams();
@@ -41,7 +41,7 @@ export function RouteAnalysisTab() {
         ...stops.map((s) => [id, route, ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, s.stop_sequence, s.stop_id, s.stop_name, s.avg_min, s.samples, matchedPrevious(s, prevStops)]),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
-      <button disabled={!id || !query.data?.stops.length || !!query.error} onClick={() => { try { saveAnalysis(id!, `${names.format(route)} · ${ctx.from} – ${ctx.to}`, ctx, compare); setNotice(t("saved")); } catch { setNotice(t("saveFailed")); } }}>{t("save")}</button>
+      <button disabled={!id || !query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id!, `${names.format(route)} · ${ctx.from} – ${ctx.to}`, ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
     </div></header>
     {notice && <span role="status">{notice}</span>}
     <AnalysisFilters agencyId={id} />

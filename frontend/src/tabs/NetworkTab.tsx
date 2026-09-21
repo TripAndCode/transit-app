@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useNetworkSummary } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import { Skeleton } from "../components/Skeleton";
 import { AsyncSection } from "../components/AsyncSection";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
@@ -51,8 +52,7 @@ const youBadgeStyle: React.CSSProperties = {
 
 export function NetworkTab() {
   const { t, i18n } = useTranslation();
-  const { agencyId } = useParams();
-  const currentAgencyId = agencyId ? Number(agencyId) : null;
+  const currentAgencyId = useAgencyId();
   const [ctx, update] = useRangeContext();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
   const [showRidershipWeighted, setShowRidershipWeighted] = useState(false);

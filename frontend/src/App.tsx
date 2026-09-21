@@ -3,6 +3,7 @@ import { Outlet, useMatch, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useDefaultRangeAnchor } from "./api/defaultRangeAnchor";
+import { useAgencyId } from "./api/useAgencyId";
 import { ActivityStrip } from "./components/ActivityStrip";
 import { CopilotPanel } from "./components/CopilotPanel";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
@@ -52,7 +53,7 @@ export default function App() {
   // is now agency-scoped (agencies/:agencyId/network) and remounts like every
   // other tab.
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
-  const agencyIdNum = agencyId ? Number(agencyId) : null;
+  const agencyIdNum = useAgencyId();
   const { pathname } = useLocation();
   const focused = FOCUSED_TAB_PATTERN.test(pathname);
   useDefaultRangeAnchor(agencyIdNum);

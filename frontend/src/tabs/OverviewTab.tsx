@@ -1,9 +1,9 @@
 // frontend/src/tabs/OverviewTab.tsx
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
 
 import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import { useRangeContext } from "../api/rangeContext";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
@@ -18,11 +18,6 @@ import { Skeleton } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
 
 import "../styles/overview.css";
-
-function useAgencyId(): number | null {
-  const { agencyId } = useParams();
-  return agencyId ? Number(agencyId) : null;
-}
 
 type OpenCard = "concentration" | "peak_hour" | "service_split" | null;
 

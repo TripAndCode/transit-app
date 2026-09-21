@@ -58,4 +58,13 @@ describe("routeGroups", () => {
     const routes = [route("a", "14-5"), route("b", "17-1")];
     expect(routeGroups(routes).map(([name]) => name).sort()).toEqual(["14-5", "17-1"]);
   });
+
+  it("only ever names a group that routeGroups actually produced for the same routes -- callers rely on this to look the group back up without a non-null assertion", () => {
+    const routes = [route("a", "14 共立ハイツ線"), route("b", "共立ハイツ線"), route("c", "17-1 五月が丘線")];
+    for (const codes of [["a"], ["a", "b"], ["c"], [], ["missing-code"]]) {
+      const name = selectedGroup(routes, codes);
+      if (name === "") continue;
+      expect(routeGroups(routes).some(([groupName]) => groupName === name)).toBe(true);
+    }
+  });
 });
