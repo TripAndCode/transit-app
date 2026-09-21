@@ -19,7 +19,7 @@ from pipeline.query.copilot_templates import (
     render_template,
     templates_for_tab,
 )
-from pipeline.query.llm_client import get_client
+from pipeline.query.llm_client import describe_provider_failure, get_client
 from pipeline.query.user_llm_keys import UserLLMKey
 
 logger = logging.getLogger(__name__)
@@ -127,14 +127,9 @@ async def generate_proactive_insight(
                 temperature=0.0,
             )
         except Exception as exc:
-            # Same constraint as chat.py's BYOK handler: the provider's error
-            # body can carry part of the user's key, so the exception type and
-            # its transport metadata are logged and its message is not.
-            status = getattr(exc, "status_code", None)
             logger.warning(
-                "copilot: BYOK completion failed; falling back to no_signal (%s%s)",
-                type(exc).__name__,
-                f", status={status}" if status else "",
+                "copilot: BYOK completion failed; falling back to no_signal (%s)",
+                describe_provider_failure(exc),
             )
             message = None
     else:

@@ -44,7 +44,7 @@ from pipeline.query.intent import IntentSignature, canonicalize, derive_confiden
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, get_client
+from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, describe_provider_failure, get_client
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
@@ -486,19 +486,7 @@ async def chat_with_tools(
         except BadRequestError:
             return None, "bad_request"
         except Exception as exc:
-            # Type, status and request id only -- never the message or a
-            # traceback. This runs on a user-supplied provider key, and a
-            # provider's error body routinely echoes part of the key back
-            # ("Incorrect API key provided: sk-..."), so the exception's own
-            # message is the one thing here that must not reach a log.
-            status = getattr(exc, "status_code", None)
-            request_id = getattr(exc, "request_id", None)
-            _log.warning(
-                "chat: BYOK completion failed (%s%s%s)",
-                type(exc).__name__,
-                f", status={status}" if status else "",
-                f", request_id={request_id}" if request_id else "",
-            )
+            _log.warning("chat: BYOK completion failed (%s)", describe_provider_failure(exc))
             return None, "unexpected"
 
     language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
