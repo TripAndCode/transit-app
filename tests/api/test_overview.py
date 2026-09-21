@@ -310,17 +310,22 @@ async def test_headline_pools_exact_sum_delay_sec_not_rounded_avg_min(aconn, aag
 
 
 @pytest.mark.asyncio
-async def test_headline_excludes_null_sum_delay_sec_row_from_avg_but_not_samples(aconn, aagency_id):
+async def test_headline_excludes_a_null_sum_delay_sec_row_from_both_avg_and_samples(aconn, aagency_id):
     """A row with ``samples`` set but ``sum_delay_sec`` still NULL (migration
     0028's column is nullable on every table — any ``agg_daily_trend`` row
     analyze() hasn't rewritten since that migration can be in this state)
     must be excluded from BOTH avg_min's numerator AND denominator, not just
     silently dropped from the numerator while still counted in the
-    denominator (which would bias avg_min down). The returned ``samples``
-    count, by contrast, stays the TRUE total across every row regardless of
-    whether sum_delay_sec is populated — a distinct "how much data backs
-    this figure" count, per pipeline/reports/overview.py's _per_route_avg
-    docstring convention.
+    denominator (which would bias avg_min down) — and from the reported
+    ``samples`` too, because that count sits beside the average and so counts
+    the rows the average covers. The ClickHouse path this endpoint falls back
+    to returns an exact count of its own average's rows, so an unfiltered
+    total here would make the same headline report a different number
+    depending on which path answered.
+
+    This is narrower than "always filter": a count that is the population of
+    a proportion, such as compute_on_time's on_time_count/samples, stays the
+    unfiltered total, since that ratio does not condition on sum_delay_sec.
 
     Day 1 (5 samples, sum_delay_sec NULL) must contribute 0 to avg_min's
     pooling; day 2 (5 samples, raw-seconds sum 300 -> exact avg 1.0 min) is
@@ -353,7 +358,7 @@ async def test_headline_excludes_null_sum_delay_sec_row_from_avg_but_not_samples
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
     avg, samples_out = await _headline_stats(aagency_id, ctx, aconn)
-    assert samples_out == 10  # true total across both rows
+    assert samples_out == 5  # only the row the average was computed from
     assert avg == 1.0  # NOT the buggy 0.5 from counting the NULL row's samples
 
 
@@ -1465,6 +1470,36 @@ async def test_peak_hour_breakdown_excludes_low_samples(client, aconn, aagency_i
     codes = [x["route_code"] for x in r.json()["routes"]]
     assert "X1" not in codes
     assert "X2" in codes
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_with_dow_pools_exact_sum_delay_sec(client, aconn, aagency_id):
+    """With a dow, peak_hour_breakdown must derive avg_min from
+    sum_delay_sec/samples exactly as the dow=None path does, not echo the
+    stored per-row avg_min -- the two paths answer the same question and must
+    not disagree on the arithmetic behind it. Seeds a stored avg_min that
+    contradicts the summed columns so only the derived value can pass."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "D1", "平日", 6, 16, 9.99, 100, sum_delay_sec=6000)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 16, "dow": 6})
+    assert r.status_code == 200
+    d1 = {x["route_code"]: x for x in r.json()["routes"]}["D1"]
+    assert d1["avg_min"] == pytest.approx(1.0, abs=1e-9)
+    assert d1["samples"] == 100
+
+
+@pytest.mark.asyncio
+async def test_peak_hour_breakdown_no_dow_floor_applies_to_the_pooled_total(client, aconn, aagency_id):
+    """The sample floor gates the pooled group, not the individual rows that
+    feed it: a route seen twice on each of two days clears three observations
+    once pooled, and dropping its rows first would both hide it and bias the
+    average left behind."""
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "P1", "平日", 1, 21, 4.0, 2)
+    await _seed_agg_route_hour_dow(aconn, aagency_id, "P1", "平日", 2, 21, 4.0, 2)
+    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 21})
+    assert r.status_code == 200
+    p1 = {x["route_code"]: x for x in r.json()["routes"]}["P1"]
+    assert p1["samples"] == 4
+    assert p1["avg_min"] == pytest.approx(4.0, abs=1e-9)
 
 
 @pytest.mark.asyncio

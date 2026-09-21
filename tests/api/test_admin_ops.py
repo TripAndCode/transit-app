@@ -6,6 +6,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.security import token_hash
 from tests.conftest import _test_pool
 
 
@@ -18,8 +19,8 @@ async def _seed_admin_session(conn) -> str:
     )["user_id"]
     sid = f"sid-ops-{uid}"
     await conn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at) VALUES ($1, $2, $3)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+        token_hash(sid),
         uid,
         datetime.now(timezone.utc) + timedelta(days=1),
     )
@@ -32,8 +33,8 @@ async def ops_client(apply_schema, ch_async_client):
 
     pool = await _test_pool()
     app.state.pool = pool
-    # admin_ops() -> aggregate_freshness(conn, ch) now unconditionally queries
-    # ClickHouse (Task 8); without a real client the call raises and
+    # admin_ops() -> aggregate_freshness(conn, ch) unconditionally queries
+    # ClickHouse; without a real client the call raises and
     # admin_ops's own try/except degrades to an empty `agencies` list, which
     # would break test_ops_agency_freshness's assertion that a seeded agency
     # appears in the response.

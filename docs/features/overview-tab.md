@@ -4,17 +4,23 @@ Magazine-style "how's the agency doing" landing page: one round-trip returns
 a headline delta, a concentration/movers module, a peak-hour ribbon, and a
 weekday-vs-weekend split, each expandable into a bigger modal view.
 
+The sidebar's **Overview** nav entry opens the realtime Map tab instead of
+this component (see `docs/features/map-tab.md`); this period-summary view is
+reached only by direct URL or the sidebar's dev-only prototype-preview link.
+
 ## How a user reaches it
 
-- Route: `/agencies/:agencyId/overview`, registered in `frontend/src/main.tsx`
-  (`React.lazy`-loaded). It **is** the default landing tab — a bare
-  `agencies/:agencyId` navigates here via `<Navigate to="overview" replace />`
-  (`frontend/src/main.tsx`). A fresh/remembered agency selection instead
-  redirects to Map (`frontend/src/components/OnboardingGate.tsx`), so Overview
-  is reached either by that default redirect or by clicking "Overview" in the
-  sidebar.
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx` (`nav.overview` i18n
-  key, first entry in `ITEMS`).
+- Route: `/agencies/:agencyId/period-overview`, registered in
+  `frontend/src/main.tsx` (`React.lazy`-loaded). This tab has no entry in the
+  sidebar's main nav (`SIDEBAR_NAV_ITEMS` in
+  `frontend/src/components/Sidebar.tsx` lists only `overview`,
+  `route-analysis`, and `reports`, and the `overview` entry there opens
+  `/agencies/:agencyId/overview`, which renders the Map tab — see
+  `docs/features/map-tab.md`).
+- Reached by direct URL, or in development builds via the sidebar's dev-only
+  prototype-preview link (`t("nav.prototype_no_data")`, rendered only under
+  `import.meta.env.DEV`), which opens this route with a fixed
+  `?from=2030-01-01&to=2030-01-07` no-data window.
 - Top-level component: `frontend/src/tabs/OverviewTab.tsx` — owns which
   module's modal is open (`OpenCard` state) and the peak-hour-breakdown
   drill-down selection; filtering comes from the shared `useRangeContext`.
@@ -98,10 +104,9 @@ alone for single-origin):
    `:5173`). `make bootstrap` alone leaves the DB empty — load data first:
    `make fetch-ingest` (or `ingest_live` + `make load_static`), then
    `make analyze` for the agency.
-2. Open the app — a fresh/remembered agency selection lands on Map, but a
-   bare `/agencies/{id}` (or a freshly picked agency without a remembered
-   tab) lands on Overview by default; otherwise click "Overview" in the
-   sidebar.
+2. Navigate directly to `/agencies/{id}/period-overview` — a bare
+   `/agencies/{id}` and the sidebar's "Overview" entry both land on the Map
+   tab instead (`/agencies/{id}/overview`).
 3. Expect the hero row (headline delta + sparkline) and a "Routes to check"
    list once data exists; with no data yet, expect the empty state instead.
 4. Click the details `<summary>` toggle — expect the concentration bar, peak
@@ -118,8 +123,9 @@ alone for single-origin):
 
 - Frontend strings live under the `overview.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
-  `npm run lint:i18n`), plus `nav.overview` / `nav.overview_subtitle` for the
-  sidebar entry and the shared `filters.*` namespace used by `TabFilterBar`.
+  `npm run lint:i18n`), plus the shared `filters.*` namespace used by
+  `TabFilterBar`. This tab has no sidebar nav entry of its own, so it needs no
+  `nav.*` label key.
 - No server-side `_LOCALES` strings for this tab — `overview_summary`'s
   `locale` parameter is reserved for future qualitative labels
   (`api/routers/overview.py`'s docstring); today's payload is numeric/string

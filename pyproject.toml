@@ -6,7 +6,6 @@ authors = []
 packages = [
     {include = "pipeline"},
     {include = "api"},
-    {include = "tests"},
 ]
 
 [tool.poetry.dependencies]
@@ -52,9 +51,11 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "--strict-markers"
 markers = [
     "requires_llm_key: tests that need a configured live LLM provider key and the dev API reachable (off by default)",
     "slow: Test downloads/loads ~120MB ML models; gated by RUN_SLOW=1",
+    "anyio: async test driven by anyio's pytest plugin instead of pytest-asyncio's auto mode",
 ]
 
 [tool.mypy]
@@ -62,6 +63,10 @@ files = ["api", "pipeline", "db", "scripts", "gtfs_pipeline.py"]
 explicit_package_bases = true
 ignore_missing_imports = true
 check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "api.routers.*"
+disallow_incomplete_defs = true
 
 [tool.ruff]
 line-length = 120

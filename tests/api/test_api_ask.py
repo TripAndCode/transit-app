@@ -12,7 +12,7 @@ async def ask_app(apply_schema):
 
     pool = await _test_pool()
     app.state.pool = pool
-    # `ask()` now declares ch=Depends(get_ch) alongside conn (Task 8); every
+    # `ask()` declares ch=Depends(get_ch) alongside conn; every
     # test in this file mocks chat_with_tools/dispatch so the real client is
     # never touched, but FastAPI still resolves the dependency, so something
     # must be present at app.state.ch_client — None is fine here.
