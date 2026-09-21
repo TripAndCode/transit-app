@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "deadcode": "knip",
     "lint:i18n": "cd .. && node --test tests/frontend/i18n_keys.test.mjs tests/frontend/user_manual_parity.test.mjs",

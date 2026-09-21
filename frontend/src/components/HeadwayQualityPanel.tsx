@@ -14,6 +14,7 @@ import { useRouteNames } from "../api/useRouteNames";
 import type { RangeCtx } from "../api/rangeContext";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
+import { formatNumber } from "../utils/format";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
   if (sec == null) return "—";
@@ -63,7 +64,7 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }
                   <td style={{ ...td(), textAlign: "right" }}>{fmtSignedMin(r.ewt_sec, t)}</td>
                   <td style={{ ...td(), textAlign: "right" }}>{fmtCov(r.cov)}</td>
                   <td style={{ ...td(), textAlign: "right" }}>{fmtPct(r.long_gap_rate)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{r.samples.toLocaleString()}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(r.samples)}</td>
                 </tr>
               ))}
             </tbody>

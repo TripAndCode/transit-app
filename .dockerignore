@@ -5,9 +5,19 @@ __pycache__
 .venv
 .worktrees
 docs
+# Re-include docs/features/: api/routers/admin.py's architecture page reads
+# these Markdown files at runtime. Docker evaluates .dockerignore patterns in
+# order, so this negation must come after the broader "docs" exclusion above
+# to take effect — a negation before the pattern it overrides is a no-op.
+!docs/features/
 tests
 .superpowers
 oracle_cloud
+.github
+deploy
+tools
+.pre-commit-config.yaml
+.gitleaks*
 frontend/node_modules
 frontend/dist
 api/static

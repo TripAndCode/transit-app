@@ -78,7 +78,7 @@ function renderPanelWithNav(initialPath: string) {
     const navigate = useNavigate();
     return (
       <>
-        <button onClick={() => navigate("/agencies/1/overview")}>go-overview</button>
+        <button onClick={() => navigate("/agencies/1/period-overview")}>go-overview</button>
         <button onClick={() => navigate("/agencies/1/map")}>go-map</button>
         <CopilotPanel />
       </>
@@ -103,8 +103,8 @@ function renderPanelWithAgencySwitch(initialPath: string) {
     const navigate = useNavigate();
     return (
       <>
-        <button onClick={() => navigate("/agencies/1/overview")}>go-agency-1</button>
-        <button onClick={() => navigate("/agencies/2/overview")}>go-agency-2</button>
+        <button onClick={() => navigate("/agencies/1/period-overview")}>go-agency-1</button>
+        <button onClick={() => navigate("/agencies/2/period-overview")}>go-agency-2</button>
         <CopilotPanel />
       </>
     );
@@ -165,7 +165,7 @@ describe("CopilotPanel", () => {
     // request per Overview visit.
     mockApiGet({ llmApproved: false });
     const spy = vi.spyOn(client, "apiPost");
-    renderPanel("/agencies/1/overview");
+    renderPanel("/agencies/1/period-overview");
     await waitFor(() => expect(client.apiGet).toHaveBeenCalled());
     expect(spy).not.toHaveBeenCalled();
   });
@@ -180,7 +180,7 @@ describe("CopilotPanel", () => {
       cite: "Overview · 1 sample",
       low_confidence: false,
     });
-    renderPanel("/agencies/1/overview");
+    renderPanel("/agencies/1/period-overview");
     await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
   });
 
@@ -194,7 +194,7 @@ describe("CopilotPanel", () => {
     vi.spyOn(client, "apiPost").mockRejectedValue(
       new client.ApiError(403, JSON.stringify({ detail: "llm_not_approved" })),
     );
-    renderPanel("/agencies/1/overview");
+    renderPanel("/agencies/1/period-overview");
     await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
     expect(
       screen.queryByText(/couldn't generate an insight|インサイトを生成できません/i),
@@ -204,7 +204,7 @@ describe("CopilotPanel", () => {
   it("clears a stale error instead of leaking it onto an unrelated tab", async () => {
     mockApiGet();
     vi.spyOn(client, "apiPost").mockRejectedValue(new Error("boom"));
-    const { container } = renderPanelWithNav("/agencies/1/overview");
+    const { container } = renderPanelWithNav("/agencies/1/period-overview");
 
     await waitFor(() =>
       expect(screen.getByText(/couldn't generate an insight|インサイトを生成できません/i)).toBeTruthy(),
@@ -225,7 +225,7 @@ describe("CopilotPanel", () => {
     // retry:false QueryClients.
     mockApiGet();
     const postSpy = vi.spyOn(client, "apiPost").mockRejectedValue(new Error("boom"));
-    renderPanelWithProductionRetryDefault("/agencies/1/overview");
+    renderPanelWithProductionRetryDefault("/agencies/1/period-overview");
 
     await waitFor(() =>
       expect(screen.getByText(/couldn't generate an insight|インサイトを生成できません/i)).toBeTruthy(),
@@ -242,7 +242,7 @@ describe("CopilotPanel", () => {
       cite: "Overview · 1 sample",
       low_confidence: false,
     });
-    renderPanel("/agencies/1/overview");
+    renderPanel("/agencies/1/period-overview");
     await waitFor(() => expect(postSpy).toHaveBeenCalled());
 
     const [, , opts] = postSpy.mock.calls[0];
@@ -268,7 +268,7 @@ describe("CopilotPanel", () => {
         result: null,
         ctx: {},
       });
-    renderPanel("/agencies/1/overview");
+    renderPanel("/agencies/1/period-overview");
     await screen.findByText("Route 12 is delayed.");
     const input = await screen.findByPlaceholderText(/ask a follow-up|続けて質問/i);
     await setupUser().type(input, "how is route 12 doing{enter}");
@@ -288,7 +288,7 @@ describe("CopilotPanel", () => {
       cite: "Overview · 1 sample",
       low_confidence: false,
     });
-    renderPanelWithAgencySwitch("/agencies/1/overview");
+    renderPanelWithAgencySwitch("/agencies/1/period-overview");
     await screen.findByText("Route 12 is delayed.");
 
     vi.spyOn(client, "apiPost").mockResolvedValueOnce({
@@ -318,14 +318,14 @@ describe("CopilotPanel", () => {
       cite: "c",
       low_confidence: false,
     } as never);
-    const on = renderPanel("/agencies/1/overview");
+    const on = renderPanel("/agencies/1/period-overview");
     await waitFor(() => expect(on.container.querySelector(".copilot-panel")).not.toBeNull());
     on.unmount();
 
     vi.restoreAllMocks();
     mockApiGet({ enabled: false });
     const postSpy = vi.spyOn(client, "apiPost");
-    const off = renderPanel("/agencies/1/overview");
+    const off = renderPanel("/agencies/1/period-overview");
     await waitFor(() => expect(client.apiGet).toHaveBeenCalled());
     expect(off.container.querySelector(".copilot-panel")).toBeNull();
     // Advance past the key debounce before asserting no POST. Rendering
@@ -340,7 +340,7 @@ describe("CopilotPanel", () => {
   it("stays off and makes no insight request when the flag check fails", async () => {
     const getSpy = vi.spyOn(client, "apiGet").mockRejectedValue(new Error("flag check down"));
     const postSpy = vi.spyOn(client, "apiPost");
-    const { container } = renderPanel("/agencies/1/overview");
+    const { container } = renderPanel("/agencies/1/period-overview");
     await waitFor(() => expect(getSpy).toHaveBeenCalled());
     expect(container.querySelector(".copilot-panel")).toBeNull();
     expect(postSpy).not.toHaveBeenCalled();
@@ -353,7 +353,7 @@ describe("CopilotPanel", () => {
       cite: "Overview · 1 sample",
       low_confidence: false,
     } as never);
-    renderPanelWithNav("/agencies/1/overview");
+    renderPanelWithNav("/agencies/1/period-overview");
     await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
     expect(postSpy).toHaveBeenCalledTimes(1);
 

@@ -25,6 +25,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { BandGrid, Legend } from "./charts/DowBandGrid";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
+import { formatNumber } from "../utils/format";
 import {
   BAND_ORDER,
   bandOf,
@@ -635,7 +636,7 @@ function RouteDetail({
                     { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${(vals[wi] as number).toFixed(1)}${axisMin}` : "—" },
                     { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${(vals[ci] as number).toFixed(1)}${axisMin}` : "—" },
                     { label: t("forecast.stat_mean"), value: `${mean.toFixed(1)}${axisMin}` },
-                    { label: t("forecast.stat_samples"), value: totalN.toLocaleString() },
+                    { label: t("forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}
                 />
                 <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />

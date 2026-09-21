@@ -9,6 +9,7 @@
  */
 import { useState, useRef, useEffect } from "react";
 import { Z_INDEX } from "../../styles/zIndex";
+import { useTranslation } from "react-i18next";
 
 /** Props for {@link LimitPill}. */
 type LimitPillProps = {
@@ -22,6 +23,7 @@ type LimitPillProps = {
 
 /** Numeric stepper pill that commits only on blur or Enter, guarding invalid drafts. */
 export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled }: LimitPillProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string>(String(value));
   // Re-sync the draft when the parent updates `value` externally (chip-swap
@@ -141,7 +143,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
               cursor: value <= min ? "not-allowed" : "pointer",
               fontSize: 14,
             }}
-            aria-label="decrement"
+            aria-label={t("common.decrement_aria")}
           >
             −
           </button>
@@ -181,7 +183,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
               cursor: value >= max ? "not-allowed" : "pointer",
               fontSize: 14,
             }}
-            aria-label="increment"
+            aria-label={t("common.increment_aria")}
           >
             +
           </button>

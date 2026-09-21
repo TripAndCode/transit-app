@@ -5,6 +5,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
+import { formatDateTime } from "../../utils/format";
 import { AdminUserDetailPage } from "./AdminUserDetailPage";
 
 const mockDetail = vi.hoisted(() => ({
@@ -75,12 +76,11 @@ describe("AdminUserDetailPage", () => {
   });
 
   it("formats the created-at timestamp in the active UI language, not a hardcoded ja-JP", async () => {
-    const localeSpy = vi.spyOn(Date.prototype, "toLocaleString");
     await i18n.changeLanguage("en");
     renderPage();
     await screen.findByText("a@b.com");
-    expect(localeSpy).toHaveBeenCalledWith("en");
-    localeSpy.mockRestore();
+    const expected = formatDateTime(mockDetail.created_at);
+    expect(document.body.textContent).toContain(expected);
   });
 
   it("has a back-to-users link", async () => {

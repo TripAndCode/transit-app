@@ -40,17 +40,12 @@ export default tseslint.config(
       // with eslint-plugin-react-hooks v7 (flags code the compiler can't
       // optimize), on top of the classic rules-of-hooks set. Its actual
       // bailout signals (`unsupported-syntax`, `incompatible-library`) ship
-      // at 'warn', and `npm run lint` is bare `eslint .` with no
-      // `--max-warnings` — so a warn-level bailout doesn't fail the build
-      // today. `react-hooks/todo` ("unimplemented compiler features", Hint
-      // severity, off by default upstream) was previously promoted to
-      // 'error' here as an attempted bailout signal — removed: it isn't
-      // actually a bailout diagnostic, and promoting an unverified
-      // off-by-default rule risks failing lint on unrelated files with no
-      // lint run available in this sandbox to confirm it's clean. Needs a
-      // human to either add `--max-warnings 0` to `frontend/package.json`'s
-      // `lint` script, or promote `unsupported-syntax`/`incompatible-library`
-      // to `error` after a verified clean `npm run lint` run.
+      // at 'warn'; `npm run lint` runs with `--max-warnings 0`, so a
+      // bailout now fails the build instead of passing silently.
+      // `react-hooks/todo` ("unimplemented compiler features", Hint
+      // severity, off by default upstream) is deliberately left at its
+      // default: it isn't a bailout diagnostic, and promoting an
+      // off-by-default rule needs its own verified-clean lint run first.
       ...reactHooks.configs['recommended-latest'].rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       ...a11yAsError,
@@ -63,9 +58,9 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_',
         },
       ],
-      // `any` is a code smell, not a correctness bug — surface it as a warning
-      // during adoption rather than blocking on the existing uses.
-      '@typescript-eslint/no-explicit-any': 'warn',
+      // `any` defeats the type checker; every existing use has been
+      // replaced with a real type, so this now blocks on new ones.
+      '@typescript-eslint/no-explicit-any': 'error',
       // React Compiler (enabled repo-wide, see CLAUDE.md) auto-memoizes —
       // manual useMemo/useCallback/React.memo are redundant at best and can
       // mask compiler bailouts at worst. Banned as a hard error; use
@@ -93,6 +88,14 @@ export default tseslint.config(
           // selector, as is a derived expression like `Z_INDEX.foo - 1`.
           selector: 'Property[key.name="zIndex"][value.type="Literal"]',
           message: "Do not hardcode zIndex — use a rung from Z_INDEX (src/styles/zIndex.ts) instead.",
+        },
+        {
+          // `Number.prototype.toLocaleString`/`Date.prototype.toLocaleDateString`/
+          // `toLocaleTimeString`/`toLocaleString` silently default to the
+          // runtime's locale rather than the active UI language, so ja/en
+          // users can see numbers or dates formatted in the wrong locale.
+          selector: 'CallExpression[callee.property.name=/^toLocale(String|DateString|TimeString)$/]',
+          message: 'Do not call toLocale*() directly — use formatNumber()/formatDateTime() from src/utils/format.ts, which read the active UI language.',
         },
       ],
       // Closes the aliased-import hole the syntax selectors above can't see

@@ -1,4 +1,11 @@
-import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
@@ -6,6 +13,7 @@ import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
 import { Z_INDEX } from "../styles/zIndex";
+import { FILTER_SEPARATOR } from "../utils/format";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -43,7 +51,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
     if (label !== tbKey) parts.push(label);
   }
 
-  return parts.join(" ・ "); // i18n-ignore: locale-neutral separator
+  return parts.join(FILTER_SEPARATOR);
 }
 
 // ─── context menu ────────────────────────────────────────────────────────────
@@ -96,8 +104,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     }
   }, [renamingId]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function openMenu(e: any, convId: string) {
+  function openMenu(e: ReactMouseEvent<HTMLElement>, convId: string) {
     e.preventDefault();
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -247,7 +254,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameBlur={commitRename}
                   onSelect={() => onSelect(conv.conversation_id)}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(" ・ ")} // i18n-ignore: locale-neutral separator
+                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(FILTER_SEPARATOR)}
                 />
               ))}
             </section>
@@ -316,8 +323,7 @@ type ConvItemProps = {
   onRenameCommit: (id: string) => void;
   onRenameBlur: (id: string) => void;
   onSelect: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onContextMenu: (e: any) => void;
+  onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
   filterSummaryText: string;
 };
 
@@ -334,7 +340,8 @@ function ConvItem({
   onContextMenu,
   filterSummaryText,
 }: ConvItemProps) {
-  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(" ・ "); // i18n-ignore: locale-neutral separator
+  const { t } = useTranslation();
+  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(FILTER_SEPARATOR);
 
   return (
     <div
@@ -437,7 +444,7 @@ function ConvItem({
           opacity: 0.6,
           marginTop: 1,
         }}
-        aria-label="More options"
+        aria-label={t("ask.sidebar.more_options_aria")}
       >
         ⋯
       </button>

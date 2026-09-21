@@ -4,6 +4,8 @@ import {
   FileText,
   BarChart3,
   LayoutDashboard,
+  CalendarRange,
+  GitCompare,
   HelpCircle,
   Clock,
   CircleSlash,
@@ -28,8 +30,10 @@ import { Z_INDEX } from "../styles/zIndex";
  *  instead of maintaining their own copy, so the marketing preview's tab
  *  set/labels cannot drift from the real, signed-in nav. */
 export const SIDEBAR_NAV_ITEMS = [
-  { to: "overview", labelKey: "design:overview", Icon: LayoutDashboard },
+  { to: "operations", labelKey: "design:overview", Icon: LayoutDashboard },
+  { to: "period-overview", labelKey: "design:period_overview", Icon: CalendarRange },
   { to: "route-analysis", labelKey: "design:analysis", Icon: BarChart3 },
+  { to: "network", labelKey: "network.title", Icon: GitCompare },
   { to: "reports", labelKey: "design:reports", Icon: FileText },
 ] as const;
 
@@ -213,7 +217,7 @@ export function Sidebar() {
                   {t("nav.prototype_onboarding")}
                 </button>
                 <NavLink
-                  to={`/agencies/${agencyId}/overview${suffix}`}
+                  to={`/agencies/${agencyId}/operations${suffix}`}
                   onClick={() => onNavigate?.()}
                   style={{
                     display: "flex",

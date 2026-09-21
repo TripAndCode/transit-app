@@ -16,6 +16,7 @@ import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
 import { ApiError, apiPost } from "../api/client";
 import { relativeTime } from "../utils/relativeTime";
+import { FILTER_SEPARATOR } from "../utils/format";
 import { buildStyle, getMapStyleOverride, readMapStylePref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
@@ -463,7 +464,7 @@ export function MapTab() {
           {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
           {delayedRows.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { if (trip.route_code) focusRoute(trip.route_code); setSelectedDirectionKey(directionKey(trip)); setSelectedTripId(trip.trip_id); }}>
-              <span>{routeNames.format(trip.route_code)}<small>{trip.scheduled_time?.slice(0, 5)} · {trip.headsign} · {trip.stop_name}</small></span>
+              <span>{routeNames.format(trip.route_code)}<small>{trip.scheduled_time?.slice(0, 5)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
               <b>{signedMin(trip.dep_delay, t)}</b>
             </button>
             {trip.route_code && <Link to={`/agencies/${id}/route-analysis?${new URLSearchParams({ routes: trip.route_code })}`}>{td("openAnalysis")}</Link>}

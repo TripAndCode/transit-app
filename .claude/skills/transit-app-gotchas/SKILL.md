@@ -11,15 +11,14 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   Postgres `updates` table still exists as a rollback safety net but has zero
   production readers.
   `agg_*`/OLTP/PostGIS/pgvector stay on Postgres.
-- NEVER run write SQL / migrations-down / resets against dev Postgres
-  `postgresql://transit:transit@localhost:5433/transit` (wiped twice). Read-only
-  verification only. Too big to clone whole — to demo on real data, slice one
-  agency + a few days via read-only
+- Dev Postgres read-only rule (`postgresql://transit:transit@localhost:5433/transit`,
+  wiped twice): canonical in `CLAUDE.md`. Too big to clone whole — to demo on
+  real data, slice one agency + a few days via read-only
   `\copy (SELECT … WHERE agency_id=… AND captured_at::date IN (…)) TO …` into a
   throwaway DB on a spare port, then migrate + analyze there.
-- Same read-only rule for dev ClickHouse (`transit-ch`, hundreds of millions
-  of real rows across 4 agencies): no manual `INSERT`/`ALTER`/`DROP`. The one
-  sanctioned exception is
+- Same rule applies to dev ClickHouse (`docker compose exec clickhouse`,
+  hundreds of millions of real rows across 4 agencies). The one sanctioned
+  exception is
   `make ch-bootstrap`'s documented one-time column-type `ALTER TABLE` (see
   `db/clickhouse/bootstrap.py`).
 - Tests use throwaway Postgres on :5544 AND throwaway ClickHouse on :8124 —
@@ -44,23 +43,17 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   ```
   Omitting `RUN_CH_INTEGRATION=1` doesn't fail the suite — it silently SKIPS
   every ClickHouse-gated test instead, which is easy to mistake for "all
-  passing." `make test`/`make check` do NOT set it, so the Makefile's own
-  default local gate has this gap too; always export the block above by hand
-  for a run that actually covers the ClickHouse path.
+  passing." `make test`/`make check` are covered: both go through
+  `scripts/run_integration_tests.sh`, which exports it. A bare `poetry run
+  pytest` is not — export the block above by hand for that.
 - The `transit-test-pg`/`transit-test-ch` pair above is a fixed name on a
   fixed port, and this repo also keeps a long-lived instance of it running
-  for everyday local use. Two runs against that same pair at once —
-  e.g. an interactive verification pass and a concurrent `/vps-loop-run`
-  worker's, in two different worktrees on the same VPS — race on
-  `tests/conftest.py`'s per-test Postgres reset and ClickHouse
-  `DROP TABLE`/`CREATE TABLE`, producing spurious failures with
-  no connection to either diff. For any run that might overlap with another one on the
-  same host, use `scripts/run_full_ci.sh` instead: it builds and starts its
-  own uniquely-named Postgres + ClickHouse pair on two free ports, applies
-  schema, runs the same lint/type/test gate as `.github/workflows/ci.yml`'s
-  `test` job, and always tears both containers down again — any number of
-  invocations can run at once on one host without coordinating, and none of
-  them touch the shared `transit-test-pg`/`transit-test-ch` containers.
+  for everyday local use. Two runs against that same pair at once — e.g. an
+  interactive verification pass and a concurrent `/vps-loop-run` worker's, in
+  two different worktrees on the same VPS — can race and produce spurious
+  failures unrelated to either diff. For any run that might overlap with
+  another one on the same host, use `scripts/run_full_ci.sh` instead — its
+  header is canonical on why and how it avoids the shared pair.
   `scripts/run_integration_tests.sh` itself also accepts `TEST_PG_PORT`/
   `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
   for a caller that starts its own containers by some other means.
@@ -81,8 +74,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `frontend/src/i18n/locales/{ja,en}.json` (key parity is CI-linted).
 - Kana in `.ts/.tsx` source fails `lint:i18n-strings`; suppress intentional cases
   with `i18n-ignore`.
-- 5 checks must pass before PR: `npm run typecheck && npm run test && npm run lint
-  && npm run lint:i18n && npm run lint:i18n-strings`.
+- The full pre-PR check list is canonical in `CLAUDE.md`'s Verification
+  commands section — run it before opening a PR.
 
 ## VPS loop / sandboxed worker sessions
 - A dispatched VPS-loop worker's sandbox has NO `poetry install`/`npm
@@ -107,6 +100,16 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   separately in that worktree's own `frontend/`. If a symlink happens to
   exist, treat it as a possibly-deliberate, worktree-specific setup detail,
   not a repo-wide guarantee to rely on going forward.
+- The same cwd-keyed resolution bites a *test or script that shells out*:
+  a child invoked as `poetry run python ...` re-resolves the virtualenv from
+  wherever it runs, so a suite launched from a worktree hands its subprocess a
+  different, unprovisioned environment and the test fails with
+  `ModuleNotFoundError` no matter what the code under test does. Pass the
+  running interpreter explicitly instead — `sys.executable` from Python, or an
+  interpreter-override env var for a bash wrapper — rather than letting the
+  child resolve poetry itself. Watch for the failure that *passes*: a test
+  asserting only a non-zero exit code is satisfied by the crash and silently
+  stops checking its actual subject.
 - **What actually works**: an interactive session (not a dispatched
   worker) usually has broader Bash permissions and CAN run `poetry
   install`/`npm install` for real, closing the gap after the fact. Fetch
@@ -142,10 +145,11 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   clean commit only contains your own changes.
 
 ## Git
-- Default branch is `main`, not master. Diff and PR against `main`.
-- Squash merges; Conventional Commits subjects.
-- Stacked PRs: retarget the next PR to `main` before `--delete-branch`, else GitHub
-  closes (not retargets) the dependent PR.
+- Default branch is `main`, not master. Diff and PR against `main`. Merge/PR
+  policy (squash merge, Conventional Commit subjects, stacked-PR retargeting)
+  is canonical in `CLAUDE.md`'s "Git and pull requests" section — mechanically,
+  retarget the next PR to `main` before `--delete-branch`, else GitHub closes
+  (not retargets) the dependent PR.
 - `git stash` is repo-wide, not worktree-scoped — a stash pushed from one
   worktree is visible (and droppable) from every other worktree and the main
   checkout. A freshly-dispatched VPS-loop worker finding a prior tick's
@@ -168,14 +172,10 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   Root `CLAUDE.md` owns the policy this serves — when CI has to run and
   when it must be green. This entry is only the mechanism, which is easy to
   get wrong in either direction.
-  The same gap shows up when resolving a conflict: running `git merge main`
-  produces an auto-generated commit message
-  ("Merge branch 'main' of ... into vps-loop/item-N") with no `[skip ci]`
-  trailer — `git merge` never adds it automatically. That merge commit
-  becomes the branch's pushed tip, so it alone (re-)triggers CI despite
-  every real work commit on the branch correctly carrying the trailer.
-  Always add `[skip ci]` to a merge commit too: either pass `git merge main
-  -m "Merge main into vps-loop/item-N" -m "[skip ci]"` directly (multiple
-  `-m` flags create a blank-line-separated body, avoiding a literal
-  embedded newline in the shell string), or amend the default merge
-  message before pushing.
+  Under that policy branch commits carry no trailer, so the usual direction
+  of the mistake is one slipping in: a tip that carries it produces no run,
+  and the merge gate then has nothing to read rather than something to
+  fail — which looks like a stuck queue, not a mistake. Amend and
+  `push --force-with-lease`; an empty follow-up commit works too but leaves
+  the confusing commit in history. Only the squash-merge `--body` should
+  contain the trailer.
