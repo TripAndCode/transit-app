@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
-import type { TrendDay } from "../api/types";
+import type { RankingRow, TrendDay } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { downloadCsv } from "../components/analysis/csv";
 import { deleteAnalysis, readAnalyses } from "../components/analysis/savedAnalyses";
@@ -19,7 +19,7 @@ function daysToCsvRows(days: TrendDay[]) {
   return [DAYS_CSV_HEADER, ...days.map((d) => [d.date, d.avg_min, d.samples])];
 }
 const RANKING_CSV_HEADER = ["route_code", "service_type", "mean_minutes", "median_minutes", "p90_minutes", "observations"];
-function rankingToCsvRows(rows: unknown[][]) {
+function rankingToCsvRows(rows: RankingRow[]) {
   return [RANKING_CSV_HEADER, ...rows];
 }
 
@@ -37,8 +37,11 @@ export function ReportsHomeTab() {
   const [saved, setSaved] = useState(readAnalyses);
   const [notice, setNotice] = useState("");
   const [shareNotice, setShareNotice] = useState("");
-  const days = ((trend.data?.rows[0] as { days?: TrendDay[] } | undefined)?.days ?? []).filter((d) => Number.isFinite(d.avg_min) && d.samples > 0).sort((a, b) => a.date.localeCompare(b.date));
-  const rows = (ranking.data?.rows ?? []).filter(Array.isArray) as unknown[][];
+  // Both queries pin their own report_type above, so these narrowings can
+  // only fall through while the response for that type is still in flight.
+  const trendPayload = trend.data?.report_type === "trend" ? trend.data.rows[0] : undefined;
+  const days = (trendPayload?.days ?? []).filter((d) => Number.isFinite(d.avg_min) && d.samples > 0).sort((a, b) => a.date.localeCompare(b.date));
+  const rows: RankingRow[] = ranking.data?.report_type === "ranking" ? ranking.data.rows : [];
   const queryString = ctxToQueryString(ctx);
   const metadata = [["agency_id", "from", "to", "dow", "time_band", "service", "route_codes"], [id, ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, ctx.routes.join(",")]];
   async function copyShareLink() {
