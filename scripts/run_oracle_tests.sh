@@ -7,8 +7,11 @@
 # exactly the kind a text check cannot see. Piping the loop, for instance,
 # would move the failure flag into a subshell and silently lose it.
 #
-# Takes the suite directory so a test can point it at a temporary one.
+# Usage: scripts/run_oracle_tests.sh [suite-directory]
+#   Takes the suite directory so a test can point it at a temporary one.
+#   Defaults to oracle_cloud/v3/tests.
 set -uo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 dir="${1:-oracle_cloud/v3/tests}"
 
