@@ -21,7 +21,7 @@ function mockMatchMedia(matches: boolean) {
   } as unknown as MediaQueryList);
 }
 
-function renderSidebar(path = "/agencies/1/map") {
+function renderSidebar(path = "/agencies/1/operations") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -37,10 +37,12 @@ function renderSidebar(path = "/agencies/1/map") {
 }
 
 describe("Sidebar", () => {
-  it("renders three focused destinations without the former report catalog", () => {
+  it("renders the five nav destinations, including Period overview and Network", () => {
     renderSidebar();
     expect(screen.getByText("Overview")).toBeTruthy();
+    expect(screen.getByText("Period overview")).toBeTruthy();
     expect(screen.getByText("Segment analysis")).toBeTruthy();
+    expect(screen.getByText("Compare agencies")).toBeTruthy();
     expect(screen.getByText("Reports")).toBeTruthy();
     expect(screen.queryByText("Agencies")).toBeNull();
     expect(screen.queryByText("Latest observations")).toBeNull();
@@ -52,15 +54,27 @@ describe("Sidebar", () => {
   });
 
   it("folds the former Live view into Overview", () => {
-    renderSidebar("/agencies/8/overview");
-    expect(screen.getByRole("link", { name: /Overview/ })).toBeTruthy();
+    renderSidebar("/agencies/8/operations");
+    expect(screen.getByRole("link", { name: "Overview" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /Latest observations/ })).toBeNull();
   });
 
-  it("points Overview at the current agency's map route, preserving the filter query string", () => {
-    renderSidebar("/agencies/8/overview?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: /Overview/ });
-    expect(link).toHaveAttribute("href", "/agencies/8/overview?from=2026-06-01&to=2026-06-07");
+  it("points Overview at the current agency's operations route, preserving the filter query string", () => {
+    renderSidebar("/agencies/8/operations?from=2026-06-01&to=2026-06-07");
+    const link = screen.getByRole("link", { name: "Overview" });
+    expect(link).toHaveAttribute("href", "/agencies/8/operations?from=2026-06-01&to=2026-06-07");
+  });
+
+  it("points Period overview at the agency's period-overview route, preserving the filter query string", () => {
+    renderSidebar("/agencies/8/operations?from=2026-06-01&to=2026-06-07");
+    const link = screen.getByRole("link", { name: "Period overview" });
+    expect(link).toHaveAttribute("href", "/agencies/8/period-overview?from=2026-06-01&to=2026-06-07");
+  });
+
+  it("points Network at the agency's network route", () => {
+    renderSidebar("/agencies/8/operations");
+    const link = screen.getByRole("link", { name: "Compare agencies" });
+    expect(link.getAttribute("href")).toMatch(/^\/agencies\/8\/network/);
   });
 
   it("does not render Overview outside any agency context", () => {
@@ -77,8 +91,8 @@ describe("Sidebar", () => {
   });
 
   it("marks the current route's nav link as active", () => {
-    renderSidebar("/agencies/1/overview");
-    const mapLink = screen.getByRole("link", { name: /Overview/ });
+    renderSidebar("/agencies/1/operations");
+    const mapLink = screen.getByRole("link", { name: "Overview" });
     expect(mapLink.getAttribute("aria-current")).toBe("page");
   });
 
@@ -120,15 +134,15 @@ describe("Sidebar", () => {
   });
 
   it("points the no-data prototype link at a far-future date range on the current agency", () => {
-    renderSidebar("/agencies/8/map");
+    renderSidebar("/agencies/8/operations");
     const link = screen.getByRole("link", { name: "No-data state" });
     expect(link).toHaveAttribute("href", "/agencies/8/period-overview?from=2030-01-01&to=2030-01-07");
   });
 
-  it("points the feed-stale prototype link at the current agency's overview, preserving the active filter", () => {
-    renderSidebar("/agencies/8/map?from=2026-06-01&to=2026-06-07");
+  it("points the feed-stale prototype link at the current agency's operations view, preserving the active filter", () => {
+    renderSidebar("/agencies/8/operations?from=2026-06-01&to=2026-06-07");
     const link = screen.getByRole("link", { name: "Feed-stale state" });
-    expect(link).toHaveAttribute("href", "/agencies/8/overview?from=2026-06-01&to=2026-06-07");
+    expect(link).toHaveAttribute("href", "/agencies/8/operations?from=2026-06-01&to=2026-06-07");
   });
 
   describe("collapse", () => {

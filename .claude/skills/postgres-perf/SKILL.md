@@ -81,8 +81,8 @@ become Nullable.
   `col IN {param:Array(String)}` binding, or the query raises a DatabaseError.
 
 ## DB safety
-- Dev Postgres `:5433` (`transit-pg`) is READ-ONLY: EXPLAIN/SELECT only.
-- Dev ClickHouse (`transit-ch`, hundreds of millions of real rows across 4
+- Dev Postgres `:5433` is READ-ONLY: EXPLAIN/SELECT only.
+- Dev ClickHouse (`docker compose exec clickhouse`, hundreds of millions of real rows across 4
   agencies) is ALSO READ-ONLY for anything outside `make ch-bootstrap`: no
   manual `INSERT`/`ALTER`/`DROP` against it. `db/clickhouse/bootstrap.py` documents the one-time
   `ALTER TABLE ... MODIFY COLUMN` needed to bring its column types in sync with
