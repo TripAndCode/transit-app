@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { TFunction } from "i18next";
 import { MAP_STYLES, type MapStyleId } from "../../styles/mapStyle";
+import { Z_INDEX } from "../../styles/zIndex";
 
 // Representative thumbnail tile (Aomori, z11) per style — decorative.
 const THUMB: Record<MapStyleId, string> = {
@@ -95,7 +96,7 @@ export function MapStyleControl({
         position: "absolute",
         left: 12,
         bottom: 28,
-        zIndex: 2,
+        zIndex: Z_INDEX.mapOverlay,
         display: "flex",
         alignItems: "flex-end",
         gap: 8,

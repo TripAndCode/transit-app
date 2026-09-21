@@ -14,13 +14,13 @@ type Session = {
 };
 
 /** GET /api/me; returns null on 401 so callers can treat anonymous as a normal state. */
-async function fetchMe(): Promise<Session | null> {
-  return apiGetOrNull<Session>("/api/me");
+async function fetchMe(signal?: AbortSignal): Promise<Session | null> {
+  return apiGetOrNull<Session>("/api/me", { signal });
 }
 
 /** React Query hook for the current session (or null when anonymous). */
 export function useSession() {
-  return useQuery({ queryKey: ["me"], queryFn: fetchMe, staleTime: 30_000 });
+  return useQuery({ queryKey: ["me"], queryFn: ({ signal }) => fetchMe(signal), staleTime: 30_000 });
 }
 
 /** Mutation that posts /api/auth/logout and clears every cached query.

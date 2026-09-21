@@ -49,19 +49,22 @@ describe("useCopilotInsight", () => {
     mockApiPost.mockReset();
   });
 
-  it("fetches the initial view payload immediately (nothing to debounce against yet)", async () => {
-    mockApiPost.mockResolvedValue({ text: "Insight text", cite: "route 1", low_confidence: false });
-    const { result } = setup(() => useCopilotInsight(1, "overview", CTX, { headline: "x" }));
+  it("debounces the very first request the same as a later key change, instead of firing immediately on mount", async () => {
+    mockApiPost.mockResolvedValue({ text: "x", cite: "c", low_confidence: false });
+    setup(() => useCopilotInsight(1, "overview", CTX, { some: "payload" }));
 
-    await vi.waitFor(() => expect(result.current.insight).not.toBeNull());
+    // Flush microtasks without advancing past DEBOUNCE_MS -- a regression
+    // that skips the debounce on the initial key fires the POST here.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockApiPost).not.toHaveBeenCalled();
 
-    expect(mockApiPost).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 50);
+    await vi.waitFor(() => expect(mockApiPost).toHaveBeenCalledTimes(1));
     expect(mockApiPost).toHaveBeenCalledWith(
       "/api/1/copilot/insight",
-      { tab: "overview", filters: CTX, view_payload: { headline: "x" } },
+      { tab: "overview", filters: CTX, view_payload: { some: "payload" } },
       expect.anything(),
     );
-    expect(result.current.insight).toEqual({ text: "Insight text", cite: "route 1", lowConfidence: false });
   });
 
   it("debounces a view-payload change instead of refetching on every keystroke", async () => {
@@ -74,6 +77,7 @@ describe("useCopilotInsight", () => {
         wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children),
       },
     );
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 50);
     await vi.waitFor(() => expect(result.current.insight).not.toBeNull());
     mockApiPost.mockClear();
 

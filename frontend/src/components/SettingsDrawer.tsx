@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Z_INDEX } from "../styles/zIndex";
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -39,7 +40,7 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
         position: "fixed",
         inset: 0,
         background: "rgba(0,0,0,0.2)",
-        zIndex: 100,
+        zIndex: Z_INDEX.drawerBackdrop,
       }}
     >
       <div

@@ -77,7 +77,7 @@ export function AdminOpsPage() {
         <p
           role="alert"
           style={{
-            marginBottom: 16, padding: "10px 14px", borderRadius: "var(--radius-md)",
+            marginBottom: 16, padding: "10px 14px", borderRadius: "var(--radius-lg)",
             background: "var(--surface-1)", color: "var(--color-warning, #C99A2E)", fontSize: 14,
           }}
         >
@@ -89,7 +89,7 @@ export function AdminOpsPage() {
       <div
         style={{
           display: "flex", alignItems: "center", gap: 20, marginBottom: 24, padding: "12px 16px",
-          background: "var(--surface-1)", borderRadius: "var(--radius-md)",
+          background: "var(--surface-1)", borderRadius: "var(--radius-lg)",
           fontSize: 14,
         }}
       >

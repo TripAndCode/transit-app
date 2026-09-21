@@ -5,7 +5,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import { AnalysisTab } from "./AnalysisTab";
-import type { DefinitionMeta, ReportMeta, ReportResponse } from "../api/types";
+import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType } from "../api/types";
 
 const DEFINITION: DefinitionMeta = {
   preset: "legacy_60s",
@@ -16,12 +16,15 @@ const DEFINITION: DefinitionMeta = {
   dedup_rule: "latest_observation_per_stop_event",
 };
 
-function reportMeta(reportType: string): ReportMeta {
+function reportMeta(reportType: ReportType): ReportMeta {
   return { report_type: reportType, rendered_at: "2026-06-01T00:00:00Z" };
 }
 
-function reportResponse(reportType: string): ReportResponse {
-  return { report_type: reportType, rendered_at: "2026-06-01T00:00:00Z", text: "", rows: [], definition: DEFINITION };
+function reportResponse(reportType: ReportType): ReportResponse {
+  // `rows: []` is valid for every member of the union, but TypeScript can't
+  // pick one from a variable discriminant -- the cast names the shape the
+  // caller is standing in for rather than widening `rows` back to unknown[].
+  return { report_type: reportType, rendered_at: "2026-06-01T00:00:00Z", text: "", rows: [], definition: DEFINITION } as ReportResponse;
 }
 
 function mockSupportHooks() {

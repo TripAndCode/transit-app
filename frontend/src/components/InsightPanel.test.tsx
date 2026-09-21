@@ -159,6 +159,31 @@ describe("InsightPanel", () => {
     expect(spy).toHaveBeenCalledWith(2, []);
   });
 
+  it("keeps the enabled flag fixed at mount instead of re-reading localStorage on every render", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: {
+        report_type: "trend",
+        route_code: "R1",
+        reason_text: "Route R1 is anomalous",
+        severity: "notable",
+        from_date: "2026-08-15",
+        to_date: "2026-08-15",
+      },
+      isPending: false,
+      error: null,
+    } as never);
+    renderPanel();
+    // Flip the stored preference off after mount -- a per-render readEnabled()
+    // call would hide the panel on the very next re-render triggered below.
+    localStorage.setItem("transit.insightPanelEnabled", "0");
+    fireEvent.click(screen.getByLabelText("Collapse insight panel"));
+    // Still mounted (the `enabled` flag was frozen at mount via
+    // useState(readEnabled)), just collapsed -- not vanished, as it would be
+    // if `enabled` were re-derived on every render.
+    expect(screen.getByLabelText("Expand insight panel")).toBeTruthy();
+  });
+
   it("collapses on click and persists the preference", () => {
     localStorage.setItem("transit.insightPanelEnabled", "1");
     vi.spyOn(hooks, "useSuggestion").mockReturnValue({

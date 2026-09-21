@@ -5,7 +5,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import { ReportsHomeTab } from "./ReportsHomeTab";
-import type { Agency, DefinitionMeta, ReportResponse } from "../api/types";
+import type { Agency, DefinitionMeta, RankingRow, ReportResponse, TrendDay } from "../api/types";
 
 const DEFINITION: DefinitionMeta = {
   preset: null,
@@ -20,11 +20,11 @@ function agencies(): Agency[] {
   return [{ agency_id: 1, agency_name: "Hiroden", feed_url: "x", static_url: null, latest_data_date: "2026-04-07" }];
 }
 
-function trendResponse(days: unknown[] = []): ReportResponse {
-  return { report_type: "trend", rendered_at: "2026-06-01T00:00:00Z", text: "", rows: [{ days }], definition: DEFINITION };
+function trendResponse(days: TrendDay[] = []): ReportResponse {
+  return { report_type: "trend", rendered_at: "2026-06-01T00:00:00Z", text: "", rows: [{ days, hourly: [], dow_band: { grid: [], worst: null } }], definition: DEFINITION };
 }
 
-function rankingResponse(rows: unknown[][] = []): ReportResponse {
+function rankingResponse(rows: RankingRow[] = []): ReportResponse {
   return { report_type: "ranking", rendered_at: "2026-06-01T00:00:00Z", text: "", rows, definition: DEFINITION };
 }
 
