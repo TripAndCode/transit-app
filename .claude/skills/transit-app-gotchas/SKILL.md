@@ -16,8 +16,9 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   real data, slice one agency + a few days via read-only
   `\copy (SELECT … WHERE agency_id=… AND captured_at::date IN (…)) TO …` into a
   throwaway DB on a spare port, then migrate + analyze there.
-- Same rule applies to dev ClickHouse (`transit-ch`, hundreds of millions of
-  real rows across 4 agencies). The one sanctioned exception is
+- Same rule applies to dev ClickHouse (`docker compose exec clickhouse`,
+  hundreds of millions of real rows across 4 agencies). The one sanctioned
+  exception is
   `make ch-bootstrap`'s documented one-time column-type `ALTER TABLE` (see
   `db/clickhouse/bootstrap.py`).
 - Tests use throwaway Postgres on :5544 AND throwaway ClickHouse on :8124 —
@@ -56,13 +57,12 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `scripts/run_integration_tests.sh` itself also accepts `TEST_PG_PORT`/
   `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
   for a caller that starts its own containers by some other means.
-- `run_full_ci.sh` measures coverage by default, because it exists to
-  reproduce CI's `test` job and that job measures it. Pass `COVERAGE=0` when
-  the run is only a pass/fail gate — a pre-merge re-check after a review
-  fix, say — and the coverage report will never be read. The
-  instrumentation is minutes per run on a VPS sharing CPU with a concurrent
-  `/vps-loop-run` tick, and this gate is often paid more than once per
-  branch. Keep coverage on whenever the number itself matters.
+- `run_full_ci.sh` does NOT measure coverage by default, and neither does
+  the CI run that gates a PR: `ci.yml` measures it on `main` only, since
+  nothing gates on the number. Pass `COVERAGE=1` when the number itself is
+  what you want. The instrumentation is minutes per run on a VPS sharing
+  CPU with a concurrent `/vps-loop-run` tick, and this gate is often paid
+  more than once per branch.
 
 ## Frontend dev proxy — two config files
 - `frontend/` ships BOTH `vite.config.ts` (tracked) and a gitignored
@@ -100,6 +100,16 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   separately in that worktree's own `frontend/`. If a symlink happens to
   exist, treat it as a possibly-deliberate, worktree-specific setup detail,
   not a repo-wide guarantee to rely on going forward.
+- The same cwd-keyed resolution bites a *test or script that shells out*:
+  a child invoked as `poetry run python ...` re-resolves the virtualenv from
+  wherever it runs, so a suite launched from a worktree hands its subprocess a
+  different, unprovisioned environment and the test fails with
+  `ModuleNotFoundError` no matter what the code under test does. Pass the
+  running interpreter explicitly instead — `sys.executable` from Python, or an
+  interpreter-override env var for a bash wrapper — rather than letting the
+  child resolve poetry itself. Watch for the failure that *passes*: a test
+  asserting only a non-zero exit code is satisfied by the crash and silently
+  stops checking its actual subject.
 - **What actually works**: an interactive session (not a dispatched
   worker) usually has broader Bash permissions and CAN run `poetry
   install`/`npm install` for real, closing the gap after the fact. Fetch

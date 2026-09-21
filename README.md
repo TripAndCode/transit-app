@@ -139,15 +139,12 @@ make test
 make check
 ```
 
-`make check`/`make test` are gaining safer semantics on a separate branch:
-`check` will stop rewriting files (it checks formatting instead of
-reapplying it) and `test` will run through a safe test runner that refuses
-to touch the real dev database. Until that lands, the notes below still
-apply.
-
-Tests must use the throwaway Postgres instance on `:5544`, never the real dev
-database on `:5433`. ClickHouse integration tests require the test instance on
-`:8124` and `RUN_CH_INTEGRATION=1`.
+`make test` always runs against the throwaway Postgres/ClickHouse instances on
+`:5544`/`:8124` via `scripts/run_integration_tests.sh`, never the real dev
+database on `:5433`, regardless of this Makefile's own `DATABASE_URL` default.
+That runner also exports `RUN_CH_INTEGRATION=1`, so the ClickHouse-gated tests
+actually run rather than silently skipping. `make check` runs `fmt-check`
+(verifies formatting, doesn't rewrite files), `lint`, `typecheck`, then `test`.
 
 Example targeted test:
 
@@ -211,6 +208,9 @@ Copy `.env.example` and set only what your environment needs. Important groups:
 - `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
 - `ASK_FOLLOWUP_ENABLED`, `COPILOT_INSIGHT_ENABLED`, `WEATHER_INGEST_ENABLED`:
   feature kill switches.
+- `OPENAPI_DOCS_ENABLED`: gates `/docs`, `/redoc`, and `/openapi.json`. Off
+  unless set, so a deployment publishes no schema by default. `.env.example`
+  turns it on for local dev.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
 - `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
   `PUBLIC_BASE_URL`, `ADMIN_EMAILS`: optional authentication and admin setup.
