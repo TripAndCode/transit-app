@@ -297,7 +297,7 @@ async def test_routes_list_empty(map_client):
     client, agency_id = map_client
     resp = await client.get(f"/api/{agency_id}/routes")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    assert resp.json() == {"rows": []}
 
 
 @pytest.mark.asyncio
@@ -305,7 +305,7 @@ async def test_stops_list_empty(map_client):
     client, agency_id = map_client
     resp = await client.get(f"/api/{agency_id}/stops")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    assert resp.json() == {"rows": []}
 
 
 @pytest.mark.asyncio
@@ -328,16 +328,18 @@ async def test_routes_list_exposes_every_documented_field(map_app):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/routes")
     assert resp.status_code == 200
-    assert resp.json() == [
-        {
-            "route_id": "国道・古川線(1021)",
-            "route_short_name": "1021",
-            "route_long_name": "国道・古川線",
-            # Extracted from the parenthesised tail of route_id.
-            "route_code": "1021",
-            "trip_headsigns": ["古川行"],
-        }
-    ]
+    assert resp.json() == {
+        "rows": [
+            {
+                "route_id": "国道・古川線(1021)",
+                "route_short_name": "1021",
+                "route_long_name": "国道・古川線",
+                # Extracted from the parenthesised tail of route_id.
+                "route_code": "1021",
+                "trip_headsigns": ["古川行"],
+            }
+        ]
+    }
 
 
 @pytest.mark.asyncio
@@ -353,7 +355,7 @@ async def test_stops_list_exposes_every_documented_field(map_app):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/stops")
     assert resp.status_code == 200
-    assert resp.json() == [{"stop_id": "S1", "stop_name": "駅前", "stop_lat": 40.5, "stop_lon": 140.5}]
+    assert resp.json() == {"rows": [{"stop_id": "S1", "stop_name": "駅前", "stop_lat": 40.5, "stop_lon": 140.5}]}
 
 
 @pytest.mark.asyncio
@@ -367,7 +369,7 @@ async def test_stops_list_tolerates_a_stop_with_no_name_or_position(map_app):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/stops")
     assert resp.status_code == 200
-    assert resp.json() == [{"stop_id": "S2", "stop_name": None, "stop_lat": None, "stop_lon": None}]
+    assert resp.json() == {"rows": [{"stop_id": "S2", "stop_name": None, "stop_lat": None, "stop_lon": None}]}
 
 
 @pytest.mark.asyncio

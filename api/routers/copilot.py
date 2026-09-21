@@ -6,22 +6,40 @@ caller's own view payload, never free-form user text, which is why this
 route needs no RAG grounding or answer verification unlike ``/ask``.
 """
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from api.deps import get_agency, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.security import csrf_guard, require_llm_approved
+from api.security import User, csrf_guard, require_llm_approved
 from pipeline.query.copilot import NoInsightAvailable, generate_proactive_insight, is_enabled
 from pipeline.query.user_llm_keys import get_user_llm_key
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["copilot"])
+
+# A ceiling on abuse, not a tuning knob: CopilotPanel posts the whole
+# OverviewSummary unmodified, and two of its fields (service_split_daily,
+# sparkline_points) carry one entry per day of the selected range. At
+# MAX_RANGE_DAYS those two alone run to tens of kilobytes, so any cap near
+# their size rejects the application's own traffic on a wide-but-legal range.
+# Keep this far above whatever the Overview tab can produce.
+_MAX_PAYLOAD_BYTES = 256 * 1024
 
 
 class CopilotInsightRequest(BaseModel):
     tab: str
     filters: dict
     view_payload: dict
+
+    @field_validator("filters", "view_payload")
+    @classmethod
+    def _bounded_payload(cls, v: dict) -> dict:
+        size = len(json.dumps(v).encode())
+        if size > _MAX_PAYLOAD_BYTES:
+            raise ValueError(f"payload exceeds {_MAX_PAYLOAD_BYTES} bytes serialized")
+        return v
 
 
 class CopilotInsightResponse(BaseModel):
@@ -37,8 +55,8 @@ async def copilot_insight(
     body: CopilotInsightRequest,
     agency_id: int = Depends(get_agency),
     locale: str = Depends(get_locale),
-    user=Depends(get_current_user_optional),
-):
+    user: User | None = Depends(get_current_user_optional),
+) -> CopilotInsightResponse:
     csrf_guard(request)
     if not is_enabled():
         # Short-circuit ahead of the approval gate: a disabled feature must
@@ -77,6 +95,6 @@ async def copilot_insight(
 @router.get("/copilot/enabled")
 async def copilot_enabled_endpoint(
     agency_id: int = Depends(get_agency),  # implicit auth scope
-):
+) -> dict[str, bool]:
     """Public flag check so the panel knows whether to render at all."""
     return {"enabled": is_enabled()}

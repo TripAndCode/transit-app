@@ -123,6 +123,22 @@ def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> Non
         )
 
 
+def _openapi_docs_enabled() -> bool:
+    """Whether ``/docs``, ``/redoc`` and ``/openapi.json`` should be exposed.
+
+    Off unless ``OPENAPI_DOCS_ENABLED`` says otherwise, matching
+    ``PERF_DEBUG_ENABLED``: a deployment that configures nothing publishes no
+    schema. The HTTPS signal behind ``cookie_secure()`` cannot stand in for
+    "is this production" here, because ``PUBLIC_BASE_URL`` is only set when
+    SSO is configured — a live HTTPS deployment without SSO leaves it at its
+    localhost default, which would read as local dev and expose the schema.
+
+    Local dev gets the docs from ``.env.example``, which turns them on and is
+    only ever copied into a developer's own ``.env``.
+    """
+    return os.environ.get("OPENAPI_DOCS_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
 def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
     """Refuse to boot with zero usable LLM providers configured.
 
@@ -136,6 +152,24 @@ def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
             "No usable LLM provider configured. Set at least one provider's "
             "API key (e.g. GEMINI_API_KEY) — see .env.example."
         )
+
+
+async def _close_startup_resources(app: FastAPI) -> None:
+    """Close the ClickHouse client and the connection pool, tolerating either
+    being absent or already failed. Shared by the startup-failure path and
+    the normal shutdown so the two cannot drift."""
+    client = getattr(app.state, "ch_client", None)
+    if client is not None:
+        try:
+            await client.close()
+        except Exception:
+            _log.warning("ClickHouse client failed to close cleanly", exc_info=True)
+    pool = getattr(app.state, "pool", None)
+    if pool is not None:
+        try:
+            await pool.close()
+        except Exception:
+            _log.warning("Connection pool failed to close cleanly", exc_info=True)
 
 
 @asynccontextmanager
@@ -162,52 +196,70 @@ async def lifespan(app: FastAPI):
     # fan-out one slot short and serialized a stage on every cold request.
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
 
-    # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
-    # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
-    # heatmap, any time_band="all" report path reading agg_* tables) have
-    # nothing to do with ClickHouse and must keep working even if it's down
-    # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
-    # client that raises a clean 503 lazily, only if something actually
-    # tries to use it.
+    # Everything below reuses app.state.pool, so any failure here must close
+    # it before re-raising — this generator's own cleanup after `yield` never
+    # runs unless `yield` is actually reached, otherwise the pool leaks.
     try:
-        app.state.ch_client = await get_ch_client()
-    except KeyError as exc:
-        _log.warning(
-            "ClickHouse client not started — missing required env var %s. "
-            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
-            exc,
-        )
-        app.state.ch_client = None
+        # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
+        # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
+        # heatmap, any time_band="all" report path reading agg_* tables) have
+        # nothing to do with ClickHouse and must keep working even if it's down
+        # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
+        # client that raises a clean 503 lazily, only if something actually
+        # tries to use it.
+        try:
+            app.state.ch_client = await get_ch_client()
+        except KeyError as exc:
+            _log.warning(
+                "ClickHouse client not started — missing required env var %s. "
+                "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+                exc,
+            )
+            app.state.ch_client = None
+        except Exception:
+            _log.warning(
+                "ClickHouse client not started — connection failed. "
+                "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+                exc_info=True,
+            )
+            app.state.ch_client = None
+
+        # Break-glass local-admin account (independent of the OAuth env block
+        # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
+        # are both set. See api.routers.auth.seed_local_admin.
+        await seed_local_admin(app.state.pool)
+
+        from pipeline.query.embeddings import get_embedder
+
+        embedder = get_embedder()
+        if not embedder.available:
+            _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
     except Exception:
-        _log.warning(
-            "ClickHouse client not started — connection failed. "
-            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
-            exc_info=True,
-        )
-        app.state.ch_client = None
-
-    # Break-glass local-admin account (independent of the OAuth env block
-    # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
-    # are both set. See api.routers.auth.seed_local_admin.
-    await seed_local_admin(app.state.pool)
-
-    from pipeline.query.embeddings import get_embedder
-
-    embedder = get_embedder()
-    if not embedder.available:
-        _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
+        # Close what startup already opened, in the same order the shutdown
+        # path below uses. The ClickHouse client is opened inside this same
+        # try, so a failure after it leaks its HTTP session otherwise.
+        # Cleanup failures are logged, never raised: the startup error is the
+        # one worth reporting, and letting a close() failure replace it would
+        # hide the actual cause.
+        await _close_startup_resources(app)
+        raise
 
     yield
-    if app.state.ch_client is not None:
-        await app.state.ch_client.close()
-    await app.state.pool.close()
+    await _close_startup_resources(app)
 
 
 _CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 
 configure_logging()
 
-app = FastAPI(title="Transit Delay API", lifespan=lifespan)
+_docs_enabled = _openapi_docs_enabled()
+app = FastAPI(
+    title="Transit Delay API",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
+)
 app.state.limiter = limiter
 # slowapi's handler is typed against its own exception class, not Starlette's
 # broader (Request, Exception) signature — runtime contract is fine.

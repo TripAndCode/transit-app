@@ -44,7 +44,7 @@ from pipeline.query.intent import IntentSignature, canonicalize, derive_confiden
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, get_client
+from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, describe_provider_failure, get_client
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
@@ -485,7 +485,8 @@ async def chat_with_tools(
             return None, "rate_limit"
         except BadRequestError:
             return None, "bad_request"
-        except Exception:
+        except Exception as exc:
+            _log.warning("chat: BYOK completion failed (%s)", describe_provider_failure(exc))
             return None, "unexpected"
 
     language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])

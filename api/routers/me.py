@@ -6,7 +6,7 @@ from typing import Any
 import asyncpg
 import openai
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
@@ -43,7 +43,7 @@ class MeOut(BaseModel):
 
 
 @router.get("/me", response_model=MeOut)
-async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)):
+async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)) -> MeOut:
     """Return the current user's profile and linked OAuth identities."""
     rows = await conn.fetch(
         "SELECT provider, email_at_link FROM oauth_identities WHERE user_id=$1",
@@ -61,7 +61,12 @@ async def get_me(user: User = Depends(require_user), conn: asyncpg.Connection = 
 
 
 class SessionOut(BaseModel):
-    """One active session row exposed to the caller (sid truncated to a prefix)."""
+    """One active session row exposed to the caller.
+
+    ``sid_prefix`` is a prefix of the stored ``sid_hash``, not of the session
+    id itself — the server no longer holds the session id, and a handle the
+    client can echo back must be derivable from what is stored. It stays an
+    opaque display/lookup handle either way."""
 
     sid_prefix: str
     user_agent: str | None
@@ -71,16 +76,18 @@ class SessionOut(BaseModel):
 
 
 @router.get("/me/sessions", response_model=list[SessionOut])
-async def list_sessions(user: User = Depends(require_user), conn=Depends(get_conn)):
+async def list_sessions(
+    user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)
+) -> list[SessionOut]:
     """List the caller's active sessions, ordered by most-recent activity."""
     rows = await conn.fetch(
-        "SELECT sid, user_agent, ip::text AS ip, created_at, last_seen_at "
+        "SELECT sid_hash, user_agent, ip::text AS ip, created_at, last_seen_at "
         "FROM sessions WHERE user_id=$1 ORDER BY last_seen_at DESC",
         user.user_id,
     )
     return [
         SessionOut(
-            sid_prefix=r["sid"][:12],
+            sid_prefix=r["sid_hash"][:12],
             user_agent=r["user_agent"],
             ip=r["ip"],
             created_at=r["created_at"],
@@ -90,49 +97,75 @@ async def list_sessions(user: User = Depends(require_user), conn=Depends(get_con
     ]
 
 
+def _is_valid_sid_prefix(sid_prefix: str) -> bool:
+    """True iff the prefix is lowercase hex, the only alphabet a stored
+    ``sid_hash`` can contain. Tighter than the session id's own alphabet was,
+    and it keeps `%` and `_` -- both LIKE wildcards -- out of the value."""
+    return all(c in "0123456789abcdef" for c in sid_prefix)
+
+
+# Exact-prefix comparison, not LIKE: a LIKE pattern treats an unescaped `_`
+# in sid_prefix as a single-character wildcard, letting a valid-looking
+# prefix match a session it isn't actually a prefix of. Belt and braces with
+# the hex check above, so neither alone is load-bearing.
+_SID_PREFIX_QUERY = "SELECT sid_hash FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2"
+
+
 @router.delete("/me/sessions/{sid_prefix}", status_code=204)
 async def revoke_session(
     sid_prefix: str,
     request: Request,
     user: User = Depends(require_user),
-    conn=Depends(get_conn),
-):
-    """Revoke the caller's session matching the given sid prefix.
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> Response:
+    """Revoke the caller's session matching the given ``sid_hash`` prefix.
 
     Rejects ambiguous prefixes with 409 — the UI passes the 12-char
-    display prefix, which is astronomically unlikely to collide for
-    opaque 32-byte tokens but the server refuses to guess if it does.
+    display prefix, which is astronomically unlikely to collide across one
+    user's sessions but the server refuses to guess if it does. Matching a
+    prefix of the digest is safe in a way matching a prefix of the session id
+    would not be: the digest is not a credential, so it can be echoed through
+    a URL path.
     """
     csrf_guard(request)
     if len(sid_prefix) < 12:
         raise HTTPException(400, "prefix too short")
-    # secrets.token_urlsafe() only emits these characters; reject anything else
-    # so a path containing `%` or `_` can't become a LIKE wildcard.
-    if not all(c.isalnum() or c in "-_" for c in sid_prefix):
+    if not _is_valid_sid_prefix(sid_prefix):
         raise HTTPException(400, "invalid prefix")
-    rows = await conn.fetch(
-        "SELECT sid FROM sessions WHERE user_id=$1 AND sid LIKE $2",
-        user.user_id,
-        sid_prefix + "%",
-    )
+    rows = await conn.fetch(_SID_PREFIX_QUERY, user.user_id, sid_prefix)
     if len(rows) == 0:
         raise HTTPException(404, "session not found")
     if len(rows) > 1:
         raise HTTPException(409, "prefix matches multiple sessions")
     await conn.execute(
-        "DELETE FROM sessions WHERE sid=$1 AND user_id=$2",
-        rows[0]["sid"],
+        "DELETE FROM sessions WHERE sid_hash=$1 AND user_id=$2",
+        rows[0]["sid_hash"],
         user.user_id,
     )
     return Response(status_code=204)
+
+
+# Sized against what the filter UI can legitimately build, not against today's
+# data: range_ctx carries a route list, and the picker can select every route an
+# agency has. A large network's full selection would exceed a few kilobytes, so
+# the cap sits well clear of it and only stops payloads no picker could produce.
+_MAX_PRESET_RANGE_CTX_BYTES = 64 * 1024
 
 
 class PresetIn(BaseModel):
     """Body for creating a saved filter preset."""
 
     agency_id: int
-    name: str
+    name: str = Field(max_length=120)
     range_ctx: dict[str, Any]
+
+    @field_validator("range_ctx")
+    @classmethod
+    def _range_ctx_bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
+        size = len(json.dumps(v).encode())
+        if size > _MAX_PRESET_RANGE_CTX_BYTES:
+            raise ValueError(f"range_ctx exceeds {_MAX_PRESET_RANGE_CTX_BYTES} bytes serialized")
+        return v
 
 
 class PresetOut(BaseModel):
@@ -145,7 +178,9 @@ class PresetOut(BaseModel):
 
 
 @router.get("/me/presets", response_model=list[PresetOut])
-async def list_presets(agency_id: int, user: User = Depends(require_user), conn=Depends(get_conn)):
+async def list_presets(
+    agency_id: int, user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)
+) -> list[PresetOut]:
     """List the caller's saved filter presets for ``agency_id``."""
     rows = await conn.fetch(
         "SELECT preset_id, agency_id, name, range_ctx::text AS range_ctx_text "
@@ -169,8 +204,8 @@ async def create_preset(
     body: PresetIn,
     request: Request,
     user: User = Depends(require_user),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> PresetOut:
     """Save a filter preset; 409 if the name is already in use."""
     csrf_guard(request)
     try:
@@ -200,8 +235,8 @@ async def delete_preset(
     preset_id: int,
     request: Request,
     user: User = Depends(require_user),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> Response:
     """Delete one of the caller's filter presets."""
     csrf_guard(request)
     result = await conn.execute(
@@ -230,7 +265,7 @@ class LLMKeyPut(BaseModel):
 
 
 @router.get("/me/llm-key", response_model=LLMKeyStatus)
-async def get_llm_key(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)):
+async def get_llm_key(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)) -> LLMKeyStatus:
     """Return whether the caller has a BYOK LLM key configured, and its masked suffix."""
     key = await get_user_llm_key(conn, user.user_id)
     if key is None:
@@ -244,7 +279,7 @@ async def put_llm_key(
     body: LLMKeyPut,
     request: Request,
     user: User = Depends(require_user),
-):
+) -> LLMKeyStatus:
     """Validate then store the caller's BYOK LLM key.
 
     Validation runs before ``save_user_llm_key`` is ever called, so a bad key
@@ -276,7 +311,7 @@ async def delete_llm_key(
     request: Request,
     user: User = Depends(require_user),
     conn: asyncpg.Connection = Depends(get_conn),
-):
+) -> Response:
     """Delete the caller's stored BYOK LLM key, if any."""
     csrf_guard(request)
     await delete_user_llm_key(conn, user.user_id)
