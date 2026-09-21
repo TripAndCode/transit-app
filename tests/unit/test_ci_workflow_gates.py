@@ -312,27 +312,24 @@ def test_frontend_job_stays_off_the_self_hosted_runner() -> None:
         )
 
 
-def test_reaper_is_scoped_by_label_and_by_age() -> None:
-    """Either half alone is wrong: unscoped by label it reaps unrelated
-    containers on a shared runner, unscoped by age it kills a concurrent
-    job's live database — the exact failure the unique name exists to stop."""
-    reap = next(s for s in _action_steps() if "docker ps -aq" in s.get("run", ""))
-    assert "label=transit-test-postgres" in reap["run"], "reaper is not scoped to this action's own containers"
-    assert "until=" in reap["run"], "reaper is not scoped by age"
-
-
 def test_reaper_cutoff_clears_the_job_timeout_without_dawdling() -> None:
     """Both directions are failures.
 
     Below the job timeout, the reaper deletes a running job's database. Far
     above it, a hard-cancelled job's container — the case the per-scope
     cleanup cannot reach, because that job never runs its teardown — holds
-    its volume for hours after it stopped being useful.
+    its volume long after it stopped being useful.
+
+    Only the number is checked here; the reaper's behaviour is executed in
+    tests/unit/test_ci_reap_stale.py against a shimmed Docker, because the
+    predecessor of this check asserted the presence of a `until=` filter
+    that `docker ps` does not accept and passed for months of nothing being
+    reaped.
     """
-    reap = next(s for s in _action_steps() if "docker ps -aq" in s.get("run", ""))
-    hours = re.search(r"'(\d+) hours? ago'", reap["run"])
-    assert hours, "the reaper cutoff is no longer expressed in whole hours; re-check it against the job timeout"
-    cutoff_minutes = int(hours.group(1)) * 60
+    reap = next(s for s in _action_steps() if "reap-stale.sh" in s.get("run", ""))
+    seconds = re.search(r"reap-stale\.sh\S*\"?\s+\S+\s+(\d+)", reap["run"])
+    assert seconds, f"could not read the reaper's cutoff from: {reap['run']!r}"
+    cutoff_minutes = int(seconds.group(1)) / 60
 
     timeouts = [job["timeout-minutes"] for job in _workflow_yaml()["jobs"].values()]
     longest_job = max(timeouts)

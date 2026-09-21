@@ -55,17 +55,12 @@ runs:
     # caps a job at 45 minutes, so nothing an hour old can still be in use,
     # and waiting longer only means holding a quarter gigabyte of volume for
     # no reason. Raise this if that timeout is ever raised past an hour.
+    # 3600s, from the 45-minute job timeout in ci.yml: nothing an hour old
+    # can still be in use, and waiting longer only holds a volume for no
+    # reason. Raise this if that timeout is ever raised past an hour.
     - name: Reap containers from scopes that will not run again
       shell: bash
-      run: |
-        set -euo pipefail
-        cutoff="$(date -u -d '1 hour ago' '+%Y-%m-%dT%H:%M:%S')"
-        stale="$(docker ps -aq --filter 'label=transit-test-postgres' --filter "until=$cutoff")"
-        if [ -n "$stale" ]; then
-          echo "removing abandoned test-postgres containers: $stale"
-          # shellcheck disable=SC2086 -- intentional word splitting over ids
-          docker rm -f -v $stale
-        fi
+      run: '"${{ github.action_path }}/reap-stale.sh" transit-test-postgres 3600'
 
     # Built from db/Dockerfile rather than declared as a `services:` entry:
     # that block can only pull a published image, and none carries PostGIS and
