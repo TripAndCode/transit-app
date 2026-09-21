@@ -12,6 +12,7 @@ import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
+import { Z_INDEX } from "../styles/zIndex";
 import { FILTER_SEPARATOR } from "../utils/format";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -271,7 +272,10 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
         position: "fixed",
         top: menu.y,
         left: menu.x,
-        zIndex: 500,
+        // Deliberately above modal/modalBackdrop: this menu can be opened
+        // from inside a modal-hosted sidebar, and a menu opened from within
+        // a surface must render above that surface.
+        zIndex: Z_INDEX.contextMenu,
         background: "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
         borderRadius: "var(--radius)",
