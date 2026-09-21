@@ -24,7 +24,7 @@ jobs:
     runs-on: [self-hosted, vps]
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run Oracle-collector bash suites
         run: make oracle-tests
@@ -49,7 +49,7 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Free disk space on the runner
         if: runner.environment == 'github-hosted'
@@ -59,7 +59,7 @@ jobs:
             /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
           df -h /
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -74,7 +74,7 @@ jobs:
       # without both of these, they self-skip for a setup reason rather
       # than actually running, which the fail-if-still-skipped check below
       # cannot tell apart from the suite being newly broken.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
