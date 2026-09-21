@@ -6,6 +6,7 @@ import { useParams } from "react-router-dom";
 import { useCappedList } from "../hooks/useCappedList";
 
 const ROWS_CAP = 200;
+import { formatNumber } from "../utils/format";
 
 type Schema = {
   /** Column index in the row tuple */
@@ -133,7 +134,7 @@ function fmtNum(v: unknown, _t: TFunction): string {
   if (v == null) return "—";
   const n = Number(v);
   if (!isFinite(n)) return "—";
-  return n.toLocaleString();
+  return formatNumber(n);
 }
 
 function fmtConfidence(v: unknown, t: TFunction): string {
@@ -171,7 +172,7 @@ export function ReportTable({ reportType, rows }: Props) {
   const schema = SCHEMAS[reportType];
 
   const maxes = computeColumnMaxes(schema, rows);
-  const cappedRows = useCappedList(rows, ROWS_CAP);
+  const cappedRows = useCappedList(rows, ROWS_CAP, reportType);
 
   if (!schema) {
     // Unknown type — fall back to raw key/value table

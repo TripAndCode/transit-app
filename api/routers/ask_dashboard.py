@@ -3,23 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import timedelta
-from typing import cast
+from typing import Any
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.deps import get_agency, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import (
-    DEFAULT_RANGE_DAYS,
-    MAX_RANGE_DAYS,
-    DowFilter,
-    RangeCtx,
-    ServiceType,
-    TimeBand,
-    jst_today,
-    parse_iso_date,
-)
+from api.range import RangeCtx, clamp_range_ctx
 from pipeline.dashboard_queries import anomaly_timeline, delay_heatmap, movers
 
 router = APIRouter(prefix="/api/{agency_id}/ask/dashboard", tags=["dashboard"])
@@ -33,34 +24,30 @@ def _resolve_ctx(
     service: str,
     routes: tuple[str, ...] = (),
 ) -> RangeCtx:
-    """Build a clamped RangeCtx from query params, defaulting invalid enums to 'all'."""
-    today = jst_today()
-    to_d = parse_iso_date(to_date) or today
-    from_d = parse_iso_date(from_date) or (to_d - timedelta(days=DEFAULT_RANGE_DAYS - 1))
-    if from_d > to_d:
-        from_d, to_d = to_d, from_d
-    if (to_d - from_d).days >= MAX_RANGE_DAYS:
-        from_d = to_d - timedelta(days=MAX_RANGE_DAYS - 1)
-    dow_ = cast(DowFilter, dow if dow in ("all", "weekday", "weekend") else "all")
-    valid_bands = {"all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"}
-    tb_ = cast(TimeBand, time_band if time_band in valid_bands else "all")
-    svc_ = cast(ServiceType, service if service in ("all", "平日", "土日祝") else "all")
-    return RangeCtx(
-        from_date=from_d,
-        to_date=to_d,
-        dow=dow_,
-        time_band=tb_,
-        service=svc_,
+    """Build a validated, clamped RangeCtx from this router's query params.
+
+    These endpoints declare their filters as loose ``str``/``list[str]``
+    params rather than the shared :func:`api.range.get_range_ctx` dependency
+    (they carry extra per-endpoint params alongside), so the validation,
+    clamping and route de-duplication have to come from the same shared
+    helper instead of a hand-copied variant.
+    """
+    return clamp_range_ctx(
+        from_=from_date,
+        to=to_date,
+        dow=dow,
+        time_band=time_band,
+        service=service,
         routes=routes,
     )
 
 
-@router.get("/heatmap")
+@router.get("/heatmap", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def heatmap_endpoint(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     dow: str = Query(default="all"),
@@ -69,7 +56,7 @@ async def heatmap_endpoint(
     routes: list[str] = Query(default=[]),
     dimension: str = Query(default="dow", description="'dow' or 'hour_band'"),
     top_routes: int = Query(default=20, ge=1, le=50),
-):
+) -> dict[str, Any]:
     if dimension not in ("dow", "hour_band"):
         raise HTTPException(status_code=400, detail="dimension must be 'dow' or 'hour_band'")
     ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
@@ -77,12 +64,12 @@ async def heatmap_endpoint(
     return asdict(result)
 
 
-@router.get("/anomalies")
+@router.get("/anomalies", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def anomalies_endpoint(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     dow: str = Query(default="all"),
@@ -91,18 +78,18 @@ async def anomalies_endpoint(
     routes: list[str] = Query(default=[]),
     days: int = Query(default=30, ge=7, le=90),
     sigma: float = Query(default=2.0, ge=1.0, le=5.0),
-):
+) -> dict[str, Any]:
     ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
     result = await anomaly_timeline(conn, agency_id=agency_id, ctx=ctx, days=days, sigma=sigma)
     return asdict(result)
 
 
-@router.get("/movers")
+@router.get("/movers", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def movers_endpoint(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     dow: str = Query(default="all"),
@@ -111,7 +98,7 @@ async def movers_endpoint(
     routes: list[str] = Query(default=[]),
     window_days: int = Query(default=7, ge=1, le=30),
     top: int = Query(default=10, ge=1, le=50),
-):
+) -> dict[str, Any]:
     ctx = _resolve_ctx(from_date, to_date, dow, time_band, service, tuple(routes))
     result = await movers(conn, agency_id=agency_id, ctx=ctx, window_days=window_days, top=top)
     return asdict(result)

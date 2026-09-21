@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -85,6 +86,26 @@ def stale_agency(apply_schema):
         ch_client.close()
 
 
+def _script_env(**overrides: str) -> dict[str, str]:
+    """Environment for invoking drift_check.sh.
+
+    PYTHON is always set: the script defaults to `poetry run python`, which
+    resolves its virtualenv from the current directory and so picks a
+    different, unprovisioned one when the suite runs from a git worktree.
+    Built once rather than per test — a hand-copied env dict is how one of
+    these call sites previously kept the default and passed for the wrong
+    reason, its assertions satisfied by the resulting crash rather than by
+    the behaviour it names.
+    """
+    return {
+        **os.environ,
+        "DATABASE_URL": os.environ["DATABASE_URL"],
+        "PYTHON": sys.executable,
+        **_CH_TEST_ENV,
+        **overrides,
+    }
+
+
 @_ch_integration
 def test_exit0_and_reports_both_checks_on_current_db(apply_schema):
     # :5544 is freshly migrated with current aggregates -> both checks pass.
@@ -92,7 +113,7 @@ def test_exit0_and_reports_both_checks_on_current_db(apply_schema):
         ["bash", str(SCRIPT)],
         capture_output=True,
         text=True,
-        env={**os.environ, "DATABASE_URL": os.environ["DATABASE_URL"], **_CH_TEST_ENV},
+        env=_script_env(),
     )
     out = r.stdout + r.stderr
     assert r.returncode == 0, out
@@ -108,7 +129,7 @@ def test_exit1_when_aggs_stale(stale_agency):
         ["bash", str(SCRIPT)],
         capture_output=True,
         text=True,
-        env={**os.environ, "DATABASE_URL": os.environ["DATABASE_URL"], **_CH_TEST_ENV},
+        env=_script_env(),
     )
     out = r.stdout + r.stderr
     assert r.returncode == 1, out
@@ -120,3 +141,29 @@ def test_exit2_when_database_url_unset():
     r = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env)
     assert r.returncode == 2
     assert "DATABASE_URL" in (r.stdout + r.stderr)
+
+
+@_ch_integration
+def test_python_override_with_a_space_in_the_path_is_one_argument(tmp_path, apply_schema):
+    """An interpreter path containing a space must reach the script whole.
+
+    Word-splitting it would run its first segment as the command, and the
+    wrapper folds any non-zero status into "PROBLEM (migrations=...)" — so a
+    broken override would be reported as schema drift rather than as the
+    configuration error it is.
+    """
+    spaced_dir = tmp_path / "dir with space"
+    spaced_dir.mkdir()
+    shim = spaced_dir / "python"
+    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    shim.chmod(0o755)
+
+    r = subprocess.run(
+        ["bash", str(SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=_script_env(PYTHON=str(shim)),
+    )
+    out = r.stdout + r.stderr
+    assert r.returncode == 0, out
+    assert "not found" not in out

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { isoDaysAgo, jstYearMonth, todayISO, toJstISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { Z_INDEX } from "../styles/zIndex";
 
 type Preset = { key: string; label: string; from: () => string; to: () => string };
 
@@ -99,7 +100,7 @@ export function RangeBadge() {
             position: "absolute",
             top: "calc(100% + 6px)",
             left: 0,
-            zIndex: 50,
+            zIndex: Z_INDEX.popover,
             minWidth: 280,
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",

@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { PeakHourBreakdown } from "../api/types";
 import { Spinner } from "./Spinner";
+import { Z_INDEX } from "../styles/zIndex";
 
 const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 
@@ -47,7 +48,7 @@ export function PeakHourModal({
           position: "fixed",
           inset: 0,
           background: "rgba(0,0,0,0.35)",
-          zIndex: 80,
+          zIndex: Z_INDEX.modalBackdrop,
         }}
       />
       <div
@@ -63,7 +64,7 @@ export function PeakHourModal({
           border: "1px solid var(--border-soft)",
           borderRadius: 10,
           padding: 24,
-          zIndex: 81,
+          zIndex: Z_INDEX.modal,
           maxHeight: "80vh",
           overflowY: "auto",
         }}

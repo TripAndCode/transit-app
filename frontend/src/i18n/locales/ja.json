@@ -6,7 +6,7 @@
     "open_menu": "メニューを開く",
     "account_menu": "アカウントメニュー",
     "help": "ヘルプ",
-    "prototype_section_label": "PROTOTYPE",
+    "prototype_section_label": "プロトタイプ",
     "prototype_onboarding": "初回ログイン画面",
     "prototype_stale_feed": "フィード遅延状態",
     "prototype_no_data": "データなし状態"
@@ -273,6 +273,8 @@
     "language_aria": "言語",
     "theme_toggle_to_dark": "ダークモードに切り替え",
     "theme_toggle_to_light": "ライトモードに切り替え",
+    "decrement_aria": "減らす",
+    "increment_aria": "増やす",
     "service_value": {
       "平日": "平日",
       "土日祝": "土日祝"
@@ -324,6 +326,8 @@
       },
       "sso_disabled_title": "SSO 未設定",
       "sso_disabled_body": "このビルドでは SSO が無効です。匿名で閲覧できます。",
+      "config_error_title": "サインインオプションを読み込めませんでした",
+      "config_error_body": "サーバーへの接続で問題が発生しました。もう一度お試しください。",
       "back_to_top": "トップへ戻る",
       "welcome_back": "おかえりなさい",
       "choose_provider": "アカウントを選択してログイン",
@@ -638,7 +642,8 @@
       "unpin": "ピン留めを外す",
       "delete": "削除",
       "delete_confirm": "この会話を削除しますか？",
-      "empty": "まだ会話がありません"
+      "empty": "まだ会話がありません",
+      "more_options_aria": "その他のオプション"
     },
     "filter_bar": {
       "edit": "編集",
@@ -1018,6 +1023,7 @@
     "architecture": {
       "title": "アーキテクチャ",
       "diagram_title": "データフロー",
+      "diagram_aria": "図",
       "docs_title": "機能ドキュメント",
       "docs_nav_label": "機能ドキュメント一覧",
       "docs_empty": "機能ドキュメントが見つかりません。"

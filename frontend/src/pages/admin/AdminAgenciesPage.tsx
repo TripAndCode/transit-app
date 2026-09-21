@@ -10,6 +10,7 @@ import {
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
 import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
+import { Z_INDEX } from "../../styles/zIndex";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
 
@@ -69,7 +70,7 @@ function AgencyFormModal({
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)",
-        zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: Z_INDEX.modalBackdrop, display: "flex", alignItems: "center", justifyContent: "center",
       }}
     >
       <form

@@ -16,6 +16,7 @@ import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
 import { ApiError, apiPost } from "../api/client";
 import { relativeTime } from "../utils/relativeTime";
+import { FILTER_SEPARATOR } from "../utils/format";
 import { buildStyle, getMapStyleOverride, readMapStylePref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
@@ -126,6 +127,7 @@ export function MapTab() {
   const mapRef = useRef<MLMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
   const refreshMessageTimerRef = useRef<number | null>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
   const fittedRouteRef = useRef<string | null>(null);
   const firstStyleRunRef = useRef(true);
   const initialLanguageRef = useRef(i18n.language);
@@ -264,6 +266,10 @@ export function MapTab() {
 
   useEffect(() => () => {
     if (refreshMessageTimerRef.current != null) window.clearTimeout(refreshMessageTimerRef.current);
+    // Cancel a manual refresh's in-flight POST on unmount so it can't land
+    // (and setIsRefreshing/showRefreshMessage a now-unmounted component)
+    // after the user has navigated away.
+    refreshAbortRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -352,8 +358,14 @@ export function MapTab() {
     }
     setRefreshMessage(t("operations.refreshing"));
     setIsRefreshing(true);
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
     try {
-      const refreshResult = await apiPost<{ status: string; inserted: number }>(`/api/${id}/delays/refresh`, {});
+      const refreshResult = await apiPost<{ status: string; inserted: number }>(
+        `/api/${id}/delays/refresh`,
+        {},
+        { signal: controller.signal },
+      );
       const [liveResult, summaryResult, progressResult] = await Promise.all([
         liveQuery.refetch(),
         summaryQuery.refetch(),
@@ -392,7 +404,7 @@ export function MapTab() {
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
   const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
   const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
-  const cappedDelayedRows = useCappedList(delayedRows, DELAYED_TRIPS_CAP);
+  const cappedDelayedRows = useCappedList(delayedRows, DELAYED_TRIPS_CAP, liveRows);
 
   return (
     <div className="operations-page focused-overview">
@@ -492,7 +504,7 @@ export function MapTab() {
           {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
           {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { if (trip.route_code) focusRoute(trip.route_code); setSelectedDirectionKey(directionKey(trip)); setSelectedTripId(trip.trip_id); }}>
-              <span>{routeNames.format(trip.route_code)}<small>{trip.scheduled_time?.slice(0, 5)} · {trip.headsign} · {trip.stop_name}</small></span>
+              <span>{routeNames.format(trip.route_code)}<small>{trip.scheduled_time?.slice(0, 5)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
               <b>{signedMin(trip.dep_delay, t)}</b>
             </button>
             {trip.route_code && <Link to={`/agencies/${id}/route-analysis?${new URLSearchParams({ routes: trip.route_code })}`}>{td("openAnalysis")}</Link>}

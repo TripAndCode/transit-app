@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import type { ToolResult, TrendDay } from "../../api/types";
 import { DailyChart } from "../../components/charts/DailyChart";
+import { formatNumber } from "../../utils/format";
 
 /** Render a tool result as a table / key-value list / chart, falling back to
  *  plain text for empty or text-kind results. */
@@ -62,7 +63,7 @@ export function RichResult({
                             : cell == null
                               ? "—"
                               : typeof cell === "number"
-                                ? cell.toLocaleString()
+                                ? formatNumber(cell)
                                 : String(cell)}
                     </td>
                   ))}
