@@ -12,8 +12,10 @@ this doc expands on with file-level detail.
   (`frontend/src/main.tsx`), and `frontend/src/components/OnboardingGate.tsx`
   redirects a fresh/remembered agency selection to `/agencies/{id}/map`.
   Reach the Ask tab by clicking "Ask" in the sidebar.
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx` (`nav.ask` i18n
-  key).
+- Sidebar link: `frontend/src/components/Sidebar.tsx` (`nav.ask` i18n key —
+  "Ask" / "質問"). It is deliberately **not** a `SIDEBAR_NAV_ITEMS` entry: it
+  renders below the uniform nav list as a distinct dashed-border call to
+  action, so it reads as an action rather than a peer tab.
 - Top-level component: `frontend/src/tabs/AskTab.tsx` — owns thread
   selection, the shared filter context (date range / DOW / time-band /
   service / routes), message dispatch, and anon-to-authenticated

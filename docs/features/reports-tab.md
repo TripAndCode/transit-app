@@ -122,8 +122,9 @@ issuing their own requests.
   (`frontend/src/i18n/design.ts`, loaded via `useTranslation("design")`), not
   the default `translation` namespace's `frontend/src/i18n/locales/{ja,en}.json`
   files. `design.ts` holds its own `ja`/`en` objects directly in the TS
-  module; `npm run lint:i18n`'s key-parity check and
-  `npm run lint:i18n-strings` both explicitly skip this file, so a new
+  module, and neither i18n gate reaches it: `npm run lint:i18n`'s key-parity
+  check reads only the two `locales/*.json` files, and
+  `npm run lint:i18n-strings` skips `src/i18n/design.ts` by name. A new
   `design.ts` key needs its `ja`/`en` pair kept in sync by hand.
 - Every report response carries the same `definition` block described in
   `docs/features/analysis-tab.md`'s i18n section; this tab renders it through
