@@ -13,7 +13,7 @@ export
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build
 
 # Default target — first-run setup.
 all: bootstrap
@@ -123,6 +123,12 @@ git-cleanup-apply:
 
 test:
 	scripts/run_integration_tests.sh
+
+# Runs every oracle_cloud/v3/tests/test_*.sh suite (each self-contained via
+# fake curl/aws shims — no real network or Oracle VM access needed) and
+# summarizes pass/fail. Exits non-zero if any suite fails, so it can gate CI.
+oracle-tests:
+	@bash scripts/run_oracle_tests.sh
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
