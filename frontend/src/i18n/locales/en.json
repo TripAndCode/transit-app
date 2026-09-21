@@ -4,6 +4,7 @@
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
     "open_menu": "Open menu",
+    "mobile_menu_title": "Navigation menu",
     "account_menu": "Account menu",
     "help": "Help",
     "prototype_section_label": "PROTOTYPE",
@@ -219,6 +220,9 @@
     "concentration_explainer": "Each route's share of total delay in the selected range. The Lorenz curve below shows the skew: the dotted diagonal would be a perfectly even spread, and the further the curve bows away from it, the more the delay sits with a few routes.",
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split weekday vs weekend/holiday — compare commute peaks against weekend patterns.",
     "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
+  },
+  "markdownMermaid": {
+    "diagram_fallback_label": "Diagram"
   },
   "peakHourModal": {
     "title_dow": "{{dow}} {{hour}}:00 — delayed routes",
@@ -1023,7 +1027,6 @@
     "architecture": {
       "title": "Architecture",
       "diagram_title": "Data flow",
-      "diagram_aria": "Diagram",
       "docs_title": "Feature docs",
       "docs_nav_label": "Feature doc list",
       "docs_empty": "No feature docs found."

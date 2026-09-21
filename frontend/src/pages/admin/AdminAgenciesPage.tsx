@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AdminAgency,
@@ -10,7 +10,7 @@ import {
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
 import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
-import { Z_INDEX } from "../../styles/zIndex";
+import { Modal } from "../../components/Modal";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
 
@@ -59,29 +59,26 @@ function AgencyFormModal({
 }) {
   const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(initial);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   function set(key: keyof FormState, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
   return (
-    <div
-      role="presentation"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <Modal
+      open
+      onClose={onClose}
+      labelledBy="agency-form-title"
+      initialFocusRef={nameInputRef}
       style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)",
-        zIndex: Z_INDEX.modalBackdrop, display: "flex", alignItems: "center", justifyContent: "center",
+        background: "var(--bg-surface)", padding: 24, borderRadius: "var(--radius-lg)",
+        width: 520, maxWidth: "90vw",
       }}
     >
       <form
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="agency-form-title"
         onSubmit={(e) => { e.preventDefault(); onSubmit(form); }}
-        style={{
-          background: "var(--bg-surface)", padding: 24, borderRadius: "var(--radius-lg)",
-          width: 520, maxWidth: "90vw", display: "flex", flexDirection: "column", gap: 14,
-        }}
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
         <h3 id="agency-form-title" style={{ margin: 0, fontSize: 18 }}>
           {isEdit ? t("admin.agencies.form_title_edit") : t("admin.agencies.form_title_add")}
@@ -89,8 +86,7 @@ function AgencyFormModal({
         <Field label={t("admin.agencies.form_name")} htmlFor="af-name">
           <input
             id="af-name"
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
+            ref={nameInputRef}
             required
             value={form.agency_name}
             onChange={(e) => set("agency_name", e.target.value)}
@@ -160,7 +156,7 @@ function AgencyFormModal({
           </AdminButton>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 

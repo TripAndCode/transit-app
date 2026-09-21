@@ -41,6 +41,26 @@ async function loadMermaid() {
  *  (`react-hooks/set-state-in-effect`, an error in this repo's ESLint
  *  config, only allows setState from a callback reacting to the external
  *  `mermaid.render()` promise settling, not from the effect body itself). */
+const TITLE_LINE = /^\s*title\s*:?\s+(.+?)\s*$/im;
+const NODE_LABEL = /[[({]([^[\](){}]{1,80})[\])}]/;
+
+/** Best-effort human label for a diagram's `aria-label`: the source's own
+ *  `title` directive (supported by most mermaid diagram types) when
+ *  present, else the first node's bracketed/parenthesized label, else
+ *  `fallback`. Never throws on unparseable source -- worst case is the
+ *  fallback, matching the raw-`<pre>` degrade this component already uses
+ *  for a `mermaid.render()` failure. */
+function deriveDiagramLabel(source: string, fallback: string): string {
+  const titleMatch = source.match(TITLE_LINE);
+  if (titleMatch?.[1]) return titleMatch[1].trim();
+
+  const nodeMatch = source.match(NODE_LABEL);
+  const nodeLabel = nodeMatch?.[1]?.trim().replace(/^["']|["']$/g, "");
+  if (nodeLabel) return nodeLabel;
+
+  return fallback;
+}
+
 export function MermaidDiagram({ source }: { source: string }) {
   const { t } = useTranslation();
   const reactId = useId();
@@ -71,5 +91,6 @@ export function MermaidDiagram({ source }: { source: string }) {
   // `react/no-danger` rule is configured in this repo's eslint.config.js to
   // suppress -- jsx-a11y doesn't ship an equivalent -- so no disable comment
   // is needed here.)
-  return <div role="img" aria-label={t("admin.architecture.diagram_aria")} dangerouslySetInnerHTML={{ __html: svg }} />;
+  const label = deriveDiagramLabel(source, t("markdownMermaid.diagram_fallback_label"));
+  return <div role="img" aria-label={label} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
