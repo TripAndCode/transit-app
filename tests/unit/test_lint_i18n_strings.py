@@ -74,3 +74,21 @@ def test_allows_non_ascii_only_attribute_value():
     # should not be flagged as untranslated prose.
     lines = ['<div title="42%" />\n']
     assert lint.find_violations(lines) == []
+
+
+def test_a_url_in_the_line_does_not_disable_the_rest_of_it():
+    """`//` inside a string is not a comment.
+
+    Splitting on the first one truncates any line carrying a URL, and the
+    attribute check then never sees what follows -- which in JSX is exactly
+    where `alt`/`title` sit, next to the `href` or `src` they describe.
+    """
+    lines = ['<a href="https://example.com/x" alt="Hardcoded">link</a>']
+    assert rules(lint.find_violations(lines)) == [(1, "jsx-attribute")]
+
+
+def test_a_real_trailing_comment_is_still_stripped():
+    """The negative control: quote tracking must not swallow the whole line,
+    or kana parked in a trailing comment starts failing the lint."""
+    lines = ["<div>{label}</div>  // 日本語のコメント"]
+    assert lint.find_violations(lines) == []

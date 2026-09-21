@@ -30,6 +30,32 @@ JSX_ATTR_PATTERN = re.compile(r'\b(?:aria-label|placeholder|alt|title)=(["\'])([
 COMMENT_LINE_RE = re.compile(r"^\s*(//|\*|/\*)")
 
 
+def strip_line_comment(line: str) -> str:
+    """Return `line` up to its `//` comment, ignoring one inside a string.
+
+    Splitting on the first `//` truncates any line containing a URL, so
+    `<a href="https://x" alt="Hardcoded">` loses everything after the
+    scheme and the attribute check never sees it. Quote tracking is enough
+    here: this is a line-oriented lint over TS/TSX, not a parser.
+    """
+    quote = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "\"'`":
+            quote = ch
+        elif ch == "/" and line[i + 1 : i + 2] == "/":
+            return line[:i]
+        i += 1
+    return line
+
+
 @dataclass(frozen=True)
 class Violation:
     line: int
@@ -49,7 +75,7 @@ def find_violations(lines: list[str]) -> list[Violation]:
             continue
         if COMMENT_LINE_RE.match(line):
             continue
-        code = line.split("//", 1)[0]
+        code = strip_line_comment(line)
         if KANA_PATTERN.search(code):
             violations.append(Violation(line_num, line.rstrip(), "kana"))
         elif JSX_ATTR_PATTERN.search(code):
