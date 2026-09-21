@@ -84,11 +84,12 @@ the task needs them.
   fix: merge latest `main`, resolve any conflicts, and re-run the review pass
   on the result before readying or merging. Every PR body states `**Origin:**
   Interactive session` or `**Origin:** Autonomous VPS loop (item N)`.
-- CI runs on a self-hosted runner and must be green on the PR's head before it
-  merges. Commit messages still carry `[skip ci]`, so a branch needs one push
-  whose tip omits it to produce the run the gate reads; `transit-app-gotchas`
-  owns that mechanism and its traps. The squash-merge commit keeps the trailer,
-  so `main` does not re-run what the branch already proved.
+- CI must be green on the PR's head before it merges. Branch commits carry no
+  `[skip ci]`: every push to a PR runs CI, which is what the gate reads. Only
+  the squash-merge commit keeps the trailer, so `main` does not re-run what the
+  branch already proved. `transit-app-gotchas` owns the mechanism and its traps
+  — chiefly that a tip which does carry the trailer produces no run at all, and
+  the gate then has nothing to read rather than something to fail.
 - Local verification stays mandatory regardless: CI sees only the tip that
   triggered it, and the pre-push hook's file-scoped checks cover only the pushed
   worktree's changed Python — its own header states what it leaves uncovered.
