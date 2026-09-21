@@ -1,8 +1,8 @@
 # Ask tab
 
 Chat-first, deterministic-by-default Q&A over an agency's delay data. See
-`README.md` ▸ "Ask tab — how it works" for the architecture summary this
-doc expands on with file-level detail.
+`README.md` ▸ "Data Flow" (the Ask-tab bullet) for the architecture summary
+this doc expands on with file-level detail.
 
 ## How a user reaches it
 
@@ -12,8 +12,10 @@ doc expands on with file-level detail.
   (`frontend/src/main.tsx`), and `frontend/src/components/OnboardingGate.tsx`
   redirects a fresh/remembered agency selection to `/agencies/{id}/map`.
   Reach the Ask tab by clicking "Ask" in the sidebar.
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx` (`nav.ask` i18n
-  key).
+- Sidebar link: `frontend/src/components/Sidebar.tsx` (`nav.ask` i18n key —
+  "Ask" / "質問"). It is deliberately **not** a `SIDEBAR_NAV_ITEMS` entry: it
+  renders below the uniform nav list as a distinct dashed-border call to
+  action, so it reads as an action rather than a peer tab.
 - Top-level component: `frontend/src/tabs/AskTab.tsx` — owns thread
   selection, the shared filter context (date range / DOW / time-band /
   service / routes), message dispatch, and anon-to-authenticated
@@ -191,7 +193,6 @@ so it is a separate mechanism to build, not a knob to turn on.
 | `frontend/src/components/ParamStrip.tsx` | Inline parameter composer for a chip template |
 | `frontend/src/components/paramPills/*.tsx` | Individual param controls (segmented/limit/route picker) |
 | `frontend/src/components/askCardTemplates.ts` | Declarative chip templates (tool + args + i18n keys) |
-| `frontend/src/components/askFollowupChips.ts` | Follow-up chip definitions |
 | `frontend/src/components/ThreadSidebar.tsx` | Conversation list (anon localStorage ↔ server) |
 | `frontend/src/components/FilterContextBar.tsx` | Date/DOW/time-band/service/route filter strip |
 | `frontend/src/api/hooks.ts` | TanStack Query hooks for all `/ask` + `/conversations` endpoints |

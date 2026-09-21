@@ -122,6 +122,29 @@ def _build_create_kwargs(
     return create_kwargs
 
 
+def describe_provider_failure(exc: BaseException) -> str:
+    """Safe-to-log description of a failed provider call.
+
+    Deliberately omits the exception's message. These calls carry an API key —
+    the user's own on the BYOK paths, the operator's on the shared ladder — and
+    a provider's error body routinely echoes part of it back ("Incorrect API
+    key provided: sk-..."), so the message is the one field that must never be
+    logged. The exception type, the HTTP status and the provider's request id
+    identify the failure well enough to act on and carry no secret.
+
+    Every handler that logs a provider failure goes through here, so a new call
+    site inherits that guarantee rather than having to remember it.
+    """
+    parts = [type(exc).__name__]
+    status = getattr(exc, "status_code", None)
+    if status:
+        parts.append(f"status={status}")
+    request_id = getattr(exc, "request_id", None)
+    if request_id:
+        parts.append(f"request_id={request_id}")
+    return ", ".join(parts)
+
+
 class LLMClient:
     """Tries each configured provider in order until one succeeds.
 
@@ -228,11 +251,11 @@ class LLMClient:
                     break  # 429 won't clear in 1s — go to next provider
                 except BadRequestError as exc:
                     last_kind = "bad_request"
-                    _log.warning("provider %s BadRequestError %r; next in ladder", cfg.name, exc)
+                    _log.warning("provider %s failed (%s); next in ladder", cfg.name, describe_provider_failure(exc))
                     break
                 except Exception as exc:
                     last_kind = "unexpected"
-                    _log.warning("provider %s unexpected %s: %r; next in ladder", cfg.name, exc.__class__.__name__, exc)
+                    _log.warning("provider %s failed (%s); next in ladder", cfg.name, describe_provider_failure(exc))
                     break
 
         # Prefer the quota signal: if any provider was rate-limited, surface that
