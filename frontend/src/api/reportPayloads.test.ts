@@ -5,6 +5,7 @@ import type {
   DwellRunPayload,
   RankingRow,
   ReportResponse,
+  ReportType,
   TrendPayload,
 } from "./types";
 
@@ -50,10 +51,16 @@ describe("ReportResponse discriminates on report_type", () => {
   });
 
   it("rejects a report_type the endpoint does not serve", () => {
-    const res = {} as ReportResponse;
+    // Asserted as an assignment, not as `expectTypeOf(...).toEqualTypeOf<
+    // "route_forecast">()`: that comparison fails whether or not the member
+    // exists, because the field is the whole union either way, so the
+    // directive stays satisfied and the test never notices the addition.
+    //
     // @ts-expect-error route_forecast is an Analysis-tab list entry served by
-    // /forecast, never a /reports/{report_type} response.
-    expectTypeOf(res.report_type).toEqualTypeOf<"route_forecast">();
-    expect(true).toBe(true);
+    // /forecast, never a /reports/{report_type} response. Adding it to
+    // ReportType makes this assignment legal, and TS then reports this
+    // directive as unused — which is the failure this test exists to cause.
+    const served: ReportType = "route_forecast";
+    expect(served).toBe("route_forecast");
   });
 });
