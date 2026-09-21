@@ -129,7 +129,7 @@ describe("NetworkTab", () => {
     expect(aomoriCard2).toHaveTextContent("—");
   });
 
-  it("links each agency name to its overview, carrying the current range", () => {
+  it("links each agency name to its operations view, carrying the current range", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07", definition,
@@ -147,7 +147,7 @@ describe("NetworkTab", () => {
     const link = screen.getByRole("link", { name: "Hiroden" });
     expect(link).toHaveAttribute(
       "href",
-      "/agencies/7/overview?from=2026-04-01&to=2026-04-07",
+      "/agencies/7/operations?from=2026-04-01&to=2026-04-07",
     );
     expect(link).toHaveAttribute("title", "View Hiroden overview");
   });

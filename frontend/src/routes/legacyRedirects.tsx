@@ -21,5 +21,23 @@ export function RedirectForecastToAnalysis() {
 export function RedirectLiveToOperations() {
   const { agencyId } = useParams();
   const location = useLocation();
-  return <Navigate to={`/agencies/${agencyId}/map${location.search}`} replace />;
+  return <Navigate to={`/agencies/${agencyId}/operations${location.search}`} replace />;
+}
+
+/** Redirect the pre-rename Overview URL (the map tab's former path) to the
+ *  renamed Operations route. */
+export function RedirectOverviewToOperations() {
+  const { agencyId } = useParams();
+  const location = useLocation();
+  return <Navigate to={`/agencies/${agencyId}/operations${location.search}`} replace />;
+}
+
+/** Redirect the pre-rename Map URL to the renamed Operations route. Kept
+ *  distinct from `RedirectOverviewToOperations` (rather than reused under one
+ *  name) so each legacy entry point's intent stays traceable at the call
+ *  site in `main.tsx`. */
+export function RedirectMapToOperations() {
+  const { agencyId } = useParams();
+  const location = useLocation();
+  return <Navigate to={`/agencies/${agencyId}/operations${location.search}`} replace />;
 }
