@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Z_INDEX } from "../../styles/zIndex";
 
 /** Surfaces the User Manual inside the dashboard-preview shell's content
  *  column the same way the real `HelpHint` does app-wide: a small
@@ -26,7 +27,7 @@ export function PreviewHelpHint() {
         position: "absolute",
         right: 12,
         bottom: 12,
-        zIndex: 2,
+        zIndex: Z_INDEX.mapOverlay,
         display: "flex",
         alignItems: "center",
         gap: 10,

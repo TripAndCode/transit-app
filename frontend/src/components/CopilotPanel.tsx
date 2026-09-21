@@ -10,9 +10,17 @@ import { useIsLlmApproved, useOverviewSummary } from "../api/hooks";
 import type { AskResponse } from "../api/types";
 import "./CopilotPanel.css";
 
+/** The route whose data this panel summarizes. It is the period-summary tab,
+ *  not the realtime Operations map: the payload comes from
+ *  `useOverviewSummary` and the follow-up carries `panel_ctx.tab = "overview"`.
+ *  Must stay outside `FOCUSED_TAB_SEGMENTS` — App renders this panel only when
+ *  the route is unfocused, so a focused route here means it can never appear.
+ */
+export const COPILOT_INSIGHT_ROUTE = "/agencies/:agencyId/period-overview";
+
 export function CopilotPanel() {
   const { t } = useTranslation();
-  const overviewMatch = useMatch("/agencies/:agencyId/overview");
+  const overviewMatch = useMatch(COPILOT_INSIGHT_ROUTE);
   const askMatch = useMatch("/agencies/:agencyId/ask");
   const agencyId = overviewMatch
     ? Number(overviewMatch.params.agencyId)
@@ -56,9 +64,9 @@ export function CopilotPanel() {
     );
   }
 
-  // Every other route (Map, Live, Analysis, Network, Forecast, Account,
-  // Admin, root redirect, ...) has nothing for this panel to show — it only
-  // ever has content on Overview (the proactive insight) or Ask (handled
+  // Every other route (Operations, Analysis, Network, Account, Admin, root
+  // redirect, ...) has nothing for this panel to show — it only ever has
+  // content on Period overview (the proactive insight) or Ask (handled
   // above). Placed after every hook call above so the hook count stays
   // identical across renders of this always-mounted instance.
   if (!overviewMatch) return null;

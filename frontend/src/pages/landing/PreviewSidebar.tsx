@@ -4,6 +4,7 @@ import { HelpCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { onActivateKey } from "../../utils/a11y";
 import { SIDEBAR_NAV_ITEMS } from "../../components/Sidebar";
 import { PREVIEW_AGENCIES, type PreviewAgencyKey } from "./previewData";
+import { Z_INDEX } from "../../styles/zIndex";
 
 export type PreviewTabKey = (typeof SIDEBAR_NAV_ITEMS)[number]["to"] | "ask";
 
@@ -85,7 +86,7 @@ function AgencyPickerMock({
             top: "calc(100% + 4px)",
             left: 0,
             right: 0,
-            zIndex: 3,
+            zIndex: Z_INDEX.dropdown,
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius)",

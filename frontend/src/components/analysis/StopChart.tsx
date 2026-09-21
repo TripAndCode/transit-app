@@ -22,6 +22,7 @@ export function StopChart({ stops, previous, selected, onSelect }: {
     {stops.map((s, i) => <g key={`${s.stop_sequence}-${s.stop_id}`}>
       <circle cx={x(i)} cy={s.avg_min == null ? 280 : y(s.avg_min)} r={s.stop_sequence === selected ? 7 : 4}
         fill={s.avg_min == null ? "var(--bg-surface)" : delayColor(s.avg_min)} stroke="var(--text-secondary)"
+        className="svg-focus-ring"
         role="button" tabIndex={0} aria-label={`${s.stop_name}: ${s.avg_min == null ? t("missing") : `${s.avg_min} ${t("minutes")}`}`}
         onClick={() => onSelect(s.stop_sequence)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(s.stop_sequence); } }}>
         <title>{s.stop_name}</title>

@@ -5,50 +5,103 @@ description: >-
 
 inputs:
   container-name:
-    description: Name for the container, so parallel jobs do not collide.
+    description: >-
+      Prefix identifying the caller. The pull request (or ref) is appended, so
+      concurrent jobs get separate containers while successive runs of one
+      pull request keep reusing — and reclaiming — the same one.
     required: true
+
+outputs:
+  port:
+    description: Host port the container's Postgres is published on.
+    value: ${{ steps.publish.outputs.port }}
+  container-name:
+    description: >-
+      The resolved, run-unique container name. A caller that tears the
+      container down must use this, not the prefix it passed in.
+    value: ${{ steps.resolve.outputs.container-name }}
 
 runs:
   using: composite
   steps:
-    # A GitHub-hosted VM is destroyed after the job, so a same-named
-    # container from a prior run never exists. A persistent self-hosted
-    # runner keeps its filesystem/Docker state between runs, so a container
-    # left behind by a cancelled or crashed job would otherwise collide
-    # with this one on both name and port.
-    - name: Remove any leftover container from a previous run
+    # The scope expression is deliberately the same one ci.yml's concurrency
+    # group uses. See container-name.sh for why that equivalence is the whole
+    # design.
+    - name: Resolve this run's container name
+      id: resolve
       shell: bash
-      run: docker rm -f "${{ inputs.container-name }}" 2>/dev/null || true
+      run: |
+        set -euo pipefail
+        name="$("${{ github.action_path }}/container-name.sh" \
+          '${{ inputs.container-name }}' \
+          '${{ github.event.pull_request.number || github.ref }}')"
+        echo "container-name=$name" >> "$GITHUB_OUTPUT"
+
+    # A GitHub-hosted VM is destroyed after the job, so nothing is ever left
+    # behind. A persistent self-hosted runner keeps its Docker state, and a
+    # job cancelled mid-run never reaches its teardown. Scoping the name to
+    # the pull request is what makes this recoverable: the next run of that
+    # same pull request comes back to the same name and clears it.
+    - name: Remove this scope's leftover container from an earlier run
+      shell: bash
+      run: docker rm -f -v "${{ steps.resolve.outputs.container-name }}" 2>/dev/null || true
+
+    # The step above only reclaims a scope that runs again. A pull request
+    # that is merged or abandoned never does, and a hard-cancelled job never
+    # reaches its own teardown, so those containers would sit holding a
+    # volume. Reap them by label.
+    #
+    # The cutoff is set from the job timeout, not picked round: `ci.yml`
+    # caps a job at 45 minutes, so nothing an hour old can still be in use,
+    # and waiting longer only means holding a quarter gigabyte of volume for
+    # no reason. Raise this if that timeout is ever raised past an hour.
+    # 3600s, from the 45-minute job timeout in ci.yml: nothing an hour old
+    # can still be in use, and waiting longer only holds a volume for no
+    # reason. Raise this if that timeout is ever raised past an hour.
+    - name: Reap containers from scopes that will not run again
+      shell: bash
+      run: '"${{ github.action_path }}/reap-stale.sh" transit-test-postgres 3600'
 
     # Built from db/Dockerfile rather than declared as a `services:` entry:
     # that block can only pull a published image, and none carries PostGIS and
     # pgvector together. Building it keeps every workflow, local dev, and the
     # throwaway test database on one definition, so a schema that migrates
     # locally cannot fail here on a missing extension.
+    #
+    # The tag stays fixed while the container name no longer is: tagging per
+    # run would leave one dangling tag behind on every CI run of a persistent
+    # runner, and every caller builds the same db/ context anyway, so sharing
+    # a tag also shares its layer cache.
     - name: Build the database image
       shell: bash
       run: |
         set -euo pipefail
-        docker build -t "${{ inputs.container-name }}" db/
+        docker build -t transit-test-postgres:ci db/
 
-    # The port and database are fixed here rather than parameterised: callers
-    # name them again in their own DATABASE_URL, and a second knob would let
-    # the two drift apart with nothing to catch it until a job failed to
-    # connect. Unlike the ClickHouse service container this repo's CI also
-    # runs (whose host port is dynamically assigned specifically because a
-    # persistent runner already had another container permanently bound to
-    # its old fixed port), 5433 is not known to be occupied by anything
-    # long-lived on any runner this workflow targets -- if that ever
-    # changes, prefer dynamizing this port the same way over reclaiming it
-    # by convention.
+    # The database name/user are fixed (callers name them again in their own
+    # DATABASE_URL, so a second knob would let the two drift with nothing to
+    # catch it), but the host port is left to Docker to assign, exactly like
+    # the ClickHouse service container this repo's CI also runs: a
+    # persistent runner can already have something bound to a fixed port
+    # (including 5433, the documented dev-DB port this container must not
+    # collide with), which an ephemeral GitHub-hosted VM never hits.
     - name: Run the container
       shell: bash
       run: |
         set -euo pipefail
-        docker run -d --name "${{ inputs.container-name }}" \
+        docker run -d --name "${{ steps.resolve.outputs.container-name }}" \
+          --label transit-test-postgres \
           -e POSTGRES_USER=transit -e POSTGRES_PASSWORD=transit \
           -e POSTGRES_DB=transit \
-          -p 5433:5432 "${{ inputs.container-name }}"
+          -p 127.0.0.1::5432 transit-test-postgres:ci
+
+    - name: Publish the assigned port
+      id: publish
+      shell: bash
+      run: |
+        set -euo pipefail
+        port="$(docker port "${{ steps.resolve.outputs.container-name }}" 5432/tcp | head -n1 | cut -d: -f2)"
+        echo "port=$port" >> "$GITHUB_OUTPUT"
 
     # `-h localhost` forces the check onto TCP. The official image's first run
     # answers on the Unix socket from a temporary bootstrap server before the
@@ -59,7 +112,7 @@ runs:
       run: |
         set -euo pipefail
         for _ in $(seq 1 60); do
-          if docker exec "${{ inputs.container-name }}" \
+          if docker exec "${{ steps.resolve.outputs.container-name }}" \
               pg_isready -h localhost -U transit -d transit >/dev/null 2>&1; then
             echo "postgres ready"
             exit 0
@@ -67,5 +120,5 @@ runs:
           sleep 2
         done
         echo "postgres did not become ready" >&2
-        docker logs "${{ inputs.container-name }}" >&2
+        docker logs "${{ steps.resolve.outputs.container-name }}" >&2
         exit 1

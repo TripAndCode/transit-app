@@ -93,7 +93,11 @@ export function InsightPanel({ className }: { className?: string } = {}) {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [seen, setSeen] = useState<string[]>(() => (id != null ? readSeen(id) : []));
 
-  const enabled = readEnabled();
+  // Lazy initializer, not a plain call: reading readEnabled() during every
+  // render would make the panel appear/disappear mid-session if a devtools
+  // toggle changes localStorage while it's mounted, instead of only on the
+  // next real mount (e.g. AnalysisTab's `key={id}` agency switch).
+  const [enabled] = useState(readEnabled);
   // Also gated on !collapsed: a collapsed panel has nowhere to show a
   // suggestion, so polling it every refetchInterval would just be wasted
   // backend load for a rail the user has explicitly hidden.

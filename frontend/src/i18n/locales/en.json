@@ -4,6 +4,7 @@
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
     "open_menu": "Open menu",
+    "mobile_menu_title": "Navigation menu",
     "account_menu": "Account menu",
     "help": "Help",
     "prototype_section_label": "PROTOTYPE",
@@ -220,6 +221,9 @@
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split weekday vs weekend/holiday — compare commute peaks against weekend patterns.",
     "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
   },
+  "markdownMermaid": {
+    "diagram_fallback_label": "Diagram"
+  },
   "peakHourModal": {
     "title_dow": "{{dow}} {{hour}}:00 — delayed routes",
     "title_all": "All days {{hour}}:00 — delayed routes",
@@ -258,6 +262,7 @@
     "route_code_fallback": "Route {{code}}",
     "save": "Save",
     "search_placeholder": "Search...",
+    "show_more": "Show {{count}} more",
     "yes": "Yes",
     "no": "No",
     "unit_min": "min",
@@ -272,6 +277,8 @@
     "language_aria": "Language",
     "theme_toggle_to_dark": "Switch to dark mode",
     "theme_toggle_to_light": "Switch to light mode",
+    "decrement_aria": "Decrement",
+    "increment_aria": "Increment",
     "service_value": {
       "平日": "Weekday",
       "土日祝": "Weekend/Holiday"
@@ -323,6 +330,8 @@
       },
       "sso_disabled_title": "SSO not configured",
       "sso_disabled_body": "SSO is disabled in this build. You can browse anonymously.",
+      "config_error_title": "Couldn't load sign-in options",
+      "config_error_body": "Something went wrong reaching the server. Please try again.",
       "back_to_top": "Back to home",
       "welcome_back": "Welcome back",
       "choose_provider": "Choose an account to sign in",
@@ -637,7 +646,8 @@
       "unpin": "Unpin",
       "delete": "Delete",
       "delete_confirm": "Delete this conversation?",
-      "empty": "No conversations yet"
+      "empty": "No conversations yet",
+      "more_options_aria": "More options"
     },
     "filter_bar": {
       "edit": "Edit",

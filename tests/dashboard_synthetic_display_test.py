@@ -102,6 +102,7 @@ from __future__ import annotations
 import os
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -172,7 +173,10 @@ def app_server():
 
     port = _free_port()
     proc = subprocess.Popen(
-        ["poetry", "run", "uvicorn", "api.main:app", "--port", str(port), "--no-access-log"],
+        # Not `poetry run`: it resolves its venv by cwd, so from a worktree it
+        # starts an interpreter without the project and this fixture reports a
+        # 30s startup timeout instead of the real cause.
+        [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port), "--no-access-log"],
         env={**os.environ},
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

@@ -14,6 +14,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.security import token_hash
 from tests.conftest import _test_pool
 
 
@@ -28,8 +29,8 @@ async def _seed(conn, *, role="user"):
     )["user_id"]
     sid = f"sid-arch-{uid}"
     await conn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at) VALUES ($1, $2, $3)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+        token_hash(sid),
         uid,
         datetime.now(timezone.utc) + timedelta(days=1),
     )

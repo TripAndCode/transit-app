@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
-import type { DwellRunPayload, RevisionBoundaries, TrendDay } from "../api/types";
+import type { DwellRunPayload, TrendPayload } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -10,7 +11,7 @@ import { InsightHint } from "../components/InsightHint";
 import { InsightPanel } from "../components/InsightPanel";
 import { Skeleton } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
-import { HourlyHeatmap, type HourlyCell } from "../components/charts/HourlyHeatmap";
+import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
 import { BandGrid, Legend } from "../components/charts/DowBandGrid";
 import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
@@ -18,12 +19,14 @@ import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
+import { formatNumber } from "../utils/format";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
-import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
+import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { th, td } from "../components/tableStyles";
+import "./analysisTab.css";
 
 /** "This week" = the 7 days ending today, in the ctx's from/to string
  *  format. Used by the "no data" EmptyState's recovery action to jump to a
@@ -45,6 +48,7 @@ export function AnalysisTab() {
   const filterSuffix = filterQS ? `?${filterQS}` : "";
   const list = useReports(id);
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
+  const [rawRowsOpen, setRawRowsOpen] = useState(false);
 
   const reportLabels: Record<string, string> = {
     ranking: t("reports.type.ranking"),
@@ -64,22 +68,6 @@ export function AnalysisTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <TabFilterBar />
-      {/* Below ~640px this row's 280px report list + flex:1 report body +
-          260px InsightPanel force a combined min-width the phone viewport
-          can't satisfy, pushing the whole page into horizontal scroll (the
-          tables inside are already self-contained via ReportTable's own
-          overflow-x:auto, so it's only this outer row that needs help).
-          This tab's dense multi-column reports stay desktop-oriented by
-          design -- the fix here is just to stack the three sections
-          vertically instead of side-by-side, not to redesign them for
-          touch. */}
-      <style>{`
-        @media (max-width: ${MOBILE_BREAKPOINT_PX}px) {
-          .analysis-body { flex-direction: column; }
-          .analysis-report-list { width: 100% !important; }
-          .analysis-insights { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border-subtle); }
-        }
-      `}</style>
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -174,7 +162,7 @@ export function AnalysisTab() {
         {reportType && reportType !== "route_forecast" && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
         )}
-        {reportType && reportType !== "route_forecast" && detail.isFetching && <Skeleton height={400} />}
+        {reportType && reportType !== "route_forecast" && detail.isPending && <Skeleton height={400} />}
         {reportType !== "route_forecast" && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
@@ -212,23 +200,13 @@ export function AnalysisTab() {
             )}
             {detail.data.definition && <DefinitionMetaBlock definition={detail.data.definition} />}
             {detail.data.report_type === "trend" ? (
-              <TrendBlock
-                data={
-                  detail.data.rows as unknown as {
-                    days: TrendDay[];
-                    hourly: HourlyCell[];
-                    dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null };
-                    revision_boundaries?: RevisionBoundaries;
-                  }[]
-                }
-                ctx={ctx}
-              />
+              <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
-              <DwellRunBlock payload={(detail.data.rows as unknown as DwellRunPayload[])[0]} />
+              <DwellRunBlock payload={detail.data.rows[0]} />
             ) : detail.data.rows.length > 0 ? (
               <ReportTable
                 reportType={detail.data.report_type}
-                rows={detail.data.rows as unknown[][]}
+                rows={detail.data.rows}
               />
             ) : (
               <EmptyState
@@ -261,26 +239,31 @@ export function AnalysisTab() {
               <WeatherDelayPanel aid={id} ctx={ctx} />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
-              <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>
+              <details
+                style={{ marginTop: 16, color: "var(--text-tertiary)" }}
+                onToggle={(e) => setRawRowsOpen(e.currentTarget.open)}
+              >
                 <summary style={{ cursor: "pointer", fontSize: 12 }}>
                   {t("reports.raw_rows", { count: detail.data.rows.length })}
                 </summary>
-                <pre
-                  style={{
-                    background: "var(--bg-surface)",
-                    border: "1px solid var(--border-soft)",
-                    borderRadius: "var(--radius)",
-                    padding: 12,
-                    marginTop: 8,
-                    whiteSpace: "pre-wrap",
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                    fontSize: 12,
-                    lineHeight: 1.6,
-                    maxWidth: 920,
-                  }}
-                >
-                  {detail.data.text}
-                </pre>
+                {rawRowsOpen && (
+                  <pre
+                    style={{
+                      background: "var(--bg-surface)",
+                      border: "1px solid var(--border-soft)",
+                      borderRadius: "var(--radius)",
+                      padding: 12,
+                      marginTop: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                      fontSize: 12,
+                      lineHeight: 1.6,
+                      maxWidth: 920,
+                    }}
+                  >
+                    {detail.data.text}
+                  </pre>
+                )}
               </details>
             )}
           </div>
@@ -302,15 +285,15 @@ function TrendBlock({
   data,
   ctx,
 }: {
-  data: {
-    days: TrendDay[];
-    hourly: HourlyCell[];
-    dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null };
-    revision_boundaries?: RevisionBoundaries;
-  }[];
+  data: TrendPayload[];
   ctx: RangeCtx;
 }) {
-  const payload = data[0] ?? { days: [], hourly: [], dow_band: { grid: [], worst: null }, revision_boundaries: [] };
+  const payload: TrendPayload = data[0] ?? {
+    days: [],
+    hourly: [],
+    dow_band: { grid: [], worst: null },
+    revision_boundaries: [],
+  };
   const rangeDays = Math.max(
     1,
     Math.round((new Date(ctx.to).getTime() - new Date(ctx.from).getTime()) / 86400000) + 1,
@@ -328,6 +311,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { format: formatRoute } = useRouteNames(id);
+  const cappedRoutes = useCappedList(payload?.routes ?? [], 200, payload);
 
   if (!payload || !payload.available) {
     return <EmptyState title={t("reports.dwell_run.not_available")} />;
@@ -345,7 +329,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   }
 
   const fmtSec = (v: number | null): string => (v == null ? "—" : `${v.toFixed(0)}${t("common.unit_sec")}`);
-  const fmtSamples = (v: number): string => v.toLocaleString();
+  const fmtSamples = (v: number): string => formatNumber(v);
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
@@ -366,7 +350,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           </tr>
         </thead>
         <tbody>
-          {payload.routes.map((r, i) => (
+          {cappedRoutes.visible.map((r, i) => (
             <tr key={`${r.route_code}-${r.service_type ?? ""}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td(), color: "var(--text-tertiary)", textAlign: "right" }}>{i + 1}</td>
               <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
@@ -383,6 +367,11 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           ))}
         </tbody>
       </table>
+      {cappedRoutes.remaining > 0 && (
+        <button type="button" className="btn-ghost" onClick={cappedRoutes.showMore}>
+          {t("common.show_more", { count: cappedRoutes.remaining })}
+        </button>
+      )}
     </div>
   );
 }

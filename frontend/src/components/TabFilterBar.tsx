@@ -14,6 +14,8 @@ import { RangeBadge } from "./RangeBadge";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
 import { pill, groupLabel } from "./pillStyles";
+import { Z_INDEX } from "../styles/zIndex";
+
 
 type Draft = {
   dow: DowFilter;
@@ -284,7 +286,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
             position: "absolute",
             top: "calc(100% + 6px)",
             left: 0,
-            zIndex: 50,
+            zIndex: Z_INDEX.popover,
             width: 480,
             maxWidth: "calc(100vw - 48px)",
             background: "var(--bg-surface)",

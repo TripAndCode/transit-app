@@ -3,7 +3,7 @@
 # Does NOT crawl the GTFS website — that runs separately on the remote server.
 #
 # Required env vars:
-#   ORACLE_HOST      IP or hostname of the collection server (e.g. 64.110.114.101)
+#   ORACLE_HOST      IP or hostname of the collection server
 #   ORACLE_USER      SSH user (e.g. opc)
 #   ORACLE_SSH_KEY   Base64-encoded private key  — OR —
 #   ORACLE_SSH_KEY_PATH  Path to private key file (used if ORACLE_SSH_KEY is not set)
@@ -13,8 +13,11 @@
 #   ORACLE_STATIC_DIR Remote static archive dir    (default: /home/opc/app/transportation_analysis/static_archive)
 #   LOCAL_RT_DIR     Local destination for RT      (default: ./raw_archives)
 #   LOCAL_STATIC_DIR Local destination for static  (default: ./raw_archives_static)
+#
+# Usage: scripts/fetch_archives.sh
 
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 ORACLE_HOST="${ORACLE_HOST:?ORACLE_HOST is required}"
 ORACLE_USER="${ORACLE_USER:-opc}"

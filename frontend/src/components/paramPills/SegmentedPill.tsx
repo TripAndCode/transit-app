@@ -7,6 +7,7 @@
  * parameter kinds in {@link ParamStrip}.
  */
 import { useState, useRef, useEffect } from "react";
+import { Z_INDEX } from "../../styles/zIndex";
 
 /** A single option entry for {@link SegmentedPill}. */
 type SegmentedOption = { value: string; label: string };
@@ -94,7 +95,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
             borderRadius: 8,
             padding: 4,
             boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            zIndex: 10,
+            zIndex: Z_INDEX.dropdown,
             minWidth: 120,
           }}
         >
