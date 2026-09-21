@@ -1,0 +1,14 @@
+/* Below the shared mobile breakpoint (MOBILE_BREAKPOINT_PX in
+   frontend/src/hooks/useMediaQuery.ts) this row's 280px report list +
+   flex:1 report body + 260px InsightPanel force a combined min-width the
+   phone viewport can't satisfy, pushing the whole page into horizontal
+   scroll (the tables inside are already self-contained via ReportTable's
+   own overflow-x:auto, so it's only this outer row that needs help). This
+   tab's dense multi-column reports stay desktop-oriented by design -- the
+   fix here is just to stack the three sections vertically instead of
+   side-by-side, not to redesign them for touch. */
+@media (max-width: 640px) {
+  .analysis-body { flex-direction: column; }
+  .analysis-report-list { width: 100% !important; }
+  .analysis-insights { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border-subtle); }
+}

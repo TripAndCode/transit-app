@@ -56,9 +56,14 @@ export function useCopilotInsight(
   // `[key]` alone as the effect dep is enough: `params` is derived from the
   // same inputs that produce `key`, so a `key` change always means fresh
   // `params` too.
+  // Starts at {key: null, params: null} rather than the current `key` so the
+  // very first request also waits DEBOUNCE_MS -- a mount that immediately has
+  // a `key` (e.g. Overview already has a cached viewPayload) would otherwise
+  // fire the billed insight POST synchronously instead of coalescing with
+  // whatever prop changes settle within the debounce window right after mount.
   const [debounced, setDebounced] = useState<{ key: string | null; params: CopilotParams | null }>({
-    key,
-    params: key == null ? null : { agencyId: agencyId!, tab: tab!, filters, viewPayload },
+    key: null,
+    params: null,
   });
 
   useEffect(() => {

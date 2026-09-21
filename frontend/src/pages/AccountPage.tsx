@@ -30,7 +30,7 @@ function LlmKeySection() {
   const qc = useQueryClient();
   const { data: status } = useQuery({
     queryKey: ["myLlmKey"],
-    queryFn: () => apiGet<LlmKeyStatus>("/api/me/llm-key"),
+    queryFn: ({ signal }) => apiGet<LlmKeyStatus>("/api/me/llm-key", { signal }),
   });
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
   const provider = providerOverride ?? status?.provider ?? "gemini";
@@ -100,7 +100,7 @@ export function AccountPage() {
   const { data: session, isLoading } = useSession();
   const { data: sessions } = useQuery({
     queryKey: ["mySessions"],
-    queryFn: () => apiGet<SessionRow[]>("/api/me/sessions"),
+    queryFn: ({ signal }) => apiGet<SessionRow[]>("/api/me/sessions", { signal }),
   });
   const logout = useLogout();
 

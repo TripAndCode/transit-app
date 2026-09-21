@@ -325,6 +325,8 @@
       },
       "sso_disabled_title": "SSO not configured",
       "sso_disabled_body": "SSO is disabled in this build. You can browse anonymously.",
+      "config_error_title": "Couldn't load sign-in options",
+      "config_error_body": "Something went wrong reaching the server. Please try again.",
       "back_to_top": "Back to home",
       "welcome_back": "Welcome back",
       "choose_provider": "Choose an account to sign in",

@@ -7,18 +7,15 @@ type AppConfig = { auth_enabled: boolean; local_admin_enabled: boolean };
  *  Google/GitHub buttons when SSO is unconfigured; ``local_admin_enabled``
  *  separately shows/hides the break-glass username/password form — the two
  *  are independent (a deployment can have either, both, or neither).
- *  Falls back to both false on network/HTTP error so a broken /api/config
- *  never produces dead login links. */
+ *  Lets a network/HTTP error surface as `isError` rather than swallowing it
+ *  into a fake "both false" success -- that used to hide every sign-in
+ *  method behind an infinite staleTime with no way back short of a reload,
+ *  indistinguishable from a deployment that genuinely has no SSO configured.
+ *  `LoginPage` renders a retry fallback on `isError` instead. */
 export function useConfig() {
   return useQuery({
     queryKey: ["config"],
-    queryFn: async ({ signal }): Promise<AppConfig> => {
-      try {
-        return await apiGet<AppConfig>("/api/config", { signal });
-      } catch {
-        return { auth_enabled: false, local_admin_enabled: false };
-      }
-    },
+    queryFn: ({ signal }) => apiGet<AppConfig>("/api/config", { signal }),
     staleTime: Infinity,
   });
 }
