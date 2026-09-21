@@ -1,3 +1,4 @@
+import asyncpg
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
@@ -22,13 +23,26 @@ class StaticStop(BaseModel):
     stop_lon: float | None
 
 
-@router.get("/routes", response_model=list[StaticRoute])
+class StaticRoutesResponse(BaseModel):
+    """Envelope for ``GET /routes`` — an object, so the catalogue can grow a
+    total or a paging cursor without breaking every client at once."""
+
+    rows: list[StaticRoute]
+
+
+class StaticStopsResponse(BaseModel):
+    """Envelope for ``GET /stops`` — see :class:`StaticRoutesResponse`."""
+
+    rows: list[StaticStop]
+
+
+@router.get("/routes", response_model=StaticRoutesResponse)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def list_routes(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> StaticRoutesResponse:
     """List of static routes plus the numeric ``route_code`` used by updates.
 
     For Aomori (``aomori_regex`` ingest) the trip-id-derived ``route_code``
@@ -57,18 +71,18 @@ async def list_routes(
         "WHERE r.agency_id=$1 ORDER BY r.route_id",
         agency_id,
     )
-    return [dict(r) for r in rows]
+    return StaticRoutesResponse(rows=[StaticRoute(**dict(r)) for r in rows])
 
 
-@router.get("/stops", response_model=list[StaticStop])
+@router.get("/stops", response_model=StaticStopsResponse)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def list_stops(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> StaticStopsResponse:
     rows = await conn.fetch(
         "SELECT stop_id, stop_name, stop_lat, stop_lon FROM static_stops WHERE agency_id=$1 ORDER BY stop_id",
         agency_id,
     )
-    return [dict(r) for r in rows]
+    return StaticStopsResponse(rows=[StaticStop(**dict(r)) for r in rows])

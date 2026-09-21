@@ -19,7 +19,7 @@ from pipeline.query.copilot_templates import (
     render_template,
     templates_for_tab,
 )
-from pipeline.query.llm_client import get_client
+from pipeline.query.llm_client import describe_provider_failure, get_client
 from pipeline.query.user_llm_keys import UserLLMKey
 
 logger = logging.getLogger(__name__)
@@ -126,8 +126,11 @@ async def generate_proactive_insight(
                 tool_choice="required",
                 temperature=0.0,
             )
-        except Exception:
-            logger.warning("copilot: BYOK completion failed; falling back to no_signal")
+        except Exception as exc:
+            logger.warning(
+                "copilot: BYOK completion failed; falling back to no_signal (%s)",
+                describe_provider_failure(exc),
+            )
             message = None
     else:
         client = _get_client()

@@ -30,7 +30,6 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
       CLICKHOUSE_HOST: localhost
       CLICKHOUSE_PORT: 8124
       CLICKHOUSE_USER: transit
@@ -66,9 +65,18 @@ jobs:
             /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
 
       - name: Start Postgres from db/Dockerfile
+        id: postgres
         uses: ./.github/actions/start-test-postgres
         with:
           container-name: transit-eval-db
+
+      # Docker assigns the port, so it cannot live in the job-level `env:`
+      # block above -- that is evaluated before any step runs. Exported once
+      # here so every later step inherits it, rather than each one repeating
+      # the expression and a newly added step silently missing it.
+      - name: Point DATABASE_URL at the allocated port
+        run: |
+          echo "DATABASE_URL=postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit" >> "$GITHUB_ENV"
 
       - name: Apply Postgres schema
         run: poetry run python gtfs_pipeline.py migrate up

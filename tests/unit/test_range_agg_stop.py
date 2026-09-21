@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Any
 
-from api.range import _TIME_BAND_RANGES, RangeCtx, build_agg_stop_filter, time_band_case_sql
+from api.range import TIME_BAND_RANGES, RangeCtx, build_agg_stop_filter, time_band_case_sql
 
 
 def _ctx(**over: Any) -> RangeCtx:
@@ -21,7 +21,7 @@ def _ctx(**over: Any) -> RangeCtx:
 def test_time_band_case_covers_all_bands_and_null():
     sql = time_band_case_sql("scheduled_time")
     assert "scheduled_time IS NULL" in sql and "'none'" in sql
-    for band, (start, end) in _TIME_BAND_RANGES.items():
+    for band, (start, end) in TIME_BAND_RANGES.items():
         assert f"'{band}'" in sql and f"'{start}'" in sql and f"'{end}'" in sql
     assert sql.strip().startswith("CASE") and sql.strip().endswith("END")
 

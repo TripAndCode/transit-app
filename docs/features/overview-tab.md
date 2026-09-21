@@ -4,17 +4,25 @@ Magazine-style "how's the agency doing" landing page: one round-trip returns
 a headline delta, a concentration/movers module, a peak-hour ribbon, and a
 weekday-vs-weekend split, each expandable into a bigger modal view.
 
+This is the period-summary view, not the realtime one. The sidebar's first
+entry, labeled "Overview", opens the Operations map (see
+`docs/features/map-tab.md`); this tab sits below it as "Period overview".
+
 ## How a user reaches it
 
 - Route: `/agencies/:agencyId/period-overview`, registered in
   `frontend/src/main.tsx` (`React.lazy`-loaded). It is **not** the default
   landing tab — a bare `agencies/:agencyId` and a fresh/remembered agency
-  selection both land on Operations (the map, `frontend/src/main.tsx`'s
+  selection both land on Operations (`frontend/src/main.tsx`'s
   `<Navigate to="operations" replace />` and
-  `frontend/src/components/OnboardingGate.tsx`). Overview is reached only by
-  clicking "Period overview" in the sidebar.
+  `frontend/src/components/OnboardingGate.tsx`).
 - Sidebar nav link: `frontend/src/components/Sidebar.tsx`'s
-  `SIDEBAR_NAV_ITEMS` (`design:period_overview` i18n key, second entry).
+  `SIDEBAR_NAV_ITEMS` (`design:period_overview` i18n key, second entry —
+  "Period overview" / "期間概況").
+- In development builds the sidebar also carries a dev-only prototype-preview
+  link (`t("nav.prototype_no_data")`, rendered only under
+  `import.meta.env.DEV`) that opens this route with a fixed
+  `?from=2030-01-01&to=2030-01-07` no-data window.
 - Top-level component: `frontend/src/tabs/OverviewTab.tsx` — owns which
   module's modal is open (`OpenCard` state) and the peak-hour-breakdown
   drill-down selection; filtering comes from the shared `useRangeContext`.
@@ -117,9 +125,9 @@ alone for single-origin):
 
 - Frontend strings live under the `overview.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
-  `npm run lint:i18n`), plus `design:period_overview` (`frontend/src/i18n/
-  design.ts`) for the sidebar entry and the shared `filters.*` namespace used
-  by `TabFilterBar`.
+  `npm run lint:i18n`), plus `design:period_overview`
+  (`frontend/src/i18n/design.ts`) for the sidebar entry and the shared
+  `filters.*` namespace used by `TabFilterBar`.
 - No server-side `_LOCALES` strings for this tab — `overview_summary`'s
   `locale` parameter is reserved for future qualitative labels
   (`api/routers/overview.py`'s docstring); today's payload is numeric/string
