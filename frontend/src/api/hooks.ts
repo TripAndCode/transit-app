@@ -20,7 +20,6 @@ import type {
   ForecastHeatmap,
   ForecastOverview,
   HeadwayQualityResponse,
-  HeatmapCollection,
   LiveTripProgressResponse,
   LiveTripsResponse,
   NetworkSummary,
@@ -32,9 +31,7 @@ import type {
   Route,
   RoutesResponse,
   RouteShapeResponse,
-  RouteStopProfileResponse,
   RouteSummaryResponse,
-  RouteTripsResponse,
   Suggestion,
   SuggestionEnvelope,
   WeatherDelayResponse,
@@ -233,19 +230,6 @@ export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary>
   });
 }
 
-export function useHeatmap(
-  agencyId: number | null,
-  ctx: RangeCtx,
-): UseQueryResult<HeatmapCollection> {
-  return useQuery({
-    queryKey: ["heatmap", agencyId, ...ctxKey(ctx)],
-    queryFn: ({ signal }) =>
-      apiGet<HeatmapCollection>(`/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`, { signal }),
-    enabled: agencyId != null,
-    staleTime: 60 * 1000,
-  });
-}
-
 export function useRouteShape(
   agencyId: number | null,
   route: string | null,
@@ -299,50 +283,6 @@ export function useLiveTripProgress(
     },
     enabled: agencyId != null && !!tripId,
     refetchInterval: 30_000,
-  });
-}
-
-export function useRouteTrips(
-  agencyId: number | null,
-  routeCode: string | null,
-): UseQueryResult<RouteTripsResponse> {
-  return useQuery({
-    queryKey: ["route_trips", agencyId, routeCode],
-    queryFn: ({ signal }) =>
-      apiGet<RouteTripsResponse>(
-        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips`,
-        { signal },
-      ),
-    enabled: agencyId != null && !!routeCode,
-    staleTime: 60 * 1000,
-  });
-}
-
-export function useRouteStopProfile(
-  agencyId: number | null,
-  routeCode: string | null,
-): UseQueryResult<RouteStopProfileResponse> {
-  return useQuery({
-    queryKey: ["route_stop_profile", agencyId, routeCode],
-    queryFn: ({ signal }) =>
-      apiGet<RouteStopProfileResponse>(
-        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/stop-profile`,
-        { signal },
-      ),
-    enabled: agencyId != null && !!routeCode,
-    staleTime: 60 * 1000,
-  });
-}
-
-type CreateAgencyBody = Omit<Agency, "agency_id">;
-
-export function useCreateAgency() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateAgencyBody) => apiPost<Agency>("/api/agencies", body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agencies"] });
-    },
   });
 }
 
