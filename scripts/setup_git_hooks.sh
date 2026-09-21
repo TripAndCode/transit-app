@@ -24,7 +24,7 @@
 # doctor` and deploy/vps/claude-loop.sh's per-tick check, so they can't
 # drift out of sync with what install_hook itself considers "installed".
 set -euo pipefail
-case "${1:-}" in -h|--help) sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 # Pinned to match .pre-commit-config.yaml's `rev: v8.18.4` and
 # .github/workflows/secrets-scan.yml's GITLEAKS_VERSION so local, hook, and

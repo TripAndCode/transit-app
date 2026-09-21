@@ -43,6 +43,16 @@ def test_help_prints_header_and_exits_zero(script: Path) -> None:
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+def test_help_stops_at_the_header_and_prints_no_shell(script: Path) -> None:
+    """The header ends at the first `set` line, which is a delimiter, not
+    content. Printing it leaks the script's own shell options into what is
+    supposed to read as documentation, and no assertion about mere non-empty
+    output would notice."""
+    leaked = [line for line in _run_help(script, "--help").stdout.splitlines() if line.startswith("set ")]
+    assert not leaked, f"{script.name} --help printed shell source: {leaked}"
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
 def test_short_help_flag_also_works(script: Path) -> None:
     result = _run_help(script, "-h")
     assert result.returncode == 0, f"{script.name} -h: {result.stdout}{result.stderr}"

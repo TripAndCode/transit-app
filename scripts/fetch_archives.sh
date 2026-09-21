@@ -17,7 +17,7 @@
 # Usage: scripts/fetch_archives.sh
 
 set -euo pipefail
-case "${1:-}" in -h|--help) sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 ORACLE_HOST="${ORACLE_HOST:?ORACLE_HOST is required}"
 ORACLE_USER="${ORACLE_USER:-opc}"

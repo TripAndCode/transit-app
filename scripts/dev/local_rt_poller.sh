@@ -20,7 +20,7 @@
 #   LOCAL_RT_POLL_MAX_INTERVAL_SEC  backoff cap, seconds (default: 300)
 #   LOCAL_RT_POLL_MAX_FAILURES      consecutive failures before giving up (default: 10)
 set -uo pipefail
-case "${1:-}" in -h|--help) sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 trap 'exit 0' TERM INT
 

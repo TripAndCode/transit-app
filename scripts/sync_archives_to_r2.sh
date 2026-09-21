@@ -15,7 +15,7 @@
 #
 # Usage: scripts/sync_archives_to_r2.sh
 set -euo pipefail
-case "${1:-}" in -h|--help) sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 : "${OBJECT_STORE_ENDPOINT:?OBJECT_STORE_ENDPOINT is required}"
 : "${OBJECT_STORE_BUCKET:?OBJECT_STORE_BUCKET is required}"

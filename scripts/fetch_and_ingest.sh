@@ -14,7 +14,7 @@
 # Usage: scripts/fetch_and_ingest.sh
 
 set -euo pipefail
-case "${1:-}" in -h|--help) sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENCY_ID="${AGENCY_ID:-1}"
