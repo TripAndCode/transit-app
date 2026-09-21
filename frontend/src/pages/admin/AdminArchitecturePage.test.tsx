@@ -15,13 +15,19 @@ vi.mock("../../components/MarkdownMermaid", () => ({
   mermaidMarkdownComponents: {},
 }));
 
-let docsReturnValue: any;
+type DocsListResult = { data: { slug: string; title: string }[] | undefined; error: Error | null };
+type DocResult = {
+  data: { slug: string; title: string; content: string } | undefined;
+  error: Error | null;
+};
+
+let docsReturnValue: DocsListResult;
 // Keyed by slug (rather than a single shared value) so this test suite can
 // only pass if clicking a sidebar entry genuinely changes which slug is
 // requested -- a mock that ignored `slug` and returned the same value
 // regardless would let "switches content when clicked" pass even for a
 // no-op click handler.
-let docsBySlug: Record<string, any>;
+let docsBySlug: Record<string, DocResult>;
 
 vi.mock("../../api/admin", () => ({
   useArchitectureDocs: () => docsReturnValue,

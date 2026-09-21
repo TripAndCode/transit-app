@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useRouteNames } from "../api/useRouteNames";
-import type { TrendDay } from "../api/types";
+import type { RankingRow, TrendDay } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { downloadCsv } from "../components/analysis/csv";
 import { deleteAnalysis, readAnalyses } from "../components/analysis/savedAnalyses";
@@ -12,6 +12,7 @@ import { PeriodChart } from "../components/analysis/PeriodChart";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
+import { FILTER_SEPARATOR } from "../utils/format";
 import "../styles/focusedAnalysis.css";
 
 const DAYS_CSV_HEADER = ["date", "mean_departure_delay_minutes", "observations"];
@@ -19,7 +20,7 @@ function daysToCsvRows(days: TrendDay[]) {
   return [DAYS_CSV_HEADER, ...days.map((d) => [d.date, d.avg_min, d.samples])];
 }
 const RANKING_CSV_HEADER = ["route_code", "service_type", "mean_minutes", "median_minutes", "p90_minutes", "observations"];
-function rankingToCsvRows(rows: unknown[][]) {
+function rankingToCsvRows(rows: RankingRow[]) {
   return [RANKING_CSV_HEADER, ...rows];
 }
 
@@ -37,8 +38,11 @@ export function ReportsHomeTab() {
   const [saved, setSaved] = useState(readAnalyses);
   const [notice, setNotice] = useState("");
   const [shareNotice, setShareNotice] = useState("");
-  const days = ((trend.data?.rows[0] as { days?: TrendDay[] } | undefined)?.days ?? []).filter((d) => Number.isFinite(d.avg_min) && d.samples > 0).sort((a, b) => a.date.localeCompare(b.date));
-  const rows = (ranking.data?.rows ?? []).filter(Array.isArray) as unknown[][];
+  // Both queries pin their own report_type above, so these narrowings can
+  // only fall through while the response for that type is still in flight.
+  const trendPayload = trend.data?.report_type === "trend" ? trend.data.rows[0] : undefined;
+  const days = (trendPayload?.days ?? []).filter((d) => Number.isFinite(d.avg_min) && d.samples > 0).sort((a, b) => a.date.localeCompare(b.date));
+  const rows: RankingRow[] = ranking.data?.report_type === "ranking" ? ranking.data.rows : [];
   const queryString = ctxToQueryString(ctx);
   const metadata = [["agency_id", "from", "to", "dow", "time_band", "service", "route_codes"], [id, ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, ctx.routes.join(",")]];
   async function copyShareLink() {
@@ -66,12 +70,12 @@ export function ReportsHomeTab() {
       </li>)}</ul>
     </section> : <>
       <TabFilterBar />
-      <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name} · {ctx.from} – {ctx.to}</h2>
+      <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name}{FILTER_SEPARATOR}{ctx.from} – {ctx.to}</h2>
       <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
         ...metadata, [], ["definition", JSON.stringify(trend.data?.definition)], [], ...daysToCsvRows(days),
       ])}>{t("csv")}</button></div></div>
       <AsyncSection loading={trend.isPending} error={trend.error} onRetry={() => void trend.refetch()} data={trend.data} hasContent={() => days.length > 0} empty={<EmptyState title={t("empty")} />}>
-        {() => <><p className="focus-muted">{t("mean")} · {t("coverage", { from: days[0]?.date, to: days.at(-1)?.date })}</p><PeriodChart days={days} /></>}
+        {() => <><p className="focus-muted">{t("mean")}{FILTER_SEPARATOR}{t("coverage", { from: days[0]?.date, to: days.at(-1)?.date })}</p><PeriodChart days={days} /></>}
       </AsyncSection></section>
       <section><div className="focus-header"><h2>{t("routesToCheck")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!rows.length || !!ranking.error || ranking.isFetching} onClick={() => downloadCsv(`patterns-${id}-${ctx.from}-${ctx.to}`, [
         ...metadata, [], ["definition", JSON.stringify(ranking.data?.definition)], [], ...rankingToCsvRows(rows),
@@ -84,7 +88,7 @@ export function ReportsHomeTab() {
         </tbody></table></div>}
       </AsyncSection></section>
       <p className="focus-muted">{t("reportNote")}</p>
-      <details><summary>{t("definitions")}</summary><p>{ctx.from} – {ctx.to} · {ctx.routes.join(", ") || t("allPatterns")}</p>
+      <details><summary>{t("definitions")}</summary><p>{ctx.from} – {ctx.to}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
         {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
         <Link to={`/agencies/${id}/analysis/trend?${queryString}`}>{t("advanced")} →</Link>
       </details>

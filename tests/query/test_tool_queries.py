@@ -4,13 +4,29 @@ from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
-from api.range import RangeCtx
+from api.range import RangeCtx, jst_today
 from pipeline.query.tool_queries import (
     route_compare_service,
     route_dow_breakdown,
     route_info,
 )
 from tests.conftest import confirm_rt_field_coverage
+
+
+def jst_midday() -> datetime:
+    """A UTC instant safely inside the current JST civil day.
+
+    Every query here buckets by the JST calendar (``api.range.jst_today``),
+    so seeding at ``datetime.now()`` puts rows on whichever side of JST
+    midnight the clock happens to be. A fixture that inserts one row per
+    minute then straddles two civil days whenever CI runs in the hour before
+    15:00 UTC, and per-day assertions come apart -- six trips become five
+    and one.
+
+    Midday leaves twelve hours of headroom either side, which no fixture
+    here comes close to using.
+    """
+    return datetime.combine(jst_today(), time(12, 0), tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
 
 
 async def _trust_schedule_padding(conn, *agency_ids):
@@ -229,7 +245,7 @@ async def test_segment_hotspots_ranks_stops_by_avg_delay(aconn, aagency_id, ch_c
     below the gate (3 samples) and must not appear in the result."""
     from pipeline.query.tool_queries import segment_hotspots
 
-    now = datetime.now(timezone.utc)
+    now = jst_midday()
     for i in range(6):
         await aconn.execute(
             "INSERT INTO updates "
@@ -275,7 +291,7 @@ async def test_segment_hotspots_ranks_stops_by_avg_delay(aconn, aagency_id, ch_c
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, aagency_id)
-    ctx = RangeCtx(from_date=now.date() - timedelta(days=1), to_date=now.date() + timedelta(days=1))
+    ctx = RangeCtx(from_date=jst_today() - timedelta(days=1), to_date=jst_today() + timedelta(days=1))
     result = await segment_hotspots(aagency_id, ctx, aconn, ch_async_client, route="R1")
     assert [r[0] for r in result] == [2]
     assert result[0][1] == "テスト停留所"
@@ -297,7 +313,7 @@ async def test_schedule_realism_segments_flags_growing_delay(aconn, aagency_id, 
     """Same 6 trips: stop_sequence=1 has near-zero delay, stop_sequence=2 has
     ~5 min more delay on every one of them — segment (1,2) must be flagged
     with avg_added_min close to 5.0."""
-    now = datetime.now(timezone.utc)
+    now = jst_midday()
     for i in range(6):
         trip = f"trip_grow_{i}"
         await aconn.execute(
@@ -317,7 +333,7 @@ async def test_schedule_realism_segments_flags_growing_delay(aconn, aagency_id, 
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, aagency_id)
-    ctx = RangeCtx(from_date=now.date() - timedelta(days=1), to_date=now.date() + timedelta(days=1))
+    ctx = RangeCtx(from_date=jst_today() - timedelta(days=1), to_date=jst_today() + timedelta(days=1))
     from pipeline.query.tool_queries import schedule_realism_segments
 
     result = await schedule_realism_segments(aagency_id, ctx, aconn, ch_async_client, route="R1")
@@ -353,7 +369,7 @@ async def test_schedule_realism_segments_partitions_recurring_trip_id_by_date(
     observations is lost/miscounted when the two calendar days' rows share
     one partition ordered only by stop_sequence.
     """
-    now = datetime.now(timezone.utc)
+    now = jst_midday()
     for i in range(5):
         trip = f"trip_grow_{i}"
         await aconn.execute(

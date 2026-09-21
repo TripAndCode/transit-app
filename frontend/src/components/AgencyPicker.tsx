@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
 import type { Agency } from "../api/types";
 import { onActivateKey } from "../utils/a11y";
+import { Z_INDEX } from "../styles/zIndex";
 
 // Module-scope pure function rather than an in-render IIFE — see
 // eslint.config.js's manual-memoization ban comment for why this shape is
@@ -55,7 +56,7 @@ export function AgencyPicker() {
   function selectAgency(id: number) {
     setOpen(false);
     setFilter("");
-    const tab = tabMatch?.params.tab ?? "map";
+    const tab = tabMatch?.params.tab ?? "operations";
     navigate(`/agencies/${id}/${tab}`);
   }
 
@@ -89,7 +90,7 @@ export function AgencyPicker() {
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius)",
             boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            zIndex: 20,
+            zIndex: Z_INDEX.dropdown,
             overflow: "hidden",
           }}
         >

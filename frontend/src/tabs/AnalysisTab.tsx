@@ -2,7 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
-import type { DwellRunPayload, RevisionBoundaries, TrendDay } from "../api/types";
+import type { DwellRunPayload, TrendPayload } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -10,7 +10,7 @@ import { InsightHint } from "../components/InsightHint";
 import { InsightPanel } from "../components/InsightPanel";
 import { Skeleton } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
-import { HourlyHeatmap, type HourlyCell } from "../components/charts/HourlyHeatmap";
+import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
 import { BandGrid, Legend } from "../components/charts/DowBandGrid";
 import { delayColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
@@ -18,6 +18,7 @@ import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
+import { formatNumber } from "../utils/format";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useRouteNames } from "../api/useRouteNames";
@@ -194,23 +195,13 @@ export function AnalysisTab() {
             )}
             {detail.data.definition && <DefinitionMetaBlock definition={detail.data.definition} />}
             {detail.data.report_type === "trend" ? (
-              <TrendBlock
-                data={
-                  detail.data.rows as unknown as {
-                    days: TrendDay[];
-                    hourly: HourlyCell[];
-                    dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null };
-                    revision_boundaries?: RevisionBoundaries;
-                  }[]
-                }
-                ctx={ctx}
-              />
+              <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
-              <DwellRunBlock payload={(detail.data.rows as unknown as DwellRunPayload[])[0]} />
+              <DwellRunBlock payload={detail.data.rows[0]} />
             ) : detail.data.rows.length > 0 ? (
               <ReportTable
                 reportType={detail.data.report_type}
-                rows={detail.data.rows as unknown[][]}
+                rows={detail.data.rows}
               />
             ) : (
               <EmptyState
@@ -284,15 +275,15 @@ function TrendBlock({
   data,
   ctx,
 }: {
-  data: {
-    days: TrendDay[];
-    hourly: HourlyCell[];
-    dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null };
-    revision_boundaries?: RevisionBoundaries;
-  }[];
+  data: TrendPayload[];
   ctx: RangeCtx;
 }) {
-  const payload = data[0] ?? { days: [], hourly: [], dow_band: { grid: [], worst: null }, revision_boundaries: [] };
+  const payload: TrendPayload = data[0] ?? {
+    days: [],
+    hourly: [],
+    dow_band: { grid: [], worst: null },
+    revision_boundaries: [],
+  };
   const rangeDays = Math.max(
     1,
     Math.round((new Date(ctx.to).getTime() - new Date(ctx.from).getTime()) / 86400000) + 1,
@@ -328,7 +319,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   }
 
   const fmtSec = (v: number | null): string => (v == null ? "—" : `${v.toFixed(0)}${t("common.unit_sec")}`);
-  const fmtSamples = (v: number): string => v.toLocaleString();
+  const fmtSamples = (v: number): string => formatNumber(v);
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>

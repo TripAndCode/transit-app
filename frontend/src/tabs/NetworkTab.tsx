@@ -7,6 +7,7 @@ import { Skeleton } from "../components/Skeleton";
 import { AsyncSection } from "../components/AsyncSection";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { delayColor } from "../styles/tokens";
+import { formatNumber } from "../utils/format";
 import type { NetworkAgencyRow } from "../api/types";
 import "./networkTab.css";
 
@@ -92,7 +93,7 @@ export function NetworkTab() {
           <div className="network-card-top" style={cardTop}>
           <span style={rankStyle}>#{index + 1}</span>
           <Link
-            to={`/agencies/${a.agency_id}/overview${suffix}`}
+            to={`/agencies/${a.agency_id}/operations${suffix}`}
             title={t("network.view_agency", { name: a.agency_name })}
             style={{ ...agencyNameStyle, color: "var(--accent)", textDecoration: "none" }}
           >
@@ -142,7 +143,7 @@ export function NetworkTab() {
               {a.vehicle_km_delivered_pct != null
                 ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
                 : a.planned_trip_count != null
-                  ? t("network.planned_trip_count_fallback", { count: a.planned_trip_count.toLocaleString() })
+                  ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
                   : "—"}
               </div>
             </div>
@@ -157,7 +158,7 @@ export function NetworkTab() {
               }}
             />
           </div>
-          <span style={samplesStyle}>{a.samples.toLocaleString()}</span>
+          <span style={samplesStyle}>{formatNumber(a.samples)}</span>
         </div>
         {(showFeedFlag || showFreshnessFlag) && (
           <div style={secondaryRow}>

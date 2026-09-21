@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
+import { formatNumber } from "../../utils/format";
 import "./stopEvidence.css";
 
 export function StopEvidenceChart({ messageId, points, onFocus, complete = false }: {
@@ -94,7 +95,7 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
                     bottom: `${(Math.min(0, point.minutes) - low) / span * 100}%`,
                     height: `${Math.abs(point.minutes) / span * 100}%`,
                   }} />
-                  <span className="stop-evidence-value" style={{ bottom: `${(Math.max(0, point.minutes) - low) / span * 100}%` }}>{point.minutes.toLocaleString()}</span>
+                  <span className="stop-evidence-value" style={{ bottom: `${(Math.max(0, point.minutes) - low) / span * 100}%` }}>{formatNumber(point.minutes)}</span>
                   </>}
                 </span>
                 <span className="stop-evidence-name">{point.name}</span>
@@ -109,7 +110,7 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
           style={{ left: `clamp(0px, ${detailLeft}px, calc(100% - 250px))` }}>
             <button className="stop-evidence-clear" type="button" onClick={() => { select(null); selectedButtonRef.current?.focus(); }}>{t("ask.evidence.clear")}</button>
             <h3>{selected.name}</h3>
-            <strong>{selected.minutes === null ? "—" : t("ask.evidence.minutes", { value: selected.minutes.toLocaleString() })}</strong>
+            <strong>{selected.minutes === null ? "—" : t("ask.evidence.minutes", { value: formatNumber(selected.minutes) })}</strong>
             {selected.minutes === null && <p>{t("ask.evidence.missing")}</p>}
             <p>{t("ask.evidence.samples", { count: selected.samples })}</p>
             <details><summary>{t("ask.evidence.values")}</summary>

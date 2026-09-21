@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Z_INDEX } from "../styles/zIndex";
 
 /**
  * Small (?) info icon that opens a quiet popover with a paragraph or two
@@ -64,7 +65,7 @@ export function InsightHint({
             position: "absolute",
             top: "calc(100% + 6px)",
             ...(anchorRight ? { right: 0 } : { left: 0 }),
-            zIndex: 30,
+            zIndex: Z_INDEX.popover,
             width: 320,
             maxWidth: "calc(100vw - 24px)",
             background: "var(--bg-surface)",

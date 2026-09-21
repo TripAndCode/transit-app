@@ -264,7 +264,7 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
-  z-index: 50;
+  z-index: var(--z-popover);
   white-space: nowrap;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
   transform: translate(-50%, -100%) translateY(-8px);
@@ -302,7 +302,7 @@
   background: rgba(15, 23, 42, 0.45);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  z-index: 100;
+  z-index: var(--z-modal-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -80,7 +80,7 @@ than splitting a group across batches.
 Each batch prompt must carry, verbatim: "You are read-only: do not edit any file, do
 not run any `gh` write call, do not post or reply to any comment, never call the
 resolve mutation, do not commit or push. Any SQL is read-only SELECT/EXPLAIN against
-dev Postgres :5433 or the dev ClickHouse (`transit-ch`) — never write to either. Read
+dev Postgres :5433 or the dev ClickHouse (`docker compose exec clickhouse`) — never write to either. Read
 only within the worktree path given; never read another worktree. Report only." — a
 dispatched subagent doesn't see this command file, so the per-thread approval gate
 above binds it only if you say so.
@@ -143,7 +143,7 @@ different thread.
    together). DB SAFETY: if a fix touches DB code, tests point at the throwaway
    Postgres (`DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`)
    and the throwaway ClickHouse on :8124 — never the dev Postgres or dev ClickHouse
-   (`transit-ch`). See CLAUDE.md / transit-app-gotchas.
+   (`docker compose exec clickhouse`). See CLAUDE.md / transit-app-gotchas.
 2. **Run `/review-branch`** on the result using its proportional routing and
    fix-triggered retry policy. This is mandatory whenever code changed. "Green"
    means: no findings ranked Major or higher remain, and any Minor findings are
