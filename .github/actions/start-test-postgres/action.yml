@@ -47,17 +47,19 @@ runs:
       run: docker rm -f -v "${{ steps.resolve.outputs.container-name }}" 2>/dev/null || true
 
     # The step above only reclaims a scope that runs again. A pull request
-    # that is merged or abandoned never does, so its container would sit
-    # there holding a volume forever. Reap those by label.
+    # that is merged or abandoned never does, and a hard-cancelled job never
+    # reaches its own teardown, so those containers would sit holding a
+    # volume. Reap them by label.
     #
-    # The age cutoff is what makes this safe to run while another job's
-    # container is live: no job outlives its own 45-minute timeout, so
-    # anything three hours old is certainly abandoned.
+    # The cutoff is set from the job timeout, not picked round: `ci.yml`
+    # caps a job at 45 minutes, so nothing an hour old can still be in use,
+    # and waiting longer only means holding a quarter gigabyte of volume for
+    # no reason. Raise this if that timeout is ever raised past an hour.
     - name: Reap containers from scopes that will not run again
       shell: bash
       run: |
         set -euo pipefail
-        cutoff="$(date -u -d '3 hours ago' '+%Y-%m-%dT%H:%M:%S')"
+        cutoff="$(date -u -d '1 hour ago' '+%Y-%m-%dT%H:%M:%S')"
         stale="$(docker ps -aq --filter 'label=transit-test-postgres' --filter "until=$cutoff")"
         if [ -n "$stale" ]; then
           echo "removing abandoned test-postgres containers: $stale"
