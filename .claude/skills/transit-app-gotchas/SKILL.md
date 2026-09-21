@@ -43,9 +43,9 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   ```
   Omitting `RUN_CH_INTEGRATION=1` doesn't fail the suite — it silently SKIPS
   every ClickHouse-gated test instead, which is easy to mistake for "all
-  passing." `make test`/`make check` do NOT set it, so the Makefile's own
-  default local gate has this gap too; always export the block above by hand
-  for a run that actually covers the ClickHouse path.
+  passing." `make test`/`make check` are covered: both go through
+  `scripts/run_integration_tests.sh`, which exports it. A bare `poetry run
+  pytest` is not — export the block above by hand for that.
 - The `transit-test-pg`/`transit-test-ch` pair above is a fixed name on a
   fixed port, and this repo also keeps a long-lived instance of it running
   for everyday local use. Two runs against that same pair at once — e.g. an
