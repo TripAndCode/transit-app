@@ -3,6 +3,9 @@ import type { TFunction } from "i18next";
 import { delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { useParams } from "react-router-dom";
+import { useCappedList } from "../hooks/useCappedList";
+
+const ROWS_CAP = 200;
 import { formatNumber } from "../utils/format";
 
 type Schema = {
@@ -169,6 +172,7 @@ export function ReportTable({ reportType, rows }: Props) {
   const schema = SCHEMAS[reportType];
 
   const maxes = computeColumnMaxes(schema, rows);
+  const cappedRows = useCappedList(rows, ROWS_CAP, reportType);
 
   if (!schema) {
     // Unknown type — fall back to raw key/value table
@@ -189,7 +193,7 @@ export function ReportTable({ reportType, rows }: Props) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
+          {cappedRows.visible.map((row, i) => (
             <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td(), color: "var(--text-tertiary)", textAlign: "right" }}>{i + 1}</td>
               {schema.map((c) => {
@@ -232,6 +236,11 @@ export function ReportTable({ reportType, rows }: Props) {
           ))}
         </tbody>
       </table>
+      {cappedRows.remaining > 0 && (
+        <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
+          {t("common.show_more", { count: cappedRows.remaining })}
+        </button>
+      )}
     </div>
   );
 }

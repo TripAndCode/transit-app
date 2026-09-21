@@ -258,6 +258,7 @@
     "route_code_fallback": "路線{{code}}",
     "save": "保存",
     "search_placeholder": "検索...",
+    "show_more": "さらに{{count}}件表示",
     "yes": "はい",
     "no": "いいえ",
     "unit_min": "分",
