@@ -181,32 +181,57 @@ def _postgres_consumers() -> list:
     return [w for w in workflows if "start-test-postgres" in w.read_text()]
 
 
-def test_container_name_is_unique_per_run() -> None:
-    """One runner is one Docker daemon, so a fixed name is a shared resource.
+_SCOPE_EXPRESSION = "github.event.pull_request.number || github.ref"
 
-    The action force-removes any container holding the name before starting
-    its own. With a literal, two jobs on the same host destroy each other's
-    database mid-test — the second one's `docker rm -f` lands on the first
-    one's running container. The run id makes the name private to the run.
+
+def test_container_scope_matches_the_concurrency_group() -> None:
+    """The container must be scoped to the same unit concurrency serializes.
+
+    One runner is one Docker daemon, and the action force-removes whatever
+    holds the name before starting. Two runs that can overlap must therefore
+    hold different names, and the set of runs that cannot overlap is exactly
+    what the concurrency group defines. Deriving both from one expression is
+    what keeps the two from drifting into a case where they disagree.
     """
-    run_step = next(s for s in _action_steps() if "docker run" in s.get("run", ""))
-    assert "github.run_id" in run_step["run"] or "steps.resolve.outputs" in run_step["run"], (
-        "the container name must carry the run id, not a literal shared across concurrent jobs"
+    concurrency_group = _workflow_yaml()["concurrency"]["group"]
+    assert _SCOPE_EXPRESSION in concurrency_group, (
+        "ci.yml's concurrency group no longer uses the expression the container name is derived from"
     )
     resolve = next(s for s in _action_steps() if s.get("id") == "resolve")
-    assert "github.run_id" in resolve["run"], "the resolved container name does not include the run id"
+    assert _SCOPE_EXPRESSION in resolve["run"], (
+        "the container name is not scoped to the pull request / ref the concurrency group uses"
+    )
 
 
-def test_image_tag_is_not_the_unique_container_name() -> None:
-    """A per-run tag would leave one dangling image tag behind on every run.
+def test_leftover_from_the_same_scope_is_cleared_before_starting() -> None:
+    """Scoping per pull request is only safe because of this step.
 
-    The container name has to be unique; the tag must not follow it, or a
-    persistent runner accumulates tags forever. Every caller builds the same
-    db/ context, so one shared tag is also one shared layer cache.
+    `cancel-in-progress` abandons a container on every re-push, so the next
+    run of that pull request arrives at a name that is already taken. Without
+    this, `docker run` fails on the name and the whole design regresses to
+    being worse than a fixed name.
+    """
+    steps = _action_steps()
+    run_index = next(i for i, s in enumerate(steps) if "docker run" in s.get("run", ""))
+    removals = [
+        i
+        for i, s in enumerate(steps)
+        if "docker rm" in s.get("run", "") and "steps.resolve.outputs.container-name" in s.get("run", "")
+    ]
+    assert removals, "nothing clears a leftover container for this scope before `docker run`"
+    assert min(removals) < run_index, "the leftover is cleared after the container is started, which is too late"
+
+
+def test_image_tag_does_not_follow_the_container_name() -> None:
+    """A scoped tag would leave one dangling image tag per pull request.
+
+    The container name varies; the tag must not follow it, or a persistent
+    runner accumulates tags forever. Every caller builds the same db/ context,
+    so one shared tag is also one shared layer cache.
     """
     build = next(s for s in _action_steps() if "docker build" in s.get("run", ""))
-    assert "github.run_id" not in build["run"], "the image tag must not be per-run"
     assert "inputs.container-name" not in build["run"], "the image tag must not follow the container name"
+    assert "steps.resolve" not in build["run"], "the image tag must not be scoped per pull request"
 
 
 def test_action_outputs_wire_to_their_own_steps() -> None:

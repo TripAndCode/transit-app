@@ -6,9 +6,9 @@ description: >-
 inputs:
   container-name:
     description: >-
-      Prefix identifying the caller. The run id and attempt are appended, so
-      the resulting container name is unique per run and two jobs sharing one
-      Docker daemon cannot tear down each other's database.
+      Prefix identifying the caller. The pull request (or ref) is appended, so
+      concurrent jobs get separate containers while successive runs of one
+      pull request keep reusing — and reclaiming — the same one.
     required: true
 
 outputs:
@@ -24,24 +24,36 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Resolve a run-unique container name
+    # The scope expression is deliberately the same one ci.yml's concurrency
+    # group uses. See container-name.sh for why that equivalence is the whole
+    # design.
+    - name: Resolve this run's container name
       id: resolve
       shell: bash
       run: |
         set -euo pipefail
-        name="${{ inputs.container-name }}-${{ github.run_id }}-${{ github.run_attempt }}"
+        name="$("${{ github.action_path }}/container-name.sh" \
+          '${{ inputs.container-name }}' \
+          '${{ github.event.pull_request.number || github.ref }}')"
         echo "container-name=$name" >> "$GITHUB_OUTPUT"
 
     # A GitHub-hosted VM is destroyed after the job, so nothing is ever left
     # behind. A persistent self-hosted runner keeps its Docker state, and a
-    # job that is cancelled or killed outright never reaches its teardown --
-    # with a run-unique name, no later run would claim that name and clean it
-    # up on the way past. So reap by label instead of by name.
+    # job cancelled mid-run never reaches its teardown. Scoping the name to
+    # the pull request is what makes this recoverable: the next run of that
+    # same pull request comes back to the same name and clears it.
+    - name: Remove this scope's leftover container from an earlier run
+      shell: bash
+      run: docker rm -f -v "${{ steps.resolve.outputs.container-name }}" 2>/dev/null || true
+
+    # The step above only reclaims a scope that runs again. A pull request
+    # that is merged or abandoned never does, so its container would sit
+    # there holding a volume forever. Reap those by label.
     #
     # The age cutoff is what makes this safe to run while another job's
     # container is live: no job outlives its own 45-minute timeout, so
     # anything three hours old is certainly abandoned.
-    - name: Reap abandoned containers from earlier runs
+    - name: Reap containers from scopes that will not run again
       shell: bash
       run: |
         set -euo pipefail
