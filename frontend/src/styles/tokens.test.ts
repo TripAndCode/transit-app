@@ -147,6 +147,16 @@ function decl(body: string, prop: string): string | null {
 const rootBlock = ruleBody(globalCss, ":root {");
 const darkBlock = ruleBody(globalCss, ':root[data-theme="dark"] {');
 const reduceBlock = ruleBody(globalCss, "@media (prefers-reduced-motion: reduce)");
+const bodyBlock = ruleBody(globalCss, "body {");
+
+const overviewCss = readFileSync(resolve(process.cwd(), "src/styles/overview.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
+const ovPageBlock = ruleBody(overviewCss, ".ov-page {");
+const ovKpiValueBlock = ruleBody(overviewCss, ".ov-kpi-value {");
+
+const indexHtml = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
 
 describe("motion tokens", () => {
   it.each([
@@ -203,6 +213,68 @@ describe("radius tokens", () => {
     ["--radius-xl", "14px"],
   ])("%s is %s", (prop, value) => {
     expect(decl(rootBlock, prop)).toBe(value);
+  });
+});
+
+describe("Japanese body typography", () => {
+  it("uses proportional (palt) spacing, strict line breaking, and safe wrapping", () => {
+    expect(decl(bodyBlock, "font-feature-settings")).toBe('"palt" 1');
+    expect(decl(bodyBlock, "line-break")).toBe("strict");
+    expect(decl(bodyBlock, "overflow-wrap")).toBe("anywhere");
+  });
+
+  it("declares text-spacing-trim as a progressive enhancement", () => {
+    expect(decl(bodyBlock, "text-spacing-trim")).toBe("space-first");
+  });
+});
+
+describe(".num — the single place tabular figures are turned on", () => {
+  it("applies tabular-nums", () => {
+    const numBlock = ruleBody(globalCss, ".num {");
+    expect(decl(numBlock, "font-variant-numeric")).toBe("tabular-nums");
+  });
+});
+
+describe("--font-display policy", () => {
+  it("is documented as an identity-moments-only font next to its declaration", () => {
+    const rawGlobalCss = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8");
+    const idx = rawGlobalCss.indexOf("--font-display:");
+    const preceding = rawGlobalCss.slice(Math.max(0, idx - 400), idx);
+    expect(preceding).toMatch(/brand wordmark/);
+    expect(preceding).toMatch(/welcome headline/i);
+  });
+});
+
+describe("period overview uses shared typography, not a page-local override", () => {
+  it("does not override font-family — inherits --font-body like every other tab", () => {
+    expect(decl(ovPageBlock, "font-family")).toBeNull();
+  });
+
+  it("does not blanket the whole page in tabular figures", () => {
+    expect(decl(ovPageBlock, "font-feature-settings")).toBeNull();
+  });
+});
+
+describe("hero KPI values use proportional figures, not tabular-nums", () => {
+  it("does not force tabular-nums on the large standalone hero number", () => {
+    expect(decl(ovKpiValueBlock, "font-variant-numeric")).toBeNull();
+  });
+});
+
+describe("index.html Noto font loading", () => {
+  it("preloads the Google Fonts stylesheet", () => {
+    expect(indexHtml).toMatch(
+      /<link rel="preload" as="style" href="https:\/\/fonts\.googleapis\.com\/css2\?family=Noto\+Sans\+JP[^"]*">/,
+    );
+  });
+
+  it("keeps the gstatic preconnect", () => {
+    expect(indexHtml).toMatch(/<link rel="preconnect" href="https:\/\/fonts\.gstatic\.com" crossorigin>/);
+  });
+
+  it("requests only the font weights actually used in the app", () => {
+    expect(indexHtml).toMatch(/Noto\+Sans\+JP:wght@400;500;600;700;800/);
+    expect(indexHtml).toMatch(/Noto\+Serif\+JP:wght@400;600/);
   });
 });
 

@@ -120,4 +120,15 @@ describe("OverviewHeroRow", () => {
     );
     expect(screen.queryByRole("img", { hidden: true })).not.toBeInTheDocument();
   });
+
+  it("keeps the hero delay value on proportional figures, not tabular-nums", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderWithProviders(
+      <OverviewHeroRow headline={headline()} delayedCount={3} agencyId={1} sparklinePoints={[2.1, 2.8, 3.3]} />,
+    );
+    const value = container.querySelector(".ov-kpi-value");
+    expect(value).not.toBeNull();
+    expect(value!.className.split(/\s+/)).not.toContain("num");
+    expect(value!.getAttribute("style") ?? "").not.toMatch(/tabular-nums/);
+  });
 });
