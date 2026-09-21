@@ -11,6 +11,7 @@ GitHub-hosted runner this repo doesn't use.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -162,3 +163,177 @@ def test_no_workflow_hardcodes_the_old_fixed_postgres_port() -> None:
     for w in consumers:
         text = w.read_text()
         assert "outputs.port" in text, f"{w.name} starts Postgres but never reads the allocated port"
+
+
+ACTION_PATH = ROOT / ".github" / "actions" / "start-test-postgres" / "action.yml"
+
+
+def _action_yaml() -> dict:
+    return yaml.load(ACTION_PATH.read_text(), Loader=_NoDuplicateKeys)
+
+
+def _action_steps() -> list[dict]:
+    return _action_yaml()["runs"]["steps"]
+
+
+def _postgres_consumers() -> list:
+    workflows = (ROOT / ".github" / "workflows").glob("*.yml")
+    return [w for w in workflows if "start-test-postgres" in w.read_text()]
+
+
+_SCOPE_EXPRESSION = "github.event.pull_request.number || github.ref"
+
+
+def test_container_scope_matches_the_concurrency_group() -> None:
+    """The container must be scoped to the same unit concurrency serializes.
+
+    One runner is one Docker daemon, and the action force-removes whatever
+    holds the name before starting. Two runs that can overlap must therefore
+    hold different names, and the set of runs that cannot overlap is exactly
+    what the concurrency group defines. Deriving both from one expression is
+    what keeps the two from drifting into a case where they disagree.
+    """
+    concurrency_group = _workflow_yaml()["concurrency"]["group"]
+    assert _SCOPE_EXPRESSION in concurrency_group, (
+        "ci.yml's concurrency group no longer uses the expression the container name is derived from"
+    )
+    resolve = next(s for s in _action_steps() if s.get("id") == "resolve")
+    assert _SCOPE_EXPRESSION in resolve["run"], (
+        "the container name is not scoped to the pull request / ref the concurrency group uses"
+    )
+
+
+def test_leftover_from_the_same_scope_is_cleared_before_starting() -> None:
+    """Scoping per pull request is only safe because of this step.
+
+    `cancel-in-progress` abandons a container on every re-push, so the next
+    run of that pull request arrives at a name that is already taken. Without
+    this, `docker run` fails on the name and the whole design regresses to
+    being worse than a fixed name.
+    """
+    steps = _action_steps()
+    run_index = next(i for i, s in enumerate(steps) if "docker run" in s.get("run", ""))
+    removals = [
+        i
+        for i, s in enumerate(steps)
+        if "docker rm" in s.get("run", "") and "steps.resolve.outputs.container-name" in s.get("run", "")
+    ]
+    assert removals, "nothing clears a leftover container for this scope before `docker run`"
+    assert min(removals) < run_index, "the leftover is cleared after the container is started, which is too late"
+
+
+def test_image_tag_does_not_follow_the_container_name() -> None:
+    """A scoped tag would leave one dangling image tag per pull request.
+
+    The container name varies; the tag must not follow it, or a persistent
+    runner accumulates tags forever. Every caller builds the same db/ context,
+    so one shared tag is also one shared layer cache.
+    """
+    build = next(s for s in _action_steps() if "docker build" in s.get("run", ""))
+    assert "inputs.container-name" not in build["run"], "the image tag must not follow the container name"
+    assert "steps.resolve" not in build["run"], "the image tag must not be scoped per pull request"
+
+
+def test_action_outputs_wire_to_their_own_steps() -> None:
+    """Both outputs are one expression each, and they are easy to cross-wire.
+
+    Pointing `port` at the name step yields a hostless URL that fails far
+    from here, at whatever step first opens a connection.
+    """
+    outputs = _action_yaml()["outputs"]
+    assert outputs["port"]["value"] == "${{ steps.publish.outputs.port }}"
+    assert outputs["container-name"]["value"] == "${{ steps.resolve.outputs.container-name }}"
+
+
+def test_no_caller_removes_the_container_by_the_prefix_it_passed_in() -> None:
+    """The prefix is no longer a container that exists.
+
+    A teardown still naming it removes nothing and reports success, so the
+    leak is silent — the container survives until the action's reaper
+    collects it hours later, holding a volume the whole time.
+    """
+    for workflow in _postgres_consumers():
+        text = workflow.read_text()
+        prefixes = re.findall(r"container-name:\s*(\S+)", text)
+        for prefix in prefixes:
+            assert f"docker rm -f -v {prefix}" not in text, (
+                f"{workflow.name} tears down the bare prefix {prefix!r}; use the action's container-name output"
+            )
+
+
+def test_every_caller_removes_its_container() -> None:
+    """A run-unique name means no later run reclaims it by name.
+
+    The action's label reaper is the backstop, but it waits out a three-hour
+    cutoff; without an explicit teardown a weekly workflow would hold a
+    volume for that long after every run.
+    """
+    for workflow in _postgres_consumers():
+        text = workflow.read_text()
+        assert "outputs.container-name" in text, (
+            f"{workflow.name} starts Postgres but never removes it by the action's resolved name"
+        )
+
+
+def test_every_container_removal_takes_its_volume_with_it() -> None:
+    """`docker rm` without `-v` keeps the container's anonymous volume.
+
+    The postgres image declares VOLUME /var/lib/postgresql/data, so every run
+    creates one. A removal that drops the container but not the volume leaks
+    roughly a quarter gigabyte per run, invisibly — nothing fails, the disk
+    just fills. This repo's runner had accumulated 47 of them, 10.4 GB.
+    """
+    sources = [ACTION_PATH, *_postgres_consumers()]
+    for path in sources:
+        for line in path.read_text().splitlines():
+            if "docker rm" not in line:
+                continue
+            assert "-v" in line.split("docker rm", 1)[1], (
+                f"{path.name}: `docker rm` without -v leaks a volume: {line.strip()}"
+            )
+
+
+def test_frontend_job_stays_off_the_self_hosted_runner() -> None:
+    """It has no reason to be there and one strong reason not to be.
+
+    The job needs no Docker, database or ClickHouse, so pinning it to the VPS
+    only queues it behind `test` on the single runner — and the box has
+    3.8 GiB of RAM, which two concurrent jobs do not fit into. Hosted, the
+    two run at once on separate machines.
+    """
+    jobs = _workflow_yaml()["jobs"]
+    assert jobs["frontend"]["runs-on"] == "ubuntu-latest"
+    assert "self-hosted" in jobs["test"]["runs-on"], "the test job does need the VPS's Docker"
+
+    frontend_text = yaml.safe_dump(jobs["frontend"])
+    for needs_the_vps in ("docker", "localhost", "services"):
+        assert needs_the_vps not in frontend_text, (
+            f"the frontend job now references {needs_the_vps!r}; re-check whether it can still be hosted"
+        )
+
+
+def test_reaper_cutoff_clears_the_job_timeout_without_dawdling() -> None:
+    """Both directions are failures.
+
+    Below the job timeout, the reaper deletes a running job's database. Far
+    above it, a hard-cancelled job's container — the case the per-scope
+    cleanup cannot reach, because that job never runs its teardown — holds
+    its volume long after it stopped being useful.
+
+    Only the number is checked here; the reaper's behaviour is executed in
+    tests/unit/test_ci_reap_stale.py against a shimmed Docker, because the
+    predecessor of this check asserted the presence of a `until=` filter
+    that `docker ps` does not accept and passed for months of nothing being
+    reaped.
+    """
+    reap = next(s for s in _action_steps() if "reap-stale.sh" in s.get("run", ""))
+    seconds = re.search(r"reap-stale\.sh\S*\"?\s+\S+\s+(\d+)", reap["run"])
+    assert seconds, f"could not read the reaper's cutoff from: {reap['run']!r}"
+    cutoff_minutes = int(seconds.group(1)) / 60
+
+    timeouts = [job["timeout-minutes"] for job in _workflow_yaml()["jobs"].values()]
+    longest_job = max(timeouts)
+    assert cutoff_minutes > longest_job, f"cutoff {cutoff_minutes}min can reap a live job (timeout {longest_job}min)"
+    assert cutoff_minutes <= longest_job * 2, (
+        f"cutoff {cutoff_minutes}min holds abandoned volumes far longer than a job can possibly run"
+    )

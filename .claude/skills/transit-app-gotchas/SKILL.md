@@ -172,14 +172,10 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   Root `CLAUDE.md` owns the policy this serves — when CI has to run and
   when it must be green. This entry is only the mechanism, which is easy to
   get wrong in either direction.
-  The same gap shows up when resolving a conflict: running `git merge main`
-  produces an auto-generated commit message
-  ("Merge branch 'main' of ... into vps-loop/item-N") with no `[skip ci]`
-  trailer — `git merge` never adds it automatically. That merge commit
-  becomes the branch's pushed tip, so it alone (re-)triggers CI despite
-  every real work commit on the branch correctly carrying the trailer.
-  Always add `[skip ci]` to a merge commit too: either pass `git merge main
-  -m "Merge main into vps-loop/item-N" -m "[skip ci]"` directly (multiple
-  `-m` flags create a blank-line-separated body, avoiding a literal
-  embedded newline in the shell string), or amend the default merge
-  message before pushing.
+  Under that policy branch commits carry no trailer, so the usual direction
+  of the mistake is one slipping in: a tip that carries it produces no run,
+  and the merge gate then has nothing to read rather than something to
+  fail — which looks like a stuck queue, not a mistake. Amend and
+  `push --force-with-lease`; an empty follow-up commit works too but leaves
+  the confusing commit in history. Only the squash-merge `--body` should
+  contain the trailer.

@@ -1,16 +1,27 @@
-# CI runs on a single self-hosted runner, and ci.yml triggers on both `push`
-# and `pull_request` for every branch. Dependabot's default behaviour is to
-# rebase its open PRs whenever the base branch moves, which on a busy `main`
-# turns a handful of update PRs into a steady stream of runs competing with
-# the branch that is actually being merged. `rebase-strategy: disabled` leaves
-# each PR at the commit it was opened on; rebase one by hand when it is time
-# to merge it.
+# Every update PR costs a full CI run on the one self-hosted runner that also
+# gates the branch someone is trying to merge, so this file is tuned for
+# throughput on that runner rather than for update latency.
+#
+# - `rebase-strategy: disabled`: Dependabot otherwise rebases every open PR
+#   each time `main` moves, turning a weekly batch into a continuous stream of
+#   runs. Rebase one by hand when it is time to merge it.
+# - `open-pull-requests-limit`: the default is five per ecosystem, so fifteen
+#   update PRs can be open at once -- at roughly ten minutes of runner time
+#   each, that is a queue no interactive merge gets through. Three keeps a
+#   batch bounded; Dependabot opens the next one as these are merged.
+# - A Saturday night schedule puts the batch where it competes with nothing.
+#   Landing it mid-week blocks the merge queue for the rest of the day, which
+#   is exactly what the first run of this config did.
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
       interval: "weekly"
+      day: "saturday"
+      time: "03:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
     rebase-strategy: "disabled"
     groups:
       npm-minor-and-patch:
@@ -24,6 +35,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "saturday"
+      time: "03:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
     rebase-strategy: "disabled"
     groups:
       pip-minor-and-patch:
@@ -35,6 +50,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "saturday"
+      time: "03:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
     rebase-strategy: "disabled"
     groups:
       github-actions-minor-and-patch:

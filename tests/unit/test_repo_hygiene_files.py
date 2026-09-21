@@ -57,6 +57,30 @@ def test_dependabot_config_is_valid_and_covers_npm_pip_and_actions():
     assert by_ecosystem["npm"]["directory"] == "/frontend", "npm manifests live in frontend/"
 
 
+def test_dependabot_cannot_swamp_the_single_ci_runner():
+    """Every update PR costs a full run on the one runner that also gates
+    merges, and none of these three settings fails loudly when dropped —
+    the symptom is a queue nobody can get through, a week later.
+
+    The defaults are the failure: five open PRs per ecosystem is fifteen
+    runs, rebased again on every push to `main`, arriving on whatever
+    weekday the config happened to land.
+    """
+    config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+
+    for entry in config["updates"]:
+        ecosystem = entry["package-ecosystem"]
+        assert entry.get("rebase-strategy") == "disabled", (
+            f"{ecosystem}: rebasing every open PR on each push to main floods the runner"
+        )
+        limit = entry.get("open-pull-requests-limit")
+        assert limit is not None and limit <= 3, f"{ecosystem}: unbounded batch (limit={limit})"
+        schedule = entry["schedule"]
+        assert schedule.get("day") in {"saturday", "sunday"}, (
+            f"{ecosystem}: a weekday batch blocks the merge queue during working hours"
+        )
+
+
 def test_gitattributes_normalizes_line_endings_and_marks_binaries():
     path = REPO_ROOT / ".gitattributes"
     assert path.is_file()

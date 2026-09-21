@@ -24,8 +24,15 @@ permissions:
   contents: read
 
 jobs:
+  # GitHub-hosted, unlike the `test` job below. Nothing here needs the VPS:
+  # no Docker, no database, no ClickHouse — the one native dependency is the
+  # `python3` that lint:i18n-strings shells out to, which every hosted image
+  # carries. Running it here buys real parallelism with `test` instead of
+  # queueing behind it on the single self-hosted runner, and takes the larger
+  # of the two jobs off a box with 3.8 GiB of RAM, where two concurrent jobs
+  # would not have fit.
   frontend:
-    runs-on: [self-hosted, vps]
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
       run:
@@ -57,8 +64,9 @@ jobs:
         run: npm run lint:i18n
 
       # Exact-string gate for server-rendered strings the frontend can't see
-      # through t(): shells out to `python3 scripts/lint-i18n-strings.py`,
-      # which the self-hosted VPS runner has on PATH.
+      # through t(): shells out to `python3 scripts/lint-i18n-strings.py`.
+      # The only native dependency in this job, and the reason it is worth
+      # naming — it is what decides whether this job can stay hosted.
       - name: i18n exact-string check
         run: npm run lint:i18n-strings
 
@@ -209,10 +217,11 @@ jobs:
         run: poetry run pytest $COV_ARGS
 
       # A persistent self-hosted runner keeps its Docker state between runs,
-      # so a leftover transit-ci-db container (its name, volume, and port
-      # binding) would otherwise collide with the next run even after this
-      # job fails or is cancelled.
+      # so the container and its volume have to go even when this job fails
+      # or is cancelled. The name is resolved by the action, not the literal
+      # passed in above: it carries the run id so concurrent jobs do not
+      # collide, and removing the prefix would remove nothing.
       - name: Stop and remove the Postgres container
         if: always()
-        run: docker rm -f -v transit-ci-db 2>/dev/null || true
+        run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
 

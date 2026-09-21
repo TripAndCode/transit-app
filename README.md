@@ -272,9 +272,9 @@ Useful entry points:
 - Dev databases are read-only; see `CLAUDE.md`. Use the throwaway `:5544`/
   `:8124` pair described above for writes.
 - Never push directly to `main`; use reviewed squash-merged PRs.
-- Commit messages carry `[skip ci]`, except the last push before a PR is
-  readied: its tip must omit the trailer so CI runs and can be green, which
-  the merge gate requires. See `CLAUDE.md` for the rule and
-  `transit-app-gotchas` for how the trailer behaves.
+- Branch commits carry no `[skip ci]`, so every push to a PR runs CI and the
+  merge gate has a result to read. Only the squash-merge commit carries the
+  trailer, keeping `main` from re-running what the branch proved. See
+  `CLAUDE.md` for the rule and `transit-app-gotchas` for how it behaves.
 - Run the relevant checks before opening a PR, then run `make check` when the
   change affects backend behavior.

@@ -12,11 +12,9 @@ on:
 permissions:
   contents: read
 
-# The Postgres container name is fixed, and start-test-postgres removes any
-# leftover container with that name before starting its own -- so a manual
-# dispatch overlapping a running schedule would tear down the first run's
-# database mid-test. Queue instead of cancelling: a nightly run that is
-# already partway through is worth finishing.
+# Queue overlapping runs instead of cancelling: a nightly run already partway
+# through is worth finishing, and this job is long enough that a manual
+# dispatch can easily land on top of a scheduled one.
 concurrency:
   group: nightly-extended
   cancel-in-progress: false
@@ -142,3 +140,10 @@ jobs:
             echo "::error::a RUN_SLOW/RUN_I18N_SCAN/RUN_DASHBOARD_E2E_SCAN test was skipped instead of run" >&2
             exit 1
           fi
+
+      # The action's label reaper would eventually collect this, but only
+      # after three hours. Removing it here returns the disk and the volume
+      # as soon as the job ends.
+      - name: Stop and remove the Postgres container
+        if: always()
+        run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
