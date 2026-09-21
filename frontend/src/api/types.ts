@@ -168,7 +168,7 @@ export type HeatmapProps = {
   stop_code?: string;
   /** Optional GTFS platform_code (pole number, e.g. "2"). */
   platform_code?: string;
-  avg_delay_min: number;
+  avg_delay_min: number | null;
   p90_delay_min?: number | null;
   samples: number;
   /** Comma-joined list of route_codes contributing to this stop's avg.
@@ -506,6 +506,13 @@ export type Suggestion = {
   to_date: string;
 };
 
+/** GET /:agency/reports/suggest. `suggestion` is null when no rule produced a
+ *  pick — an object body rather than a bare `null`, so the endpoint has
+ *  somewhere to say more about the empty case later. */
+export type SuggestionEnvelope = {
+  suggestion: Suggestion | null;
+};
+
 export type TrendDay = {
   date: string;
   avg_min: number;
@@ -640,6 +647,12 @@ export type Route = {
   route_long_name: string | null;
   route_code: string | null;
   trip_headsigns: string[];
+};
+
+/** GET /:agency/routes. Collection endpoints answer with an object, not a bare
+ *  array, so the server can add paging or a total without breaking clients. */
+export type RoutesResponse = {
+  rows: Route[];
 };
 
 export interface ForecastHeatmapCell {
