@@ -16,7 +16,7 @@ the task needs them.
 
 ## Database safety
 
-- Dev Postgres `localhost:5433/transit` and dev ClickHouse `transit-ch` contain real
+- Dev Postgres `localhost:5433/transit` and dev ClickHouse (`docker compose exec clickhouse`) contain real
   data and are read-only for agents. SELECT/EXPLAIN is allowed; never run writes,
   DDL, resets, down migrations, or destructive Make targets against them.
 - Tests use throwaway Postgres `:5544/transit_test` and ClickHouse `:8124`. Before a

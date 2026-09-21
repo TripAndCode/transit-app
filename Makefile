@@ -1,10 +1,19 @@
 -include .env
+# `.env` is the only mechanism that puts configuration into the environment --
+# nothing in the app or the shell scripts loads it (no python-dotenv, no
+# pydantic-settings), they all read bare `os.environ` / `${VAR:?}`. So the
+# export must stay file-wide: narrowing it to an allowlist silently strips
+# `serve`'s OAuth/LLM/session config and hard-breaks `fetch`, `fetch-ingest`
+# and `sync-r2`, whose scripts require ORACLE_*/OBJECT_STORE_* with no default.
+# Keeping the real DATABASE_URL out of the test path is `test`'s job, not this
+# line's: it delegates to scripts/run_integration_tests.sh, which force-sets
+# its own :5544/:8124 block regardless of what the caller exports.
 export
 
 DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt lint typecheck check serve db db-down ch-test ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build
 
 # Default target — first-run setup.
 all: bootstrap
@@ -62,12 +71,9 @@ doctor:
 		if [ "$$n" = "3" ]; then echo "  CLICKHOUSE env: all 3 set"; \
 		else echo "  CLICKHOUSE env: PARTIAL ($$n/3) — \`make ch-bootstrap\` will fail"; fi
 	@echo "── db ──"
-	@docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -q '^transit-pg' \
-		&& docker ps --format '  {{.Names}}: {{.Status}}' | grep transit-pg \
-		|| echo "  transit-pg NOT running — \`make db\`"
-	@docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep -q '^transit-ch' \
-		&& docker ps --format '  {{.Names}}: {{.Status}}' | grep transit-ch \
-		|| echo "  transit-ch NOT running — \`make db\`"
+	@running=$$(docker compose ps --services --filter status=running 2>/dev/null); \
+		echo "$$running" | grep -qx db && echo "  db: running" || echo "  db NOT running — \`make db\`"; \
+		echo "$$running" | grep -qx clickhouse && echo "  clickhouse: running" || echo "  clickhouse NOT running — \`make db\`"
 	@echo "── port 8000 ──"
 	@pid=$$(lsof -ti :8000 2>/dev/null | tr '\n' ' ' || true); \
 		if [ -n "$$pid" ]; then echo "  in use by PID(s) $${pid}— kill before \`make serve\`"; \
@@ -90,13 +96,16 @@ install:
 fmt:
 	poetry run ruff format .
 
+fmt-check:
+	poetry run ruff format --check .
+
 lint:
 	poetry run ruff check .
 
 typecheck:
 	poetry run mypy
 
-check: fmt lint typecheck test
+check: fmt-check lint typecheck test
 
 # Post-merge local maintenance. Planning is the default; apply rechecks every
 # candidate immediately before removing local refs/worktrees.
@@ -107,9 +116,13 @@ git-cleanup-apply:
 	python3 scripts/cleanup_git_state.py --apply
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
+# Runs against the throwaway :5544/:8124 stack via scripts/run_integration_tests.sh,
+# never this Makefile's own DATABASE_URL (which defaults to the real, read-only
+# dev database on :5433) -- see that script for why it force-sets its own block
+# instead of trusting the caller's environment.
 
 test:
-	DATABASE_URL=$(DATABASE_URL) poetry run pytest
+	scripts/run_integration_tests.sh
 
 # Runs every oracle_cloud/v3/tests/test_*.sh suite (each self-contained via
 # fake curl/aws shims — no real network or Oracle VM access needed) and
@@ -170,9 +183,13 @@ geosql-down:
 	docker compose -f tools/geosql/compose.yml down
 
 ch-test:
+	@docker rm -f transit-test-ch 2>/dev/null || true
 	docker run -d --rm --name transit-test-ch \
 	  -e CLICKHOUSE_USER=transit -e CLICKHOUSE_PASSWORD=transit -e CLICKHOUSE_DB=transit_test \
 	  -p 127.0.0.1:8124:8123 clickhouse/clickhouse-server:26.3
+
+ch-test-down:
+	docker rm -f transit-test-ch 2>/dev/null || true
 
 ch-bootstrap:
 	poetry run python -c "from pipeline.clickhouse import get_client; \
@@ -181,18 +198,26 @@ ch-bootstrap:
 migrate:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up
 
+# Destructive: rolls back applied schema migrations. Requires CONFIRM=1 so a
+# stray `make migrate-down` (no confirmation, possibly against the wrong
+# DATABASE_URL) can't silently roll back a real database; the unconfirmed
+# path prints which database it would have targeted instead.
 migrate-down:
+	@if [ "$(CONFIRM)" != "1" ]; then \
+		echo "Refusing to roll back migrations without CONFIRM=1."; \
+		DATABASE_URL=$(DATABASE_URL) poetry run python -c 'from gtfs_pipeline import describe_target; import os; print("Target:", describe_target(os.environ["DATABASE_URL"]))'; \
+		exit 1; \
+	fi
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate down $(if $(TARGET),--target $(TARGET),)
 
 # ── Data fetch (pull from Oracle Cloud collection server) ────────────────────
 # Requires: ORACLE_HOST, ORACLE_USER, ORACLE_SSH_KEY or ORACLE_SSH_KEY_PATH
 #
-# `fetch` + `sync-r2` were the primary path for mirroring the collector VM's
-# archives to Cloudflare R2 until 2026-08-29, when oracle_cloud/v3/bin/sync-r2.sh
-# started running daily in cron directly on the VM (see MIGRATION.md's 9b).
-# These two targets are now a manual/disaster-recovery fallback (e.g. rebuild
-# a local copy for inspection) — not required for the VM's own R2 mirror to
-# stay current.
+# `fetch` + `sync-r2` are the manual/disaster-recovery fallback for mirroring
+# the collector VM's archives to Cloudflare R2 (e.g. rebuilding a local copy
+# for inspection). The VM's own cron job (oracle_cloud/v3/bin/sync-r2.sh)
+# keeps the R2 mirror current on its own, so these two targets are not
+# required for that.
 
 fetch:
 	bash scripts/fetch_archives.sh
@@ -252,14 +277,11 @@ seed-agencies:
 build-rag-index:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py build_rag_index --all-agencies
 
-.PHONY: promote-intent-cache
 promote-intent-cache:
 	DATABASE_URL=$(DATABASE_URL) poetry run python scripts/promote_intent_cache.py --agency-id $(AGENCY_ID)
 
 prune-query-log:
 	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py prune_query_log --days 90
-
-.PHONY: frontend-install frontend-dev frontend-build
 
 frontend-install:
 	cd frontend && npm install
