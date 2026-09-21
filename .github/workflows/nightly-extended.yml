@@ -12,6 +12,15 @@ on:
 permissions:
   contents: read
 
+# The Postgres container name is fixed, and start-test-postgres removes any
+# leftover container with that name before starting its own -- so a manual
+# dispatch overlapping a running schedule would tear down the first run's
+# database mid-test. Queue instead of cancelling: a nightly run that is
+# already partway through is worth finishing.
+concurrency:
+  group: nightly-extended
+  cancel-in-progress: false
+
 jobs:
   oracle-bash-tests:
     runs-on: [self-hosted, vps]
@@ -83,6 +92,7 @@ jobs:
         run: poetry run playwright install chromium
 
       - name: Start Postgres from db/Dockerfile
+        id: postgres
         uses: ./.github/actions/start-test-postgres
         with:
           container-name: transit-nightly-db
@@ -90,7 +100,7 @@ jobs:
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up
         env:
-          DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
+          DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
 
       - name: Apply ClickHouse schema
         run: |
@@ -108,7 +118,7 @@ jobs:
       - name: Run extended pytest suites
         run: poetry run pytest -ra | tee pytest-extended.log
         env:
-          DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
+          DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
           GEMINI_API_KEY: test-key
           CLICKHOUSE_HOST: localhost
           CLICKHOUSE_PORT: ${{ job.services.clickhouse.ports['8123'] }}

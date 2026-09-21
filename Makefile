@@ -128,17 +128,7 @@ test:
 # fake curl/aws shims — no real network or Oracle VM access needed) and
 # summarizes pass/fail. Exits non-zero if any suite fails, so it can gate CI.
 oracle-tests:
-	@fail=0; \
-	for t in oracle_cloud/v3/tests/test_*.sh; do \
-		echo "── $$t ──"; \
-		if bash "$$t"; then \
-			echo "PASS: $$t"; \
-		else \
-			echo "FAIL: $$t"; \
-			fail=1; \
-		fi; \
-	done; \
-	exit $$fail
+	@bash scripts/run_oracle_tests.sh
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
