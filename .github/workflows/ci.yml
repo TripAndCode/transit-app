@@ -209,10 +209,11 @@ jobs:
         run: poetry run pytest $COV_ARGS
 
       # A persistent self-hosted runner keeps its Docker state between runs,
-      # so a leftover transit-ci-db container (its name, volume, and port
-      # binding) would otherwise collide with the next run even after this
-      # job fails or is cancelled.
+      # so the container and its volume have to go even when this job fails
+      # or is cancelled. The name is resolved by the action, not the literal
+      # passed in above: it carries the run id so concurrent jobs do not
+      # collide, and removing the prefix would remove nothing.
       - name: Stop and remove the Postgres container
         if: always()
-        run: docker rm -f -v transit-ci-db 2>/dev/null || true
+        run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
 

@@ -11,6 +11,7 @@ GitHub-hosted runner this repo doesn't use.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -162,3 +163,97 @@ def test_no_workflow_hardcodes_the_old_fixed_postgres_port() -> None:
     for w in consumers:
         text = w.read_text()
         assert "outputs.port" in text, f"{w.name} starts Postgres but never reads the allocated port"
+
+
+ACTION_PATH = ROOT / ".github" / "actions" / "start-test-postgres" / "action.yml"
+
+
+def _action_yaml() -> dict:
+    return yaml.load(ACTION_PATH.read_text(), Loader=_NoDuplicateKeys)
+
+
+def _action_steps() -> list[dict]:
+    return _action_yaml()["runs"]["steps"]
+
+
+def _postgres_consumers() -> list:
+    workflows = (ROOT / ".github" / "workflows").glob("*.yml")
+    return [w for w in workflows if "start-test-postgres" in w.read_text()]
+
+
+def test_container_name_is_unique_per_run() -> None:
+    """One runner is one Docker daemon, so a fixed name is a shared resource.
+
+    The action force-removes any container holding the name before starting
+    its own. With a literal, two jobs on the same host destroy each other's
+    database mid-test — the second one's `docker rm -f` lands on the first
+    one's running container. The run id makes the name private to the run.
+    """
+    run_step = next(s for s in _action_steps() if "docker run" in s.get("run", ""))
+    assert "github.run_id" in run_step["run"] or "steps.resolve.outputs" in run_step["run"], (
+        "the container name must carry the run id, not a literal shared across concurrent jobs"
+    )
+    resolve = next(s for s in _action_steps() if s.get("id") == "resolve")
+    assert "github.run_id" in resolve["run"], "the resolved container name does not include the run id"
+
+
+def test_image_tag_is_not_the_unique_container_name() -> None:
+    """A per-run tag would leave one dangling image tag behind on every run.
+
+    The container name has to be unique; the tag must not follow it, or a
+    persistent runner accumulates tags forever. Every caller builds the same
+    db/ context, so one shared tag is also one shared layer cache.
+    """
+    build = next(s for s in _action_steps() if "docker build" in s.get("run", ""))
+    assert "github.run_id" not in build["run"], "the image tag must not be per-run"
+    assert "inputs.container-name" not in build["run"], "the image tag must not follow the container name"
+
+
+def test_action_outputs_wire_to_their_own_steps() -> None:
+    """Both outputs are one expression each, and they are easy to cross-wire.
+
+    Pointing `port` at the name step yields a hostless URL that fails far
+    from here, at whatever step first opens a connection.
+    """
+    outputs = _action_yaml()["outputs"]
+    assert outputs["port"]["value"] == "${{ steps.publish.outputs.port }}"
+    assert outputs["container-name"]["value"] == "${{ steps.resolve.outputs.container-name }}"
+
+
+def test_no_caller_removes_the_container_by_the_prefix_it_passed_in() -> None:
+    """The prefix is no longer a container that exists.
+
+    A teardown still naming it removes nothing and reports success, so the
+    leak is silent — the container survives until the action's reaper
+    collects it hours later, holding a volume the whole time.
+    """
+    for workflow in _postgres_consumers():
+        text = workflow.read_text()
+        prefixes = re.findall(r"container-name:\s*(\S+)", text)
+        for prefix in prefixes:
+            assert f"docker rm -f -v {prefix}" not in text, (
+                f"{workflow.name} tears down the bare prefix {prefix!r}; use the action's container-name output"
+            )
+
+
+def test_every_caller_removes_its_container() -> None:
+    """A run-unique name means no later run reclaims it by name.
+
+    The action's label reaper is the backstop, but it waits out a three-hour
+    cutoff; without an explicit teardown a weekly workflow would hold a
+    volume for that long after every run.
+    """
+    for workflow in _postgres_consumers():
+        text = workflow.read_text()
+        assert "outputs.container-name" in text, (
+            f"{workflow.name} starts Postgres but never removes it by the action's resolved name"
+        )
+
+
+def test_reaper_is_scoped_by_label_and_by_age() -> None:
+    """Either half alone is wrong: unscoped by label it reaps unrelated
+    containers on a shared runner, unscoped by age it kills a concurrent
+    job's live database — the exact failure the unique name exists to stop."""
+    reap = next(s for s in _action_steps() if "docker ps -aq" in s.get("run", ""))
+    assert "label=transit-test-postgres" in reap["run"], "reaper is not scoped to this action's own containers"
+    assert "until=" in reap["run"], "reaper is not scoped by age"
