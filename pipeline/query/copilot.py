@@ -126,8 +126,16 @@ async def generate_proactive_insight(
                 tool_choice="required",
                 temperature=0.0,
             )
-        except Exception:
-            logger.warning("copilot: BYOK completion failed; falling back to no_signal")
+        except Exception as exc:
+            # Same constraint as chat.py's BYOK handler: the provider's error
+            # body can carry part of the user's key, so the exception type and
+            # its transport metadata are logged and its message is not.
+            status = getattr(exc, "status_code", None)
+            logger.warning(
+                "copilot: BYOK completion failed; falling back to no_signal (%s%s)",
+                type(exc).__name__,
+                f", status={status}" if status else "",
+            )
             message = None
     else:
         client = _get_client()

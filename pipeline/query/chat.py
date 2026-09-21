@@ -485,7 +485,20 @@ async def chat_with_tools(
             return None, "rate_limit"
         except BadRequestError:
             return None, "bad_request"
-        except Exception:
+        except Exception as exc:
+            # Type, status and request id only -- never the message or a
+            # traceback. This runs on a user-supplied provider key, and a
+            # provider's error body routinely echoes part of the key back
+            # ("Incorrect API key provided: sk-..."), so the exception's own
+            # message is the one thing here that must not reach a log.
+            status = getattr(exc, "status_code", None)
+            request_id = getattr(exc, "request_id", None)
+            _log.warning(
+                "chat: BYOK completion failed (%s%s%s)",
+                type(exc).__name__,
+                f", status={status}" if status else "",
+                f", request_id={request_id}" if request_id else "",
+            )
             return None, "unexpected"
 
     language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
