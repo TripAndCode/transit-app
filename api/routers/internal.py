@@ -105,8 +105,21 @@ async def collector_update(agency_id: int, request: Request) -> dict:
         raise HTTPException(status_code=400, detail="Invalid X-Captured-At") from exc
     if captured.tzinfo is None:
         raise HTTPException(status_code=400, detail="X-Captured-At must include timezone")
-    raw = await request.body()
-    if not raw or len(raw) > _MAX_COLLECTOR_PAYLOAD:
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except ValueError:
+            declared_length = None
+        if declared_length is not None and declared_length > _MAX_COLLECTOR_PAYLOAD:
+            raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
+    chunks = bytearray()
+    async for chunk in request.stream():
+        chunks.extend(chunk)
+        if len(chunks) > _MAX_COLLECTOR_PAYLOAD:
+            raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
+    raw = bytes(chunks)
+    if not raw:
         raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
     file_name = f"oracle/{source_file}"
     try:

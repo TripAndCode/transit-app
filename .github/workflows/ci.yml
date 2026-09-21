@@ -1,9 +1,24 @@
 name: CI
+
+# `pull_request` is what the merge gate reads, and it already covers every
+# branch headed anywhere. Listening on `push` for all branches as well meant
+# every push to an open PR ran the whole suite twice over the same tree — on
+# a single self-hosted runner that is double the queue for no extra signal.
+# `push` stays for `main` alone, so a commit landing there outside a PR is
+# still checked. Mirrors `secrets-scan.yml`.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
-    branches: ["**"]
+
+# One in-flight run per pull request: a new push supersedes the previous run
+# instead of queueing behind it, which on one runner is the difference
+# between the current head being tested now and being tested after every
+# head before it. Pull requests only — a `main` run records what that commit
+# did rather than previewing it, so nothing should cancel it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -189,7 +204,12 @@ jobs:
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
-        run: poetry run pytest --cov=api --cov=pipeline --cov=db --cov-report=term
+          # Coverage instruments every line the suite executes and nothing
+          # gates on the number it prints, so a pull request pays for a
+          # report no check reads. `main` still produces one, which is where
+          # the figure is worth having: it describes what landed.
+          COV_ARGS: ${{ github.event_name == 'push' && '--cov=api --cov=pipeline --cov=db --cov-report=term' || '' }}
+        run: poetry run pytest $COV_ARGS
 
       # A persistent self-hosted runner keeps its Docker state between runs,
       # so a leftover transit-ci-db container (its name, volume, and port

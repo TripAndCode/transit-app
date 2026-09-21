@@ -24,8 +24,8 @@ async def reports_app(apply_schema):
 
     pool = await _test_pool()
     app.state.pool = pool
-    # get_report() now declares ch=Depends(get_ch) alongside conn (Task 8,
-    # compare_ranking's time_band-filtered live-fallback) — every report type
+    # get_report() declares ch=Depends(get_ch) alongside conn
+    # (compare_ranking's time_band-filtered live-fallback) — every report type
     # resolves the dependency regardless of whether it's used, so something
     # must be present at app.state.ch_client. None of this file's tests pass
     # a time_band filter (all exercise the agg-table fast path), so None is
@@ -1357,7 +1357,7 @@ async def test_suggest_returns_on_time_fallback_when_no_anomaly(reports_client, 
 
     resp = await client.get(f"/api/{agency_id}/reports/suggest")
     assert resp.status_code == 200
-    body = resp.json()
+    body = resp.json()["suggestion"]
     assert body["report_type"] == "on_time"
     assert body["route_code"] == "BAD"
     assert body.get("reason_text")
@@ -1381,7 +1381,7 @@ async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_clien
     # keeps entries it can split into (report_type, route_code).
     resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY&exclude=garbage")
     assert resp.status_code == 200
-    assert resp.json() is None
+    assert resp.json() == {"suggestion": None}
 
 
 def _run_analyze_from_ch(agency_id, ch_client):
