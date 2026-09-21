@@ -30,7 +30,7 @@ function renderGate() {
     <MemoryRouter initialEntries={["/"]}>
       <Routes>
         <Route path="/" element={<OnboardingGate />} />
-        <Route path="/agencies/:agencyId/map" element={<MapProbe />} />
+        <Route path="/agencies/:agencyId/operations" element={<MapProbe />} />
         <Route path="/welcome" element={<WelcomeProbe />} />
       </Routes>
     </MemoryRouter>,

@@ -37,14 +37,17 @@ but are not plotted.
 
 ## User flow
 
-- The sidebar's **Overview** entry (`SIDEBAR_NAV_ITEMS` in
+- The sidebar's first entry (`SIDEBAR_NAV_ITEMS` in
   `frontend/src/components/Sidebar.tsx`, labeled from the `design:overview`
-  i18n key) opens `/agencies/:agencyId/overview`, which renders this tab —
-  not the `frontend/src/tabs/OverviewTab.tsx` component documented in
-  `docs/features/overview-tab.md`. The same component is also mounted at
-  `/agencies/:agencyId/map`.
-- `/agencies/:agencyId/live` redirects to `/agencies/:agencyId/map` and
-  preserves the agency and query string.
+  i18n key) opens `/agencies/:agencyId/operations`, the single mount point for
+  this tab. A bare `/agencies/:agencyId` lands here too.
+- `/agencies/:agencyId/overview`, `/agencies/:agencyId/map` and
+  `/agencies/:agencyId/live` all redirect here, preserving the agency and
+  query string. They render a redirect only — this component is mounted once,
+  so navigating between those URLs never tears down and rebuilds MapLibre's GL
+  context.
+- The period-summary view at `/agencies/:agencyId/period-overview` is a
+  different tab — see `docs/features/overview-tab.md`.
 - **Current** is the active mode. **Historical analysis** links to
   `/agencies/:agencyId/analysis/trend`.
 - With all routes selected, the right panel lists routes from the latest
