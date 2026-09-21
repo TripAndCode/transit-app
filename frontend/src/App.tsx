@@ -11,6 +11,27 @@ import { GuestPrompt } from "./components/GuestPrompt";
 import { HelpHint } from "./components/HelpHint";
 import { Sidebar } from "./components/Sidebar";
 
+/** Tabs that own their whole viewport: the banners, HelpHint and CopilotPanel
+ *  are hidden on these so nothing competes with the visualization.
+ *
+ *  `overview` and `map` stay listed even though both now render only a
+ *  redirect. React-router's declarative `<Navigate>` fires from an effect
+ *  after the redirect element renders once, so the pathname is briefly the
+ *  pre-redirect one — listing them avoids a one-frame flash of the chrome.
+ *
+ *  Anything routed here is a place CopilotPanel can never appear, which is
+ *  why `COPILOT_ROUTES` is asserted disjoint from this set. */
+export const FOCUSED_TAB_SEGMENTS = [
+  "operations",
+  "overview",
+  "map",
+  "route-analysis",
+  "reports",
+  "ask",
+] as const;
+
+export const FOCUSED_TAB_PATTERN = new RegExp(`/agencies/[^/]+/(${FOCUSED_TAB_SEGMENTS.join("|")})$`);
+
 /**
  * Keep <title> in sync with the active locale. The static `<title>` in
  * `index.html` is JP; this effect overwrites it post-mount and re-runs on
@@ -33,13 +54,7 @@ export default function App() {
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
   const agencyIdNum = agencyId ? Number(agencyId) : null;
   const { pathname } = useLocation();
-  // `overview` and `map` are kept here even though both now render only a
-  // redirect (never real tab content): react-router's declarative <Navigate>
-  // fires from an effect after the redirect element itself renders once, so
-  // this regex briefly sees the pre-redirect pathname during that render.
-  // Keeping the old segments avoids a one-frame flash of the banners/
-  // CopilotPanel that `!focused` hides on every real tab.
-  const focused = /\/agencies\/[^/]+\/(operations|overview|map|route-analysis|reports|ask)$/.test(pathname);
+  const focused = FOCUSED_TAB_PATTERN.test(pathname);
   useDefaultRangeAnchor(agencyIdNum);
   useAnonymousFilterPersistence(agencyIdNum);
   return (
