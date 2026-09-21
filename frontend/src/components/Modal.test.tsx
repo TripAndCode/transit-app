@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { Modal } from "./Modal";
+import { Z_INDEX } from "../styles/zIndex";
 
 function Harness({ initialOpen = true }: { initialOpen?: boolean }) {
   const [open, setOpen] = useState(initialOpen);
@@ -134,5 +135,31 @@ describe("Modal", () => {
       </Modal>,
     );
     expect(document.body.style.overflow).not.toBe("hidden");
+  });
+});
+
+describe("stacking", () => {
+  it("puts a drawer on the drawer rungs and a modal on the modal rungs", () => {
+    // The ladder separates the two so a modal opened over a drawer layers
+    // above it. Pinning both variants to the modal rungs leaves DOM order
+    // to decide, which is the thing the ladder exists to stop.
+    const { unmount } = render(
+      <Modal open onClose={() => {}} ariaLabel="drawer" variant="drawer">
+        <p>body</p>
+      </Modal>,
+    );
+    const drawerPanel = screen.getByRole("dialog");
+    expect(drawerPanel.style.zIndex).toBe(String(Z_INDEX.drawer));
+    expect((drawerPanel.parentElement as HTMLElement).style.zIndex).toBe(String(Z_INDEX.drawerBackdrop));
+    unmount();
+
+    render(
+      <Modal open onClose={() => {}} ariaLabel="modal">
+        <p>body</p>
+      </Modal>,
+    );
+    const modalPanel = screen.getByRole("dialog");
+    expect(modalPanel.style.zIndex).toBe(String(Z_INDEX.modal));
+    expect((modalPanel.parentElement as HTMLElement).style.zIndex).toBe(String(Z_INDEX.modalBackdrop));
   });
 });

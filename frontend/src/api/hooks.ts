@@ -20,7 +20,6 @@ import type {
   ForecastHeatmap,
   ForecastOverview,
   HeadwayQualityResponse,
-  HeatmapCollection,
   LiveTripProgressResponse,
   LiveTripsResponse,
   NetworkSummary,
@@ -30,11 +29,11 @@ import type {
   ReportMeta,
   ReportResponse,
   Route,
+  RoutesResponse,
   RouteShapeResponse,
-  RouteStopProfileResponse,
   RouteSummaryResponse,
-  RouteTripsResponse,
   Suggestion,
+  SuggestionEnvelope,
   WeatherDelayResponse,
 } from "./types";
 import { useSession } from "./auth";
@@ -68,7 +67,8 @@ export function useForecastOverview(
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
   return useQuery({
     queryKey: ["routes", agencyId],
-    queryFn: ({ signal }) => apiGet<Route[]>(`/api/${agencyId}/routes`, { signal }),
+    queryFn: ({ signal }) =>
+      apiGet<RoutesResponse>(`/api/${agencyId}/routes`, { signal }).then((r) => r.rows),
     enabled: agencyId != null,
     // Routes are quarterly-static, but a 1-hour staleTime froze empty
     // arrays (returned during a fresh deploy's initial ingest) for an
@@ -111,6 +111,11 @@ export function useReport(
     queryFn: ({ signal }) =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && !!reportType,
+    // Keep the prior report mounted while a new report type or filter change
+    // loads, so callers can gate their skeleton on `isPending` (first load
+    // only) instead of `isFetching` (every refetch), matching AnalysisTab's
+    // report-switch UX to useNetworkSummary/useForecastOverview's.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -177,7 +182,9 @@ export function useSuggestion(
     queryKey: ["reports-suggest", agencyId, excludeKey],
     queryFn: ({ signal }) => {
       const qs = exclude.map((e) => `exclude=${encodeURIComponent(e)}`).join("&");
-      return apiGet<Suggestion | null>(`/api/${agencyId}/reports/suggest${qs ? `?${qs}` : ""}`, { signal });
+      return apiGet<SuggestionEnvelope>(`/api/${agencyId}/reports/suggest${qs ? `?${qs}` : ""}`, {
+        signal,
+      }).then((r) => r.suggestion);
     },
     enabled: agencyId != null,
     staleTime: 60 * 1000,
@@ -218,26 +225,18 @@ export function usePeakHourBreakdown(
 
 export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary> {
   return useQuery({
-    queryKey: ["network-summary", ctx.from, ctx.to],
+    // The endpoint itself only reads from/to -- it ignores dow/time_band/
+    // service/routes -- but the key still spreads the full ctxKey(ctx)
+    // rather than hand-picking [ctx.from, ctx.to], so this doesn't silently
+    // drift out of sync with ctxKey if RangeCtx grows a new server-honored
+    // dimension later.
+    queryKey: ["network-summary", ...ctxKey(ctx)],
     queryFn: ({ signal }) =>
       apiGet<NetworkSummary>(`/api/network/summary?from=${ctx.from}&to=${ctx.to}`, { signal }),
     staleTime: 60 * 1000,
     // Keep the prior range's table mounted while the new range loads, so stepping
     // the date pickers doesn't flicker the whole board through a Skeleton each change.
     placeholderData: keepPreviousData,
-  });
-}
-
-export function useHeatmap(
-  agencyId: number | null,
-  ctx: RangeCtx,
-): UseQueryResult<HeatmapCollection> {
-  return useQuery({
-    queryKey: ["heatmap", agencyId, ...ctxKey(ctx)],
-    queryFn: ({ signal }) =>
-      apiGet<HeatmapCollection>(`/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`, { signal }),
-    enabled: agencyId != null,
-    staleTime: 60 * 1000,
   });
 }
 
@@ -297,50 +296,6 @@ export function useLiveTripProgress(
   });
 }
 
-export function useRouteTrips(
-  agencyId: number | null,
-  routeCode: string | null,
-): UseQueryResult<RouteTripsResponse> {
-  return useQuery({
-    queryKey: ["route_trips", agencyId, routeCode],
-    queryFn: ({ signal }) =>
-      apiGet<RouteTripsResponse>(
-        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips`,
-        { signal },
-      ),
-    enabled: agencyId != null && !!routeCode,
-    staleTime: 60 * 1000,
-  });
-}
-
-export function useRouteStopProfile(
-  agencyId: number | null,
-  routeCode: string | null,
-): UseQueryResult<RouteStopProfileResponse> {
-  return useQuery({
-    queryKey: ["route_stop_profile", agencyId, routeCode],
-    queryFn: ({ signal }) =>
-      apiGet<RouteStopProfileResponse>(
-        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/stop-profile`,
-        { signal },
-      ),
-    enabled: agencyId != null && !!routeCode,
-    staleTime: 60 * 1000,
-  });
-}
-
-type CreateAgencyBody = Omit<Agency, "agency_id">;
-
-export function useCreateAgency() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateAgencyBody) => apiPost<Agency>("/api/agencies", body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agencies"] });
-    },
-  });
-}
-
 // ─── Conversation + chip hooks ───────────────────────────────────────────────
 
 /**
@@ -390,6 +345,7 @@ export function useConversations(agencyId: number): UseQueryResult<Conversation[
       // Anonymous: read from localStorage; shape-convert to Conversation
       return conversationsAnon.list(agencyId).map(toServerLikeConversation);
     },
+    enabled: agencyId > 0,
     staleTime: 5_000,
   });
 }
@@ -414,7 +370,7 @@ export function useConversation(
       if (!anon) return null;
       return { conversation: toServerLikeConversation(anon), messages: anon.messages };
     },
-    enabled: Boolean(conversationId),
+    enabled: agencyId > 0 && Boolean(conversationId),
   });
 }
 

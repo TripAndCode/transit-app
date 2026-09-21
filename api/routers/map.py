@@ -24,20 +24,21 @@ import pathlib
 import re
 import subprocess
 import tempfile
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import RangeCtx, build_agg_stop_filter, get_range_ctx
+from api.range import RangeCtx, build_agg_stop_filter, ctx_payload, get_range_ctx
 from api.security import csrf_guard
-from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
+from api.triage import LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.reports.map import compute_route_shape, route_exists
 
 _log = logging.getLogger(__name__)
@@ -152,7 +153,9 @@ def _round_half_up_int(x: float) -> int:
     return int(Decimal(str(x)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-async def _latest_route_observation(conn, ch, agency_id: int, route_code: str) -> datetime | None:
+async def _latest_route_observation(
+    conn: asyncpg.Connection, ch: AsyncClient, agency_id: int, route_code: str
+) -> datetime | None:
     """Existence precheck + 30-day-bounded latest-observation probe.
 
     Shared by ``route_trips`` and ``route_stop_profile``, which both need
@@ -181,15 +184,15 @@ async def _latest_route_observation(conn, ch, agency_id: int, route_code: str) -
     return _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
 
 
-@router.get("/delays/live")
+@router.get("/delays/live", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
-    limit: int = Query(default=500, le=500),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+    limit: int = Query(default=500, ge=1, le=500),
+) -> dict[str, Any]:
     """Latest reported stop and delay for trips in the current feed window."""
     latest_ts = await max_captured_at(ch, agency_id)
     if latest_ts is None:
@@ -300,12 +303,12 @@ async def live_delays(
     }
 
 
-@router.post("/delays/refresh")
+@router.post("/delays/refresh", response_model=None)
 @limiter.limit("5/minute")
 async def refresh_live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
-):
+) -> dict[str, Any]:
     """Fetch the agency's current GTFS-RT feed and persist it before reading."""
     csrf_guard(request)
     try:
@@ -318,15 +321,15 @@ async def refresh_live_delays(
     return {"status": "updated", "inserted": inserted}
 
 
-@router.get("/delays/live-progress")
+@router.get("/delays/live-progress", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def live_trip_progress(
     request: Request,
     trip_id: str = Query(min_length=1, max_length=300),
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+) -> dict[str, Any]:
     """Reported progress for one trip that is present in the live window.
 
     GTFS-RT TripUpdates commonly contain several upcoming stops. For each
@@ -443,16 +446,16 @@ async def live_trip_progress(
     }
 
 
-@router.get("/route-shape")
+@router.get("/route-shape", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_shape(
     request: Request,
-    route: str,
+    route: str = Query(min_length=1, max_length=300),
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
-):
+) -> dict[str, Any]:
     """Ordered stop sequence + per-stop avg delay for one route over ctx.
 
     Returns ``{ route, geometry, stops: [{ stop_sequence, stop_name, stop_id,
@@ -468,14 +471,14 @@ async def route_shape(
     return await compute_route_shape(conn, ch, agency_id, str(route), ctx)
 
 
-@router.get("/today/route-summary")
+@router.get("/today/route-summary", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def today_route_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+) -> dict[str, Any]:
     """Per-route triage summary for the most recent analyzed date.
 
     Powers the 最新観測 tab. Each row carries the latest analyzed day's figures
@@ -664,248 +667,7 @@ async def today_route_summary(
     }
 
 
-@router.get("/today/route/{route_code}/trips")
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
-async def route_trips(
-    request: Request,
-    route_code: str,
-    agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
-):
-    """Per-trip delay for one route on the latest observation date.
-
-    One row per trip_id: representative scheduled departure (HH:MM), headsign
-    (from static_trips), and the trip's average dep_delay across its stops.
-    Sorted worst-first — answers "which buses were late". Read-only.
-    """
-    # Cheap existence precheck + 30-day-bounded latest-observation probe FIRST,
-    # before any further ClickHouse work: a fabricated/nonexistent route_code
-    # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
-    # just a bounded-but-still-huge scan (a date bound alone isn't enough
-    # while every agency's full history still fits inside the bound's
-    # window). See `_latest_route_observation` for the full existence-check
-    # and bound rationale.
-    latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
-    if latest_ts is None:
-        return {"date": None, "trips": []}
-
-    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring).
-    # Two non-key columns (scheduled_time, dep_delay) are read off the SAME
-    # winning row, so they're packed into ONE tuple-argMax rather than one
-    # argMax per column — per-column argMax on a captured_at tie could
-    # silently mix columns from two different physical rows. Unpacked by
-    # position in the outer SELECT to keep the result's column order exactly
-    # `trip_id, stop_sequence, scheduled_time, dep_delay` (this function
-    # unpacks each row by position below). `ORDER BY trip_id` on the outer
-    # select restores the deterministic row order the old sort-based form got
-    # for free from its own ORDER BY — a bare GROUP BY has no defined output
-    # order, and this route's row count (~1.7k) makes the sort cheap.
-    dedup_result = await ch.query(
-        """
-        SELECT trip_id, stop_sequence, winner.1 AS scheduled_time, winner.2 AS dep_delay
-        FROM (
-            SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
-                argMax(tuple(u.scheduled_time, u.dep_delay), (u.captured_at, u.file_name)) AS winner
-            FROM updates AS u
-            WHERE u.agency_id = {agency_id:UInt16} AND u.route_code = {route:String}
-              AND u.dep_delay IS NOT NULL
-              AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
-            GROUP BY u.trip_id, u.stop_sequence
-        ) AS grouped
-        ORDER BY trip_id
-        """,
-        parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
-    )
-    per_trip: dict[str, dict] = defaultdict(lambda: {"scheduled_times": [], "delays": []})
-    for trip_id, _stop_sequence, scheduled_time, dep_delay in dedup_result.result_rows:
-        t = per_trip[trip_id]
-        if scheduled_time is not None:
-            t["scheduled_times"].append(scheduled_time)
-        t["delays"].append(dep_delay)
-
-    trip_ids = list(per_trip.keys())
-    headsigns: dict[str, str | None] = {}
-    if trip_ids:
-        headsign_rows = await conn.fetch(
-            "SELECT trip_id, trip_headsign FROM static_trips WHERE agency_id = $1 AND trip_id = ANY($2)",
-            agency_id,
-            trip_ids,
-        )
-        for r in headsign_rows:
-            headsigns[r["trip_id"]] = r["trip_headsign"]
-
-    trips: list[dict[str, Any]] = []
-    for trip_id, t in per_trip.items():
-        delays = t["delays"]
-        avg_delay_sec = _round_half_up_int(sum(delays) / len(delays)) if delays else None
-        sched = min(t["scheduled_times"]) if t["scheduled_times"] else None
-        trips.append(
-            {
-                "trip_id": trip_id,
-                "scheduled_time": sched[:5] if sched else None,
-                "headsign": headsigns.get(trip_id),
-                "avg_delay_sec": avg_delay_sec,
-                "samples": len(delays),
-            }
-        )
-    trips.sort(key=lambda t: (t["avg_delay_sec"] is None, -(t["avg_delay_sec"] or 0)))
-    return {
-        "date": latest_ts.date().isoformat(),
-        "trips": trips,
-    }
-
-
-def _cohort_fields(stop_id: str | None, route_avg_sec: int, cohort: dict) -> dict:
-    """Merge cohort stats for one stop into the stop dict.
-
-    ``cohort_low_confidence`` flags a thin total observation count behind
-    ``cohort_avg_delay_sec`` — independent of ``is_outlier``'s own
-    ``cohort_route_count >= 2`` gate, which only checks how many DISTINCT
-    routes contributed, not how many total observations they contributed
-    between them (two routes with 5 observations each still clears that
-    gate but is still a thin average).
-    """
-    if stop_id is None or stop_id not in cohort:
-        return {
-            "cohort_avg_delay_sec": None,
-            "cohort_route_count": 0,
-            "cohort_samples": 0,
-            "cohort_low_confidence": False,
-            "is_outlier": False,
-        }
-    c = cohort[stop_id]
-    cohort_avg = c["cohort_avg_delay_sec"]
-    route_count = c["cohort_route_count"]
-    cohort_samples = c["cohort_samples"] or 0
-    is_outlier = cohort_avg is not None and route_count >= 2 and route_avg_sec > cohort_avg * 1.5
-    return {
-        "cohort_avg_delay_sec": cohort_avg,
-        "cohort_route_count": route_count,
-        "cohort_samples": cohort_samples,
-        "cohort_low_confidence": cohort_avg is not None and cohort_samples < COHORT_LOW_CONFIDENCE_SAMPLES,
-        "is_outlier": is_outlier,
-    }
-
-
-@router.get("/today/route/{route_code}/stop-profile")
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
-async def route_stop_profile(
-    request: Request,
-    route_code: str,
-    agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
-):
-    """Average delay per stop_sequence along one route on the latest date.
-
-    Joins observed (trip_id, stop_sequence) to static_stops for a stop name,
-    ordered by sequence — answers "where on the route does delay build". The
-    name is best-effort (MAX over the sequence's mapped stop). Read-only.
-    """
-    # Existence precheck + bounded route-scoped probe — see
-    # `_latest_route_observation` for the full rationale (same
-    # fabricated-route-code / unbounded-scan vulnerability, same fix, shared
-    # with route_trips above).
-    latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
-    if latest_ts is None:
-        return {"date": None, "stops": []}
-
-    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
-    # only one non-key column (dep_delay) is read off the winning row, so a
-    # single argMax suffices.
-    dedup_result = await ch.query(
-        """
-        SELECT u.trip_id, u.stop_sequence,
-            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
-        FROM updates AS u
-        WHERE u.agency_id = {agency_id:UInt16} AND u.route_code = {route:String}
-          AND u.dep_delay IS NOT NULL
-          AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
-        GROUP BY u.trip_id, u.stop_sequence
-        """,
-        parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
-    )
-    dedup_rows = list(dedup_result.result_rows)
-
-    static_join_rows: list = []
-    if dedup_rows:
-        dedup_trip_ids = list({tid for tid, _, _ in dedup_rows})
-        static_join_rows = await conn.fetch(
-            "SELECT sst.trip_id, sst.stop_sequence, sst.stop_id, ss.stop_name "
-            "FROM static_stop_times sst "
-            "LEFT JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = sst.stop_id "
-            "WHERE sst.agency_id = $1 AND sst.trip_id = ANY($2)",
-            agency_id,
-            dedup_trip_ids,
-        )
-    static_by_pair = {(r["trip_id"], r["stop_sequence"]): r for r in static_join_rows}
-
-    per_seq: dict[int, dict] = defaultdict(lambda: {"delays": [], "stop_ids": [], "stop_names": []})
-    for trip_id, stop_sequence, dep_delay in dedup_rows:
-        a = per_seq[stop_sequence]
-        a["delays"].append(dep_delay)
-        info = static_by_pair.get((trip_id, stop_sequence))
-        if info is not None:
-            if info["stop_id"] is not None:
-                a["stop_ids"].append(info["stop_id"])
-            if info["stop_name"] is not None:
-                a["stop_names"].append(info["stop_name"])
-
-    rows: list[dict[str, Any]] = [
-        {
-            "stop_sequence": seq,
-            "stop_id": max(a["stop_ids"]) if a["stop_ids"] else None,
-            "stop_name": max(a["stop_names"]) if a["stop_names"] else None,
-            "avg_delay_sec": _round_half_up_int(sum(a["delays"]) / len(a["delays"])) if a["delays"] else None,
-            "samples": len(a["delays"]),
-        }
-        for seq, a in sorted(per_seq.items())
-    ]
-
-    # Build cohort stats per stop_id from agg_route_stop_daily (last 30 days).
-    stop_ids = [r["stop_id"] for r in rows if r["stop_id"] is not None]
-    cohort_by_stop: dict[str, dict] = {}
-    if stop_ids:
-        date_from = latest_ts.date() - timedelta(days=30)
-        cohort_rows = await conn.fetch(
-            """
-            SELECT
-                stop_id,
-                COUNT(DISTINCT route_code) AS cohort_route_count,
-                SUM(samples)::int AS cohort_samples,
-                ROUND(
-                    (SUM(delay_sum)::float / NULLIF(SUM(samples), 0))::numeric, 0
-                )::int AS cohort_avg_delay_sec
-            FROM agg_route_stop_daily
-            WHERE agency_id = $1
-              AND stop_id = ANY($2)
-              AND date >= $3
-            GROUP BY stop_id
-            """,
-            agency_id,
-            stop_ids,
-            date_from,
-        )
-        cohort_by_stop = {cr["stop_id"]: dict(cr) for cr in cohort_rows}
-
-    return {
-        "date": latest_ts.date().isoformat(),
-        "stops": [
-            {
-                "stop_sequence": r["stop_sequence"],
-                "stop_id": r["stop_id"],
-                "stop_name": r["stop_name"],
-                "avg_delay_sec": r["avg_delay_sec"],
-                "samples": r["samples"],
-                **_cohort_fields(r["stop_id"], r["avg_delay_sec"], cohort_by_stop),
-            }
-            for r in rows
-        ],
-    }
-
-
-def _heatmap_features(rows) -> dict:
+def _heatmap_features(rows: Any) -> dict[str, Any]:
     """Build a GeoJSON FeatureCollection from query rows.
 
     Each row must have columns: lon, lat, stop_name, stop_ids, platform_codes,
@@ -913,6 +675,10 @@ def _heatmap_features(rows) -> dict:
     are mapped to the GeoJSON Feature properties (stop_id, stop_name, stop_code,
     platform_code, avg_delay_min, p90_delay_min, samples, route_codes,
     low_confidence).
+
+    ``avg_delay_min`` and ``p90_delay_min`` pass through as ``null`` rather
+    than a number when the cluster has no usable sample total to divide by, so
+    a consumer must treat them as "no average available", never as zero delay.
 
     ``low_confidence`` reuses the same sample-count floor as the route-level
     baselines (``LOW_CONFIDENCE_SAMPLES``) rather than the cohort-specific one:
@@ -929,7 +695,7 @@ def _heatmap_features(rows) -> dict:
                 "stop_name": r["stop_name"],
                 "stop_code": r["stop_codes"] or "",
                 "platform_code": r["platform_codes"] or "",
-                "avg_delay_min": float(r["avg_delay_min"]),
+                "avg_delay_min": float(r["avg_delay_min"]) if r["avg_delay_min"] is not None else None,
                 "p90_delay_min": float(r["p90_delay_min"]) if r["p90_delay_min"] is not None else None,
                 "samples": r["samples"],
                 "route_codes": r["route_codes"] or "",
@@ -942,14 +708,56 @@ def _heatmap_features(rows) -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
-@router.get("/delays/heatmap")
+# Aggregates `joined` rows into one heatmap feature per (name_key, cluster_id).
+# Shared by both branches of the heatmap endpoint: each builds its own `joined`
+# CTE from a different aggregate table, aliasing its route column to the common
+# name `route_code_val` (a.route_code vs. r.route_codes) so this one projection
+# serves both.
+_HEATMAP_CLUSTER_PROJECTION_SQL = """
+        SELECT
+            AVG(ST_X(geom))::numeric AS lon,
+            AVG(ST_Y(geom))::numeric AS lat,
+            string_agg(DISTINCT stop_name, ' / ' ORDER BY stop_name) AS stop_name,
+            string_agg(DISTINCT stop_id, ',') AS stop_ids,
+            string_agg(DISTINCT NULLIF(platform_code, ''), ',' ORDER BY NULLIF(platform_code, ''))
+                AS platform_codes,
+            string_agg(DISTINCT NULLIF(stop_code, ''), ' / ' ORDER BY NULLIF(stop_code, ''))
+                AS stop_codes,
+            string_agg(DISTINCT route_code_val, ',' ORDER BY route_code_val) AS route_codes,
+            -- NULLIF guards the sample total: the aggregates constrain
+            -- `samples` to be present, not to be positive, so a cluster
+            -- summing to zero observations would otherwise divide by zero and
+            -- abort the whole request instead of reporting "no average
+            -- available" for that one dot.
+            ROUND(SUM(delay_sum)::numeric / NULLIF(SUM(samples), 0) / 60.0, 2) AS avg_delay_min,
+            -- p90_delay_min runs PERCENTILE_CONT(0.9) over the joined rows'
+            -- own per-row averages (delay_sum/samples for each pre-cluster
+            -- stop/date/time_band row), not over the underlying raw
+            -- per-observation delays -- the agg schema stores only a summed
+            -- delay and a sample count per row, never the raw distribution,
+            -- so an exact percentile of individual observations isn't
+            -- computable from it. This is a percentile of row-level
+            -- averages: a defensible approximation given the schema, but a
+            -- different statistic from a true p90 of raw delays.
+            ROUND(
+                PERCENTILE_CONT(0.9) WITHIN GROUP (
+                    ORDER BY delay_sum::float / NULLIF(samples, 0)
+                )::numeric / 60.0,
+            2) AS p90_delay_min,
+            SUM(samples) AS samples
+        FROM joined
+        GROUP BY name_key, cluster_id
+"""
+
+
+@router.get("/delays/heatmap", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def delay_heatmap(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
-):
+) -> dict[str, Any]:
     """Per-stop average delay GeoJSON, scoped to the request's range/DOW/time-band.
 
     Clustering: two physical platforms with the same ``stop_name`` within
@@ -1006,42 +814,6 @@ async def delay_heatmap(
             ) named
         )
     """
-    # Shared by both branches below: aggregates `joined` rows into one heatmap
-    # feature per (name_key, cluster_id). `joined` aliases each branch's route
-    # column to the common name `route_code_val` (a.route_code vs. r.route_codes)
-    # so this one projection works for both — the only thing that actually
-    # differs between the branches is how `joined` is built (which agg
-    # table/filter feeds it).
-    cluster_projection_sql = """
-        SELECT
-            AVG(ST_X(geom))::numeric AS lon,
-            AVG(ST_Y(geom))::numeric AS lat,
-            string_agg(DISTINCT stop_name, ' / ' ORDER BY stop_name) AS stop_name,
-            string_agg(DISTINCT stop_id, ',') AS stop_ids,
-            string_agg(DISTINCT NULLIF(platform_code, ''), ',' ORDER BY NULLIF(platform_code, ''))
-                AS platform_codes,
-            string_agg(DISTINCT NULLIF(stop_code, ''), ' / ' ORDER BY NULLIF(stop_code, ''))
-                AS stop_codes,
-            string_agg(DISTINCT route_code_val, ',' ORDER BY route_code_val) AS route_codes,
-            ROUND(SUM(delay_sum)::numeric / SUM(samples) / 60.0, 2) AS avg_delay_min,
-            -- p90_delay_min runs PERCENTILE_CONT(0.9) over the joined rows'
-            -- own per-row averages (delay_sum/samples for each pre-cluster
-            -- stop/date/time_band row), not over the underlying raw
-            -- per-observation delays -- the agg schema stores only a summed
-            -- delay and a sample count per row, never the raw distribution,
-            -- so an exact percentile of individual observations isn't
-            -- computable from it. This is a percentile of row-level
-            -- averages: a defensible approximation given the schema, but a
-            -- different statistic from a true p90 of raw delays.
-            ROUND(
-                PERCENTILE_CONT(0.9) WITHIN GROUP (
-                    ORDER BY delay_sum::float / NULLIF(samples, 0)
-                )::numeric / 60.0,
-            2) AS p90_delay_min,
-            SUM(samples) AS samples
-        FROM joined
-        GROUP BY name_key, cluster_id
-    """
     if ctx.routes:
         # Route filter → aggregate path (agg_route_stop_daily is pre-split by route_code).
         # Mirrors the no-route branch's spatial grouping; adds a route_code = ANY($2)
@@ -1057,7 +829,7 @@ async def delay_heatmap(
                 JOIN stop_clusters sc ON sc.stop_id = a.stop_id
                 WHERE a.agency_id = $1 AND a.route_code = ANY($2) AND {agg_where}
             )
-            {cluster_projection_sql}
+            {_HEATMAP_CLUSTER_PROJECTION_SQL}
             """,
             agency_id,
             list(ctx.routes),
@@ -1077,19 +849,12 @@ async def delay_heatmap(
                 LEFT JOIN agg_stop_routes r ON r.agency_id = $1 AND r.stop_id = a.stop_id
                 WHERE a.agency_id = $1 AND {agg_where}
             )
-            {cluster_projection_sql}
+            {_HEATMAP_CLUSTER_PROJECTION_SQL}
             """,
             agency_id,
             *params,
         )
 
     fc = _heatmap_features(rows)
-    fc["ctx"] = {
-        "from": ctx.from_date.isoformat(),
-        "to": ctx.to_date.isoformat(),
-        "dow": ctx.dow,
-        "time_band": ctx.time_band,
-        "service": ctx.service,
-        "routes": list(ctx.routes),
-    }
+    fc["ctx"] = ctx_payload(ctx)
     return fc

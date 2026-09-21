@@ -6,6 +6,11 @@
     "target": "ES2022",
     "skipLibCheck": true,
     "strict": true,
+    // Index and key lookups yield `T | undefined` here. The `src` project
+    // can't carry this setting yet -- it has hundreds of unguarded lookups --
+    // so it is scoped to this project, which is small enough to hold the
+    // line and keeps new build-config code out of that backlog.
+    "noUncheckedIndexedAccess": true,
     "allowSyntheticDefaultImports": true,
     "outDir": "./node_modules/.tmp/tsconfig-node-out",
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"

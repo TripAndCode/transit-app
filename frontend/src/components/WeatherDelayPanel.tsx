@@ -15,6 +15,7 @@ import type { WeatherDelayBucket } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { delayColor } from "../styles/tokens";
+import { formatNumber } from "../utils/format";
 
 function fmtDelaySec(v: number | null, t: TFunction): string {
   if (v == null) return "—";
@@ -82,14 +83,14 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) 
                 <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.wet")}</td>
                   <td style={{ ...td(), textAlign: "right" }}>{fmtDelaySec(data.wet.avg_delay_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.wet.days.toLocaleString()}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.wet.samples.toLocaleString()}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.wet.days)}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.wet.samples)}</td>
                 </tr>
                 <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.dry")}</td>
                   <td style={{ ...td(), textAlign: "right" }}>{fmtDelaySec(data.dry.avg_delay_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.dry.days.toLocaleString()}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.dry.samples.toLocaleString()}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.dry.days)}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.dry.samples)}</td>
                 </tr>
               </tbody>
             </table>

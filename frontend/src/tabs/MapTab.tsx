@@ -16,6 +16,7 @@ import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
 import { ApiError, apiPost } from "../api/client";
 import { relativeTime } from "../utils/relativeTime";
+import { FILTER_SEPARATOR } from "../utils/format";
 import { buildStyle, getMapStyleOverride, readMapStylePref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
@@ -36,7 +37,16 @@ import {
 } from "./map/useOperationsMapLayers";
 import { buildCurrentRouteSummaries } from "./map/currentRouteStatus";
 import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
+import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
+import { useCappedList } from "../hooks/useCappedList";
+
+const DELAYED_TRIPS_CAP = 200;
+
+// Upper bound between staleness re-checks when no row has a boundary due
+// sooner (e.g. an idle map with no live rows, or a system clock jump) --
+// scheduling only ever exact boundaries would otherwise never re-check.
+const STALENESS_SAFETY_TICK_MS = 60_000;
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
@@ -104,10 +114,6 @@ export function MapTab() {
   const { t: td } = useTranslation("design");
   const [ctx, updateCtx] = useRangeContext();
   const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
-    return () => window.clearInterval(timer);
-  }, []);
   const [styleId, setStyleId] = useMapStylePref();
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
@@ -121,11 +127,35 @@ export function MapTab() {
   const mapRef = useRef<MLMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
   const refreshMessageTimerRef = useRef<number | null>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
   const fittedRouteRef = useRef<string | null>(null);
   const firstStyleRunRef = useRef(true);
   const initialLanguageRef = useRef(i18n.language);
 
   const liveQuery = useLiveTrips(id);
+  // Ticks `now` only at the next moment a row would actually change bucket
+  // (leave the live-rows age window, or move the header freshness badge),
+  // instead of polling every 15s and re-pushing the GeoJSON source on every
+  // tick regardless of whether anything crossed a boundary. Re-armed on
+  // every fetch (liveQuery.data) since new rows shift where that boundary
+  // is; the recursive schedule (rather than depending on `now`) keeps
+  // re-arming itself between fetches without re-running this effect.
+  useEffect(() => {
+    let timer: number | undefined;
+    const schedule = () => {
+      const boundary = nextBoundaryMs(liveQuery.data?.rows ?? [], Date.now());
+      const delay = Math.min(
+        boundary != null ? Math.max(boundary - Date.now(), 0) : STALENESS_SAFETY_TICK_MS,
+        STALENESS_SAFETY_TICK_MS,
+      );
+      timer = window.setTimeout(() => {
+        setNow(Date.now());
+        schedule();
+      }, delay);
+    };
+    schedule();
+    return () => window.clearTimeout(timer);
+  }, [liveQuery.data]);
   const summaryQuery = useTodayRouteSummary(id);
   const routeNames = useRouteNames(id);
   const liveRows = filterLiveRows(liveQuery.data?.rows ?? [], now, ctx.routes);
@@ -236,6 +266,10 @@ export function MapTab() {
 
   useEffect(() => () => {
     if (refreshMessageTimerRef.current != null) window.clearTimeout(refreshMessageTimerRef.current);
+    // Cancel a manual refresh's in-flight POST on unmount so it can't land
+    // (and setIsRefreshing/showRefreshMessage a now-unmounted component)
+    // after the user has navigated away.
+    refreshAbortRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -324,8 +358,14 @@ export function MapTab() {
     }
     setRefreshMessage(t("operations.refreshing"));
     setIsRefreshing(true);
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
     try {
-      const refreshResult = await apiPost<{ status: string; inserted: number }>(`/api/${id}/delays/refresh`, {});
+      const refreshResult = await apiPost<{ status: string; inserted: number }>(
+        `/api/${id}/delays/refresh`,
+        {},
+        { signal: controller.signal },
+      );
       const [liveResult, summaryResult, progressResult] = await Promise.all([
         liveQuery.refetch(),
         summaryQuery.refetch(),
@@ -364,6 +404,7 @@ export function MapTab() {
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
   const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
   const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
+  const cappedDelayedRows = useCappedList(delayedRows, DELAYED_TRIPS_CAP, liveRows);
 
   return (
     <div className="operations-page focused-overview">
@@ -461,13 +502,18 @@ export function MapTab() {
             ...liveRows.map((r) => [id, r.route_code, r.trip_id, r.headsign, r.stop_id, r.stop_name, r.dep_delay, r.captured_at]),
           ])}><Download size={13} aria-hidden="true" />{td("csv")}</button>
           {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
-          {delayedRows.map((trip) => <div className="focus-trip" key={trip.trip_id}>
+          {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { if (trip.route_code) focusRoute(trip.route_code); setSelectedDirectionKey(directionKey(trip)); setSelectedTripId(trip.trip_id); }}>
-              <span>{routeNames.format(trip.route_code)}<small>{trip.scheduled_time?.slice(0, 5)} · {trip.headsign} · {trip.stop_name}</small></span>
+              <span>{routeNames.format(trip.route_code)}<small>{trip.scheduled_time?.slice(0, 5)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
               <b>{signedMin(trip.dep_delay, t)}</b>
             </button>
             {trip.route_code && <Link to={`/agencies/${id}/route-analysis?${new URLSearchParams({ routes: trip.route_code })}`}>{td("openAnalysis")}</Link>}
           </div>)}
+          {cappedDelayedRows.remaining > 0 && (
+            <button type="button" className="btn-ghost" onClick={cappedDelayedRows.showMore}>
+              {t("common.show_more", { count: cappedDelayedRows.remaining })}
+            </button>
+          )}
           <details><summary>{td("allObserved")}</summary><OperationsTripPanel
           routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
           activeRoutes={activeRouteOptions}

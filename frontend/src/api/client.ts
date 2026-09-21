@@ -52,9 +52,9 @@ export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): 
 }
 
 /** GET that returns null on 401. Used for the anonymous-allowed `/api/me` probe. */
-export async function apiGetOrNull<T>(path: string): Promise<T | null> {
+export async function apiGetOrNull<T>(path: string, opts?: { signal?: AbortSignal }): Promise<T | null> {
   try {
-    return await request<T>(path, { method: "GET" });
+    return await request<T>(path, { method: "GET", signal: opts?.signal });
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) return null;
     throw e;
@@ -78,19 +78,27 @@ export async function apiPost<T>(path: string, body: unknown, opts?: { signal?: 
 }
 
 /** PATCH — same JSON-or-204 contract as apiPost. */
-export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  return requestMaybeEmpty<T>(path, { method: "PATCH", body: JSON.stringify(body) }) as Promise<T>;
+export async function apiPatch<T>(path: string, body: unknown, opts?: { signal?: AbortSignal }): Promise<T> {
+  return requestMaybeEmpty<T>(path, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    signal: opts?.signal,
+  }) as Promise<T>;
 }
 
 /** PUT — same JSON-or-204 contract as apiPost. Used for idempotent
  * replace-the-whole-resource endpoints, e.g. `/api/me/llm-key`. */
-export async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  return requestMaybeEmpty<T>(path, { method: "PUT", body: JSON.stringify(body) }) as Promise<T>;
+export async function apiPut<T>(path: string, body: unknown, opts?: { signal?: AbortSignal }): Promise<T> {
+  return requestMaybeEmpty<T>(path, {
+    method: "PUT",
+    body: JSON.stringify(body),
+    signal: opts?.signal,
+  }) as Promise<T>;
 }
 
 /** DELETE — handles 204 No Content (returns undefined when no JSON body). */
-export async function apiDelete<T = void>(path: string): Promise<T | undefined> {
-  return requestMaybeEmpty<T>(path, { method: "DELETE" });
+export async function apiDelete<T = void>(path: string, opts?: { signal?: AbortSignal }): Promise<T | undefined> {
+  return requestMaybeEmpty<T>(path, { method: "DELETE", signal: opts?.signal });
 }
 
 /** Parsed `detail` field of an `ApiError`'s JSON body, e.g. FastAPI's

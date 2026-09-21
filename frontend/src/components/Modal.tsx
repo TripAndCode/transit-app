@@ -43,7 +43,7 @@ const BASE_PANEL_STYLE: Record<"modal" | "drawer", CSSProperties> = {
     top: 0,
     bottom: 0,
     background: "var(--bg-surface)",
-    zIndex: Z_INDEX.modal,
+    zIndex: Z_INDEX.drawer,
   },
 };
 
@@ -121,7 +121,16 @@ export function Modal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: Z_INDEX.modalBackdrop }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.3)",
+        // Each variant sits on its own rung. The ladder separates drawer
+        // (300/301) from modal (400/401) so a modal opened over a drawer
+        // layers above it; pinning both to the modal rungs would leave DOM
+        // order to decide, which is what the ladder exists to stop.
+        zIndex: variant === "drawer" ? Z_INDEX.drawerBackdrop : Z_INDEX.modalBackdrop,
+      }}
     >
       <div
         ref={panelRef}

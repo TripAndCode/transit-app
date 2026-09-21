@@ -6,6 +6,7 @@ import { DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
 import { rangeLabel } from "../utils/rangeLabel";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
+import { FILTER_SEPARATOR } from "../utils/format";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -19,9 +20,9 @@ type Props = {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 /** Reuses ThreadSidebar's rangeLabel for the date-range segment; the
- *  day-of-week key namespace, empty-range fallback, and join separator are
- *  intentionally different between the two callers, so only the range block
- *  (the part that had the same separator bug fixed twice) is shared. */
+ *  day-of-week key namespace and empty-range fallback are intentionally
+ *  different between the two callers, so only the range block (the part
+ *  that had the same separator bug fixed twice) is shared. */
 function filterSummary(
   fc: FilterCtx,
   t: (key: string, opts?: Record<string, unknown>) => string,
@@ -45,7 +46,7 @@ function filterSummary(
     if (label !== tbKey) parts.push(label);
   }
 
-  return parts.join(" ▸ ");
+  return parts.join(FILTER_SEPARATOR);
 }
 
 function routesSummary(

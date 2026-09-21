@@ -11,31 +11,29 @@ user's chosen window without having to mention it in the prompt.
 """
 
 import asyncio
+import json
 import logging
 import os as _os
-from datetime import timedelta
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
+import asyncpg
 import clickhouse_connect
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import (
-    DEFAULT_RANGE_DAYS,
-    MAX_RANGE_DAYS,
-    DowFilter,
     RangeCtx,
-    ServiceType,
-    TimeBand,
-    jst_today,
-    parse_iso_date,
+    clamp_range_ctx,
+    ctx_payload,
 )
-from api.security import csrf_guard
+from api.security import User, csrf_guard
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
+from pipeline.query.followup import MAX_QUESTION_CHARS
 from pipeline.query.intent import _TOOL_DEFAULTS as _PAGINATABLE_TOOL_DEFAULTS
 from pipeline.query.query_log import log_query
 from pipeline.query.rag_index import nearest as rag_nearest
@@ -60,10 +58,24 @@ class AskCtx(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+# Turns actually attached to the follow-up prompt. Anything the caller sends
+# beyond a small multiple of this is work the server will throw away.
+HISTORY_TURNS_USED = 3
+MAX_HISTORY_TURNS = 20
+_MAX_TURN_ARGS_BYTES = 8192
+
+
 class Turn(BaseModel):
-    question: str
+    question: str = Field(max_length=MAX_QUESTION_CHARS)
     tool: str | None = None
     args: dict | None = None
+
+    @field_validator("args")
+    @classmethod
+    def _bounded_args(cls, v: dict | None) -> dict | None:
+        if v is not None and len(json.dumps(v).encode()) > _MAX_TURN_ARGS_BYTES:
+            raise ValueError(f"args exceeds {_MAX_TURN_ARGS_BYTES} bytes serialized")
+        return v
 
 
 # Kept in sync with the frontend's top-level tab routes (frontend/src/main.tsx)
@@ -79,10 +91,10 @@ class PanelCtx(BaseModel):
 
 
 class AskRequest(BaseModel):
-    question: str
+    question: str = Field(max_length=MAX_QUESTION_CHARS)
     model: str | None = None
     ctx: AskCtx | None = None
-    history: list[Turn] = []
+    history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
     # Threaded through to chat_with_tools's system-prompt addendum only — never
     # consulted by the rules/embedding routing stage above.
     panel_ctx: PanelCtx | None = None
@@ -109,31 +121,22 @@ class AskResponse(BaseModel):
 
 
 def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
-    """Build a clamped RangeCtx from the request body, defaulting invalid enums to 'all'."""
-    today = jst_today()
+    """Build a validated, clamped RangeCtx from the request body.
+
+    An omitted ``ctx`` means "no opinion" and gets the default window;
+    anything the client did send goes through the same validation as a query
+    string (:func:`api.range.clamp_range_ctx`), so a malformed date or an
+    unrecognised enum is a 422 rather than a silently different answer.
+    """
     if body_ctx is None:
-        return RangeCtx(from_date=today - timedelta(days=DEFAULT_RANGE_DAYS - 1), to_date=today)
-
-    to_date = parse_iso_date(body_ctx.to_date) or today
-    from_date = parse_iso_date(body_ctx.from_date) or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
-    if from_date > to_date:
-        from_date, to_date = to_date, from_date
-    if (to_date - from_date).days >= MAX_RANGE_DAYS:
-        from_date = to_date - timedelta(days=MAX_RANGE_DAYS - 1)
-
-    dow = cast(DowFilter, body_ctx.dow if body_ctx.dow in ("all", "weekday", "weekend") else "all")
-    valid_bands = {"all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"}
-    tb = cast(TimeBand, body_ctx.time_band if body_ctx.time_band in valid_bands else "all")
-    svc = cast(ServiceType, body_ctx.service if body_ctx.service in ("all", "平日", "土日祝") else "all")
-    routes = tuple(r for r in (body_ctx.routes or []) if r)[:100]
-
-    return RangeCtx(
-        from_date=from_date,
-        to_date=to_date,
-        dow=dow,
-        time_band=tb,
-        service=svc,
-        routes=routes,
+        return clamp_range_ctx(from_=None, to=None)
+    return clamp_range_ctx(
+        from_=body_ctx.from_date,
+        to=body_ctx.to_date,
+        dow=body_ctx.dow,
+        time_band=body_ctx.time_band,
+        service=body_ctx.service,
+        routes=body_ctx.routes or (),
     )
 
 
@@ -143,11 +146,11 @@ async def ask(
     request: Request,
     body: AskRequest,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
-    user=Depends(get_current_user_optional),
-):
+    user: User | None = Depends(get_current_user_optional),
+) -> AskResponse:
     """Answer a natural-language question via tool-use.
 
     Cross-origin POSTs are rejected by ``csrf_guard`` before the LLM call
@@ -163,14 +166,7 @@ async def ask(
         raise HTTPException(status_code=400, detail="question must not be empty")
     ctx = _resolve_ctx(body.ctx)
 
-    ctx_dict = {
-        "from": ctx.from_date.isoformat(),
-        "to": ctx.to_date.isoformat(),
-        "dow": ctx.dow,
-        "time_band": ctx.time_band,
-        "service": ctx.service,
-        "routes": list(ctx.routes),
-    }
+    ctx_dict = ctx_payload(ctx)
 
     history_enabled = _os.environ.get("ASK_HISTORY_ENABLED", "true").lower() != "false"
     log_enabled = _os.environ.get("ASK_QUERY_LOG_ENABLED", "true").lower() != "false"
@@ -178,8 +174,9 @@ async def ask(
 
     # Follow-ups ("次の50件", "もっと") have no standalone tool mapping, so
     # they skip the stateless router and go straight to the LLM with the
-    # last few turns attached. History is capped at 3 turns.
-    history = [t.model_dump() for t in body.history][-3:] if history_enabled else []
+    # last few turns attached. Slice before dumping: the rest is discarded,
+    # so serializing it first is work spent on data that never leaves here.
+    history = [t.model_dump() for t in body.history[-HISTORY_TURNS_USED:]] if history_enabled else []
     follow_up = history_enabled and bool(history) and is_follow_up(body.question)
     # A forced tool call only makes sense when there is an actual prior tool
     # invocation to continue (e.g. re-paginating the same describe_data
@@ -434,12 +431,12 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
 }
 
 
-@router.get("/ask/build-schema")
+@router.get("/ask/build-schema", response_model=None)
 async def ask_build_schema(
     request: Request,
     agency_id: int = Depends(get_agency),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, Any]:
     """Return tool-form metadata for the frontend's guided build mode.
 
     Driven by ``_BUILD_TOOL_META``. The ``capabilities`` and ``route_meta``
@@ -464,15 +461,58 @@ async def ask_build_schema(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/ask/suggest")
+class AskSuggestion(BaseModel):
+    """One autocomplete candidate: the stored question plus the tool call it
+    maps to. ``distance`` is the cosine distance from the typed query, or
+    ``None`` for the starter set (which is ranked by hit count, not similarity)."""
+
+    question: str
+    tool: str
+    args: dict[str, Any]
+    distance: float | None
+
+
+class AskSuggestResponse(BaseModel):
+    """Envelope for ``GET /ask/suggest`` — an object, so the endpoint can later
+    say *why* it has nothing to offer instead of returning a bare empty array."""
+
+    rows: list[AskSuggestion] = []
+
+
+def _ask_suggestion(golden: dict, chunk_id: str, question: str, distance: float | None) -> AskSuggestion:
+    """Pair a RAG chunk with the golden-set tool call it stands for; a chunk
+    with no golden entry still shows up, with an empty tool call."""
+    tool, args = golden.get(chunk_id, ("", {}))
+    return AskSuggestion(question=question, tool=tool, args=dict(args), distance=distance)
+
+
+# Autocomplete runs per keystroke, so a persistently broken embedder or vector
+# index would emit a traceback per request and bury every other warning in the
+# log. The first failure of each kind is a warning with its traceback — the
+# signal an operator needs — and the repeats that follow are debug until the
+# path succeeds again, which clears the state so a later outage is announced
+# afresh. Losing the failure entirely to `debug`, as this used to, is the other
+# way to get this wrong.
+_SUGGEST_FAILING: set[str] = set()
+
+
+def _log_suggest_failure(stage: str) -> None:
+    if stage in _SUGGEST_FAILING:
+        _log.debug("ask_suggest: %s still failing; returning no suggestions", stage, exc_info=True)
+        return
+    _SUGGEST_FAILING.add(stage)
+    _log.warning("ask_suggest: %s failed; returning no suggestions", stage, exc_info=True)
+
+
+@router.get("/ask/suggest", response_model=AskSuggestResponse)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def ask_suggest(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     q: str = Query(default=""),
     limit: int = Query(default=8),
-):
+) -> AskSuggestResponse:
     """Live autocomplete for the Ask input.
 
     With a non-empty ``q``: e5-embed the query, nearest-neighbour against
@@ -502,50 +542,28 @@ async def ask_suggest(
             limit,
         )
         golden = _load_golden()
-        result = []
-        for row in rows:
-            cid = row["chunk_id"]
-            tool, args = golden.get(cid, ("", {}))
-            result.append(
-                {
-                    "question": row["content"],
-                    "tool": tool,
-                    "args": dict(args),
-                    "distance": None,
-                }
-            )
-        return result
+        return AskSuggestResponse(rows=[_ask_suggestion(golden, row["chunk_id"], row["content"], None) for row in rows])
 
     # Non-empty query: embed + NN search.
     embedder = get_embedder()
     if not getattr(embedder, "available", False):
-        return []
+        return AskSuggestResponse()
 
     try:
         qvec = await asyncio.to_thread(embedder.embed, q.strip(), mode="query")
     except Exception:
-        _log.debug("ask_suggest: embedding failed; returning no suggestions", exc_info=True)
-        return []
+        _log_suggest_failure("embedding")
+        return AskSuggestResponse()
 
     try:
         matches = await rag_nearest(conn, agency_id, qvec, k=limit)
     except Exception:
-        _log.debug("ask_suggest: rag_nearest failed; returning no suggestions", exc_info=True)
-        return []
+        _log_suggest_failure("rag_nearest")
+        return AskSuggestResponse()
+    _SUGGEST_FAILING.clear()
 
     golden = _load_golden()
-    result = []
-    for m in matches:
-        tool, args = golden.get(m.chunk_id, ("", {}))
-        result.append(
-            {
-                "question": m.content,
-                "tool": tool,
-                "args": dict(args),
-                "distance": m.distance,
-            }
-        )
-    return result
+    return AskSuggestResponse(rows=[_ask_suggestion(golden, m.chunk_id, m.content, m.distance) for m in matches])
 
 
 # ---------------------------------------------------------------------------
@@ -564,8 +582,8 @@ async def ask_edit_action(
     request: Request,
     body: EditActionRequest,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> dict[str, bool]:
     """Record the user's verdict on a cached interpretation.
 
     Body: ``{"signature_hash": str, "action": "confirmed"|"edited"}``
