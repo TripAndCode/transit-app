@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "./useMediaQuery";
+import { onActivateKey } from "../utils/a11y";
 
 type MessageProps = {
   role?: "button";
@@ -19,44 +20,40 @@ type MessageProps = {
  * 19's banner-hierarchy work), that adds up disproportionately on a phone
  * viewport. Desktop is unaffected: always the full, never-truncated message.
  *
- * Deliberately one-directional (compact -> expanded, not a collapse-back
- * toggle) — once a user has tapped through to read the full message there's
- * no value in re-truncating it later in the same visit, and a toggle would
- * add aria-expanded/keyboard-interaction complexity for no real benefit.
+ * A real toggle: the row stays a keyboard- and screen-reader-reachable
+ * control (role="button", tabIndex, aria-expanded reflecting the actual
+ * state) both before and after expanding, so a user can collapse it back to
+ * the single-line form the same way they expanded it.
  */
 export function useTapToExpandBanner(): { messageProps: MessageProps } {
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const [expanded, setExpanded] = useState(false);
-  const compact = isMobile && !expanded;
 
-  if (!compact) {
+  if (!isMobile) {
     return { messageProps: { style: { flex: 1 } } };
   }
 
-  function expand() {
-    setExpanded(true);
+  function toggle() {
+    setExpanded((prev) => !prev);
   }
 
   return {
     messageProps: {
       role: "button",
       tabIndex: 0,
-      "aria-expanded": false,
-      onClick: expand,
-      onKeyDown: (e: KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          expand();
-        }
-      },
-      style: {
-        flex: 1,
-        minWidth: 0,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        cursor: "pointer",
-      },
+      "aria-expanded": expanded,
+      onClick: toggle,
+      onKeyDown: onActivateKey(toggle),
+      style: expanded
+        ? { flex: 1, cursor: "pointer" }
+        : {
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            cursor: "pointer",
+          },
     },
   };
 }

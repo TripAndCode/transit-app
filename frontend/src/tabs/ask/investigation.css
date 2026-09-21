@@ -17,7 +17,7 @@
 .ask-workspace-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border-soft); }
 .ask-thread-menu { position: relative; }
 .ask-thread-menu summary, .ask-tool-menu summary, .investigation-history summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
-.ask-thread-menu-content { position: absolute; right: 0; top: 28px; width: min(340px, 85vw); max-height: 65vh; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border-soft); border-radius: var(--radius); z-index: 20; box-shadow: 0 8px 24px #0001; }
+.ask-thread-menu-content { position: absolute; right: 0; top: 28px; width: min(340px, 85vw); max-height: 65vh; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border-soft); border-radius: var(--radius); z-index: var(--z-dropdown); box-shadow: 0 8px 24px #0001; }
 .ask-tool-menu { flex-shrink: 0; padding: 8px 16px; border-top: 1px solid var(--border-soft); }
 .investigation-history { margin: 4px 0 12px; }
 .investigation-history[open] .investigation-steps { padding-top: 12px; flex-wrap: wrap; }

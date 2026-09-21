@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PreviewMapCanvas } from "./PreviewMapCanvas";
+import { Z_INDEX } from "../../styles/zIndex";
 
 type StyleVariant = "standard" | "muted";
 type HeatmapField = "avg" | "p90";
@@ -37,7 +38,7 @@ export function PreviewMapPanel() {
           position: "absolute",
           left: 12,
           top: 12,
-          zIndex: 1,
+          zIndex: Z_INDEX.mapOverlay,
           background: "var(--map-badge-bg)",
           backdropFilter: "blur(6px)",
           border: "1px solid var(--border-subtle)",
@@ -61,7 +62,7 @@ export function PreviewMapPanel() {
 
       {/* Style switcher + heatmap-field toggle -- bottom-left, matching the
           real MapStyleControl / heatmap-mode button's placement. */}
-      <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1, display: "flex", gap: 8 }}>
+      <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: Z_INDEX.mapOverlay, display: "flex", gap: 8 }}>
         <div
           role="group"
           aria-label={t("map.style.label")}

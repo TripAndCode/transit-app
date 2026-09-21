@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { usePerformanceStandards } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
 import type { RangeCtx } from "../api/rangeContext";
+import { th, td } from "./tableStyles";
 import type { PerformanceStandardRow } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -72,12 +73,12 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
-                <th style={th("left")}>{t("reports.performance_standard.col.route")}</th>
-                <th style={th("left")}>{t("reports.performance_standard.col.metric")}</th>
-                <th style={th("right")}>{t("reports.performance_standard.col.threshold")}</th>
-                <th style={th("right")}>{t("reports.performance_standard.col.actual")}</th>
-                <th style={th("right")}>{t("reports.performance_standard.col.achievement_rate")}</th>
-                <th style={th("right")}>{t("reports.performance_standard.col.estimate")}</th>
+                <th style={th({ align: "left" })}>{t("reports.performance_standard.col.route")}</th>
+                <th style={th({ align: "left" })}>{t("reports.performance_standard.col.metric")}</th>
+                <th style={th({ align: "right" })}>{t("reports.performance_standard.col.threshold")}</th>
+                <th style={th({ align: "right" })}>{t("reports.performance_standard.col.actual")}</th>
+                <th style={th({ align: "right" })}>{t("reports.performance_standard.col.achievement_rate")}</th>
+                <th style={th({ align: "right" })}>{t("reports.performance_standard.col.estimate")}</th>
               </tr>
             </thead>
             <tbody>
@@ -111,14 +112,3 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
   );
 }
 
-const th = (align: "left" | "right"): React.CSSProperties => ({
-  padding: "8px 10px",
-  textAlign: align,
-  fontWeight: 500,
-  color: "var(--text-secondary)",
-  fontSize: 12,
-});
-const td = (): React.CSSProperties => ({
-  padding: "6px 10px",
-  fontSize: 13,
-});

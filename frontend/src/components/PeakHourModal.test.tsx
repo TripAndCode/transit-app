@@ -31,8 +31,15 @@ describe("PeakHourModal", () => {
     render(
       <PeakHourModal data={mockBreakdown} loading={false} onClose={onClose} />
     );
-    fireEvent.click(screen.getByTestId("peak-hour-modal-backdrop"));
+    fireEvent.click(screen.getByRole("presentation"));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("renders via the shared accessible Modal (aria-modal dialog)", () => {
+    render(
+      <PeakHourModal data={mockBreakdown} loading={false} onClose={() => {}} />
+    );
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
   });
 
   it("shows empty state when no routes", () => {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { delayColor } from "../../styles/tokens";
+import { formatNumber } from "../../utils/format";
 import type { RevisionBoundaries, TrendDay } from "../../api/types";
 
 type Props = { days: TrendDay[]; height?: number; revisionBoundaries?: RevisionBoundaries };
@@ -231,7 +232,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [] }: Prop
             <strong>{days[hover].date}</strong>:{" "}
             {t("reports.daily.tooltip_metrics", {
               min: (days[hover].avg_min ?? 0).toFixed(2),
-              count: (days[hover].samples ?? 0).toLocaleString(),
+              count: formatNumber(days[hover].samples ?? 0),
             })}
           </div>
           {days[hover].avg_min_smoothed != null && (

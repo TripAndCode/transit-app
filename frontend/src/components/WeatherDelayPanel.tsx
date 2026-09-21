@@ -15,6 +15,8 @@ import type { WeatherDelayBucket } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { delayColor } from "../styles/tokens";
+import { th, td } from "./tableStyles";
+import { formatNumber } from "../utils/format";
 
 function fmtDelaySec(v: number | null, t: TFunction): string {
   if (v == null) return "—";
@@ -72,24 +74,24 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) 
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "var(--bg-soft)" }}>
-                  <th style={th("left")}>{t("reports.weather_delay.col.condition")}</th>
-                  <th style={th("right")}>{t("reports.weather_delay.col.avg_delay")}</th>
-                  <th style={th("right")}>{t("reports.weather_delay.col.days")}</th>
-                  <th style={th("right")}>{t("reports.weather_delay.col.samples")}</th>
+                  <th style={th({ align: "left" })}>{t("reports.weather_delay.col.condition")}</th>
+                  <th style={th({ align: "right" })}>{t("reports.weather_delay.col.avg_delay")}</th>
+                  <th style={th({ align: "right" })}>{t("reports.weather_delay.col.days")}</th>
+                  <th style={th({ align: "right" })}>{t("reports.weather_delay.col.samples")}</th>
                 </tr>
               </thead>
               <tbody>
                 <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.wet")}</td>
                   <td style={{ ...td(), textAlign: "right" }}>{fmtDelaySec(data.wet.avg_delay_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.wet.days.toLocaleString()}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.wet.samples.toLocaleString()}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.wet.days)}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.wet.samples)}</td>
                 </tr>
                 <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.dry")}</td>
                   <td style={{ ...td(), textAlign: "right" }}>{fmtDelaySec(data.dry.avg_delay_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.dry.days.toLocaleString()}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{data.dry.samples.toLocaleString()}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.dry.days)}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.dry.samples)}</td>
                 </tr>
               </tbody>
             </table>
@@ -112,17 +114,6 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) 
   );
 }
 
-const th = (align: "left" | "right"): React.CSSProperties => ({
-  padding: "8px 10px",
-  textAlign: align,
-  fontWeight: 500,
-  color: "var(--text-secondary)",
-  fontSize: 12,
-});
-const td = (): React.CSSProperties => ({
-  padding: "6px 10px",
-  fontSize: 13,
-});
 
 // Column height of the bar track, in px -- fixed rather than a CSS percentage
 // so each bar's own height is a plain JS computation against it, matching

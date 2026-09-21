@@ -49,7 +49,7 @@ export function LoginPage() {
   const next = sanitizeNext(params.get("next"));
   const error = params.get("error");
   const [pending, setPending] = useState<"google" | "github" | null>(null);
-  const { data: config } = useConfig();
+  const { data: config, isError: configError, refetch: refetchConfig } = useConfig();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -82,7 +82,7 @@ export function LoginPage() {
     }
   }
 
-  if (config && !config.auth_enabled && !config.local_admin_enabled) {
+  if (configError || (config && !config.auth_enabled && !config.local_admin_enabled)) {
     return (
       <div className="login-shell">
         <div className="login-shell__grid" aria-hidden="true" />
@@ -91,13 +91,25 @@ export function LoginPage() {
             <span className="login-card__brand-title">{t("header.app_title")}</span>
             <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
           </div>
-          <h1 className="login-card__h1">{t("account.login.sso_disabled_title")}</h1>
+          <h1 className="login-card__h1">
+            {configError ? t("account.login.config_error_title") : t("account.login.sso_disabled_title")}
+          </h1>
           <p className="login-card__sub">
-            {t("account.login.sso_disabled_body")}
+            {configError ? t("account.login.config_error_body") : t("account.login.sso_disabled_body")}
           </p>
-          <p className="login-card__footer">
-            <Link to="/" style={{ color: "inherit" }}>{t("account.login.back_to_top")}</Link>
-          </p>
+          {configError ? (
+            <button
+              type="button"
+              className="login-card__btn login-card__btn--local"
+              onClick={() => { void refetchConfig(); }}
+            >
+              <span>{t("common.retry")}</span>
+            </button>
+          ) : (
+            <p className="login-card__footer">
+              <Link to="/" style={{ color: "inherit" }}>{t("account.login.back_to_top")}</Link>
+            </p>
+          )}
         </main>
       </div>
     );

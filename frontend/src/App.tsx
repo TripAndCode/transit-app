@@ -3,6 +3,7 @@ import { Outlet, useMatch, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useDefaultRangeAnchor } from "./api/defaultRangeAnchor";
+import { useAgencyId } from "./api/useAgencyId";
 import { ActivityStrip } from "./components/ActivityStrip";
 import { CopilotPanel } from "./components/CopilotPanel";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
@@ -10,6 +11,27 @@ import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
 import { HelpHint } from "./components/HelpHint";
 import { Sidebar } from "./components/Sidebar";
+
+/** Tabs that own their whole viewport: the banners, HelpHint and CopilotPanel
+ *  are hidden on these so nothing competes with the visualization.
+ *
+ *  `overview` and `map` stay listed even though both now render only a
+ *  redirect. React-router's declarative `<Navigate>` fires from an effect
+ *  after the redirect element renders once, so the pathname is briefly the
+ *  pre-redirect one — listing them avoids a one-frame flash of the chrome.
+ *
+ *  Anything routed here is a place CopilotPanel can never appear, which is
+ *  why `COPILOT_ROUTES` is asserted disjoint from this set. */
+export const FOCUSED_TAB_SEGMENTS = [
+  "operations",
+  "overview",
+  "map",
+  "route-analysis",
+  "reports",
+  "ask",
+] as const;
+
+export const FOCUSED_TAB_PATTERN = new RegExp(`/agencies/[^/]+/(${FOCUSED_TAB_SEGMENTS.join("|")})$`);
 
 /**
  * Keep <title> in sync with the active locale. The static `<title>` in
@@ -31,9 +53,9 @@ export default function App() {
   // is now agency-scoped (agencies/:agencyId/network) and remounts like every
   // other tab.
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
-  const agencyIdNum = agencyId ? Number(agencyId) : null;
+  const agencyIdNum = useAgencyId();
   const { pathname } = useLocation();
-  const focused = /\/agencies\/[^/]+\/(overview|map|route-analysis|reports|ask)$/.test(pathname);
+  const focused = FOCUSED_TAB_PATTERN.test(pathname);
   useDefaultRangeAnchor(agencyIdNum);
   useAnonymousFilterPersistence(agencyIdNum);
   return (

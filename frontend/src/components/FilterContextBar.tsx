@@ -6,7 +6,8 @@ import { DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
 import { rangeLabel } from "../utils/rangeLabel";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
-import "./FilterContextBar.css";
+import { pill, groupLabel } from "./pillStyles";
+import { FILTER_SEPARATOR } from "../utils/format";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -20,9 +21,9 @@ type Props = {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 /** Reuses ThreadSidebar's rangeLabel for the date-range segment; the
- *  day-of-week key namespace, empty-range fallback, and join separator are
- *  intentionally different between the two callers, so only the range block
- *  (the part that had the same separator bug fixed twice) is shared. */
+ *  day-of-week key namespace and empty-range fallback are intentionally
+ *  different between the two callers, so only the range block (the part
+ *  that had the same separator bug fixed twice) is shared. */
 function filterSummary(
   fc: FilterCtx,
   t: (key: string, opts?: Record<string, unknown>) => string,
@@ -46,7 +47,7 @@ function filterSummary(
     if (label !== tbKey) parts.push(label);
   }
 
-  return parts.join(" ▸ ");
+  return parts.join(FILTER_SEPARATOR);
 }
 
 function routesSummary(
@@ -73,27 +74,6 @@ const pillRowStyle: CSSProperties = {
   fontSize: 12,
   color: "var(--text-secondary)",
 };
-
-const groupLabel: CSSProperties = {
-  fontSize: "var(--text-xs)",
-  color: "var(--text-tertiary)",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  marginBottom: 6,
-  display: "block",
-};
-
-const pill = (active: boolean): CSSProperties => ({
-  background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-  color: active ? "var(--accent)" : "var(--text-secondary)",
-  border: `1px solid ${active ? "var(--accent)" : "var(--border-soft)"}`,
-  borderRadius: 999,
-  padding: "4px 12px",
-  fontSize: 12,
-  fontWeight: active ? 600 : 400,
-  cursor: "pointer",
-  transition: "all var(--transition)",
-});
 
 const editButtonStyle: CSSProperties = {
   background: "transparent",
@@ -235,7 +215,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
               type="button"
               onClick={() => setDraft((d) => ({ ...d, dow: o.value }))}
               disabled={pending}
-              style={pill((draft.dow ?? "all") === o.value)}
+              style={pill((draft.dow ?? "all") === o.value, "sm")}
             >
               {o.label}
             </button>
@@ -253,7 +233,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
               type="button"
               onClick={() => setDraft((d) => ({ ...d, time_band: o.value }))}
               disabled={pending}
-              style={pill((draft.time_band ?? "all") === o.value)}
+              style={pill((draft.time_band ?? "all") === o.value, "sm")}
             >
               {o.label}
             </button>

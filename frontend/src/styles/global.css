@@ -24,6 +24,12 @@
      light enough that white text on it falls below AA. */
   --brand: #5b6cad;
   --on-brand: #ffffff;
+  /* Own token (aliasing --accent) rather than a hardcoded var(--accent)
+     reference in every :focus-visible rule, so a future focus-ring color
+     can diverge from the accent color in one place. Tracks --accent
+     automatically in both themes, including the .app-shell/dark overrides
+     below, with no separate dark-block entry needed. */
+  --focus-ring: var(--accent);
   --error-bg: #fdf6e3;
   --error-fg: #8a6f1c;
   /* Derived from --bg-surface (not a hand-copied literal per theme) so it
@@ -119,15 +125,12 @@
   --trend-neutral: #475569;
   --track-bg: rgba(0, 0, 0, 0.03);
   --hover-tint: rgba(0, 0, 0, 0.04);
-  --bg-soft-hover: #e4e4e0;
   --skeleton-a: #ececec;
   --skeleton-b: #f5f5f5;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
   --radius: 6px;
   --radius-lg: 10px;
   --radius-xl: 14px;
@@ -167,6 +170,23 @@
   --text-xl: 26px;
   --text-2xl: 34px;
   --text-3xl: 46px;
+  /* Stacking-order ladder -- mirrors src/styles/zIndex.ts's Z_INDEX exactly
+     (zIndex.test.ts enforces it) for CSS files that can't import the TS
+     constant. Keep both in sync: add/change a rung in Z_INDEX first, then
+     mirror the same value here. */
+  --z-base: 0;
+  --z-raised: 1;
+  --z-map-overlay: 5;
+  --z-dropdown: 20;
+  --z-popover: 30;
+  --z-sticky: 40;
+  --z-tooltip: 60;
+  --z-drawer-backdrop: 300;
+  --z-drawer: 301;
+  --z-modal-backdrop: 400;
+  --z-modal: 401;
+  --z-context-menu: 500;
+  --z-toast: 600;
   --font-display: "Noto Serif JP", "Times New Roman", serif;
   --font-body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
                "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
@@ -206,7 +226,6 @@
   --trend-neutral: #94a3b8;
   --track-bg: rgba(255, 255, 255, 0.08);
   --hover-tint: rgba(255, 255, 255, 0.08);
-  --bg-soft-hover: #2a2f4a;
   --skeleton-a: #202642;
   --skeleton-b: #30385A;
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
@@ -260,7 +279,7 @@ input[type="date"] { color-scheme: light; }
    mounted, regardless of route, so their styling lives here rather than in a
    route-lazy-loaded stylesheet. */
 .focus-data-status { position: relative; margin: 18px 14px; font-size: 12px; color: var(--text-secondary); }
-.focus-data-status > div { position: absolute; bottom: 30px; left: 0; padding: 16px; width: min(280px, 75vw); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-surface); z-index: 410; }
+.focus-data-status > div { position: absolute; bottom: 30px; left: 0; padding: 16px; width: min(280px, 75vw); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-surface); z-index: var(--z-modal); }
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -340,7 +359,27 @@ body {
 }
 
 button { font: inherit; cursor: pointer; }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* `outline` on an SVG shape (not the whole <svg>) renders inconsistently
+   across engines, so interactive SVG shapes (role="button" circles/rects
+   inside a chart) opt into this instead of the generic [tabindex] rule:
+   a thicker, high-contrast stroke plus a matching drop-shadow ring, both of
+   which SVG paints reliably. */
+.svg-focus-ring:focus-visible {
+  outline: none;
+  stroke: var(--focus-ring);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 2px var(--focus-ring));
+}
 /* Shared secondary-button style (CSV downloads, share actions, etc.) --
    an explicit visible border + accent text, so it never looks disabled
    when the action is actually available (default browser button chrome
@@ -382,7 +421,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 60;
+  z-index: var(--z-tooltip);
   max-width: 240px;
   padding: 5px 9px;
   border-radius: var(--radius);
@@ -422,7 +461,6 @@ input, select, textarea {
   transition: border-color var(--transition);
 }
 input:focus, select:focus, textarea:focus {
-  outline: none;
   border-color: var(--accent);
 }
 

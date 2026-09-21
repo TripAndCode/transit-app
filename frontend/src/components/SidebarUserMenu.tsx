@@ -6,6 +6,7 @@ import { useConfig } from "../api/config";
 import { useTheme } from "../styles/useTheme";
 import type { Theme } from "../styles/theme";
 import { SUPPORTED_LOCALES, type Locale } from "../i18n";
+import { Z_INDEX } from "../styles/zIndex";
 
 const LOCALE_LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
 
@@ -96,7 +97,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             borderRadius: 8,
             boxShadow: "var(--el-2)",
             padding: 6,
-            zIndex: 10,
+            zIndex: Z_INDEX.dropdown,
           }}
         >
           {config?.auth_enabled &&
@@ -120,6 +121,14 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           <button type="button" role="menuitem" onClick={() => void i18n.changeLanguage(other)} style={popItemStyle}>
             <span>{t("common.language_aria")}</span>
             <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>{LOCALE_LABELS[current]}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            style={popItemStyle}
+          >
+            <span>{theme === "dark" ? t("common.theme_toggle_to_light") : t("common.theme_toggle_to_dark")}</span>
           </button>
           {/* Three states, not a two-way toggle: "system" has to be reachable
               and distinguishable from whichever theme it currently resolves
