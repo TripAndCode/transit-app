@@ -18,6 +18,7 @@ import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
+import { formatNumber } from "../utils/format";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
@@ -334,7 +335,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   }
 
   const fmtSec = (v: number | null): string => (v == null ? "—" : `${v.toFixed(0)}${t("common.unit_sec")}`);
-  const fmtSamples = (v: number): string => v.toLocaleString();
+  const fmtSamples = (v: number): string => formatNumber(v);
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>

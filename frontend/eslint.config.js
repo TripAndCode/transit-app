@@ -79,6 +79,14 @@ export default tseslint.config(
           message:
             'Do not use useMemo/useCallback/React.memo — the React Compiler handles memoization automatically. Inline the computation or use a plain function.',
         },
+        {
+          // `Number.prototype.toLocaleString`/`Date.prototype.toLocaleDateString`/
+          // `toLocaleTimeString`/`toLocaleString` silently default to the
+          // runtime's locale rather than the active UI language, so ja/en
+          // users can see numbers or dates formatted in the wrong locale.
+          selector: 'CallExpression[callee.property.name=/^toLocale(String|DateString|TimeString)$/]',
+          message: 'Do not call toLocale*() directly — use formatNumber()/formatDateTime() from src/utils/format.ts, which read the active UI language.',
+        },
       ],
       // Closes the aliased-import hole the syntax selectors above can't see
       // (e.g. `import { useMemo as m } from "react"`). Only matches *named*
