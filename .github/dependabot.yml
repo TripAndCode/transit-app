@@ -1,19 +1,30 @@
+# CI runs on a single self-hosted runner, and ci.yml triggers on both `push`
+# and `pull_request` for every branch. Dependabot's default behaviour is to
+# rebase its open PRs whenever the base branch moves, which on a busy `main`
+# turns a handful of update PRs into a steady stream of runs competing with
+# the branch that is actually being merged. `rebase-strategy: disabled` leaves
+# each PR at the commit it was opened on; rebase one by hand when it is time
+# to merge it.
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    rebase-strategy: "disabled"
     groups:
       npm-minor-and-patch:
         update-types:
           - "minor"
           - "patch"
 
+  # Covers Poetry: the pip ecosystem reads pyproject.toml/poetry.lock, and
+  # this repo has no requirements.txt.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
+    rebase-strategy: "disabled"
     groups:
       pip-minor-and-patch:
         update-types:
@@ -24,6 +35,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    rebase-strategy: "disabled"
     groups:
       github-actions-minor-and-patch:
         update-types:
