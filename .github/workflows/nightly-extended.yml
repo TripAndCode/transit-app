@@ -61,7 +61,7 @@ jobs:
             /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
           df -h /
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

@@ -116,7 +116,7 @@ jobs:
       # PATH. That rules out `cache: poetry`, which needs Poetry to already be
       # installed when setup-python runs -- the two requirements are mutually
       # exclusive here, and a working gate matters more than the cache.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
