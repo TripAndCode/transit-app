@@ -50,6 +50,24 @@ class Movers:
 _DOW_LABELS = ["月", "火", "水", "木", "金", "土", "日"]  # 0..6 (Mon..Sun)
 
 
+# route_code in the aggregates is the digit-only code; static_routes.route_id
+# may carry a trailing "(NNNN)" (Aomori), so the code is derived on both sides.
+# One definition because both callers must narrow to the same row population:
+# a change to the regex or the filter made in only one copy silently reopens
+# the wider scan in the other.
+_ROUTE_LABEL_SQL = (
+    "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code, route_short_name AS label "
+    "FROM static_routes WHERE agency_id = $1 "
+    "AND regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') = ANY($2::text[])"
+)
+
+
+async def _route_labels(conn, agency_id: int, route_codes: list[str]) -> dict[str, str]:
+    """Short name per route_code, limited to the codes asked for."""
+    rows = await conn.fetch(_ROUTE_LABEL_SQL, agency_id, route_codes)
+    return {r["route_code"]: (r["label"] or r["route_code"]) for r in rows}
+
+
 @perf.timed("dashboard.heatmap")
 @async_lru_cache(maxsize=32, ttl_seconds=300)
 async def delay_heatmap(
@@ -86,18 +104,7 @@ async def _build_heatmap(
     normalize: Any,
 ) -> DelayHeatmap:
     """Shared assembly: route labels + dense routes×buckets cell grid."""
-    labels = {
-        r["route_code"]: (r["label"] or r["route_code"])
-        for r in await conn.fetch(
-            # route_code in the aggregates is the digit-only code; static_routes.route_id
-            # may carry a trailing "(NNNN)" (Aomori), so derive the code on both sides.
-            "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code, route_short_name AS label "
-            "FROM static_routes WHERE agency_id = $1 "
-            "AND regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') = ANY($2::text[])",
-            agency_id,
-            route_codes,
-        )
-    }
+    labels = await _route_labels(conn, agency_id, route_codes)
     by_route: dict[str, dict[int, float | None]] = {rc: {} for rc in route_codes}
     for r in grid_rows:
         b = normalize(r["bucket"])
@@ -353,15 +360,7 @@ async def movers(
     """
     rows = await _movers_from_agg(conn, agency_id, ctx, window_days, top)
     route_codes = [r["route_code"] for r in rows]
-    label_rows = await conn.fetch(
-        # Derive the digit-only route_code so labels match the aggregates' keys.
-        "SELECT regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') AS route_code, route_short_name "
-        "FROM static_routes WHERE agency_id = $1 "
-        "AND regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') = ANY($2::text[])",
-        agency_id,
-        route_codes,
-    )
-    labels = {r["route_code"]: (r["route_short_name"] or r["route_code"]) for r in label_rows}
+    labels = await _route_labels(conn, agency_id, route_codes)
     out_rows = []
     for r in rows:
         rc = r["route_code"]
