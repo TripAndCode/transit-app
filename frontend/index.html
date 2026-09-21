@@ -2,11 +2,19 @@
 <html lang="ja">
   <head>
     <script>
+      // Paints data-theme before first render so the page never flashes the
+      // wrong theme. Mirrors readThemePref/resolveTheme in src/styles/theme.ts;
+      // src/styles/theme.test.ts asserts the two stay in step.
       (function () {
         try {
           var stored = localStorage.getItem("transit.theme");
-          var theme = stored === "light" || stored === "dark" ? stored : "light";
-          document.documentElement.dataset.theme = theme;
+          var pref =
+            stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+          var prefersDark =
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.dataset.theme =
+            pref === "system" ? (prefersDark ? "dark" : "light") : pref;
         } catch (e) {
           document.documentElement.dataset.theme = "light";
         }

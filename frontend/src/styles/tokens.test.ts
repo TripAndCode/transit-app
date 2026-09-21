@@ -1,7 +1,16 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
-import { DELAY_RAMP, delayColor, delayColorResolved, severeColorResolved, severityStepColors } from "./tokens";
+import {
+  DELAY_RAMP,
+  contrastRatio,
+  delayColor,
+  delayColorResolved,
+  readableInkOn,
+  severeColorResolved,
+  severityStepColors,
+  surfaceColorResolved,
+} from "./tokens";
 
 // Two distinct severe-color surfaces:
 //  - `DELAY_RAMP.severe` / `delayColor(>10)` return the LITERAL string
@@ -28,7 +37,7 @@ describe("DELAY_RAMP.severe (literal var() for DOM consumers)", () => {
 
   it("delayColor(>=5) returns the literal var(--delay-severe) string", () => {
     expect(delayColor(15)).toBe("var(--delay-severe)");
-    document.documentElement.style.setProperty("--delay-severe", "#A83A1A");
+    document.documentElement.style.setProperty("--delay-severe", "#F0837A");
     expect(delayColor(15)).toBe("var(--delay-severe)");
   });
 
@@ -53,12 +62,12 @@ describe("severeColorResolved() (real hex for MapLibre)", () => {
   });
 
   it("falls back to the light-mode red when --delay-severe is unresolved (jsdom default)", () => {
-    expect(severeColorResolved()).toBe("#d92121");
+    expect(severeColorResolved()).toBe("#A8391F");
   });
 
   it("reads --delay-severe when it is set (the dark-mode value in a real cascade)", () => {
-    document.documentElement.style.setProperty("--delay-severe", "#A83A1A");
-    expect(severeColorResolved()).toBe("#A83A1A");
+    document.documentElement.style.setProperty("--delay-severe", "#F0837A");
+    expect(severeColorResolved()).toBe("#F0837A");
   });
 });
 
@@ -75,9 +84,9 @@ describe("delayColorResolved() (MapLibre-safe delayColor)", () => {
   });
 
   it("returns a real parseable hex (never the literal var() string) at/above the severe threshold", () => {
-    expect(delayColorResolved(15)).toBe("#d92121");
-    document.documentElement.style.setProperty("--delay-severe", "#A83A1A");
-    expect(delayColorResolved(15)).toBe("#A83A1A");
+    expect(delayColorResolved(15)).toBe("#A8391F");
+    document.documentElement.style.setProperty("--delay-severe", "#F0837A");
+    expect(delayColorResolved(15)).toBe("#F0837A");
   });
 });
 
@@ -91,7 +100,7 @@ describe("severityStepColors() (MapLibre step-expression stops)", () => {
       "#2EA87A", 1.5,
       "#C99A2E", 3,
       "#D4622A", 5,
-      "#d92121", // severeColorResolved() jsdom fallback
+      "#A8391F", // severeColorResolved() jsdom fallback
     ]);
   });
 });
@@ -106,7 +115,11 @@ describe("severityStepColors() (MapLibre step-expression stops)", () => {
 // ---------------------------------------------------------------------------
 // `process.cwd()` is the `frontend/` package root under vitest; the module
 // URL is not a file: URL after vite's transform, so it cannot be used here.
-const globalCss = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8");
+// Comments are stripped before parsing: prose explaining a token routinely
+// contains a `--token: value`-shaped phrase, and `decl()` would otherwise read
+// the sentence instead of the declaration.
+const globalCss = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8")
+  .replace(/\/\*[\s\S]*?\*\//g, "");
 
 /** Body of the first rule whose selector text starts at `selector`, with
  *  braces balanced so nested at-rules/rules are included. */
@@ -206,5 +219,146 @@ describe("global reduced-motion regime", () => {
     expect(decl(reduceBlock, "animation-duration")).toBe(".01ms !important");
     expect(decl(reduceBlock, "animation-iteration-count")).toBe("1 !important");
     expect(decl(reduceBlock, "transition-duration")).toBe(".01ms !important");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Colour identity
+// ---------------------------------------------------------------------------
+
+/** Channel triple of a `#rrggbb` token value. */
+function rgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+describe("one accent identity", () => {
+  it.each([
+    [rootBlock, "--accent", "#187b80"],
+    [rootBlock, "--accent-soft", "#e1f1f1"],
+    [darkBlock, "--accent", "#43c5ba"],
+    [darkBlock, "--accent-soft", "#183b3d"],
+  ])("declares the teal accent", (block, prop, value) => {
+    expect(decl(block, prop)).toBe(value);
+  });
+
+  it("carries no scoped --accent override that would fork the identity", () => {
+    // A `.app-shell { --accent: … }` (or any other scoped redefinition) means
+    // the signed-in shell and the pre-auth pages render different accents.
+    // The token is only allowed to be declared on the two theme roots.
+    const accentDeclarations = [...globalCss.matchAll(/([^{}]*)\{[^{}]*--accent\s*:/g)]
+      .map((m) => m[1].trim().split(/\s*\n\s*/).pop()!.trim());
+    expect(accentDeclarations).toEqual([":root", ':root[data-theme="dark"]']);
+  });
+
+  it("keeps the blue-purple as --brand in both themes, not as --accent", () => {
+    expect(decl(rootBlock, "--brand")).toBe("#5b6cad");
+    expect(decl(darkBlock, "--brand")).toBe("#7E8CD0");
+    expect(decl(rootBlock, "--on-brand")).toBeTruthy();
+    expect(decl(darkBlock, "--on-brand")).toBeTruthy();
+  });
+
+  it("keeps --accent-strong in the accent's own hue family", () => {
+    // --accent-strong is documented as a deepened --accent; if it stays in a
+    // different hue family the app still reads as two brands.
+    for (const block of [rootBlock, darkBlock]) {
+      const [ar, ag, ab] = rgb(decl(block, "--accent")!);
+      const [sr, sg, sb] = rgb(decl(block, "--accent-strong")!);
+      // Teal: green and blue both dominate red, in the accent and its
+      // deepened sibling alike.
+      expect(Math.min(ag, ab)).toBeGreaterThan(ar);
+      expect(Math.min(sg, sb)).toBeGreaterThan(sr);
+    }
+  });
+
+  it("keeps --accent and --accent-strong readable at text weight", () => {
+    for (const block of [rootBlock, darkBlock]) {
+      for (const prop of ["--accent", "--accent-strong"]) {
+        for (const surface of ["--bg-surface", "--bg-soft"]) {
+          expect(contrastRatio(decl(block, prop)!, decl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+});
+
+describe("--delay-severe clears AA on its own theme's surface", () => {
+  const lightSevere = decl(rootBlock, "--delay-severe")!;
+  const darkSevere = decl(darkBlock, "--delay-severe")!;
+  const lightSurface = decl(rootBlock, "--bg-surface")!;
+  const darkSurface = decl(darkBlock, "--bg-surface")!;
+
+  it("the light value clears 4.5:1 on the light surface", () => {
+    expect(contrastRatio(lightSevere, lightSurface)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("the dark value clears 4.5:1 on the dark surface", () => {
+    expect(contrastRatio(darkSevere, darkSurface)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("neither value clears AA on the OTHER theme's surface", () => {
+    // This is the invariant that forces the token to be per-theme: a single
+    // hex dark enough for white is too dark for a near-black page, and vice
+    // versa. If both of these ever pass, the split is no longer necessary.
+    expect(contrastRatio(lightSevere, darkSurface)).toBeLessThan(4.5);
+    expect(contrastRatio(darkSevere, lightSurface)).toBeLessThan(4.5);
+  });
+
+  it("stays a deep warm tone, not a saturated alarm red", () => {
+    // Pure/near-pure red (a fully saturated hue-0 channel) is the alarm
+    // signal the calm-UI rule rules out; the severe tier is the deep end of
+    // the warm ramp instead, so it keeps a visible green and blue component.
+    for (const hex of [lightSevere, darkSevere]) {
+      const [r, g, b] = rgb(hex);
+      expect(g).toBeGreaterThan(0x20);
+      expect(b).toBeGreaterThan(0x18);
+      expect(r - g).toBeLessThan(0x90);
+    }
+  });
+
+  it("SEVERE_FALLBACK (via severeColorResolved under jsdom) tracks the light CSS value", () => {
+    // There is no build-time link between tokens.ts and global.css, so this
+    // assertion is what keeps the hand-mirrored pair from drifting.
+    expect(severeColorResolved()).toBe(lightSevere);
+  });
+});
+
+describe("contrastRatio()", () => {
+  it("is 21:1 for black on white and 1:1 for a colour on itself", () => {
+    expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 1);
+    expect(contrastRatio("#187b80", "#187b80")).toBeCloseTo(1, 5);
+  });
+
+  it("is symmetric in its arguments", () => {
+    expect(contrastRatio("#A8391F", "#ffffff")).toBeCloseTo(contrastRatio("#ffffff", "#A8391F"), 10);
+  });
+});
+
+describe("readableInkOn()", () => {
+  it("picks whichever ink clears AA on every colour in the delay ramp", () => {
+    const ramp = [DELAY_RAMP.ok, DELAY_RAMP.mild, DELAY_RAMP.moderate, "#A8391F", "#F0837A"];
+    for (const bg of ramp) {
+      expect(contrastRatio(readableInkOn(bg), bg)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("goes light on the deep severe red and dark on the pale one", () => {
+    expect(readableInkOn("#A8391F")).toBe("#ffffff");
+    expect(readableInkOn("#F0837A")).not.toBe("#ffffff");
+  });
+});
+
+describe("surfaceColorResolved()", () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--bg-surface");
+  });
+
+  it("falls back to the light surface when --bg-surface is unresolved (jsdom)", () => {
+    expect(surfaceColorResolved()).toBe("#ffffff");
+  });
+
+  it("reads --bg-surface when the cascade provides it", () => {
+    document.documentElement.style.setProperty("--bg-surface", "#141726");
+    expect(surfaceColorResolved()).toBe("#141726");
   });
 });

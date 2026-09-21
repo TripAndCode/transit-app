@@ -44,9 +44,9 @@ export function MapReference({ located, total, t }: {
     <div className="ops-map-ref" aria-label={t("operations.map.legend_label")}>
       <div className="ops-map-ref__legend">
         <LegendChip color="var(--accent-strong)" label={t("operations.map.legend_current")} />
-        <LegendChip color="#2bc5aa" label={t("operations.map.legend_trail")} />
+        <LegendChip color="var(--accent)" label={t("operations.map.legend_trail")} />
         <LegendChip color="var(--delay-flag)" label={t("operations.map.legend_delay")} />
-        <LegendChip color="#2bc5aa" label={t("operations.map.legend_cluster")} />
+        <LegendChip color="var(--accent)" label={t("operations.map.legend_cluster")} />
       </div>
       {/* States what the markers are, and nothing else: the reading's age is
           the header freshness dot's job, and repeating it here put the same

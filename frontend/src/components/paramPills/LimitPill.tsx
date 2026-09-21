@@ -92,12 +92,12 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
           (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
         }}
         style={{
-          background: "var(--bg-soft, rgba(0,0,0,0.04))",
+          background: "var(--bg-soft)",
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
           borderRadius: 6,
           padding: "3px 8px",
           fontSize: 12,
-          color: "var(--text-primary, #1a1a1a)",
+          color: "var(--text-primary)",
           cursor: disabled ? "not-allowed" : "pointer",
           display: "inline-flex",
           alignItems: "center",
@@ -138,7 +138,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
               height: 26,
               borderRadius: 4,
               border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
-              background: "var(--bg-soft, rgba(0,0,0,0.04))",
+              background: "var(--bg-soft)",
               color: "var(--text-primary)",
               cursor: value <= min ? "not-allowed" : "pointer",
               fontSize: 14,
@@ -178,7 +178,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
               height: 26,
               borderRadius: 4,
               border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
-              background: "var(--bg-soft, rgba(0,0,0,0.04))",
+              background: "var(--bg-soft)",
               color: "var(--text-primary)",
               cursor: value >= max ? "not-allowed" : "pointer",
               fontSize: 14,

@@ -124,7 +124,10 @@
 .ops-route-browser__list { min-height: 0; margin-top: 8px; overflow-y: auto; }
 .ops-route-browser__list button { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto 15px; align-items: center; gap: 8px; width: 100%; margin-bottom: 6px; padding: 8px; border: 1px solid var(--card-border); border-radius: var(--radius); color: var(--text-primary); background: var(--bg-surface); text-align: left; }
 .ops-route-browser__list button:hover { border-color: var(--accent); background: var(--accent-soft); }
-.ops-route-browser__badge { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: var(--on-accent); background: var(--accent); font-size: var(--text-xs); font-weight: 800; }
+/* --brand, not --accent: a route badge identifies a line, it is not an
+   interactive accent, and keeping it on the former blue-purple is what lets
+   --accent mean exactly one thing everywhere else. */
+.ops-route-browser__badge { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: var(--on-brand); background: var(--brand); font-size: var(--text-xs); font-weight: 800; }
 .ops-route-browser__list button > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; }
 .ops-route-browser__list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
 .ops-route-browser__list small { color: var(--text-secondary); font-size: var(--text-xs); }
