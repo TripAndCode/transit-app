@@ -20,7 +20,7 @@ const PILL: React.CSSProperties = {
   background: "#ffffff",
   border: "1px solid rgba(0,0,0,0.14)",
   borderRadius: 14,
-  boxShadow: "0 3px 14px rgba(0,0,0,0.28)",
+  boxShadow: "var(--el-2)",
 };
 
 function Tile({

@@ -64,17 +64,17 @@ export function PreviewReportsPanel({ agencyKey }: { agencyKey: PreviewAgencyKey
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <div style={statTile}>
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("network.col_avg_delay")}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("network.col_avg_delay")}</div>
           <div style={{ fontSize: 22, fontWeight: 600, color: "var(--text-primary)" }}>
             {average(filtered.map((r) => r.delayMin)).toFixed(1)}
           </div>
         </div>
         <div style={statTile}>
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("network.col_on_time")}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("network.col_on_time")}</div>
           <div style={{ fontSize: 22, fontWeight: 600, color: "var(--text-primary)" }}>{onTimePct}%</div>
         </div>
         <div style={statTile}>
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("network.col_samples")}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("network.col_samples")}</div>
           <div style={{ fontSize: 22, fontWeight: 600, color: "var(--text-primary)" }}>{filtered.length}</div>
         </div>
       </div>

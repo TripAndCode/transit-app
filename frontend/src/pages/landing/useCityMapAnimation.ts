@@ -80,6 +80,21 @@ export function useCityMapAnimation(canvasRef: RefObject<HTMLCanvasElement | nul
     resize();
     window.addEventListener("resize", resize);
 
+    // A continuously moving decorative background is exactly what a
+    // reduced-motion preference asks to be spared: draw the scene once so the
+    // panel is not blank, then leave it alone. Checked here rather than left
+    // to the CSS regime because a rAF loop is invisible to a stylesheet.
+    const vehicleDrawsFor = (vehicles: Vehicle[]): VehicleDraw[] =>
+      vehicles.map((v) => {
+        const route = routesById.get(v.routeId)!;
+        return { pose: poseAtT(route, v.t), colorVar: route.colorVar, mode: route.vehicleMode };
+      });
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      drawScene(ctx, width, height, scene, vehicleDrawsFor(vehiclesRef.current), colors);
+      return () => window.removeEventListener("resize", resize);
+    }
+
     let rafId = 0;
     let lastFrameTime = performance.now();
     function frame(now: number) {
@@ -91,11 +106,7 @@ export function useCityMapAnimation(canvasRef: RefObject<HTMLCanvasElement | nul
       if (document.hidden) return;
 
       vehiclesRef.current = vehiclesRef.current.map((v) => advanceVehicle(v, dtMs));
-      const vehicleDraws: VehicleDraw[] = vehiclesRef.current.map((v) => {
-        const route = routesById.get(v.routeId)!;
-        return { pose: poseAtT(route, v.t), colorVar: route.colorVar, mode: route.vehicleMode };
-      });
-      drawScene(ctx, width, height, scene, vehicleDraws, colors);
+      drawScene(ctx, width, height, scene, vehicleDrawsFor(vehiclesRef.current), colors);
     }
     rafId = requestAnimationFrame(frame);
 

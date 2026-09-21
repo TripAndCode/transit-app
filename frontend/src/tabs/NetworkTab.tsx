@@ -31,11 +31,11 @@ const onTimeStyle: React.CSSProperties = { fontSize: 12, color: "var(--text-seco
 const barRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 };
 const barBg: React.CSSProperties = { flex: 1, height: 6, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" };
 const barFill: React.CSSProperties = { height: "100%", borderRadius: 3 };
-const samplesStyle: React.CSSProperties = { fontSize: 11, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
-const secondaryRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--text-tertiary)", marginBottom: 4 };
-const coverageStyle: React.CSSProperties = { fontSize: 11.5, color: "var(--text-tertiary)" };
+const samplesStyle: React.CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+const secondaryRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", marginBottom: 4 };
+const coverageStyle: React.CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-tertiary)" };
 const youBadgeStyle: React.CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--text-xs)",
   fontWeight: 600,
   letterSpacing: "0.06em",
   textTransform: "uppercase",

@@ -210,7 +210,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
           alignItems: "center",
           gap: 8,
           cursor: "pointer",
-          boxShadow: activeCount > 0 ? "0 1px 3px rgba(91,108,173,0.30)" : "none",
+          boxShadow: activeCount > 0 ? "var(--el-1)" : "none",
           transition: "all var(--transition)",
         }}
       >
@@ -292,7 +292,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius-lg)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.10)",
+            boxShadow: "var(--el-2)",
             padding: 18,
           }}
         >
@@ -381,7 +381,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
                 fontSize: 13,
                 fontWeight: 500,
                 cursor: dirty ? "pointer" : "not-allowed",
-                boxShadow: dirty ? "0 1px 2px rgba(91,108,173,0.25)" : "none",
+                boxShadow: dirty ? "var(--el-1)" : "none",
               }}
             >
               {`✓ ${t("common.apply")}`}

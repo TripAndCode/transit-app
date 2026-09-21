@@ -44,7 +44,7 @@ body:has(.login-shell),
   padding: 36px 32px 28px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.04),
     0 12px 32px -16px rgba(15, 23, 42, 0.12);
@@ -66,7 +66,7 @@ body:has(.login-shell),
 }
 .login-card__brand-tag {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.06em;
   color: var(--text-tertiary);
 }
@@ -95,7 +95,7 @@ body:has(.login-shell),
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: #b91c1c;
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -113,7 +113,7 @@ body:has(.login-shell),
   justify-content: center;
   gap: 10px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   font-size: 14px;
   font-weight: 500;
   transition: box-shadow var(--transition), background var(--transition), border-color var(--transition);
@@ -150,10 +150,12 @@ body:has(.login-shell),
 .login-card__spinner {
   width: 18px;
   height: 18px;
-  animation: login-spin 0.8s linear infinite;
 }
-@keyframes login-spin {
-  to { transform: rotate(360deg); }
+@media (prefers-reduced-motion: no-preference) {
+  .login-card__spinner { animation: login-spin 0.8s linear infinite; }
+  @keyframes login-spin {
+    to { transform: rotate(360deg); }
+  }
 }
 
 .login-card__divider {
@@ -190,7 +192,7 @@ body:has(.login-shell),
 .login-card__field input {
   height: 40px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   color: var(--text-primary);
@@ -211,7 +213,7 @@ body:has(.login-shell),
 
 .login-card__footer {
   margin: 20px 0 0;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   text-align: center;
   color: var(--text-tertiary);

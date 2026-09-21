@@ -81,7 +81,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
       >
         <span style={{ color: "var(--text-secondary, #666)" }}>{label}:</span>
         <b>{current.label}</b>
-        <span style={{ color: "var(--text-tertiary, #999)", fontSize: 10 }}>▾</span>
+        <span style={{ color: "var(--text-tertiary, #999)", fontSize: "var(--text-xs)" }}>▾</span>
       </button>
       {open && (
         <div
@@ -94,7 +94,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
             border: "1px solid var(--border-soft, rgba(0,0,0,0.12))",
             borderRadius: 8,
             padding: 4,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+            boxShadow: "var(--el-2)",
             zIndex: Z_INDEX.dropdown,
             minWidth: 120,
           }}

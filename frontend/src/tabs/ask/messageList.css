@@ -8,7 +8,7 @@
 .msg-bubble--user {
   background: var(--accent-strong);
   color: var(--on-accent);
-  border-radius: 12px 12px 3px 12px;
+  border-radius: var(--radius-lg) var(--radius-lg) 3px var(--radius-lg);
 }
 
 /* Left-aligned, soft surface, tail toward the bottom-left corner. */
@@ -16,5 +16,5 @@
   background: var(--bg-soft);
   border: 1px solid var(--card-border);
   color: var(--text-primary);
-  border-radius: 12px 12px 12px 3px;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 3px;
 }

@@ -19,7 +19,7 @@
   color: var(--text-primary, #1a1a1a);
   background: var(--bg-surface, #fff);
   border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.14));
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -58,7 +58,7 @@
 .rp-caret {
   flex: 0 0 auto;
   color: var(--text-tertiary, #999);
-  font-size: 10px;
+  font-size: var(--text-xs);
 }
 
 /* ---- popover (opens downward by default) ---- */
@@ -71,7 +71,7 @@
   padding: 6px;
   background: var(--bg-surface, #fff);
   border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.12));
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
   z-index: var(--z-dropdown);
 }
@@ -103,7 +103,7 @@
   color: var(--text-primary, #1a1a1a);
   background: var(--bg-soft, rgba(0, 0, 0, 0.03));
   border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.1));
-  border-radius: 7px;
+  border-radius: var(--radius);
 }
 .rp-search:focus-visible {
   outline: none;
@@ -130,7 +130,7 @@
   width: 100%;
   padding: 7px 10px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -157,7 +157,7 @@
 }
 .rp-opt-code {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary, #999);
 }
 /* avg-delay chip — only rendered when delay data is supplied via the `delays` prop */

@@ -26,13 +26,13 @@ export function PreviewPeriodOverviewPanel({ agencyKey }: { agencyKey: PreviewAg
     <div style={{ padding: 16 }}>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <div style={statTile}>
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("network.col_avg_delay")}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("network.col_avg_delay")}</div>
           <div style={{ fontSize: 22, fontWeight: 600, color: "var(--text-primary)" }}>
             {agency.avgDelayMin.toFixed(1)}
           </div>
         </div>
         <div style={statTile}>
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{t("network.col_on_time")}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("network.col_on_time")}</div>
           <div style={{ fontSize: 22, fontWeight: 600, color: "var(--text-primary)" }}>{agency.onTimePct}%</div>
         </div>
       </div>
@@ -49,7 +49,7 @@ export function PreviewPeriodOverviewPanel({ agencyKey }: { agencyKey: PreviewAg
                 opacity: 0.35 + 0.65 * (delayMin / MAX_HOURLY),
               }}
             />
-            <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{hour}:00</span>
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{hour}:00</span>
           </div>
         ))}
       </div>

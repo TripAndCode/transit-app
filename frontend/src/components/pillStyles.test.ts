@@ -26,6 +26,6 @@ describe("pill", () => {
 describe("groupLabel", () => {
   it("is a small uppercase label style", () => {
     expect(groupLabel.textTransform).toBe("uppercase");
-    expect(groupLabel.fontSize).toBe(11);
+    expect(groupLabel.fontSize).toBe("var(--text-xs)");
   });
 });

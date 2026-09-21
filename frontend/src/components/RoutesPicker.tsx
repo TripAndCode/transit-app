@@ -229,7 +229,7 @@ export function RoutesPicker({
                           style={{
                             color: "var(--text-tertiary)",
                             fontFamily: "ui-monospace, monospace",
-                            fontSize: 11,
+                            fontSize: "var(--text-xs)",
                           }}
                         >
                           {v.code}

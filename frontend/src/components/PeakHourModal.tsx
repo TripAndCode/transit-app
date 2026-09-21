@@ -92,7 +92,7 @@ export function PeakHourModal({
               </span>
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--text-tertiary)",
                   minWidth: 40,
                 }}
@@ -142,7 +142,7 @@ export function PeakHourModal({
         {data?.routes.length ? (
           <p
             style={{
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               color: "var(--text-tertiary)",
               marginTop: 10,
             }}

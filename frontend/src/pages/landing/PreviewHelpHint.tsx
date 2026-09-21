@@ -36,7 +36,7 @@ export function PreviewHelpHint() {
         background: "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
         borderRadius: 8,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+        boxShadow: "var(--el-2)",
         fontSize: 12.5,
       }}
     >

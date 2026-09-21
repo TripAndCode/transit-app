@@ -67,7 +67,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
     <div style={{ position: "relative", width: "100%", marginTop: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 13 }}>{t("reports.heatmap.title")}</strong>
-        <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
           {t("reports.heatmap.subtitle")}
         </span>
         <button
@@ -80,7 +80,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             borderRadius: "50%",
             width: 18,
             height: 18,
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             color: "var(--text-secondary)",
             cursor: "pointer",
             padding: 0,
@@ -95,7 +95,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
               display: "inline-flex",
               alignItems: "center",
               gap: 8,
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               color: "var(--text-secondary)",
               padding: "4px 10px",
               background: "var(--bg-soft)",
@@ -212,7 +212,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             borderRadius: 4,
             padding: "6px 10px",
             fontSize: 12,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+            boxShadow: "var(--el-2)",
             pointerEvents: "none",
           }}
         >

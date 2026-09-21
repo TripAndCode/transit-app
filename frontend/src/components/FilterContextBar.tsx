@@ -292,29 +292,13 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
-            boxShadow: pending ? "none" : "0 1px 2px rgba(91,108,173,0.25)",
+            boxShadow: pending ? "none" : "var(--el-1)",
           }}
         >
-          {pending && (
-            <span
-              aria-hidden
-              style={{
-                display: "inline-block",
-                width: 12,
-                height: 12,
-                border: "2px solid currentColor",
-                borderTopColor: "transparent",
-                borderRadius: "50%",
-                animation: "fcb-spin 0.7s linear infinite",
-              }}
-            />
-          )}
+          {pending && <span aria-hidden className="fcb-spinner" />}
           {t("ask.filter_bar.apply")}
         </button>
       </div>
-
-      {/* Spinner keyframes (scoped) */}
-      <style>{`@keyframes fcb-spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

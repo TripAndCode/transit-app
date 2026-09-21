@@ -109,7 +109,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
       >
         <span style={{ color: "var(--text-secondary, #666)" }}>{label}:</span>
         <b>{value}</b>
-        <span style={{ color: "var(--text-tertiary, #999)", fontSize: 10 }}>▾</span>
+        <span style={{ color: "var(--text-tertiary, #999)", fontSize: "var(--text-xs)" }}>▾</span>
       </button>
       {open && (
         <div
@@ -122,7 +122,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
             border: "1px solid var(--border-soft, rgba(0,0,0,0.12))",
             borderRadius: 8,
             padding: 8,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+            boxShadow: "var(--el-2)",
             zIndex: Z_INDEX.dropdown,
             display: "flex",
             gap: 6,

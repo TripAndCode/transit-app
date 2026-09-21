@@ -43,9 +43,9 @@ export function PreviewMapPanel() {
           backdropFilter: "blur(6px)",
           border: "1px solid var(--border-subtle)",
           borderRadius: 8,
-          boxShadow: "0 2px 12px rgba(0,0,0,0.10)",
+          boxShadow: "var(--el-2)",
           padding: "8px 10px",
-          fontSize: 11,
+          fontSize: "var(--text-xs)",
           color: "var(--text-secondary)",
           minWidth: 140,
         }}
@@ -71,7 +71,7 @@ export function PreviewMapPanel() {
             background: "#ffffff",
             border: "1px solid rgba(0,0,0,0.14)",
             borderRadius: 8,
-            boxShadow: "0 3px 14px rgba(0,0,0,0.28)",
+            boxShadow: "var(--el-2)",
             overflow: "hidden",
           }}
         >
@@ -105,7 +105,7 @@ export function PreviewMapPanel() {
             background: heatmapField === "p90" ? "var(--accent-soft)" : "#ffffff",
             border: "1px solid rgba(0,0,0,0.14)",
             borderRadius: 8,
-            boxShadow: "0 3px 14px rgba(0,0,0,0.28)",
+            boxShadow: "var(--el-2)",
             cursor: "pointer",
             color: heatmapField === "p90" ? "var(--accent)" : "#333",
             fontWeight: 600,

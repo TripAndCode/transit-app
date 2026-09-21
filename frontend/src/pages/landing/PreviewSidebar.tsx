@@ -90,7 +90,7 @@ function AgencyPickerMock({
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius)",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+            boxShadow: "var(--el-2)",
             overflow: "hidden",
           }}
         >

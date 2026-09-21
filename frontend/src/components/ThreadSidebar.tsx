@@ -331,7 +331,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
 // ─── sub-components ───────────────────────────────────────────────────────────
 
 const groupHeaderStyle: CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   fontWeight: 600,
   textTransform: "uppercase",
   letterSpacing: "0.06em",
@@ -460,7 +460,7 @@ function ConvItem({
             {subLine && (
               <div
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--text-tertiary)",
                   whiteSpace: "nowrap",
                   overflow: "hidden",

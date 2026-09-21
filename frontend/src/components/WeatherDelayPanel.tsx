@@ -54,7 +54,7 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) 
             {data.low_confidence && (
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   fontWeight: 500,
                   color: "var(--text-secondary)",
                   background: "var(--bg-soft)",
@@ -104,10 +104,10 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) 
           {data.buckets != null && data.buckets.length > 0 && (
             <WeatherBucketChart buckets={data.buckets} />
           )}
-          <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--text-tertiary)", fontStyle: "italic" }}>
+          <p style={{ margin: "12px 0 0", fontSize: "var(--text-xs)", color: "var(--text-tertiary)", fontStyle: "italic" }}>
             {data.disclaimer}
           </p>
-          <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--text-tertiary)" }}>{data.attribution}</p>
+          <p style={{ margin: "4px 0 0", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{data.attribution}</p>
         </div>
       )}
     </div>
@@ -155,7 +155,7 @@ function WeatherBucketChart({ buckets }: { buckets: WeatherDelayBucket[] }) {
               key={b.label}
               style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0 }}
             >
-              <span style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 4 }}>{valueLabel}</span>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 4 }}>{valueLabel}</span>
               <div
                 style={{
                   width: "100%",
@@ -184,8 +184,8 @@ function WeatherBucketChart({ buckets }: { buckets: WeatherDelayBucket[] }) {
                   }}
                 />
               </div>
-              <span style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 6 }}>{b.label}</span>
-              <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", marginTop: 6 }}>{b.label}</span>
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
                 {t("reports.weather_delay.buckets.sample_count", { count: b.samples })}
               </span>
             </div>

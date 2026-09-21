@@ -17,7 +17,7 @@ export function pill(active: boolean, size: PillSize = "md"): CSSProperties {
     border: `1px solid ${active ? "var(--accent)" : "var(--border-soft)"}`,
     borderRadius: 999,
     padding: PADDING[size],
-    fontSize: 12,
+    fontSize: "var(--text-xs)",
     fontWeight: active ? 600 : 400,
     cursor: "pointer",
     transition: "all var(--transition)",
@@ -26,7 +26,7 @@ export function pill(active: boolean, size: PillSize = "md"): CSSProperties {
 
 /** Shared small-caps label above a group of filter pills. */
 export const groupLabel: CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   color: "var(--text-tertiary)",
   letterSpacing: "0.05em",
   textTransform: "uppercase",
