@@ -76,7 +76,7 @@ jobs:
       # without both of these, they self-skip for a setup reason rather
       # than actually running, which the fail-if-still-skipped check below
       # cannot tell apart from the suite being newly broken.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
