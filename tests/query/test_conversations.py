@@ -89,6 +89,39 @@ async def test_list_conversations_ordered_by_updated(pool_with_users):
 
 
 @pytest.mark.asyncio
+async def test_list_conversations_anonymous_sees_only_anonymous_threads(pool_with_users):
+    """The anonymous branch is a separate predicate from the signed-in one, so
+    it needs its own coverage: a `user_id IS NULL` list must return the
+    anonymous threads and none of a signed-in user's."""
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        await create_conversation(c, user_id=u1, agency_id=agency, title="owned", filter_ctx={})
+        await create_conversation(c, user_id=None, agency_id=agency, title="anon-1", filter_ctx={})
+        await create_conversation(c, user_id=None, agency_id=agency, title="anon-2", filter_ctx={})
+
+        anon = await list_conversations(c, user_id=None, agency_id=agency, limit=10)
+        owned = await list_conversations(c, user_id=u1, agency_id=agency, limit=10)
+
+    assert [r["title"] for r in anon] == ["anon-2", "anon-1"]
+    assert [r["title"] for r in owned] == ["owned"]
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_anonymous_respects_agency_and_limit(pool_with_users):
+    """The anonymous branch renumbers its placeholders, so agency scoping and
+    the limit have to be checked on that path too, not just the signed-in one."""
+    pool, agency, _, _ = pool_with_users
+    async with pool.acquire() as c:
+        for i in range(3):
+            await create_conversation(c, user_id=None, agency_id=agency, title=f"t{i}", filter_ctx={})
+        limited = await list_conversations(c, user_id=None, agency_id=agency, limit=2)
+        other_agency = await list_conversations(c, user_id=None, agency_id=agency + 9999, limit=10)
+
+    assert len(limited) == 2
+    assert other_agency == []
+
+
+@pytest.mark.asyncio
 async def test_update_conversation_owner_only(pool_with_users):
     pool, agency, u1, u2 = pool_with_users
     async with pool.acquire() as c:

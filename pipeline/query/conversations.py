@@ -67,27 +67,25 @@ async def list_conversations(
     agency_id: int,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    # Two spellings rather than `user_id IS NOT DISTINCT FROM $1`: that form is
-    # not sargable, so the planner ignores every index on user_id and falls back
-    # to a sequential scan plus a sort. `= $1` and `IS NULL` both drive the
-    # (user_id, agency_id, pinned, updated_at) index instead.
+    # `user_id IS NOT DISTINCT FROM $1` reads naturally but is not sargable:
+    # asyncpg sends user_id as a bound parameter, so the planner cannot push it
+    # into an index condition even when the value is NULL at runtime, and the
+    # whole table is scanned and sorted. `= $1` and `IS NULL` both drive the
+    # (user_id, agency_id, pinned, updated_at) index. Only the predicate and
+    # its parameters differ — the projection, ordering and limit stay in one
+    # place so a later change to them cannot reach one branch and miss the
+    # other.
     if user_id is None:
-        rows = await conn.fetch(
-            f"SELECT {_CONV_COLS} FROM ask_conversations "
-            f"WHERE user_id IS NULL AND agency_id = $1 "
-            f"ORDER BY pinned DESC, updated_at DESC LIMIT $2",
-            agency_id,
-            int(limit),
-        )
+        predicate, params = "user_id IS NULL AND agency_id = $1", [agency_id]
     else:
-        rows = await conn.fetch(
-            f"SELECT {_CONV_COLS} FROM ask_conversations "
-            f"WHERE user_id = $1 AND agency_id = $2 "
-            f"ORDER BY pinned DESC, updated_at DESC LIMIT $3",
-            user_id,
-            agency_id,
-            int(limit),
-        )
+        predicate, params = "user_id = $1 AND agency_id = $2", [user_id, agency_id]
+    rows = await conn.fetch(
+        f"SELECT {_CONV_COLS} FROM ask_conversations "
+        f"WHERE {predicate} "
+        f"ORDER BY pinned DESC, updated_at DESC LIMIT ${len(params) + 1}",
+        *params,
+        int(limit),
+    )
     return [_row_to_conv(r) for r in rows]
 
 
