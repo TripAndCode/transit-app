@@ -48,9 +48,10 @@ async def map_client(map_app):
 @pytest.fixture
 async def map_app_ch(map_app, ch_async_client):
     """`map_app` with `app.state.ch_client` wired to a real async ClickHouse
-    client: /delays/live, /route-shape and /today/route-summary read live
-    `updates` from ClickHouse rather than Postgres. Tests using this fixture
-    require `make ch-test` / RUN_CH_INTEGRATION=1 (via `ch_async_client`)."""
+    client. /delays/live, /route-shape, /today/route-summary,
+    /today/route/*/trips and /today/route/*/stop-profile read live `updates`
+    from ClickHouse rather than Postgres, so tests using this fixture require
+    `make ch-test` / RUN_CH_INTEGRATION=1 (via `ch_async_client`)."""
     app, agency_id = map_app
     app.state.ch_client = ch_async_client
     yield app, agency_id
@@ -1146,6 +1147,162 @@ async def test_route_summary_low_confidence_caps_anomaly(map_app_ch, ch_client):
     r = next(x for x in resp.json()["routes"] if x["route_code"] == "R_THIN")
     assert r["bucket"] == "watch"
     assert r["low_confidence"] is True
+
+
+@pytest.mark.asyncio
+async def test_route_trips_drilldown(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    # trip A: two stops, delays 600 & 540 -> avg 570; trip B: one stop, 120
+    await _seed_route(
+        pool,
+        agency_id,
+        "R_DRILL",
+        "平日",
+        [("A", 1, 600, "08:40"), ("A", 2, 540, "08:40"), ("B", 1, 120, "12:05")],
+        ch_client=ch_client,
+    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, trip_headsign) VALUES ($1,'A','造道行'),($1,'B','八重田行')",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_DRILL/trips")
+    assert resp.status_code == 200
+    trips = resp.json()["trips"]
+    assert [t["trip_id"] for t in trips] == ["A", "B"]  # worst first
+    assert trips[0]["avg_delay_sec"] == 570
+    assert trips[0]["headsign"] == "造道行"
+    assert trips[0]["scheduled_time"] == "08:40"
+    assert trips[1]["avg_delay_sec"] == 120
+
+
+@pytest.mark.asyncio
+async def test_route_trips_empty_when_no_data(map_client_ch):
+    client, agency_id = map_client_ch
+    resp = await client.get(f"/api/{agency_id}/today/route/NOPE/trips")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": None, "trips": []}
+
+
+@pytest.mark.asyncio
+async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_client):
+    """A route that DOES exist (has an agg_route_daily row, so it passes the
+    existence precheck) but whose only ClickHouse observations are older
+    than the 30-day bound anchored to the agency's own latest activity must
+    resolve to the empty response, not resurrect that stale data as if it
+    were "today's". Regression for the pre-bound behavior, which scanned all
+    history and would have returned the 60-day-old trip as current."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        # Sets this agency's latest captured_at to "now" via an unrelated route.
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_OTHER', 'R_OTHER', 1, 10, NOW(), 'other.pb', 'weekday', '08:00:00')",
+            agency_id,
+        )
+        # R_STALE exists (has an agg_route_daily row, so it passes the
+        # precheck) but its only observations are 60 days old -- outside the
+        # 30-day bound anchored to the agency's latest activity seeded above.
+        await _seed_route_existence(conn, agency_id, "R_STALE")
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_STALE', 'R_STALE', 1, 600, NOW() - INTERVAL '60 days', 'stale.pb', 'weekday', '09:00:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_STALE/trips")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": None, "trips": []}
+
+
+@pytest.mark.asyncio
+async def test_route_stop_profile_empty_when_no_data(map_client_ch):
+    """A fabricated/never-observed route_code resolves to the empty response.
+    route_stop_profile shares route_trips' existence-precheck + bounded-probe
+    logic, so this mirrors test_route_trips_empty_when_no_data to keep both
+    copies of that branch covered."""
+    client, agency_id = map_client_ch
+    resp = await client.get(f"/api/{agency_id}/today/route/NOPE/stop-profile")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": None, "stops": []}
+
+
+@pytest.mark.asyncio
+async def test_route_stop_profile_excludes_stale_route_beyond_bound(map_app_ch, ch_client):
+    """A route that exists (has an agg_route_daily row) but whose only
+    ClickHouse observations are older than the 30-day bound anchored to the
+    agency's own latest activity must resolve to the empty response,
+    mirroring test_route_trips_excludes_stale_route_beyond_bound."""
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_OTHER', 'R_OTHER', 1, 10, NOW(), 'other.pb', 'weekday', '08:00:00')",
+            agency_id,
+        )
+        await _seed_route_existence(conn, agency_id, "R_STALE_SP")
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T_STALE', 'R_STALE_SP', 1, 600, NOW() - INTERVAL '60 days', "
+            "'stale.pb', 'weekday', '09:00:00')",
+            agency_id,
+        )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_STALE_SP/stop-profile")
+    assert resp.status_code == 200
+    assert resp.json() == {"date": None, "stops": []}
+
+
+@pytest.mark.asyncio
+async def test_route_stop_profile_drilldown(map_app_ch, ch_client):
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    # seq 1: delays 60 & 120 -> avg 90; seq 2: 600 -> avg 600 (bottleneck)
+    await _seed_route(
+        pool,
+        agency_id,
+        "R_PROF",
+        "平日",
+        [("A", 1, 60, "08:40"), ("B", 1, 120, "09:00"), ("A", 2, 600, "08:40")],
+        ch_client=ch_client,
+    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES ($1,'s1','始発',ST_SetSRID(ST_MakePoint(140.7,40.8),4326)),"
+            "       ($1,'s2','中央病院前',ST_SetSRID(ST_MakePoint(140.71,40.81),4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) "
+            "VALUES ($1,'A',1,'s1'),($1,'A',2,'s2'),($1,'B',1,'s1')",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_PROF/stop-profile")
+    assert resp.status_code == 200
+    stops = resp.json()["stops"]
+    assert [s["stop_sequence"] for s in stops] == [1, 2]  # ordered by sequence
+    assert stops[0]["stop_name"] == "始発"
+    assert stops[0]["avg_delay_sec"] == 90
+    assert stops[1]["stop_name"] == "中央病院前"
+    assert stops[1]["avg_delay_sec"] == 600
 
 
 @pytest.mark.asyncio

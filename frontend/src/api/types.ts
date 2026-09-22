@@ -160,6 +160,41 @@ export type ReportType =
   | "council_summary"
   | "delay_certificate";
 
+export type RouteTrip = {
+  trip_id: string;
+  scheduled_time: string | null;
+  headsign: string | null;
+  avg_delay_sec: number;
+  samples: number;
+};
+export type RouteTripsResponse = {
+  date: string | null;
+  trips: RouteTrip[];
+};
+export type RouteStopProfileRow = {
+  stop_sequence: number;
+  stop_id?: string | null;
+  stop_name: string | null;
+  avg_delay_sec: number;
+  samples: number;
+  cohort_avg_delay_sec?: number | null;
+  cohort_route_count?: number;
+  /** Total observation count backing `cohort_avg_delay_sec` (pooled across
+   *  every route in the cohort) — distinct from `cohort_route_count`, which
+   *  only counts how many DISTINCT routes contributed. */
+  cohort_samples?: number;
+  /** True when `cohort_samples` is too thin to trust `cohort_avg_delay_sec`
+   *  (a lower floor than the route-level LOW_CONFIDENCE_SAMPLES — see
+   *  api.triage.COHORT_LOW_CONFIDENCE_SAMPLES). Independent of `is_outlier`,
+   *  which only gates on `cohort_route_count >= 2`. */
+  cohort_low_confidence?: boolean;
+  is_outlier?: boolean;
+};
+export type RouteStopProfileResponse = {
+  date: string | null;
+  stops: RouteStopProfileRow[];
+};
+
 export type ReportMeta = {
   report_type: ReportType;
   rendered_at: string;

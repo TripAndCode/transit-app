@@ -14,8 +14,8 @@ import type {
   AnonThread,
   AppendMessageResult,
   AskResponse,
-  Conversation,
   ConvMessage,
+  Conversation,
   FilterCtx,
   ForecastHeatmap,
   ForecastOverview,
@@ -29,9 +29,11 @@ import type {
   ReportMeta,
   ReportResponse,
   Route,
-  RoutesResponse,
   RouteShapeResponse,
+  RouteStopProfileResponse,
   RouteSummaryResponse,
+  RouteTripsResponse,
+  RoutesResponse,
   Suggestion,
   SuggestionEnvelope,
   WeatherDelayResponse,
@@ -253,6 +255,37 @@ export function useRouteShape(
       return apiGet<RouteShapeResponse>(`/api/${agencyId}/route-shape?${qs.toString()}`, { signal });
     },
     enabled: agencyId != null && !!route,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useRouteTrips(
+  agencyId: number | null,
+  routeCode: string | null,
+): UseQueryResult<RouteTripsResponse> {
+  return useQuery({
+    queryKey: ["route_trips", agencyId, routeCode],
+    queryFn: ({ signal }) =>
+      apiGet<RouteTripsResponse>(
+        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips`,
+        { signal },
+      ),
+    enabled: agencyId != null && !!routeCode,
+    staleTime: 60 * 1000,
+  });
+}
+export function useRouteStopProfile(
+  agencyId: number | null,
+  routeCode: string | null,
+): UseQueryResult<RouteStopProfileResponse> {
+  return useQuery({
+    queryKey: ["route_stop_profile", agencyId, routeCode],
+    queryFn: ({ signal }) =>
+      apiGet<RouteStopProfileResponse>(
+        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/stop-profile`,
+        { signal },
+      ),
+    enabled: agencyId != null && !!routeCode,
     staleTime: 60 * 1000,
   });
 }
