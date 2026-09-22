@@ -53,7 +53,7 @@ export function ClampSparkline({ days, label }: { days: AgencyClampDay[]; label:
           />
         ))}
       </svg>
-      <span style={{ fontSize: 11, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
+      <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
         {latest.toFixed(2)}%
       </span>
     </span>

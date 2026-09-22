@@ -12,6 +12,7 @@ import {
   type RtFieldCoverage,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
+import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
 import { ClampSparkline } from "./ClampSparkline";
 
@@ -23,7 +24,7 @@ function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        fontSize: 11,
+        fontSize: "var(--text-xs)",
         letterSpacing: "0.1em",
         textTransform: "uppercase",
         color: "var(--text-tertiary)",
@@ -61,11 +62,6 @@ function KeyValueGrid({ children }: { children: ReactNode }) {
   );
 }
 
-function formatTimestamp(iso: string | null): string {
-  if (!iso) return EM_DASH;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
-}
 
 /** Four distinct verdicts, not two: a field nobody has measured must not read
  *  the same as one a probe refuted, and an expired verdict is "unknown again",
@@ -250,7 +246,7 @@ function StandardsEditor({
           style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "end" }}
         >
           <label>
-            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: 11 }}>
+            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
               {t("admin.agency_diag.editor_route")}
             </span>
             <input
@@ -260,7 +256,7 @@ function StandardsEditor({
             />
           </label>
           <label>
-            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: 11 }}>
+            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
               {t("admin.agency_diag.editor_metric")}
             </span>
             <select
@@ -283,7 +279,7 @@ function StandardsEditor({
             ×
           </AdminButton>
           <label>
-            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: 11 }}>
+            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
               {t("admin.agency_diag.editor_threshold")}
             </span>
             <input
@@ -294,7 +290,7 @@ function StandardsEditor({
             />
           </label>
           <label>
-            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: 11 }}>
+            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
               {t("admin.agency_diag.editor_rate")}
             </span>
             <input
@@ -377,7 +373,7 @@ function WeightsEditor({
           style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "end" }}
         >
           <label>
-            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: 11 }}>
+            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
               {t("admin.agency_diag.editor_route")}
             </span>
             {d.route_code === null ? (
@@ -395,7 +391,7 @@ function WeightsEditor({
             )}
           </label>
           <label>
-            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: 11 }}>
+            <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
               {t("admin.agency_diag.editor_weight")}
             </span>
             <input
@@ -481,7 +477,7 @@ export function AgencyDiagnosticsDrawer({
               {data.ingest_strategy ?? EM_DASH}
             </KeyValue>
             <KeyValue label={t("admin.agency_diag.last_capture")}>
-              {formatTimestamp(data.last_capture_at)}
+              {formatDateTime(data.last_capture_at ?? "")}
             </KeyValue>
             <KeyValue label={t("admin.agency_diag.aggregation")}>
               <StatusChip tone={data.freshness === "fresh" ? "good" : data.freshness === "stale" ? "warn" : "neutral"}>
@@ -495,7 +491,7 @@ export function AgencyDiagnosticsDrawer({
           </KeyValueGrid>
 
           <SectionTitle>{t("admin.agency_diag.rt_section")}</SectionTitle>
-          <div style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
             {t("admin.agency_diag.rt_scope_note")}
           </div>
           <KeyValueGrid>
@@ -505,7 +501,7 @@ export function AgencyDiagnosticsDrawer({
                 <KeyValue key={name} label={name}>
                   <StatusChip tone={tone}>{t(`admin.agency_diag.${key}`)}</StatusChip>{" "}
                   {field.coverage_pct != null && (
-                    <span style={{ color: "var(--text-tertiary)", fontSize: 11.5 }}>
+                    <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
                       {t("admin.agency_diag.rt_detail", {
                         pct: field.coverage_pct,
                         samples: field.sample_size ?? 0,
@@ -649,7 +645,7 @@ export function AgencyDiagnosticsDrawer({
             pending={disablePending}
             onConfirm={() => onDisable(agency.agency_id)}
           />
-          <div style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
             {t("admin.agency_diag.purge_unavailable")}
           </div>
         </>

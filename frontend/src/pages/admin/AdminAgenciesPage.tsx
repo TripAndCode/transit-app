@@ -12,6 +12,7 @@ import {
   type AgencyHealthRow,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
+import { formatDateTime } from "../../utils/format";
 import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -211,11 +212,6 @@ function RtCoverageCell({ health }: { health?: AgencyHealthRow }) {
   );
 }
 
-function formatTimestamp(iso: string | null | undefined): string {
-  if (!iso) return EM_DASH;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
-}
 
 // ── Page ─────────────────────────────────────────────────────────────────
 
@@ -278,7 +274,7 @@ export function AdminAgenciesPage() {
       header: t("admin.agencies.col_last_capture"),
       render: (a) => (
         <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
-          {formatTimestamp(healthById.get(a.agency_id)?.last_capture_at)}
+          {formatDateTime(healthById.get(a.agency_id)?.last_capture_at ?? "")}
         </span>
       ),
     },
