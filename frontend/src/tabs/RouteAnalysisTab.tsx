@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteShape } from "../api/hooks";
 import { useRangeContext, isoDaysBefore } from "../api/rangeContext";
-import { useUrlState } from "../api/useUrlState";
+import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import type { RouteShapeStop } from "../api/types";
@@ -34,12 +34,12 @@ export function RouteAnalysisTab() {
   // stale `stop_seq` matching a different route's stop after the route
   // changes (the same invalidation the old `selection.route === route` check
   // did) -- both are cleared together in `setSelection`.
-  const [stopRouteParam, setStopRouteParam] = useUrlState<string>("stop_route", "");
-  const [stopSeqParam, setStopSeqParam] = useUrlState<string>("stop_seq", "");
+  const [stopRouteParam] = useUrlState<string>("stop_route", "");
+  const [stopSeqParam] = useUrlState<string>("stop_seq", "");
+  const patchUrl = useUrlPatch();
   const selection = stopRouteParam && stopSeqParam ? { route: stopRouteParam, sequence: Number(stopSeqParam) } : null;
   function setSelection(next: { route: string | null; sequence: number }) {
-    setStopRouteParam(next.route ?? "");
-    setStopSeqParam(String(next.sequence));
+    patchUrl({ stop_route: next.route, stop_seq: String(next.sequence) });
   }
   const [notice, setNotice] = useState("");
   const [activeTab, setActiveTab] = useUrlState<"map" | "trend" | "byStop">("sub_tab", "trend");
