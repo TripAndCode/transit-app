@@ -127,6 +127,33 @@ describe("BottomSheet", () => {
     expect(parseFloat(region.style.height)).toBeGreaterThan(SNAP_HEIGHT_VH.peek);
   });
 
+  it("treats a real flick as a fling, advancing a snap point past the nearest one", () => {
+    render(<Harness initial="peek" />);
+    const handle = grabHandle();
+
+    // ~250px up in ~60ms: a brisk thumb flick. It ends nearer peek than
+    // half, so only the fling branch can reach "half" from here.
+    pointer(handle, "pointerdown", 600);
+    pointer(handle, "pointermove", 350);
+    pointer(handle, "pointerup", 350);
+
+    expect(handle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("settles on the nearest snap point when dragged slowly rather than flicked", async () => {
+    render(<Harness initial="peek" />);
+    const handle = grabHandle();
+
+    // The same gesture shape, but taking long enough that it reads as
+    // positioning rather than a flick -- so it settles where it was let go.
+    pointer(handle, "pointerdown", 600);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    pointer(handle, "pointermove", 500);
+    pointer(handle, "pointerup", 500);
+
+    expect(handle).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("collapses from full to half on Escape, moving focus back to the handle", () => {
     render(<Harness initial="full" />);
     fireEvent.keyDown(document, { key: "Escape" });

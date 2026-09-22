@@ -86,6 +86,42 @@ describe("useFocusTrap", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("only lets the topmost of two concurrent traps act on Escape", async () => {
+    // Both traps listen on `document`, where stopPropagation does not reach
+    // a sibling listener -- so without a stack one Escape closes both.
+    function Nested({ onOuter, onInner }: { onOuter: () => void; onInner: () => void }) {
+      const [innerOpen, setInnerOpen] = useState(false);
+      const outerRef = useRef<HTMLDivElement>(null);
+      const innerRef = useRef<HTMLDivElement>(null);
+      useFocusTrap(true, outerRef, onOuter);
+      useFocusTrap(innerOpen, innerRef, onInner);
+      return (
+        <div>
+          <div ref={outerRef} tabIndex={-1}>
+            <button type="button" onClick={() => setInnerOpen(true)}>
+              open inner
+            </button>
+          </div>
+          {innerOpen && (
+            <div ref={innerRef} tabIndex={-1}>
+              <button type="button">inner content</button>
+            </div>
+          )}
+        </div>
+      );
+    }
+    const onOuter = vi.fn();
+    const onInner = vi.fn();
+    const user = userEvent.setup();
+    render(<Nested onOuter={onOuter} onInner={onInner} />);
+    await user.click(screen.getByText("open inner"));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onInner).toHaveBeenCalledTimes(1);
+    expect(onOuter).not.toHaveBeenCalled();
+  });
+
   it("locks the page behind it from scrolling, and restores it on deactivation", async () => {
     const user = userEvent.setup();
     document.body.style.overflow = "auto";

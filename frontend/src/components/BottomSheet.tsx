@@ -86,11 +86,13 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     if (!drag) return;
     const ratio = ratioFromClientY(e.clientY);
     const dt = Math.max(1, drag.lastTime - drag.startTime);
-    // Velocity in the same 0..1 ratio units as position, per millisecond --
-    // a positive dy (finger moved down) should read as a positive
-    // (peek-ward) velocity, matching nextSnap's sign convention.
-    const dyRatio = (drag.lastY - drag.startY) / (window.innerHeight || 1);
-    const velocity = dyRatio / dt;
+    // Velocity in the same units as position -- ratios of the peek-to-full
+    // travel, per second -- so FLING_VELOCITY is a speed on the same scale
+    // the sheet is measured in. A positive dy (finger moved down) reads as a
+    // positive (peek-ward) velocity, matching nextSnap's sign convention.
+    const travelPx = (window.innerHeight || 1) * ((SNAP_HEIGHT_VH.full - SNAP_HEIGHT_VH.peek) / 100);
+    const dyRatio = (drag.lastY - drag.startY) / travelPx;
+    const velocity = (dyRatio / dt) * 1000;
     setDragRatio(null);
     onSnapChange(nextSnap(ratio, velocity));
   }

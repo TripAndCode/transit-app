@@ -365,13 +365,16 @@
   .focused-overview .ops-map { position: absolute; inset: 0; height: 100%; }
   .ops-resizer { display: none; }
   .ops-map-ref__legend { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  /* The map fills the whole workspace here, so the transport and the sheet
-     hug the same bottom edge and would otherwise overlap at the sheet's
-     resting height. The 14vh mirrors SNAP_HEIGHT_VH.peek in
-     bottomSheetSnap.ts (tokens.test.ts fails if the two drift): clearing
-     peek keeps both usable, and dragging the sheet up past peek
-     deliberately trades the transport away. */
-  .ops-playback { bottom: calc(14vh + 8px); }
+  /* The map fills the whole workspace here, so every piece of bottom-anchored
+     map chrome shares an edge with the sheet -- and the same z-index rung, so
+     the later-painted sheet wins. Each keeps its own offset but measures it
+     from the sheet's resting top rather than the viewport bottom. The 14vh
+     mirrors SNAP_HEIGHT_VH.peek in bottomSheetSnap.ts (tokens.test.ts fails
+     if they drift); dragging the sheet above peek deliberately trades this
+     chrome away for queue height. */
+  .ops-map-fit { bottom: calc(14vh + 44px); }
+  .ops-style-control { bottom: calc(14vh + 28px); }
+  .ops-playback { bottom: calc(14vh + 12px); }
 }
 
 /* Layered over the map rather than a sibling column: the map already fills

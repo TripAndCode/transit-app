@@ -21,10 +21,17 @@ export const SNAP_RATIO: Record<SnapPoint, number> = Object.fromEntries(
   ]),
 ) as Record<SnapPoint, number>;
 
-/** A fast flick, in the drag's own normalized ratio-per-millisecond units,
+/** A fast flick, in the drag's own normalized ratio-per-*second* units,
  *  strong enough to move the sheet one snap point regardless of where the
  *  pointer let go. Below this, the release just settles on whichever snap
- *  point the current position is closest to. */
+ *  point the current position is closest to.
+ *
+ *  Per second, not per millisecond: at this scale a threshold has to be a
+ *  speed a thumb can actually reach. 0.6 means crossing 60% of the
+ *  peek-to-full travel in a second -- brisk for a deliberate flick, far
+ *  above a drag that is being positioned by hand. The same number read as
+ *  ratio-per-millisecond would demand the whole range in under two
+ *  milliseconds, which no gesture reaches. */
 const FLING_VELOCITY = 0.6;
 
 export function clampRatio(ratio: number): number {
