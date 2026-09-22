@@ -471,7 +471,7 @@ summary:focus-visible,
   position: absolute;
   top: 100%;
   right: 0;
-  z-index: 40;
+  z-index: var(--z-dropdown);
   margin-top: 6px;
   min-width: 180px;
   display: flex;
@@ -490,7 +490,7 @@ summary:focus-visible,
   border: 0;
   background: none;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   text-align: left;
   border-radius: var(--radius);
   cursor: pointer;
@@ -507,7 +507,7 @@ summary:focus-visible,
   position: absolute;
   top: 100%;
   right: 0;
-  z-index: 40;
+  z-index: var(--z-dropdown);
   margin-top: 6px;
   padding: 10px;
   background: var(--bg-surface);
