@@ -7,6 +7,7 @@ import rehypeSlug from "rehype-slug";
 import { ApiError } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { SidebarNavList } from "../components/SidebarNavList";
+import { PageHeader } from "../components/ui/PageHeader";
 
 const MANUAL_BASE = "/user-manual";
 
@@ -234,7 +235,7 @@ export function HelpPage() {
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 0 64px" }}>
-      <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("help.title")}</h1>
+      <PageHeader title={t("help.title")} />
       <input
         type="search"
         placeholder={t("help.search_placeholder")}

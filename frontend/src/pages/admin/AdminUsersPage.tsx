@@ -6,6 +6,7 @@ import { useSession } from "../../api/auth";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { pageItems } from "./pageItems";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -145,7 +146,7 @@ export function AdminUsersPage() {
 
   return (
     <div style={{ padding: 24 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("admin.users.title")}</h1>
+      <PageHeader title={t("admin.users.title")} />
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <AdminUserSearchBox
           q={q}
