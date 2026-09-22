@@ -6,7 +6,7 @@ Pure-logic only — no ClickHouse and no Postgres. The SQL is asserted as text
 asserted against mocked rows.
 """
 
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -23,6 +23,7 @@ from pipeline.reports.timeline import (
     build_frames,
     build_timeline_ch_sql,
     fold_stop_buckets,
+    playback_day_for,
 )
 
 
@@ -80,6 +81,34 @@ def test_bucket_of_maps_a_schedule_second_into_the_window(scheduled_sec, step, e
 
 
 # ── rendered SQL ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("captured", "expected"),
+    [
+        # Inside the window: the stamped date is the service day.
+        (datetime(2026, 3, 4, 8, 30), date(2026, 3, 4)),
+        (datetime(2026, 3, 4, 23, 59, 59), date(2026, 3, 4)),
+        # Exactly when the window opens -- the new day owns it.
+        (datetime(2026, 3, 4, 5, 0, 0), date(2026, 3, 4)),
+        # After midnight but before it opens: a late run still belongs to
+        # the day that is finishing, whose rail actually has data.
+        (datetime(2026, 3, 4, 0, 5), date(2026, 3, 3)),
+        (datetime(2026, 3, 4, 4, 59, 59), date(2026, 3, 3)),
+        # Across a month boundary, so the rollback is a real date subtraction.
+        (datetime(2026, 3, 1, 0, 20), date(2026, 2, 28)),
+    ],
+)
+def test_playback_day_rolls_back_before_the_window_opens(captured, expected):
+    assert playback_day_for(captured) == expected
+
+
+def test_timeline_sql_orders_before_truncating_to_the_row_guard():
+    """An unordered LIMIT would keep an arbitrary slice that can differ
+    between two recomputes of the very same day."""
+    sql, _ = build_timeline_ch_sql(_ctx(), 60)
+    assert "ORDER BY samples DESC" in sql
+    assert sql.index("ORDER BY samples DESC") < sql.index("LIMIT {tl_max_rows:UInt32}")
 
 
 def test_timeline_sql_reads_the_shared_dedup_cte_and_buckets_by_scheduled_sec():

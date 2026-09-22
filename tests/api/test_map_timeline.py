@@ -14,6 +14,7 @@ from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
 from pipeline import cache
+from pipeline.reports.timeline import bucket_label, bucket_of
 from tests.conftest import _test_pool
 
 _DAY = date(2026, 3, 4)
@@ -143,8 +144,15 @@ async def test_timeline_places_an_observed_stop_in_its_scheduled_bucket(timeline
 
     resp = await client.get(f"/api/{agency_id}/delays/timeline?date={_DAY.isoformat()}")
     frames = {f["t"]: f for f in resp.json()["frames"]}
-    assert [p["stop_id"] for p in frames["08:00"]["points"]] == ["S1"]
-    point = frames["08:00"]["points"][0]
+    # Expected bucket comes from `bucket_of`, not a literal: that helper and
+    # the SQL's own intDiv are two spellings of one rule, and this is where
+    # they are held to each other.
+    scheduled_bucket = bucket_of(8 * 3600, 60)
+    assert scheduled_bucket is not None
+    label = bucket_label(scheduled_bucket, 60)
+    assert label == "08:00"
+    assert [p["stop_id"] for p in frames[label]["points"]] == ["S1"]
+    point = frames[label]["points"][0]
     assert point["avg_delay_min"] == 2.0
     assert point["samples"] == 3
     assert point["lon"] == 140.7 and point["lat"] == 40.8

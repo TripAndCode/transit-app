@@ -49,7 +49,7 @@ from api.range import (
 from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.reports.map import compute_route_shape, route_exists
-from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline
+from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
 
 _log = logging.getLogger(__name__)
 
@@ -1181,7 +1181,7 @@ async def delay_timeline(
 
     if date_ is None:
         latest = await max_captured_at(ch, agency_id)
-        day = latest.astimezone(ZoneInfo("Asia/Tokyo")).date() if latest is not None else jst_today()
+        day = playback_day_for(latest.astimezone(ZoneInfo("Asia/Tokyo"))) if latest is not None else jst_today()
     else:
         parsed = parse_iso_date(date_)
         if parsed is None:

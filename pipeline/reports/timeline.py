@@ -17,7 +17,7 @@ the same split `api.routers.map.route_stop_profile` already uses.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -69,6 +69,21 @@ def bucket_label(index: int, step_minutes: int) -> str:
     return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}"
 
 
+def playback_day_for(latest_local: datetime) -> date:
+    """The service day whose rail a caller who named no date should get.
+
+    The window opens at ``PLAYBACK_START_SEC``, so a capture landing after
+    local midnight but before then belongs to the service day that is still
+    finishing, not to the calendar date it is stamped with -- that date's
+    own window has not opened, and resolving to it returns a rail whose
+    every frame is empty.
+    """
+    second_of_day = latest_local.hour * 3600 + latest_local.minute * 60 + latest_local.second
+    if second_of_day < PLAYBACK_START_SEC:
+        return latest_local.date() - timedelta(days=1)
+    return latest_local.date()
+
+
 def bucket_of(scheduled_sec: int | None, step_minutes: int) -> int | None:
     """Frame index for a schedule second, or ``None`` when it is off the rail."""
     if scheduled_sec is None:
@@ -115,6 +130,13 @@ def build_timeline_ch_sql(ctx: RangeCtx, step_minutes: int) -> tuple[str, dict]:
         "WHERE scheduled_sec IS NOT NULL "
         "AND scheduled_sec >= {tl_start_sec:UInt32} AND scheduled_sec < {tl_end_sec:UInt32} "
         "GROUP BY bucket, trip_id, stop_sequence "
+        # The cap is a guard against a pathological day, not an expected
+        # path, but an unordered LIMIT would truncate to whatever the engine
+        # emitted first -- a different arbitrary slice of the same day on
+        # each cache-cold recompute. Ordering by evidence keeps the kept
+        # subset both deterministic and the most-observed one, matching what
+        # the per-frame cap in `build_frames` does.
+        "ORDER BY samples DESC, bucket, trip_id, stop_sequence "
         "LIMIT {tl_max_rows:UInt32}"
     )
     return sql, params
@@ -181,7 +203,8 @@ def build_frames(
                 "lat": geo["lat"],
                 "avg_delay_min": _round2(delay_sum / samples / 60),
                 "samples": samples,
-                # Kept out of the payload; only the cap reads it.
+                # Popped once the frame's points are final, to weight the frame mean
+                # by samples. Not what the per-frame cap sorts on -- that reads `samples`.
                 "_delay_sum": delay_sum,
             }
         )
