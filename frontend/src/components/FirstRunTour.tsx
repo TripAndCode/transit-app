@@ -53,6 +53,11 @@ export function FirstRunTour() {
     // re-asserting the attribute on an unrelated re-render would hide a
     // panel that is already placed, until the next tick moved it back.
     panel.hidden = true;
+    // Focus moves on the transition into view, not at mount: an anchor the
+    // dashboard has not finished fetching yet is the case the retry poll
+    // exists for, and a panel that appears three ticks later still has to
+    // announce itself. Once per step -- a reposition is not a new arrival.
+    let announced = false;
     function place() {
       // A poll that forces layout on a tab nobody is looking at buys
       // nothing; the anchor cannot have moved under the visitor.
@@ -72,12 +77,15 @@ export function FirstRunTour() {
       panel.style.top = `${pos.top}px`;
       panel.dataset.placement = pos.placement;
       panel.hidden = false;
+      if (!announced) {
+        announced = true;
+        // Captured before the panel takes focus, so dismissing returns the
+        // visitor to what they were on rather than the tour's own button.
+        previouslyFocused.current ??= document.activeElement as HTMLElement | null;
+        panel.querySelector<HTMLElement>("button")?.focus();
+      }
     }
     place();
-    if (!panel.hidden) {
-      previouslyFocused.current ??= document.activeElement as HTMLElement | null;
-      panel.querySelector<HTMLElement>("button")?.focus();
-    }
     const intervalId = window.setInterval(place, FIND_RETRY_MS);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);

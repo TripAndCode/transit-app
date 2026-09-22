@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
@@ -29,6 +29,12 @@ describe("FirstRunTour", () => {
   beforeEach(() => {
     localStorage.clear();
     resetTourSeenMemoryForTests();
+  });
+
+  // One test makes storage throw; without this every later test inherits it
+  // and sees an "unavailable" store, which now suppresses the tour.
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("does not render once the tour has already been seen", () => {
@@ -104,5 +110,33 @@ describe("FirstRunTour", () => {
     });
     renderTourWithAnchors();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // The anchor arriving late is what the retry poll is for, so it is also
+  // the case the focus cue has to survive -- the panel appears on screen
+  // several ticks after mount.
+  it("moves focus when the anchor only appears after mounting", async () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(
+        <I18nextProvider i18n={i18n}>
+          <FirstRunTour />
+        </I18nextProvider>,
+      );
+      const panel = document.querySelector<HTMLElement>(".first-run-tour");
+      expect(panel?.hidden).toBe(true);
+
+      const anchor = document.createElement("div");
+      anchor.setAttribute("data-tour", "filter-bar");
+      container.appendChild(anchor);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+      });
+
+      expect(panel?.hidden).toBe(false);
+      expect(panel?.contains(document.activeElement)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
