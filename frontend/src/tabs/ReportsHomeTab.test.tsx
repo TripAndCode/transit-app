@@ -74,3 +74,30 @@ describe("ReportsHomeTab", () => {
     ).toBeInTheDocument();
   });
 });
+
+function renderRecoveryTab(path: string) {
+  vi.spyOn(hooks, "useReport").mockReturnValue({ data: trendResponse(), isPending: false, error: null, refetch: vi.fn() } as never);
+  vi.spyOn(hooks, "useAgencies").mockReturnValue({
+    data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
+    isPending: false,
+  } as never);
+  renderWithProviders(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/agencies/:agencyId/reports" element={<ReportsHomeTab />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("ReportsHomeTab empty state recoveries", () => {
+  it("offers a jump-to-latest-data recovery for an empty trend/ranking report", () => {
+    renderRecoveryTab("/agencies/8/reports?from=2020-01-01&to=2020-01-07");
+    expect(screen.getAllByRole("button", { name: "Jump to the latest data" }).length).toBeGreaterThan(0);
+  });
+
+  it("offers a clear-routes recovery when routes are scoped", () => {
+    renderRecoveryTab("/agencies/8/reports?from=2020-01-01&to=2020-01-07&routes=A05");
+    expect(screen.getAllByRole("button", { name: "Clear the route filter" }).length).toBeGreaterThan(0);
+  });
+});

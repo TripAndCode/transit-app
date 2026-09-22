@@ -125,7 +125,7 @@ function ResultTable({
                         : cell == null
                           ? "—"
                           : typeof cell === "number"
-                            ? cell.toLocaleString()
+                            ? formatNumber(cell)
                             : String(cell)}
                 </td>
               ))}

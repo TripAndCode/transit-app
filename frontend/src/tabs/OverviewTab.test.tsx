@@ -24,11 +24,16 @@ function SearchProbe() {
   return <span data-testid="search">{params.toString()}</span>;
 }
 
-function renderOverview(data: OverviewSummary) {
+function renderOverview(data: OverviewSummary, path = "/agencies/8/overview?from=2030-01-01&to=2030-01-07") {
   vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data, isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
+  // The jump-to-latest-data recovery reads the agency's latest_data_date.
+  vi.spyOn(hooks, "useAgencies").mockReturnValue({
+    data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
+    isPending: false,
+  } as never);
   renderWithProviders(
-    <MemoryRouter initialEntries={["/agencies/8/overview?from=2030-01-01&to=2030-01-07"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/agencies/:agencyId/overview" element={<><OverviewTab /><SearchProbe /></>} />
       </Routes>
@@ -110,5 +115,21 @@ describe("OverviewTab", () => {
     // Progressively revealed, not gated behind a disclosure widget.
     expect(document.querySelector("details")).not.toBeInTheDocument();
     expect(document.querySelector("summary")).not.toBeInTheDocument();
+  });
+
+  it("offers a clear-routes recovery when the empty result is scoped to specific routes", () => {
+    renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07&routes=A05");
+    expect(screen.getByRole("button", { name: "Clear the route filter" })).toBeInTheDocument();
+  });
+
+  it("offers a jump-to-latest-data recovery when the agency has data outside this window", () => {
+    renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07");
+    expect(screen.getByRole("button", { name: "Jump to the latest data" })).toBeInTheDocument();
+  });
+
+  it("offers no recoveries beyond the jump when nothing is filtered", () => {
+    renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07");
+    expect(screen.queryByRole("button", { name: "Clear the route filter" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reset service type to all" })).not.toBeInTheDocument();
   });
 });

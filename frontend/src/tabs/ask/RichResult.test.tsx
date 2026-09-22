@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -170,7 +171,12 @@ describe("RichResult evidence card", () => {
   it("exports the chart as PNG locally for the export_png chip, without requiring onChip", async () => {
     const chartPng = await import("./chartPng");
     const spy = vi.spyOn(chartPng, "exportSvgAsPng").mockImplementation(() => {});
-    renderWithProviders(<Wrapper result={seriesResult} tool="time_series" />);
+    // DailyChart reads the shared range context, which needs a router.
+    renderWithProviders(
+      <MemoryRouter>
+        <Wrapper result={seriesResult} tool="time_series" />
+      </MemoryRouter>,
+    );
     const chip = screen.getByRole("button", { name: t("ask.evidence.chip.export_png") });
     await userEvent.click(chip);
     expect(spy).toHaveBeenCalledTimes(1);
