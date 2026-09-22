@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { TFunction } from "i18next";
 import type { Map as MLMap } from "maplibre-gl";
 import { buildThumbnailUrl, DEFAULT_THUMBNAIL_VIEW, MAP_STYLES, MAX_DIM_AMOUNT, type MapStyleId } from "../../styles/mapStyle";
@@ -57,15 +57,20 @@ export function MapStyleControl({
 
   // Reads the map's current view (an imperative MapLibre instance, not React
   // state) so a thumbnail reflects where the operator is actually looking
-  // rather than a fixed reference tile. Re-synced on open rather than on
-  // every pan/zoom, so the three non-current style tiles are only ever
-  // fetched — not just rendered — while the switcher is actually expanded.
-  useEffect(() => {
+  // rather than a fixed reference tile. Sampled here, as the panel opens,
+  // rather than in an effect afterwards: both updates batch into the commit
+  // that first shows the tiles, so they never render once at the previous
+  // view and immediately refetch at the current one. Not resampled on pan,
+  // so the non-current style tiles are only fetched while actually expanded.
+  function toggleOpen() {
+    const opening = !open;
     const map = mapRef?.current;
-    if (!map) return;
-    const center = map.getCenter();
-    setView({ lng: center.lng, lat: center.lat, zoom: map.getZoom() });
-  }, [open, mapRef]);
+    if (opening && map) {
+      const center = map.getCenter();
+      setView({ lng: center.lng, lat: center.lat, zoom: map.getZoom() });
+    }
+    setOpen(opening);
+  }
 
   const dimPercent = Math.round(dimAmount * 100);
   const maxDimPercent = Math.round(MAX_DIM_AMOUNT * 100);
@@ -78,7 +83,7 @@ export function MapStyleControl({
         className="ops-style-control__entry map-chrome"
         aria-label={t("map.style.label")}
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
       >
         <img
           src={buildThumbnailUrl(current.id, lang, view)}
