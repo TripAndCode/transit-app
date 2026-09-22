@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -149,7 +149,15 @@ describe("NetworkTab", () => {
       "href",
       "/agencies/7/operations?from=2026-04-01&to=2026-04-07",
     );
-    expect(link).toHaveAttribute("title", "View Hiroden overview");
+    // The description moved off `title` and onto the Tooltip primitive, which
+    // shows on focus as well as hover and is wired as aria-describedby.
+    expect(link).not.toHaveAttribute("title");
+    act(() => {
+      fireEvent.focus(link);
+    });
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveTextContent("View Hiroden overview");
+    expect(link.getAttribute("aria-describedby")).toBe(tip.id);
   });
 
   it("renders the empty message and no agency cards when there are no agencies", () => {

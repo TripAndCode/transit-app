@@ -434,3 +434,36 @@ describe("surfaceColorResolved()", () => {
     expect(surfaceColorResolved()).toBe("#141726");
   });
 });
+
+describe("route-enter animation", () => {
+  it("is declared once, inside a motion-allowed block, reusing the shared fade keyframes", () => {
+    // Nothing outside a no-preference block may define it: the class is
+    // applied unconditionally by RouteTransition, so the media query is the
+    // only thing standing between it and a reduced-motion user.
+    const allowed = [...globalCss.matchAll(/@media \(prefers-reduced-motion: no-preference\)/g)]
+      .map((m) => ruleBody(globalCss.slice(m.index), "@media (prefers-reduced-motion: no-preference)"))
+      .filter((block) => block.includes(".route-enter"));
+
+    expect(globalCss.match(/\.route-enter/g)).toHaveLength(1);
+    expect(allowed).toHaveLength(1);
+    expect(decl(ruleBody(allowed[0], ".route-enter"), "animation")).toBe(
+      "ov-fade-in var(--dur-2) var(--ease-out)",
+    );
+  });
+});
+
+describe("tooltip surface", () => {
+  it("no longer ships the CSS-only .tip pseudo-element tooltip", () => {
+    expect(globalCss).not.toContain("content: attr(data-tip)");
+    expect(globalCss).not.toContain(".tip--below");
+  });
+
+  it("paints the Tooltip primitive from the tooltip and elevation tokens", () => {
+    const tooltipBlock = ruleBody(globalCss, ".tooltip {");
+    expect(decl(tooltipBlock, "background")).toBe("var(--tooltip-bg)");
+    expect(decl(tooltipBlock, "color")).toBe("var(--tooltip-fg)");
+    expect(decl(tooltipBlock, "box-shadow")).toBe("var(--el-2)");
+    expect(decl(tooltipBlock, "pointer-events")).toBe("none");
+    expect(decl(tooltipBlock, "position")).toBe("fixed");
+  });
+});

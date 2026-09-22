@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Download, Maximize2, RefreshCw } from "lucide-react";
 import { FilterDock } from "./map/FilterDock";
 import { downloadCsv } from "../components/analysis/csv";
+import { Tooltip } from "../components/Tooltip";
 import "../styles/focusedAnalysis.css";
 import "./map/focusedOverview.css";
 import maplibregl, { Map as MLMap, Popup } from "maplibre-gl";
@@ -471,15 +472,16 @@ export function MapTab() {
               located trip a press is indistinguishable from a broken button.
               The tooltip carries the part the label can't -- that this moves
               the map and changes nothing about which trips are shown. */}
-          <button
-            type="button"
-            className="ops-map-fit tip"
-            data-tip={t("operations.map.fit_all_hint")}
-            onClick={fitAllTrips}
-            disabled={locatedTrips === 0}
-          >
-            <Maximize2 size={14} />{t("operations.map.fit_all")}
-          </button>
+          <Tooltip label={t("operations.map.fit_all_hint")}>
+            <button
+              type="button"
+              className="ops-map-fit"
+              onClick={fitAllTrips}
+              disabled={locatedTrips === 0}
+            >
+              <Maximize2 size={14} />{t("operations.map.fit_all")}
+            </button>
+          </Tooltip>
         </section>
 
         <QueueResizer width={queueWidth} label={td("resizeQueue")} onWidth={setQueueWidth} onCommit={storeQueueWidth} />
