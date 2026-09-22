@@ -545,15 +545,6 @@ summary::-webkit-details-marker { display: none; }
   }
 }
 
-/* MapLibre's popup override rules (.maplibregl-popup-content etc.) live in
-   src/tabs/map/mapOverrides.css now, imported from MapTab.tsx right after
-   maplibre-gl's own CSS — same lazy chunk, so import order (and therefore
-   cascade order against MapLibre's hardcoded-white defaults) is reliable.
-   They used to live here because main.tsx imported maplibre-gl.css before
-   this file; once MapLibre's CSS moved to MapTab's lazy chunk (to keep it
-   out of the entry chunk), staying here would load AFTER MapLibre's own
-   stylesheet with equal specificity and silently lose the cascade. */
-
 /* HelpPage renders the user manual (a fetched .md asset) via react-markdown,
    which emits bare h1-h6/p/ul/table/blockquote/img with no styling of their
    own -- give them the same tokens the rest of the app uses instead of

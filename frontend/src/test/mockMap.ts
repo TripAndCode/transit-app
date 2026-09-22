@@ -80,7 +80,11 @@ export function makeMockMap(
       map.fire("idle");
     },
     flyTo: () => {},
+    jumpTo: () => {},
     fitBounds: () => {},
+    // Undefined is a real MapLibre return -- bounds it cannot frame -- so
+    // callers already handle it and the stub takes that branch.
+    cameraForBounds: () => undefined,
   };
   return map;
 }
