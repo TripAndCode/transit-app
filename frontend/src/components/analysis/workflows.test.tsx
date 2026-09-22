@@ -39,6 +39,9 @@ vi.mock("../../api/hooks", () => ({
     { route_id: "b", route_code: "999", route_long_name: "Coast", route_short_name: "9", trip_headsigns: [] },
   ], isPending: false }),
   useAgencies: () => ({ data: [{ agency_id: 1, agency_name: "Test Agency" }] }),
+  // RouteAnalysisTab's new time-distance tab reads this; the mock is complete,
+  // so an omitted hook is `undefined` at call time rather than the real one.
+  useRouteTrips: vi.fn(() => ({ data: { date: "2026-09-12", time_band: "morning", truncated: false, trips: [] }, isPending: false })),
   useRouteShape: vi.fn(() => ({ data: { route: "101", geometry: null, stops: [{ stop_id: "A", stop_sequence: 1, stop_name: "Station A", lon: 140, lat: 40, avg_min: 2, samples: 5 }] }, isPending: false })),
   useReport: vi.fn((_id, type) => ({ data: type ? { report_type: type, definition: {}, rows: type === "trend" ? [{ days: [{ date: "2026-09-07", avg_min: 2, samples: 4 }] }] : [["101", null, 2, 1, 3, 4]] } : undefined, isPending: false })),
 }));

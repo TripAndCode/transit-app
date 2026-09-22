@@ -1,3 +1,5 @@
+import type { TimeBand } from "./rangeContext";
+
 export type Agency = {
   agency_id: number;
   agency_name: string;
@@ -187,15 +189,37 @@ export type ReportType =
   | "council_summary"
   | "delay_certificate";
 
+/** One observed stop of one trip, as a point on a time-distance diagram. */
+export type RouteTripStop = {
+  stop_id: string | null;
+  stop_sequence: number;
+  /** Seconds since the service day's 00:00, not a clock string: a GTFS
+   *  post-midnight continuation (25:30) has no same-day "HH:MM" form, and a
+   *  time axis needs a number anyway. Null when the row carries no usable
+   *  scheduled time. */
+  scheduled_sec: number | null;
+  /** `scheduled_sec + delay_sec`; null whenever `scheduled_sec` is. */
+  observed_sec: number | null;
+  delay_sec: number;
+};
+
 export type RouteTrip = {
   trip_id: string;
   scheduled_time: string | null;
   headsign: string | null;
   avg_delay_sec: number;
   samples: number;
+  /** Ordered by stop_sequence — this is the drawing order of the trip's
+   *  polyline in the Marey diagram. */
+  stops: RouteTripStop[];
 };
+
 export type RouteTripsResponse = {
   date: string | null;
+  time_band: TimeBand;
+  /** True when the route ran more trips than the endpoint will return and the
+   *  least-delayed tail was dropped. */
+  truncated: boolean;
   trips: RouteTrip[];
 };
 export type RouteStopProfileRow = {

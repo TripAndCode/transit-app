@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useRouteShape } from "../api/hooks";
+import { useRouteShape, useRouteTrips } from "../api/hooks";
 import { useRangeContext, isoDaysBefore } from "../api/rangeContext";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
@@ -11,6 +11,8 @@ import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { AnalysisMap } from "../components/analysis/AnalysisMap";
+import { MareyDiagram } from "../components/charts/MareyDiagram";
+import { SkeletonChart } from "../components/Skeleton";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { AsyncSection } from "../components/AsyncSection";
@@ -42,8 +44,19 @@ export function RouteAnalysisTab() {
     patchUrl({ stop_route: next.route, stop_seq: String(next.sequence) });
   }
   const [notice, setNotice] = useState("");
-  const [activeTab, setActiveTab] = useUrlState<"map" | "trend" | "byStop">("sub_tab", "trend");
+  const [activeTab, setActiveTab] = useUrlState<"map" | "trend" | "marey" | "byStop">("sub_tab", "trend");
   const [mapVisited, setMapVisited] = useState(false);
+  // No `date`: the server answers for the route's own latest observed day.
+  // The range filter's end date is routinely a day this route did not run, and
+  // a diagram of nothing teaches nothing.
+  const trips = useRouteTrips(id, route, { timeBand: ctx.time_band });
+  // The ghost week can only be asked for once the current day is known, since
+  // it is that day minus seven, not the filter's end date minus seven.
+  const ghostDate = compare && trips.data?.date ? isoDaysBefore(trips.data.date, 7) : null;
+  const previousTrips = useRouteTrips(id, ghostDate ? route : null, {
+    date: ghostDate,
+    timeBand: ctx.time_band,
+  });
   const stops = query.data ? orderedStops(query.data) : [];
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? stops.find((s) => s.avg_min != null) ?? stops[0];
@@ -76,6 +89,7 @@ export function RouteAnalysisTab() {
         {compare && !previous.isPending && !previous.error && !prevStops.length && <p>{t("compareUnavailable")}</p>}
         <div className="focus-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={activeTab === "trend"} onClick={() => setActiveTab("trend")}>{t("tabTrend")}</button>
+          <button type="button" role="tab" aria-selected={activeTab === "marey"} onClick={() => setActiveTab("marey")}>{t("tabMarey")}</button>
           <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => { setActiveTab("map"); setMapVisited(true); }}>{t("tabMap")}</button>
           <button type="button" role="tab" aria-selected={activeTab === "byStop"} onClick={() => setActiveTab("byStop")}>{t("tabByStop")}</button>
         </div>
@@ -85,6 +99,11 @@ export function RouteAnalysisTab() {
               <div className="focus-actions focus-muted"><span style={{ color: "var(--accent)" }}>● {t("selected")}</span>{compare && <span>┄ {t("previous")}</span>}<span>○ {t("missing")}</span></div>
               <StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
               <p className="focus-muted">{t("selected")} {ctx.from} – {ctx.to}{compare && ` · ${t("previous")} ${prevCtx.from} – ${prevCtx.to}`}</p>
+            </div>}
+            {activeTab === "marey" && <div className="focus-tab-panel">
+              <AsyncSection loading={trips.isPending} error={trips.error} onRetry={() => void trips.refetch()} data={trips.data} hasContent={(d) => d.trips.length > 0} empty={<EmptyState title={t("empty")} />} skeleton={<SkeletonChart height={320} />}>
+                {(d) => <MareyDiagram trips={d.trips} previousTrips={previousTrips.data?.trips ?? []} axis={stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }))} band={ctx.time_band} truncated={d.truncated} date={d.date} />}
+              </AsyncSection>
             </div>}
             {mapVisited && <div className={`focus-tab-panel${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`}>
               <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} />
