@@ -149,16 +149,14 @@ export function Sidebar() {
   const suffix = filterQS ? `?${filterQS}` : "";
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Narrow-viewport drawer: below 640px (the shared MOBILE_BREAKPOINT_QUERY)
-  // the desktop rail's fixed 230/64px width would otherwise eat most of a
-  // ~390px phone screen, leaving almost no room for tab content. isMobile
-  // conditionally renders only the active variant instead of always
-  // mounting both and toggling visibility via CSS `display`, which used to
-  // double the nav's DOM nodes/listeners at every viewport width. The
-  // drawer body itself is additionally only mounted while open (on top of
-  // the desktop/mobile split), so the common case (drawer closed) doesn't
-  // duplicate every nav label/link in the DOM and break single-match
-  // queries in tests or a11y tooling.
+  // Below 640px (the shared MOBILE_BREAKPOINT_QUERY) the desktop rail's
+  // fixed 230/64px width would eat most of a ~390px phone screen, leaving
+  // almost no room for tab content. isMobile renders only the active
+  // variant rather than mounting both and hiding one with CSS `display`,
+  // which would double the nav's DOM nodes and listeners at every width.
+  // The four destinations live in the persistent tab bar on mobile; only
+  // the "more" sheet is mounted on demand, so its contents cannot break a
+  // single-match query while it is closed.
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   // Below BP.sm the rail's nav links move into a persistent bottom tab bar
   // (thumb-reachable, and it gives the tab content back the width the rail
@@ -489,7 +487,12 @@ export function Sidebar() {
             right: 0,
             bottom: 0,
             left: 0,
-            zIndex: Z_INDEX.drawer,
+            // Persistent chrome, so it stays under every overlay rung rather
+            // than sharing `drawer` with the sheet it opens. Above the
+            // drawer backdrop the tabs would stay tappable while MoreSheet
+            // claims `aria-modal`, and a tab press would route away leaving
+            // the backdrop and the focus trap mounted over the new page.
+            zIndex: Z_INDEX.sticky,
             height: MOBILE_TABBAR_HEIGHT_PX,
             display: "flex",
             alignItems: "stretch",

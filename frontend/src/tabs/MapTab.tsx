@@ -500,7 +500,7 @@ export function MapTab() {
   // trips.
   const queueContent = (
     <>
-          <h2>{td("attention")}</h2>
+          <h2 className="focus-queue-title">{td("attention")}</h2>
           {/* The only live reading of these counts on the screen. Repeating
               them next to the filters invited the reader to check whether the
               two agreed instead of reading either; staleness likewise reads
@@ -529,7 +529,7 @@ export function MapTab() {
           )}
           {/* FirstRunTour.tsx's second coach mark anchors here -- the panel
               where an observed trip is actually inspected. */}
-          <details data-tour="map-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
+          <details className="focus-queue-inspect" data-tour="map-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
           routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
           activeRoutes={activeRouteOptions}
           directions={directions}

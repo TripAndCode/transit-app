@@ -284,6 +284,19 @@ describe("Sidebar", () => {
       expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
       expect(screen.queryByRole("dialog")).toBeNull();
     });
+
+    it("stacks under the sheet's backdrop, so an aria-modal sheet is genuinely modal", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+      await user.click(screen.getByRole("button", { name: "More" }));
+
+      const backdrop = Number(screen.getByRole("presentation").style.zIndex);
+      // A tab bar above the backdrop stays tappable while the sheet claims
+      // `aria-modal`, and the route change it causes leaves the backdrop and
+      // the focus trap mounted over the page that replaced it.
+      expect(Number(nav.style.zIndex)).toBeLessThan(backdrop);
+    });
   });
 
   describe("mobile more sheet", () => {

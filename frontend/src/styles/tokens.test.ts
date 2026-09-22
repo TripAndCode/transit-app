@@ -524,3 +524,39 @@ describe("tooltip surface", () => {
     expect(decl(tooltipBlock, "position")).toBe("fixed");
   });
 });
+
+// The tab bar's height is a number in Sidebar.tsx (it positions the More
+// sheet above the bar) and a length in global.css (it reserves the same
+// space under the routed content). Edited in one place only, the bar either
+// overlaps the content or leaves a gap, and nothing else notices.
+describe("mobile tab bar height", () => {
+  it("is the same value in Sidebar.tsx and global.css", () => {
+    const ts = readFileSync(resolve(process.cwd(), "src/components/Sidebar.tsx"), "utf8");
+    const fromTs = ts.match(/const MOBILE_TABBAR_HEIGHT_PX = (\d+);/)?.[1];
+    expect(fromTs, "MOBILE_TABBAR_HEIGHT_PX not found in Sidebar.tsx").toBeDefined();
+
+    const css = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8");
+    const fromCss = css.match(/\.app-main \{ padding-bottom: calc\((\d+)px \+ env\(safe-area-inset-bottom\)\)/)?.[1];
+    expect(fromCss, "the .app-main mobile padding rule was not found").toBeDefined();
+
+    expect(fromCss).toBe(fromTs);
+  });
+});
+
+// The sheet's peek height drives its own inline height from TS, while the
+// map's playback transport has to clear that height from CSS. Nothing links
+// them at runtime, so raising one alone silently hides the transport behind
+// the sheet at its resting height.
+describe("bottom sheet peek height", () => {
+  it("is the same value in bottomSheetSnap.ts and operationsMap.css", () => {
+    const ts = readFileSync(resolve(process.cwd(), "src/components/bottomSheetSnap.ts"), "utf8");
+    const fromTs = ts.match(/SNAP_HEIGHT_VH[^=]*=\s*\{\s*peek:\s*(\d+)/)?.[1];
+    expect(fromTs, "SNAP_HEIGHT_VH.peek not found in bottomSheetSnap.ts").toBeDefined();
+
+    const css = readFileSync(resolve(process.cwd(), "src/tabs/map/operationsMap.css"), "utf8");
+    const fromCss = css.match(/\.ops-playback \{ bottom: calc\((\d+)vh \+ \d+px\); \}/)?.[1];
+    expect(fromCss, "the .ops-playback mobile offset rule was not found").toBeDefined();
+
+    expect(fromCss).toBe(fromTs);
+  });
+});

@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BottomSheet } from "./BottomSheet";
-import { nextSnap, type SnapPoint } from "./bottomSheetSnap";
+import { nextSnap, SNAP_HEIGHT_VH, type SnapPoint } from "./bottomSheetSnap";
 
 describe("nextSnap", () => {
   it("settles on the nearest snap point when released with no meaningful velocity", () => {
@@ -50,6 +50,24 @@ function Harness({ initial = "peek" as SnapPoint }: { initial?: SnapPoint }) {
   );
 }
 
+function grabHandle(): HTMLElement {
+  const handle = screen.getByRole("button", { name: /expand|collapse|handle/i });
+  handle.setPointerCapture = () => {};
+  return handle;
+}
+
+/** jsdom implements no `PointerEvent`, so `fireEvent.pointerDown` falls back
+ *  to a bare `Event` that carries no `clientY` -- every coordinate the drag
+ *  reads comes back undefined and the resulting NaN height is silently
+ *  dropped by CSSOM, leaving the element at its last valid value. A
+ *  MouseEvent dispatched under the pointer event's name carries the
+ *  coordinates and still reaches React's `onPointerDown`. */
+function pointer(el: HTMLElement, type: string, clientY: number): void {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientY });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  fireEvent(el, event);
+}
+
 describe("BottomSheet", () => {
   it("renders a drag handle and the sheet content at every snap point", () => {
     render(<Harness />);
@@ -84,6 +102,29 @@ describe("BottomSheet", () => {
     screen.getByText("last row").focus();
     await user.tab();
     expect(screen.getByRole("button", { name: /expand|collapse|handle/i })).toHaveFocus();
+  });
+
+  it("holds its resting height when a drag starts but has not travelled", () => {
+    render(<Harness initial="peek" />);
+    const region = screen.getByLabelText("Trips to check");
+    const handle = grabHandle();
+
+    const restingY = 400;
+    pointer(handle, "pointerdown", restingY);
+    pointer(handle, "pointermove", restingY);
+
+    expect(region.style.height).toBe(`${SNAP_HEIGHT_VH.peek}vh`);
+  });
+
+  it("grows the sheet as the handle is dragged up from peek", () => {
+    render(<Harness initial="peek" />);
+    const region = screen.getByLabelText("Trips to check");
+    const handle = grabHandle();
+
+    pointer(handle, "pointerdown", 400);
+    pointer(handle, "pointermove", 300);
+
+    expect(parseFloat(region.style.height)).toBeGreaterThan(SNAP_HEIGHT_VH.peek);
   });
 
   it("collapses from full to half on Escape, moving focus back to the handle", () => {

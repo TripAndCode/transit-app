@@ -365,6 +365,13 @@
   .focused-overview .ops-map { position: absolute; inset: 0; height: 100%; }
   .ops-resizer { display: none; }
   .ops-map-ref__legend { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* The map fills the whole workspace here, so the transport and the sheet
+     hug the same bottom edge and would otherwise overlap at the sheet's
+     resting height. The 14vh mirrors SNAP_HEIGHT_VH.peek in
+     bottomSheetSnap.ts (tokens.test.ts fails if the two drift): clearing
+     peek keeps both usable, and dragging the sheet up past peek
+     deliberately trades the transport away. */
+  .ops-playback { bottom: calc(14vh + 8px); }
 }
 
 /* Layered over the map rather than a sibling column: the map already fills
@@ -376,8 +383,10 @@
   right: 0;
   bottom: 0;
   left: 0;
-  /* Map chrome like the dock and the legend, so it takes their rung; the
-     two never overlap (one hugs the top edge, this the bottom). */
+  /* Map chrome like the dock and the legend, so it takes their rung. A
+     shared rung leaves DOM order to break ties, so anything else anchored
+     to this same bottom edge is positioned clear of the sheet's resting
+     height rather than stacked against it. */
   z-index: var(--z-map-overlay);
   display: flex;
   min-height: 0;

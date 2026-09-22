@@ -85,4 +85,16 @@ describe("useFocusTrap", () => {
     await user.click(screen.getByText("close"));
     expect(trigger).toHaveFocus();
   });
+
+  it("locks the page behind it from scrolling, and restores it on deactivation", async () => {
+    const user = userEvent.setup();
+    document.body.style.overflow = "auto";
+    const { unmount } = render(<Harness onEscape={() => {}} />);
+
+    await user.click(screen.getByText("outside trigger"));
+    expect(document.body.style.overflow).toBe("hidden");
+
+    unmount();
+    expect(document.body.style.overflow).toBe("auto");
+  });
 });

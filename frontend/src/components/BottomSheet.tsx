@@ -25,26 +25,50 @@ type Props = {
 export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) {
   const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
-  const dragStateRef = useRef<{ startY: number; startTime: number; lastY: number; lastTime: number } | null>(null);
+  const dragStateRef = useRef<{
+    startY: number;
+    startTime: number;
+    lastY: number;
+    lastTime: number;
+    /** The panel's height when the drag began. Measured once: `snap` cannot
+     *  change mid-gesture, so re-reading it per move would only force a
+     *  synchronous layout between the previous frame's write and the next. */
+    restingHeight: number;
+  } | null>(null);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
   const isFull = snap === "full";
 
   useFocusTrap(isFull, panelRef, () => onSnapChange("half"));
 
+  /** The pointer's height, expressed on the same peek-anchored 0..1 scale as
+   *  `SNAP_RATIO` and `heightVh`. Normalizing against the full height alone
+   *  would put peek at 0.159 rather than 0, so the first move of a drag that
+   *  has not travelled yet would re-render the sheet at a different height
+   *  than it is resting at. */
   function ratioFromClientY(clientY: number): number {
-    const panel = panelRef.current;
     const viewportH = window.innerHeight || 1;
-    const panelH = panel?.getBoundingClientRect().height || viewportH * (SNAP_HEIGHT_VH[snap] / 100);
-    const restingTop = viewportH - panelH;
-    const draggedTop = restingTop + (clientY - (dragStateRef.current?.startY ?? clientY));
-    const draggedHeight = viewportH - draggedTop;
-    return clampRatio(draggedHeight / (viewportH * (SNAP_HEIGHT_VH.full / 100)));
+    const panelH = dragStateRef.current?.restingHeight ?? viewportH * (SNAP_HEIGHT_VH[snap] / 100);
+    const draggedHeight = panelH - (clientY - (dragStateRef.current?.startY ?? clientY));
+    const peekH = viewportH * (SNAP_HEIGHT_VH.peek / 100);
+    const fullH = viewportH * (SNAP_HEIGHT_VH.full / 100);
+    return clampRatio((draggedHeight - peekH) / (fullH - peekH));
   }
 
   function onHandlePointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
     const now = performance.now();
-    dragStateRef.current = { startY: e.clientY, startTime: now, lastY: e.clientY, lastTime: now };
+    const viewportH = window.innerHeight || 1;
+    dragStateRef.current = {
+      startY: e.clientY,
+      startTime: now,
+      lastY: e.clientY,
+      lastTime: now,
+      // `||`, not `??`: an unlaid-out panel measures 0 rather than nothing,
+      // and a 0 resting height would place the very first pointermove far
+      // below peek and clamp the sheet shut.
+      restingHeight:
+        panelRef.current?.getBoundingClientRect().height || viewportH * (SNAP_HEIGHT_VH[snap] / 100),
+    };
     setDragRatio(SNAP_RATIO[snap]);
   }
 
