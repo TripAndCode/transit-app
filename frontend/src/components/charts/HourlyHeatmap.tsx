@@ -27,7 +27,13 @@ const HOUR_TO_BAND: { hours: [number, number]; band: TimeBand }[] = [
 ];
 
 // Evenly spaced sample points across the ramp domain, for the legend strip.
-const RAMP_STOPS = [0, 1.1, 2.2, 3.3, 4.4, 5.5];
+// Derived from the ramp's own endpoint so retuning it moves the swatches and
+// the `ramp_max` caption beside them together.
+const RAMP_STOP_COUNT = 6;
+const RAMP_STOPS = Array.from(
+  { length: RAMP_STOP_COUNT },
+  (_, i) => (HEAT_RAMP.maxMin * i) / (RAMP_STOP_COUNT - 1),
+);
 
 function bandFor(hour: number): TimeBand | null {
   for (const b of HOUR_TO_BAND) {

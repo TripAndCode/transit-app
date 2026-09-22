@@ -201,6 +201,29 @@ describe("DailyChart brush", () => {
     expect(container.querySelector("[data-testid='shaded-days']")).toBeNull();
   });
 
+  // The same hazard the hover index is clamped for: a filter change can
+  // shrink `days` while a selection is still open, and the endpoints are
+  // indices into the array that just got shorter.
+  it("drops a selection whose days no longer exist rather than indexing past the end", () => {
+    const { container, rerender } = renderChart(<DailyChart days={days} />);
+    const surface = screen.getByRole("slider");
+    fireEvent.keyDown(surface, { key: "ArrowRight", shiftKey: true });
+    fireEvent.keyDown(surface, { key: "ArrowRight", shiftKey: true });
+    expect(container.querySelector("[data-testid='shaded-days']")).not.toBeNull();
+
+    // Narrowing another filter refetches the same query with fewer days.
+    expect(() =>
+      rerender(
+        <MemoryRouter>
+          <DailyChart days={days.slice(0, 1)} />
+          <RangeProbe />
+        </MemoryRouter>,
+      ),
+    ).not.toThrow();
+    expect(container.querySelector("[data-testid='shaded-days']")).toBeNull();
+    expect(screen.getByRole("slider")).toHaveAttribute("aria-valuetext", WEEK_DAYS[0]);
+  });
+
   it("drops an in-progress keyboard selection on Escape", () => {
     const { container } = renderChart(<DailyChart days={days} />);
     const surface = screen.getByRole("slider");

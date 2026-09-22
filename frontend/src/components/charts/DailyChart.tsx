@@ -26,7 +26,7 @@ type Drag = { anchor: number; head: number };
 export function DailyChart({ days, height = 240, revisionBoundaries = [], brushable = true }: Props) {
   const { t } = useTranslation();
   const [rawHover, setHover] = useState<number | null>(null);
-  const [drag, setDrag] = useState<Drag | null>(null);
+  const [rawDrag, setDrag] = useState<Drag | null>(null);
   const [brushed, setBrushed] = useState(false);
   const [, updateRange] = useRangeContext();
   const { focus, setFocus } = useTrendFocus();
@@ -36,6 +36,11 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
   // If the data shrinks (filter narrowed), a stale hover index would
   // dereference out-of-bounds — clamp during render instead of an effect.
   const hover = rawHover != null && rawHover < days.length ? rawHover : null;
+  // A selection carries two indices and has the same hazard, but it is
+  // dropped rather than clamped: a range quietly resized to span different
+  // days than the user drew is worse than no range at all.
+  const drag =
+    rawDrag != null && rawDrag.anchor < days.length && rawDrag.head < days.length ? rawDrag : null;
   const W = 760;
   const H = height;
   const padL = 44;
@@ -203,7 +208,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
                     from: days[Math.min(drag.anchor, drag.head)].date,
                     to: days[Math.max(drag.anchor, drag.head)].date,
                   })
-                : days[cursor ?? 0].date,
+                : (days[cursor ?? 0]?.date ?? ""),
               onKeyDown,
               onMouseUp: commitBrush,
               // A release outside the plot still has to resolve the drag;
