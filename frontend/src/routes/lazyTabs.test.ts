@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import { ROUTE_CHUNK_LOADERS, prefetchRouteChunk } from "./lazyTabs";
-import { SIDEBAR_NAV_ITEMS } from "../components/Sidebar";
+import { SIDEBAR_NAV_ITEMS } from "../components/sidebarNavItems";
 
 const mainTsx = readFileSync(resolve(process.cwd(), "src/main.tsx"), "utf8");
 const appTsx = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");

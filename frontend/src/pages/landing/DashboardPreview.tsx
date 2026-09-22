@@ -10,7 +10,7 @@ import { PreviewAskPanel } from "./PreviewAskPanel";
 import { PreviewHelpHint } from "./PreviewHelpHint";
 import type { PreviewAgencyKey } from "./previewData";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { SIDEBAR_NAV_ITEMS } from "../../components/Sidebar";
+import { SIDEBAR_NAV_ITEMS } from "../../components/sidebarNavItems";
 
 // The living-demo timer spotlights only the three headline tabs, in the same
 // order the real sidebar lists them first (`SIDEBAR_NAV_ITEMS`, shared with
