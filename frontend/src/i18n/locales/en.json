@@ -485,7 +485,8 @@
       "pale": "Light",
       "std": "Standard",
       "photo": "Satellite",
-      "layers": "Layers"
+      "layers": "Layers",
+      "dim_label": "Basemap dim"
     },
     "heatmapMode": {
       "avg": "Avg delay",

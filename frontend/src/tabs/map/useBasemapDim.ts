@@ -17,17 +17,21 @@ const BASEMAP_LAYER = "basemap";
 // severity colors competed with a fully-saturated basemap (measured ~2.1:1
 // contrast for the "ok" green against typical OSM land-green -- under the
 // WCAG 3:1 floor for meaningful graphics).
-function dimSaturation(startZoom: number): ExpressionSpecification {
-  return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, -0.5];
+// Each function's literal is the mute at dimAmount = 1 (full strength — the
+// only strength this hook offered before it gained a caller-supplied
+// amount). Scaling linearly by dimAmount makes 0 a true no-op mute and any
+// intermediate amount interpolate smoothly between it and this design.
+function dimSaturation(startZoom: number, dimAmount: number): ExpressionSpecification {
+  return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, -0.5 * dimAmount];
 }
-function dimContrast(startZoom: number): ExpressionSpecification {
-  return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, -0.12];
+function dimContrast(startZoom: number, dimAmount: number): ExpressionSpecification {
+  return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, -0.12 * dimAmount];
 }
-function dimBrightnessMax(startZoom: number): ExpressionSpecification {
-  return ["interpolate", ["linear"], ["zoom"], startZoom, 1, 14, 0.92];
+function dimBrightnessMax(startZoom: number, dimAmount: number): ExpressionSpecification {
+  return ["interpolate", ["linear"], ["zoom"], startZoom, 1, 14, 1 - 0.08 * dimAmount];
 }
-function scrimOpacity(startZoom: number): ExpressionSpecification {
-  return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, 0.2];
+function scrimOpacity(startZoom: number, dimAmount: number): ExpressionSpecification {
+  return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, 0.2 * dimAmount];
 }
 
 /**
@@ -41,11 +45,16 @@ function scrimOpacity(startZoom: number): ExpressionSpecification {
  *
  * `isRouteMode` (default false) widens the zoom range the ramp is active
  * over — see the startZoom comment above the helper functions.
+ *
+ * `dimAmount` (default 1, full strength) scales how strong the mute gets at
+ * zoom 14 — the user-facing "basemap dim" slider passes its current value
+ * here. 0 disables the mute entirely without changing the zoom range.
  */
 export function useBasemapDim(
   mapRef: React.MutableRefObject<MLMap | null>,
   styleEpoch: number,
   isRouteMode = false,
+  dimAmount = 1,
 ): void {
   useEffect(() => {
     const m = mapRef.current;
@@ -54,9 +63,9 @@ export function useBasemapDim(
 
     function apply() {
       if (!m || !m.getLayer(BASEMAP_LAYER)) return;
-      m.setPaintProperty(BASEMAP_LAYER, "raster-saturation", dimSaturation(startZoom));
-      m.setPaintProperty(BASEMAP_LAYER, "raster-contrast", dimContrast(startZoom));
-      m.setPaintProperty(BASEMAP_LAYER, "raster-brightness-max", dimBrightnessMax(startZoom));
+      m.setPaintProperty(BASEMAP_LAYER, "raster-saturation", dimSaturation(startZoom, dimAmount));
+      m.setPaintProperty(BASEMAP_LAYER, "raster-contrast", dimContrast(startZoom, dimAmount));
+      m.setPaintProperty(BASEMAP_LAYER, "raster-brightness-max", dimBrightnessMax(startZoom, dimAmount));
       if (!m.getLayer(SCRIM_LAYER)) {
         // First non-basemap layer = the lowest overlay (if any yet). Insert the
         // scrim before it so it sits ABOVE basemap but BELOW the overlay; if no
@@ -70,12 +79,12 @@ export function useBasemapDim(
           {
             id: SCRIM_LAYER,
             type: "background",
-            paint: { "background-color": "#ffffff", "background-opacity": scrimOpacity(startZoom) },
+            paint: { "background-color": "#ffffff", "background-opacity": scrimOpacity(startZoom, dimAmount) },
           },
           before,
         );
       } else {
-        m.setPaintProperty(SCRIM_LAYER, "background-opacity", scrimOpacity(startZoom));
+        m.setPaintProperty(SCRIM_LAYER, "background-opacity", scrimOpacity(startZoom, dimAmount));
       }
     }
 
@@ -83,5 +92,5 @@ export function useBasemapDim(
     // one-shot `style.load`) so the scrim survives a basemap/language reload
     // even when basemap tiles finish after style.load fires.
     return whenStyleReady(m, apply);
-  }, [mapRef, styleEpoch, isRouteMode]);
+  }, [mapRef, styleEpoch, isRouteMode, dimAmount]);
 }

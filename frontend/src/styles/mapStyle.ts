@@ -2,9 +2,10 @@ import type { StyleSpecification } from "maplibre-gl";
 
 export type MapStyleId = "osm" | "pale" | "std" | "photo";
 
-// The original pre-feature basemap (OSM) stays the default; the GSI styles are
-// additional options. Changing this only affects users with no stored choice.
-export const DEFAULT_MAP_STYLE_ID: MapStyleId = "osm";
+// GSI's pale (淡色) reads calmer under the map's data overlays than a busy
+// full-color basemap; OSM and the other GSI styles remain available as
+// options. Changing this only affects users with no stored choice.
+export const DEFAULT_MAP_STYLE_ID: MapStyleId = "pale";
 
 const GSI = "https://cyberjapandata.gsi.go.jp/xyz";
 const GSI_ATTRIBUTION = "© 国土地理院"; // i18n-ignore: legally-required GSI tile attribution (official source name, not UI chrome)
@@ -78,6 +79,39 @@ export function getMapStyleOverride(): string | null {
   return typeof url === "string" && url.length > 0 ? url : null;
 }
 
+/** Slippy-map tile index (x, y) containing (lng, lat) at an integer zoom —
+ *  the standard Web Mercator tile formula every {z}/{x}/{y} raster template
+ *  in the catalog expects. */
+function tileXY(lng: number, lat: number, zoom: number): { x: number; y: number } {
+  const n = 2 ** zoom;
+  const x = Math.floor(((lng + 180) / 360) * n);
+  const latRad = (lat * Math.PI) / 180;
+  const y = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
+  return { x: Math.min(Math.max(x, 0), n - 1), y: Math.min(Math.max(y, 0), n - 1) };
+}
+
+/** Wide view of Japan, used for a style's thumbnail before a live map view is
+ *  available (before the map mounts, or in a render with no `mapRef`) —
+ *  chosen so every catalog entry's tile request lands on real territory
+ *  rather than open ocean. */
+export const DEFAULT_THUMBNAIL_VIEW = { lng: 138.0, lat: 37.5, zoom: 5 };
+
+/** Build a single tile URL from a catalog style's own template at the given
+ *  center/zoom, for use as a basemap-switcher thumbnail. English-label tiles
+ *  are picked the same way `buildStyle` picks them. Zoom is clamped to the
+ *  style's own `maxzoom` so a thumbnail never requests an unpublished level. */
+export function buildThumbnailUrl(
+  id: MapStyleId,
+  lang: string,
+  view: { lng: number; lat: number; zoom: number } = DEFAULT_THUMBNAIL_VIEW,
+): string {
+  const def = MAP_STYLES.find((s) => s.id === id) ?? MAP_STYLES[0];
+  const tiles = lang.startsWith("en") && def.tilesEn ? def.tilesEn : def.tiles;
+  const z = Math.round(Math.min(Math.max(view.zoom, 0), def.maxzoom));
+  const { x, y } = tileXY(view.lng, view.lat, z);
+  return tiles[0].replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y));
+}
+
 const PREF_KEY = "transit.mapStyle";
 
 /** Read the persisted style id, validated against the catalog. */
@@ -95,6 +129,40 @@ export function readMapStylePref(): MapStyleId {
 export function writeMapStylePref(id: MapStyleId): void {
   try {
     localStorage.setItem(PREF_KEY, id);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Slider ceiling for the basemap dim (`useBasemapDim`'s `dimAmount`): a
+ *  calm map keeps some basemap saturation visible even at maximum, so the
+ *  control never offers a fully greyed-out extreme. */
+export const MAX_DIM_AMOUNT = 0.6;
+
+// The pre-slider design always dimmed at full strength; splitting the
+// difference between "off" and that ceiling reads as calm rather than
+// visually flat, and is used only when no user choice is stored yet.
+const DEFAULT_DIM_AMOUNT = MAX_DIM_AMOUNT / 2;
+
+const DIM_PREF_KEY = "transit.mapDim";
+
+/** Read the persisted basemap-dim amount, clamped to [0, MAX_DIM_AMOUNT]. */
+export function readMapDimPref(): number {
+  try {
+    const v = localStorage.getItem(DIM_PREF_KEY);
+    const n = v == null ? NaN : Number(v);
+    if (Number.isFinite(n)) return Math.min(Math.max(n, 0), MAX_DIM_AMOUNT);
+  } catch {
+    /* localStorage unavailable — fall through */
+  }
+  return DEFAULT_DIM_AMOUNT;
+}
+
+/** Persist the chosen basemap-dim amount, clamped to [0, MAX_DIM_AMOUNT].
+ *  No-ops if localStorage is unavailable. */
+export function writeMapDimPref(amount: number): void {
+  try {
+    localStorage.setItem(DIM_PREF_KEY, String(Math.min(Math.max(amount, 0), MAX_DIM_AMOUNT)));
   } catch {
     /* ignore */
   }

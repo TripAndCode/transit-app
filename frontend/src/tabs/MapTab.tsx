@@ -19,7 +19,7 @@ import { ApiError, apiPost } from "../api/client";
 import { hhmm } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
 import { FILTER_SEPARATOR } from "../utils/format";
-import { buildStyle, getMapStyleOverride, readMapStylePref } from "../styles/mapStyle";
+import { buildStyle, getMapStyleOverride, readMapDimPref, readMapStylePref, writeMapDimPref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -99,6 +99,7 @@ export function MapTab() {
   const [ctx, updateCtx] = useRangeContext();
   const [now, setNow] = useState(Date.now);
   const [styleId, setStyleId] = useMapStylePref();
+  const [dimAmount, setDimAmountState] = useState(readMapDimPref);
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [routeSelection, setRouteSelection] = useState<RouteSelection>({ agencyId: id, route: null });
@@ -310,7 +311,7 @@ export function MapTab() {
     fittedRouteRef.current = effectiveRoute;
   }, [effectiveRoute, shapeQuery.data]);
 
-  useBasemapDim(mapRef, styleEpoch, true);
+  useBasemapDim(mapRef, styleEpoch, true, dimAmount);
   useOperationsMapLayers(
     mapRef,
     liveQuery.data ? { ...liveQuery.data, rows: liveRows } : undefined,
@@ -451,7 +452,17 @@ export function MapTab() {
         <section className="ops-map" aria-label={t("operations.map.aria_label")}>
           <div ref={mapContainerRef} className="ops-map__canvas" />
           {mapUnavailable && <div className="ops-map__empty"><p role="status">{td("mapUnavailable")}</p></div>}
-          {!getMapStyleOverride() && <MapStyleControl value={styleId} onChange={setStyleId} t={t} />}
+          {!getMapStyleOverride() && (
+            <MapStyleControl
+              value={styleId}
+              onChange={setStyleId}
+              dimAmount={dimAmount}
+              onDimChange={(amount) => { writeMapDimPref(amount); setDimAmountState(amount); }}
+              mapRef={mapRef}
+              lang={i18n.language}
+              t={t}
+            />
+          )}
           {(liveQuery.isLoading || summaryQuery.isLoading) && <div className="ops-map__loading">{t("operations.loading")}</div>}
           {!mapUnavailable && !liveQuery.isLoading && liveRows.length === 0 && (
             <div className="ops-map__empty">

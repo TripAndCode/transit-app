@@ -112,4 +112,50 @@ describe("useBasemapDim", () => {
       "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
     ]);
   });
+
+  it("scales every ramp end-value by dimAmount, leaving the zoom range untouched", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useBasemapDim(mapRef, 0, false, 0.5);
+    });
+    expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.25,
+    ]);
+    expect(map.getPaintProperty("basemap", "raster-contrast")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.06,
+    ]);
+    expect(map.getPaintProperty("basemap", "raster-brightness-max")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 1, 14, 0.96,
+    ]);
+    const scrim = map.getLayer(SCRIM_LAYER)!;
+    expect((scrim.paint as Record<string, unknown>)["background-opacity"]).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 0, 14, 0.1,
+    ]);
+  });
+
+  it("defaults dimAmount to full strength (1), matching the pre-slider behaviour", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useBasemapDim(mapRef, 0);
+    });
+    expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0.5,
+    ]);
+  });
+
+  it("dimAmount 0 fully disables the mute (flat 0/1 ramp)", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useBasemapDim(mapRef, 0, false, 0);
+    });
+    expect(map.getPaintProperty("basemap", "raster-saturation")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 0, 14, -0,
+    ]);
+    expect(map.getPaintProperty("basemap", "raster-brightness-max")).toEqual([
+      "interpolate", ["linear"], ["zoom"], 12, 1, 14, 1,
+    ]);
+  });
 });

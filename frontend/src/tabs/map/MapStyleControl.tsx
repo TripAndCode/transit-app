@@ -1,77 +1,31 @@
 import { useState } from "react";
 import type { TFunction } from "i18next";
-import { MAP_STYLES, type MapStyleId } from "../../styles/mapStyle";
-import { Z_INDEX } from "../../styles/zIndex";
+import type { Map as MLMap } from "maplibre-gl";
+import { buildThumbnailUrl, DEFAULT_THUMBNAIL_VIEW, MAP_STYLES, MAX_DIM_AMOUNT, type MapStyleId } from "../../styles/mapStyle";
 
-// Representative thumbnail tile (Aomori, z11) per style — decorative.
-const THUMB: Record<MapStyleId, string> = {
-  osm: "https://a.tile.openstreetmap.org/11/1824/769.png",
-  pale: "https://cyberjapandata.gsi.go.jp/xyz/pale/11/1824/769.png",
-  std: "https://cyberjapandata.gsi.go.jp/xyz/std/11/1824/769.png",
-  photo: "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/11/1824/769.jpg",
-};
-
-const THUMB_PX = 60;
-
-// Solid white + a real drop shadow + hairline border so the control reads on
-// ANY basemap — light (淡色/OSM), busy (標準), and dark imagery (航空写真).
-// (The previous translucent --bg-surface chip blended into light basemaps.)
-const PILL: React.CSSProperties = {
-  background: "#ffffff",
-  border: "1px solid rgba(0,0,0,0.14)",
-  borderRadius: 14,
-  boxShadow: "var(--el-2)",
-};
+const THUMB_PX = 44;
 
 function Tile({
-  styleId,
   label,
   active,
+  thumbSrc,
   onClick,
 }: {
-  styleId: MapStyleId;
   label: string;
   active: boolean;
+  thumbSrc: string;
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 5,
-        padding: 0,
-        background: "transparent",
-        border: "none",
-        cursor: "pointer",
-        width: THUMB_PX,
-      }}
-    >
+    <button type="button" className="ops-style-control__tile" aria-pressed={active} onClick={onClick}>
       <img
-        src={THUMB[styleId]}
+        src={thumbSrc}
         alt=""
         width={THUMB_PX}
         height={THUMB_PX}
-        style={{
-          borderRadius: 12,
-          objectFit: "cover",
-          outline: active ? "3px solid var(--accent)" : "1px solid rgba(0,0,0,0.12)",
-          outlineOffset: active ? -1 : 0,
-        }}
+        className={active ? "ops-style-control__thumb ops-style-control__thumb--active" : "ops-style-control__thumb"}
       />
-      <span
-        style={{
-          fontSize: 12,
-          lineHeight: 1.1,
-          fontWeight: active ? 700 : 500,
-          color: active ? "var(--chip-accent)" : "var(--chip-text-secondary)",
-          textAlign: "center",
-        }}
-      >
+      <span className={active ? "ops-style-control__label ops-style-control__label--active" : "ops-style-control__label"}>
         {label}
       </span>
     </button>
@@ -81,69 +35,96 @@ function Tile({
 export function MapStyleControl({
   value,
   onChange,
+  dimAmount,
+  onDimChange,
+  mapRef,
+  lang = "ja",
   t,
 }: {
   value: MapStyleId;
   onChange: (id: MapStyleId) => void;
+  dimAmount: number;
+  onDimChange: (amount: number) => void;
+  mapRef?: React.MutableRefObject<MLMap | null>;
+  /** UI language, for picking a style's English tile template (only `std` has
+   *  one) — matches the same `lang.startsWith("en")` rule `buildStyle` uses. */
+  lang?: string;
   t: TFunction;
 }) {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState(DEFAULT_THUMBNAIL_VIEW);
   const current = MAP_STYLES.find((s) => s.id === value) ?? MAP_STYLES[0];
 
+  // Reads the map's current view (an imperative MapLibre instance, not React
+  // state) so a thumbnail reflects where the operator is actually looking
+  // rather than a fixed reference tile. Sampled on every open/close rather
+  // than in an effect afterwards: both updates batch into one commit, so the
+  // tiles never render once at the previous view and immediately refetch at
+  // the current one. Sampling on close too keeps the always-visible entry
+  // thumbnail honest after a pan — the map stays draggable behind this
+  // overlay. Not resampled while open, so the non-current style tiles are
+  // only fetched when the panel is actually expanded.
+  function setOpenSamplingView(next: boolean) {
+    const map = mapRef?.current;
+    if (map) {
+      const center = map.getCenter();
+      setView({ lng: center.lng, lat: center.lat, zoom: map.getZoom() });
+    }
+    setOpen(next);
+  }
+
+  const dimPercent = Math.round(dimAmount * 100);
+  const maxDimPercent = Math.round(MAX_DIM_AMOUNT * 100);
+
   return (
-    <div
-      style={{
-        position: "absolute",
-        left: 12,
-        bottom: 28,
-        zIndex: Z_INDEX.mapOverlay,
-        display: "flex",
-        alignItems: "flex-end",
-        gap: 8,
-      }}
-    >
+    <div className="ops-style-control">
       {/* Entry button: current-style thumbnail + "Layers" — Google-style affordance. */}
       <button
         type="button"
+        className="ops-style-control__entry map-chrome"
         aria-label={t("map.style.label")}
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          ...PILL,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 4,
-          padding: "8px 10px",
-          cursor: "pointer",
-        }}
+        onClick={() => setOpenSamplingView(!open)}
       >
         <img
-          src={THUMB[current.id]}
+          src={buildThumbnailUrl(current.id, lang, view)}
           alt=""
           width={THUMB_PX}
           height={THUMB_PX}
-          style={{ borderRadius: 12, objectFit: "cover", outline: "1px solid rgba(0,0,0,0.12)" }}
+          className="ops-style-control__thumb"
         />
-        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--chip-text-primary)" }}>
-          {t("map.style.layers")}
-        </span>
+        <span className="ops-style-control__entry-label">{t("map.style.layers")}</span>
       </button>
 
       {open && (
-        <div style={{ ...PILL, display: "flex", gap: 14, padding: "10px 14px", maxWidth: "70vw", overflowX: "auto" }}>
-          {MAP_STYLES.map((s) => (
-            <Tile
-              key={s.id}
-              styleId={s.id}
-              label={t(s.labelKey)}
-              active={s.id === value}
-              onClick={() => {
-                onChange(s.id);
-                setOpen(false);
-              }}
+        <div className="ops-style-control__panel map-chrome">
+          <div className="ops-style-control__tiles">
+            {MAP_STYLES.map((s) => (
+              <Tile
+                key={s.id}
+                label={t(s.labelKey)}
+                active={s.id === value}
+                thumbSrc={buildThumbnailUrl(s.id, lang, view)}
+                onClick={() => {
+                  onChange(s.id);
+                  setOpenSamplingView(false);
+                }}
+              />
+            ))}
+          </div>
+          <div className="ops-style-control__dim">
+            <label htmlFor="ops-map-dim">{t("map.style.dim_label")}</label>
+            <input
+              id="ops-map-dim"
+              type="range"
+              min={0}
+              max={maxDimPercent}
+              step={5}
+              value={dimPercent}
+              onChange={(e) => onDimChange(Number(e.target.value) / 100)}
             />
-          ))}
+            <output htmlFor="ops-map-dim" className="num">{dimPercent}%</output>
+          </div>
         </div>
       )}
     </div>
