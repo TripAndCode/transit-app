@@ -81,8 +81,28 @@ describe("OverviewHeroRow", () => {
     mockHooks(38, 0.1);
     renderHero({ headline: headline({ delta_min: 0.9 }) });
     expect(
-      screen.getByText(/Running 0\.9 min behind last week; the 17:00 hour is heaviest\. 60% of delay sits in the top 1 routes\./),
+      screen.getByText(/Running 0\.9 min behind last week; the 17:00 hour is heaviest\. 60% of delay sits in the top 1 route\./),
     ).toBeInTheDocument();
+  });
+
+  // One dominant route is a real case, not an edge one: a small agency may
+  // only have a single observed route. Both halves of the plural go through
+  // i18next here, where the fake `t` in storySentence.test.ts cannot see them.
+  it("pluralises the concentration clause on the number of top routes", () => {
+    mockHooks(38, 0.1);
+    renderHero({
+      headline: headline({ delta_min: 0.9 }),
+      concentration: {
+        top_routes: [
+          { route_code: "42", route_short_name: null, share_pct: 30 },
+          { route_code: "27", route_short_name: null, share_pct: 20 },
+          { route_code: "15", route_short_name: null, share_pct: 10 },
+        ],
+        rest_share_pct: 40,
+        rest_route_count: 5,
+      },
+    });
+    expect(screen.getByText(/60% of delay sits in the top 3 routes\./)).toBeInTheDocument();
   });
 
   it("renders the ahead-of-schedule story sentence for a negative delta", () => {

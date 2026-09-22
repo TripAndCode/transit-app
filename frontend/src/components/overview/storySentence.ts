@@ -47,5 +47,13 @@ export function storySentence(
   }
 
   const share = Math.round(topRoutes.reduce((sum, r) => sum + r.share_pct, 0));
-  return t(`overview.story.${branch}`, { delta, peak: peak.peak_hour, share, n: topRoutes.length });
+  // `count` rather than a plain interpolation: one dominant route is a real
+  // case (a small agency may only have one observed route at all), and the
+  // English clause has to read "the top route", not "the top 1 routes".
+  return t(`overview.story.${branch}`, {
+    delta,
+    peak: peak.peak_hour,
+    share,
+    count: topRoutes.length,
+  });
 }

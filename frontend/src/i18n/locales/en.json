@@ -184,11 +184,14 @@
       "feed_status_updated": "Last updated {{when}}"
     },
     "story": {
-      "behind": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{n}} routes.",
+      "behind_one": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
+      "behind_other": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
       "behind_short": "Running {{delta}} min behind last week.",
-      "ahead": "Running {{delta}} min ahead of last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{n}} routes.",
+      "ahead_one": "Running {{delta}} min ahead of last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
+      "ahead_other": "Running {{delta}} min ahead of last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
       "ahead_short": "Running {{delta}} min ahead of last week.",
-      "flat": "Delay is about the same as last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{n}} routes.",
+      "flat_one": "Delay is about the same as last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
+      "flat_other": "Delay is about the same as last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
       "flat_short": "Delay is about the same as last week."
     },
     "routes_to_check": {

@@ -1155,9 +1155,9 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
 async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[float]:
     """Daily avg_min points (oldest first) over ``ctx``.
 
-    Returns the FULL daily series. The frontend hero card slices the
-    trailing 7 days for the inline sparkline; the modal variant uses the
-    full series (typically 30+ points for a 30-day default range).
+    Returns the FULL daily series (typically 30+ points for a 30-day
+    default range) and leaves any windowing to the caller, so a consumer
+    that wants a shorter tail can take one without a second query.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
     a sample-weighted average per date. Slow path reads the shared grain

@@ -23,22 +23,22 @@ const concentration: OverviewConcentration = {
 describe("storySentence", () => {
   it("selects the behind template when delay is meaningfully worse than last week", () => {
     const result = storySentence({ delta_min: 0.9 }, peak, concentration, fakeT as never);
-    expect(result).toBe('overview.story.behind:{"delta":"0.9","peak":17,"share":60,"n":3}');
+    expect(result).toBe('overview.story.behind:{"delta":"0.9","peak":17,"share":60,"count":3}');
   });
 
   it("selects the ahead template when delay is meaningfully better than last week", () => {
     const result = storySentence({ delta_min: -1.2 }, peak, concentration, fakeT as never);
-    expect(result).toBe('overview.story.ahead:{"delta":"1.2","peak":17,"share":60,"n":3}');
+    expect(result).toBe('overview.story.ahead:{"delta":"1.2","peak":17,"share":60,"count":3}');
   });
 
   it("selects the flat template when the change is within the noise threshold", () => {
     const result = storySentence({ delta_min: 0.2 }, peak, concentration, fakeT as never);
-    expect(result).toBe('overview.story.flat:{"delta":"0.2","peak":17,"share":60,"n":3}');
+    expect(result).toBe('overview.story.flat:{"delta":"0.2","peak":17,"share":60,"count":3}');
   });
 
   it("treats a missing delta as flat rather than guessing a direction", () => {
     const result = storySentence({ delta_min: null }, peak, concentration, fakeT as never);
-    expect(result).toBe('overview.story.flat:{"delta":"0.0","peak":17,"share":60,"n":3}');
+    expect(result).toBe('overview.story.flat:{"delta":"0.0","peak":17,"share":60,"count":3}');
   });
 
   it("falls back to the short template when peak-hour data is missing", () => {
@@ -70,6 +70,6 @@ describe("storySentence", () => {
       rest_route_count: 0,
     };
     const result = storySentence({ delta_min: 0.9 }, peak, wide, fakeT as never);
-    expect(result).toBe('overview.story.behind:{"delta":"0.9","peak":17,"share":30,"n":3}');
+    expect(result).toBe('overview.story.behind:{"delta":"0.9","peak":17,"share":30,"count":3}');
   });
 });
