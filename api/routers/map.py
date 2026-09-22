@@ -1161,9 +1161,9 @@ async def delay_timeline(
     date_: str | None = Query(default=None, alias="date"),
     step: int = Query(default=60),
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+) -> DelayTimelineResponse:
     """Positioned per-stop delays for every time bucket of one service day.
 
     Backs the map's day-playback rail. ``date`` omitted resolves to the
