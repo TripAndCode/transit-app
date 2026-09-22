@@ -24,6 +24,7 @@ import pathlib
 import re
 import subprocess
 import tempfile
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -31,14 +32,14 @@ from zoneinfo import ZoneInfo
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, build_agg_stop_filter, ctx_payload, get_range_ctx
 from api.security import csrf_guard
-from api.triage import LOW_CONFIDENCE_SAMPLES, classify_route
+from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.reports.map import compute_route_shape, route_exists
 
 _log = logging.getLogger(__name__)
@@ -664,6 +665,253 @@ async def today_route_summary(
         "routes": routes,
         "raw_samples": fh["raw_samples"] if fh else 0,
         "clamp_count": fh["clamp_count"] if fh else 0,
+    }
+
+
+@router.get("/today/route/{route_code}/trips", response_model=None)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def route_trips(
+    request: Request,
+    route_code: str = Path(min_length=1, max_length=300),
+    agency_id: int = Depends(get_agency),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+) -> dict[str, Any]:
+    """Per-trip delay for one route on the latest observation date.
+
+    One row per trip_id: representative scheduled departure (HH:MM), headsign
+    (from static_trips), and the trip's average dep_delay across its stops.
+    Sorted worst-first — answers "which buses were late". Read-only.
+    """
+    # Cheap existence precheck + 30-day-bounded latest-observation probe FIRST,
+    # before any further ClickHouse work: a fabricated/nonexistent route_code
+    # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
+    # just a bounded-but-still-huge scan (a date bound alone isn't enough
+    # while every agency's full history still fits inside the bound's
+    # window). See `_latest_route_observation` for the full existence-check
+    # and bound rationale.
+    latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
+    if latest_ts is None:
+        return {"date": None, "trips": []}
+
+    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring).
+    # Two non-key columns (scheduled_time, dep_delay) are read off the SAME
+    # winning row, so they're packed into ONE tuple-argMax rather than one
+    # argMax per column — per-column argMax on a captured_at tie could
+    # silently mix columns from two different physical rows. Unpacked by
+    # position in the outer SELECT to keep the result's column order exactly
+    # `trip_id, stop_sequence, scheduled_time, dep_delay` (this function
+    # unpacks each row by position below). `ORDER BY trip_id` on the outer
+    # select restores the deterministic row order the old sort-based form got
+    # for free from its own ORDER BY — a bare GROUP BY has no defined output
+    # order, and this route's row count (~1.7k) makes the sort cheap.
+    dedup_result = await ch.query(
+        """
+        SELECT trip_id, stop_sequence, winner.1 AS scheduled_time, winner.2 AS dep_delay
+        FROM (
+            SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
+                argMax(tuple(u.scheduled_time, u.dep_delay), (u.captured_at, u.file_name)) AS winner
+            FROM updates AS u
+            WHERE u.agency_id = {agency_id:UInt16} AND u.route_code = {route:String}
+              AND u.dep_delay IS NOT NULL
+              AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
+            GROUP BY u.trip_id, u.stop_sequence
+        ) AS grouped
+        ORDER BY trip_id
+        """,
+        parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
+    )
+    per_trip: dict[str, dict] = defaultdict(lambda: {"scheduled_times": [], "delays": []})
+    for trip_id, _stop_sequence, scheduled_time, dep_delay in dedup_result.result_rows:
+        t = per_trip[trip_id]
+        if scheduled_time is not None:
+            t["scheduled_times"].append(scheduled_time)
+        t["delays"].append(dep_delay)
+
+    trip_ids = list(per_trip.keys())
+    headsigns: dict[str, str | None] = {}
+    if trip_ids:
+        headsign_rows = await conn.fetch(
+            "SELECT trip_id, trip_headsign FROM static_trips WHERE agency_id = $1 AND trip_id = ANY($2)",
+            agency_id,
+            trip_ids,
+        )
+        for r in headsign_rows:
+            headsigns[r["trip_id"]] = r["trip_headsign"]
+
+    trips: list[dict[str, Any]] = []
+    for trip_id, t in per_trip.items():
+        delays = t["delays"]
+        avg_delay_sec = _round_half_up_int(sum(delays) / len(delays)) if delays else None
+        sched = min(t["scheduled_times"]) if t["scheduled_times"] else None
+        trips.append(
+            {
+                "trip_id": trip_id,
+                "scheduled_time": sched[:5] if sched else None,
+                "headsign": headsigns.get(trip_id),
+                "avg_delay_sec": avg_delay_sec,
+                "samples": len(delays),
+            }
+        )
+    trips.sort(key=lambda t: (t["avg_delay_sec"] is None, -(t["avg_delay_sec"] or 0)))
+    return {
+        "date": latest_ts.date().isoformat(),
+        "trips": trips,
+    }
+
+
+def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Merge cohort stats for one stop into the stop dict.
+
+    ``route_avg_sec`` is ``None`` for a stop_sequence with zero delay samples
+    (see ``route_stop_profile``'s ``avg_delay_sec`` field) — such a stop can
+    never be flagged an outlier, regardless of how its cohort compares.
+
+    ``cohort_low_confidence`` flags a thin total observation count behind
+    ``cohort_avg_delay_sec`` — independent of ``is_outlier``'s own
+    ``cohort_route_count >= 2`` gate, which only checks how many DISTINCT
+    routes contributed, not how many total observations they contributed
+    between them (two routes with 5 observations each still clears that
+    gate but is still a thin average).
+    """
+    if stop_id is None or stop_id not in cohort:
+        return {
+            "cohort_avg_delay_sec": None,
+            "cohort_route_count": 0,
+            "cohort_samples": 0,
+            "cohort_low_confidence": False,
+            "is_outlier": False,
+        }
+    c = cohort[stop_id]
+    cohort_avg = c["cohort_avg_delay_sec"]
+    route_count = c["cohort_route_count"]
+    cohort_samples = c["cohort_samples"] or 0
+    is_outlier = (
+        route_avg_sec is not None and cohort_avg is not None and route_count >= 2 and route_avg_sec > cohort_avg * 1.5
+    )
+    return {
+        "cohort_avg_delay_sec": cohort_avg,
+        "cohort_route_count": route_count,
+        "cohort_samples": cohort_samples,
+        "cohort_low_confidence": cohort_avg is not None and cohort_samples < COHORT_LOW_CONFIDENCE_SAMPLES,
+        "is_outlier": is_outlier,
+    }
+
+
+@router.get("/today/route/{route_code}/stop-profile", response_model=None)
+@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+async def route_stop_profile(
+    request: Request,
+    route_code: str = Path(min_length=1, max_length=300),
+    agency_id: int = Depends(get_agency),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+) -> dict[str, Any]:
+    """Average delay per stop_sequence along one route on the latest date.
+
+    Joins observed (trip_id, stop_sequence) to static_stops for a stop name,
+    ordered by sequence — answers "where on the route does delay build". The
+    name is best-effort (MAX over the sequence's mapped stop). Read-only.
+    """
+    # Existence precheck + bounded route-scoped probe — see
+    # `_latest_route_observation` for the full rationale (same
+    # fabricated-route-code / unbounded-scan vulnerability, same fix, shared
+    # with route_trips above).
+    latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
+    if latest_ts is None:
+        return {"date": None, "stops": []}
+
+    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
+    # only one non-key column (dep_delay) is read off the winning row, so a
+    # single argMax suffices.
+    dedup_result = await ch.query(
+        """
+        SELECT u.trip_id, u.stop_sequence,
+            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+        FROM updates AS u
+        WHERE u.agency_id = {agency_id:UInt16} AND u.route_code = {route:String}
+          AND u.dep_delay IS NOT NULL
+          AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
+        GROUP BY u.trip_id, u.stop_sequence
+        """,
+        parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
+    )
+    dedup_rows = list(dedup_result.result_rows)
+
+    static_join_rows: list = []
+    if dedup_rows:
+        dedup_trip_ids = list({tid for tid, _, _ in dedup_rows})
+        static_join_rows = await conn.fetch(
+            "SELECT sst.trip_id, sst.stop_sequence, sst.stop_id, ss.stop_name "
+            "FROM static_stop_times sst "
+            "LEFT JOIN static_stops ss ON ss.agency_id = $1 AND ss.stop_id = sst.stop_id "
+            "WHERE sst.agency_id = $1 AND sst.trip_id = ANY($2)",
+            agency_id,
+            dedup_trip_ids,
+        )
+    static_by_pair = {(r["trip_id"], r["stop_sequence"]): r for r in static_join_rows}
+
+    per_seq: dict[int, dict] = defaultdict(lambda: {"delays": [], "stop_ids": [], "stop_names": []})
+    for trip_id, stop_sequence, dep_delay in dedup_rows:
+        a = per_seq[stop_sequence]
+        a["delays"].append(dep_delay)
+        info = static_by_pair.get((trip_id, stop_sequence))
+        if info is not None:
+            if info["stop_id"] is not None:
+                a["stop_ids"].append(info["stop_id"])
+            if info["stop_name"] is not None:
+                a["stop_names"].append(info["stop_name"])
+
+    rows: list[dict[str, Any]] = [
+        {
+            "stop_sequence": seq,
+            "stop_id": max(a["stop_ids"]) if a["stop_ids"] else None,
+            "stop_name": max(a["stop_names"]) if a["stop_names"] else None,
+            "avg_delay_sec": _round_half_up_int(sum(a["delays"]) / len(a["delays"])) if a["delays"] else None,
+            "samples": len(a["delays"]),
+        }
+        for seq, a in sorted(per_seq.items())
+    ]
+
+    # Build cohort stats per stop_id from agg_route_stop_daily (last 30 days).
+    stop_ids = [r["stop_id"] for r in rows if r["stop_id"] is not None]
+    cohort_by_stop: dict[str, dict] = {}
+    if stop_ids:
+        date_from = latest_ts.date() - timedelta(days=30)
+        cohort_rows = await conn.fetch(
+            """
+            SELECT
+                stop_id,
+                COUNT(DISTINCT route_code) AS cohort_route_count,
+                SUM(samples)::int AS cohort_samples,
+                ROUND(
+                    (SUM(delay_sum)::float / NULLIF(SUM(samples), 0))::numeric, 0
+                )::int AS cohort_avg_delay_sec
+            FROM agg_route_stop_daily
+            WHERE agency_id = $1
+              AND stop_id = ANY($2)
+              AND date >= $3
+            GROUP BY stop_id
+            """,
+            agency_id,
+            stop_ids,
+            date_from,
+        )
+        cohort_by_stop = {cr["stop_id"]: dict(cr) for cr in cohort_rows}
+
+    return {
+        "date": latest_ts.date().isoformat(),
+        "stops": [
+            {
+                "stop_sequence": r["stop_sequence"],
+                "stop_id": r["stop_id"],
+                "stop_name": r["stop_name"],
+                "avg_delay_sec": r["avg_delay_sec"],
+                "samples": r["samples"],
+                **_cohort_fields(r["stop_id"], r["avg_delay_sec"], cohort_by_stop),
+            }
+            for r in rows
+        ],
     }
 
 
