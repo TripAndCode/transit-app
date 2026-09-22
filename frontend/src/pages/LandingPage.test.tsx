@@ -45,11 +45,15 @@ describe("LandingPage", () => {
     expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
   });
 
-  it("renders the dashboard-preview shell below the hero", () => {
+  it("renders the scroll narrative's real chart sections below the hero, not the retired DashboardPreview mock", () => {
     renderLanding();
-    expect(screen.getByRole("heading", { name: "See what's inside" })).toBeTruthy();
-    // The sidebar's real nav set, not a top-nav bar -- see DashboardPreview.test.tsx
-    // for the full structural/interaction assertions.
-    expect(screen.getByRole("button", { name: /Overview/ })).toBeTruthy();
+    // The three narrative section headings.
+    expect(screen.getByRole("heading", { name: "Delay builds along a route" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Every day, compared" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Ask, get evidence" })).toBeTruthy();
+    // Real components, not a mocked shell -- see ScrollNarrative.test.tsx for
+    // the full per-section assertions.
+    expect(screen.getByRole("group", { name: "Delay by stop" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Daily average delay chart" })).toBeTruthy();
   });
 });

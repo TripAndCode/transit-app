@@ -25,12 +25,9 @@ function resolveRouteColors(): { onTime: string; delayed: string } {
   };
 }
 
-/** Runs the shared schematic-city rAF animation loop (procedurally-drawn
+/** Runs the schematic-city rAF animation loop (procedurally-drawn
  *  blocks/park/river, two metro-style routes, and looping vehicle markers)
- *  against a caller-owned canvas. Extracted so both the hero's tilted scene
- *  (`CityMapHero`) and the dashboard-preview Map panel's untilted,
- *  floating-controls version (`PreviewMapCanvas`) share one implementation
- *  instead of two copies of the same rAF/resize bookkeeping.
+ *  against a caller-owned canvas, for the hero's tilted scene (`CityMapHero`).
  *
  *  The render loop lives entirely inside this effect's own
  *  `requestAnimationFrame`, driven by a ref (`vehiclesRef`), never React

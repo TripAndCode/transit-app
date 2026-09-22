@@ -1,10 +1,10 @@
 import { BarChart3, CalendarRange, FileText, GitCompare, LayoutDashboard } from "lucide-react";
 
-/** The sidebar's real nav destinations -- exported so the landing page's
- *  preview mockups (`pages/landing/PreviewSidebar.tsx`, and
- *  `DashboardPreview.tsx` for its auto-advance order) import this array
- *  instead of maintaining their own copy, so the marketing preview's tab
- *  set/labels cannot drift from the real, signed-in nav. */
+/** The sidebar's real nav destinations, in the order it lists them.
+ *
+ *  Lives outside Sidebar.tsx so a consumer can take the list without
+ *  importing the component -- a file exporting both is not a component
+ *  module Fast Refresh can handle. */
 export const SIDEBAR_NAV_ITEMS = [
   { to: "operations", labelKey: "design:overview", Icon: LayoutDashboard },
   { to: "period-overview", labelKey: "design:period_overview", Icon: CalendarRange },

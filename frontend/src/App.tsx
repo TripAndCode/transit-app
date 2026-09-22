@@ -10,6 +10,7 @@ import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
 import { HelpHint } from "./components/HelpHint";
+import { FirstRunTour } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import { RouteTransition } from "./components/RouteTransition";
 import { Sidebar } from "./components/Sidebar";
@@ -80,6 +81,12 @@ export default function App() {
         </RouteTransition>
       </main>
       {!focused && <CopilotPanel />}
+      {/* Persisted like welcomeSeen.ts (transit.tourSeen); a no-op render
+          once a visitor has finished or dismissed it. Mounted here rather
+          than per-tab so its "Ask" step (anchored on the always-rendered
+          Sidebar nav link) survives navigating away from the filter/map
+          steps' own tab. */}
+      <FirstRunTour />
     </div>
   );
 }
