@@ -71,9 +71,13 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
   /** Apply the current selection to the shared range, or drop it if the
    *  pointer never moved off the day it went down on. */
   function commitBrush() {
+    // Cleared unconditionally, before the `drag` guard: when the selection
+    // was dropped for pointing past a shrunken `days`, the raw value behind
+    // it is still set, and leaving it there lets a later hover extend it
+    // back into range as a selection the user never drew.
+    setDrag(null);
     if (!drag) return;
     const selection = drag.anchor === drag.head ? null : brushRange(drag.anchor, drag.head, days);
-    setDrag(null);
     if (!selection) return;
     updateRange({ from: selection.from, to: selection.to });
     // The chart is about to re-render over exactly the brushed range, so the
@@ -338,7 +342,14 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
                   onMouseDown={brushable ? () => setDrag({ anchor: i, head: i }) : undefined}
                   onMouseEnter={() => {
                     focusDay(i);
-                    setDrag((d2) => (d2 ? { ...d2, head: i } : d2));
+                    // Extends only a selection that is still valid for the
+                    // current `days`; the updater sees raw state, which the
+                    // render-time clamp has no say over.
+                    setDrag((d2) =>
+                      d2 && d2.anchor < days.length && d2.head < days.length
+                        ? { ...d2, head: i }
+                        : null,
+                    );
                   }}
                   onMouseLeave={() => clearDay(i)}
                 />

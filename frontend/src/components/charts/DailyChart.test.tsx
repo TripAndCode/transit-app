@@ -224,6 +224,59 @@ describe("DailyChart brush", () => {
     expect(screen.getByRole("slider")).toHaveAttribute("aria-valuetext", WEEK_DAYS[0]);
   });
 
+  // Dropping the selection at render time does not clear the state behind
+  // it, so a drag abandoned while the data was short must not come back as a
+  // range the user never drew once the data widens again.
+  it("does not revive a dropped drag when the days come back", () => {
+    const { container, rerender } = renderChart(<DailyChart days={days} />);
+    fireEvent.mouseDown(dayRects(container)[0]);
+    fireEvent.mouseEnter(dayRects(container)[3]);
+    expect(container.querySelector("[data-testid='shaded-days']")).not.toBeNull();
+
+    const short = (
+      <MemoryRouter>
+        <DailyChart days={days.slice(0, 2)} />
+        <RangeProbe />
+      </MemoryRouter>
+    );
+    rerender(short);
+    expect(container.querySelector("[data-testid='shaded-days']")).toBeNull();
+
+    // Hovering while the selection is dropped must not extend it, and the
+    // widened data must not bring the abandoned anchor back.
+    fireEvent.mouseEnter(dayRects(container)[1]);
+    rerender(
+      <MemoryRouter>
+        <DailyChart days={days} />
+        <RangeProbe />
+      </MemoryRouter>,
+    );
+    expect(container.querySelector("[data-testid='shaded-days']") === null).toBe(true);
+    expect(screen.getByTestId("range").textContent).toBe("..");
+  });
+
+  // The other way out of a dropped drag: the pointer leaves the chart, which
+  // commits. That path must clear the state behind the dropped selection too,
+  // or widening the data later resurrects it and commits a range unprompted.
+  it("does not revive a dropped drag after the pointer leaves the chart", () => {
+    const { container, rerender } = renderChart(<DailyChart days={days} />);
+    fireEvent.mouseDown(dayRects(container)[0]);
+    fireEvent.mouseEnter(dayRects(container)[3]);
+
+    const widen = (d: typeof days) => (
+      <MemoryRouter>
+        <DailyChart days={d} />
+        <RangeProbe />
+      </MemoryRouter>
+    );
+    rerender(widen(days.slice(0, 2)));
+    fireEvent.mouseLeave(screen.getByRole("slider"));
+    rerender(widen(days));
+
+    expect(container.querySelector("[data-testid='shaded-days']") === null).toBe(true);
+    expect(screen.getByTestId("range").textContent).toBe("..");
+  });
+
   it("drops an in-progress keyboard selection on Escape", () => {
     const { container } = renderChart(<DailyChart days={days} />);
     const surface = screen.getByRole("slider");
