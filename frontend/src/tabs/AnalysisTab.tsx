@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
-import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { ctxToQueryString, useRangeContext, type RangeCtx } from "../api/rangeContext";
 import type { DwellRunPayload, TrendPayload } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
@@ -30,16 +30,8 @@ import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { th, td } from "../components/tableStyles";
 import { ReportList } from "../components/analysis/ReportList";
-import { REPORT_GROUPS, reportLabel } from "../components/analysis/reportGroups";
+import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
-
-/** "This week" = the 7 days ending today, in the ctx's from/to string
- *  format. Used by the "no data" EmptyState's recovery action to jump to a
- *  window likely to have real data, rather than leaving the user stuck on
- *  whatever empty range they'd filtered to. */
-function thisWeekRange(): { from: string; to: string } {
-  return { from: isoDaysAgo(6), to: todayISO() };
-}
 
 export function AnalysisTab() {
   const { t } = useTranslation();

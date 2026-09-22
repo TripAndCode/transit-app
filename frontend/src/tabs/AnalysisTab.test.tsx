@@ -90,13 +90,15 @@ describe("AnalysisTab", () => {
     vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
     renderAnalysis("/agencies/1/analysis");
 
-    const onTimeButton = screen.getByRole("button", { name: "On-time rate" });
+    // The grouped list puts the report's one-line description inside the
+    // same button, so its accessible name is the label plus that sentence.
+    const onTimeButton = screen.getByRole("button", { name: /^On-time rate/ });
     expect(onTimeButton).toHaveAttribute("aria-pressed", "false");
 
     await userEvent.click(onTimeButton);
 
     expect(onTimeButton).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Delay ranking" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: /^Delay ranking/ })).toHaveAttribute("aria-pressed", "false");
   });
 });
 

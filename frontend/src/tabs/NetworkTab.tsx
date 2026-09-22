@@ -10,6 +10,7 @@ import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { PageHeader } from "../components/ui/PageHeader";
 import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
+import { formatNumber } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
 import { useUrlState } from "../api/useUrlState";
@@ -102,7 +103,7 @@ function AgencyRow({
     >
       <span className="network-row__name">
         <Tooltip label={t("network.view_agency", { name: a.agency_name })}>
-          <Link to={`/agencies/${a.agency_id}/overview${linkSuffix}`}>{a.agency_name}</Link>
+          <Link to={`/agencies/${a.agency_id}/operations${linkSuffix}`}>{a.agency_name}</Link>
         </Tooltip>
         {isCurrent && (
           <span data-testid="you-badge" className="network-row__you">
@@ -160,13 +161,13 @@ function AgencyRow({
               ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
               : a.planned_trip_count != null
                 ? t("network.planned_trip_count_fallback", {
-                    count: a.planned_trip_count.toLocaleString(),
+                    count: formatNumber(a.planned_trip_count),
                   })
                 : "—"}
           </span>
         </ScheduleVersionTooltip>
         <span>
-          {t("network.col_samples")} {a.samples.toLocaleString()}
+          {t("network.col_samples")} {formatNumber(a.samples)}
         </span>
         {a.clamp_pct != null && a.clamp_pct > CLAMP_NOTABLE_PCT && (
           <span>
