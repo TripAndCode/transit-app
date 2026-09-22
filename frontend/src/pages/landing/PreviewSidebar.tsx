@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { HelpCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { onActivateKey } from "../../utils/a11y";
-import { SIDEBAR_NAV_ITEMS } from "../../components/Sidebar";
+import { SIDEBAR_NAV_ITEMS } from "../../components/sidebarNavItems";
 import { PREVIEW_AGENCIES, type PreviewAgencyKey } from "./previewData";
 import { Z_INDEX } from "../../styles/zIndex";
 

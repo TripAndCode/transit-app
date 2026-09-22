@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { FOCUSED_TAB_SEGMENTS, FOCUSED_TAB_PATTERN } from "../App";
+import { FOCUSED_TAB_SEGMENTS, FOCUSED_TAB_PATTERN } from "../routes/focusedTabs";
 import { COPILOT_INSIGHT_ROUTE } from "./CopilotPanel";
 
 /**

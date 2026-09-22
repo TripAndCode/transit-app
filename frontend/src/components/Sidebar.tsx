@@ -1,11 +1,6 @@
 import { useState, type ReactElement, type ReactNode } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import {
-  FileText,
-  BarChart3,
-  LayoutDashboard,
-  CalendarRange,
-  GitCompare,
   HelpCircle,
   Clock,
   CircleSlash,
@@ -26,18 +21,8 @@ import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Modal } from "./Modal";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
 
-/** The sidebar's real nav destinations -- exported so the landing page's
- *  preview mockups (`pages/landing/PreviewSidebar.tsx`, and
- *  `DashboardPreview.tsx` for its auto-advance order) import this array
- *  instead of maintaining their own copy, so the marketing preview's tab
- *  set/labels cannot drift from the real, signed-in nav. */
-export const SIDEBAR_NAV_ITEMS = [
-  { to: "operations", labelKey: "design:overview", Icon: LayoutDashboard },
-  { to: "period-overview", labelKey: "design:period_overview", Icon: CalendarRange },
-  { to: "route-analysis", labelKey: "design:analysis", Icon: BarChart3 },
-  { to: "network", labelKey: "network.title", Icon: GitCompare },
-  { to: "reports", labelKey: "design:reports", Icon: FileText },
-] as const;
+
+import { SIDEBAR_NAV_ITEMS } from "./sidebarNavItems";
 
 type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
