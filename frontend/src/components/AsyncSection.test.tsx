@@ -1,9 +1,11 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "../test/renderWithProviders";
+import { ApiError } from "../api/client";
 import { AsyncSection } from "./AsyncSection";
+import { AUTO_RETRY_DELAYS_MS } from "./useAutoRetry";
 
 type Row = { id: number };
 
@@ -69,8 +71,11 @@ describe("AsyncSection", () => {
   });
 
   it("wires the retry control through to onRetry", async () => {
+    // A non-transient class (server 5xx), not a plain Error/TypeError -- a
+    // transient network/timeout error auto-retries first (see the "quiet
+    // auto-retry" suite below) rather than showing a button immediately.
     const onRetry = vi.fn();
-    renderSection({ error: new Error("boom"), data: undefined, onRetry });
+    renderSection({ error: new ApiError(500, "boom"), data: undefined, onRetry });
     await userEvent.click(screen.getByRole("button"));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
@@ -87,10 +92,56 @@ describe("AsyncSection", () => {
   it("keeps the failure on screen while a retry is in flight", () => {
     // A retry leaves `error` set and the query fetching at the same time.
     // Swapping to the skeleton here would make the retry control vanish from
-    // under the pointer that just pressed it, then reappear.
-    renderSection({ loading: true, error: new Error("boom"), data: undefined, onRetry: () => {} });
+    // under the pointer that just pressed it, then reappear. Non-transient
+    // class, same reasoning as above.
+    renderSection({ loading: true, error: new ApiError(500, "boom"), data: undefined, onRetry: () => {} });
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.queryByTestId("skel")).not.toBeInTheDocument();
+  });
+
+  describe("quiet auto-retry", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("shows the skeleton, not the banner, on a transient network error while quietly retrying", () => {
+      vi.useFakeTimers();
+      const onRetry = vi.fn();
+      renderSection({ error: new TypeError("Failed to fetch"), data: undefined, onRetry });
+      expect(screen.getByTestId("skel")).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(onRetry).not.toHaveBeenCalled();
+    });
+
+    it("calls onRetry twice on backoff, then falls back to the visible banner", () => {
+      vi.useFakeTimers();
+      const onRetry = vi.fn();
+      renderSection({ error: new TypeError("Failed to fetch"), data: undefined, onRetry });
+
+      act(() => {
+        vi.advanceTimersByTime(AUTO_RETRY_DELAYS_MS[0]);
+      });
+      expect(onRetry).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("skel")).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(AUTO_RETRY_DELAYS_MS[1]);
+      });
+      expect(onRetry).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(screen.getByRole("button")).toBeInTheDocument();
+    });
+
+    it("shows the banner immediately for a non-transient error, with no quiet phase", () => {
+      vi.useFakeTimers();
+      const onRetry = vi.fn();
+      renderSection({ error: new ApiError(404, ""), data: undefined, onRetry });
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(onRetry).not.toHaveBeenCalled();
+    });
   });
 
   it("adds no wrapper element of its own", () => {

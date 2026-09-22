@@ -1,11 +1,8 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import {
-  ApiError,
-  apiErrorDetail,
-  isAggregateNotReady,
-  isLlmNotApproved,
-} from "../api/client";
+import { ApiError, apiErrorDetail } from "../api/client";
+import { classifyError, type ErrorClass } from "../api/errorClass";
 
 type Props = {
   error: unknown;
@@ -14,77 +11,80 @@ type Props = {
 
 // Machine-readable detail codes from the Ask follow-up endpoint (see
 // `_raise_for_followup_error` in api/routers/conversations.py). Checked
-// before the generic status-code branches below so a follow-up failure
-// explains *why* (too long / rate-limited / connection) instead of a
-// one-size-fits-all message.
+// before the class-driven branches below so a follow-up failure explains
+// *why* (too long / rate-limited / connection) instead of a one-size-fits-all
+// message.
 const FOLLOWUP_TOO_LONG_DETAIL = "question_too_long";
 const FOLLOWUP_LLM_ERROR_PREFIX = "llm_error:";
 
-function messageFor(err: unknown, t: TFunction): string {
-  if (err instanceof ApiError) {
-    const detail = apiErrorDetail(err);
-    if (detail === FOLLOWUP_TOO_LONG_DETAIL) return t("errors.followup_too_long");
-    if (detail?.startsWith(FOLLOWUP_LLM_ERROR_PREFIX)) {
-      const kind = detail.slice(FOLLOWUP_LLM_ERROR_PREFIX.length);
-      if (kind === "rate_limit") return t("errors.followup_rate_limit");
-      if (kind === "connection") return t("errors.followup_connection");
-      return t("errors.followup_llm_generic");
-    }
-    if (err.status === 429) return t("errors.rate_limited");
-    if (err.status === 404) return t("errors.not_found");
-    if (err.status >= 500) return t("errors.server_5xx");
-    return t("errors.generic_status", { status: err.status });
+function followupDetailMessage(err: unknown, t: TFunction): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const detail = apiErrorDetail(err);
+  if (detail === FOLLOWUP_TOO_LONG_DETAIL) return t("errors.followup_too_long");
+  if (detail?.startsWith(FOLLOWUP_LLM_ERROR_PREFIX)) {
+    const kind = detail.slice(FOLLOWUP_LLM_ERROR_PREFIX.length);
+    if (kind === "rate_limit") return t("errors.followup_rate_limit");
+    if (kind === "connection") return t("errors.followup_connection");
+    return t("errors.followup_llm_generic");
   }
-  if (err instanceof Error) return t("errors.network");
-  return t("errors.generic");
+  return null;
+}
+
+function messageFor(err: unknown, cls: ErrorClass, t: TFunction): string {
+  const followup = followupDetailMessage(err, t);
+  if (followup) return followup;
+  switch (cls) {
+    case "rate_limited":
+      return t("errors.rate_limited");
+    case "not_found":
+      return t("errors.not_found");
+    case "server":
+      return t("errors.server_5xx");
+    case "timeout":
+      return t("errors.timeout");
+    case "network":
+      return t("errors.network");
+    case "generic":
+      return err instanceof ApiError ? t("errors.generic_status", { status: err.status }) : t("errors.generic");
+    default:
+      return t("errors.generic");
+  }
+}
+
+/** A calm, no-retry status banner for a standing condition (not a service
+ *  problem, not something a retry or a re-login fixes). */
+function CalmStatus({ children }: { children: ReactNode }) {
+  return (
+    <div
+      role="status"
+      style={{
+        background: "var(--bg-soft)",
+        color: "var(--text-secondary)",
+        border: "1px solid var(--border-soft)",
+        padding: "10px 14px",
+        borderRadius: "var(--radius)",
+        margin: "0 0 16px",
+        lineHeight: 1.5,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function ErrorBanner({ error, onRetry }: Props) {
   const { t } = useTranslation();
+  const cls = classifyError(error);
 
   // Admin-approval-required 403 (Copilot insight, Ask follow-up) — a standing
   // condition until an admin flips users.llm_approved, not a service problem
   // or something signing in again fixes, so this gets a calm explanation with
   // no login link and no retry button.
-  if (isLlmNotApproved(error)) {
-    return (
-      <div
-        role="status"
-        style={{
-          background: "var(--bg-soft)",
-          color: "var(--text-secondary)",
-          border: "1px solid var(--border-soft)",
-          padding: "10px 14px",
-          borderRadius: "var(--radius)",
-          margin: "0 0 16px",
-          lineHeight: 1.5,
-        }}
-      >
-        {t("errors.llm_not_approved")}
-      </div>
-    );
-  }
+  if (cls === "not_approved") return <CalmStatus>{t("errors.llm_not_approved")}</CalmStatus>;
 
   // Aggregates-not-built (503) is persistent, not transient: explain it calmly
   // in a neutral tone and offer no retry (retrying can't build the data).
-  if (isAggregateNotReady(error)) {
-    return (
-      <div
-        role="status"
-        style={{
-          background: "var(--bg-soft)",
-          color: "var(--text-secondary)",
-          border: "1px solid var(--border-soft)",
-          padding: "10px 14px",
-          borderRadius: "var(--radius)",
-          margin: "0 0 16px",
-          lineHeight: 1.5,
-        }}
-      >
-        {t("errors.aggregate_not_ready")}
-      </div>
-    );
-  }
+  if (cls === "not_ready") return <CalmStatus>{t("errors.aggregate_not_ready")}</CalmStatus>;
 
   return (
     <div
@@ -101,7 +101,7 @@ export function ErrorBanner({ error, onRetry }: Props) {
         margin: "0 0 16px",
       }}
     >
-      <span style={{ flex: 1 }}>{messageFor(error, t)}</span>
+      <span style={{ flex: 1 }}>{messageFor(error, cls, t)}</span>
       {onRetry && (
         <button
           type="button"

@@ -559,7 +559,34 @@
       "samples": "観測 {{count}}件",
       "unit": "単位：分・ゼロより下は早発",
       "caveat": "停留所順序で集計し、名称は代表便から取得しています。この集計だけでは遅延の原因は分かりません。",
-      "recorded": "取得したデータ・記録された引数を見る"
+      "recorded": "取得したデータ・記録された引数を見る",
+      "tool_label": {
+        "route_stop_patterns": "停留所別の停車パターン",
+        "segment_hotspots": "停留所別の遅延ホットスポット",
+        "on_time_rate": "定時率ランキング"
+      },
+      "window_range": "{{from}} 〜 {{to}}",
+      "conditions_all": "条件なし（すべて）",
+      "chip": {
+        "morning_peak": "朝ピークだけで見る",
+        "view_map": "地図で見る",
+        "compare_previous": "先々週と比べる",
+        "export_png": "PNGで保存"
+      },
+      "badge": {
+        "sql": "SQLのみ",
+        "llm": "LLM"
+      },
+      "disclosure_title": "この答えの出どころ",
+      "disclosure_route": "路線",
+      "disclosure_conditions": "条件",
+      "disclosure_aggregation": "集計",
+      "disclosure_confidence": "確からしさ",
+      "confidence": {
+        "sql": "確定（集計から直接算出）",
+        "llm": "生成AIによる要約（既存の取得結果のみを参照）"
+      },
+      "sample_count": "観測 {{count}}件"
     },
     "workspace": {
       "investigations": "これまでの調査",
@@ -755,8 +782,8 @@
       }
     },
     "landing": {
-      "header_title": "路線インテリジェンス",
-      "header_subtitle": "ルール → 埋め込みNN → RAGの3段階で回答します",
+      "header_title": "遅延について聞いてみましょう",
+      "header_subtitle": "路線や停留所を選ぶだけで、すぐに答えが返ってきます",
       "cards_title": "こんな質問ができます",
       "pills_title": "その他の質問"
     }
@@ -828,8 +855,7 @@
     },
     "no_data": {
       "title": "該当データがありません",
-      "hint": "期間や条件を変更してください",
-      "reset_action": "今週を表示"
+      "hint": "期間や条件を変更してください"
     },
     "heatmap": {
       "empty": "時間帯別データがありません。",
@@ -951,6 +977,7 @@
     "aggregate_not_ready": "このビューのデータはこの環境ではまだ準備されていません。データの整備が完了すると表示されます。",
     "generic_status": "読み込みに失敗しました ({{status}})",
     "network": "通信が一時的に途切れました。再試行してください。",
+    "timeout": "応答に時間がかかっています。もう一度お試しください。",
     "generic": "読み込みに失敗しました。",
     "followup_too_long": "質問が長すぎます。短くしてもう一度お試しください。",
     "followup_rate_limit": "アクセスが集中しています。少し待って再試行してください。",
@@ -1115,6 +1142,14 @@
       "go_to": "{{target}}へ移動",
       "open_shortcuts": "このショートカット一覧を表示",
       "extend_brush": "日次チャートの選択範囲を拡張"
+    }
+  },
+  "empty_state": {
+    "reason_format": "{{label}}: {{value}}",
+    "recovery": {
+      "clear_routes": "路線指定を外す",
+      "reset_service": "運行種別をすべてに戻す",
+      "jump_latest_data": "最新のデータに移動する"
     }
   }
 }

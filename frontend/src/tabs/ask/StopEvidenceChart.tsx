@@ -1,17 +1,29 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { ConvMessage } from "../../api/types";
+import { conditionsLabel, provenancePath, toolLabel } from "./provenance";
 import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
 import { formatNumber } from "../../utils/format";
 import "./stopEvidence.css";
 
-export function StopEvidenceChart({ messageId, points, onFocus, complete = false }: {
+export function StopEvidenceChart({ messageId, points, onFocus, complete = false, message }: {
   messageId: number;
   points: StopEvidence[];
   onFocus?: (focus: StopFocus | null) => void;
   complete?: boolean;
+  /** The dispatched message this chart renders, for the provenance badge
+   *  and the definition disclosure's route/conditions lines. Omitted by
+   *  callers that don't have it in hand — the chart renders exactly as
+   *  before with no provenance chrome in that case. */
+  message?: ConvMessage;
 }) {
   const { t } = useTranslation();
+  const path = message ? provenancePath(message) : null;
+  const label = message ? toolLabel(message.tool, t) : null;
+  const route = typeof (message?.args?.route ?? message?.args?.route_code) === "string"
+    ? String(message!.args!.route ?? message!.args!.route_code)
+    : null;
   const detailId = useId();
   const selectedButtonRef = useRef<HTMLButtonElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -74,6 +86,33 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   }
   return (
     <section className="stop-evidence" aria-label={t("ask.evidence.title")}>
+      {path && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 4,
+            fontSize: 12,
+            color: "var(--text-tertiary)",
+          }}
+        >
+          <span
+            style={{
+              fontWeight: 600,
+              color: path === "sql" ? "var(--accent)" : "var(--text-secondary)",
+              background: "var(--bg-soft)",
+              border: "1px solid var(--border-soft)",
+              borderRadius: 20,
+              padding: "2px 9px",
+            }}
+          >
+            {t(path === "sql" ? "ask.evidence.badge.sql" : "ask.evidence.badge.llm")}
+          </span>
+          {label && <span>{label}</span>}
+        </div>
+      )}
       <h3>{t(complete ? "ask.evidence.complete_title" : "ask.evidence.title")}</h3>
       <p className="investigation-caption">{t(complete ? "ask.evidence.pattern_short" : "ask.evidence.scope")}</p>
       <div className="stop-evidence-layout" ref={layoutRef}>
@@ -126,6 +165,26 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
       <details className="stop-evidence-definition"><summary>{t("ask.evidence.definition")}</summary>
         <p>{t(complete ? "ask.evidence.complete_scope" : "ask.evidence.scope")}</p>
         <p>{t(complete ? "ask.evidence.pattern_caveat" : "ask.evidence.caveat")}</p>
+        {message && (
+          <dl style={{ margin: "6px 0 0", display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px" }}>
+            {route && (
+              <>
+                <dt>{t("ask.evidence.disclosure_route")}</dt>
+                <dd>{route}</dd>
+              </>
+            )}
+            <dt>{t("ask.evidence.disclosure_conditions")}</dt>
+            <dd>{conditionsLabel(message.conditions, t)}</dd>
+            {label && (
+              <>
+                <dt>{t("ask.evidence.disclosure_aggregation")}</dt>
+                <dd>{label}</dd>
+              </>
+            )}
+            <dt>{t("ask.evidence.disclosure_confidence")}</dt>
+            <dd>{t(path === "sql" ? "ask.evidence.confidence.sql" : "ask.evidence.confidence.llm")}</dd>
+          </dl>
+        )}
       </details>
     </section>
   );

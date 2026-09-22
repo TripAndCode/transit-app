@@ -147,14 +147,19 @@ async def append_message(
     signature_hash: str | None,
     result: dict[str, Any] | None,
     rendered_summary: str | None,
+    conditions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """``conditions`` is the dow/time_band/service RangeCtx the dispatch (if
+    any) actually ran under -- the historical record for the Ask evidence
+    card's provenance disclosure. ``None`` for user messages and for
+    assistant messages with no dispatch (e.g. an LLM-grounded follow-up)."""
     row = await conn.fetchrow(
         """
         INSERT INTO ask_conversation_messages
-          (conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary)
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8)
+          (conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary, conditions)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb)
         RETURNING message_id, conversation_id, role, chip_id, tool, args, signature_hash,
-                  result, rendered_summary, created_at
+                  result, rendered_summary, conditions, created_at
         """,
         conversation_id,
         role,
@@ -164,6 +169,7 @@ async def append_message(
         signature_hash,
         json.dumps(result) if result is not None else None,
         rendered_summary,
+        json.dumps(conditions) if conditions is not None else None,
     )
     await conn.execute(
         "UPDATE ask_conversations SET updated_at = now() WHERE conversation_id = $1",
@@ -174,6 +180,8 @@ async def append_message(
         d["args"] = json.loads(d["args"])
     if isinstance(d.get("result"), str):
         d["result"] = json.loads(d["result"])
+    if isinstance(d.get("conditions"), str):
+        d["conditions"] = json.loads(d["conditions"])
     return d
 
 
@@ -190,7 +198,7 @@ async def list_messages(
     rows = await conn.fetch(
         """
         SELECT message_id, conversation_id, role, chip_id, tool, args, signature_hash,
-               result, rendered_summary, created_at
+               result, rendered_summary, conditions, created_at
         FROM ask_conversation_messages
         WHERE conversation_id = $1 ORDER BY message_id
         """,
@@ -203,6 +211,8 @@ async def list_messages(
             d["args"] = json.loads(d["args"])
         if isinstance(d.get("result"), str):
             d["result"] = json.loads(d["result"])
+        if isinstance(d.get("conditions"), str):
+            d["conditions"] = json.loads(d["conditions"])
         out.append(d)
     return out
 

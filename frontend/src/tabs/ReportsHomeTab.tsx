@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
+import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
@@ -14,6 +15,7 @@ import { deleteAnalysis, readAnalyses } from "../components/analysis/savedAnalys
 import { PeriodChart } from "../components/analysis/PeriodChart";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
+import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { FILTER_SEPARATOR } from "../utils/format";
 import "../styles/focusedAnalysis.css";
@@ -36,7 +38,8 @@ const rankingColumns: CsvColumn<RankingRow>[] = [
 export function ReportsHomeTab() {
   const id = useAgencyId();
   const { t } = useTranslation("design");
-  const [ctx] = useRangeContext();
+  const [ctx, update] = useRangeContext();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
   const [view, setView] = useUrlState<"summary" | "saved">("view", "summary");
   const savedTab = view === "saved";
   const trend = useReport(id, savedTab ? null : "trend", ctx);
@@ -52,6 +55,16 @@ export function ReportsHomeTab() {
   const rows: RankingRow[] = ranking.data?.report_type === "ranking" ? ranking.data.rows : [];
   const queryString = ctxToQueryString(ctx);
   const chartWrapRef = useRef<HTMLDivElement>(null);
+  // Shared by both the trend and ranking EmptyStates below -- same ctx, same
+  // way out either way.
+  const emptyReasons = buildFilterCtxReasons(ctx, t);
+  const emptyRecoveries = buildFilterCtxRecoveries({
+    ctx,
+    onClearRoutes: () => update({ routes: null }),
+    onResetService: () => update({ service: "all" }),
+    jumpToLatestData,
+    t,
+  });
   return <div className="focus-page">
     <header className="focus-header"><div><h1>{t("reports")}</h1><p>{t("reportTitle")}</p></div>
       {!savedTab && <ExportMenu
@@ -80,13 +93,13 @@ export function ReportsHomeTab() {
       <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
         ["definition", JSON.stringify(trend.data?.definition)], [], ...buildCsv(days, daysColumns, ctx),
       ])}>{t("csv")}</button></div></div>
-      <AsyncSection loading={trend.isPending} error={trend.error} onRetry={() => void trend.refetch()} data={trend.data} hasContent={() => days.length > 0} empty={<EmptyState title={t("empty")} />}>
+      <AsyncSection loading={trend.isPending} error={trend.error} onRetry={() => void trend.refetch()} data={trend.data} hasContent={() => days.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
         {() => <><p className="focus-muted">{t("mean")}{FILTER_SEPARATOR}{t("coverage", { from: days[0]?.date, to: days.at(-1)?.date })}</p><div ref={chartWrapRef}><PeriodChart days={days} /></div></>}
       </AsyncSection></section>
       <section><div className="focus-header"><h2>{t("routesToCheck")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!rows.length || !!ranking.error || ranking.isFetching} onClick={() => downloadCsv(`patterns-${id}-${ctx.from}-${ctx.to}`, [
         ["definition", JSON.stringify(ranking.data?.definition)], [], ...buildCsv(rows, rankingColumns, ctx),
       ])}>{t("csv")}</button></div></div>
-      <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} />}>
+      <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
         {() => <div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("pattern")}</th><th>{t("days")}</th><th>{t("mean")}</th><th>{t("samples")}</th><th /></tr></thead><tbody>
           {rows.map((row, i) => <tr key={`${row[0]}-${row[1]}-${i}`}><td>{names.format(String(row[0]))}</td><td>{String(row[1] ?? "—")}</td><td>{row[2] == null ? "—" : Number(row[2]).toFixed(1)}</td><td>{String(row[5] ?? "—")}</td><td>
             <Link to={`/agencies/${id}/route-analysis?${(() => { const next = new URLSearchParams(queryString); next.set("routes", String(row[0])); if (row[1] === "平日" || row[1] === "土日祝") next.set("service", row[1]); return next.toString(); })()}`}>{t("open")}</Link>{/* i18n-ignore: query contract */}

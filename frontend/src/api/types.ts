@@ -646,6 +646,12 @@ export type ConvMessage = {
     pairs: unknown | null;
   } | null;
   rendered_summary: string | null;
+  /** The dow/time_band/service the message's dispatch actually ran under —
+   *  distinct from `args` (the tool's own arguments) and from the live,
+   *  editable conversation `filter_ctx`, which can change after this
+   *  message was sent. `null` for user messages and for a dispatch-free
+   *  assistant reply (e.g. an LLM-grounded follow-up). */
+  conditions?: { dow: string; time_band: string; service: string } | null;
   created_at: string;
 };
 

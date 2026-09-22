@@ -64,3 +64,39 @@ describe("RouteAnalysisTab", () => {
     expect(screen.getByText("Delay by stop")).toBeInTheDocument();
   });
 });
+
+function renderRecoveryTab(
+  path: string,
+  response: RouteShapeResponse | undefined = { route: "A05", geometry: null, stops: [] } as RouteShapeResponse,
+) {
+  vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+    data: response,
+    isPending: false,
+    error: null,
+    refetch: vi.fn(),
+  } as never);
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
+  vi.spyOn(hooks, "useAgencies").mockReturnValue({
+    data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
+    isPending: false,
+  } as never);
+  renderWithProviders(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/agencies/:agencyId/route-analysis" element={<RouteAnalysisTab />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("RouteAnalysisTab empty state recoveries", () => {
+  it("offers a jump-to-latest-data recovery when a route is scoped but its window has no stop data", () => {
+    renderRecoveryTab("/agencies/8/route-analysis?from=2020-01-01&to=2020-01-07&routes=A05");
+    expect(screen.getByRole("button", { name: "Jump to the latest data" })).toBeInTheDocument();
+  });
+
+  it("offers a reset-service recovery when service is scoped to a non-default value", () => {
+    renderRecoveryTab("/agencies/8/route-analysis?from=2020-01-01&to=2020-01-07&routes=A05&service=%E5%B9%B3%E6%97%A5");
+    expect(screen.getByRole("button", { name: "Reset service type to all" })).toBeInTheDocument();
+  });
+});
