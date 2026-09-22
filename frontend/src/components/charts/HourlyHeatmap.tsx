@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useRangeContext, type TimeBand } from "../../api/rangeContext";
 import { DELAY_RAMP, DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
+import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
+import { staggerDelay } from "./ChartEnter";
 
 export type HourlyCell = {
   date: string;
@@ -41,6 +43,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const [hover, setHover] = useState<HourlyCell | null>(null);
   const [showLegend, setShowLegend] = useState(false);
   const [, setCtx] = useRangeContext();
+  const entered = useEnteredOnMount();
 
   const dates = Array.from(new Set(cells.map((c) => c.date))).sort();
 
@@ -180,6 +183,13 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
               const b = bandFor(c.hour);
               setCtx({ from: c.date, to: c.date, time_band: b ?? "all" });
             };
+            // The `opacity` presentation attribute stays as the source of
+            // truth for the sample-density encoding -- it is what a
+            // reduced-motion viewer sees immediately, since .chart-cell-enter
+            // only exists inside the motion-allowed media block. When motion
+            // is allowed, that class's stylesheet rule (opacity: 0, then
+            // var(--cell-opacity)) outranks the attribute by specificity and
+            // fades in to the same value the attribute already names.
             return (
               <rect
                 key={`${d}|${h}`}
@@ -188,10 +198,18 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                 width={Math.max(1, cellW - 1)}
                 height={Math.max(1, cellH - 1)}
                 opacity={opacity}
+                className={`chart-cell-enter${entered ? " chart-cell-enter--in" : ""}`}
                 // `fill` goes in `style`, not the SVG presentation attribute:
                 // delayColor()'s severe tier is now the literal "var(--delay-severe)",
                 // and var() only resolves in a CSS property, not a presentation attr.
-                style={{ fill, cursor: c ? "pointer" : "default" }}
+                style={
+                  {
+                    fill,
+                    cursor: c ? "pointer" : "default",
+                    "--cell-opacity": opacity,
+                    ...staggerDelay(i * 24 + h),
+                  } as CSSProperties
+                }
                 onMouseEnter={() => c && setHover(c)}
                 onMouseLeave={() => setHover((v) => (v === c ? null : v))}
                 onClick={handleCellClick}

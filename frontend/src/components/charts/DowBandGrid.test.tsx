@@ -52,7 +52,28 @@ describe("BandGrid", () => {
     const cells = screen.getAllByTestId("ov-band-cell");
     const populated = cells.find((c) => (c as HTMLElement).style.background === "rgb(170, 187, 204)");
     expect(populated).toBeTruthy();
-    expect((populated as HTMLElement).style.opacity).toBe("0.5");
+    // The target opacity a low-confidence cell fades in *to* is carried as a
+    // CSS custom property (--cell-opacity), consumed by the .chart-cell-enter
+    // stylesheet rule -- not a plain inline `opacity`, which would always
+    // outrank that rule and leave nothing for the entrance fade to animate.
+    expect((populated as HTMLElement).style.getPropertyValue("--cell-opacity")).toBe("0.5");
+  });
+
+  it("marks every cell with the staggered-fade entrance class", () => {
+    render(
+      <BandGrid
+        grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])}
+        bandLabel={(b) => b}
+        dayLabel={(d) => String(d)}
+        axisMin="min"
+        colorFor={() => "#000"}
+        onTip={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+    for (const cell of screen.getAllByTestId("ov-band-cell")) {
+      expect(cell.classList.contains("chart-cell-enter")).toBe(true);
+    }
   });
 });
 

@@ -10,6 +10,7 @@ import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { delayColor } from "../styles/tokens";
 import { formatNumber } from "../utils/format";
+import { useCountUp } from "../hooks/useCountUp";
 import type { NetworkAgencyRow } from "../api/types";
 import { useCappedList } from "../hooks/useCappedList";
 import "./networkTab.css";
@@ -67,6 +68,24 @@ function ScheduleVersionTooltip({
 }) {
   if (label == null) return children;
   return <Tooltip label={label}>{children}</Tooltip>;
+}
+
+/** A dedicated component (not inlined in `renderCard`, which is a plain
+ *  function called from `.map()`) -- `useCountUp` is a hook, and a hook
+ *  cannot be called from inside a loop callback. Animates the per-agency
+ *  figure toward a new average whenever the range/filters change and the
+ *  network summary refetches. */
+function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
+  const { t } = useTranslation();
+  const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1 });
+  if (avgDelayMin == null) return <>—</>;
+  return (
+    <span style={{ color: delayColor(avgDelayMin) }}>
+      {avgDelayMin >= 0 ? "+" : ""}
+      {displayed.toFixed(1)}
+      <span style={delayUnitStyle}>{t("network.delay_unit")}</span>
+    </span>
+  );
 }
 
 export function NetworkTab() {
@@ -127,15 +146,7 @@ export function NetworkTab() {
             <div className="network-card-metric network-card-metric--delay">
               <span className="network-card-metric-label">{t("network.col_avg_delay")}</span>
               <div style={delayValStyle} aria-label={t("network.col_avg_delay")}>
-              {a.avg_delay_min == null ? (
-                "—"
-              ) : (
-                <span style={{ color: delayColor(a.avg_delay_min) }}>
-                  {a.avg_delay_min >= 0 ? "+" : ""}
-                  {a.avg_delay_min.toFixed(1)}
-                  <span style={delayUnitStyle}>{t("network.delay_unit")}</span>
-                </span>
-              )}
+                <AgencyDelayFigure avgDelayMin={a.avg_delay_min} />
               </div>
             </div>
             <div className="network-card-metric">

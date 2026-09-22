@@ -15,4 +15,15 @@ describe("StatTile", () => {
     rerender(<StatTile label="遅延" value="2" flagged />);
     expect(container.querySelector(".stat-tile__value--flagged")).not.toBeNull();
   });
+
+  it("formats a numeric value via useCountUp and appends the suffix", () => {
+    render(<StatTile label="On-time" value={87} suffix="%" />);
+    expect(screen.getByText("87%")).toBeInTheDocument();
+  });
+
+  it("keeps a pre-formatted string value unanimated and as-is", () => {
+    render(<StatTile label="観測便" value="3" />);
+    // A string value is rendered verbatim -- no useCountUp/toLocaleString pass.
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
 });

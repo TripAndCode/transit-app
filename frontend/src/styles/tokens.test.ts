@@ -452,6 +452,40 @@ describe("route-enter animation", () => {
   });
 });
 
+describe("chart entrance motion (ChartEnter.tsx)", () => {
+  function motionAllowedBlocksContaining(selector: string): string[] {
+    return [...globalCss.matchAll(/@media \(prefers-reduced-motion: no-preference\)/g)]
+      .map((m) => ruleBody(globalCss.slice(m.index), "@media (prefers-reduced-motion: no-preference)"))
+      .filter((block) => block.includes(selector));
+  }
+
+  it("draws a line on via --len, only inside a motion-allowed block", () => {
+    const allowed = motionAllowedBlocksContaining(".chart-draw-on {");
+    expect(globalCss.match(/\.chart-draw-on \{/g)).toHaveLength(1);
+    expect(allowed).toHaveLength(1);
+    const body = ruleBody(allowed[0], ".chart-draw-on {");
+    expect(decl(body, "stroke-dasharray")).toBe("var(--len, 9999)");
+    expect(decl(body, "stroke-dashoffset")).toBe("var(--len, 9999)");
+    expect(decl(body, "transition")).toBe("stroke-dashoffset var(--dur-4) var(--ease-out)");
+    expect(decl(ruleBody(allowed[0], ".chart-draw-on.chart-draw-on--active {"), "stroke-dashoffset")).toBe("0");
+  });
+
+  it("fades a staggered cell in via opacity, only inside a motion-allowed block", () => {
+    const allowed = motionAllowedBlocksContaining(".chart-cell-enter {");
+    expect(globalCss.match(/\.chart-cell-enter \{/g)).toHaveLength(1);
+    expect(allowed).toHaveLength(1);
+    const body = ruleBody(allowed[0], ".chart-cell-enter {");
+    expect(decl(body, "opacity")).toBe("0");
+    expect(decl(body, "transition")).toBe("opacity var(--dur-3) var(--ease-out)");
+    // The target opacity is per-cell, not a flat 1 -- HourlyHeatmap's cells
+    // encode sample density as opacity, and the fade-in must land on that
+    // value rather than overriding it.
+    expect(decl(ruleBody(allowed[0], ".chart-cell-enter.chart-cell-enter--in {"), "opacity")).toBe(
+      "var(--cell-opacity, 1)",
+    );
+  });
+});
+
 describe("tooltip surface", () => {
   it("no longer ships the CSS-only .tip pseudo-element tooltip", () => {
     expect(globalCss).not.toContain("content: attr(data-tip)");

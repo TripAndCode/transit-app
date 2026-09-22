@@ -1,13 +1,22 @@
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { RouteShapeStop } from "../../api/types";
 import { matchedPrevious } from "./stopSeries";
 import { delayColor } from "../../styles/tokens";
 import { ChartAxis } from "./ChartAxis";
+import { useDrawOn } from "../charts/ChartEnter";
 
 export function StopChart({ stops, previous, selected, onSelect }: {
   stops: RouteShapeStop[]; previous: RouteShapeStop[]; selected: number; onSelect: (sequence: number) => void;
 }) {
   const { t } = useTranslation("design");
+  // Only the current-period line draws on. The dashed "previous period" line
+  // keeps a static `strokeDasharray: "5 5"` -- useDrawOn overrides
+  // stroke-dasharray to reveal the path, which would flatten that pattern
+  // into one long dash for the length of the animation and leave it looking
+  // like a plain solid line forever after.
+  const lineRef = useRef<SVGPathElement | null>(null);
+  useDrawOn(lineRef);
   const low = Math.min(0, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const high = Math.max(1, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const x = (i: number) => 52 + i / Math.max(1, stops.length - 1) * 700;
@@ -18,7 +27,7 @@ export function StopChart({ stops, previous, selected, onSelect }: {
   return <svg className="focus-chart" viewBox="0 0 780 335" role="group" aria-label={t("stopDelay")}>
     <ChartAxis low={low} high={high} y={y} />
     <path d={path(stops.map((s) => matchedPrevious(s, previous)))} fill="none" stroke="var(--text-secondary)" strokeWidth={2} strokeDasharray="5 5" />
-    <path d={path(stops.map((s) => s.avg_min))} fill="none" stroke="var(--accent)" strokeWidth={2.5} />
+    <path ref={lineRef} d={path(stops.map((s) => s.avg_min))} fill="none" stroke="var(--accent)" strokeWidth={2.5} />
     {stops.map((s, i) => <g key={`${s.stop_sequence}-${s.stop_id}`}>
       <circle cx={x(i)} cy={s.avg_min == null ? 280 : y(s.avg_min)} r={s.stop_sequence === selected ? 7 : 4}
         fill={s.avg_min == null ? "var(--bg-surface)" : delayColor(s.avg_min)} stroke="var(--text-secondary)"
