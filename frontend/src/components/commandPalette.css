@@ -6,10 +6,10 @@
 .cmdp-overlay {
   position: fixed;
   inset: 0;
-  /* Above the sidebar drawer pair (300/301, styles/zIndex.ts) and the
-     highest other overlay in the app (global.css's 410 staleness popover) —
-     the palette is a global modal and must sit above any other surface. */
-  z-index: 500;
+  /* The palette is a global modal and must sit above every other surface,
+     including the drawer pair and the modal pair below it on the ladder.
+     `--z-context-menu` is the top rung, which is the rank this needs. */
+  z-index: var(--z-context-menu);
   background: rgba(15, 17, 25, 0.35);
   display: flex;
   justify-content: center;

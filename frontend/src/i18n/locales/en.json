@@ -1112,10 +1112,7 @@
     "shortcuts": {
       "title": "Keyboard shortcuts",
       "open_palette": "Open the command palette",
-      "go_overview": "Go to Overview",
-      "go_route_analysis": "Go to Segment analysis",
-      "go_reports": "Go to Reports",
-      "go_ask": "Go to Ask",
+      "go_to": "Go to {{target}}",
       "open_shortcuts": "Show this shortcut list",
       "extend_brush": "Extend the daily chart's selected range"
     }

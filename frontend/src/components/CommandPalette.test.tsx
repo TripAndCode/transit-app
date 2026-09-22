@@ -110,7 +110,9 @@ describe("CommandPalette", () => {
       renderPalette();
       fireEvent.keyDown(document, { key: "g" });
       fireEvent.keyDown(document, { key: "o" });
-      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/overview");
+      // `operations` is where Overview lives; `/overview` is only a legacy
+      // alias that redirects there, so the chord must not route through it.
+      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/operations");
     });
 
     it("navigates to route-analysis on g then a", () => {

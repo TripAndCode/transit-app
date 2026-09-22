@@ -34,7 +34,7 @@ const GO_CHORD_TIMEOUT_MS = 900;
  *  key and search sublabel, so a from-scratch table of all four together is
  *  the simpler single source for this list specifically. */
 const GO_TO_TARGETS = [
-  { to: "overview", chordKey: "o", labelKey: "design:overview", sublabelKey: "design:live" },
+  { to: "operations", chordKey: "o", labelKey: "design:overview", sublabelKey: "design:live" },
   { to: "route-analysis", chordKey: "a", labelKey: "design:analysis", sublabelKey: "design:investigate" },
   { to: "reports", chordKey: "r", labelKey: "design:reports", sublabelKey: "design:summary" },
   { to: "ask", chordKey: "q", labelKey: "nav.ask", sublabelKey: "palette.nav_ask_sublabel" },
@@ -517,7 +517,7 @@ export function CommandPalette() {
             </li>
             {GO_TO_TARGETS.map((target) => (
               <li key={target.to}>
-                <span>{t(`palette.shortcuts.go_${target.to.replace("-", "_")}`)}</span>
+                <span>{t("palette.shortcuts.go_to", { target: t(target.labelKey) })}</span>
                 <span className="cmdp-item-keys">
                   <kbd className="cmdp-kbd">g</kbd>
                   <kbd className="cmdp-kbd">{target.chordKey}</kbd>

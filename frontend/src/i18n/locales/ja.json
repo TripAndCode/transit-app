@@ -1112,10 +1112,7 @@
     "shortcuts": {
       "title": "キーボードショートカット",
       "open_palette": "コマンドパレットを開く",
-      "go_overview": "概況へ移動",
-      "go_route_analysis": "区間分析へ移動",
-      "go_reports": "レポートへ移動",
-      "go_ask": "質問へ移動",
+      "go_to": "{{target}}へ移動",
       "open_shortcuts": "このショートカット一覧を表示",
       "extend_brush": "日次チャートの選択範囲を拡張"
     }
