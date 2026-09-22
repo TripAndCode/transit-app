@@ -135,7 +135,10 @@
     "col_vehicle_km_delivered": "Vehicle-km delivered %",
     "help_vehicle_km_delivered": "Share of the current schedule's planned vehicle-kilometers actually run — shows \"—\" when this agency has no shapes.txt loaded or doesn't report cancellations (see Service delivered).",
     "planned_trip_count_fallback": "{{count}} planned trips (vehicle-km not available)",
-    "schedule_version_title": "Static schedule version: {{version}}"
+    "schedule_version_title": "Static schedule version: {{version}}",
+    "col_agency": "Agency",
+    "axis_caption": "Shared axis · 0–{{max}} min",
+    "definition_disclosure": "How these are calculated"
   },
   "definitionMeta": {
     "tolerance_line": "On-time definition: {{preset}} (early ≤ {{early}}, late ≤ {{late}})",
@@ -967,6 +970,27 @@
         "sample_count": "{{count}} samples",
         "bar_aria": "{{label}}: {{value}}, {{count}} samples"
       }
+    },
+    "group": {
+      "ranking": "Rankings",
+      "punctuality": "Punctuality",
+      "pattern": "Patterns over time",
+      "forecast": "Forecasts and evidence",
+      "other": "Other"
+    },
+    "desc": {
+      "ranking": "Which routes run latest, worst first.",
+      "ranking_best": "Which routes keep to the timetable best.",
+      "on_time": "Share of departures inside the on-time threshold, by route.",
+      "worst_5min": "Routes with the most departures five minutes or more late.",
+      "trend": "How delay moved day by day, by hour and by weekday.",
+      "compare_ranking": "The same ranking against the previous period.",
+      "dow_weekday": "How a typical weekday runs, band by band.",
+      "dow_weekend": "How a typical weekend or holiday runs, band by band.",
+      "dwell_run": "Where time goes: waiting at stops against running between them.",
+      "route_forecast": "Expected delay for a route on an upcoming day.",
+      "council_summary": "A period summary written for a council or board.",
+      "delay_certificate": "Proof of a specific late departure, for a passenger."
     }
   },
   "insight_panel": {

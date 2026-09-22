@@ -135,7 +135,10 @@
     "col_vehicle_km_delivered": "走行キロ達成率",
     "help_vehicle_km_delivered": "現行ダイヤの計画走行キロのうち実際に運行された割合です。shapes.txtが未読み込みの場合や運休を報告しないフィードでは「—」と表示されます（「運行達成率」も参照）。",
     "planned_trip_count_fallback": "計画本数 {{count}} 本（走行キロは算出不可）",
-    "schedule_version_title": "静的ダイヤバージョン: {{version}}"
+    "schedule_version_title": "静的ダイヤバージョン: {{version}}",
+    "col_agency": "事業者",
+    "axis_caption": "共通軸 · 0〜{{max}} 分",
+    "definition_disclosure": "集計条件を見る"
   },
   "definitionMeta": {
     "tolerance_line": "定時判定: {{preset}}（早着許容 ≤ {{early}}、遅延許容 ≤ {{late}}）",
@@ -967,6 +970,27 @@
         "sample_count": "{{count}}件",
         "bar_aria": "{{label}}: {{value}}、{{count}}件"
       }
+    },
+    "group": {
+      "ranking": "順位",
+      "punctuality": "定時性",
+      "pattern": "傾向",
+      "forecast": "予測・証明",
+      "other": "その他"
+    },
+    "desc": {
+      "ranking": "遅れの大きい系統から順に並べます。",
+      "ranking_best": "時刻表どおりに運行できている系統を並べます。",
+      "on_time": "定時基準内に収まった出発の割合を系統別に見ます。",
+      "worst_5min": "5分以上の遅れが多い系統を抽出します。",
+      "trend": "日ごと・時間帯ごと・曜日ごとの遅れの推移を見ます。",
+      "compare_ranking": "同じ順位を前期と比べます。",
+      "dow_weekday": "平日の一日を時間帯別に見ます。",
+      "dow_weekend": "土日祝の一日を時間帯別に見ます。",
+      "dwell_run": "停留所での停車時間と走行時間の内訳を見ます。",
+      "route_forecast": "指定日の系統別の遅れを予測します。",
+      "council_summary": "議会・取締役会向けの期間まとめです。",
+      "delay_certificate": "特定の遅延便を証明する書類です。"
     }
   },
   "insight_panel": {

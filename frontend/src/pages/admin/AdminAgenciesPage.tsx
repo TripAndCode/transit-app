@@ -11,6 +11,7 @@ import {
 import { formatApiError } from "../../api/client";
 import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { Modal } from "../../components/Modal";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
 
@@ -209,9 +210,9 @@ export function AdminAgenciesPage() {
 
   return (
     <div style={{ padding: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 16, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 22, margin: 0 }}>{t("admin.agencies.title")}</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <PageHeader
+        title={t("admin.agencies.title")}
+        actions={<>
           <AdminSearchInput
             placeholder={t("admin.agencies.search_placeholder")}
             value={search}
@@ -227,8 +228,8 @@ export function AdminAgenciesPage() {
           >
             {t("admin.agencies.add_button")}
           </AdminButton>
-        </div>
-      </div>
+        </>}
+      />
 
       {error && <div style={{ color: "var(--text-tertiary)", marginBottom: 12 }}>{formatApiError(error)}</div>}
       {isLoading && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
