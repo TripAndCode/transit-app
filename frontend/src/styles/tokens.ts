@@ -136,6 +136,36 @@ export function delayColor(minutes: number): string {
   return DELAY_RAMP[delayBand(minutes)];
 }
 
+// A dense grid of cells encodes one quantity, so it gets one hue that runs
+// light to dark: switching hue at each severity cutoff turns a continuous
+// magnitude into four unordered categories and makes a 2.9-minute cell look
+// unrelated to a 3.1-minute one. The cutoffs still matter, but they are drawn
+// as an outline annotation on top of the ramp, not as its colour. The domain
+// runs slightly past `DELAY_THRESHOLDS.severe` so a severe cell reads as
+// "near the top of the scale" instead of every value from 5 minutes upwards
+// saturating to the same ink. The floor is non-zero so a cell holding data is
+// always distinguishable from one holding none.
+export const HEAT_RAMP = {
+  maxMin: 5.5,
+  minOpacity: 0.08,
+  maxOpacity: 1,
+} as const;
+
+/** Where `minutes` sits on the single-hue heat ramp, as an opacity. Rounded
+ *  so the value written into the DOM is stable and comparable. */
+export function heatOpacity(minutes: number): number {
+  const t = Math.min(1, Math.max(0, minutes / HEAT_RAMP.maxMin));
+  const opacity = HEAT_RAMP.minOpacity + t * (HEAT_RAMP.maxOpacity - HEAT_RAMP.minOpacity);
+  return Math.round(opacity * 1000) / 1000;
+}
+
+/** The same ramp as a CSS colour, for grids that paint a `background`
+ *  instead of setting an SVG opacity. `var(--accent)` is kept intact so the
+ *  cascade recolors the whole ramp on a theme toggle. */
+export function accentRampColor(minutes: number): string {
+  return `color-mix(in srgb, var(--accent) ${Math.round(heatOpacity(minutes) * 100)}%, transparent)`;
+}
+
 /** Same ramp as `delayColor()`, but MapLibre-safe: the severe tier resolves
  *  to a real hex via `severeColorResolved()` instead of the literal
  *  `var(--delay-severe)` string MapLibre paint expressions can't parse. Use

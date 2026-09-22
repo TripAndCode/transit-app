@@ -496,6 +496,16 @@ summary::-webkit-details-marker { display: none; }
   .skeleton { animation: skeleton-pulse calc(var(--dur-4) * 1.5) var(--ease-in-out) infinite; }
 }
 
+/* The resting value of a cell whose opacity is data-driven (a low-confidence
+   forecast cell, a crossfiltered one). Declared before the motion block below
+   and at equal specificity, so a reduced-motion viewer -- who gets none of the
+   entrance classes -- still sees that opacity, while under motion
+   `.chart-cell-enter`'s `opacity: 0` is declared later and wins the start of
+   the fade. */
+.chart-cell-opacity {
+  opacity: var(--cell-opacity, 1);
+}
+
 /* ---------- Shared entrance animations ----------
    These live here rather than in a tab stylesheet so every route can use
    them; a lazily-loaded tab sheet would otherwise define the same keyframes
@@ -546,6 +556,22 @@ summary::-webkit-details-marker { display: none; }
     opacity: var(--cell-opacity, 1);
   }
 
+  /* TrendFocusContext's crossfilter: a mark that disagrees with the hovered
+     day/weekday/hour recedes. On a grid cell the dim rides `fill-opacity`,
+     a channel the entrance fade above does not touch -- sharing `opacity`
+     would make the hover response inherit that cell's staggered entrance
+     delay. */
+  .chart-focus-dimmable {
+    transition:
+      opacity var(--dur-2) var(--ease-out),
+      fill-opacity var(--dur-2) var(--ease-out);
+  }
+  .chart-cell-enter.chart-focus-dimmable {
+    transition:
+      opacity var(--dur-3) var(--ease-out),
+      fill-opacity var(--dur-2) var(--ease-out);
+  }
+
   /* RevealSection.tsx's useInView(): a section starts fully visible, only
      offset downward -- transform only, never opacity: 0 -- so it stays
      readable before the observer's first callback (or without JS at all). */
@@ -556,6 +582,14 @@ summary::-webkit-details-marker { display: none; }
   .reveal.reveal--in {
     transform: translateY(0);
   }
+}
+
+/* The daily chart's plot is a keyboard-operable range control: arrows move
+   the read-out cursor, Shift+arrows extend the selection. */
+.chart-brush-surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
 }
 
 /* HelpPage renders the user manual (a fetched .md asset) via react-markdown,

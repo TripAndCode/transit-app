@@ -103,7 +103,7 @@ export function RichResult({
     return (
       <div>
         <div style={{ fontWeight: 600, marginBottom: 4 }}>{result.summary}</div>
-        <DailyChart days={result.series as TrendDay[]} height={200} />
+        <DailyChart days={result.series as TrendDay[]} height={200} brushable={false} />
       </div>
     );
   }

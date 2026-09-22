@@ -837,13 +837,12 @@
       "subtitle": "縦: 時間 (0-23) ・ 横: 日付 ・ クリックで絞り込み",
       "legend_aria": "凡例を表示",
       "delay_label": "遅延:",
-      "band_lt": "< {{min}}分",
-      "band_range": "{{min}} – {{max}}分",
-      "band_gt": "> {{min}}分",
-      "legend_explainer": "・ 濃さ=サンプル数 ・ 行→時間帯 ・ 列→日付",
+      "legend_explainer": "・行 → 時間帯 ・列 → 日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
       "tooltip_hour": "{{hour}}時 ・ 平均",
-      "tooltip_metrics": "{{min}}分 ・ {{count}}件"
+      "tooltip_metrics": "{{min}}分 ・ {{count}}件",
+      "ramp_max": "{{min}}分以上",
+      "severe_outline": "枠線 = {{min}}分以上"
     },
     "dow_band": {
       "title": "いつもの遅れ方",
@@ -859,7 +858,13 @@
       "worst_label": "悪化:",
       "offender": "路線{{code}}({{min}}分)",
       "revision_boundary_label": "ダイヤ改正",
-      "revision_boundary_aria": "{{date}}にダイヤ改正が反映されました"
+      "revision_boundary_aria": "{{date}}にダイヤ改正が反映されました",
+      "brush_hint": "ドラッグで期間を絞り込み",
+      "brush_reset": "期間をリセット",
+      "brush_aria": "日次チャートの期間選択。矢印キーでカーソル移動、Shift+矢印キーで範囲を拡張、Enterで適用します。",
+      "brush_range": "{{from}} 〜 {{to}}",
+      "severe_band_label": "重大 ({{min}}分以上)",
+      "worst_day_label": "最も遅い日"
     },
     "dwell_run": {
       "not_available": "この事業者のフィードは到着遅延を送信しないため、滞留・走行時間の内訳は利用できません。",

@@ -1,8 +1,9 @@
 import type { CSSProperties } from "react";
-import { delayColor } from "../../styles/tokens";
+import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
 import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
 import { staggerDelay } from "./ChartEnter";
+import { DIM_OPACITY, isFocusDimmed, useTrendFocus } from "./trendFocus";
 
 const RAMP_STOPS = 5;
 
@@ -25,7 +26,13 @@ export function Legend({ min, max, unit, colorFor = delayColor }: { min: number;
 }
 
 /** 7-day × 5-band grid. Dense by construction — used for the agency overview and
- * the per-route detail (route cells collapsed to bands client-side). */
+ * the per-route detail (route cells collapsed to bands client-side).
+ *
+ * Hovering a cell publishes its weekday to `TrendFocusContext` when one is
+ * mounted, so the trend view's other charts narrow to that weekday; outside a
+ * provider (the forecast tab) the focus is inert and the grid behaves as
+ * before. A cell at or beyond the severe threshold is outlined rather than
+ * recoloured, so the outline survives whatever ramp `colorFor` applies. */
 export function BandGrid({
   grid,
   bandLabel,
@@ -46,9 +53,18 @@ export function BandGrid({
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
   const cols = `34px repeat(${BAND_ORDER.length}, 1fr)`;
   const entered = useEnteredOnMount();
-  const cellClass = `chart-cell-enter${entered ? " chart-cell-enter--in" : ""}`;
+  const { focus, setFocus } = useTrendFocus();
+  // .chart-cell-opacity gives a reduced-motion viewer (who gets none of the
+  // entrance classes) the same --cell-opacity the fade would have landed on,
+  // so the low-confidence dimming and the crossfilter both still apply.
+  const cellClass = `chart-cell-opacity chart-cell-enter${entered ? " chart-cell-enter--in" : ""}`;
   return (
-    <div onMouseLeave={onLeave}>
+    <div
+      onMouseLeave={() => {
+        onLeave();
+        setFocus(null);
+      }}
+    >
       <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
         <span />
         {BAND_ORDER.map((b) => (
@@ -71,16 +87,28 @@ export function BandGrid({
               // `opacity` -- an inline style always wins over the
               // .chart-cell-enter class's own opacity rule, which would
               // permanently pin every cell at its final value and leave
-              // nothing for the fade-in to animate from.
-              const targetOpacity = c?.low_confidence ? 0.5 : 1;
+              // nothing for the fade-in to animate.
+              const dimmed = isFocusDimmed(focus, { dow }, "dow");
+              const targetOpacity = dimmed ? DIM_OPACITY : c?.low_confidence ? 0.5 : 1;
               const staggerStyle = { ...staggerDelay(di * BAND_ORDER.length + bi), "--cell-opacity": targetOpacity } as CSSProperties;
+              const onEnter = (e: React.MouseEvent) => {
+                onTip(e, tipText);
+                setFocus({ source: "dow", dow });
+              };
+              // inset, not `border`/`outline`: a border would resize the cell
+              // and break the grid's alignment with its unmarked neighbours.
+              const severeOutline =
+                v != null && v >= DELAY_THRESHOLDS.severe
+                  ? { boxShadow: "inset 0 0 0 1px var(--delay-severe)" }
+                  : null;
               if (v == null) {
                 return (
                   <div
                     key={b}
                     data-testid="ov-band-cell"
+                    data-dow={dow}
                     className={cellClass}
-                    onMouseEnter={(e) => onTip(e, tipText)}
+                    onMouseEnter={onEnter}
                     onMouseMove={(e) => onTip(e, tipText)}
                     style={{
                       height: 30,
@@ -95,10 +123,11 @@ export function BandGrid({
                 <div
                   key={b}
                   data-testid="ov-band-cell"
+                  data-dow={dow}
                   className={cellClass}
-                  onMouseEnter={(e) => onTip(e, tipText)}
+                  onMouseEnter={onEnter}
                   onMouseMove={(e) => onTip(e, tipText)}
-                  style={{ height: 30, borderRadius: 3, background: colorFor(v), ...staggerStyle }}
+                  style={{ height: 30, borderRadius: 3, background: colorFor(v), ...severeOutline, ...staggerStyle }}
                 />
               );
             }),
