@@ -5,6 +5,8 @@ import { Download, Maximize2, RefreshCw } from "lucide-react";
 import { FilterDock } from "./map/FilterDock";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { Tooltip } from "../components/Tooltip";
+import { BottomSheet, type SnapPoint } from "../components/BottomSheet";
+import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import "../styles/focusedAnalysis.css";
 import "./map/focusedOverview.css";
 import maplibregl, { Map as MLMap } from "maplibre-gl";
@@ -160,6 +162,8 @@ export function MapTab() {
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [playbackOn, setPlaybackOn] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+  const [sheetSnap, setSheetSnap] = useState<SnapPoint>("peek");
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const refreshMessageTimerRef = useRef<number | null>(null);
@@ -490,6 +494,64 @@ export function MapTab() {
     ? liveRows.filter((trip) => trip.route_code === inspected.route_code).length
     : 0;
 
+  // Shared between the desktop side column (<aside>) and the phone bottom
+  // sheet -- same queue/inspect/timeline content, just a different container
+  // around it, so the two layouts can never drift into showing different
+  // trips.
+  const queueContent = (
+    <>
+          <h2 className="focus-queue-title">{td("attention")}</h2>
+          {/* The only live reading of these counts on the screen. Repeating
+              them next to the filters invited the reader to check whether the
+              two agreed instead of reading either; staleness likewise reads
+              once, from the header's freshness dot. */}
+          <div className="focus-summary-strip">
+            <StatTile label={td("observedLabel")} value={liveRows.length} />
+            <StatTile label={td("delayedLabel")} value={delayedRows.length} flagged={delayedRows.length > 0} />
+            {onTimePct != null && <StatTile label={td("onTimePct")} value={onTimePct} suffix="%" />}
+          </div>
+          {/* Directly under the tiles, because the CSV is exactly the rows
+              they count -- and above the delay list, so a long list can't
+              push the export below the panel's scroll. */}
+          <button type="button" className="btn-ghost ops-queue__export" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
+          {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
+          {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
+            <button type="button" onClick={() => { focusTripRow(trip); }}>
+              <span>{routeNames.format(trip.route_code)}<small>{hhmm(trip)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
+              <b>{signedMin(trip.dep_delay, t)}</b>
+            </button>
+            {trip.route_code && <Link to={`/agencies/${id}/route-analysis?${new URLSearchParams({ routes: trip.route_code })}`}>{td("openAnalysis")}</Link>}
+          </div>)}
+          {cappedDelayedRows.remaining > 0 && (
+            <button type="button" className="btn-ghost" onClick={cappedDelayedRows.showMore}>
+              {t("common.show_more", { count: cappedDelayedRows.remaining })}
+            </button>
+          )}
+          {/* FirstRunTour.tsx's second coach mark anchors here -- the panel
+              where an observed trip is actually inspected. */}
+          <details className="focus-queue-inspect" data-tour="map-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
+          routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
+          activeRoutes={activeRouteOptions}
+          directions={directions}
+          selectedDirection={effectiveDirection}
+          trips={directionTrips}
+          selectedTripId={effectiveTrip?.trip_id ?? null}
+          progress={progressQuery.data}
+          progressLoading={progressQuery.isLoading}
+          onSelectDirection={(key) => patchSelection({ direction: key, trip: null })}
+          onSelectRoute={focusRoute}
+          onSelectTrip={(trip) => {
+            setSelectedTripId(trip.trip_id);
+            if (trip.stop_lon != null && trip.stop_lat != null && mapRef.current) {
+              inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat]);
+            }
+          }}
+          t={t}
+        /></details>
+        
+    </>
+  );
+
   return (
     <div className="operations-page focused-overview">
       <header className="ops-header">
@@ -608,58 +670,17 @@ export function MapTab() {
           </Tooltip>
         </section>
 
-        <QueueResizer width={queueWidth} label={td("resizeQueue")} onWidth={setQueueWidth} onCommit={storeQueueWidth} />
+        {!isMobile && (
+          <QueueResizer width={queueWidth} label={td("resizeQueue")} onWidth={setQueueWidth} onCommit={storeQueueWidth} />
+        )}
 
-        <aside className="focus-live-queue">
-          <h2>{td("attention")}</h2>
-          {/* The only live reading of these counts on the screen. Repeating
-              them next to the filters invited the reader to check whether the
-              two agreed instead of reading either; staleness likewise reads
-              once, from the header's freshness dot. */}
-          <div className="focus-summary-strip">
-            <StatTile label={td("observedLabel")} value={liveRows.length} />
-            <StatTile label={td("delayedLabel")} value={delayedRows.length} flagged={delayedRows.length > 0} />
-            {onTimePct != null && <StatTile label={td("onTimePct")} value={onTimePct} suffix="%" />}
-          </div>
-          {/* Directly under the tiles, because the CSV is exactly the rows
-              they count -- and above the delay list, so a long list can't
-              push the export below the panel's scroll. */}
-          <button type="button" className="btn-ghost ops-queue__export" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
-          {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
-          {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
-            <button type="button" onClick={() => { focusTripRow(trip); }}>
-              <span>{routeNames.format(trip.route_code)}<small>{hhmm(trip)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
-              <b>{signedMin(trip.dep_delay, t)}</b>
-            </button>
-            {trip.route_code && <Link to={`/agencies/${id}/route-analysis?${new URLSearchParams({ routes: trip.route_code })}`}>{td("openAnalysis")}</Link>}
-          </div>)}
-          {cappedDelayedRows.remaining > 0 && (
-            <button type="button" className="btn-ghost" onClick={cappedDelayedRows.showMore}>
-              {t("common.show_more", { count: cappedDelayedRows.remaining })}
-            </button>
-          )}
-          {/* FirstRunTour.tsx's second coach mark anchors here -- the panel
-              where an observed trip is actually inspected. */}
-          <details data-tour="map-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
-          routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
-          activeRoutes={activeRouteOptions}
-          directions={directions}
-          selectedDirection={effectiveDirection}
-          trips={directionTrips}
-          selectedTripId={effectiveTrip?.trip_id ?? null}
-          progress={progressQuery.data}
-          progressLoading={progressQuery.isLoading}
-          onSelectDirection={(key) => patchSelection({ direction: key, trip: null })}
-          onSelectRoute={focusRoute}
-          onSelectTrip={(trip) => {
-            setSelectedTripId(trip.trip_id);
-            if (trip.stop_lon != null && trip.stop_lat != null && mapRef.current) {
-              inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat]);
-            }
-          }}
-          t={t}
-        /></details>
-        </aside>
+        {isMobile ? (
+          <BottomSheet snap={sheetSnap} onSnapChange={setSheetSnap} ariaLabel={td("attention")}>
+            {queueContent}
+          </BottomSheet>
+        ) : (
+          <aside className="focus-live-queue">{queueContent}</aside>
+        )}
       </div>
     </div>
   );
