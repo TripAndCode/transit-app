@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { useRangeContext } from "../api/rangeContext";
+import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
 import { AsyncSection } from "../components/AsyncSection";
@@ -29,10 +30,21 @@ export function OverviewTab() {
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
-  const [peakHourSel, setPeakHourSel] = useState<{
-    hour: number;
-    dow: number | null;
-  } | null>(null);
+  // Two string keys rather than one JSON-shaped one, consistent with the
+  // route-analysis stop selection: `peak_dow` is only ever written alongside
+  // `peak_hour`, so its presence/absence stays a plain empty-string default.
+  const [peakHourParam] = useUrlState<string>("peak_hour", "");
+  const [peakDowParam] = useUrlState<string>("peak_dow", "");
+  const patchUrl = useUrlPatch();
+  const peakHourSel = peakHourParam
+    ? { hour: Number(peakHourParam), dow: peakDowParam ? Number(peakDowParam) : null }
+    : null;
+  function setPeakHourSel(next: { hour: number; dow: number | null } | null) {
+    patchUrl({
+      peak_hour: next ? String(next.hour) : null,
+      peak_dow: next?.dow != null ? String(next.dow) : null,
+    });
+  }
   const peakBreakdown = usePeakHourBreakdown(
     agencyId,
     peakHourSel?.hour ?? null,

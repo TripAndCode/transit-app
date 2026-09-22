@@ -3,14 +3,16 @@ import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteShape } from "../api/hooks";
 import { useRangeContext, isoDaysBefore } from "../api/rangeContext";
+import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
+import type { RouteShapeStop } from "../api/types";
 import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { AnalysisMap } from "../components/analysis/AnalysisMap";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
-import { downloadCsv } from "../components/analysis/csv";
+import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -27,18 +29,37 @@ export function RouteAnalysisTab() {
   const prevCtx = { ...ctx, from: isoDaysBefore(ctx.from, 7), to: isoDaysBefore(ctx.to, 7) };
   const previous = useRouteShape(id, compare ? route : null, prevCtx);
   const names = useRouteNames(id);
-  const [selection, setSelection] = useState<{ route: string | null; sequence: number } | null>(null);
+  // Two plain string keys rather than one JSON-shaped one, so a shared link
+  // shows a human-readable stop selection. `stopRouteParam` guards against a
+  // stale `stop_seq` matching a different route's stop after the route
+  // changes (the same invalidation the old `selection.route === route` check
+  // did) -- both are cleared together in `setSelection`.
+  const [stopRouteParam] = useUrlState<string>("stop_route", "");
+  const [stopSeqParam] = useUrlState<string>("stop_seq", "");
+  const patchUrl = useUrlPatch();
+  const selection = stopRouteParam && stopSeqParam ? { route: stopRouteParam, sequence: Number(stopSeqParam) } : null;
+  function setSelection(next: { route: string | null; sequence: number }) {
+    patchUrl({ stop_route: next.route, stop_seq: String(next.sequence) });
+  }
   const [notice, setNotice] = useState("");
-  const [activeTab, setActiveTab] = useState<"map" | "trend" | "byStop">("trend");
+  const [activeTab, setActiveTab] = useUrlState<"map" | "trend" | "byStop">("sub_tab", "trend");
   const [mapVisited, setMapVisited] = useState(false);
   const stops = query.data ? orderedStops(query.data) : [];
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? stops.find((s) => s.avg_min != null) ?? stops[0];
+  const stopColumns: CsvColumn<RouteShapeStop>[] = [
+    { header: "route_code", value: () => route },
+    { header: "stop_sequence", value: (s) => s.stop_sequence },
+    { header: "stop_id", value: (s) => s.stop_id },
+    { header: "stop_name", value: (s) => s.stop_name },
+    { header: "mean_departure_delay_minutes", value: (s) => s.avg_min },
+    { header: "observations", value: (s) => s.samples },
+    { header: "comparison_mean_minutes", value: (s) => matchedPrevious(s, prevStops) },
+  ];
   return <div className="focus-page">
     <header className="focus-header"><h1>{t("investigate")}</h1><div className="focus-actions">
       <button className="btn-ghost" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
-        ["agency_id", "route_code", "from", "to", "dow", "time_band", "service", "stop_sequence", "stop_id", "stop_name", "mean_departure_delay_minutes", "observations", "comparison_mean_minutes"],
-        ...stops.map((s) => [id, route, ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, s.stop_sequence, s.stop_id, s.stop_name, s.avg_min, s.samples, matchedPrevious(s, prevStops)]),
+        ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
       <button disabled={!id || !query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id!, `${names.format(route)} · ${ctx.from} – ${ctx.to}`, ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>

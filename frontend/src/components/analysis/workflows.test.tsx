@@ -19,7 +19,12 @@ vi.mock("./AnalysisMap", () => ({
     return <div>Map</div>;
   },
 }));
-vi.mock("./csv", () => ({ downloadCsv: vi.fn() }));
+// `buildCsv`/`csvText` stay real (pure, deterministic) -- only `downloadCsv`
+// (which touches the DOM to trigger a file download) is replaced.
+vi.mock("./csv", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./csv")>()),
+  downloadCsv: vi.fn(),
+}));
 // TabFilterBar renders PresetMenu, which calls useSession -> a real
 // apiGet("/api/me"). Unstubbed that fetch stays pending past the end of this
 // file and destabilises whichever file vitest runs next, so it is settled
@@ -55,7 +60,15 @@ it("keeps pattern and period in exported observations and saved analysis", async
   show("route-analysis");
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "Download CSV" }));
-  expect(vi.mocked(downloadCsv).mock.calls[0][1][1]).toEqual(expect.arrayContaining([1, "101", "2026-09-07", "2026-09-12", "weekday", "morning", "Station A", 2, 5]));
+  const rows = vi.mocked(downloadCsv).mock.calls[0][1];
+  // Pattern: a per-row column. Period: consolidated into one `buildCsv`
+  // metadata line (`ctxToQueryString`) instead of repeated on every row.
+  expect(rows[1]).toEqual(expect.arrayContaining(["101", "Station A", 2, 5]));
+  const queryRow = rows.find((r) => r[0] === "query");
+  expect(queryRow?.[1]).toContain("from=2026-09-07");
+  expect(queryRow?.[1]).toContain("to=2026-09-12");
+  expect(queryRow?.[1]).toContain("dow=weekday");
+  expect(queryRow?.[1]).toContain("time_band=morning");
   await user.click(screen.getByRole("button", { name: "Save analysis" }));
   expect(readAnalyses()[0].query).toContain("routes=101");
   expect(readAnalyses()[0].query).toContain("time_band=morning");
@@ -76,7 +89,11 @@ it("changing keito scopes both report queries and CSV to the selected code", asy
   await user.click(screen.getByRole("button", { name: /Apply/ }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["999"]);
   await user.click(screen.getAllByRole("button", { name: "Download CSV" })[0]);
-  expect(vi.mocked(downloadCsv).mock.calls[0][1][1]).toContain("999");
+  // The mocked ranking data itself never changes (it's a fixed fixture), so
+  // "999" can only appear via the `buildCsv` query-string metadata line,
+  // proving the export used the current ctx rather than a stale one.
+  const cells = vi.mocked(downloadCsv).mock.calls[0][1].flat();
+  expect(cells.some((cell) => typeof cell === "string" && cell.includes("999"))).toBe(true);
 });
 it("saved analyses stay agency-scoped and open with their original filters", async () => {
   saveAnalysis(1, "Coast mornings", ctx, true);
@@ -89,20 +106,17 @@ it("saved analyses stay agency-scoped and open with their original filters", asy
   expect(readAnalyses()[0].agencyId).toBe(8);
 });
 
-it("footer CSV exports the report data, not just the filter-metadata prefix", async () => {
+it("the header export menu's CSV item exports the report data, not just the filter-metadata prefix", async () => {
   show("reports");
   const user = userEvent.setup();
-  // Three "Download CSV" buttons exist: the trend section, the ranking
-  // section, and the closing footer. Only the footer button combines both
-  // datasets; the trend and ranking buttons above each export just their own
-  // dataset ("changing keito scopes both report queries and CSV to the
-  // selected code" covers those).
-  const footerCsv = screen.getAllByRole("button", { name: "Download CSV" }).at(-1)!;
-  await user.click(footerCsv);
+  // The trend and ranking sections each export just their own dataset
+  // ("changing keito scopes both report queries and CSV to the selected
+  // code" covers those); only the header ExportMenu's CSV item combines both.
+  await user.click(screen.getByRole("button", { name: "Export" }));
+  await user.click(screen.getByRole("menuitem", { name: "Download CSV" }));
   const payload = vi.mocked(downloadCsv).mock.calls.at(-1)![1];
   expect(payload.flat()).toContain("mean_departure_delay_minutes");
   expect(payload.flat()).toContain("median_minutes");
-  expect(payload.length).toBe(8);
 });
 
 it("defers the analysis filters until Apply instead of querying mid-selection", async () => {

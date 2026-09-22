@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { fireEvent, screen } from "@testing-library/react";
+import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewTab } from "./OverviewTab";
 import * as hooks from "../api/hooks";
@@ -19,13 +19,18 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
   };
 }
 
+function SearchProbe() {
+  const [params] = useSearchParams();
+  return <span data-testid="search">{params.toString()}</span>;
+}
+
 function renderOverview(data: OverviewSummary) {
   vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data, isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
   renderWithProviders(
     <MemoryRouter initialEntries={["/agencies/8/overview?from=2030-01-01&to=2030-01-07"]}>
       <Routes>
-        <Route path="/agencies/:agencyId/overview" element={<OverviewTab />} />
+        <Route path="/agencies/:agencyId/overview" element={<><OverviewTab /><SearchProbe /></>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -65,6 +70,29 @@ describe("OverviewTab", () => {
     // MapLibre helper and carry this class whatever the wrapper is called.
     expect(document.querySelector(".maplibregl-map")).not.toBeInTheDocument();
     expect(document.querySelector("canvas")).not.toBeInTheDocument();
+  });
+
+  // Selecting an hour writes two query keys. Written as two per-key setters
+  // they would not compose -- the second navigation starts from the same
+  // params snapshot as the first and drops it -- so the hour would never
+  // reach the URL and the breakdown would never open.
+  it("writes the peak hour to the URL when an hour is picked", () => {
+    renderOverview(
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        peak_hour: { by_hour: Array.from({ length: 24 }, (_, i) => i / 10), peak_hour: 8, peak_avg_min: 2.3 },
+      }),
+    );
+    // jsdom reports a zero-size rect, and the ribbon maps a click to an hour
+    // through its own width, so the geometry has to be supplied here.
+    const ribbon = screen.getByRole("img", { name: "Worst hour of day" });
+    ribbon.getBoundingClientRect = () =>
+      ({ width: 660, height: 90, left: 0, top: 0, right: 660, bottom: 90, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.click(ribbon, { clientX: 8 * (660 / 24) + 1 });
+    const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(search.has("peak_hour")).toBe(true);
+    // The range the tab was opened with must survive the selection write.
+    expect(search.get("from")).toBe("2030-01-01");
   });
 
   it("renders peak-hour, concentration, and service-split content inline, with nothing to disclose", () => {

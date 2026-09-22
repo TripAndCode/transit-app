@@ -1,7 +1,8 @@
-import { useState, type ReactElement } from "react";
+import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
+import { useUrlState } from "../api/useUrlState";
 import { useNetworkSummary } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { Skeleton } from "../components/Skeleton";
@@ -93,7 +94,8 @@ export function NetworkTab() {
   const currentAgencyId = useAgencyId();
   const [ctx, update] = useRangeContext();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
-  const [showRidershipWeighted, setShowRidershipWeighted] = useState(false);
+  const [ridershipWeightedParam, setRidershipWeightedParam] = useUrlState<"1" | "0">("ridership_weighted", "0");
+  const showRidershipWeighted = ridershipWeightedParam === "1";
   const cappedAgencies = useCappedList(data?.agencies ?? [], 200, data?.agencies);
 
   // Absent (not just unchecked) whenever NO agency in the current list has a
@@ -260,7 +262,7 @@ export function NetworkTab() {
               type="checkbox"
               data-testid="ridership-weighted-toggle"
               checked={showRidershipWeighted}
-              onChange={(e) => setShowRidershipWeighted(e.target.checked)}
+              onChange={(e) => setRidershipWeightedParam(e.target.checked ? "1" : "0")}
             />
             {t("network.ridership_weighted_toggle")}
           </label>
