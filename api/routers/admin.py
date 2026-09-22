@@ -20,19 +20,23 @@ killed, and OAuth identities are removed so re-login under the same
 provider sub creates a fresh user.
 """
 
+import asyncio
 import json
 import logging
+import os
 import re
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
+from api.admin_board import board_alerts, board_freshness, board_window, collector_tiles
 from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin
@@ -70,6 +74,7 @@ async def list_users(
     q: str | None = None,
     role: str | None = None,
     suspended: bool | None = None,
+    llm_approved: bool | None = None,
     limit: int = 50,
     offset: int = Query(0, ge=0),
     _admin: User = Depends(require_admin),
@@ -81,7 +86,11 @@ async def list_users(
     - ``role``: exact match, restricted to ``user`` / ``admin`` (silently
       ignored otherwise so a malformed query param doesn't 500).
     - ``suspended``: ``True`` filters to suspended only, ``False`` to active.
+    - ``llm_approved``: ``False`` filters to those still awaiting AI access.
     - ``limit`` clamped to [1, 200] to keep response sizes bounded.
+
+    ``total`` counts every match, not just the returned page, so a caller
+    that only wants "how many are there" can ask for one row and read it.
     """
     limit = max(1, min(200, limit))
     where = []
@@ -96,6 +105,10 @@ async def list_users(
         where.append("suspended_at IS NOT NULL")
     elif suspended is False:
         where.append("suspended_at IS NULL")
+    if llm_approved is True:
+        where.append("llm_approved")
+    elif llm_approved is False:
+        where.append("NOT llm_approved")
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     total = await conn.fetchval(f"SELECT count(*) FROM users {where_sql}", *args)
@@ -507,3 +520,187 @@ async def get_architecture_doc(slug: str, _admin: User = Depends(require_admin))
     if not _has_real_content(text):
         raise HTTPException(404, "doc not found")
     return ArchitectureDocDetail(slug=slug, title=_feature_doc_title(text, slug), content=text)
+
+
+# ── Control board ────────────────────────────────────────────────────────
+
+#: Where the ops collectors find the git checkout they read. Named to match
+#: the standalone status server's own override so one setting covers both.
+_OPS_STATUS_REPO_ENV = "OPS_STATUS_REPO"
+
+_COLLECTOR_BUDGET_SECONDS = 5.0
+
+_BOARD_FRESHNESS_SQL = """
+    SELECT a.agency_id, a.agency_name, m.analyzed_at, h.date, h.raw_samples, h.clamp_count
+    FROM agencies a
+    LEFT JOIN agg_meta m ON m.agency_id = a.agency_id
+    LEFT JOIN agg_feed_health h ON h.agency_id = a.agency_id AND h.date >= $1
+    WHERE a.deleted_at IS NULL
+    ORDER BY a.agency_id, h.date
+"""
+
+_BOARD_AGENCIES_SQL = "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+
+_PENDING_LLM_APPROVALS_SQL = "SELECT count(*) FROM users WHERE NOT llm_approved AND suspended_at IS NULL"
+
+
+class CollectorTileOut(BaseModel):
+    key: str
+    label: str
+    status: str  # ok | warn | down | unknown
+    last_success_at: str | None
+    detail: str | None
+    history: list[int]
+
+
+class FreshnessDayOut(BaseModel):
+    date: str
+    state: str  # fresh | stale | missing
+    clamp_pct: float | None
+
+
+class AgencyFreshnessRowOut(BaseModel):
+    agency_id: int
+    agency_name: str
+    days: list[FreshnessDayOut]
+
+
+class BoardAlertOut(BaseModel):
+    level: str  # warn | info
+    #: Stable identifier the UI translates; `text` is the untranslated
+    #: summary, for consumers with no locale (logs, exports).
+    code: str
+    params: dict[str, Any]
+    text: str
+    href: str | None
+
+
+class AdminBoard(BaseModel):
+    collectors: list[CollectorTileOut]
+    freshness: list[AgencyFreshnessRowOut]
+    #: None only when the migration check itself threw — distinguishable from
+    #: a genuine "0 behind", the same way `/admin/ops` already reports it.
+    migrations: MigrationStatusOut | None
+    alerts: list[BoardAlertOut]
+
+
+def _collect_all() -> list[dict[str, Any]]:
+    """The four ops collectors, imported lazily.
+
+    `scripts/` is not part of the installed package set, and the collectors
+    reach for `gh`/`aws` and the filesystem, so importing them at module scope
+    would tie every admin route's importability to a tree the API does not
+    otherwise need.
+    """
+    from scripts import ops_status_page
+
+    # The collectors read a git checkout, and their default is the VPS's own
+    # path. Any other host -- the API container among them -- has the tree
+    # somewhere else or not at all, so the same `OPS_STATUS_REPO` override
+    # the standalone status server reads decides where to look; without it
+    # every tile degrades to `unknown` on every request rather than on a
+    # real collector outage.
+    override = os.environ.get(_OPS_STATUS_REPO_ENV)
+    if override:
+        return ops_status_page.collect_all(local_repo=Path(override))
+    return ops_status_page.collect_all()
+
+
+def _collector_reasons(documents: list[dict[str, Any]]) -> dict[str, str]:
+    """Each non-healthy component's short human-facing explanation, reusing
+    the combined status page's own reason builders rather than re-deriving
+    them from the raw `details` bags."""
+    try:
+        from scripts import ops_status_page
+
+        return {
+            doc["component"]: reason for doc in documents if (reason := ops_status_page.reason_for(doc)) is not None
+        }
+    except Exception:
+        _log.warning("board: collector reasons unavailable", exc_info=True)
+        return {}
+
+
+async def _collect_documents() -> list[dict[str, Any]]:
+    """Collector documents, or `[]` once the budget is spent.
+
+    The collectors are blocking and shell out, so they run in a worker thread
+    under a wall-clock budget. A thread cannot be cancelled: on timeout the
+    call is abandoned, the request answers with `unknown` tiles, and the
+    orphaned thread finishes into the collectors' own caches — which the next
+    poll then reads cheaply.
+
+    At most one collection runs at a time. The default executor is shared
+    with the embedder and the LLM calls and holds only a handful of threads,
+    and this page polls on a timer from every operator who has it open, so
+    without the guard abandoned collections would accumulate there and stall
+    unrelated requests. Concurrent polls await the collection already in
+    flight instead of starting another; `shield` keeps one poll's timeout
+    from cancelling the shared task out from under the others.
+    """
+    global _collector_task
+    task = _collector_task
+    if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
+        task = _collector_task = asyncio.create_task(asyncio.to_thread(_collect_all))
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), _COLLECTOR_BUDGET_SECONDS)
+    except Exception:
+        _log.warning("board: collectors unavailable within budget", exc_info=True)
+        return []
+
+
+#: The collection currently in flight, if any. Module-level rather than
+#: per-request: its whole purpose is to be shared across requests.
+_collector_task: asyncio.Task[list[dict[str, Any]]] | None = None
+
+
+async def _freshness_rows(conn: asyncpg.Connection, window_start: date) -> list[Any]:
+    """Agency x day feed-health rows, falling back to the bare agency list
+    when the aggregate tables are absent (a freshly migrated environment), so
+    the heatmap still shows who exists with every day missing."""
+    for sql, args in ((_BOARD_FRESHNESS_SQL, (window_start,)), (_BOARD_AGENCIES_SQL, ())):
+        try:
+            return list(await conn.fetch(sql, *args))
+        except Exception:
+            _log.warning("board: freshness query failed, trying next fallback", exc_info=True)
+            continue
+    return []
+
+
+@router.get("/board", response_model=AdminBoard)
+async def admin_board(
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> AdminBoard:
+    """The admin entry page's one snapshot: collectors, freshness, alerts."""
+    from pipeline.health import migration_status
+
+    now = datetime.now(timezone.utc)
+    today = now.astimezone(ZoneInfo("Asia/Tokyo")).date()
+
+    documents = await _collect_documents()
+    collectors = collector_tiles(documents, now, reasons=_collector_reasons(documents))
+
+    freshness = board_freshness(await _freshness_rows(conn, board_window(today)[0]), today)
+
+    mig: MigrationStatusOut | None = None
+    migrations = None
+    try:
+        migrations = await migration_status(conn)
+        mig = MigrationStatusOut(applied=migrations.applied, latest=migrations.latest, behind=migrations.behind)
+    except Exception:
+        _log.warning("board: migration status unavailable", exc_info=True)  # mig stays None
+
+    try:
+        pending_llm_approvals = int(await conn.fetchval(_PENDING_LLM_APPROVALS_SQL) or 0)
+    except Exception:
+        _log.warning("board: pending-approvals count failed", exc_info=True)
+        pending_llm_approvals = 0
+
+    alerts = board_alerts(freshness=freshness, migrations=migrations, pending_llm_approvals=pending_llm_approvals)
+    return AdminBoard(
+        collectors=[CollectorTileOut(**tile) for tile in collectors],
+        freshness=[AgencyFreshnessRowOut(**row) for row in freshness],
+        migrations=mig,
+        alerts=[BoardAlertOut(**alert) for alert in alerts],
+    )

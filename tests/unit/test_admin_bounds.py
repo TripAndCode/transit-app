@@ -73,3 +73,21 @@ def test_list_users_escapes_percent_in_q_and_adds_escape_clause():
     sql, args = conn.calls[0]
     assert r"50\%\_off" in args[0]
     assert "ESCAPE '\\'" in sql
+
+
+def test_list_users_filters_on_llm_approved_so_total_counts_the_waiting():
+    """The nav badge asks for a count, not a page: it reads ``total`` from a
+    one-row request, which is only exact if the filter reaches the SQL."""
+    conn = _RecordingConn()
+    response = _client(conn).get("/api/admin/users", params={"llm_approved": "false", "suspended": "false", "limit": 1})
+    assert response.status_code == 200
+    count_sql, _ = conn.calls[0]
+    assert "NOT llm_approved" in count_sql
+    assert "suspended_at IS NULL" in count_sql
+
+
+def test_list_users_leaves_llm_approved_unfiltered_when_it_is_not_asked_for():
+    conn = _RecordingConn()
+    assert _client(conn).get("/api/admin/users").status_code == 200
+    count_sql, _ = conn.calls[0]
+    assert "llm_approved" not in count_sql

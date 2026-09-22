@@ -1069,7 +1069,14 @@
       "agencies": "Agencies",
       "users": "Users",
       "ops": "Ops",
-      "architecture": "Architecture"
+      "architecture": "Architecture",
+      "board": "Control board",
+      "group": {
+        "operations": "Operations",
+        "people": "People",
+        "governance": "Governance",
+        "reference": "Reference"
+      }
     },
     "ops": {
       "title": "Ops",
@@ -1128,6 +1135,59 @@
       "docs_title": "Feature docs",
       "docs_nav_label": "Feature doc list",
       "docs_empty": "No feature docs found."
+    },
+    "table": {
+      "empty": "Nothing to show.",
+      "select_all": "Select all",
+      "select_row": "Select {{label}}"
+    },
+    "drawer": {
+      "close": "Close"
+    },
+    "board": {
+      "title": "Control board",
+      "poll_note": "Refreshed every 10 seconds",
+      "load_error": "Couldn't load the control board — showing what's available.",
+      "reanalyze": "Re-aggregate now",
+      "reanalyze_unavailable": "Running a re-aggregation isn't wired up yet.",
+      "collectors_title": "Collectors",
+      "collector": {
+        "oracle_crawler": "Oracle crawler",
+        "r2": "R2 sync",
+        "vps_loop": "VPS loop",
+        "github": "CI (GitHub)"
+      },
+      "status": {
+        "ok": "Healthy",
+        "warn": "Behind",
+        "down": "Failing",
+        "unknown": "Unknown"
+      },
+      "last_success": "Last success {{when}}",
+      "never": "No success on record",
+      "sparkline_label": "Confirmed running for {{ok}} of the last 24 hours",
+      "freshness_title": "Aggregate freshness — agency x last 14 days",
+      "freshness_empty": "No agencies registered.",
+      "agency_column": "Agency",
+      "legend_fresh": "Aggregated",
+      "legend_stale": "Behind",
+      "legend_missing": "No data",
+      "state": {
+        "fresh": "Aggregated",
+        "stale": "Behind",
+        "missing": "No data"
+      },
+      "cell_tooltip": "{{agency}} · {{date}} · {{state}}",
+      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · clamp {{pct}}%",
+      "alerts_title": "Alerts",
+      "alerts_none": "Nothing needs attention.",
+      "alert_open": "Open",
+      "alert": {
+        "agency_stale": "{{agency}}: aggregates {{days}} day(s) behind",
+        "clamp_high": "{{agency}}: {{pct}}% of samples clamped on {{date}}",
+        "migrations_behind": "Schema behind by {{count}} migration(s)",
+        "llm_approvals_pending": "{{count}} user(s) awaiting AI access approval"
+      }
     }
   },
   "copilot": {

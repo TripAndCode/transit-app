@@ -19,6 +19,7 @@ export function useAdminUsers(params: {
   q?: string;
   role?: string;
   suspended?: string;
+  llmApproved?: string;
   limit?: number;
   offset?: number;
 }) {
@@ -26,6 +27,7 @@ export function useAdminUsers(params: {
   if (params.q) qs.set("q", params.q);
   if (params.role) qs.set("role", params.role);
   if (params.suspended) qs.set("suspended", params.suspended);
+  if (params.llmApproved) qs.set("llm_approved", params.llmApproved);
   if (params.limit != null) qs.set("limit", String(params.limit));
   if (params.offset != null) qs.set("offset", String(params.offset));
   return useQuery({
@@ -218,5 +220,58 @@ export function useArchitectureDoc(slug: string | null) {
       apiGet<ArchitectureDoc>(`/api/admin/architecture/docs/${encodeURIComponent(slug ?? "")}`, { signal }),
     enabled: slug != null,
     staleTime: 30_000,
+  });
+}
+
+// ── Control board ────────────────────────────────────────────────────────
+
+export type BoardCollector = {
+  key: string;
+  /** Server-side fallback name, used when the UI has no translation for `key`. */
+  label: string;
+  status: "ok" | "warn" | "down" | "unknown";
+  last_success_at: string | null;
+  detail: string | null;
+  /** 24 hourly cells, oldest first: 1 where the collector was still known good. */
+  history: number[];
+};
+
+export type BoardFreshnessDay = {
+  date: string;
+  state: "fresh" | "stale" | "missing";
+  clamp_pct: number | null;
+};
+
+type BoardFreshnessRow = {
+  agency_id: number;
+  agency_name: string;
+  days: BoardFreshnessDay[];
+};
+
+export type BoardAlert = {
+  level: "warn" | "info";
+  /** Translated as `admin.board.alert.<code>`; `text` is the untranslated
+   *  server summary, rendered as-is for a code this build doesn't know. */
+  code: string;
+  params: Record<string, unknown>;
+  text: string;
+  href: string | null;
+};
+
+export type AdminBoard = {
+  collectors: BoardCollector[];
+  freshness: BoardFreshnessRow[];
+  migrations: { applied: string | null; latest: string | null; behind: number } | null;
+  alerts: BoardAlert[];
+};
+
+/** The `/admin` entry page's single snapshot. Polled rather than pushed: the
+ *  underlying collectors are themselves cached snapshots, so a short poll is
+ *  as fresh as the data can be. */
+export function useAdminBoard() {
+  return useQuery({
+    queryKey: ["adminBoard"],
+    queryFn: ({ signal }) => apiGet<AdminBoard>("/api/admin/board", { signal }),
+    refetchInterval: 10_000,
   });
 }

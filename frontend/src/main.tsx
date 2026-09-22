@@ -53,6 +53,9 @@ const AdminUserDetailPage = lazy(() =>
 const AdminLayout = lazy(() =>
   import("./pages/admin/AdminLayout").then((m) => ({ default: m.AdminLayout }))
 );
+const AdminBoardPage = lazy(() =>
+  import("./pages/admin/AdminBoardPage").then((m) => ({ default: m.AdminBoardPage }))
+);
 const AdminAgenciesPage = lazy(() =>
   import("./pages/admin/AdminAgenciesPage").then((m) => ({ default: m.AdminAgenciesPage }))
 );
@@ -130,7 +133,7 @@ const router = createBrowserRouter([
         path: "admin",
         element: <RequireAdmin><AdminLayout /></RequireAdmin>,
         children: [
-          { index: true, element: <Navigate to="agencies" replace /> },
+          { index: true, element: <AdminBoardPage /> },
           { path: "agencies", element: <AdminAgenciesPage /> },
           { path: "users", element: <AdminUsersPage /> },
           { path: "users/:uid", element: <AdminUserDetailPage /> },
