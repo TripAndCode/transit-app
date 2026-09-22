@@ -57,19 +57,20 @@ export function MapStyleControl({
 
   // Reads the map's current view (an imperative MapLibre instance, not React
   // state) so a thumbnail reflects where the operator is actually looking
-  // rather than a fixed reference tile. Sampled here, as the panel opens,
-  // rather than in an effect afterwards: both updates batch into the commit
-  // that first shows the tiles, so they never render once at the previous
-  // view and immediately refetch at the current one. Not resampled on pan,
-  // so the non-current style tiles are only fetched while actually expanded.
-  function toggleOpen() {
-    const opening = !open;
+  // rather than a fixed reference tile. Sampled on every open/close rather
+  // than in an effect afterwards: both updates batch into one commit, so the
+  // tiles never render once at the previous view and immediately refetch at
+  // the current one. Sampling on close too keeps the always-visible entry
+  // thumbnail honest after a pan — the map stays draggable behind this
+  // overlay. Not resampled while open, so the non-current style tiles are
+  // only fetched when the panel is actually expanded.
+  function setOpenSamplingView(next: boolean) {
     const map = mapRef?.current;
-    if (opening && map) {
+    if (map) {
       const center = map.getCenter();
       setView({ lng: center.lng, lat: center.lat, zoom: map.getZoom() });
     }
-    setOpen(opening);
+    setOpen(next);
   }
 
   const dimPercent = Math.round(dimAmount * 100);
@@ -83,7 +84,7 @@ export function MapStyleControl({
         className="ops-style-control__entry map-chrome"
         aria-label={t("map.style.label")}
         aria-expanded={open}
-        onClick={toggleOpen}
+        onClick={() => setOpenSamplingView(!open)}
       >
         <img
           src={buildThumbnailUrl(current.id, lang, view)}
@@ -106,7 +107,7 @@ export function MapStyleControl({
                 thumbSrc={buildThumbnailUrl(s.id, lang, view)}
                 onClick={() => {
                   onChange(s.id);
-                  setOpen(false);
+                  setOpenSamplingView(false);
                 }}
               />
             ))}
