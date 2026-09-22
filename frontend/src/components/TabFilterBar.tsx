@@ -176,17 +176,14 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   }
 
   return (
-    <div
-      ref={ref}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        flexWrap: "wrap",
-        marginBottom: 16,
-        position: "relative",
-      }}
-    >
+    <div ref={ref} style={{ marginBottom: 16, position: "relative" }}>
+      {/* The scrolling behavior lives on this inner row, not the outer
+          relative-positioned wrapper: the wrapper also anchors the filter
+          popover below via `position: absolute`, and giving the wrapper
+          itself `overflow-x: auto` would clip that popover's vertical
+          overflow too (an auto axis forces the other axis to auto as well,
+          per the CSS overflow spec). */}
+      <div className="tab-filter-bar-row" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <RangeBadge />
       {agencyIdNum !== null && (
         <PresetMenu
@@ -279,6 +276,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
       )}
 
       {after && <div style={{ marginLeft: "auto" }}>{after}</div>}
+      </div>
 
       {open && (
         <div

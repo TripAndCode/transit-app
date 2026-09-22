@@ -46,7 +46,7 @@ export default function App() {
     <div className="app-shell" style={{ display: "flex", height: "100dvh" }}>
       <CommandPalette />
       <Sidebar />
-      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+      <main className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
         {/* Scoped to the content area, not the whole app shell — these are
             notices about the agency data being viewed, not app-wide chrome,
             so they shouldn't span above the sidebar (a full-height nav rail
@@ -74,7 +74,7 @@ export default function App() {
             router's startTransition (main.tsx) can leave that painted until
             the incoming chunk resolves. RouteTransition then fades the new
             content in without remounting this wrapper. */}
-        <RouteTransition style={{ display: "flex", flexDirection: "column", padding: 24, flex: 1, minHeight: 0, boxSizing: "border-box" }}>
+        <RouteTransition style={{ display: "flex", flexDirection: "column", padding: "clamp(16px, 4vw, 24px)", flex: 1, minHeight: 0, boxSizing: "border-box" }}>
           <Suspense fallback={<ChunkLoading />}>
             <Outlet key={agencyId ?? "root"} />
           </Suspense>

@@ -357,6 +357,26 @@ html, body, #root { height: 100%; margin: 0; }
   margin-top: 16px;
 }
 
+/* BP.sm: Sidebar's bottom tab bar becomes `position: fixed` at this
+   breakpoint (Sidebar.tsx's `MOBILE_TABBAR_HEIGHT_PX` -- keep this 56px in
+   sync with that constant) and no longer claims layout space as a flex
+   sibling, so the content column needs the same height reserved at its own
+   bottom edge or the tab bar sits on top of whatever the active tab last
+   renders instead of below it. */
+@media (max-width: 640px) {
+  /* border-box, not the default content-box: main's height is a flex
+     stretch value (its parent, .app-shell, is the 100dvh row), so an
+     content-box padding would grow main taller than that stretch target
+     instead of eating into it, pushing the whole shell past the viewport. */
+  .app-main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+  /* TabFilterBar's shared filter row (Overview/Analysis/Reports): wrapping
+     at this width pushes the preset menu and chips onto several lines
+     before the tab content even starts. A single scrollable row keeps every
+     control one thumb-swipe away instead. */
+  .tab-filter-bar-row { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab-filter-bar-row > * { flex-shrink: 0; }
+}
+
 body {
   font-family: var(--font-body);
   font-size: 15px;
