@@ -20,6 +20,7 @@ import { Tooltip } from "./Tooltip";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Modal } from "./Modal";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
+import { openCommandPalette } from "./commandPaletteEvents";
 
 
 import { SIDEBAR_NAV_ITEMS } from "./sidebarNavItems";
@@ -270,6 +271,52 @@ export function Sidebar() {
         )}
         {!collapsedFlag && <CompactDataStatus />}
         {!collapsedFlag && <SidebarUserMenu onOpenSettings={openSettings} />}
+        {/* Passive discoverability hint for the ⌘K command palette (mounted
+            once in App.tsx, not here) — clicking it opens the palette via a
+            window event rather than shared state, so this component doesn't
+            need to know the palette's open/closed status. */}
+        {!collapsedFlag && (
+          <button
+            type="button"
+            onClick={() => openCommandPalette()}
+            aria-label={t("palette.hint_aria")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              width: "100%",
+              marginTop: 4,
+              padding: "6px 22px",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--text-tertiary)",
+              fontSize: "var(--text-xs)",
+            }}
+          >
+            <span>{t("palette.hint")}</span>
+            <span style={{ display: "flex", gap: 3 }}>
+              {["⌘", "K"].map((k) => (
+                <kbd
+                  key={k}
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    border: "1px solid var(--border-subtle)",
+                    borderBottomWidth: 2,
+                    borderRadius: 4,
+                    padding: "0 5px",
+                    background: "var(--bg-soft)",
+                    color: "var(--text-secondary)",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {k}
+                </kbd>
+              ))}
+            </span>
+          </button>
+        )}
       </>
     );
   }

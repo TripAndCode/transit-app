@@ -12,6 +12,13 @@
  * (400/401): a context menu can be opened from inside a modal (e.g.
  * ThreadSidebar's conversation menu), and a menu opened from within a
  * surface must render above that surface, not under it.
+ *
+ * `commandPalette` (550) sits above `contextMenu` rather than sharing it:
+ * the palette opens from a global shortcut that fires while a context menu
+ * is still open, and two surfaces on the same rung order by mount position
+ * instead of intent, which would let the smaller one cover the palette.
+ * `toast` stays above it — a notification must not be swallowed by a
+ * surface the user opened on top of it.
  */
 export const Z_INDEX = {
   base: 0,
@@ -26,5 +33,6 @@ export const Z_INDEX = {
   modalBackdrop: 400,
   modal: 401,
   contextMenu: 500,
+  commandPalette: 550,
   toast: 600,
 } as const;

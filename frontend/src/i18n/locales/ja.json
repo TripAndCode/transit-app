@@ -1082,5 +1082,39 @@
     "ask_step_back": "こちらで会話が続いています。",
     "followup_placeholder": "続けて質問…",
     "followup_submit": "質問する"
+  },
+  "palette": {
+    "placeholder": "事業者・系統・レポート・時間帯・操作を検索…",
+    "aria_label": "コマンドパレット",
+    "no_results": "一致する項目がありません",
+    "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
+    "hint": "コマンド",
+    "hint_aria": "コマンドパレットを開く（⌘K）",
+    "group": {
+      "recent": "最近使った項目",
+      "nav": "移動",
+      "agency": "事業者",
+      "route": "系統",
+      "report": "レポート",
+      "timeband": "時間帯",
+      "action": "操作"
+    },
+    "action": {
+      "toggle_theme": "テーマを切り替える",
+      "toggle_theme_sublabel": "システム / ライト / ダーク",
+      "shortcuts": "ショートカット一覧"
+    },
+    "footer": {
+      "navigate": "移動",
+      "select": "実行",
+      "close": "閉じる"
+    },
+    "shortcuts": {
+      "title": "キーボードショートカット",
+      "open_palette": "コマンドパレットを開く",
+      "go_to": "{{target}}へ移動",
+      "open_shortcuts": "このショートカット一覧を表示",
+      "extend_brush": "日次チャートの選択範囲を拡張"
+    }
   }
 }

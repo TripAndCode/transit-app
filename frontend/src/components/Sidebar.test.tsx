@@ -96,6 +96,27 @@ describe("Sidebar", () => {
     expect(mapLink.getAttribute("aria-current")).toBe("page");
   });
 
+  it("renders a command-palette hint in the footer that opens the palette", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    window.addEventListener("command-palette:open", onOpen);
+    renderSidebar();
+    await user.click(screen.getByRole("button", { name: /Open the command palette/ }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    window.removeEventListener("command-palette:open", onOpen);
+  });
+
+  it("hides the command-palette hint while collapsed", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
+    // Collapsing persists the preference to localStorage (see the "collapse"
+    // describe block below); reset it so later tests in this file don't
+    // inherit a collapsed sidebar.
+    localStorage.clear();
+  });
+
   it("renders the brand block above the nav items", () => {
     renderSidebar();
     expect(screen.getByText("Delay Dashboard")).toBeTruthy();
