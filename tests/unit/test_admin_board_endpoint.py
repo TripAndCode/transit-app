@@ -88,6 +88,12 @@ def _stub_documents(documents):
     return _collect
 
 
+#: Captured before `_no_real_collectors` can replace it, so the few tests
+#: that are *about* the collection path still exercise the real function
+#: instead of silently asserting against the stub.
+_REAL_COLLECT_DOCUMENTS = admin_router._collect_documents
+
+
 @pytest.fixture(autouse=True)
 def _no_real_collectors(monkeypatch):
     """A unit test must never shell out to the real collectors."""
@@ -166,12 +172,74 @@ async def test_collectors_are_abandoned_once_the_budget_expires(monkeypatch):
     import time
 
     def _hang():
-        time.sleep(30)
+        # Long relative to the 0.05s budget below, short enough that the
+        # abandoned thread does not hold up interpreter shutdown.
+        time.sleep(2)
         return ["never"]
 
     monkeypatch.setattr(admin_router, "_COLLECTOR_BUDGET_SECONDS", 0.05)
     monkeypatch.setattr(admin_router, "_collect_all", _hang)
-    loop = asyncio.get_running_loop()
-    started = loop.time()
-    assert await admin_router._collect_documents() == []
-    assert loop.time() - started < 5
+    admin_router._collector_task = None
+    try:
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        assert await _REAL_COLLECT_DOCUMENTS() == []
+        assert loop.time() - started < 5
+    finally:
+        admin_router._collector_task = None
+
+
+async def test_only_one_collection_runs_however_many_polls_arrive(monkeypatch):
+    """The default executor is shared with the embedder and the LLM calls
+    and holds only a handful of threads, so a board left open in several
+    tabs must not spend them all on abandoned collections."""
+    import threading
+    import time
+
+    started = 0
+    lock = threading.Lock()
+
+    def _slow():
+        nonlocal started
+        with lock:
+            started += 1
+        time.sleep(0.4)
+        return []
+
+    monkeypatch.setattr(admin_router, "_COLLECTOR_BUDGET_SECONDS", 0.05)
+    monkeypatch.setattr(admin_router, "_collect_all", _slow)
+    admin_router._collector_task = None
+    try:
+        results = await asyncio.gather(*(_REAL_COLLECT_DOCUMENTS() for _ in range(6)))
+        assert results == [[]] * 6  # every poll gave up on its own budget
+
+        shared = admin_router._collector_task
+        assert shared is not None
+        await shared  # the abandoned collection is still the only one running
+        assert started == 1
+    finally:
+        admin_router._collector_task = None
+
+
+def test_the_collectors_read_the_repo_the_environment_points_at(monkeypatch, tmp_path):
+    """The collectors' own default is the VPS's checkout path; anywhere else
+    -- the API container included -- the tree is elsewhere or absent."""
+    seen: dict[str, object] = {}
+
+    class _Stub:
+        @staticmethod
+        def collect_all(**kwargs):
+            seen.update(kwargs)
+            return []
+
+    import scripts
+
+    monkeypatch.setattr(scripts, "ops_status_page", _Stub, raising=False)
+    monkeypatch.setenv(admin_router._OPS_STATUS_REPO_ENV, str(tmp_path))
+    admin_router._collect_all()
+    assert seen["local_repo"] == tmp_path
+
+    seen.clear()
+    monkeypatch.delenv(admin_router._OPS_STATUS_REPO_ENV)
+    admin_router._collect_all()
+    assert "local_repo" not in seen

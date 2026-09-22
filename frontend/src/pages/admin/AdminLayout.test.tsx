@@ -5,9 +5,15 @@ import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { AdminLayout } from "./AdminLayout";
 
-let mockUsers: { data?: { users: { llm_approved: boolean; suspended_at: string | null }[]; total: number } };
+let mockUsers: { data?: { total: number } };
+const usersParams = vi.fn();
 
-vi.mock("../../api/admin", () => ({ useAdminUsers: () => mockUsers }));
+vi.mock("../../api/admin", () => ({
+  useAdminUsers: (params: unknown) => {
+    usersParams(params);
+    return mockUsers;
+  },
+}));
 
 function wrap(path = "/admin") {
   return render(
@@ -21,7 +27,7 @@ function wrap(path = "/admin") {
 
 describe("AdminLayout sub-nav", () => {
   beforeEach(() => {
-    mockUsers = { data: { users: [], total: 0 } };
+    mockUsers = { data: { total: 0 } };
   });
 
   it("groups the destinations under section headings", () => {
@@ -46,20 +52,22 @@ describe("AdminLayout sub-nav", () => {
   });
 
   it("badges the people group with the count of users awaiting AI approval", () => {
-    mockUsers = {
-      data: {
-        users: [
-          { llm_approved: false, suspended_at: null },
-          { llm_approved: false, suspended_at: null },
-          { llm_approved: true, suspended_at: null },
-          { llm_approved: false, suspended_at: "2026-01-01T00:00:00Z" },
-        ],
-        total: 4,
-      },
-    };
+    mockUsers = { data: { total: 2 } };
     wrap();
     const users = screen.getByRole("link", { name: new RegExp(i18n.t("admin.nav.users")) });
     expect(within(users).getByTestId("nav-badge")).toHaveTextContent("2");
+  });
+
+  it("asks the server to count the waiting users rather than filtering a page of them", () => {
+    // A page-limited list stops counting once the table outgrows it, and
+    // the badge then undercounts with nothing to show that it has.
+    mockUsers = { data: { total: 2 } };
+    wrap();
+    expect(usersParams).toHaveBeenCalledWith(
+      expect.objectContaining({ llmApproved: "false", suspended: "false" }),
+    );
+    const [{ limit }] = usersParams.mock.calls.at(-1) as [{ limit: number }];
+    expect(limit).toBeLessThanOrEqual(1);
   });
 
   it("shows no badge when nothing is waiting", () => {

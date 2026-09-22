@@ -23,6 +23,7 @@ provider sub creates a fresh user.
 import asyncio
 import json
 import logging
+import os
 import re
 from collections.abc import Iterator
 from datetime import date, datetime, timezone
@@ -73,6 +74,7 @@ async def list_users(
     q: str | None = None,
     role: str | None = None,
     suspended: bool | None = None,
+    llm_approved: bool | None = None,
     limit: int = 50,
     offset: int = Query(0, ge=0),
     _admin: User = Depends(require_admin),
@@ -84,7 +86,11 @@ async def list_users(
     - ``role``: exact match, restricted to ``user`` / ``admin`` (silently
       ignored otherwise so a malformed query param doesn't 500).
     - ``suspended``: ``True`` filters to suspended only, ``False`` to active.
+    - ``llm_approved``: ``False`` filters to those still awaiting AI access.
     - ``limit`` clamped to [1, 200] to keep response sizes bounded.
+
+    ``total`` counts every match, not just the returned page, so a caller
+    that only wants "how many are there" can ask for one row and read it.
     """
     limit = max(1, min(200, limit))
     where = []
@@ -99,6 +105,10 @@ async def list_users(
         where.append("suspended_at IS NOT NULL")
     elif suspended is False:
         where.append("suspended_at IS NULL")
+    if llm_approved is True:
+        where.append("llm_approved")
+    elif llm_approved is False:
+        where.append("NOT llm_approved")
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     total = await conn.fetchval(f"SELECT count(*) FROM users {where_sql}", *args)
@@ -513,13 +523,10 @@ async def get_architecture_doc(slug: str, _admin: User = Depends(require_admin))
 
 
 # ── Control board ────────────────────────────────────────────────────────
-#
-# Backs `/admin`, the admin section's entry page: collector tiles, the
-# agency x completed-day freshness heatmap, and the alerts derived from both.
-# Read-only, polled every few seconds by the UI, and degrade-per-section: any
-# one source going away turns its own section into "unknown"/empty and never
-# fails the request, because an operator looking at a partly-broken system is
-# exactly when this page has to still render.
+
+#: Where the ops collectors find the git checkout they read. Named to match
+#: the standalone status server's own override so one setting covers both.
+_OPS_STATUS_REPO_ENV = "OPS_STATUS_REPO"
 
 _COLLECTOR_BUDGET_SECONDS = 5.0
 
@@ -587,6 +594,15 @@ def _collect_all() -> list[dict[str, Any]]:
     """
     from scripts import ops_status_page
 
+    # The collectors read a git checkout, and their default is the VPS's own
+    # path. Any other host -- the API container among them -- has the tree
+    # somewhere else or not at all, so the same `OPS_STATUS_REPO` override
+    # the standalone status server reads decides where to look; without it
+    # every tile degrades to `unknown` on every request rather than on a
+    # real collector outage.
+    override = os.environ.get(_OPS_STATUS_REPO_ENV)
+    if override:
+        return ops_status_page.collect_all(local_repo=Path(override))
     return ops_status_page.collect_all()
 
 
@@ -601,6 +617,7 @@ def _collector_reasons(documents: list[dict[str, Any]]) -> dict[str, str]:
             doc["component"]: reason for doc in documents if (reason := ops_status_page.reason_for(doc)) is not None
         }
     except Exception:
+        _log.warning("board: collector reasons unavailable", exc_info=True)
         return {}
 
 
@@ -612,11 +629,29 @@ async def _collect_documents() -> list[dict[str, Any]]:
     call is abandoned, the request answers with `unknown` tiles, and the
     orphaned thread finishes into the collectors' own caches — which the next
     poll then reads cheaply.
+
+    At most one collection runs at a time. The default executor is shared
+    with the embedder and the LLM calls and holds only a handful of threads,
+    and this page polls on a timer from every operator who has it open, so
+    without the guard abandoned collections would accumulate there and stall
+    unrelated requests. Concurrent polls await the collection already in
+    flight instead of starting another; `shield` keeps one poll's timeout
+    from cancelling the shared task out from under the others.
     """
+    global _collector_task
+    task = _collector_task
+    if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
+        task = _collector_task = asyncio.create_task(asyncio.to_thread(_collect_all))
     try:
-        return await asyncio.wait_for(asyncio.to_thread(_collect_all), _COLLECTOR_BUDGET_SECONDS)
+        return await asyncio.wait_for(asyncio.shield(task), _COLLECTOR_BUDGET_SECONDS)
     except Exception:
+        _log.warning("board: collectors unavailable within budget", exc_info=True)
         return []
+
+
+#: The collection currently in flight, if any. Module-level rather than
+#: per-request: its whole purpose is to be shared across requests.
+_collector_task: asyncio.Task[list[dict[str, Any]]] | None = None
 
 
 async def _freshness_rows(conn: asyncpg.Connection, window_start: date) -> list[Any]:
@@ -627,6 +662,7 @@ async def _freshness_rows(conn: asyncpg.Connection, window_start: date) -> list[
         try:
             return list(await conn.fetch(sql, *args))
         except Exception:
+            _log.warning("board: freshness query failed, trying next fallback", exc_info=True)
             continue
     return []
 
@@ -653,11 +689,12 @@ async def admin_board(
         migrations = await migration_status(conn)
         mig = MigrationStatusOut(applied=migrations.applied, latest=migrations.latest, behind=migrations.behind)
     except Exception:
-        pass  # mig stays None
+        _log.warning("board: migration status unavailable", exc_info=True)  # mig stays None
 
     try:
         pending_llm_approvals = int(await conn.fetchval(_PENDING_LLM_APPROVALS_SQL) or 0)
     except Exception:
+        _log.warning("board: pending-approvals count failed", exc_info=True)
         pending_llm_approvals = 0
 
     alerts = board_alerts(freshness=freshness, migrations=migrations, pending_llm_approvals=pending_llm_approvals)

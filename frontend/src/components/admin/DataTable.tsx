@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Z_INDEX } from "../../styles/zIndex";
 import { useSearchParams } from "react-router-dom";
 import type { ReactNode } from "react";
 
@@ -224,11 +225,11 @@ export function DataTable<Row>({
 const HEADER_STYLE: React.CSSProperties = {
   position: "sticky",
   top: 0,
-  zIndex: 1,
+  zIndex: Z_INDEX.raised,
   background: "var(--surface-1)",
   textAlign: "left",
   padding: "8px 10px",
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   fontWeight: 600,
   letterSpacing: "0.04em",
   textTransform: "uppercase",

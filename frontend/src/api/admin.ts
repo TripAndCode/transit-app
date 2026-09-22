@@ -19,6 +19,7 @@ export function useAdminUsers(params: {
   q?: string;
   role?: string;
   suspended?: string;
+  llmApproved?: string;
   limit?: number;
   offset?: number;
 }) {
@@ -26,6 +27,7 @@ export function useAdminUsers(params: {
   if (params.q) qs.set("q", params.q);
   if (params.role) qs.set("role", params.role);
   if (params.suspended) qs.set("suspended", params.suspended);
+  if (params.llmApproved) qs.set("llm_approved", params.llmApproved);
   if (params.limit != null) qs.set("limit", String(params.limit));
   if (params.offset != null) qs.set("offset", String(params.offset));
   return useQuery({
@@ -240,7 +242,7 @@ export type BoardFreshnessDay = {
   clamp_pct: number | null;
 };
 
-export type BoardFreshnessRow = {
+type BoardFreshnessRow = {
   agency_id: number;
   agency_name: string;
   days: BoardFreshnessDay[];

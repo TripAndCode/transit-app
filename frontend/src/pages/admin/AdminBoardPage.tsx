@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
+import { formatDateTime } from "../../utils/format";
 import { useAdminBoard, type BoardAlert, type BoardCollector, type BoardFreshnessDay } from "../../api/admin";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
@@ -84,13 +85,13 @@ function CollectorTile({ collector }: { collector: BoardCollector }) {
         />
       </div>
       <p style={{ fontSize: 17, fontWeight: 700, margin: "4px 0 0" }}>{t(`admin.board.status.${collector.status}`)}</p>
-      <p style={{ fontSize: 11, color: "var(--text-tertiary)", margin: "2px 0 0" }}>
+      <p style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "2px 0 0" }}>
         {collector.last_success_at
-          ? t("admin.board.last_success", { when: new Date(collector.last_success_at).toLocaleString() })
+          ? t("admin.board.last_success", { when: formatDateTime(collector.last_success_at) })
           : t("admin.board.never")}
       </p>
       {collector.detail && (
-        <p style={{ fontSize: 11, color: "var(--text-tertiary)", margin: "2px 0 0" }}>{collector.detail}</p>
+        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "2px 0 0" }}>{collector.detail}</p>
       )}
       <Sparkline history={collector.history} />
     </div>
@@ -179,7 +180,7 @@ export function AdminBoardPage() {
           }}
         >
           <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.freshness_title")}</h2>
-          <p style={{ margin: 0, fontSize: 11, color: "var(--text-tertiary)", display: "flex", gap: 12 }}>
+          <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", display: "flex", gap: 12 }}>
             <span>■ {t("admin.board.legend_fresh")}</span>
             <span>■ {t("admin.board.legend_stale")}</span>
             <span>□ {t("admin.board.legend_missing")}</span>
@@ -207,7 +208,7 @@ export function AdminBoardPage() {
                 >
                   <span
                     style={{
-                      fontSize: 11.5,
+                      fontSize: "var(--text-xs)",
                       color: "var(--text-secondary)",
                       whiteSpace: "nowrap",
                       overflow: "hidden",

@@ -35,8 +35,11 @@ const NAV_GROUPS: readonly { groupKey: string; items: readonly NavItem[] }[] = [
  *  queue that builds up silently, so it gets a badge rather than waiting to
  *  be discovered on the users page. */
 function useApprovalsWaiting(): number {
-  const { data } = useAdminUsers({ limit: 200 });
-  return data?.users.filter((user) => !user.llm_approved && user.suspended_at === null).length ?? 0;
+  // `total` counts every match, so this asks the server the question rather
+  // than filtering a page of rows -- a page-limited list stops counting once
+  // the table outgrows it, and the badge silently undercounts from then on.
+  const { data } = useAdminUsers({ llmApproved: "false", suspended: "false", limit: 1 });
+  return data?.total ?? 0;
 }
 
 export function AdminLayout() {
@@ -60,7 +63,7 @@ export function AdminLayout() {
               style={{
                 margin: "12px 0 4px",
                 padding: "0 20px",
-                fontSize: 10.5,
+                fontSize: "var(--text-xs)",
                 fontWeight: 600,
                 letterSpacing: "0.1em",
                 textTransform: "uppercase",
@@ -97,7 +100,7 @@ export function AdminLayout() {
                           data-testid="nav-badge"
                           style={{
                             marginLeft: "auto",
-                            fontSize: 10.5,
+                            fontSize: "var(--text-xs)",
                             fontWeight: 600,
                             borderRadius: 999,
                             padding: "0 7px",
