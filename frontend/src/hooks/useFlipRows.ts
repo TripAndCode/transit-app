@@ -17,6 +17,22 @@ export function useFlipRows(containerRef: RefObject<HTMLElement | null>, signal:
     const container = containerRef.current;
     if (!container) return;
     const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-flip-key]"));
+
+    // A reorder arriving before the last one has played leaves rows holding
+    // an inverse transform. getBoundingClientRect reports the painted box,
+    // so measuring now would read that offset as the row's real position
+    // and animate from a place it was never at. Drop the pending releases
+    // and the offsets they were going to clear, then measure.
+    const pending = FLIP_FRAMES.get(container);
+    if (pending?.length) {
+      for (const id of pending) cancelAnimationFrame(id);
+      for (const row of rows) {
+        row.style.transition = "";
+        row.style.transform = "";
+      }
+    }
+    const frames: number[] = [];
+
     const previous = FLIP_POSITIONS.get(container);
     const current = new Map<string, number>();
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -31,15 +47,25 @@ export function useFlipRows(containerRef: RefObject<HTMLElement | null>, signal:
       if (dy === 0) continue;
       row.style.transition = "none";
       row.style.transform = `translateY(${dy}px)`;
-      requestAnimationFrame(() => {
-        row.style.transition = "";
-        row.style.transform = "";
-      });
+      frames.push(
+        requestAnimationFrame(() => {
+          row.style.transition = "";
+          row.style.transform = "";
+        }),
+      );
     }
     FLIP_POSITIONS.set(container, current);
+    FLIP_FRAMES.set(container, frames);
+    return () => {
+      for (const id of frames) cancelAnimationFrame(id);
+    };
   }, [containerRef, signal]);
 }
 
 /** Keyed by the container element rather than held in a ref, so the measured
  *  positions live exactly as long as the DOM node they describe. */
 const FLIP_POSITIONS = new WeakMap<HTMLElement, Map<string, number>>();
+
+/** The releases a run scheduled, so the next run can cancel any that have
+ *  not fired rather than letting them reset a row mid-animation. */
+const FLIP_FRAMES = new WeakMap<HTMLElement, number[]>();

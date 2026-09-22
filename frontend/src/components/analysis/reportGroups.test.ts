@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { REPORT_GROUPS, groupReports, reportLabel, reportDescriptionKey } from "./reportGroups";
+import { REPORT_TYPE_IDS } from "../../tabs/reportTypes";
 import en from "../../i18n/locales/en.json";
 import ja from "../../i18n/locales/ja.json";
 
@@ -59,5 +60,16 @@ describe("labels and descriptions", () => {
     }
     expect(en.reports.group).toHaveProperty("other");
     expect(ja.reports.group).toHaveProperty("other");
+  });
+});
+
+describe("REPORT_GROUPS vs the app's own list of report types", () => {
+  // Two lists of the same types now exist: this grouping, and
+  // REPORT_TYPE_IDS, which the command palette lists from. Adding a type to
+  // one and not the other loses it from the palette, or files it under
+  // "Other" here, with nothing else failing.
+  it("covers exactly the report types the rest of the app knows about", () => {
+    const grouped = Object.values(REPORT_GROUPS).flat().slice().sort();
+    expect(grouped).toEqual([...REPORT_TYPE_IDS].sort());
   });
 });

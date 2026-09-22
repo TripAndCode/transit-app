@@ -204,7 +204,7 @@ describe("NetworkTab", () => {
     renderTab("2"); // viewing agency 2 (HiroBus)
     const badges = screen.getAllByTestId("you-badge");
     expect(badges).toHaveLength(1);
-    // the badge sits inside HiroBus's card, not Hiroden's
+    // the badge sits inside HiroBus's row, not Hiroden's
     const hiroBusCard = screen.getByText("HiroBus").closest(".network-row");
     expect(hiroBusCard).toContainElement(badges[0]);
   });

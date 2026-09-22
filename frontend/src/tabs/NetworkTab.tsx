@@ -177,7 +177,7 @@ function AgencyRow({
             {a.clamp_pct.toFixed(2)}%
           </span>
         )}
-        {a.is_stale && <span className="network-row__stale">{t("network.stale_badge")}</span>}
+        {a.is_stale && <span className="network-row__stale" title={t("network.help_freshness")}>{t("network.stale_badge")}</span>}
       </div>
     </div>
   );
@@ -199,7 +199,7 @@ export function NetworkTab() {
   const ridershipWeightingAvailable = data?.agencies.some((a) => a.has_ridership_weights) ?? false;
 
   // Carry the full current range into each agency's Overview, matching how
-  // Sidebar/ReportsTab build agency links (proper encoding; "all" dims omitted).
+  // Sidebar/AnalysisTab build agency links (proper encoding; "all" dims omitted).
   const filterQS = ctxToQueryString(ctx);
   const suffix = filterQS ? `?${filterQS}` : "";
 
