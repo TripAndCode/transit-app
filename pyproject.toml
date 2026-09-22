@@ -42,7 +42,7 @@ playwright = "^1.60.0"
 optional = true
 
 [tool.poetry.group.embeddings.dependencies]
-sentence-transformers = "^3.0"
+sentence-transformers = ">=3,<7"
 
 [build-system]
 requires = ["poetry-core"]
