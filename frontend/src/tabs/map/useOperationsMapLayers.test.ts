@@ -1,23 +1,55 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
-import { describe, expect, it } from "vitest";
-import type { LiveTrip, LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse } from "../../api/types";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import type { LiveTrip, LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
 import { makeMockMap, type MockLayer } from "../../test/mockMap";
-import { readableInkOn, severityStepColors, surfaceColorResolved } from "../../styles/tokens";
+import { delayColorResolved, readableInkOn, severityStepColors, surfaceColorResolved } from "../../styles/tokens";
+import { applyTheme } from "../../styles/theme";
 import {
+  ACTIVE_ROUTE_FLOW_LAYER,
   CLUSTER_RADIUS,
+  FLOW_DASH,
+  FLOW_CYCLE_MS,
+  FLOW_PAINT_INTERVAL_MS,
   LIVE_TRIPS_CLUSTER_LAYER,
   LIVE_TRIPS_CLUSTER_PROPERTIES,
   LIVE_TRIPS_LABEL_LAYER,
   LIVE_TRIPS_LAYER,
   LIVE_TRIPS_SOURCE,
   VEHICLE_RADIUS,
+  activeRouteLinePaint,
+  buildRouteLineGradient,
+  flowDashArrayAtPhase,
   labelPaint,
   clusterCirclePaint,
   clusterCountPaint,
   useOperationsMapLayers,
   vehicleCirclePaint,
 } from "./useOperationsMapLayers";
+
+function setReducedMotion(reduce: boolean) {
+  vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+    matches: reduce && query.includes("prefers-reduced-motion"),
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }) as unknown as MediaQueryList);
+}
+
+function stopProfileRow(overrides: Partial<RouteStopProfileRow> = {}): RouteStopProfileRow {
+  return {
+    stop_sequence: 1,
+    stop_id: "S1",
+    stop_name: "stop",
+    avg_delay_sec: 0,
+    samples: 10,
+    ...overrides,
+  };
+}
 
 function liveTrip(overrides: Partial<LiveTrip> = {}): LiveTrip {
   return {
@@ -205,5 +237,231 @@ describe("operations-map layers use resolved tokens, never literal hexes", () =>
     // take the theme's ink and halo instead of a fixed white.
     expect((map.getLayer(LIVE_TRIPS_LABEL_LAYER) as MockLayer).paint).toEqual(labelPaint());
     expect(labelPaint()["text-color"]).not.toBe(labelPaint()["text-halo-color"]);
+  });
+});
+
+describe("buildRouteLineGradient (pure builder)", () => {
+  it("builds a line-progress gradient, ordered by stop_sequence, evenly spaced 0..1", () => {
+    const stops = [
+      stopProfileRow({ stop_sequence: 3, avg_delay_sec: 360 }),
+      stopProfileRow({ stop_sequence: 1, avg_delay_sec: 0 }),
+      stopProfileRow({ stop_sequence: 2, avg_delay_sec: 120 }),
+    ];
+    expect(buildRouteLineGradient(stops)).toEqual([
+      "interpolate", ["linear"], ["line-progress"],
+      0, delayColorResolved(0),
+      0.5, delayColorResolved(2),
+      1, delayColorResolved(6),
+    ]);
+  });
+
+  it("falls back to undefined (no gradient) when there are fewer than two usable stops", () => {
+    expect(buildRouteLineGradient(undefined)).toBeUndefined();
+    expect(buildRouteLineGradient([])).toBeUndefined();
+    expect(buildRouteLineGradient([stopProfileRow()])).toBeUndefined();
+  });
+});
+
+describe("activeRouteLinePaint (pure builder)", () => {
+  it("paints a line-gradient when a usable stop profile is available", () => {
+    const stops = [stopProfileRow({ stop_sequence: 1, avg_delay_sec: 0 }), stopProfileRow({ stop_sequence: 2, avg_delay_sec: 360 })];
+    const paint = activeRouteLinePaint(420, stops);
+    expect(paint["line-gradient"]).toEqual(buildRouteLineGradient(stops));
+    expect(paint["line-color"]).toBeUndefined();
+  });
+
+  it("falls back to the current single delay colour when no profile is available", () => {
+    const paint = activeRouteLinePaint(420, undefined);
+    expect(paint["line-color"]).toBe(delayColorResolved(7));
+    expect(paint["line-gradient"]).toBeUndefined();
+  });
+});
+
+describe("flowDashArrayAtPhase (pure builder)", () => {
+  it("always sums to the base dash+gap period, at any elapsed time", () => {
+    const period = FLOW_DASH.dash + FLOW_DASH.gap;
+    for (const elapsed of [0, 1, 800, 1600, 3199, 3200, 4750, 32000]) {
+      const array = flowDashArrayAtPhase(elapsed);
+      const sum = array.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(period, 10);
+    }
+  });
+
+  it("is periodic on FLOW_CYCLE_MS", () => {
+    expect(flowDashArrayAtPhase(0)).toEqual(flowDashArrayAtPhase(FLOW_CYCLE_MS));
+    expect(flowDashArrayAtPhase(500)).toEqual(flowDashArrayAtPhase(500 + FLOW_CYCLE_MS));
+  });
+
+  it("starts at the base [dash, gap] pattern", () => {
+    expect(flowDashArrayAtPhase(0)).toEqual([FLOW_DASH.dash, FLOW_DASH.gap, 0]);
+  });
+
+  it("shifts into the gap once phase passes the dash's share of the cycle", () => {
+    // Halfway through the cycle lands inside the gap portion of the period
+    // (dash=0.6, gap=2 -> gap starts at dash/period ≈ 0.23 of the cycle).
+    const array = flowDashArrayAtPhase(FLOW_CYCLE_MS / 2);
+    expect(array[0]).toBe(0);
+    expect(array).toHaveLength(4);
+  });
+});
+
+describe("active route line: gradient, casing and the calm flow overlay", () => {
+  const LIGHT_ACCENT = "#187b80";
+  const DARK_ACCENT = "#43c5ba";
+
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--accent");
+    delete document.documentElement.dataset.theme;
+    vi.restoreAllMocks();
+  });
+
+  const STOP_PROFILE: RouteStopProfileRow[] = [
+    stopProfileRow({ stop_sequence: 1, avg_delay_sec: 0 }),
+    stopProfileRow({ stop_sequence: 2, avg_delay_sec: 120 }),
+    stopProfileRow({ stop_sequence: 3, avg_delay_sec: 360 }),
+  ];
+
+  it("enables lineMetrics and paints a per-stop gradient when a stop profile is available", () => {
+    setReducedMotion(true); // isolate the gradient/casing assertions from the flow rAF loop
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, null, undefined, STOP_PROFILE);
+    });
+
+    expect((map.getSource("active-route") as { lineMetrics?: boolean }).lineMetrics).toBe(true);
+    const routeLayer = map.getLayer("active-route-line") as MockLayer;
+    expect(routeLayer.paint?.["line-gradient"]).toEqual(buildRouteLineGradient(STOP_PROFILE));
+    expect(routeLayer.paint?.["line-color"]).toBeUndefined();
+  });
+
+  it("falls back to a flat delay colour when no stop profile is available", () => {
+    setReducedMotion(true);
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+
+    const routeLayer = map.getLayer("active-route-line") as MockLayer;
+    expect(routeLayer.paint?.["line-color"]).toBe(delayColorResolved(7));
+    expect(routeLayer.paint?.["line-gradient"]).toBeUndefined();
+  });
+
+  it("adds a calm flow-dash layer above the casing and the route line", () => {
+    setReducedMotion(true);
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+
+    const flowLayer = map.getLayer(ACTIVE_ROUTE_FLOW_LAYER) as MockLayer;
+    expect(flowLayer).toBeDefined();
+    expect(flowLayer.paint?.["line-width"]).toBe(2);
+    expect(flowLayer.paint?.["line-dasharray"]).toEqual([FLOW_DASH.dash, FLOW_DASH.gap]);
+    const ids = map.layers.map((l) => l.id);
+    expect(ids.indexOf("active-route-casing")).toBeLessThan(ids.indexOf(ACTIVE_ROUTE_FLOW_LAYER));
+    expect(ids.indexOf("active-route-line")).toBeLessThan(ids.indexOf(ACTIVE_ROUTE_FLOW_LAYER));
+  });
+
+  it("removes the flow layer along with the rest of the route overlay when the route is cleared", () => {
+    setReducedMotion(true);
+    const map = makeMockMap();
+    const { rerender } = renderHook(
+      ({ route }: { route: string | null }) => {
+        const mapRef = useRef(map as never);
+        useOperationsMapLayers(mapRef, LIVE, SHAPE, route, 420, 1, 0);
+      },
+      { initialProps: { route: "12" as string | null } },
+    );
+    expect(map.getLayer(ACTIVE_ROUTE_FLOW_LAYER)).toBeDefined();
+    rerender({ route: null });
+    expect(map.getLayer(ACTIVE_ROUTE_FLOW_LAYER)).toBeUndefined();
+  });
+
+  it("schedules the flow animation loop when motion is allowed", () => {
+    setReducedMotion(false);
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+    expect(raf).toHaveBeenCalled();
+  });
+
+  it("schedules no flow animation loop under prefers-reduced-motion: reduce", () => {
+    setReducedMotion(true);
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+    expect(raf).not.toHaveBeenCalled();
+  });
+
+  it("advances the flow layer's dasharray on each animation frame", () => {
+    setReducedMotion(false);
+    let tick: FrameRequestCallback = () => {};
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => { tick = cb; return 1; });
+    vi.spyOn(performance, "now").mockReturnValue(0);
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+
+    vi.spyOn(performance, "now").mockReturnValue(500);
+    tick(500);
+    expect(map.getPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray")).toEqual(flowDashArrayAtPhase(500));
+  });
+
+  it("throttles dasharray writes rather than repainting on every frame", () => {
+    setReducedMotion(false);
+    let tick: FrameRequestCallback = () => {};
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => { tick = cb; return 1; });
+    vi.spyOn(performance, "now").mockReturnValue(0);
+    const map = makeMockMap();
+    const painted = vi.spyOn(map, "setPaintProperty");
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+    painted.mockClear();
+
+    tick(1000);
+    expect(painted).toHaveBeenCalledTimes(1);
+
+    // A frame arriving well inside the throttle window carries no visible
+    // change, so it must not reach the map at all.
+    tick(1000 + FLOW_PAINT_INTERVAL_MS / 2);
+    expect(painted).toHaveBeenCalledTimes(1);
+
+    tick(1000 + FLOW_PAINT_INTERVAL_MS);
+    expect(painted).toHaveBeenCalledTimes(2);
+    expect(map.getPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray"))
+      .toEqual(flowDashArrayAtPhase(1000 + FLOW_PAINT_INTERVAL_MS));
+  });
+
+  it("recolours the flow overlay when the theme toggles under a selected route", () => {
+    setReducedMotion(true);
+    document.documentElement.dataset.theme = "light";
+    document.documentElement.style.setProperty("--accent", LIGHT_ACCENT);
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+    expect((map.getLayer(ACTIVE_ROUTE_FLOW_LAYER) as MockLayer).paint?.["line-color"]).toBe(LIGHT_ACCENT);
+
+    // The source already exists, so the re-run takes the update branch rather
+    // than re-adding the layer — the path where a resolved colour can be left
+    // behind at the theme that created it.
+    document.documentElement.style.setProperty("--accent", DARK_ACCENT);
+    act(() => applyTheme("dark"));
+
+    expect(map.getPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-color")).toBe(DARK_ACCENT);
   });
 });

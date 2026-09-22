@@ -10,7 +10,7 @@ import "./map/focusedOverview.css";
 import maplibregl, { Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
-import { useLiveTripProgress, useLiveTrips, useRouteShape, useTodayRouteSummary } from "../api/hooks";
+import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useTodayRouteSummary } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
 import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
@@ -175,6 +175,7 @@ export function MapTab() {
   const effectiveTrip = directionTrips.find((trip) => trip.trip_id === selectedTripId) ?? directionTrips[0] ?? null;
   const progressQuery = useLiveTripProgress(id, effectiveTrip?.trip_id ?? null);
   const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
+  const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
   const freshness = freshnessFor(liveQuery.data?.latest_captured_at);
 
   const onTripClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
@@ -320,6 +321,7 @@ export function MapTab() {
     styleEpoch,
     effectiveTrip?.trip_id ?? null,
     progressQuery.data,
+    stopProfileQuery.data?.stops,
   );
 
   function focusRoute(routeCode: string) {
