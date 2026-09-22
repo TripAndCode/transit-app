@@ -6,8 +6,8 @@
 
 import type { VehicleMode } from "./vehicleIcons";
 
-export type Rect = { x: number; y: number; w: number; h: number };
-export type Point = { x: number; y: number };
+type Rect = { x: number; y: number; w: number; h: number };
+type Point = { x: number; y: number };
 
 /** One metro-style route: a bent (right-angle) polyline between station
  *  points. `colorVar` names the real theme token this route's color carries

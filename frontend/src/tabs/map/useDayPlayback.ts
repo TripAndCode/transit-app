@@ -4,7 +4,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { TimelineFrame } from "../../api/types";
 import { FRAME_MS, clampFrameIndex, frameIndexAt, stepFrameIndex } from "./playbackFrames";
 
-export type PlaybackSpeed = 1 | 2;
+type PlaybackSpeed = 1 | 2;
 
 export type PlaybackController = {
   frames: TimelineFrame[];
