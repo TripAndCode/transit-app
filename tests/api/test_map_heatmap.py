@@ -400,8 +400,8 @@ async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
 async def test_stop_profile_cohort_avg_is_samples_weighted(weighted_cohort_client):
     """cohort_avg_delay_sec must weight each cohort row by its own `samples`,
     matching every other averaging site in map.py (today_route_summary's
-    `rb` CTE at map.py:635-636, delay_heatmap's `avg_delay_min` at
-    map.py:1062) rather than a plain AVG over each row's own
+    `rb` CTE, delay_heatmap's `avg_delay_min`) rather than a plain AVG over
+    each row's own
     delay_sum/samples ratio, where a 2-sample row would otherwise count the
     same as a 500-sample row."""
     client, aid = weighted_cohort_client

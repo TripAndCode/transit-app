@@ -704,7 +704,7 @@ async def route_trips(
     # unpacks each row by position below). `ORDER BY trip_id` on the outer
     # select restores the deterministic row order the old sort-based form got
     # for free from its own ORDER BY — a bare GROUP BY has no defined output
-    # order, and this route's row count (~1.7k) makes the sort cheap.
+    # order, and one route's single-day rows sort cheaply.
     dedup_result = await ch.query(
         """
         SELECT trip_id, stop_sequence, winner.1 AS scheduled_time, winner.2 AS dep_delay

@@ -48,10 +48,10 @@ async def map_client(map_app):
 @pytest.fixture
 async def map_app_ch(map_app, ch_async_client):
     """`map_app` with `app.state.ch_client` wired to a real async ClickHouse
-    client (Task 8: /delays/live, /route-shape, /today/route-summary,
-    /today/route/*/trips and /today/route/*/stop-profile now read live
-    `updates` from ClickHouse instead of Postgres). Tests using this fixture
-    require `make ch-test` / RUN_CH_INTEGRATION=1 (via `ch_async_client`)."""
+    client. /delays/live, /route-shape, /today/route-summary,
+    /today/route/*/trips and /today/route/*/stop-profile read live `updates`
+    from ClickHouse rather than Postgres, so tests using this fixture require
+    `make ch-test` / RUN_CH_INTEGRATION=1 (via `ch_async_client`)."""
     app, agency_id = map_app
     app.state.ch_client = ch_async_client
     yield app, agency_id
@@ -1226,12 +1226,10 @@ async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_clie
 
 @pytest.mark.asyncio
 async def test_route_stop_profile_empty_when_no_data(map_client_ch):
-    """Characterization test (slice 3 refactor baseline): a fabricated/never-
-    observed route_code resolves to the empty response, mirroring
-    test_route_trips_empty_when_no_data. Added because this branch of
-    route_stop_profile had no direct test before this slice, despite sharing
-    the exact existence-precheck + bounded-probe logic route_trips already
-    covers."""
+    """A fabricated/never-observed route_code resolves to the empty response.
+    route_stop_profile shares route_trips' existence-precheck + bounded-probe
+    logic, so this mirrors test_route_trips_empty_when_no_data to keep both
+    copies of that branch covered."""
     client, agency_id = map_client_ch
     resp = await client.get(f"/api/{agency_id}/today/route/NOPE/stop-profile")
     assert resp.status_code == 200
@@ -1240,12 +1238,10 @@ async def test_route_stop_profile_empty_when_no_data(map_client_ch):
 
 @pytest.mark.asyncio
 async def test_route_stop_profile_excludes_stale_route_beyond_bound(map_app_ch, ch_client):
-    """Characterization test (slice 3 refactor baseline): a route that exists
-    (has an agg_route_daily row) but whose only ClickHouse observations are
-    older than the 30-day bound anchored to the agency's own latest activity
-    must resolve to the empty response, mirroring
-    test_route_trips_excludes_stale_route_beyond_bound. Added because this
-    branch of route_stop_profile had no direct test before this slice."""
+    """A route that exists (has an agg_route_daily row) but whose only
+    ClickHouse observations are older than the 30-day bound anchored to the
+    agency's own latest activity must resolve to the empty response,
+    mirroring test_route_trips_excludes_stale_route_beyond_bound."""
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
