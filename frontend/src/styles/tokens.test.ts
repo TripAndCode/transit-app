@@ -486,6 +486,29 @@ describe("chart entrance motion (ChartEnter.tsx)", () => {
   });
 });
 
+describe("progressive reveal (RevealSection.tsx's useInView())", () => {
+  function motionAllowedBlocksContaining(selector: string): string[] {
+    return [...globalCss.matchAll(/@media \(prefers-reduced-motion: no-preference\)/g)]
+      .map((m) => ruleBody(globalCss.slice(m.index), "@media (prefers-reduced-motion: no-preference)"))
+      .filter((block) => block.includes(selector));
+  }
+
+  it("is transform-only and visible at rest -- never opacity: 0 -- only inside a motion-allowed block", () => {
+    const allowed = motionAllowedBlocksContaining(".reveal {");
+    expect(globalCss.match(/\.reveal \{/g)).toHaveLength(1);
+    expect(allowed).toHaveLength(1);
+
+    const body = ruleBody(allowed[0], ".reveal {");
+    expect(decl(body, "opacity")).toBeNull();
+    expect(decl(body, "transform")).toBe("translateY(16px)");
+    expect(decl(body, "transition")).toBe("transform var(--dur-3) var(--ease-out)");
+
+    const inBody = ruleBody(allowed[0], ".reveal.reveal--in {");
+    expect(decl(inBody, "opacity")).toBeNull();
+    expect(decl(inBody, "transform")).toBe("translateY(0)");
+  });
+});
+
 describe("tooltip surface", () => {
   it("no longer ships the CSS-only .tip pseudo-element tooltip", () => {
     expect(globalCss).not.toContain("content: attr(data-tip)");

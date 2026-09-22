@@ -175,7 +175,6 @@
       "avg_delay_label": "Network avg delay",
       "baseline_hint_title": "About the vs. last week comparison",
       "baseline_hint_body": "Compares the average delay for the selected date range against the same-length period immediately before it.",
-      "avg_delay_compared": "{{sign}}{{min}} min vs. last week",
       "avg_delay_no_baseline": "No comparison data",
       "delayed_count_label": "Routes delayed",
       "delayed_count_value": "{{count}} / {{total}} routes",
@@ -184,11 +183,21 @@
       "feed_status_stale": "Data delayed",
       "feed_status_updated": "Last updated {{when}}"
     },
+    "story": {
+      "behind_one": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
+      "behind_other": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
+      "behind_short": "Running {{delta}} min behind last week.",
+      "ahead_one": "Running {{delta}} min ahead of last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
+      "ahead_other": "Running {{delta}} min ahead of last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
+      "ahead_short": "Running {{delta}} min ahead of last week.",
+      "flat_one": "Delay is about the same as last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
+      "flat_other": "Delay is about the same as last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
+      "flat_short": "Delay is about the same as last week."
+    },
     "routes_to_check": {
       "title": "Routes to check now",
       "empty": "No routes need attention"
     },
-    "details_toggle": "Show details",
     "concentration": {
       "single_route": "{{name}} accounts for 100% — only 1 route observed.",
       "lorenz_label": "Lorenz curve — cumulative share of delay",

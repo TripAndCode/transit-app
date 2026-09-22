@@ -545,6 +545,17 @@ summary::-webkit-details-marker { display: none; }
   .chart-cell-enter.chart-cell-enter--in {
     opacity: var(--cell-opacity, 1);
   }
+
+  /* RevealSection.tsx's useInView(): a section starts fully visible, only
+     offset downward -- transform only, never opacity: 0 -- so it stays
+     readable before the observer's first callback (or without JS at all). */
+  .reveal {
+    transform: translateY(16px);
+    transition: transform var(--dur-3) var(--ease-out);
+  }
+  .reveal.reveal--in {
+    transform: translateY(0);
+  }
 }
 
 /* HelpPage renders the user manual (a fetched .md asset) via react-markdown,
