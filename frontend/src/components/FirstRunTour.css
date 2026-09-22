@@ -4,9 +4,9 @@
    stylesheet. */
 .first-run-tour {
   position: fixed;
-  /* Above .tooltip's z-index: 60 -- a coach mark must never be occluded by
-     an incidental hover tooltip on the element it's pointing at. */
-  z-index: 70;
+  /* Its own rung, just above tooltip: a coach mark must never be occluded
+     by an incidental hover tooltip on the element it points at. */
+  z-index: var(--z-coach-mark);
   width: 260px;
   max-width: calc(100vw - 16px);
   background: var(--bg-surface);
