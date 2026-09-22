@@ -761,8 +761,8 @@ def resolve_route_trips_date(requested: CalendarDate | None, latest_observed: Ca
     return requested
 
 
-def build_route_trips_sql(time_band: TimeBand) -> tuple[str, dict]:
-    """Rendered per-stop dedup query for one route on one JST day, plus its band params.
+def build_route_trips_sql(time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS) -> tuple[str, dict]:
+    """Rendered per-stop dedup query for one route on one JST day, plus its params.
 
     argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring).
     The four non-key columns are read off the SAME winning row via ONE
@@ -770,13 +770,17 @@ def build_route_trips_sql(time_band: TimeBand) -> tuple[str, dict]:
     captured_at tie could silently mix a scheduled time from one physical row
     with a delay from another. They are unpacked by position in the outer
     SELECT, which is also the order `build_route_trips` unpacks each row in.
+
+    The trip cap is applied here rather than after the fetch: the response
+    carries stops per trip, so a route with many trips would otherwise ship
+    and materialise every one of them only to drop the tail. One trip beyond
+    the cap is selected so the caller can still tell that a tail existed
+    without counting the whole day.
     """
     band_frag, band_params = time_band_clause_ch_for(time_band)
     band_clause = "" if band_frag == "1" else f"\n              AND {band_frag}"
     sql = f"""
-        SELECT trip_id, stop_sequence, winner.1 AS scheduled_time, winner.2 AS dep_delay,
-            winner.3 AS stop_id, winner.4 AS scheduled_sec
-        FROM (
+        WITH grouped AS (
             SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
                 argMax(tuple(u.scheduled_time, u.dep_delay, u.stop_id, u.scheduled_sec),
                     (u.captured_at, u.file_name)) AS winner
@@ -785,17 +789,27 @@ def build_route_trips_sql(time_band: TimeBand) -> tuple[str, dict]:
               AND u.dep_delay IS NOT NULL
               AND toDate(u.captured_at, 'Asia/Tokyo') = {{target_date:Date}}{band_clause}
             GROUP BY u.trip_id, u.stop_sequence
-        ) AS grouped
+        ),
+        kept AS (
+            SELECT trip_id
+            FROM grouped
+            GROUP BY trip_id
+            ORDER BY avg(winner.2) DESC, trip_id
+            LIMIT {{rt_limit:UInt32}}
+        )
+        SELECT trip_id, stop_sequence, winner.1 AS scheduled_time, winner.2 AS dep_delay,
+            winner.3 AS stop_id, winner.4 AS scheduled_sec
+        FROM grouped
+        WHERE trip_id IN (SELECT trip_id FROM kept)
         ORDER BY trip_id, stop_sequence
     """
-    return sql, band_params
+    return sql, {**band_params, "rt_limit": limit + 1}
 
 
 def build_route_trips(
     # Sequence, not tuple: the driver types `result_rows` as sequences and
     # this only ever unpacks them by position.
     rows: Iterable[Sequence[Any]],
-    headsigns: dict[str, str | None],
     limit: int = MAX_ROUTE_TRIPS,
 ) -> tuple[list[RouteTripRow], bool]:
     """Group `build_route_trips_sql`'s rows into trips, worst-delayed first.
@@ -836,14 +850,27 @@ def build_route_trips(
             RouteTripRow(
                 trip_id=trip_id,
                 scheduled_time=clock[:5] if clock else None,
-                headsign=headsigns.get(trip_id),
+                headsign=None,
                 avg_delay_sec=_round_half_up_int(sum(delays) / len(delays)) if delays else None,
                 samples=len(delays),
                 stops=stops,
             )
         )
-    trips.sort(key=lambda t: (t.avg_delay_sec is None, -(t.avg_delay_sec or 0)))
+    # trip_id breaks ties so the kept set matches the SQL's own ranking,
+    # which orders by the same average and then by trip_id.
+    trips.sort(key=lambda t: (t.avg_delay_sec is None, -(t.avg_delay_sec or 0), t.trip_id))
     return trips[:limit], len(trips) > limit
+
+
+def attach_headsigns(trips: list[RouteTripRow], headsigns: dict[str, str | None]) -> None:
+    """Fill in each trip's headsign from a trip_id -> headsign mapping.
+
+    Separate from :func:`build_route_trips` so the lookup that feeds it can
+    run after the cap, against the trips actually being returned rather than
+    every trip the day held. A trip with no static row keeps a null headsign.
+    """
+    for trip in trips:
+        trip.headsign = headsigns.get(trip.trip_id)
 
 
 @router.get("/today/route/{route_code}/trips", response_model=RouteTripsResponse)
@@ -894,20 +921,19 @@ async def route_trips(
             **band_params,
         },
     )
-    rows = dedup_result.result_rows
+    trips, truncated = build_route_trips(dedup_result.result_rows)
 
-    headsigns: dict[str, str | None] = {}
-    trip_ids = sorted({r[0] for r in rows})
+    # Headsigns are read for the trips actually being returned, after the
+    # cap: keyed off the pre-cap set this would send the dropped tail's ids
+    # to Postgres too, for rows no reader ever sees.
+    trip_ids = sorted(t.trip_id for t in trips)
     if trip_ids:
         headsign_rows = await conn.fetch(
             "SELECT trip_id, trip_headsign FROM static_trips WHERE agency_id = $1 AND trip_id = ANY($2)",
             agency_id,
             trip_ids,
         )
-        for r in headsign_rows:
-            headsigns[r["trip_id"]] = r["trip_headsign"]
-
-    trips, truncated = build_route_trips(rows, headsigns)
+        attach_headsigns(trips, {r["trip_id"]: r["trip_headsign"] for r in headsign_rows})
     return RouteTripsResponse(
         date=target_date.isoformat(),
         time_band=time_band,
