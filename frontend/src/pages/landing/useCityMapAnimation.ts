@@ -29,7 +29,6 @@ function resolveRouteColors(): { onTime: string; delayed: string } {
  *  blocks/park/river, two metro-style routes, and looping vehicle markers)
  *  against a caller-owned canvas, for the hero's tilted scene (`CityMapHero`).
  *
-
  *  The render loop lives entirely inside this effect's own
  *  `requestAnimationFrame`, driven by a ref (`vehiclesRef`), never React
  *  state -- advancing 4 vehicles 60 times a second by calling setState would

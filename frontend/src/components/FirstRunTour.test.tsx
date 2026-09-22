@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nextProvider } from "react-i18next";
@@ -75,5 +75,34 @@ describe("FirstRunTour", () => {
     await user.click(screen.getByRole("button", { name: "Dismiss this tour" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(readTourSeen()).toBe("seen");
+  });
+
+  // role="dialog" with no focus move means a keyboard user gets no cue it
+  // appeared and must tab the whole app shell to reach it -- the panel is
+  // portalled to the end of <body>.
+  it("moves focus into the panel and hands it back when dismissed", async () => {
+    const outside = document.createElement("button");
+    outside.textContent = "outside";
+    document.body.appendChild(outside);
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+
+    renderTourWithAnchors();
+    await screen.findByRole("dialog");
+    const panel = screen.getByRole("dialog");
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: i18n.t("tour.later") }));
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it("stays away when the store cannot remember a dismissal", () => {
+    // Otherwise the tour reappears on every single mount, forever.
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    renderTourWithAnchors();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

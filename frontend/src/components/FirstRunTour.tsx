@@ -34,16 +34,29 @@ const FIND_RETRY_MS = 250;
  */
 export function FirstRunTour() {
   const { t } = useTranslation();
-  const [dismissed, setDismissed] = useState(() => readTourSeen() === "seen");
+  // "unavailable" as well as "seen": a store that cannot be read or written
+  // can never remember a dismissal, so running the tour on every single
+  // mount is worse than not running it. This is the distinction the
+  // tri-state exists for.
+  const [dismissed, setDismissed] = useState(() => readTourSeen() !== "unseen");
   const [stepIndex, setStepIndex] = useState(0);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
   const step = STEPS[stepIndex];
 
   useLayoutEffect(() => {
     if (dismissed) return;
     const panel = panelRef.current;
     if (!panel) return;
+    // Hidden until `place` has found an anchor. Set here rather than as a
+    // JSX attribute: `place` writes straight to the node, so React
+    // re-asserting the attribute on an unrelated re-render would hide a
+    // panel that is already placed, until the next tick moved it back.
+    panel.hidden = true;
     function place() {
+      // A poll that forces layout on a tab nobody is looking at buys
+      // nothing; the anchor cannot have moved under the visitor.
+      if (document.hidden) return;
       const target = document.querySelector(step.selector);
       if (!target || !panel) {
         if (panel) panel.hidden = true;
@@ -61,6 +74,10 @@ export function FirstRunTour() {
       panel.hidden = false;
     }
     place();
+    if (!panel.hidden) {
+      previouslyFocused.current ??= document.activeElement as HTMLElement | null;
+      panel.querySelector<HTMLElement>("button")?.focus();
+    }
     const intervalId = window.setInterval(place, FIND_RETRY_MS);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
@@ -73,12 +90,19 @@ export function FirstRunTour() {
 
   if (dismissed) return null;
 
+  /** Hand focus back to wherever it was before the tour took it. */
+  function restoreFocus() {
+    previouslyFocused.current?.focus();
+    previouslyFocused.current = null;
+  }
   function finish() {
     writeTourSeen();
     setDismissed(true);
+    restoreFocus();
   }
   function later() {
     setDismissed(true);
+    restoreFocus();
   }
   function next() {
     if (stepIndex === STEPS.length - 1) {
@@ -91,7 +115,7 @@ export function FirstRunTour() {
   const isLast = stepIndex === STEPS.length - 1;
 
   return createPortal(
-    <div ref={panelRef} className="first-run-tour" role="dialog" aria-label={t(step.titleKey)} hidden>
+    <div ref={panelRef} className="first-run-tour" role="dialog" aria-label={t(step.titleKey)}>
       <button type="button" className="first-run-tour__close" aria-label={t("tour.dismiss")} onClick={finish}>
         ×
       </button>

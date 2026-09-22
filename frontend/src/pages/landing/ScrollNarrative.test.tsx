@@ -42,4 +42,12 @@ describe("ScrollNarrative", () => {
       expect(section.classList.contains("landing-reveal--pending")).toBe(true);
     }
   });
+
+  // The charts here illustrate; they do not drive anything. A brushable
+  // DailyChart writes from/to into the URL on drag, which on an
+  // unauthenticated marketing page changes nothing the visitor can see.
+  it("renders no brush control on the demo charts", () => {
+    renderNarrative();
+    expect(screen.queryByRole("slider")).toBeNull();
+  });
 });

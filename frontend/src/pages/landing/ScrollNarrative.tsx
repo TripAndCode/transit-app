@@ -41,7 +41,9 @@ function RouteDelaySection() {
 function DayTrendSection() {
   return (
     <NarrativeSection titleKey="landing.narrative.trend.title" bodyKey="landing.narrative.trend.body">
-      <DailyChart days={PREVIEW_DAILY_TREND} />
+      {/* Illustrative, like the Ask embed: a drag here would rewrite the
+          marketing page's from/to for a selection that changes nothing. */}
+      <DailyChart days={PREVIEW_DAILY_TREND} brushable={false} />
     </NarrativeSection>
   );
 }
@@ -62,10 +64,6 @@ function AskEvidenceSection() {
  * a route), the Reports `DailyChart` (day-over-day comparison, drawn on via
  * `ChartEnter`'s `useDrawOn`), and Ask's `StopEvidenceChart` (the same
  * evidence view a real answer renders).
- *
- * Follow-up: once `StopRibbon` (E9), `PlaybackRail` (E4), and the Ask
- * evidence card (E10) land on this branch's base, they are closer matches
- * for this narrative's three beats and can replace the components above.
  */
 export function ScrollNarrative() {
   return (
