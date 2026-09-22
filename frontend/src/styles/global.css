@@ -181,6 +181,7 @@
   --z-modal-backdrop: 400;
   --z-modal: 401;
   --z-context-menu: 500;
+  --z-command-palette: 550;
   --z-toast: 600;
   /* Identity moments only: the brand wordmark, the Welcome headline, and a
      single-sentence "story" line. Everything else — body copy, tables,

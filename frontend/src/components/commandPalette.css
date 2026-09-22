@@ -6,10 +6,9 @@
 .cmdp-overlay {
   position: fixed;
   inset: 0;
-  /* The palette is a global modal and must sit above every other surface,
-     including the drawer pair and the modal pair below it on the ladder.
-     `--z-context-menu` is the top rung, which is the rank this needs. */
-  z-index: var(--z-context-menu);
+  /* Its own rung, above the context menu: ⌘K fires while one can still be
+     open, and a tie orders by mount position rather than by intent. */
+  z-index: var(--z-command-palette);
   background: rgba(15, 17, 25, 0.35);
   display: flex;
   justify-content: center;
