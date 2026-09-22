@@ -1,14 +1,16 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { LiveTrip, LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
 import { makeMockMap, type MockLayer } from "../../test/mockMap";
 import { delayColorResolved, readableInkOn, severityStepColors, surfaceColorResolved } from "../../styles/tokens";
+import { applyTheme } from "../../styles/theme";
 import {
   ACTIVE_ROUTE_FLOW_LAYER,
   CLUSTER_RADIUS,
   FLOW_DASH,
   FLOW_CYCLE_MS,
+  FLOW_PAINT_INTERVAL_MS,
   LIVE_TRIPS_CLUSTER_LAYER,
   LIVE_TRIPS_CLUSTER_PROPERTIES,
   LIVE_TRIPS_LABEL_LAYER,
@@ -304,7 +306,12 @@ describe("flowDashArrayAtPhase (pure builder)", () => {
 });
 
 describe("active route line: gradient, casing and the calm flow overlay", () => {
+  const LIGHT_ACCENT = "#187b80";
+  const DARK_ACCENT = "#43c5ba";
+
   afterEach(() => {
+    document.documentElement.style.removeProperty("--accent");
+    delete document.documentElement.dataset.theme;
     vi.restoreAllMocks();
   });
 
@@ -409,5 +416,52 @@ describe("active route line: gradient, casing and the calm flow overlay", () => 
     vi.spyOn(performance, "now").mockReturnValue(500);
     tick(500);
     expect(map.getPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray")).toEqual(flowDashArrayAtPhase(500));
+  });
+
+  it("throttles dasharray writes rather than repainting on every frame", () => {
+    setReducedMotion(false);
+    let tick: FrameRequestCallback = () => {};
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => { tick = cb; return 1; });
+    vi.spyOn(performance, "now").mockReturnValue(0);
+    const map = makeMockMap();
+    const painted = vi.spyOn(map, "setPaintProperty");
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+    painted.mockClear();
+
+    tick(1000);
+    expect(painted).toHaveBeenCalledTimes(1);
+
+    // A frame arriving well inside the throttle window carries no visible
+    // change, so it must not reach the map at all.
+    tick(1000 + FLOW_PAINT_INTERVAL_MS / 2);
+    expect(painted).toHaveBeenCalledTimes(1);
+
+    tick(1000 + FLOW_PAINT_INTERVAL_MS);
+    expect(painted).toHaveBeenCalledTimes(2);
+    expect(map.getPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray"))
+      .toEqual(flowDashArrayAtPhase(1000 + FLOW_PAINT_INTERVAL_MS));
+  });
+
+  it("recolours the flow overlay when the theme toggles under a selected route", () => {
+    setReducedMotion(true);
+    document.documentElement.dataset.theme = "light";
+    document.documentElement.style.setProperty("--accent", LIGHT_ACCENT);
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
+    });
+    expect((map.getLayer(ACTIVE_ROUTE_FLOW_LAYER) as MockLayer).paint?.["line-color"]).toBe(LIGHT_ACCENT);
+
+    // The source already exists, so the re-run takes the update branch rather
+    // than re-adding the layer — the path where a resolved colour can be left
+    // behind at the theme that created it.
+    document.documentElement.style.setProperty("--accent", DARK_ACCENT);
+    act(() => applyTheme("dark"));
+
+    expect(map.getPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-color")).toBe(DARK_ACCENT);
   });
 });

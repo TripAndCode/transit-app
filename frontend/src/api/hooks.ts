@@ -287,6 +287,13 @@ export function useRouteStopProfile(
       ),
     enabled: agencyId != null && !!routeCode,
     staleTime: 60 * 1000,
+    // Feeds the operations map's delay gradient beside live trip positions.
+    // staleTime alone never refetches on its own, so without an interval the
+    // gradient would freeze at selection time while the trips beside it keep
+    // moving. Slower than those trip layers on purpose: this is an average
+    // over the whole service day so far, which moves far less per minute
+    // than a position does, and recomputing it rescans the day.
+    refetchInterval: 60_000,
   });
 }
 

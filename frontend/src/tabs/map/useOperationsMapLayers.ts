@@ -170,6 +170,11 @@ export const FLOW_DASH = { dash: 0.6, gap: 2 } as const;
  *  dash/gap lengths -- the loop always lines back up with where it started. */
 export const FLOW_CYCLE_MS = 3200;
 
+/** Shortest gap between two `line-dasharray` writes while the flow animates.
+ *  The cycle is slow enough that this still yields tens of distinct frames
+ *  per traversal, which is past the point where a finer step is visible. */
+export const FLOW_PAINT_INTERVAL_MS = 100;
+
 /** A MapLibre `line-dasharray` for the [dash, gap] pattern rotated by
  *  `elapsedMs` around its own period. MapLibre has no dash-*offset* paint
  *  property, so animating a flowing dash means re-describing the same
@@ -322,6 +327,13 @@ export function useOperationsMapLayers(
         // or a stale flat colour layered underneath the new one.
         map.setPaintProperty(ACTIVE_ROUTE_LAYER, "line-gradient", linePaint["line-gradient"]);
         map.setPaintProperty(ACTIVE_ROUTE_LAYER, "line-color", linePaint["line-color"]);
+        // `theme` is a dependency of this effect so a toggle re-resolves the
+        // colour tokens, but a selected route takes this branch instead of
+        // re-adding the layers -- every resolved colour in the stack has to
+        // be refreshed here or it stays pinned to the theme that created it.
+        if (map.getLayer(ACTIVE_ROUTE_FLOW_LAYER)) {
+          map.setPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-color", accentColorResolved());
+        }
         return;
       }
       map.addSource(ACTIVE_ROUTE_SOURCE, { type: "geojson", data, lineMetrics: true });
@@ -370,9 +382,17 @@ export function useOperationsMapLayers(
 
     let frameId = 0;
     const start = performance.now();
+    // This loop runs for as long as a route stays selected, unlike every
+    // other animation here, which is a bounded one-shot. Repainting on every
+    // vsync would rewrite the dasharray ~60 times a second to advance a
+    // cycle lasting FLOW_CYCLE_MS, so writes are throttled to a step that is
+    // still far finer than the eye resolves against that cycle.
+    let lastPaint = -Infinity;
     function tick(now: number) {
       frameId = requestAnimationFrame(tick);
+      if (now - lastPaint < FLOW_PAINT_INTERVAL_MS) return;
       if (!map.getLayer(ACTIVE_ROUTE_FLOW_LAYER)) return;
+      lastPaint = now;
       map.setPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray", flowDashArrayAtPhase(now - start));
     }
     frameId = requestAnimationFrame(tick);
