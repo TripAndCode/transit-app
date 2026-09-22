@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Clapperboard } from "lucide-react";
 import { PatternFilters } from "../../components/analysis/AnalysisFilters";
 
 /** Deferred-commit route/pattern filters, mounted as a floating control on
@@ -23,13 +24,21 @@ import { PatternFilters } from "../../components/analysis/AnalysisFilters";
  * `PatternFilters` stays a controlled component shared with the analysis
  * screen, which commits immediately and should keep doing so — the deferral
  * belongs to this caller, not to the control itself.
+ *
+ * Day playback is offered here rather than as a fourth floating control: it is
+ * a way of looking at the same filtered selection, so it belongs beside the
+ * filters that define it — and it is the one control on the map that replaces
+ * what the map is showing rather than reframing it, which is worth saying by
+ * placement as well as by label.
  */
-export function FilterDock({ agencyId, applied, onApply }: {
+export function FilterDock({ agencyId, applied, onApply, playback }: {
   agencyId: number | null;
   applied: string[];
   onApply: (codes: string[]) => void;
+  playback?: { active: boolean; onToggle: () => void };
 }) {
   const { t } = useTranslation("design");
+  const { t: tc } = useTranslation();
   const [draft, setDraft] = useState<string[] | null>(null);
   const codes = draft ?? applied;
   // Compared as sets, not arrays: `PatternFilters` rebuilds a whole group's
@@ -51,6 +60,17 @@ export function FilterDock({ agencyId, applied, onApply }: {
       onSubmit={(e) => { e.preventDefault(); apply(); }}
     >
       <PatternFilters agencyId={agencyId} codes={codes} onChange={setDraft} />
+      {playback && (
+        <button
+          type="button"
+          className={`ops-dock__playback${playback.active ? " ops-dock__playback--on" : ""}`}
+          aria-pressed={playback.active}
+          onClick={playback.onToggle}
+        >
+          <Clapperboard size={14} aria-hidden="true" />
+          {tc(playback.active ? "operations.playback.toggle_off" : "operations.playback.toggle_on")}
+        </button>
+      )}
       {dirty && (
         <>
           <button type="submit" className="ops-dock__apply">{t("apply")}</button>

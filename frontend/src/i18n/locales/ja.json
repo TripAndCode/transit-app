@@ -480,6 +480,21 @@
     "empty": {
       "title": "現在表示できる便がありません",
       "hint": "最新のTripUpdateを待っています。受信後、自動的に表示します。"
+    },
+    "playback": {
+      "aria_label": "1日の再生",
+      "play": "再生",
+      "pause": "一時停止",
+      "step_back": "1つ前の時間帯へ",
+      "step_forward": "次の時間帯へ",
+      "scrubber": "時間帯を選ぶ",
+      "speed": "再生速度 {{speed}}倍",
+      "speed_label": "{{speed}}×",
+      "exit": "再生を終了して現在の運行に戻る",
+      "loading": "1日分のデータを読み込んでいます",
+      "empty": "この日の観測データはありません",
+      "toggle_on": "1日の動きを再生",
+      "toggle_off": "現在の運行に戻る"
     }
   },
   "map": {
