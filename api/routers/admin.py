@@ -1,5 +1,12 @@
 """Admin user-management endpoints. All routes require role=admin.
 
+Every mutating route records an entry through
+``api.admin_audit.record_admin_action`` as well as the per-user
+``login_events`` trail, so an operator's audit visibility does not depend on
+which control they used. The bulk route's self-guard is narrower than the
+single-user one by design: it blocks only the two transitions that could
+lock the operator out, where the single-user route refuses any self-edit.
+
 Mutating routes (PATCH, DELETE) carry two structural guards:
 
 - **self-guard**: an admin cannot mutate or delete their own row. Prevents
@@ -459,6 +466,15 @@ async def patch_user(
             "FROM users WHERE user_id=$1",
             uid,
         )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="users.patch",
+            target_type="user",
+            target_id=uid,
+            before={"role": old_role, "suspended": old_suspended, "llm_approved": old_llm_approved},
+            after={"role": new_role, "suspended": new_suspended, "llm_approved": new_llm_approved},
+        )
     return UserRow(**dict(out))
 
 
@@ -498,6 +514,14 @@ async def delete_user(
         await conn.execute("DELETE FROM sessions WHERE user_id=$1", uid)
         await conn.execute("DELETE FROM oauth_identities WHERE user_id=$1", uid)
         await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="deleted")
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="users.delete",
+            target_type="user",
+            target_id=uid,
+            before={"role": row["role"], "suspended_at": row["suspended_at"], "llm_approved": row["llm_approved"]},
+        )
     return Response(status_code=204)
 
 

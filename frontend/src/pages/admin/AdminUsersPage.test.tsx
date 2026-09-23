@@ -466,6 +466,19 @@ describe("AdminUsersPage", () => {
       expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", true);
     });
 
+    it("disables the bulk bar's own controls while a batch is in flight", async () => {
+      // A second click sends the same ids again and lets whichever request
+      // lands second decide the outcome.
+      const user = userEvent.setup();
+      bulkPending = true;
+      bulkVariables = { ids: [1], patch: { llm_approved: true } };
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+      const bar = within(screen.getByTestId("admin-users-bulk-bar"));
+      expect(bar.getByRole("button", { name: "Suspend" })).toHaveProperty("disabled", true);
+      expect(bar.getByRole("combobox")).toHaveProperty("disabled", true);
+    });
+
     it("locks the row a bulk request is mutating even when nothing is selected", () => {
       // The `a` shortcut acts on one unselected row, so a guard reading the
       // page's selection would leave that row's own controls live.

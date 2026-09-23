@@ -219,6 +219,11 @@ export function AdminUsersPage() {
   // DataTable speaks string keys; this page's ids are numeric.
   const selectedKeys = new Set([...selected].map(String));
 
+  // The bulk bar acts on the whole selection, so any batch still in flight
+  // disables all of it -- clicking twice would send the same ids again and
+  // let whichever landed second decide the outcome.
+  const bulkBusy = bulkPatch.isPending || del.isPending;
+
   function showUndo(message: string, ids: number[], inverse: UserPatchBody) {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     setUndo({ message, ids, inverse });
@@ -539,14 +544,23 @@ export function AdminUsersPage() {
           }}
         >
           <b>{t("admin.users.bulk.selected_count", { count: selected.size })}</b>
-          <AdminButton variant="secondary" onClick={() => runBulkAction("approve", [...selected])}>
+          <AdminButton
+            variant="secondary"
+            disabled={bulkBusy}
+            onClick={() => runBulkAction("approve", [...selected])}
+          >
             {t("admin.users.action.approve_llm")}
           </AdminButton>
-          <AdminButton variant="secondary" onClick={() => runBulkAction("suspend", [...selected])}>
+          <AdminButton
+            variant="secondary"
+            disabled={bulkBusy}
+            onClick={() => runBulkAction("suspend", [...selected])}
+          >
             {t("admin.users.action.suspend")}
           </AdminButton>
           <select
             aria-label={t("admin.users.bulk.role_label")}
+            disabled={bulkBusy}
             defaultValue=""
             onChange={(e) => {
               const value = e.target.value;
@@ -561,7 +575,7 @@ export function AdminUsersPage() {
             <option value="admin">{t("account.role.admin")}</option>
             <option value="user">{t("account.role.user")}</option>
           </select>
-          <AdminButton variant="danger" onClick={() => handleBulkDelete([...selected])}>
+          <AdminButton variant="danger" disabled={bulkBusy} onClick={() => handleBulkDelete([...selected])}>
             {t("admin.users.action.delete")}
           </AdminButton>
           <AdminButton variant="secondary" onClick={() => setSelected(new Set())}>

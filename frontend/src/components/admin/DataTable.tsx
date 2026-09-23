@@ -156,7 +156,11 @@ export function DataTable<Row>({
   return (
     <div>
       {savedViews && savedViews.length > 0 && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        <div
+          role="group"
+          aria-label={t("admin.table.saved_views")}
+          style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}
+        >
           {savedViews.map((view) => {
             const on = view.id === activeView;
             return (

@@ -1053,7 +1053,6 @@
         "prev": "Previous",
         "next": "Next"
       },
-      "saved_views": "Saved views",
       "view": {
         "all": "All",
         "pending": "Pending approval",
@@ -1221,6 +1220,7 @@
       "docs_empty": "No feature docs found."
     },
     "table": {
+      "saved_views": "Saved views",
       "empty": "Nothing to show.",
       "select_all": "Select all",
       "select_row": "Select {{label}}"

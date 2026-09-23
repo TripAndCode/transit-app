@@ -1053,7 +1053,6 @@
         "prev": "前へ",
         "next": "次へ"
       },
-      "saved_views": "保存された表示",
       "view": {
         "all": "すべて",
         "pending": "承認待ち",
@@ -1221,6 +1220,7 @@
       "docs_empty": "機能ドキュメントが見つかりません。"
     },
     "table": {
+      "saved_views": "保存された表示",
       "empty": "該当する行がありません。",
       "select_all": "すべて選択",
       "select_row": "{{label}} を選択"
