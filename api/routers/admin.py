@@ -597,19 +597,20 @@ async def revoke_user_session(
     assumed) 404s instead of deleting the wrong -- or multiple -- sessions.
     """
     csrf_guard(request)
-    rows = await conn.fetch("SELECT sid_hash FROM sessions WHERE user_id=$1", uid)
-    sid_hash = unique_prefix_match([r["sid_hash"] for r in rows], sid_prefix)
-    if sid_hash is None:
-        raise HTTPException(404, "session not found")
-    await conn.execute("DELETE FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2", uid, sid_hash)
-    await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="session_revoked")
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
-        action="session_revoked",
-        target_type="user",
-        target_id=str(uid),
-    )
+    async with conn.transaction():
+        rows = await conn.fetch("SELECT sid_hash FROM sessions WHERE user_id=$1", uid)
+        sid_hash = unique_prefix_match([r["sid_hash"] for r in rows], sid_prefix)
+        if sid_hash is None:
+            raise HTTPException(404, "session not found")
+        await conn.execute("DELETE FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2", uid, sid_hash)
+        await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="session_revoked")
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="session_revoked",
+            target_type="user",
+            target_id=str(uid),
+        )
     return Response(status_code=204)
 
 
@@ -681,34 +682,35 @@ async def issue_api_key(
     same digest the auth stack uses for sessions -- so this key validates
     through the same ``key_hash`` lookup as any other row in the table."""
     csrf_guard(request)
-    owner = await conn.fetchval("SELECT 1 FROM users WHERE user_id=$1", body.owner_user_id)
-    if not owner:
-        raise HTTPException(404, "owner user not found")
-    raw_key = f"sk_{secrets.token_urlsafe(32)}"
-    digest = token_hash(raw_key)
-    row = await conn.fetchrow(
-        """
-        INSERT INTO api_keys (key_hash, owner_user_id, tier, label, expires_at, owner_email)
-        VALUES ($1, $2, $3, $4, $5, (SELECT email FROM users WHERE user_id=$2))
-        RETURNING id, owner_user_id, tier, label, created_at, expires_at, revoked_at
-        """,
-        digest,
-        body.owner_user_id,
-        body.tier,
-        body.label,
-        body.expires_at,
-    )
-    await record_event(
-        conn, user_id=body.owner_user_id, actor_id=admin.user_id, kind="api_key_issued", meta={"label": body.label}
-    )
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
-        action="api_key_issued",
-        target_type="user",
-        target_id=str(body.owner_user_id),
-        after={"label": body.label, "tier": body.tier},
-    )
+    async with conn.transaction():
+        owner = await conn.fetchval("SELECT 1 FROM users WHERE user_id=$1", body.owner_user_id)
+        if not owner:
+            raise HTTPException(404, "owner user not found")
+        raw_key = f"sk_{secrets.token_urlsafe(32)}"
+        digest = token_hash(raw_key)
+        row = await conn.fetchrow(
+            """
+            INSERT INTO api_keys (key_hash, owner_user_id, tier, label, expires_at, owner_email)
+            VALUES ($1, $2, $3, $4, $5, (SELECT email FROM users WHERE user_id=$2))
+            RETURNING id, owner_user_id, tier, label, created_at, expires_at, revoked_at
+            """,
+            digest,
+            body.owner_user_id,
+            body.tier,
+            body.label,
+            body.expires_at,
+        )
+        await record_event(
+            conn, user_id=body.owner_user_id, actor_id=admin.user_id, kind="api_key_issued", meta={"label": body.label}
+        )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="api_key_issued",
+            target_type="user",
+            target_id=str(body.owner_user_id),
+            after={"label": body.label, "tier": body.tier},
+        )
     return ApiKeyIssued(**dict(row), key=raw_key)
 
 
@@ -720,22 +722,23 @@ async def revoke_api_key(
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
     csrf_guard(request)
-    row = await conn.fetchrow(
-        "UPDATE api_keys SET revoked_at = now() "
-        "WHERE id=$1 AND owner_user_id IS NOT NULL AND revoked_at IS NULL "
-        "RETURNING id, owner_user_id",
-        key_id,
-    )
-    if not row:
-        raise HTTPException(404, "api key not found")
-    await record_event(conn, user_id=row["owner_user_id"], actor_id=admin.user_id, kind="api_key_revoked")
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
-        action="api_key_revoked",
-        target_type="api_key",
-        target_id=str(key_id),
-    )
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            "UPDATE api_keys SET revoked_at = now() "
+            "WHERE id=$1 AND owner_user_id IS NOT NULL AND revoked_at IS NULL "
+            "RETURNING id, owner_user_id",
+            key_id,
+        )
+        if not row:
+            raise HTTPException(404, "api key not found")
+        await record_event(conn, user_id=row["owner_user_id"], actor_id=admin.user_id, kind="api_key_revoked")
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="api_key_revoked",
+            target_type="api_key",
+            target_id=str(key_id),
+        )
     return Response(status_code=204)
 
 
@@ -768,34 +771,35 @@ async def create_invite(
     hasn't signed in yet. Honored by the OAuth callback on that email's
     first login (see ``api/routers/auth.py``'s ``_upsert_user``)."""
     csrf_guard(request)
-    if body.role not in ("user", "admin"):
-        raise HTTPException(400, "invalid role")
-    row = await conn.fetchrow(
-        """
-        INSERT INTO user_invites (email, role, llm_approved, invited_by)
-        VALUES ($1, $2, $3, $4)
-        RETURNING invite_id, email, role, llm_approved, created_at, expires_at
-        """,
-        body.email,
-        body.role,
-        body.llm_approved,
-        admin.user_id,
-    )
-    await record_event(
-        conn,
-        user_id=None,
-        actor_id=admin.user_id,
-        kind="invite_created",
-        meta={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
-    )
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
-        action="invite_created",
-        target_type="invite",
-        target_id=str(row["invite_id"]),
-        after={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
-    )
+    async with conn.transaction():
+        if body.role not in ("user", "admin"):
+            raise HTTPException(400, "invalid role")
+        row = await conn.fetchrow(
+            """
+            INSERT INTO user_invites (email, role, llm_approved, invited_by)
+            VALUES ($1, $2, $3, $4)
+            RETURNING invite_id, email, role, llm_approved, created_at, expires_at
+            """,
+            body.email,
+            body.role,
+            body.llm_approved,
+            admin.user_id,
+        )
+        await record_event(
+            conn,
+            user_id=None,
+            actor_id=admin.user_id,
+            kind="invite_created",
+            meta={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
+        )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="invite_created",
+            target_type="invite",
+            target_id=str(row["invite_id"]),
+            after={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
+        )
     return InviteOut(**dict(row))
 
 

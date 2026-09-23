@@ -25,13 +25,19 @@ def _key_usable(row, now: datetime) -> bool:
 class APIKeyMiddleware(BaseHTTPMiddleware):
     """Resolves the request's rate-limit tier from an optional ``X-API-Key``.
 
-    No header means the free tier, which is every caller today. Rows in
-    ``api_keys`` are operator-inserted by hand -- the same convention as
-    ``ridership_weights`` (migration 0035) and ``route_performance_standards``
-    (0041): a paid tier is a commercial decision, not something derivable from
-    the data, so there is no ingestion path and no CRUD endpoint. The table's
-    ``tier`` column defaults to ``'pro'`` so that inserting a key hash and an
-    owner email is the whole provisioning step.
+    No header means the free tier, which is every caller today. A paid tier
+    is a commercial decision, not something derivable from the data, so keys
+    are provisioned deliberately: an admin issues one against a user through
+    ``POST /api/admin/api-keys``, and older rows were inserted by hand with
+    only an owner email. The table's ``tier`` column defaults to ``'pro'``.
+
+    A key is only as live as the account behind it. Suspending or
+    soft-deleting a user kills their sessions, and both set
+    ``users.suspended_at``, so the owner's state is checked here rather than
+    by revoking every key at suspension time -- that keeps the decision
+    reversible (restoring the account restores its keys) and leaves no way
+    to miss a key issued through some later path. A row with no owner is a
+    legacy hand-inserted key and stands on its own columns alone.
 
     The stored column is ``key_hash``, the SHA-256 digest of the key; the
     operator issuing a key keeps the only copy of the raw string. Revocation
@@ -51,10 +57,17 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         pool: asyncpg.Pool = request.app.state.pool
         row = await pool.fetchrow(
-            "SELECT tier, revoked_at, expires_at FROM api_keys WHERE key_hash = $1",
+            """
+            SELECT k.tier, k.revoked_at, k.expires_at, u.suspended_at AS owner_suspended_at
+            FROM api_keys k
+            LEFT JOIN users u ON u.user_id = k.owner_user_id
+            WHERE k.key_hash = $1
+            """,
             token_hash(key),
         )
-        if row is None or not _key_usable(row, datetime.now(timezone.utc)):
+        if row is None or row["owner_suspended_at"] is not None:
+            return JSONResponse({"detail": "Invalid API key"}, status_code=401)
+        if not _key_usable(row, datetime.now(timezone.utc)):
             return JSONResponse({"detail": "Invalid API key"}, status_code=401)
         request.state.tier = row["tier"]
         return await call_next(request)

@@ -10,6 +10,7 @@ for the same pattern.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
@@ -43,6 +44,16 @@ class _FakeConn:
         self.api_keys = api_keys or []  # list of dict(id, owner_user_id, revoked_at)
         self._next_api_key_id = (max((k["id"] for k in self.api_keys), default=0)) + 1
         self.events: list[tuple] = []
+
+    def transaction(self):
+        """The handlers wrap their write and its audit entry together; this
+        fake has no rollback to model, so the block just runs."""
+
+        @asynccontextmanager
+        async def _noop():
+            yield
+
+        return _noop()
 
     async def fetch(self, sql, *args):
         if "FROM sessions WHERE user_id=$1" in sql:
