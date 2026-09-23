@@ -35,6 +35,11 @@ _CACHE_TTL_SECONDS = 30.0
 _TRUE_STRINGS = ("1", "true", "yes")
 _FALSE_STRINGS = ("0", "false", "no")
 _CONNECT_TIMEOUT_SECONDS = 2
+#: `connect_timeout` bounds only the handshake, so a query that is accepted
+#: and then stalls would keep a refresh thread alive indefinitely -- and the
+#: "one refresh at a time" guard would see it still running and never start
+#: another, leaving the cache frozen for the life of the process.
+_STATEMENT_TIMEOUT_MS = 5000
 
 
 @dataclass(frozen=True)
@@ -131,7 +136,11 @@ def _load_overrides() -> dict[str, tuple[bool, str | None, int | None, Any]] | N
     if not db_url:
         return {}
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=_CONNECT_TIMEOUT_SECONDS)
+        conn = psycopg2.connect(
+            db_url,
+            connect_timeout=_CONNECT_TIMEOUT_SECONDS,
+            options=f"-c statement_timeout={_STATEMENT_TIMEOUT_MS}",
+        )
     except psycopg2.Error:
         _log.warning("flags: could not connect to read feature_flags; keeping last known values", exc_info=True)
         return None
@@ -150,30 +159,14 @@ def _load_overrides() -> dict[str, tuple[bool, str | None, int | None, Any]] | N
     return {key: (bool(value), reason, updated_by, updated_at) for key, value, reason, updated_by, updated_at in rows}
 
 
-def _refresh_cache_locked() -> None:
-    """Rebuild `_cache` for every registered flag. Caller holds `_cache_lock`."""
-    global _cache, _cache_expires_at
-    overrides = _load_overrides()
-    if overrides is None:
-        # Transient read failure: carry forward only the entries an operator
-        # actually overrode. Those are the ones worth protecting -- an
-        # override exists to switch something off, and an incident is
-        # exactly when the database is also likely to be unwell, so letting
-        # "cannot read" mean "no overrides" would switch it back on at the
-        # worst moment. Everything else re-resolves from the environment,
-        # which stays responsive and keeps the never-raises contract when
-        # nothing has been read yet.
-        overrides = {
-            key: (state.value, state.reason, state.updated_by, state.updated_at)
-            for key, state in _cache.items()
-            if state.source == "override"
-        }
-    new_cache: dict[str, FlagState] = {}
+def _build_states(overrides: dict[str, tuple[bool, str | None, int | None, Any]]) -> dict[str, FlagState]:
+    """Resolve every registered flag against `overrides` and the environment."""
+    states: dict[str, FlagState] = {}
     for definition in REGISTRY:
         env_default = _env_bool(definition.env_var, definition.env_default)
         override = overrides.get(definition.key)
         if override is None:
-            new_cache[definition.key] = FlagState(
+            states[definition.key] = FlagState(
                 key=definition.key,
                 value=env_default,
                 source="env",
@@ -184,7 +177,7 @@ def _refresh_cache_locked() -> None:
             )
         else:
             value, reason, updated_by, updated_at = override
-            new_cache[definition.key] = FlagState(
+            states[definition.key] = FlagState(
                 key=definition.key,
                 value=value,
                 source="override",
@@ -193,43 +186,67 @@ def _refresh_cache_locked() -> None:
                 updated_at=updated_at,
                 reason=reason,
             )
-    _cache = new_cache
-    _cache_expires_at = time.monotonic() + _CACHE_TTL_SECONDS
+    return states
 
 
-def _start_background_refresh_locked() -> None:
-    """Refresh off the caller's thread, serving the cached values meanwhile.
+def _refresh() -> None:
+    """Read the overrides, then swap the resolved states into the cache.
 
-    `flag()` is called from `async def` request handlers, so the refresh
-    cannot run inline: `psycopg2.connect` plus the SELECT are blocking, and
-    on the event-loop thread they stall every concurrent request the worker
-    is serving, not just the caller. Serving a value up to one window stale
-    is the right trade against that -- and the expiry is pushed out before
-    the thread starts, so callers arriving during a slow refresh keep
-    reading the cache instead of queueing another one.
+    The read happens with no lock held. Holding `_cache_lock` across the
+    database round trip would make every concurrent reader wait on it,
+    which is the same stall this exists to avoid -- just moved off one
+    unlucky caller and onto all of them. The lock covers only the
+    in-memory swap.
+    """
+    overrides = _load_overrides()
+    global _cache, _cache_expires_at, _force_sync_refresh
+    with _cache_lock:
+        # Any completed read satisfies an outstanding "the next read must
+        # see this" promise, whoever made it -- otherwise a startup warm
+        # leaves the first request to redo the same blocking read.
+        _force_sync_refresh = False
+        if overrides is None:
+            # Transient read failure: carry forward only the entries an
+            # operator actually overrode. An override exists to switch
+            # something off, and an incident is exactly when the database is
+            # also likely to be unwell, so letting "cannot read" mean "no
+            # overrides" would switch it back on at the worst moment.
+            # Everything else re-resolves from the environment, so a local
+            # toggle is not inert while the database is down.
+            overrides = {
+                key: (state.value, state.reason, state.updated_by, state.updated_at)
+                for key, state in _cache.items()
+                if state.source == "override"
+            }
+        _cache = _build_states(overrides)
+        _cache_expires_at = time.monotonic() + _CACHE_TTL_SECONDS
+
+
+def _start_background_refresh() -> None:
+    """Refresh behind the readers, who keep seeing the cached values.
+
+    `flag()` is called from `async def` handlers, so a refresh must never
+    run on the caller's thread. The expiry is pushed out before the thread
+    starts so arrivals during a slow refresh read the cache rather than
+    queueing more refreshes.
     """
     global _refresh_thread, _cache_expires_at
-    if _refresh_thread is not None and _refresh_thread.is_alive():
-        return
-    _cache_expires_at = time.monotonic() + _CACHE_TTL_SECONDS
-    _refresh_thread = threading.Thread(target=_refresh_in_background, name="flags-refresh", daemon=True)
-    _refresh_thread.start()
-
-
-def _refresh_in_background() -> None:
     with _cache_lock:
-        _refresh_cache_locked()
+        if _refresh_thread is not None and _refresh_thread.is_alive():
+            return
+        _cache_expires_at = time.monotonic() + _CACHE_TTL_SECONDS
+        _refresh_thread = threading.Thread(target=_refresh, name="flags-refresh", daemon=True)
+        _refresh_thread.start()
 
 
 def warm() -> None:
-    """Resolve every flag now, so the first request does not have to.
+    """Resolve every flag now, so no request has to.
 
-    Blocking, and meant to be called from startup (off the event loop) --
-    `get_flag_state` otherwise does this read inline the first time a flag
-    is touched, which on an async handler is the one place it must not.
+    Blocking, and meant for startup, off the event loop. Without it the
+    first flag touched would do this read inline on whichever request got
+    there first -- the one place it must not happen.
     """
-    with _cache_lock:
-        _refresh_cache_locked()
+    _refresh()
 
 
 def get_flag_state(key: str) -> FlagState:
@@ -238,22 +255,31 @@ def get_flag_state(key: str) -> FlagState:
     Raises `KeyError` for a key not in `REGISTRY` -- every caller of `flag()`
     is expected to pass a registered key, and a typo here should fail loud
     rather than silently always resolving to its literal `env_default`.
-
-    The first resolution in a process reads the database on the calling
-    thread, because there is nothing cached to serve and an override must
-    not be missed; every refresh after that happens in the background.
     """
+    global _force_sync_refresh
     if key not in _BY_KEY:
         raise KeyError(f"unknown feature flag: {key!r}")
-    global _force_sync_refresh
+
     with _cache_lock:
-        if key not in _cache or _force_sync_refresh:
-            # Nothing to serve, or an override was just written and the
-            # caller was promised it would be visible immediately.
+        cached = _cache.get(key)
+        if cached is not None and not _force_sync_refresh:
+            stale = time.monotonic() >= _cache_expires_at
+            if not stale:
+                return cached
+        else:
+            cached = None
             _force_sync_refresh = False
-            _refresh_cache_locked()
-        elif time.monotonic() >= _cache_expires_at:
-            _start_background_refresh_locked()
+
+    if cached is not None:
+        # Expired: serve what we have and refresh behind it.
+        _start_background_refresh()
+        return cached
+
+    # Nothing cached, or an override was just written and the caller was
+    # promised it would be visible. Read on this thread -- startup and the
+    # admin PATCH, not a hot path.
+    _refresh()
+    with _cache_lock:
         return _cache[key]
 
 

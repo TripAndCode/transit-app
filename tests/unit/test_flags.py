@@ -212,3 +212,41 @@ def test_an_unrecognised_env_value_keeps_the_flags_own_default(monkeypatch):
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "nonsense")
     flags.invalidate()
     assert flags.flag("ask_intent_cache_enabled", False) is False
+
+
+def test_a_slow_refresh_does_not_block_readers(monkeypatch):
+    """`flag()` is called from async request handlers, so a refresh must
+    never be something a caller waits on -- not even by way of the lock the
+    refresh holds while it swaps its result in."""
+    import threading
+
+    refresh_seconds = 0.3
+
+    def slow_load():
+        time.sleep(refresh_seconds)
+        return {"ask_intent_cache_enabled": (False, "held", 1, None)}
+
+    monkeypatch.setattr(flags, "_load_overrides", slow_load)
+    monkeypatch.setattr(flags, "_CACHE_TTL_SECONDS", 0.05)
+    flags.warm()
+
+    slowest = 0.0
+
+    def reader():
+        nonlocal slowest
+        for _ in range(20):
+            started = time.monotonic()
+            flags.flag("ask_intent_cache_enabled", True)
+            slowest = max(slowest, time.monotonic() - started)
+            time.sleep(0.01)
+
+    threads = [threading.Thread(target=reader) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+    assert all(not t.is_alive() for t in threads)
+    assert slowest < refresh_seconds / 3, f"a reader waited {slowest * 1000:.0f}ms on the refresh"
+
+    if flags._refresh_thread is not None:
+        flags._refresh_thread.join(timeout=5)
