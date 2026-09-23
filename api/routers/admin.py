@@ -59,6 +59,7 @@ _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 MAX_BULK_USER_IDS = 200
+MAX_API_KEYS_LISTED = 500
 
 
 class UserRow(BaseModel):
@@ -650,18 +651,21 @@ async def list_api_keys(
     """List admin-issued API keys (rows with an ``owner_user_id``) -- excludes
     legacy operator-inserted rows that predate this table's ownership/label
     columns. ``key_hash`` no longer distinguishes the two: it is backfilled
-    for every row, admin-issued or legacy."""
-    if owner_user_id is not None:
-        rows = await conn.fetch(
-            "SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at FROM api_keys "
-            "WHERE owner_user_id IS NOT NULL AND owner_user_id=$1 ORDER BY created_at DESC",
-            owner_user_id,
-        )
-    else:
-        rows = await conn.fetch(
-            "SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at FROM api_keys "
-            "WHERE owner_user_id IS NOT NULL ORDER BY created_at DESC"
-        )
+    for every row, admin-issued or legacy.
+
+    Bounded: unscoped, this returns every admin-issued key in the system, and
+    that set only grows."""
+    rows = await conn.fetch(
+        """
+        SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at
+        FROM api_keys
+        WHERE owner_user_id IS NOT NULL AND ($1::int IS NULL OR owner_user_id = $1)
+        ORDER BY created_at DESC
+        LIMIT $2
+        """,
+        owner_user_id,
+        MAX_API_KEYS_LISTED,
+    )
     return [ApiKeyOut(**dict(r)) for r in rows]
 
 

@@ -126,7 +126,11 @@ def test_a_healthy_collector_reaches_the_tile(monkeypatch):
         {
             "component": "r2",
             "state": "healthy",
-            "last_success_at": _NOW.isoformat().replace("+00:00", "Z"),
+            # Read at call time, not module import: the endpoint builds the
+            # 24-hour history against its own `now`, so a success pinned to
+            # import time drops a cell once the suite crosses an hour
+            # boundary before reaching this test.
+            "last_success_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "details": {},
         }
     ]

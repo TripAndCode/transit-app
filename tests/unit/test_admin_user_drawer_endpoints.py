@@ -53,11 +53,13 @@ class _FakeConn:
                 if s["user_id"] == uid
             ]
         if "FROM api_keys" in sql:
+            # One query with a NULL-guarded owner filter and a row cap, so
+            # the owner arrives as $1 (possibly None) and the limit as $2.
+            owner, limit = args
             rows = [r for r in self.api_keys if r.get("owner_user_id") is not None]
-            if "owner_user_id=$1" in sql:
-                (owner,) = args
+            if owner is not None:
                 rows = [r for r in rows if r["owner_user_id"] == owner]
-            return rows
+            return rows[:limit]
         raise AssertionError(f"unexpected fetch: {sql}")
 
     async def fetchval(self, sql, *args):

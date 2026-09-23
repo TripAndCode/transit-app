@@ -1073,6 +1073,7 @@
       }
     },
     "user_detail": {
+      "panel_label": "ユーザー詳細",
       "error": "エラー: {{msg}}",
       "name_label": "名前",
       "status_label": "状態",

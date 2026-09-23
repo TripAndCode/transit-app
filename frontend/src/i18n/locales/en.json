@@ -1073,6 +1073,7 @@
       }
     },
     "user_detail": {
+      "panel_label": "User detail",
       "error": "Error: {{msg}}",
       "name_label": "Name",
       "status_label": "Status",

@@ -32,8 +32,10 @@ type Detail = {
 /** Admin user drawer: identity, role/LLM-approval/BYOK status, sessions,
  * API keys, login history, and a danger zone -- rendered as a right-hand
  * panel over `AdminUsersPage` (mounted via the nested `users/:uid` route;
- * see main.tsx). Escape/overlay-click/the back link all navigate back to
- * `/admin/users`, which unmounts this route and closes the drawer. */
+ * see main.tsx). Escape and the back link both navigate to `/admin/users`,
+ * which unmounts this route and closes the drawer. There is no overlay to
+ * click: the shared Drawer is deliberately non-modal so the list behind it
+ * stays readable and scrollable. */
 export function AdminUserDetailPage() {
   const { t } = useTranslation();
   const { uid } = useParams<{ uid: string }>();
@@ -61,7 +63,9 @@ export function AdminUserDetailPage() {
 
   if (isLoading || !data) {
     return (
-      <Drawer open onClose={handleClose} label={t("admin.user_detail.actions_title")}>
+      // Named for what the panel is, not for a section it has not loaded:
+      // "Actions" would be the accessible name while this shows a spinner.
+      <Drawer open onClose={handleClose} label={t("admin.user_detail.panel_label")}>
         <div style={{ padding: 24 }}>
           {backLink}
           <div style={{ marginTop: 12 }}>

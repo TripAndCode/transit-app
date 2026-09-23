@@ -92,6 +92,14 @@ describe("AdminUserDetailPage", () => {
     expect(document.body.textContent).toContain(expected);
   });
 
+  it("names the panel for what it is while the detail is still loading", async () => {
+    // The accessible name is read before the content arrives, so it must not
+    // be borrowed from a section that has not rendered yet.
+    apiGetMock.mockImplementationOnce(() => new Promise<never[]>(() => {}));
+    renderPage();
+    expect(await screen.findByRole("dialog", { name: "User detail" })).toBeTruthy();
+  });
+
   it("has a back-to-users link", async () => {
     renderPage();
     await screen.findByText("a@b.com");
