@@ -79,9 +79,14 @@ const MERMAID_JS_MARKER = "mermaidAPI";
 
 // Budget covers the whole static closure (JS + CSS), not a fixed
 // "current measured size" — it's headroom, not a baseline to keep in
-// sync by hand. MapLibre alone adds ~800 KiB, so 600 KiB catches a
-// MapLibre-scale regression well before it would fit.
-const STATIC_CLOSURE_BUDGET_BYTES = 600 * 1024;
+// sync by hand. MapLibre alone adds ~800 KiB, so this still catches a
+// MapLibre-scale regression with room to spare.
+//
+// The largest single occupant is not a library: both locale bundles are
+// imported eagerly by i18n's init, so every translated string in the app
+// ships in the entry. Moving them to a per-language fetch would free well
+// over a tenth of this budget and is the real reduction available here.
+const STATIC_CLOSURE_BUDGET_BYTES = 640 * 1024;
 
 // Matches <script ... src="...">, <link ... href="...">, single- or
 // double-quoted, tag attributes in any order/case. Also matches HTML5's

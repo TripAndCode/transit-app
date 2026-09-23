@@ -136,6 +136,93 @@ async def test_callback_creates_user_and_session(auth_client, aconn, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_pending_invite_preapproves_role_and_llm_on_first_login(auth_client, aconn, monkeypatch):
+    """An admin-created ``user_invites`` row for this email is honored on the
+    invitee's first OAuth login: role and llm_approved come from the invite,
+    and the invite is marked consumed so it can't be reused."""
+    from api.routers import auth as auth_mod
+
+    admin_uid = (await aconn.fetchrow("INSERT INTO users (email, role) VALUES ('admin@x', 'admin') RETURNING user_id"))[
+        "user_id"
+    ]
+    invite_id = (
+        await aconn.fetchrow(
+            "INSERT INTO user_invites (email, role, llm_approved, invited_by) "
+            "VALUES ('invitee@x', 'admin', true, $1) RETURNING invite_id",
+            admin_uid,
+        )
+    )["invite_id"]
+
+    async def fake_userinfo(client, token, provider):
+        return {
+            "sub": "google-sub-invitee",
+            "email": "invitee@x",
+            "email_verified": True,
+            "name": "Invitee",
+            "avatar_url": None,
+        }
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "tok"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+
+    row = await aconn.fetchrow("SELECT role, llm_approved FROM users WHERE email='invitee@x'")
+    assert row is not None
+    assert row["role"] == "admin"
+    assert row["llm_approved"] is True
+
+    invite_row = await aconn.fetchrow(
+        "SELECT consumed_at, consumed_user_id FROM user_invites WHERE invite_id=$1", invite_id
+    )
+    assert invite_row["consumed_at"] is not None
+    assert invite_row["consumed_user_id"] is not None
+
+
+@pytest.mark.asyncio
+async def test_expired_invite_is_not_honored(auth_client, aconn, monkeypatch):
+    from api.routers import auth as auth_mod
+
+    await aconn.execute(
+        "INSERT INTO user_invites (email, role, llm_approved, expires_at) "
+        "VALUES ('stale@x', 'admin', true, now() - interval '1 day')"
+    )
+
+    async def fake_userinfo(client, token, provider):
+        return {
+            "sub": "google-sub-stale",
+            "email": "stale@x",
+            "email_verified": True,
+            "name": "Stale",
+            "avatar_url": None,
+        }
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "tok"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+
+    row = await aconn.fetchrow("SELECT role, llm_approved FROM users WHERE email='stale@x'")
+    assert row is not None
+    assert row["role"] == "user"
+    assert row["llm_approved"] is False
+
+
+@pytest.mark.asyncio
 async def test_admin_email_promotes(auth_client, aconn, monkeypatch):
     from api.routers import auth as auth_mod
 

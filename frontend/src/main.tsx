@@ -135,8 +135,15 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <AdminBoardPage /> },
           { path: "agencies", element: <AdminAgenciesPage /> },
-          { path: "users", element: <AdminUsersPage /> },
-          { path: "users/:uid", element: <AdminUserDetailPage /> },
+          {
+            path: "users",
+            element: <AdminUsersPage />,
+            // Nested rather than a sibling route: AdminUsersPage renders the
+            // list plus an <Outlet/>, so navigating to users/:uid overlays
+            // the drawer on top of the still-mounted list instead of
+            // replacing it with a standalone detail page.
+            children: [{ path: ":uid", element: <AdminUserDetailPage /> }],
+          },
           { path: "ops", element: <AdminOpsPage /> },
           { path: "architecture", element: <AdminArchitecturePage /> },
         ],

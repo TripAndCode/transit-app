@@ -443,3 +443,96 @@ export function useReanalyzeAgency() {
     mutationFn: (id: number) => apiPost<{ status: string }>(`/api/admin/agencies/${id}/reanalyze`, {}),
   });
 }
+
+// ── User drawer: sessions ─────────────────────────────────────────────────
+
+type AdminSession = {
+  sid_prefix: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  user_agent: string | null;
+  ip: string | null;
+};
+
+/** Active sessions for one user, identified only by a display-safe prefix
+ * -- the full session id is a bearer credential and is never fetched. */
+export function useUserSessions(uid: number) {
+  return useQuery({
+    queryKey: ["adminUserSessions", uid],
+    queryFn: ({ signal }) => apiGet<AdminSession[]>(`/api/admin/users/${uid}/sessions`, { signal }),
+  });
+}
+
+/** Mutation: revoke one session by its prefix; refetches the session list. */
+export function useRevokeSession(uid: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sidPrefix: string) => apiDelete(`/api/admin/users/${uid}/sessions/${sidPrefix}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminUserSessions", uid] }),
+  });
+}
+
+// ── User drawer: API keys ─────────────────────────────────────────────────
+
+export type AdminApiKey = {
+  id: number;
+  owner_user_id: number | null;
+  tier: string;
+  label: string | null;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+};
+
+export type AdminApiKeyIssued = AdminApiKey & { key: string };
+
+/** API keys issued (via the admin drawer) for one user. */
+export function useApiKeys(ownerUserId: number) {
+  return useQuery({
+    queryKey: ["adminApiKeys", ownerUserId],
+    queryFn: ({ signal }) =>
+      apiGet<AdminApiKey[]>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
+  });
+}
+
+/** Mutation: issue a new API key for a user. The raw key is returned only
+ * in this response -- callers must show it once and never refetch it. */
+export function useIssueApiKey(ownerUserId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { tier?: string; label?: string | null }) =>
+      apiPost<AdminApiKeyIssued>("/api/admin/api-keys", { owner_user_id: ownerUserId, ...body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminApiKeys", ownerUserId] }),
+  });
+}
+
+/** Mutation: revoke an API key by id; refetches the owner's key list. */
+export function useRevokeApiKey(ownerUserId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiDelete(`/api/admin/api-keys/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminApiKeys", ownerUserId] }),
+  });
+}
+
+// ── Invites ────────────────────────────────────────────────────────────────
+
+type InviteCreateBody = { email: string; role: "user" | "admin"; llm_approved: boolean };
+
+type AdminInvite = {
+  invite_id: number;
+  email: string;
+  role: "user" | "admin";
+  llm_approved: boolean;
+  created_at: string;
+  expires_at: string;
+};
+
+/** Mutation: pre-approve a role (+ optional LLM access) for an email that
+ * hasn't signed in yet; the OAuth callback honors it on first login. */
+export function useCreateInvite() {
+  return useMutation({
+    mutationFn: (body: InviteCreateBody) => apiPost<AdminInvite>("/api/admin/invites", body),
+  });
+}
