@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams, type SetURLSearchParams } from "react-router-dom";
+import { Link, Outlet, useNavigate, useSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   useAdminUsers,
@@ -15,6 +15,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Z_INDEX } from "../../styles/zIndex";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
+import { InviteDialog } from "./InviteDialog";
 import { pageItems } from "./pageItems";
 
 const PAGE_SIZE = 50;
@@ -115,6 +116,7 @@ function AdminUserSearchBox({
  *  and inline role / suspend / delete controls. */
 export function AdminUsersPage() {
   const { t } = useTranslation();
+  const [inviteOpen, setInviteOpen] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get("q") ?? "";
@@ -447,8 +449,18 @@ export function AdminUsersPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <PageHeader title={t("admin.users.title")} />
+    // position: relative bounds the user-detail Drawer (rendered via the
+    // nested users/:uid route below) to this page's content area, so it
+    // docks inside the admin main area rather than covering the sidebar.
+    <div style={{ padding: 24, position: "relative" }}>
+      <PageHeader
+        title={t("admin.users.title")}
+        actions={
+          <AdminButton variant="primary" onClick={() => setInviteOpen(true)}>
+            {t("admin.invite.trigger")}
+          </AdminButton>
+        }
+      />
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <AdminUserSearchBox
           q={q}
@@ -614,6 +626,8 @@ export function AdminUsersPage() {
           </button>
         </div>
       )}
+      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <Outlet />
     </div>
   );
 }

@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+import secrets
 from collections.abc import Iterator
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -47,8 +48,9 @@ from api.admin_audit import record_admin_action
 from api.admin_board import board_alerts, board_freshness, board_window, collector_tiles
 from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
-from api.security import User, csrf_guard, require_admin
+from api.security import User, csrf_guard, require_admin, token_hash
 from api.sqlutil import escape_like
+from pipeline.admin_users import session_id_prefix, unique_prefix_match
 from pipeline.audit import record_event
 from pipeline.query import agencies as _agencies
 
@@ -57,6 +59,7 @@ _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 MAX_BULK_USER_IDS = 200
+MAX_API_KEYS_LISTED = 500
 
 
 class UserRow(BaseModel):
@@ -142,6 +145,9 @@ class UserDetail(UserRow):
 
     identities: list[dict]
     recent_events: list[dict]
+    # BYOK (bring-your-own-key) presence only -- never the key or its
+    # suffix. `None` means the user hasn't configured a provider key.
+    byok_provider: str | None
 
 
 @router.get("/users/{uid}", response_model=UserDetail)
@@ -172,6 +178,11 @@ async def user_detail(
         "FROM login_events WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
         uid,
     )
+    # Presence-only check -- deliberately not pipeline.query.user_llm_keys's
+    # get_user_llm_key, which decrypts the stored value and requires
+    # LLM_KEY_ENCRYPTION_KEY to be configured. This admin view never needs
+    # (or should see) the key itself, so it skips that dependency entirely.
+    byok_row = await conn.fetchrow("SELECT provider FROM user_llm_keys WHERE user_id=$1", uid)
     return UserDetail(
         **dict(row),
         identities=[dict(i) for i in ids],
@@ -185,6 +196,7 @@ async def user_detail(
             }
             for e in events
         ],
+        byok_provider=byok_row["provider"] if byok_row else None,
     )
 
 
@@ -523,6 +535,272 @@ async def delete_user(
             before={"role": row["role"], "suspended_at": row["suspended_at"], "llm_approved": row["llm_approved"]},
         )
     return Response(status_code=204)
+
+
+# ── Sessions ──────────────────────────────────────────────────────────────
+
+
+class SessionOut(BaseModel):
+    """One active session, identified only by a display-safe prefix of its
+    ``sid_hash`` -- the raw session id is a bearer credential, is never
+    persisted, and is never returned to the admin UI."""
+
+    sid_prefix: str
+    created_at: Any
+    last_seen_at: Any
+    expires_at: Any
+    user_agent: str | None
+    ip: str | None
+
+
+@router.get("/users/{uid}/sessions", response_model=list[SessionOut])
+async def list_user_sessions(
+    uid: int,
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[SessionOut]:
+    rows = await conn.fetch(
+        "SELECT sid_hash, created_at, last_seen_at, expires_at, user_agent, ip::text AS ip "
+        "FROM sessions WHERE user_id=$1 ORDER BY created_at DESC",
+        uid,
+    )
+    return [
+        SessionOut(
+            sid_prefix=session_id_prefix(r["sid_hash"]),
+            created_at=r["created_at"],
+            last_seen_at=r["last_seen_at"],
+            expires_at=r["expires_at"],
+            user_agent=r["user_agent"],
+            ip=r["ip"],
+        )
+        for r in rows
+    ]
+
+
+@router.delete("/users/{uid}/sessions/{sid_prefix}", status_code=204)
+async def revoke_user_session(
+    uid: int,
+    sid_prefix: str,
+    request: Request,
+    admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> Response:
+    """Revoke one session identified by an admin-visible prefix of its
+    ``sid_hash``.
+
+    Looks up every session hash for the user and picks the prefix match in
+    Python (:func:`pipeline.admin_users.unique_prefix_match`) rather than a
+    SQL ``LIKE $1 || '%'`` -- an exact ``left(sid_hash, length($1)) = $1``
+    comparison, driven by that lookup, never treats a caller-supplied
+    prefix as a wildcard pattern. A prefix that matches zero or more than
+    one session (astronomically unlikely for random tokens, but never
+    assumed) 404s instead of deleting the wrong -- or multiple -- sessions.
+    """
+    csrf_guard(request)
+    async with conn.transaction():
+        rows = await conn.fetch("SELECT sid_hash FROM sessions WHERE user_id=$1", uid)
+        sid_hash = unique_prefix_match([r["sid_hash"] for r in rows], sid_prefix)
+        if sid_hash is None:
+            raise HTTPException(404, "session not found")
+        await conn.execute("DELETE FROM sessions WHERE user_id=$1 AND left(sid_hash, length($2)) = $2", uid, sid_hash)
+        await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="session_revoked")
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="session_revoked",
+            target_type="user",
+            target_id=str(uid),
+        )
+    return Response(status_code=204)
+
+
+# ── API keys ──────────────────────────────────────────────────────────────
+
+
+class ApiKeyOut(BaseModel):
+    """One admin-issued API key's metadata. Never the raw key or its hash."""
+
+    id: int
+    owner_user_id: int | None
+    tier: str
+    label: str | None
+    created_at: Any
+    expires_at: Any
+    revoked_at: Any
+
+
+class ApiKeyIssued(ApiKeyOut):
+    """Same shape as :class:`ApiKeyOut` plus the raw key -- returned exactly
+    once, from the issuing POST response, and never persisted in this form."""
+
+    key: str
+
+
+class ApiKeyCreate(BaseModel):
+    owner_user_id: int
+    tier: str = "pro"
+    label: str | None = None
+    expires_at: Any = None
+
+
+@router.get("/api-keys", response_model=list[ApiKeyOut])
+async def list_api_keys(
+    owner_user_id: int | None = None,
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[ApiKeyOut]:
+    """List admin-issued API keys (rows with an ``owner_user_id``) -- excludes
+    legacy operator-inserted rows that predate this table's ownership/label
+    columns. ``key_hash`` no longer distinguishes the two: it is backfilled
+    for every row, admin-issued or legacy.
+
+    Bounded: unscoped, this returns every admin-issued key in the system, and
+    that set only grows."""
+    rows = await conn.fetch(
+        """
+        SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at
+        FROM api_keys
+        WHERE owner_user_id IS NOT NULL AND ($1::int IS NULL OR owner_user_id = $1)
+        ORDER BY created_at DESC
+        LIMIT $2
+        """,
+        owner_user_id,
+        MAX_API_KEYS_LISTED,
+    )
+    return [ApiKeyOut(**dict(r)) for r in rows]
+
+
+@router.post("/api-keys", response_model=ApiKeyIssued, status_code=201)
+async def issue_api_key(
+    body: ApiKeyCreate,
+    request: Request,
+    admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> ApiKeyIssued:
+    """Generate a raw API key, store only its hash, and return the raw value
+    once. ``key_hash`` is ``api.security.token_hash`` of the raw key -- the
+    same digest the auth stack uses for sessions -- so this key validates
+    through the same ``key_hash`` lookup as any other row in the table."""
+    csrf_guard(request)
+    async with conn.transaction():
+        owner = await conn.fetchval("SELECT 1 FROM users WHERE user_id=$1", body.owner_user_id)
+        if not owner:
+            raise HTTPException(404, "owner user not found")
+        raw_key = f"sk_{secrets.token_urlsafe(32)}"
+        digest = token_hash(raw_key)
+        row = await conn.fetchrow(
+            """
+            INSERT INTO api_keys (key_hash, owner_user_id, tier, label, expires_at, owner_email)
+            VALUES ($1, $2, $3, $4, $5, (SELECT email FROM users WHERE user_id=$2))
+            RETURNING id, owner_user_id, tier, label, created_at, expires_at, revoked_at
+            """,
+            digest,
+            body.owner_user_id,
+            body.tier,
+            body.label,
+            body.expires_at,
+        )
+        await record_event(
+            conn, user_id=body.owner_user_id, actor_id=admin.user_id, kind="api_key_issued", meta={"label": body.label}
+        )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="api_key_issued",
+            target_type="user",
+            target_id=str(body.owner_user_id),
+            after={"label": body.label, "tier": body.tier},
+        )
+    return ApiKeyIssued(**dict(row), key=raw_key)
+
+
+@router.delete("/api-keys/{key_id}", status_code=204)
+async def revoke_api_key(
+    key_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> Response:
+    csrf_guard(request)
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            "UPDATE api_keys SET revoked_at = now() "
+            "WHERE id=$1 AND owner_user_id IS NOT NULL AND revoked_at IS NULL "
+            "RETURNING id, owner_user_id",
+            key_id,
+        )
+        if not row:
+            raise HTTPException(404, "api key not found")
+        await record_event(conn, user_id=row["owner_user_id"], actor_id=admin.user_id, kind="api_key_revoked")
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="api_key_revoked",
+            target_type="api_key",
+            target_id=str(key_id),
+        )
+    return Response(status_code=204)
+
+
+# ── Invites ───────────────────────────────────────────────────────────────
+
+
+class InviteCreate(BaseModel):
+    email: str
+    role: str = "user"
+    llm_approved: bool = False
+
+
+class InviteOut(BaseModel):
+    invite_id: int
+    email: str
+    role: str
+    llm_approved: bool
+    created_at: Any
+    expires_at: Any
+
+
+@router.post("/invites", response_model=InviteOut, status_code=201)
+async def create_invite(
+    body: InviteCreate,
+    request: Request,
+    admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> InviteOut:
+    """Pre-approve a role (and optionally LLM access) for an email that
+    hasn't signed in yet. Honored by the OAuth callback on that email's
+    first login (see ``api/routers/auth.py``'s ``_upsert_user``)."""
+    csrf_guard(request)
+    async with conn.transaction():
+        if body.role not in ("user", "admin"):
+            raise HTTPException(400, "invalid role")
+        row = await conn.fetchrow(
+            """
+            INSERT INTO user_invites (email, role, llm_approved, invited_by)
+            VALUES ($1, $2, $3, $4)
+            RETURNING invite_id, email, role, llm_approved, created_at, expires_at
+            """,
+            body.email,
+            body.role,
+            body.llm_approved,
+            admin.user_id,
+        )
+        await record_event(
+            conn,
+            user_id=None,
+            actor_id=admin.user_id,
+            kind="invite_created",
+            meta={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
+        )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="invite_created",
+            target_type="invite",
+            target_id=str(row["invite_id"]),
+            after={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
+        )
+    return InviteOut(**dict(row))
 
 
 # ── Ops health endpoint ──────────────────────────────────────────────────
