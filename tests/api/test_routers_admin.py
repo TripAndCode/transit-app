@@ -205,3 +205,190 @@ async def test_user_detail(admin_client, aconn):
     body = r.json()
     assert body["email"] == "detail@x"
     assert any(i["provider"] == "google" for i in body["identities"])
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_approves_llm_for_every_id_in_one_transaction(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_a, _ = await _seed(aconn, email="bulk-a@x")
+    _, uid_b, _ = await _seed(aconn, email="bulk-b@x")
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_a, uid_b], "patch": {"llm_approved": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert {u["user_id"] for u in body} == {uid_a, uid_b}
+    assert all(u["llm_approved"] for u in body)
+    rows = await aconn.fetch("SELECT llm_approved FROM users WHERE user_id = ANY($1::int[])", [uid_a, uid_b])
+    assert all(row["llm_approved"] for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_suspend_kills_sessions_for_every_target(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    sid_a, uid_a, _ = await _seed(aconn, email="bulk-susp-a@x")
+    sid_b, uid_b, _ = await _seed(aconn, email="bulk-susp-b@x")
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_a, uid_b], "patch": {"suspended": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 200
+    n = await aconn.fetchval("SELECT count(*) FROM sessions WHERE user_id = ANY($1::int[])", [uid_a, uid_b])
+    assert n == 0
+    for sid in (sid_a, sid_b):
+        r2 = await admin_client.get("/api/me", cookies={"sid": sid})
+        assert r2.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_refuses_to_demote_self_even_among_many_ids(admin_client, aconn):
+    sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
+    _, uid_other, _ = await _seed(aconn, role="admin")
+    _, uid_user, _ = await _seed(aconn)
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_other, uid_admin, uid_user], "patch": {"role": "user"}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 400
+    assert "self" in r.json()["detail"]
+    # Rejected atomically: not even the other ids were touched.
+    row = await aconn.fetchrow("SELECT role FROM users WHERE user_id=$1", uid_other)
+    assert row["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_counts_the_whole_batch_before_deciding(admin_client, aconn):
+    """The active-admin count is evaluated over every locked row with the
+    patch applied, not one id at a time -- so suspending several admins at
+    once is allowed exactly while one remains active.
+
+    The caller is always an active admin and the self-guard keeps them out of
+    a suspending batch, so this endpoint cannot actually reach zero; the
+    "would leave no admins" branch is defence in depth for a future caller
+    that is not the actor. What is reachable, and what this pins, is that the
+    batch-wide count does not misfire on a legitimate multi-admin suspend.
+    """
+    sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
+    _, uid_a, _ = await _seed(aconn, role="admin")
+    _, uid_b, _ = await _seed(aconn, role="admin")
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_a, uid_b], "patch": {"suspended": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 200
+    still_active = await aconn.fetchval(
+        "SELECT array_agg(user_id ORDER BY user_id) FROM users WHERE role='admin' AND suspended_at IS NULL"
+    )
+    assert still_active == [uid_admin]
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_refuses_to_suspend_the_caller_among_others(admin_client, aconn):
+    """The self-guard is what keeps the batch from reaching zero admins."""
+    sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
+    _, uid_a, _ = await _seed(aconn, role="admin")
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_a, uid_admin], "patch": {"suspended": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 400
+    assert "self" in r.json()["detail"]
+    untouched = await aconn.fetchval("SELECT suspended_at FROM users WHERE user_id=$1", uid_a)
+    assert untouched is None
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_rejects_unknown_id(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_a, _ = await _seed(aconn)
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_a, 999_999_999], "patch": {"llm_approved": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_rejects_more_than_200_ids(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": list(range(1, 202)), "patch": {"llm_approved": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_non_admin_forbidden(admin_client, aconn):
+    sid, _, _ = await _seed(aconn, role="user")
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [1], "patch": {"llm_approved": True}},
+        cookies={"sid": sid},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_users_filters_by_llm_approved(admin_client, aconn):
+    sid, _, _ = await _seed(aconn, role="admin")
+    _, uid_pending, _ = await _seed(aconn, email="pending@x")
+    r = await admin_client.get("/api/admin/users?llm_approved=false", cookies={"sid": sid})
+    assert r.status_code == 200
+    body = r.json()
+    assert any(u["user_id"] == uid_pending for u in body["users"])
+    assert all(not u["llm_approved"] for u in body["users"])
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_writes_the_same_per_user_trail_as_the_single_endpoint(admin_client, aconn):
+    """A durable record of who was suspended must not depend on which
+    control the operator used; the bulk path touches the most rows."""
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_a, _ = await _seed(aconn, role="user")
+    _, uid_b, _ = await _seed(aconn, role="user")
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_a, uid_b], "patch": {"suspended": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 200
+    kinds = await aconn.fetch(
+        "SELECT user_id, kind FROM login_events WHERE user_id = ANY($1::int[]) ORDER BY user_id",
+        [uid_a, uid_b],
+    )
+    assert [(row["user_id"], row["kind"]) for row in kinds] == [(uid_a, "suspended"), (uid_b, "suspended")]
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_records_nothing_for_an_id_the_patch_does_not_change(admin_client, aconn):
+    """A no-op id in a batch must not manufacture an audit event."""
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_already, _ = await _seed(aconn, role="user")
+    await aconn.execute("UPDATE users SET suspended_at = now() WHERE user_id=$1", uid_already)
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_already], "patch": {"suspended": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 200
+    count = await aconn.fetchval("SELECT count(*) FROM login_events WHERE user_id=$1", uid_already)
+    assert count == 0

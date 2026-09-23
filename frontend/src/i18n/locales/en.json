@@ -1016,6 +1016,7 @@
   },
   "admin": {
     "users": {
+      "table_label": "Users",
       "title": "User management",
       "search_placeholder": "Search by email / name",
       "col": {
@@ -1051,6 +1052,24 @@
       "pagination": {
         "prev": "Previous",
         "next": "Next"
+      },
+      "view": {
+        "all": "All",
+        "pending": "Pending approval",
+        "admin": "Admins",
+        "suspended": "Suspended"
+      },
+      "bulk": {
+        "selected_count": "{{count}} selected",
+        "clear": "Clear selection",
+        "undo": "Undo",
+        "role_label": "Change role",
+        "toast": {
+          "approved": "Approved AI access for {{count}}",
+          "suspended": "Suspended {{count}}",
+          "promoted": "Made {{count}} admin",
+          "demoted": "Changed {{count}} to standard user"
+        }
       }
     },
     "user_detail": {
@@ -1201,6 +1220,7 @@
       "docs_empty": "No feature docs found."
     },
     "table": {
+      "saved_views": "Saved views",
       "empty": "Nothing to show.",
       "select_all": "Select all",
       "select_row": "Select {{label}}"

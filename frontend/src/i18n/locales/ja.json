@@ -1016,6 +1016,7 @@
   },
   "admin": {
     "users": {
+      "table_label": "ユーザー一覧",
       "title": "ユーザー管理",
       "search_placeholder": "メール / 名前で検索",
       "col": {
@@ -1051,6 +1052,24 @@
       "pagination": {
         "prev": "前へ",
         "next": "次へ"
+      },
+      "view": {
+        "all": "すべて",
+        "pending": "承認待ち",
+        "admin": "管理者",
+        "suspended": "停止中"
+      },
+      "bulk": {
+        "selected_count": "{{count}} 件選択中",
+        "clear": "選択を解除",
+        "undo": "取り消す",
+        "role_label": "ロールを変更",
+        "toast": {
+          "approved": "{{count}} 件のAI利用を承認しました",
+          "suspended": "{{count}} 件を停止しました",
+          "promoted": "{{count}} 件を管理者にしました",
+          "demoted": "{{count}} 件を一般ユーザーにしました"
+        }
       }
     },
     "user_detail": {
@@ -1201,6 +1220,7 @@
       "docs_empty": "機能ドキュメントが見つかりません。"
     },
     "table": {
+      "saved_views": "保存された表示",
       "empty": "該当する行がありません。",
       "select_all": "すべて選択",
       "select_row": "{{label}} を選択"

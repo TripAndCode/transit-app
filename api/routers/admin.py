@@ -1,5 +1,12 @@
 """Admin user-management endpoints. All routes require role=admin.
 
+Every mutating route records an entry through
+``api.admin_audit.record_admin_action`` as well as the per-user
+``login_events`` trail, so an operator's audit visibility does not depend on
+which control they used. The bulk route's self-guard is narrower than the
+single-user one by design: it blocks only the two transitions that could
+lock the operator out, where the single-user route refuses any self-edit.
+
 Mutating routes (PATCH, DELETE) carry two structural guards:
 
 - **self-guard**: an admin cannot mutate or delete their own row. Prevents
@@ -34,8 +41,9 @@ from zoneinfo import ZoneInfo
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from api.admin_audit import record_admin_action
 from api.admin_board import board_alerts, board_freshness, board_window, collector_tiles
 from api.deps import get_ch, get_conn
 from api.routers.agencies import AdminAgencyOut
@@ -47,6 +55,8 @@ from pipeline.query import agencies as _agencies
 _log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+MAX_BULK_USER_IDS = 200
 
 
 class UserRow(BaseModel):
@@ -86,7 +96,8 @@ async def list_users(
     - ``role``: exact match, restricted to ``user`` / ``admin`` (silently
       ignored otherwise so a malformed query param doesn't 500).
     - ``suspended``: ``True`` filters to suspended only, ``False`` to active.
-    - ``llm_approved``: ``False`` filters to those still awaiting AI access.
+    - ``llm_approved``: filters to the matching approval state -- backs the
+      "awaiting approval" saved view and its badge count.
     - ``limit`` clamped to [1, 200] to keep response sizes bounded.
 
     ``total`` counts every match, not just the returned page, so a caller
@@ -183,6 +194,175 @@ class UserPatch(BaseModel):
     role: str | None = None
     suspended: bool | None = None
     llm_approved: bool | None = None
+
+
+class UserBulkPatch(BaseModel):
+    """Request body for a bulk admin PATCH across many users at once."""
+
+    ids: list[int] = Field(min_length=1, max_length=MAX_BULK_USER_IDS)
+    patch: UserPatch
+
+
+def _bulk_self_guard(patch: UserPatch, actor_id: int, ids: list[int]) -> None:
+    """Refuse a bulk patch that would demote (role -> non-admin) or suspend
+    the calling admin, even when their id is only one of many in ``ids``.
+    Approving/revoking LLM access for one's own id is not blocked -- only
+    the two transitions that could lock the operator out of the admin
+    surface are.
+    """
+    demotes_or_suspends = (patch.role is not None and patch.role != "admin") or patch.suspended is True
+    if demotes_or_suspends and actor_id in ids:
+        raise HTTPException(400, "cannot demote or suspend self")
+
+
+@router.patch("/users/bulk", response_model=list[UserRow])
+async def bulk_patch_users(
+    body: UserBulkPatch,
+    request: Request,
+    admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[UserRow]:
+    """Apply one patch to many users in a single transaction.
+
+    Registered ahead of ``PATCH /users/{uid}`` so ``/users/bulk`` doesn't
+    fall into that route's ``uid: int`` path parameter first.
+
+    Duplicate ids are collapsed (order preserved). The self-guard and the
+    invalid-role check run before any row is locked, so a rejected request
+    never touches the database. The last-admin guard mirrors the single-user
+    endpoint's: it locks every targeted row plus every other active admin
+    row (fixed ``user_id`` order, same deadlock-avoidance rationale as
+    ``_lock_target_and_active_admins``) and simulates the patch across the
+    whole set before committing, so a bulk suspend/demote can't zero out the
+    active-admin count even when no single id in the batch is the caller.
+    One audit action is recorded for the whole batch, carrying the id list.
+    """
+    csrf_guard(request)
+    patch = body.patch
+    if patch.role is not None and patch.role not in ("user", "admin"):
+        raise HTTPException(400, "invalid role")
+    if patch.role is None and patch.suspended is None and patch.llm_approved is None:
+        raise HTTPException(400, "empty patch")
+
+    ids = list(dict.fromkeys(body.ids))
+    _bulk_self_guard(patch, admin.user_id, ids)
+
+    async with conn.transaction():
+        rows = await conn.fetch(
+            """
+            SELECT user_id, role, suspended_at, llm_approved FROM users
+            WHERE user_id = ANY($1::int[]) OR (role='admin' AND suspended_at IS NULL)
+            ORDER BY user_id
+            FOR UPDATE
+            """,
+            ids,
+        )
+        by_id = {r["user_id"]: r for r in rows}
+        missing = [uid for uid in ids if uid not in by_id]
+        if missing:
+            raise HTTPException(404, f"user(s) not found: {missing}")
+
+        target_ids = set(ids)
+        remaining_active_admins = 0
+        for r in rows:
+            if r["user_id"] in target_ids:
+                new_role = patch.role if patch.role is not None else r["role"]
+                new_suspended = patch.suspended if patch.suspended is not None else (r["suspended_at"] is not None)
+            else:
+                new_role, new_suspended = r["role"], r["suspended_at"] is not None
+            if new_role == "admin" and not new_suspended:
+                remaining_active_admins += 1
+        if remaining_active_admins == 0:
+            raise HTTPException(400, "would leave no admins")
+
+        set_clauses = ["updated_at = now()"]
+        args: list[Any] = []
+        if patch.role is not None:
+            args.append(patch.role)
+            set_clauses.append(f"role = ${len(args)}")
+        if patch.suspended is not None:
+            args.append(datetime.now(timezone.utc) if patch.suspended else None)
+            set_clauses.append(f"suspended_at = ${len(args)}")
+        if patch.llm_approved is not None:
+            args.append(patch.llm_approved)
+            set_clauses.append(f"llm_approved = ${len(args)}")
+        args.append(ids)
+        await conn.execute(
+            f"UPDATE users SET {', '.join(set_clauses)} WHERE user_id = ANY(${len(args)}::int[])",
+            *args,
+        )
+        if patch.suspended is True:
+            await conn.execute("DELETE FROM sessions WHERE user_id = ANY($1::int[])", ids)
+
+        # The same per-user `login_events` trail the single-user endpoint
+        # writes. Without it the durable record of who was suspended or
+        # demoted would depend on which control the operator happened to
+        # use, and the bulk path is the one that touches the most rows.
+        # Only actual transitions are recorded, so a no-op id in a batch
+        # does not manufacture an event.
+        for uid in ids:
+            before_row = by_id[uid]
+            old_suspended = before_row["suspended_at"] is not None
+            if patch.suspended is not None and patch.suspended != old_suspended:
+                await record_event(
+                    conn,
+                    user_id=uid,
+                    actor_id=admin.user_id,
+                    kind="suspended" if patch.suspended else "unsuspended",
+                )
+            if patch.role is not None and patch.role != before_row["role"]:
+                await record_event(
+                    conn,
+                    user_id=uid,
+                    actor_id=admin.user_id,
+                    kind="role_changed",
+                    meta={"old": before_row["role"], "new": patch.role},
+                )
+            if patch.llm_approved is not None and patch.llm_approved != before_row["llm_approved"]:
+                await record_event(
+                    conn,
+                    user_id=uid,
+                    actor_id=admin.user_id,
+                    kind="llm_approved_changed",
+                    meta={"old": before_row["llm_approved"], "new": patch.llm_approved},
+                )
+
+        out_rows = await conn.fetch(
+            "SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at "
+            "FROM users WHERE user_id = ANY($1::int[]) ORDER BY user_id",
+            ids,
+        )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="users.bulk_patch",
+            target_type="user",
+            target_id=",".join(str(i) for i in ids),
+            # The rows themselves, not the request body: the seam reports the
+            # union of a payload's field names, so wrapping the body would
+            # log "ids,patch" for every bulk action instead of naming the
+            # columns that actually moved.
+            before=[
+                {
+                    "user_id": r["user_id"],
+                    "role": r["role"],
+                    "suspended_at": r["suspended_at"],
+                    "llm_approved": r["llm_approved"],
+                }
+                for r in rows
+                if r["user_id"] in target_ids
+            ],
+            after=[
+                {
+                    "user_id": r["user_id"],
+                    "role": r["role"],
+                    "suspended_at": r["suspended_at"],
+                    "llm_approved": r["llm_approved"],
+                }
+                for r in out_rows
+            ],
+        )
+    return [UserRow(**dict(r)) for r in out_rows]
 
 
 async def _lock_target_and_active_admins(conn: asyncpg.Connection, uid: int) -> tuple[asyncpg.Record | None, int]:
@@ -286,6 +466,15 @@ async def patch_user(
             "FROM users WHERE user_id=$1",
             uid,
         )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="users.patch",
+            target_type="user",
+            target_id=uid,
+            before={"role": old_role, "suspended": old_suspended, "llm_approved": old_llm_approved},
+            after={"role": new_role, "suspended": new_suspended, "llm_approved": new_llm_approved},
+        )
     return UserRow(**dict(out))
 
 
@@ -325,6 +514,14 @@ async def delete_user(
         await conn.execute("DELETE FROM sessions WHERE user_id=$1", uid)
         await conn.execute("DELETE FROM oauth_identities WHERE user_id=$1", uid)
         await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="deleted")
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="users.delete",
+            target_type="user",
+            target_id=uid,
+            before={"role": row["role"], "suspended_at": row["suspended_at"], "llm_approved": row["llm_approved"]},
+        )
     return Response(status_code=204)
 
 
