@@ -207,8 +207,11 @@ export function AdminUsersPage() {
       (del.isPending && del.variables === uid) ||
       // A row in a bulk request that has not answered yet: a per-row action
       // fired now would commit alongside it, and whichever landed second
-      // would win rather than whichever the operator asked for last.
-      (bulkPatch.isPending && selected.has(uid))
+      // would win rather than whichever the operator asked for last. Read
+      // the request's own ids, not the page selection -- the `a` shortcut
+      // acts on one unselected row, and undo runs after the selection has
+      // already been cleared.
+      (bulkPatch.isPending && (bulkPatch.variables?.ids.includes(uid) ?? false))
     );
   }
 
@@ -351,7 +354,11 @@ export function AdminUsersPage() {
       render: (u) => (
         <>
           <AdminAvatar label={u.name || u.email} />
-          <Link to={`/admin/users/${u.user_id}`} state={{ listSearch: searchParams.toString() }}>
+          <Link
+            to={`/admin/users/${u.user_id}`}
+            state={{ listSearch: searchParams.toString() }}
+            onClick={(e) => e.stopPropagation()}
+          >
             {u.email}
           </Link>
         </>

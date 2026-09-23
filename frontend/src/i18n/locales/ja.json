@@ -1016,6 +1016,7 @@
   },
   "admin": {
     "users": {
+      "table_label": "ユーザー一覧",
       "title": "ユーザー管理",
       "search_placeholder": "メール / 名前で検索",
       "col": {

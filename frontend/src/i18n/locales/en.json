@@ -1016,6 +1016,7 @@
   },
   "admin": {
     "users": {
+      "table_label": "Users",
       "title": "User management",
       "search_placeholder": "Search by email / name",
       "col": {

@@ -17,6 +17,8 @@ const useAdminUsersMock = vi.fn();
 const useSessionMock = vi.fn();
 
 let patchMutationError: unknown = null;
+let bulkPending = false;
+let bulkVariables: { ids: number[]; patch: unknown } | undefined;
 
 vi.mock("../../api/admin", () => ({
   useAdminUsers: (params: unknown) => useAdminUsersMock(params),
@@ -29,7 +31,7 @@ vi.mock("../../api/admin", () => ({
     isPending: false,
     variables: undefined,
   }),
-  useBulkPatchUsers: () => ({ mutate: bulkMutate, error: null, isPending: false }),
+  useBulkPatchUsers: () => ({ mutate: bulkMutate, error: null, isPending: bulkPending, variables: bulkVariables }),
 }));
 
 // A signed-in admin who is not one of the two rendered users (user_id 999),
@@ -114,6 +116,8 @@ function dataRows(): HTMLElement[] {
 describe("AdminUsersPage", () => {
   beforeEach(() => {
     patchMutationError = null;
+    bulkPending = false;
+    bulkVariables = undefined;
     useAdminUsersMock.mockReset();
     useAdminUsersMock.mockReturnValue(twoUsers());
     useSessionMock.mockReset();
@@ -420,6 +424,23 @@ describe("AdminUsersPage", () => {
     });
   });
 
+  it("names the table for a screen reader instead of leaking the i18n key", () => {
+    // The caption is the table's accessible name; key parity between
+    // locales cannot catch a key that exists in neither.
+    wrap();
+    expect(screen.getByRole("table", { name: "Users" })).toBeTruthy();
+  });
+
+  it("navigates once when the email link is clicked, so Back returns to the list", async () => {
+    // The row is clickable as a whole now, and Link does not stop
+    // propagation on its own.
+    const user = userEvent.setup();
+    wrap();
+    const before = window.history.length;
+    await user.click(screen.getByRole("link", { name: "active@example.com" }));
+    expect(window.history.length - before).toBeLessThanOrEqual(1);
+  });
+
   describe("keyboard navigation", () => {
     it("j moves focus down and x toggles selection on the focused row", () => {
       wrap();
@@ -443,6 +464,16 @@ describe("AdminUsersPage", () => {
       expect(first).toHaveFocus();
       fireEvent.keyDown(first, { key: "x" });
       expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", true);
+    });
+
+    it("locks the row a bulk request is mutating even when nothing is selected", () => {
+      // The `a` shortcut acts on one unselected row, so a guard reading the
+      // page's selection would leave that row's own controls live.
+      bulkPending = true;
+      bulkVariables = { ids: [1], patch: { llm_approved: true } };
+      wrap();
+      const row = within(dataRows()[0]);
+      expect(row.getByRole("button", { name: /Delete/ })).toHaveProperty("disabled", true);
     });
 
     it("a approves the focused row when nothing is selected", () => {
