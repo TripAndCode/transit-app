@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "../../components/Modal";
+import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import { useFeatureFlags, usePatchFeatureFlag, type FeatureFlag } from "../../api/admin";
 import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
@@ -125,6 +126,40 @@ export function AdminFlagsPage() {
   const patch = usePatchFeatureFlag();
   const [pending, setPending] = useState<PendingChange | null>(null);
 
+  const columns: DataTableColumn<FeatureFlag>[] = [
+    {
+      key: "flag",
+      header: t("admin.flags.col_flag"),
+      render: (f) => <span style={{ fontWeight: 500 }}>{t(f.label_key)}</span>,
+    },
+    {
+      key: "value",
+      header: t("admin.flags.col_value"),
+      render: (f) => <FlagToggle flag={f} onRequestChange={(nextValue) => setPending({ flag: f, nextValue })} />,
+    },
+    {
+      key: "source",
+      header: t("admin.flags.col_source"),
+      render: (f) => (
+        <StatusChip tone={f.source === "override" ? "good" : "neutral"}>
+          {t(f.source === "override" ? "admin.flags.source_override" : "admin.flags.source_env")}
+        </StatusChip>
+      ),
+    },
+    {
+      key: "updated",
+      header: t("admin.flags.col_updated"),
+      render: (f) =>
+        f.source === "override" ? (
+          <span style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
+            {f.updated_by !== null && <div>{t("admin.flags.updated_by", { id: f.updated_by })}</div>}
+            <div>{formatUpdatedAt(f.updated_at)}</div>
+            <div>{f.reason ?? t("admin.flags.no_reason")}</div>
+          </span>
+        ) : null,
+    },
+  ];
+
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
       <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.flags.title")}</h1>
@@ -145,42 +180,13 @@ export function AdminFlagsPage() {
         </p>
       )}
 
-      <table className="admin-table">
-        <thead>
-          <tr>
-            <th>{t("admin.flags.col_flag")}</th>
-            <th>{t("admin.flags.col_value")}</th>
-            <th>{t("admin.flags.col_source")}</th>
-            <th>{t("admin.flags.col_updated")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data?.map((flag) => (
-            <tr key={flag.key}>
-              <td style={{ fontWeight: 500 }}>{t(flag.label_key)}</td>
-              <td>
-                <FlagToggle flag={flag} onRequestChange={(nextValue) => setPending({ flag, nextValue })} />
-              </td>
-              <td>
-                <StatusChip tone={flag.source === "override" ? "good" : "neutral"}>
-                  {t(flag.source === "override" ? "admin.flags.source_override" : "admin.flags.source_env")}
-                </StatusChip>
-              </td>
-              <td style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
-                {flag.source === "override" ? (
-                  <>
-                    {flag.updated_by !== null && (
-                      <div>{t("admin.flags.updated_by", { id: flag.updated_by })}</div>
-                    )}
-                    <div>{formatUpdatedAt(flag.updated_at)}</div>
-                    <div>{flag.reason ?? t("admin.flags.no_reason")}</div>
-                  </>
-                ) : null}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        caption={t("admin.flags.table_label")}
+        rows={data ?? []}
+        columns={columns}
+        rowKey={(f) => f.key}
+        emptyLabel={t("admin.flags.empty")}
+      />
 
       {pending && (
         <FlagReasonDialog

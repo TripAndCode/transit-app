@@ -7,6 +7,7 @@ at ``/`` with an explicit JSON 404 for unknown ``/api/*`` paths so frontend
 fetches keep getting structured errors instead of HTML index pages.
 """
 
+import asyncio
 import logging
 import os
 import os.path
@@ -200,6 +201,7 @@ async def lifespan(app: FastAPI):
     partial set is rejected as a misconfiguration since a half-wired OAuth
     flow would leak state cookies without ever completing.
     """
+    from pipeline.flags import warm as warm_flags
     from pipeline.query.llm_client import _load_providers
 
     _validate_llm_providers(_load_providers())
@@ -214,6 +216,12 @@ async def lifespan(app: FastAPI):
     # get_conn dependency still holds a slot — default sizing left the
     # fan-out one slot short and serialized a stage on every cold request.
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
+
+    # Resolve the flags once here, off the request path. Every later refresh
+    # happens on a background thread, so this is the one read that would
+    # otherwise land on the event loop -- inside whichever request happened
+    # to touch a flag first.
+    await asyncio.to_thread(warm_flags)
 
     # Everything below reuses app.state.pool, so any failure here must close
     # it before re-raising — this generator's own cleanup after `yield` never

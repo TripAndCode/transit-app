@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { AdminFlagsPage } from "./AdminFlagsPage";
@@ -48,7 +49,9 @@ function wrap() {
   return render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={qc}>
-        <AdminFlagsPage />
+        <MemoryRouter>
+          <AdminFlagsPage />
+        </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>
   );

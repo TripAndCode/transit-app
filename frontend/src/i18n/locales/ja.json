@@ -1281,6 +1281,8 @@
       }
     },
     "flags": {
+      "table_label": "機能フラグ",
+      "empty": "登録されたフラグはありません。",
       "title": "機能フラグ",
       "col_flag": "フラグ",
       "col_value": "値",

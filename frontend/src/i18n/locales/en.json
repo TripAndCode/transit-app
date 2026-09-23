@@ -1281,6 +1281,8 @@
       }
     },
     "flags": {
+      "table_label": "Feature flags",
+      "empty": "No flags registered.",
       "title": "Feature flags",
       "col_flag": "Flag",
       "col_value": "Value",

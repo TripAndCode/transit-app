@@ -33,6 +33,7 @@ _log = logging.getLogger(__name__)
 
 _CACHE_TTL_SECONDS = 30.0
 _TRUE_STRINGS = ("1", "true", "yes")
+_FALSE_STRINGS = ("0", "false", "no")
 _CONNECT_TIMEOUT_SECONDS = 2
 
 
@@ -65,11 +66,6 @@ REGISTRY: tuple[FlagDefinition, ...] = (
     FlagDefinition(
         "weather_ingest_enabled", "WEATHER_INGEST_ENABLED", "admin.flags.labels.weatherIngestEnabled", False
     ),
-    # Registered even though A15 (the PR that introduced this env var) may
-    # not have merged yet in every checkout -- see this task's own report
-    # for the merge-order note. Harmless if the call site still reads the
-    # env var directly: this registry entry just makes the admin UI able to
-    # show/override it once the call site is switched over too.
     FlagDefinition("openapi_docs_enabled", "OPENAPI_DOCS_ENABLED", "admin.flags.labels.openapiDocsEnabled", False),
     FlagDefinition("perf_debug_enabled", "PERF_DEBUG_ENABLED", "admin.flags.labels.perfDebugEnabled", False),
 )
@@ -93,21 +89,43 @@ class FlagState:
 _cache: dict[str, FlagState] = {}
 _cache_expires_at = 0.0
 _cache_lock = threading.Lock()
+_refresh_thread: threading.Thread | None = None
+_force_sync_refresh = False
 
 
 def _env_bool(env_var: str, default: bool) -> bool:
+    """Resolve one env var, falling back to the flag's own default.
+
+    A value this does not recognise resolves to the default rather than to
+    False. The default-on switches here were previously read as "off only
+    when the value is exactly `false`", so treating an unrecognised value
+    as off would quietly disable a feature in any deployment that had set
+    one of them to something like `on` or `enabled`.
+    """
     raw = os.environ.get(env_var)
     if raw is None:
         return default
-    return raw.strip().lower() in _TRUE_STRINGS
+    value = raw.strip().lower()
+    if value in _TRUE_STRINGS:
+        return True
+    if value in _FALSE_STRINGS:
+        return False
+    return default
 
 
-def _load_overrides() -> dict[str, tuple[bool, str | None, int | None, Any]]:
+def _load_overrides() -> dict[str, tuple[bool, str | None, int | None, Any]] | None:
     """Read every row of `feature_flags` in one round trip.
 
-    Returns an empty dict -- meaning "no overrides, use env for everything"
-    -- when `DATABASE_URL` is unset, the database is unreachable, or the
-    table doesn't exist yet (fresh deployment pending this task's migration).
+    Returns an empty dict -- "no overrides, use env for everything" -- when
+    `DATABASE_URL` is unset or the table does not exist yet, both of which
+    mean there is genuinely nothing to override with.
+
+    Returns `None` for a transient failure (unreachable database, query
+    error). That is deliberately not the same answer: an override exists to
+    switch something off, and an incident is exactly when the database is
+    also likely to be unwell. Treating "cannot read" as "no overrides" would
+    quietly restore the env default and turn the feature back on at the
+    worst possible moment, so the caller keeps whatever it last read instead.
     """
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -115,15 +133,18 @@ def _load_overrides() -> dict[str, tuple[bool, str | None, int | None, Any]]:
     try:
         conn = psycopg2.connect(db_url, connect_timeout=_CONNECT_TIMEOUT_SECONDS)
     except psycopg2.Error:
-        _log.warning("flags: could not connect to read feature_flags; using env defaults", exc_info=True)
-        return {}
+        _log.warning("flags: could not connect to read feature_flags; keeping last known values", exc_info=True)
+        return None
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT key, value, reason, updated_by, updated_at FROM feature_flags")
             rows = cur.fetchall()
-    except psycopg2.Error:
-        _log.warning("flags: could not query feature_flags; using env defaults", exc_info=True)
+    except psycopg2.errors.UndefinedTable:
+        _log.warning("flags: feature_flags table absent; using env defaults", exc_info=True)
         return {}
+    except psycopg2.Error:
+        _log.warning("flags: could not query feature_flags; keeping last known values", exc_info=True)
+        return None
     finally:
         conn.close()
     return {key: (bool(value), reason, updated_by, updated_at) for key, value, reason, updated_by, updated_at in rows}
@@ -133,6 +154,20 @@ def _refresh_cache_locked() -> None:
     """Rebuild `_cache` for every registered flag. Caller holds `_cache_lock`."""
     global _cache, _cache_expires_at
     overrides = _load_overrides()
+    if overrides is None:
+        # Transient read failure: carry forward only the entries an operator
+        # actually overrode. Those are the ones worth protecting -- an
+        # override exists to switch something off, and an incident is
+        # exactly when the database is also likely to be unwell, so letting
+        # "cannot read" mean "no overrides" would switch it back on at the
+        # worst moment. Everything else re-resolves from the environment,
+        # which stays responsive and keeps the never-raises contract when
+        # nothing has been read yet.
+        overrides = {
+            key: (state.value, state.reason, state.updated_by, state.updated_at)
+            for key, state in _cache.items()
+            if state.source == "override"
+        }
     new_cache: dict[str, FlagState] = {}
     for definition in REGISTRY:
         env_default = _env_bool(definition.env_var, definition.env_default)
@@ -162,18 +197,63 @@ def _refresh_cache_locked() -> None:
     _cache_expires_at = time.monotonic() + _CACHE_TTL_SECONDS
 
 
+def _start_background_refresh_locked() -> None:
+    """Refresh off the caller's thread, serving the cached values meanwhile.
+
+    `flag()` is called from `async def` request handlers, so the refresh
+    cannot run inline: `psycopg2.connect` plus the SELECT are blocking, and
+    on the event-loop thread they stall every concurrent request the worker
+    is serving, not just the caller. Serving a value up to one window stale
+    is the right trade against that -- and the expiry is pushed out before
+    the thread starts, so callers arriving during a slow refresh keep
+    reading the cache instead of queueing another one.
+    """
+    global _refresh_thread, _cache_expires_at
+    if _refresh_thread is not None and _refresh_thread.is_alive():
+        return
+    _cache_expires_at = time.monotonic() + _CACHE_TTL_SECONDS
+    _refresh_thread = threading.Thread(target=_refresh_in_background, name="flags-refresh", daemon=True)
+    _refresh_thread.start()
+
+
+def _refresh_in_background() -> None:
+    with _cache_lock:
+        _refresh_cache_locked()
+
+
+def warm() -> None:
+    """Resolve every flag now, so the first request does not have to.
+
+    Blocking, and meant to be called from startup (off the event loop) --
+    `get_flag_state` otherwise does this read inline the first time a flag
+    is touched, which on an async handler is the one place it must not.
+    """
+    with _cache_lock:
+        _refresh_cache_locked()
+
+
 def get_flag_state(key: str) -> FlagState:
     """Return the full resolved state (value + provenance) for `key`.
 
     Raises `KeyError` for a key not in `REGISTRY` -- every caller of `flag()`
     is expected to pass a registered key, and a typo here should fail loud
     rather than silently always resolving to its literal `env_default`.
+
+    The first resolution in a process reads the database on the calling
+    thread, because there is nothing cached to serve and an override must
+    not be missed; every refresh after that happens in the background.
     """
     if key not in _BY_KEY:
         raise KeyError(f"unknown feature flag: {key!r}")
+    global _force_sync_refresh
     with _cache_lock:
-        if time.monotonic() >= _cache_expires_at or key not in _cache:
+        if key not in _cache or _force_sync_refresh:
+            # Nothing to serve, or an override was just written and the
+            # caller was promised it would be visible immediately.
+            _force_sync_refresh = False
             _refresh_cache_locked()
+        elif time.monotonic() >= _cache_expires_at:
+            _start_background_refresh_locked()
         return _cache[key]
 
 
@@ -198,10 +278,19 @@ def invalidate() -> None:
     new value without delay. Also used by the test suite to keep flag state
     from leaking between tests that monkeypatch env vars.
     """
-    global _cache, _cache_expires_at
+    global _cache_expires_at, _force_sync_refresh
     with _cache_lock:
-        _cache = {}
+        # Marked stale rather than emptied. The next read replaces every
+        # entry on success, so nothing leaks between tests that swap env
+        # vars; but if that read fails -- including the one right after a
+        # PATCH -- the override just written is still there to carry
+        # forward instead of being dropped on the floor.
         _cache_expires_at = 0.0
+        # An explicit invalidation is a promise that the next read sees the
+        # new value, so it re-reads on the calling thread rather than
+        # serving a stale entry while a background refresh catches up. The
+        # callers are the admin PATCH and the test suite, not a hot path.
+        _force_sync_refresh = True
 
 
 # Reuse pipeline.cache's existing "clear every cache" registry (wired into

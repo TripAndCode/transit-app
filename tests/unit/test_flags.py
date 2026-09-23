@@ -82,13 +82,21 @@ def test_cache_is_reused_within_ttl(monkeypatch):
     assert first == second is True
 
 
-def test_cache_expires_after_ttl(monkeypatch):
+def test_an_expired_cache_refreshes_behind_the_reader(monkeypatch):
+    """`flag()` is called from async request handlers, so an expired window
+    must not make the caller wait on the database. The read that finds the
+    cache stale gets the old value and starts the refresh behind it."""
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
     assert flags.flag("ask_intent_cache_enabled", False) is True
 
     real_monotonic = time.monotonic
     monkeypatch.setattr(flags.time, "monotonic", lambda: real_monotonic() + flags._CACHE_TTL_SECONDS + 1)
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "false")
+    assert flags.flag("ask_intent_cache_enabled", False) is True, "the reader waited on the refresh"
+
+    refresh = flags._refresh_thread
+    assert refresh is not None
+    refresh.join(timeout=5)
     assert flags.flag("ask_intent_cache_enabled", False) is False
 
 
@@ -149,3 +157,58 @@ def test_registry_label_keys_are_i18n_keys_not_literal_text():
     Japanese/English strings baked into the API response."""
     for definition in flags.REGISTRY:
         assert definition.label_key.startswith("admin.flags.")
+
+
+def test_an_override_survives_a_database_read_failure(monkeypatch):
+    """A kill switch is used during an incident, which is exactly when the
+    database may also be unwell. Losing the override then would switch the
+    feature back on at the worst possible moment."""
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {"ask_intent_cache_enabled": (False, "incident", 1, None)})
+    flags.invalidate()
+    assert flags.flag("ask_intent_cache_enabled", False) is False
+
+    monkeypatch.setattr(flags, "_load_overrides", lambda: None)
+    flags.invalidate()
+    state = flags.get_flag_state("ask_intent_cache_enabled")
+    assert state.value is False, "the override was lost when the read failed"
+    assert state.source == "override"
+
+
+def test_an_env_change_still_lands_while_the_database_is_unreadable(monkeypatch):
+    """Only overrides are held back. A flag nobody has overridden keeps
+    following its env var, so a local toggle is not silently inert."""
+    monkeypatch.setattr(flags, "_load_overrides", lambda: None)
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+    flags.invalidate()
+    assert flags.flag("weather_ingest_enabled", False) is True
+
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "false")
+    flags.invalidate()
+    assert flags.flag("weather_ingest_enabled", False) is False
+
+
+def test_a_missing_table_is_not_treated_as_a_read_failure(monkeypatch):
+    """A fresh deployment pending the migration genuinely has no overrides,
+    so env is the right answer rather than something to hold onto."""
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {})
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+    flags.invalidate()
+    assert flags.get_flag_state("weather_ingest_enabled").source == "env"
+
+
+def test_an_unrecognised_env_value_keeps_the_flags_own_default(monkeypatch):
+    """The default-on switches were previously read as "off only when the
+    value is exactly false", so an unrecognised value must not disable
+    them -- a deployment using `on` or `enabled` would go dark."""
+    monkeypatch.setenv("ASK_QUERY_LOG_ENABLED", "on")
+    flags.invalidate()
+    assert flags.flag("ask_query_log_enabled", True) is True
+
+    monkeypatch.setenv("ASK_QUERY_LOG_ENABLED", "false")
+    flags.invalidate()
+    assert flags.flag("ask_query_log_enabled", True) is False
+
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "nonsense")
+    flags.invalidate()
+    assert flags.flag("ask_intent_cache_enabled", False) is False
