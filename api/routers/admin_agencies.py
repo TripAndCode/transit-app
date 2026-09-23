@@ -134,7 +134,7 @@ class AgencyDiagnostics(BaseModel):
     feed_url: str
     static_url: str | None
     ingest_strategy: str | None
-    deleted_at: Any  # datetime | None
+    deleted_at: str | None
     freshness: str
     last_analyzed_at: str | None
     latest_data_date: str | None
@@ -478,7 +478,11 @@ async def reanalyze_agency(
     from api.routers.internal import _run_ingest_and_analyze
 
     csrf_guard(request)
-    await _load_agency(conn, agency_id)
+    header = await _load_agency(conn, agency_id)
+    if header["deleted_at"] is not None:
+        # The runner selects on `deleted_at IS NULL`, so queueing this would
+        # report "started" for work that finds no agency and does nothing.
+        raise HTTPException(status_code=409, detail="This agency is disabled")
     await record_admin_action(
         conn,
         actor_id=admin.user_id,

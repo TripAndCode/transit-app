@@ -15,6 +15,7 @@ import { formatApiError } from "../../api/client";
 import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
 import { ClampSparkline } from "./ClampSparkline";
+import { useRowDrafts } from "./useRowDrafts";
 
 const METRIC_TYPES = ["ewt_sec", "vehicle_km_delivered_pct"] as const;
 
@@ -186,26 +187,12 @@ function StandardsEditor({
 }) {
   const { t } = useTranslation();
   const patch = usePatchAgencyStandards();
-  const [drafts, setDrafts] = useState<StandardDraft[]>(() =>
-    rows.map((r) => ({
-      route_code: r.route_code,
-      metric_type: r.metric_type,
-      threshold_value: String(r.threshold_value),
-      bonus_malus_rate: String(r.bonus_malus_rate),
-    }))
-  );
-  const [removed, setRemoved] = useState<AgencyStandard[]>([]);
-
-  function update(index: number, key: keyof StandardDraft, value: string) {
-    setDrafts((ds) => ds.map((d, i) => (i === index ? { ...d, [key]: value } : d)));
-  }
-
-  function remove(index: number) {
-    const draft = drafts[index];
-    const original = rows.find((r) => r.route_code === draft.route_code && r.metric_type === draft.metric_type);
-    if (original) setRemoved((rs) => [...rs, original]);
-    setDrafts((ds) => ds.filter((_, i) => i !== index));
-  }
+  const { drafts, update, add, remove, deletions } = useRowDrafts<AgencyStandard, StandardDraft>(rows, (r) => ({
+    route_code: r.route_code,
+    metric_type: r.metric_type,
+    threshold_value: String(r.threshold_value),
+    bonus_malus_rate: String(r.bonus_malus_rate),
+  }));
 
   const valid = drafts.every(
     (d) =>
@@ -226,7 +213,9 @@ function StandardsEditor({
             threshold_value: Number(d.threshold_value),
             bonus_malus_rate: Number(d.bonus_malus_rate),
           })),
-          delete: removed,
+          delete: deletions(
+            (d, origin) => d.route_code.trim() !== origin.route_code || d.metric_type !== origin.metric_type,
+          ),
         },
       });
       onDone();
@@ -242,7 +231,7 @@ function StandardsEditor({
       )}
       {drafts.map((d, i) => (
         <div
-          key={`${d.route_code}-${d.metric_type}-${i}`}
+          key={i}
           style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "end" }}
         >
           <label>
@@ -305,12 +294,7 @@ function StandardsEditor({
       <div>
         <AdminButton
           variant="secondary"
-          onClick={() =>
-            setDrafts((ds) => [
-              ...ds,
-              { route_code: "", metric_type: METRIC_TYPES[0], threshold_value: "0", bonus_malus_rate: "0" },
-            ])
-          }
+          onClick={() => add({ route_code: "", metric_type: METRIC_TYPES[0], threshold_value: "0", bonus_malus_rate: "0" })}
         >
           {t("admin.agency_diag.editor_add")}
         </AdminButton>
@@ -330,17 +314,10 @@ function WeightsEditor({
 }) {
   const { t } = useTranslation();
   const patch = usePatchAgencyWeights();
-  const [drafts, setDrafts] = useState<WeightDraft[]>(() =>
-    rows.map((r) => ({ route_code: r.route_code, weight: String(r.weight) }))
-  );
-  const [removed, setRemoved] = useState<AgencyWeight[]>([]);
-
-  function remove(index: number) {
-    const draft = drafts[index];
-    const original = rows.find((r) => r.route_code === draft.route_code);
-    if (original) setRemoved((rs) => [...rs, original]);
-    setDrafts((ds) => ds.filter((_, i) => i !== index));
-  }
+  const { drafts, update, add, remove, deletions } = useRowDrafts<AgencyWeight, WeightDraft>(rows, (r) => ({
+    route_code: r.route_code,
+    weight: String(r.weight),
+  }));
 
   const valid = drafts.every((d) => isPositiveNumber(d.weight) && (d.route_code === null || d.route_code.trim() !== ""));
 
@@ -353,7 +330,9 @@ function WeightsEditor({
             route_code: d.route_code === null ? null : d.route_code.trim(),
             weight: Number(d.weight),
           })),
-          delete: removed,
+          delete: deletions(
+            (d, origin) => (d.route_code === null ? null : d.route_code.trim()) !== origin.route_code,
+          ),
         },
       });
       onDone();
@@ -369,7 +348,7 @@ function WeightsEditor({
       )}
       {drafts.map((d, i) => (
         <div
-          key={`${d.route_code ?? "__default__"}-${i}`}
+          key={i}
           style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "end" }}
         >
           <label>
@@ -383,9 +362,7 @@ function WeightsEditor({
             ) : (
               <input
                 value={d.route_code}
-                onChange={(e) =>
-                  setDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, route_code: e.target.value } : x)))
-                }
+                onChange={(e) => update(i, "route_code", e.target.value)}
                 style={{ width: "100%" }}
               />
             )}
@@ -397,7 +374,7 @@ function WeightsEditor({
             <input
               type="number"
               value={d.weight}
-              onChange={(e) => setDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, weight: e.target.value } : x)))}
+              onChange={(e) => update(i, "weight", e.target.value)}
               style={{ width: "100%" }}
             />
           </label>
@@ -413,7 +390,7 @@ function WeightsEditor({
       <div>
         <AdminButton
           variant="secondary"
-          onClick={() => setDrafts((ds) => [...ds, { route_code: "", weight: "1" }])}
+          onClick={() => add({ route_code: "", weight: "1" })}
         >
           {t("admin.agency_diag.editor_add")}
         </AdminButton>

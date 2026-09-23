@@ -287,6 +287,63 @@ describe("AgencyDiagnosticsDrawer", () => {
     });
   });
 
+  it("deletes the old key when a standard's route is renamed", async () => {
+    // route_code is both a value the operator types and half the key the
+    // backend upserts on, so a rename that only upserts leaves the original
+    // row in the table, still feeding the bonus/malus calculation.
+    const user = userEvent.setup();
+    renderDrawer();
+    await user.click(screen.getByRole("button", { name: /edit performance standards/i }));
+    const route = screen.getByLabelText(/route/i);
+    await user.clear(route);
+    await user.type(route, "43");
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+    expect(standardsMutateAsync).toHaveBeenCalledWith({
+      id: 1,
+      body: {
+        upsert: [{ route_code: "43", metric_type: "ewt_sec", threshold_value: 120, bonus_malus_rate: 1.5 }],
+        delete: [{ route_code: "42", metric_type: "ewt_sec", threshold_value: 120, bonus_malus_rate: 1.5 }],
+      },
+    });
+  });
+
+  it("deletes the old key when a ridership weight's route is renamed", async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+    await user.click(screen.getByRole("button", { name: /edit ridership weights/i }));
+    await user.clear(screen.getByLabelText(/route/i));
+    await user.type(screen.getByLabelText(/route/i), "77");
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+    expect(weightsMutateAsync).toHaveBeenCalledWith({
+      id: 1,
+      body: {
+        upsert: [
+          { route_code: null, weight: 1 },
+          { route_code: "77", weight: 3 },
+        ],
+        delete: [{ route_code: "42", weight: 3 }],
+      },
+    });
+  });
+
+  it("still deletes the original when a renamed row is then removed", async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+    await user.click(screen.getByRole("button", { name: /edit performance standards/i }));
+    const route = screen.getByLabelText(/route/i);
+    await user.clear(route);
+    await user.type(route, "43");
+    await user.click(screen.getByRole("button", { name: /remove row/i }));
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+    expect(standardsMutateAsync).toHaveBeenCalledWith({
+      id: 1,
+      body: {
+        upsert: [],
+        delete: [{ route_code: "42", metric_type: "ewt_sec", threshold_value: 120, bonus_malus_rate: 1.5 }],
+      },
+    });
+  });
+
   it("removes a row from the editor as a delete", async () => {
     const user = userEvent.setup();
     renderDrawer();
