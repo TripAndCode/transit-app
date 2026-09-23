@@ -13,6 +13,60 @@ const createReset = vi.fn();
 const patchReset = vi.fn();
 const delMutate = vi.fn();
 const restoreMutate = vi.fn();
+const probeMutate = vi.fn();
+const reanalyzeMutate = vi.fn();
+
+const HEALTH = [
+  {
+    agency_id: 1,
+    agency_name: "Aomori Bus",
+    feed_url: "http://feed.example.com",
+    ingest_strategy: "aomori_regex",
+    deleted_at: null,
+    freshness: "fresh" as const,
+    latest_data_date: "2026-09-19",
+    last_analyzed_at: "2026-09-20T01:00:00+00:00",
+    last_capture_at: "2026-09-20T02:30:00+00:00",
+    rt_coverage: { complete: true, present_count: 4, field_count: 4, probed: true, last_probed_at: null },
+    clamp_history: [{ date: "2026-09-19", clamp_pct: 0.4 }],
+    static_version: { version: "v2026-09-01", loaded_at: null },
+  },
+  {
+    agency_id: 2,
+    agency_name: "Deleted Bus",
+    feed_url: "http://del.example.com",
+    ingest_strategy: null,
+    deleted_at: "2026-06-01T00:00:00Z",
+    freshness: "stale" as const,
+    latest_data_date: "2026-09-01",
+    last_analyzed_at: null,
+    last_capture_at: null,
+    rt_coverage: { complete: false, present_count: 0, field_count: 4, probed: false, last_probed_at: null },
+    clamp_history: [{ date: "2026-09-19", clamp_pct: null }],
+    static_version: null,
+  },
+];
+
+const DIAGNOSTICS = {
+  agency_id: 1,
+  agency_name: "Aomori Bus",
+  feed_url: "http://feed.example.com",
+  static_url: null,
+  ingest_strategy: "aomori_regex",
+  deleted_at: null,
+  freshness: "fresh" as const,
+  last_analyzed_at: "2026-09-20T01:00:00+00:00",
+  latest_data_date: "2026-09-19",
+  last_capture_at: "2026-09-20T02:30:00+00:00",
+  rt_coverage: { complete: true, last_probed_at: null, fields: {} },
+  static_versions: [],
+  clamp_history: [],
+  weather_station: null,
+  standards: [],
+  standards_count: 0,
+  weights: [],
+  weights_coverage: { routes_with_weights: 0, routes_total: 0 },
+};
 
 let delState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
 let restoreState: { isPending: boolean; variables: number | undefined } = { isPending: false, variables: undefined };
@@ -47,6 +101,12 @@ vi.mock("../../api/admin", () => ({
   usePatchAgency: () => ({ mutateAsync: patchMutateAsync, isPending: false, error: null, reset: patchReset }),
   useDeleteAgency: () => ({ mutate: delMutate, ...delState }),
   useRestoreAgency: () => ({ mutate: restoreMutate, ...restoreState }),
+  useAgenciesHealth: () => ({ data: HEALTH, isLoading: false, error: null }),
+  useAgencyDiagnostics: () => ({ data: DIAGNOSTICS, isLoading: false, error: null }),
+  useProbeAgencyFeed: () => ({ mutate: probeMutate, isPending: false, error: null, data: undefined }),
+  useReanalyzeAgency: () => ({ mutate: reanalyzeMutate, isPending: false, error: null, data: undefined }),
+  usePatchAgencyStandards: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
+  usePatchAgencyWeights: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
 }));
 
 function wrap(ui: React.ReactElement) {
@@ -120,39 +180,50 @@ describe("AdminAgenciesPage", () => {
     );
   });
 
-  it("calls delete mutation with the agency id after confirming", async () => {
-    const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("renders the health columns from the health query", () => {
     wrap(<AdminAgenciesPage />);
-    await user.click(screen.getByRole("button", { name: /delete/i }));
+    expect(screen.getByText("Fresh")).toBeTruthy();
+    expect(screen.getByText("Behind")).toBeTruthy();
+    expect(screen.getByText("4/4 fields")).toBeTruthy();
+    expect(screen.getByText("Not probed")).toBeTruthy();
+    expect(screen.getByText("v2026-09-01")).toBeTruthy();
+  });
+
+  it("opens the diagnostics drawer on a row click", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Aomori Bus"));
+    expect(screen.getByLabelText("Agency details")).toBeTruthy();
+  });
+
+  it("disables an agency only after the typed confirm matches", async () => {
+    const user = userEvent.setup();
+    wrap(<AdminAgenciesPage />);
+    await user.click(screen.getByText("Aomori Bus"));
+    const drawer = within(screen.getByLabelText("Agency details"));
+    const confirmButton = drawer.getByRole("button", { name: /^Disable$/ });
+    expect(confirmButton).toHaveProperty("disabled", true);
+    await user.type(drawer.getByLabelText(/type the agency name to confirm/i), "Aomori Bus");
+    await user.click(confirmButton);
     expect(delMutate).toHaveBeenCalledWith(1);
   });
 
-  it("does not call delete mutation when confirm is declined", async () => {
-    const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(false);
-    wrap(<AdminAgenciesPage />);
-    await user.click(screen.getByRole("button", { name: /delete/i }));
-    expect(delMutate).not.toHaveBeenCalled();
-  });
-
-  it("calls restore mutation with the agency id", async () => {
+  it("restores a disabled agency from its drawer, with no typed confirm", async () => {
     const user = userEvent.setup();
     wrap(<AdminAgenciesPage />);
-    await user.click(screen.getByRole("button", { name: /restore/i }));
+    await user.click(screen.getByText("Deleted Bus"));
+    const drawer = within(screen.getByLabelText("Agency details"));
+    expect(drawer.queryByLabelText(/type the agency name to confirm/i)).toBeNull();
+    await user.click(drawer.getByRole("button", { name: /^Restore$/ }));
     expect(restoreMutate).toHaveBeenCalledWith(2);
   });
 
-  it("disables the restore button only for the row actually being restored", () => {
-    restoreState = { isPending: true, variables: 2 };
+  it("narrows the list to behind-schedule agencies via the saved view", async () => {
+    const user = userEvent.setup();
     wrap(<AdminAgenciesPage />);
-    expect(screen.getByRole("button", { name: /restore/i })).toHaveProperty("disabled", true);
-  });
-
-  it("does not disable delete when a different row's delete is pending", () => {
-    delState = { isPending: true, variables: 999 };
-    wrap(<AdminAgenciesPage />);
-    expect(screen.getByRole("button", { name: /delete/i })).toHaveProperty("disabled", false);
+    await user.click(screen.getByRole("button", { name: /Behind schedule/ }));
+    expect(screen.queryByText("Aomori Bus")).toBeNull();
+    expect(screen.getByText("Deleted Bus")).toBeTruthy();
   });
 
   it("filters rows by agency name via the search input", async () => {

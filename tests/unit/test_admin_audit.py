@@ -60,6 +60,27 @@ async def test_changed_field_names_are_logged_but_their_values_are_not(caplog):
     assert "deleted-42@local" not in message
 
 
+async def test_a_replaced_policy_table_logs_its_columns_and_none_of_its_cells(caplog):
+    """Surfaces that swap a whole table pass the rows, not one row's columns.
+    The log still has to come out as field names only."""
+    with caplog.at_level(logging.INFO, logger="api.admin_audit"):
+        await record_admin_action(
+            _Conn(),
+            actor_id=1,
+            action="agency_standards_updated",
+            target_type="agency",
+            target_id=7,
+            before=[{"route_code": "R1", "bonus_malus_rate": 0.5}],
+            after=[{"route_code": "R2", "target_seconds": 90}],
+        )
+    message = caplog.records[0].getMessage()
+    assert "route_code" in message
+    assert "bonus_malus_rate" in message
+    assert "target_seconds" in message
+    for value in ("R1", "R2", "0.5", "90"):
+        assert value not in message
+
+
 async def test_optional_arguments_may_be_omitted(caplog):
     with caplog.at_level(logging.INFO, logger="api.admin_audit"):
         await record_admin_action(_Conn(), actor_id=1, action="board.refresh", target_type="system", target_id=None)

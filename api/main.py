@@ -32,6 +32,7 @@ from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
 from api.routers.admin import router as admin_router
+from api.routers.admin_agencies import router as admin_agencies_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
 from api.routers.ask_dashboard import router as ask_dashboard_router
@@ -313,6 +314,7 @@ app.add_middleware(
 app.add_middleware(RequestLogMiddleware)
 
 app.include_router(admin_router)
+app.include_router(admin_agencies_router)
 app.include_router(agencies_router)
 app.include_router(ask_router)
 app.include_router(ask_dashboard_router)
