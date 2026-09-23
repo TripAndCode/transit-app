@@ -287,6 +287,39 @@ async def bulk_patch_users(
         if patch.suspended is True:
             await conn.execute("DELETE FROM sessions WHERE user_id = ANY($1::int[])", ids)
 
+        # The same per-user `login_events` trail the single-user endpoint
+        # writes. Without it the durable record of who was suspended or
+        # demoted would depend on which control the operator happened to
+        # use, and the bulk path is the one that touches the most rows.
+        # Only actual transitions are recorded, so a no-op id in a batch
+        # does not manufacture an event.
+        for uid in ids:
+            before_row = by_id[uid]
+            old_suspended = before_row["suspended_at"] is not None
+            if patch.suspended is not None and patch.suspended != old_suspended:
+                await record_event(
+                    conn,
+                    user_id=uid,
+                    actor_id=admin.user_id,
+                    kind="suspended" if patch.suspended else "unsuspended",
+                )
+            if patch.role is not None and patch.role != before_row["role"]:
+                await record_event(
+                    conn,
+                    user_id=uid,
+                    actor_id=admin.user_id,
+                    kind="role_changed",
+                    meta={"old": before_row["role"], "new": patch.role},
+                )
+            if patch.llm_approved is not None and patch.llm_approved != before_row["llm_approved"]:
+                await record_event(
+                    conn,
+                    user_id=uid,
+                    actor_id=admin.user_id,
+                    kind="llm_approved_changed",
+                    meta={"old": before_row["llm_approved"], "new": patch.llm_approved},
+                )
+
         out_rows = await conn.fetch(
             "SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at "
             "FROM users WHERE user_id = ANY($1::int[]) ORDER BY user_id",
@@ -298,7 +331,29 @@ async def bulk_patch_users(
             action="users.bulk_patch",
             target_type="user",
             target_id=",".join(str(i) for i in ids),
-            after={"ids": ids, "patch": patch.model_dump(exclude_none=True)},
+            # The rows themselves, not the request body: the seam reports the
+            # union of a payload's field names, so wrapping the body would
+            # log "ids,patch" for every bulk action instead of naming the
+            # columns that actually moved.
+            before=[
+                {
+                    "user_id": r["user_id"],
+                    "role": r["role"],
+                    "suspended_at": r["suspended_at"],
+                    "llm_approved": r["llm_approved"],
+                }
+                for r in rows
+                if r["user_id"] in target_ids
+            ],
+            after=[
+                {
+                    "user_id": r["user_id"],
+                    "role": r["role"],
+                    "suspended_at": r["suspended_at"],
+                    "llm_approved": r["llm_approved"],
+                }
+                for r in out_rows
+            ],
         )
     return [UserRow(**dict(r)) for r in out_rows]
 

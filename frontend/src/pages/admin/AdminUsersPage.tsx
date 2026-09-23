@@ -1,12 +1,20 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useAdminUsers, useBulkPatchUsers, useDeleteUser, usePatchUser, type UserPatchBody } from "../../api/admin";
+import {
+  useAdminUsers,
+  useBulkPatchUsers,
+  useDeleteUser,
+  usePatchUser,
+  type AdminUser,
+  type UserPatchBody,
+} from "../../api/admin";
 import { useSession } from "../../api/auth";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Z_INDEX } from "../../styles/zIndex";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
+import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import { pageItems } from "./pageItems";
 
 const PAGE_SIZE = 50;
@@ -169,11 +177,9 @@ export function AdminUsersPage() {
   const rowSetKey = `${q}|${role}|${suspended}|${llmApproved}|${page}`;
   const [priorRowSetKey, setPriorRowSetKey] = useState(rowSetKey);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
-  const [focusedIndex, setFocusedIndex] = useState(0);
   if (rowSetKey !== priorRowSetKey) {
     setPriorRowSetKey(rowSetKey);
     setSelected(new Set());
-    setFocusedIndex(0);
   }
 
   const [undo, setUndo] = useState<{ message: string; ids: number[]; inverse: UserPatchBody } | null>(null);
@@ -198,34 +204,17 @@ export function AdminUsersPage() {
       isPlaceholderData ||
       uid === me?.user_id ||
       (patch.isPending && patch.variables?.uid === uid) ||
-      (del.isPending && del.variables === uid)
+      (del.isPending && del.variables === uid) ||
+      // A row in a bulk request that has not answered yet: a per-row action
+      // fired now would commit alongside it, and whichever landed second
+      // would win rather than whichever the operator asked for last.
+      (bulkPatch.isPending && selected.has(uid))
     );
   }
 
-  function toggleSelected(uid: number) {
-    if (!isSelectable(uid)) return;
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(uid)) next.delete(uid);
-      else next.add(uid);
-      return next;
-    });
-  }
 
-  const selectableRows = rows.filter((u) => isSelectable(u.user_id));
-  const allVisibleSelected = selectableRows.length > 0 && selectableRows.every((u) => selected.has(u.user_id));
-
-  function toggleSelectAll() {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allVisibleSelected) {
-        for (const u of selectableRows) next.delete(u.user_id);
-      } else {
-        for (const u of selectableRows) next.add(u.user_id);
-      }
-      return next;
-    });
-  }
+  // DataTable speaks string keys; this page's ids are numeric.
+  const selectedKeys = new Set([...selected].map(String));
 
   function showUndo(message: string, ids: number[], inverse: UserPatchBody) {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
@@ -327,39 +316,123 @@ export function AdminUsersPage() {
     del.mutate(uid);
   }
 
+  function onRowKeyDown(e: React.KeyboardEvent<HTMLTableRowElement>, row: AdminUser) {
+    if (e.key !== "a") return;
+    // Approve acts on the selection when there is one, so the shortcut
+    // matches what the bulk bar in front of the operator is offering.
+    const ids = selected.size > 0 ? [...selected] : [row.user_id];
+    e.preventDefault();
+    runBulkAction("approve", ids);
+  }
+
+  // `/` has to reach the search box from anywhere on the page, so it stays a
+  // document listener rather than a row's own key handling.
   const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
-    if (isTypingTarget(e.target)) return;
-    if (e.key === "j") {
-      e.preventDefault();
-      setFocusedIndex((i) => Math.min(rows.length - 1, i + 1));
-    } else if (e.key === "k") {
-      e.preventDefault();
-      setFocusedIndex((i) => Math.max(0, i - 1));
-    } else if (e.key === "x") {
-      const row = rows[focusedIndex];
-      if (row) {
-        e.preventDefault();
-        toggleSelected(row.user_id);
-      }
-    } else if (e.key === "a") {
-      const ids = selected.size > 0 ? [...selected] : rows[focusedIndex] ? [rows[focusedIndex].user_id] : [];
-      if (ids.length > 0) {
-        e.preventDefault();
-        runBulkAction("approve", ids);
-      }
-    } else if (e.key === "/") {
-      e.preventDefault();
-      searchInputRef.current?.focus();
-    } else if (e.key === "Enter") {
-      const row = rows[focusedIndex];
-      if (row) navigate(`/admin/users/${row.user_id}`, { state: { listSearch: searchParams.toString() } });
-    }
+    if (isTypingTarget(e.target) || e.key !== "/") return;
+    e.preventDefault();
+    searchInputRef.current?.focus();
   });
 
   useEffect(() => {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  const savedViewChips = SAVED_VIEWS.map((view) => ({
+    id: view,
+    label: t(`admin.users.view.${view}`),
+    count: view === "pending" && pendingCount > 0 ? pendingCount : undefined,
+  }));
+
+  const columns: DataTableColumn<AdminUser>[] = [
+    {
+      key: "email",
+      header: t("admin.users.col.email"),
+      render: (u) => (
+        <>
+          <AdminAvatar label={u.name || u.email} />
+          <Link to={`/admin/users/${u.user_id}`} state={{ listSearch: searchParams.toString() }}>
+            {u.email}
+          </Link>
+        </>
+      ),
+    },
+    { key: "name", header: t("admin.users.col.name"), render: (u) => u.name ?? "-" },
+    {
+      key: "role",
+      header: t("admin.users.col.role"),
+      render: (u) => (
+        <select
+          value={u.role}
+          disabled={isRowLocked(u.user_id)}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => handleRoleChange(u.user_id, u.email, e.target.value)}
+        >
+          <option value="user">{t("account.role.user")}</option>
+          <option value="admin">{t("account.role.admin")}</option>
+        </select>
+      ),
+    },
+    {
+      key: "status",
+      header: t("admin.users.col.status"),
+      render: (u) => (
+        <StatusChip tone={u.suspended_at ? "warn" : "good"}>
+          {u.suspended_at ? t("admin.users.status.suspended") : t("admin.users.status.active")}
+        </StatusChip>
+      ),
+    },
+    {
+      key: "llm_approved",
+      header: t("admin.users.col.llm_approved"),
+      render: (u) => (
+        <StatusChip tone={u.llm_approved ? "good" : "warn"}>
+          {u.llm_approved ? t("admin.users.llm_approved.yes") : t("admin.users.llm_approved.no")}
+        </StatusChip>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (u) => (
+        <span style={{ whiteSpace: "nowrap" }}>
+          <AdminButton
+            variant="secondary"
+            disabled={isRowLocked(u.user_id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleLlmApprovedToggle(u.user_id, u.llm_approved);
+            }}
+            style={{ marginRight: 8 }}
+          >
+            {u.llm_approved ? t("admin.users.action.revoke_llm") : t("admin.users.action.approve_llm")}
+          </AdminButton>
+          <AdminButton
+            variant="secondary"
+            disabled={isRowLocked(u.user_id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSuspendToggle(u.user_id, u.suspended_at);
+            }}
+            style={{ marginRight: 8 }}
+          >
+            {u.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
+          </AdminButton>
+          <AdminButton
+            variant="danger"
+            disabled={isRowLocked(u.user_id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDelete(u.user_id, u.email);
+            }}
+          >
+            {t("admin.users.action.delete")}
+          </AdminButton>
+        </span>
+      ),
+    },
+  ];
 
   return (
     <div style={{ padding: 24 }}>
@@ -390,132 +463,25 @@ export function AdminUsersPage() {
           <option value="true">{t("admin.users.status.suspended")}</option>
         </select>
       </div>
-      <div role="tablist" aria-label={t("admin.users.saved_views")} style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "12px 0" }}>
-        {SAVED_VIEWS.map((view) => (
-          <button
-            key={view}
-            type="button"
-            role="tab"
-            aria-selected={activeView === view}
-            onClick={() => selectView(view)}
-            style={{
-              fontSize: 12,
-              padding: "4px 10px",
-              borderRadius: 999,
-              cursor: "pointer",
-              border: `1px solid ${activeView === view ? "var(--accent)" : "var(--border-subtle)"}`,
-              color: activeView === view ? "var(--accent)" : "var(--text-secondary)",
-              background: activeView === view ? "var(--accent-soft)" : "transparent",
-            }}
-          >
-            {t(`admin.users.view.${view}`)}
-            {view === "pending" && pendingCount > 0 && <span style={{ marginLeft: 6 }}>{pendingCount}</span>}
-          </button>
-        ))}
-      </div>
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {isLoading && <div>{t("common.loading")}</div>}
-      <table className="admin-table" style={{ opacity: isPlaceholderData ? 0.6 : 1 }}>
-        <thead>
-          <tr>
-            <th style={{ width: 32 }}>
-              <input
-                type="checkbox"
-                aria-label={t("admin.users.select_all")}
-                checked={allVisibleSelected}
-                disabled={selectableRows.length === 0}
-                onChange={toggleSelectAll}
-              />
-            </th>
-            <th>{t("admin.users.col.email")}</th>
-            <th>{t("admin.users.col.name")}</th>
-            <th>{t("admin.users.col.role")}</th>
-            <th>{t("admin.users.col.status")}</th>
-            <th>{t("admin.users.col.llm_approved")}</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {data && data.users.length === 0 && (
-            <tr>
-              <td colSpan={7} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 24 }}>
-                {t("admin.users.empty")}
-              </td>
-            </tr>
-          )}
-          {data?.users.map((u, i) => (
-            <tr
-              key={u.user_id}
-              onClick={() => setFocusedIndex(i)}
-              style={{ background: selected.has(u.user_id) ? "var(--accent-soft)" : undefined }}
-            >
-              <td style={{ boxShadow: focusedIndex === i ? "inset 3px 0 0 var(--accent)" : undefined }}>
-                <input
-                  type="checkbox"
-                  aria-label={t("admin.users.select_row", { email: u.email })}
-                  checked={selected.has(u.user_id)}
-                  disabled={!isSelectable(u.user_id)}
-                  onChange={() => toggleSelected(u.user_id)}
-                />
-              </td>
-              <td>
-                <AdminAvatar label={u.name || u.email} />
-                <Link to={`/admin/users/${u.user_id}`} state={{ listSearch: searchParams.toString() }}>
-                  {u.email}
-                </Link>
-              </td>
-              <td>{u.name ?? "-"}</td>
-              <td>
-                <select
-                  value={u.role}
-                  disabled={isRowLocked(u.user_id)}
-                  onChange={(e) => handleRoleChange(u.user_id, u.email, e.target.value)}
-                >
-                  <option value="user">{t("account.role.user")}</option>
-                  <option value="admin">{t("account.role.admin")}</option>
-                </select>
-              </td>
-              <td>
-                <StatusChip tone={u.suspended_at ? "warn" : "good"}>
-                  {u.suspended_at ? t("admin.users.status.suspended") : t("admin.users.status.active")}
-                </StatusChip>
-              </td>
-              <td>
-                <StatusChip tone={u.llm_approved ? "good" : "warn"}>
-                  {u.llm_approved ? t("admin.users.llm_approved.yes") : t("admin.users.llm_approved.no")}
-                </StatusChip>
-              </td>
-              <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                <AdminButton
-                  variant="secondary"
-                  disabled={isRowLocked(u.user_id)}
-                  onClick={() => handleLlmApprovedToggle(u.user_id, u.llm_approved)}
-                  style={{ marginRight: 8 }}
-                >
-                  {u.llm_approved
-                    ? t("admin.users.action.revoke_llm")
-                    : t("admin.users.action.approve_llm")}
-                </AdminButton>
-                <AdminButton
-                  variant="secondary"
-                  disabled={isRowLocked(u.user_id)}
-                  onClick={() => handleSuspendToggle(u.user_id, u.suspended_at)}
-                  style={{ marginRight: 8 }}
-                >
-                  {u.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
-                </AdminButton>
-                <AdminButton
-                  variant="danger"
-                  disabled={isRowLocked(u.user_id)}
-                  onClick={() => handleDelete(u.user_id, u.email)}
-                >
-                  {t("admin.users.action.delete")}
-                </AdminButton>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        caption={t("admin.users.table_label")}
+        rows={data?.users ?? []}
+        columns={columns}
+        rowKey={(u) => String(u.user_id)}
+        rowLabel={(u) => u.email}
+        selectable
+        isRowSelectable={(u) => isSelectable(u.user_id)}
+        selectedIds={selectedKeys}
+        onSelectionChange={(next) => setSelected(new Set([...next].map(Number)))}
+        onOpen={(u) => navigate(`/admin/users/${u.user_id}`, { state: { listSearch: searchParams.toString() } })}
+        onRowKeyDown={onRowKeyDown}
+        savedViews={savedViewChips}
+        activeView={activeView}
+        onSelectView={(id) => selectView(id as SavedView)}
+        emptyLabel={t("admin.users.empty")}
+      />
       {(patch.error || del.error || bulkPatch.error) && (
         <ErrorBanner error={patch.error || del.error || bulkPatch.error} />
       )}

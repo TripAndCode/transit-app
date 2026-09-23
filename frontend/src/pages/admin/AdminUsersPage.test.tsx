@@ -105,6 +105,12 @@ function wrapWithExternalNav(initialEntries: string[]) {
   );
 }
 
+/** The table's body rows, without the header row. Row focus is real DOM
+ *  focus, so a keyboard test has to start from a focused row. */
+function dataRows(): HTMLElement[] {
+  return screen.getAllByRole("row").slice(1);
+}
+
 describe("AdminUsersPage", () => {
   beforeEach(() => {
     patchMutationError = null;
@@ -309,7 +315,7 @@ describe("AdminUsersPage", () => {
     it("select-all checks every selectable row and bulk-clear unchecks them", async () => {
       const user = userEvent.setup();
       wrap();
-      await user.click(screen.getByRole("checkbox", { name: "Select all users" }));
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
       expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", true);
       expect(screen.getByRole("checkbox", { name: "Select suspended@example.com" })).toHaveProperty(
         "checked",
@@ -370,7 +376,7 @@ describe("AdminUsersPage", () => {
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
       const user = userEvent.setup();
       wrap();
-      await user.click(screen.getByRole("checkbox", { name: "Select all users" }));
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
       await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Delete" }));
       await vi.waitFor(() => expect(delMutate).toHaveBeenCalledTimes(2));
       expect(delMutate).toHaveBeenCalledWith(1);
@@ -402,7 +408,7 @@ describe("AdminUsersPage", () => {
       const user = userEvent.setup();
       wrap(["/admin/users?role=admin&suspended=true"]);
       useAdminUsersMock.mockClear();
-      await user.click(screen.getByRole("tab", { name: /Pending approval/ }));
+      await user.click(screen.getByRole("button", { name: /Pending approval/ }));
       expect(useAdminUsersMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ role: "", suspended: "", llmApproved: "false" }),
       );
@@ -410,15 +416,18 @@ describe("AdminUsersPage", () => {
 
     it("marks the admins view active from the role=admin URL param", () => {
       wrap(["/admin/users?role=admin"]);
-      expect(screen.getByRole("tab", { name: "Admins" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("button", { name: "Admins" })).toHaveAttribute("aria-pressed", "true");
     });
   });
 
   describe("keyboard navigation", () => {
     it("j moves focus down and x toggles selection on the focused row", () => {
       wrap();
-      fireEvent.keyDown(document, { key: "j" });
-      fireEvent.keyDown(document, { key: "x" });
+      const [first, second] = dataRows();
+      first.focus();
+      fireEvent.keyDown(first, { key: "j" });
+      expect(second).toHaveFocus();
+      fireEvent.keyDown(second, { key: "x" });
       expect(screen.getByRole("checkbox", { name: "Select suspended@example.com" })).toHaveProperty(
         "checked",
         true,
@@ -428,14 +437,19 @@ describe("AdminUsersPage", () => {
 
     it("k does not move focus above the first row", () => {
       wrap();
-      fireEvent.keyDown(document, { key: "k" });
-      fireEvent.keyDown(document, { key: "x" });
+      const [first] = dataRows();
+      first.focus();
+      fireEvent.keyDown(first, { key: "k" });
+      expect(first).toHaveFocus();
+      fireEvent.keyDown(first, { key: "x" });
       expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", true);
     });
 
     it("a approves the focused row when nothing is selected", () => {
       wrap();
-      fireEvent.keyDown(document, { key: "a" });
+      const [first] = dataRows();
+      first.focus();
+      fireEvent.keyDown(first, { key: "a" });
       expect(bulkMutate).toHaveBeenCalledWith(
         { ids: [1], patch: { llm_approved: true } },
         expect.objectContaining({ onSuccess: expect.any(Function) }),
@@ -448,12 +462,23 @@ describe("AdminUsersPage", () => {
       expect(screen.getByRole("searchbox")).toHaveFocus();
     });
 
-    it("does not react to j/k/x/a while typing in the search box", async () => {
+    it("does not react to row keys while typing in the search box", async () => {
       const user = userEvent.setup();
       wrap();
       await user.click(screen.getByRole("searchbox"));
       fireEvent.keyDown(screen.getByRole("searchbox"), { key: "x" });
       expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", false);
+    });
+
+    it("lets / be typed into the search box instead of re-focusing it", async () => {
+      // `/` is the one shortcut still bound on the document, so it is the
+      // one that can still swallow a character the operator meant to type.
+      const user = userEvent.setup();
+      wrap();
+      const box = screen.getByRole("searchbox");
+      await user.click(box);
+      await user.type(box, "a/b");
+      expect(box).toHaveValue("a/b");
     });
   });
 

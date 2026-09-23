@@ -354,3 +354,41 @@ async def test_list_users_filters_by_llm_approved(admin_client, aconn):
     body = r.json()
     assert any(u["user_id"] == uid_pending for u in body["users"])
     assert all(not u["llm_approved"] for u in body["users"])
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_writes_the_same_per_user_trail_as_the_single_endpoint(admin_client, aconn):
+    """A durable record of who was suspended must not depend on which
+    control the operator used; the bulk path touches the most rows."""
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_a, _ = await _seed(aconn, role="user")
+    _, uid_b, _ = await _seed(aconn, role="user")
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_a, uid_b], "patch": {"suspended": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 200
+    kinds = await aconn.fetch(
+        "SELECT user_id, kind FROM login_events WHERE user_id = ANY($1::int[]) ORDER BY user_id",
+        [uid_a, uid_b],
+    )
+    assert [(row["user_id"], row["kind"]) for row in kinds] == [(uid_a, "suspended"), (uid_b, "suspended")]
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_records_nothing_for_an_id_the_patch_does_not_change(admin_client, aconn):
+    """A no-op id in a batch must not manufacture an audit event."""
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_already, _ = await _seed(aconn, role="user")
+    await aconn.execute("UPDATE users SET suspended_at = now() WHERE user_id=$1", uid_already)
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_already], "patch": {"suspended": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 200
+    count = await aconn.fetchval("SELECT count(*) FROM login_events WHERE user_id=$1", uid_already)
+    assert count == 0

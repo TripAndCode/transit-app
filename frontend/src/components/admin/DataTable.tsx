@@ -36,8 +36,24 @@ type DataTableProps<Row> = {
   /** Row activation: click or Enter on the focused row. */
   onOpen?: (row: Row) => void;
   savedViews?: readonly SavedView[];
-  /** URL search param the saved-view chips read and write. */
+  /** URL search param the saved-view chips read and write. Ignored when
+   *  `activeView`/`onSelectView` are supplied. */
   savedViewParam?: string;
+  /** Controlled saved views, for a caller whose views are a named
+   *  combination of its own existing filter params rather than one opaque
+   *  value -- the chips then stay in step with a URL a user can still edit
+   *  or bookmark by those params directly. */
+  activeView?: string;
+  onSelectView?: (id: string) => void;
+  /** Rows this table must not offer for selection -- e.g. the signed-in
+   *  operator's own row on a page whose bulk actions could lock them out.
+   *  Their checkbox renders disabled, and they are excluded from the header
+   *  checkbox's "all", so select-all does not silently mean "all but one". */
+  isRowSelectable?: (row: Row) => boolean;
+  /** Seen before the table's own `j`/`k`/`x`/`Enter` handling, for keys that
+   *  belong to the page rather than to a table. Call `preventDefault()` to
+   *  take the key. */
+  onRowKeyDown?: (event: React.KeyboardEvent<HTMLTableRowElement>, row: Row) => void;
   emptyLabel?: string;
   /** The row a detail surface is currently open on, marked so an operator
    *  scanning the list can still see which one they opened. */
@@ -78,15 +94,27 @@ export function DataTable<Row>({
   savedViewParam = "view",
   emptyLabel,
   activeRowKey = null,
+  activeView: controlledView,
+  onSelectView,
+  isRowSelectable,
+  onRowKeyDown: onCallerRowKeyDown,
 }: DataTableProps<Row>) {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const activeView = params.get(savedViewParam) ?? savedViews?.[0]?.id;
+  const activeView = controlledView ?? params.get(savedViewParam) ?? savedViews?.[0]?.id;
 
   function selectView(id: string) {
+    if (onSelectView) {
+      onSelectView(id);
+      return;
+    }
     const next = new URLSearchParams(params);
     next.set(savedViewParam, id);
     setParams(next, { replace: true });
+  }
+
+  function selectableRows(): readonly Row[] {
+    return isRowSelectable ? rows.filter(isRowSelectable) : rows;
   }
 
   function toggle(id: string) {
@@ -98,11 +126,14 @@ export function DataTable<Row>({
 
   function toggleAll() {
     if (!onSelectionChange) return;
-    const allSelected = rows.length > 0 && rows.every((row) => selectedIds.has(rowKey(row)));
-    onSelectionChange(allSelected ? new Set() : new Set(rows.map(rowKey)));
+    const rowsToSelect = selectableRows();
+    const allSelected = rowsToSelect.length > 0 && rowsToSelect.every((row) => selectedIds.has(rowKey(row)));
+    onSelectionChange(allSelected ? new Set() : new Set(rowsToSelect.map(rowKey)));
   }
 
   function onRowKeyDown(event: React.KeyboardEvent<HTMLTableRowElement>, row: Row) {
+    onCallerRowKeyDown?.(event, row);
+    if (event.defaultPrevented) return;
     if (event.key === "j") {
       event.preventDefault();
       focusSiblingRow(event.currentTarget, 1);
@@ -110,6 +141,7 @@ export function DataTable<Row>({
       event.preventDefault();
       focusSiblingRow(event.currentTarget, -1);
     } else if (event.key === "x") {
+      if (isRowSelectable && !isRowSelectable(row)) return;
       event.preventDefault();
       toggle(rowKey(row));
     } else if (event.key === "Enter") {
@@ -118,7 +150,8 @@ export function DataTable<Row>({
     }
   }
 
-  const allSelected = rows.length > 0 && rows.every((row) => selectedIds.has(rowKey(row)));
+  const selectableList = selectableRows();
+  const allSelected = selectableList.length > 0 && selectableList.every((row) => selectedIds.has(rowKey(row)));
 
   return (
     <div>
@@ -212,6 +245,10 @@ export function DataTable<Row>({
                         <input
                           type="checkbox"
                           checked={selected}
+                          // Disabled rather than absent: an empty cell reads
+                          // as a rendering gap, where a disabled box says the
+                          // row is deliberately out of reach.
+                          disabled={!(isRowSelectable?.(row) ?? true)}
                           onClick={(event) => event.stopPropagation()}
                           onChange={() => toggle(id)}
                           aria-label={t("admin.table.select_row", { label: rowLabel?.(row) ?? id })}

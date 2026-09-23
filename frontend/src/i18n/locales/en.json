@@ -1059,8 +1059,6 @@
         "admin": "Admins",
         "suspended": "Suspended"
       },
-      "select_all": "Select all users",
-      "select_row": "Select {{email}}",
       "bulk": {
         "selected_count": "{{count}} selected",
         "clear": "Clear selection",

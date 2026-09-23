@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 
-type AdminUser = {
+export type AdminUser = {
   user_id: number;
   email: string;
   name: string | null;

@@ -140,3 +140,17 @@ def test_bulk_patch_rejects_invalid_role():
         headers=_ORIGIN,
     )
     assert response.status_code == 400
+
+
+def test_the_bulk_audit_payload_names_the_columns_that_moved():
+    """`record_admin_action` logs the union of its payload's field names, so
+    a payload shaped like the request body would report "ids,patch" for every
+    bulk action instead of the columns an operator needs to see."""
+    from api.admin_audit import _changed_fields
+
+    before = [{"user_id": 1, "role": "admin", "suspended_at": None, "llm_approved": True}]
+    after = [{"user_id": 1, "role": "user", "suspended_at": None, "llm_approved": True}]
+    assert _changed_fields(before, after) == ["llm_approved", "role", "suspended_at", "user_id"]
+
+    body_shaped = {"ids": [1], "patch": {"role": "user"}}
+    assert _changed_fields(None, body_shaped) == ["ids", "patch"]

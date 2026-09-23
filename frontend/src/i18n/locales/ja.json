@@ -1059,8 +1059,6 @@
         "admin": "管理者",
         "suspended": "停止中"
       },
-      "select_all": "すべてのユーザーを選択",
-      "select_row": "{{email}} を選択",
       "bulk": {
         "selected_count": "{{count}} 件選択中",
         "clear": "選択を解除",
