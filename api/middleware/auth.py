@@ -65,9 +65,11 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             """,
             token_hash(key),
         )
-        if row is None or row["owner_suspended_at"] is not None:
-            return JSONResponse({"detail": "Invalid API key"}, status_code=401)
-        if not _key_usable(row, datetime.now(timezone.utc)):
+        # One rejection for every reason: an unknown key, a revoked or
+        # expired one, and a suspended owner must be indistinguishable to a
+        # caller holding a stolen key, or the response becomes an oracle for
+        # the account's state.
+        if row is None or row["owner_suspended_at"] is not None or not _key_usable(row, datetime.now(timezone.utc)):
             return JSONResponse({"detail": "Invalid API key"}, status_code=401)
         request.state.tier = row["tier"]
         return await call_next(request)
