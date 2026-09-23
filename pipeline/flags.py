@@ -96,6 +96,14 @@ _cache_expires_at = 0.0
 _cache_lock = threading.Lock()
 _refresh_thread: threading.Thread | None = None
 _force_sync_refresh = False
+#: Bumped by `invalidate()`; a refresh that began under an older value read
+#: the database before the write it is meant to pick up.
+_generation = 0
+#: Ticket dispenser for refreshes, and the highest ticket whose result has
+#: been committed. A counter rather than a timestamp: ordering must not
+#: depend on a clock, which a caller (or a test) can move.
+_refresh_seq = 0
+_committed_seq = 0
 
 
 def _env_bool(env_var: str, default: bool) -> bool:
@@ -198,12 +206,30 @@ def _refresh() -> None:
     unlucky caller and onto all of them. The lock covers only the
     in-memory swap.
     """
-    overrides = _load_overrides()
-    global _cache, _cache_expires_at, _force_sync_refresh
+    global _refresh_seq
     with _cache_lock:
-        # Any completed read satisfies an outstanding "the next read must
-        # see this" promise, whoever made it -- otherwise a startup warm
-        # leaves the first request to redo the same blocking read.
+        started_generation = _generation
+        _refresh_seq += 1
+        ticket = _refresh_seq
+
+    overrides = _load_overrides()
+
+    global _cache, _cache_expires_at, _force_sync_refresh, _committed_seq
+    with _cache_lock:
+        # Two refreshes can be in flight at once -- a background one from an
+        # expiry, and a synchronous one forced by an admin write. Last to
+        # finish would otherwise win, so a slow read that began before the
+        # write could overwrite the value it just stored. Discard a result
+        # the cache has already moved past: a newer read has committed, or
+        # an invalidate has happened since, meaning this data predates the
+        # write that prompted it.
+        if started_generation != _generation or ticket < _committed_seq:
+            return
+        _committed_seq = ticket
+        # This read is current, so it satisfies an outstanding "the next
+        # read must see this" promise -- otherwise a startup warm leaves the
+        # first request to redo the same blocking read. A superseded read
+        # returns above without clearing it, so the promise survives.
         _force_sync_refresh = False
         if overrides is None:
             # Transient read failure: carry forward only the entries an
@@ -304,8 +330,10 @@ def invalidate() -> None:
     new value without delay. Also used by the test suite to keep flag state
     from leaking between tests that monkeypatch env vars.
     """
-    global _cache_expires_at, _force_sync_refresh
+    global _cache_expires_at, _force_sync_refresh, _generation
     with _cache_lock:
+        # Anything already reading is now reading pre-write data.
+        _generation += 1
         # Marked stale rather than emptied. The next read replaces every
         # entry on success, so nothing leaks between tests that swap env
         # vars; but if that read fails -- including the one right after a

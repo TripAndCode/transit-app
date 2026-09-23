@@ -250,3 +250,36 @@ def test_a_slow_refresh_does_not_block_readers(monkeypatch):
 
     if flags._refresh_thread is not None:
         flags._refresh_thread.join(timeout=5)
+
+
+def test_a_refresh_that_began_before_a_write_cannot_overwrite_it(monkeypatch):
+    """A background refresh started by an expiry can still be reading when
+    an admin PATCH lands. Finishing last must not make it win: its data
+    predates the write, and the PATCH is promised the next read sees the
+    new value."""
+    key = "ask_intent_cache_enabled"
+    calls = {"n": 0}
+
+    def staged_load():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            time.sleep(0.4)
+            return {key: (True, "before-the-write", 1, None)}
+        return {key: (False, "after-the-write", 1, None)}
+
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {})
+    flags.warm()
+    monkeypatch.setattr(flags, "_load_overrides", staged_load)
+
+    flags._cache_expires_at = 0.0
+    flags.flag(key, True)  # starts the slow pre-write read in the background
+    time.sleep(0.05)
+
+    flags.invalidate()  # the PATCH
+    assert flags.get_flag_state(key).reason == "after-the-write"
+
+    if flags._refresh_thread is not None:
+        flags._refresh_thread.join(timeout=5)
+    state = flags.get_flag_state(key)
+    assert state.reason == "after-the-write", "a refresh that predates the write overwrote it"
+    assert state.value is False
