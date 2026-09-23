@@ -7,6 +7,7 @@ import {
   type AdminAuditFilters,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
+import { formatDateTime } from "../../utils/format";
 import { downloadCsv } from "../../components/analysis/csv";
 import { AdminButton, AdminSearchInput } from "./adminControls";
 import { diffEntries, formatDiffValue } from "./auditDiff";
@@ -86,7 +87,7 @@ function AuditTimeline({ filters }: { filters: AdminAuditFilters }) {
           )}
           {data?.items.map((item, i) => (
             <tr key={`${item.at}-${item.action}-${item.target_id ?? ""}-${i}`}>
-              <td style={{ whiteSpace: "nowrap" }}>{new Date(item.at).toLocaleString()}</td>
+              <td style={{ whiteSpace: "nowrap" }}>{formatDateTime(item.at)}</td>
               <td>{item.actor_id ?? "—"}</td>
               <td>{item.action}</td>
               <td>

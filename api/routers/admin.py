@@ -348,7 +348,7 @@ async def bulk_patch_users(
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
-            action="users.bulk_patch",
+            action="user.bulk_patched",
             target_type="user",
             target_id=",".join(str(i) for i in ids),
             # The rows themselves, not the request body: the seam reports the
@@ -496,7 +496,7 @@ async def patch_user(
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
-            action="users.patch",
+            action="user.patched",
             target_type="user",
             target_id=uid,
             before={"role": old_role, "suspended": old_suspended, "llm_approved": old_llm_approved},
@@ -628,7 +628,7 @@ async def revoke_user_session(
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
-            action="session_revoked",
+            action="user.session_revoked",
             target_type="user",
             target_id=str(uid),
         )
@@ -727,7 +727,7 @@ async def issue_api_key(
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
-            action="api_key_issued",
+            action="api_key.issued",
             target_type="user",
             target_id=str(body.owner_user_id),
             after={"label": body.label, "tier": body.tier},
@@ -756,7 +756,7 @@ async def revoke_api_key(
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
-            action="api_key_revoked",
+            action="api_key.revoked",
             target_type="api_key",
             target_id=str(key_id),
         )
@@ -816,7 +816,7 @@ async def create_invite(
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
-            action="invite_created",
+            action="invite.created",
             target_type="invite",
             target_id=str(row["invite_id"]),
             after={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
