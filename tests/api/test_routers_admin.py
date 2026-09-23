@@ -264,10 +264,18 @@ async def test_bulk_patch_refuses_to_demote_self_even_among_many_ids(admin_clien
 
 
 @pytest.mark.asyncio
-async def test_bulk_patch_last_admin_guard_across_the_whole_batch(admin_client, aconn):
-    """Suspending two different admins in one bulk call must not be able to
-    zero out the active-admin count, even though neither id is the caller."""
-    sid_admin, _, _ = await _seed(aconn, role="admin")
+async def test_bulk_patch_counts_the_whole_batch_before_deciding(admin_client, aconn):
+    """The active-admin count is evaluated over every locked row with the
+    patch applied, not one id at a time -- so suspending several admins at
+    once is allowed exactly while one remains active.
+
+    The caller is always an active admin and the self-guard keeps them out of
+    a suspending batch, so this endpoint cannot actually reach zero; the
+    "would leave no admins" branch is defence in depth for a future caller
+    that is not the actor. What is reachable, and what this pins, is that the
+    batch-wide count does not misfire on a legitimate multi-admin suspend.
+    """
+    sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
     _, uid_a, _ = await _seed(aconn, role="admin")
     _, uid_b, _ = await _seed(aconn, role="admin")
     r = await admin_client.patch(
@@ -276,10 +284,28 @@ async def test_bulk_patch_last_admin_guard_across_the_whole_batch(admin_client, 
         cookies={"sid": sid_admin},
         headers={"Origin": "http://test"},
     )
+    assert r.status_code == 200
+    still_active = await aconn.fetchval(
+        "SELECT array_agg(user_id ORDER BY user_id) FROM users WHERE role='admin' AND suspended_at IS NULL"
+    )
+    assert still_active == [uid_admin]
+
+
+@pytest.mark.asyncio
+async def test_bulk_patch_refuses_to_suspend_the_caller_among_others(admin_client, aconn):
+    """The self-guard is what keeps the batch from reaching zero admins."""
+    sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
+    _, uid_a, _ = await _seed(aconn, role="admin")
+    r = await admin_client.patch(
+        "/api/admin/users/bulk",
+        json={"ids": [uid_a, uid_admin], "patch": {"suspended": True}},
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
     assert r.status_code == 400
-    assert "no admins" in r.json()["detail"]
-    remaining = await aconn.fetchval("SELECT count(*) FROM users WHERE role='admin' AND suspended_at IS NULL")
-    assert remaining >= 1
+    assert "self" in r.json()["detail"]
+    untouched = await aconn.fetchval("SELECT suspended_at FROM users WHERE user_id=$1", uid_a)
+    assert untouched is None
 
 
 @pytest.mark.asyncio

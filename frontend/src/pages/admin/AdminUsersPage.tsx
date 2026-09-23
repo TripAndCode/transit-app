@@ -5,6 +5,7 @@ import { useAdminUsers, useBulkPatchUsers, useDeleteUser, usePatchUser, type Use
 import { useSession } from "../../api/auth";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { Z_INDEX } from "../../styles/zIndex";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { pageItems } from "./pageItems";
 
@@ -561,7 +562,7 @@ export function AdminUsersPage() {
             gap: 8,
             alignItems: "center",
             fontSize: 13,
-            zIndex: 40,
+            zIndex: Z_INDEX.sticky,
           }}
         >
           <b>{t("admin.users.bulk.selected_count", { count: selected.size })}</b>
@@ -610,7 +611,9 @@ export function AdminUsersPage() {
             gap: 12,
             alignItems: "center",
             fontSize: 13,
-            zIndex: 40,
+            // Above the selection bar it shares a corner with: undoing is
+            // the one action still worth taking while both are on screen.
+            zIndex: Z_INDEX.toast,
             boxShadow: "0 4px 16px rgba(0,0,0,0.16)",
           }}
         >
