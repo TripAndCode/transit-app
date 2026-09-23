@@ -54,7 +54,7 @@ function AuditTimeline({ filters }: { filters: AdminAuditFilters }) {
   const { t } = useTranslation();
   const [cursorStack, setCursorStack] = useState<(string | null)[]>([null]);
   const pageIndex = cursorStack.length - 1;
-  const { data, isLoading, error } = useAdminAudit(filters, cursorStack[pageIndex]);
+  const { data, isLoading, isPlaceholderData, error } = useAdminAudit(filters, cursorStack[pageIndex]);
 
   function goNext() {
     if (data?.next_cursor) setCursorStack((s) => [...s, data.next_cursor as string]);
@@ -91,6 +91,7 @@ function AuditTimeline({ filters }: { filters: AdminAuditFilters }) {
         columns={columns}
         rowKey={(item) => `${item.at}-${item.action}-${item.target_id ?? ""}-${item.actor_id ?? ""}`}
         emptyLabel={t("admin.audit.empty")}
+        pending={isPlaceholderData}
       />
       <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <AdminButton variant="secondary" disabled={pageIndex === 0} onClick={goPrev}>

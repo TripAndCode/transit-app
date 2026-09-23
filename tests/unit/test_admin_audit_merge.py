@@ -121,14 +121,16 @@ class TestMergeAuditPages:
         assert len(page) == 2
         assert next_cursor is None
 
-    def test_cursor_excludes_the_boundary_row_itself(self):
-        # Simulates page 2: caller re-fetched rows with `at <= cursor.at`,
-        # which includes the cursor row again -- merge must drop it.
-        audit_rows = [_audit_row(2, T1), _audit_row(1, T2)]
+    def test_the_boundary_row_is_excluded_by_the_query_bound(self):
+        """The cursor row is left out by each source's own keyset predicate,
+        not filtered after the fact -- filtering post-hoc is what forced the
+        `at <= cursor.at` fetch that silently dropped tied rows."""
         cursor = {"at": T1, "source": "audit", "id": 2}
-        page, next_cursor = aa.merge_audit_pages(audit_rows, [], limit=10, cursor=cursor)
-        assert [r["id"] for r in page] == [1]
-        assert next_cursor is None
+        assert aa.cursor_bound("audit", cursor) == "compound"
+        # "login" sorts above "audit", so its rows at this timestamp were
+        # already served on the previous page.
+        assert aa.cursor_bound("login", cursor) == "exclusive"
+        assert aa.cursor_bound("audit", {"at": T1, "source": "login", "id": 2}) == "inclusive"
 
     def test_ties_at_same_timestamp_break_deterministically(self):
         a = _audit_row(1, T0)
@@ -179,3 +181,56 @@ class TestParseBound:
     def test_invalid_format_raises_value_error(self):
         with pytest.raises(ValueError):
             aa.parse_bound("not-a-date", end=False)
+
+
+class TestKeysetBoundAcrossTies:
+    """Paging must not lose a row when one source has more rows at a single
+    timestamp than the page's fetch limit.
+
+    Simulates what each source query does -- apply the cursor bound, order
+    by (at, id) descending, take `fetch_limit` -- so the bound itself is
+    under test without a database.
+    """
+
+    @staticmethod
+    def _fetch(rows, source, cursor, fetch_limit):
+        if cursor is not None:
+            bound = aa.cursor_bound(source, cursor)
+            at_c, id_c = cursor["at"], cursor["id"]
+            if bound == "compound":
+                rows = [r for r in rows if r["at"] < at_c or (r["at"] == at_c and r["id"] < id_c)]
+            elif bound == "inclusive":
+                rows = [r for r in rows if r["at"] <= at_c]
+            else:
+                rows = [r for r in rows if r["at"] < at_c]
+        rows = sorted(rows, key=lambda r: (r["at"], r["id"]), reverse=True)
+        return rows[:fetch_limit]
+
+    def _page_through(self, audit_rows, login_rows, limit):
+        seen, cursor, pages = [], None, 0
+        while True:
+            pages += 1
+            assert pages < 50, "pagination did not terminate"
+            page, cursor = aa.merge_audit_pages(
+                self._fetch(audit_rows, "audit", cursor, limit + 1),
+                self._fetch(login_rows, "login", cursor, limit + 1),
+                limit=limit,
+                cursor=cursor,
+            )
+            seen.extend((r["source"], r["id"]) for r in page)
+            if cursor is None:
+                return seen
+
+    def test_more_tied_rows_in_one_source_than_the_fetch_limit(self):
+        at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        audit_rows = [{"at": at, "source": "audit", "id": i} for i in range(10, 15)]
+        seen = self._page_through(audit_rows, [], limit=3)
+        assert sorted(i for _, i in seen) == [10, 11, 12, 13, 14]
+        assert len(seen) == len(set(seen)), "a row was served on more than one page"
+
+    def test_ties_spanning_both_sources(self):
+        at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        audit_rows = [{"at": at, "source": "audit", "id": i} for i in range(1, 5)]
+        login_rows = [{"at": at, "source": "login", "id": i} for i in range(1, 5)]
+        seen = self._page_through(audit_rows, login_rows, limit=3)
+        assert len(seen) == 8 and len(set(seen)) == 8

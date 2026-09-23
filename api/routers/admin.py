@@ -971,8 +971,13 @@ async def list_admin_audit(
         a_args.append(to_dt)
         a_where.append(f"at <= ${len(a_args)}")
     if cursor_row is not None:
+        bound = _admin_audit.cursor_bound("audit", cursor_row)
         a_args.append(cursor_row["at"])
-        a_where.append(f"at <= ${len(a_args)}")
+        if bound == "compound":
+            a_args.append(cursor_row["id"])
+            a_where.append(f"(at < ${len(a_args) - 1} OR (at = ${len(a_args) - 1} AND id < ${len(a_args)}))")
+        else:
+            a_where.append(f"at {'<=' if bound == 'inclusive' else '<'} ${len(a_args)}")
     a_where_sql = ("WHERE " + " AND ".join(a_where)) if a_where else ""
     a_args.append(fetch_limit)
     audit_raw = await conn.fetch(
@@ -1009,8 +1014,16 @@ async def list_admin_audit(
             l_args.append(to_dt)
             l_where.append(f"created_at <= ${len(l_args)}")
         if cursor_row is not None:
+            bound = _admin_audit.cursor_bound("login", cursor_row)
             l_args.append(cursor_row["at"])
-            l_where.append(f"created_at <= ${len(l_args)}")
+            if bound == "compound":
+                l_args.append(cursor_row["id"])
+                l_where.append(
+                    f"(created_at < ${len(l_args) - 1}"
+                    f" OR (created_at = ${len(l_args) - 1} AND event_id < ${len(l_args)}))"
+                )
+            else:
+                l_where.append(f"created_at {'<=' if bound == 'inclusive' else '<'} ${len(l_args)}")
         l_args.append(fetch_limit)
         login_raw = await conn.fetch(
             f"""

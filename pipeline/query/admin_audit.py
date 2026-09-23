@@ -79,6 +79,27 @@ def _sort_key(row: Row) -> tuple[Any, str, Any]:
     return (row["at"], row["source"], row["id"])
 
 
+def cursor_bound(source: str, cursor: Cursor) -> str:
+    """Which boundary `source`'s own query needs for a keyset page.
+
+    The total order is `(at, source, id)` descending, so a bound on `at`
+    alone is not enough: rows sharing the cursor's timestamp are ordered
+    among themselves by source and then id. Bounding only on `at` re-fetches
+    the same highest-id tied rows on every page, so once one source has more
+    rows at a single timestamp than the page's fetch limit, the lower-id ones
+    never enter the window and are lost from the timeline for good -- while
+    the ones that do come back are served twice.
+
+    - `compound`: same source as the cursor, so ties are split by id.
+    - `inclusive`: sorts below the cursor's source, so its tied rows are all
+      still to come.
+    - `exclusive`: sorts above it, so its tied rows were already served.
+    """
+    if source == cursor["source"]:
+        return "compound"
+    return "inclusive" if source < cursor["source"] else "exclusive"
+
+
 def merge_audit_pages(
     audit_rows: list[Row],
     login_rows: list[Row],
@@ -90,16 +111,14 @@ def merge_audit_pages(
     `limit` rows, newest first.
 
     `cursor`, if given, is the identity of the last row already returned on
-    a previous page -- both source queries re-include that boundary row (via
-    `at <= cursor.at`) to stay correct across ties, so it is filtered back
-    out here before merging.
+    a previous page. Each source query is bounded by `cursor_bound`, which
+    excludes everything already served -- including the boundary row itself
+    -- so nothing has to be filtered back out here.
 
     Returns `(page, next_cursor)`; `next_cursor` is `None` once the combined
     pool (after the cursor-row exclusion) fits within `limit`.
     """
     pool = list(audit_rows) + list(login_rows)
-    if cursor is not None:
-        pool = [r for r in pool if not (r["source"] == cursor["source"] and r["id"] == cursor["id"])]
     pool.sort(key=_sort_key, reverse=True)
     has_more = len(pool) > limit
     page = pool[:limit]

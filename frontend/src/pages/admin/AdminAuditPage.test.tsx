@@ -88,6 +88,21 @@ describe("AdminAuditPage", () => {
     }));
   });
 
+  it("dims the timeline while a newer page is in flight", () => {
+    // keepPreviousData leaves the old rows on screen; on an audit trail a
+    // reader must not take stale rows for current ones.
+    useAdminAuditMock.mockReturnValue({
+      data: PAGE_1,
+      isLoading: false,
+      isPlaceholderData: true,
+      error: null,
+    });
+    wrap(<AdminAuditPage />);
+    const dimmed = screen.getByRole("table", { name: "Audit timeline" }).closest<HTMLElement>("div[style*=opacity]");
+    expect(dimmed).not.toBeNull();
+    expect(dimmed).toHaveStyle({ opacity: "0.6" });
+  });
+
   it("names the timeline for a screen reader instead of leaking the i18n key", () => {
     // The caption is the table's accessible name; locale parity cannot
     // catch a key that is missing from both files.
