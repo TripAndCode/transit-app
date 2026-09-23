@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Modal } from "../../components/Modal";
 import { useFeatureFlags, usePatchFeatureFlag, type FeatureFlag } from "../../api/admin";
+import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
 
 /** The flag a toggle click opened a reason dialog for, plus the value it
@@ -27,43 +29,16 @@ function FlagReasonDialog({
     label,
   });
 
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
   const trimmed = reason.trim();
 
   return (
-    <>
-      <div
-        onClick={onCancel}
-        aria-hidden="true"
-        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 80 }}
-      />
-      <div
-        role="dialog"
-        aria-label={title}
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: "min(420px, 92vw)",
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-soft)",
-          borderRadius: 10,
-          padding: 24,
-          zIndex: 81,
-        }}
-      >
+    <Modal
+      open
+      onClose={onCancel}
+      ariaLabel={title}
+      initialFocusRef={textareaRef}
+      style={{ width: "min(420px, 92vw)" }}
+    >
         <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 700 }}>{title}</h3>
         <label style={{ display: "block", fontSize: 13, color: "var(--text-secondary)", marginBottom: 6 }}>
           {t("admin.flags.reason_label")}
@@ -97,8 +72,7 @@ function FlagReasonDialog({
             {t("admin.flags.confirm")}
           </AdminButton>
         </div>
-      </div>
-    </>
+    </Modal>
   );
 }
 
@@ -142,7 +116,7 @@ function FlagToggle({ flag, onRequestChange }: { flag: FeatureFlag; onRequestCha
 
 function formatUpdatedAt(iso: string | null): string {
   if (iso === null) return "";
-  return new Date(iso).toLocaleString();
+  return formatDateTime(iso);
 }
 
 export function AdminFlagsPage() {
@@ -161,7 +135,7 @@ export function AdminFlagsPage() {
           style={{
             marginBottom: 16,
             padding: "10px 14px",
-            borderRadius: "var(--radius-md)",
+            borderRadius: "var(--radius-lg)",
             background: "var(--surface-1)",
             color: "var(--color-warning, #C99A2E)",
             fontSize: 14,
