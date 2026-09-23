@@ -371,7 +371,7 @@ def test_issuing_a_key_audits_the_action_without_the_key_itself():
     raw_key = r.json()["key"]
 
     assert len(conn.audit) == 1
-    actor_id, action, target_type, target_id, before, after, reason = conn.audit[0]
+    _actor_id, action, target_type, target_id, before, after, _reason = conn.audit[0]
     assert action == "api_key.issued"
     assert target_type == "user" and target_id == "2"
     assert raw_key not in str(after) and raw_key not in str(before)

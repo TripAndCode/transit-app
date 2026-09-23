@@ -1251,6 +1251,7 @@
       "docs_empty": "機能ドキュメントが見つかりません。"
     },
     "audit": {
+      "table_label": "監査タイムライン",
       "title": "監査ログ",
       "filter": {
         "actor_placeholder": "実行者ID",

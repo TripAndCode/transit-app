@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { AdminAuditItem, AuditSnapshot } from "../../api/admin";
+import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import {
   fetchAllAdminAudit,
   useAdminAudit,
@@ -19,8 +21,8 @@ function DiffPills({
   before,
   after,
 }: {
-  before: Record<string, unknown> | null;
-  after: Record<string, unknown> | null;
+  before: AuditSnapshot;
+  after: AuditSnapshot;
 }) {
   const entries = diffEntries(before, after).filter((e) => e.changed);
   if (entries.length === 0) return <span style={{ color: "var(--text-tertiary)" }}>—</span>;
@@ -52,7 +54,7 @@ function AuditTimeline({ filters }: { filters: AdminAuditFilters }) {
   const { t } = useTranslation();
   const [cursorStack, setCursorStack] = useState<(string | null)[]>([null]);
   const pageIndex = cursorStack.length - 1;
-  const { data, isLoading, isPlaceholderData, error } = useAdminAudit(filters, cursorStack[pageIndex]);
+  const { data, isLoading, error } = useAdminAudit(filters, cursorStack[pageIndex]);
 
   function goNext() {
     if (data?.next_cursor) setCursorStack((s) => [...s, data.next_cursor as string]);
@@ -61,48 +63,35 @@ function AuditTimeline({ filters }: { filters: AdminAuditFilters }) {
     setCursorStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   }
 
+  const columns: DataTableColumn<AdminAuditItem>[] = [
+    { key: "at", header: t("admin.audit.col.at"), render: (item) => formatDateTime(item.at) },
+    { key: "actor", header: t("admin.audit.col.actor"), render: (item) => item.actor_id ?? "—" },
+    { key: "action", header: t("admin.audit.col.action"), render: (item) => item.action },
+    {
+      key: "target",
+      header: t("admin.audit.col.target"),
+      render: (item) => `${item.target_type}${item.target_id ? `:${item.target_id}` : ""}`,
+    },
+    {
+      key: "diff",
+      header: t("admin.audit.col.diff"),
+      render: (item) => <DiffPills before={item.before} after={item.after} />,
+    },
+    { key: "reason", header: t("admin.audit.col.reason"), render: (item) => item.reason ?? "—" },
+    { key: "ip", header: t("admin.audit.col.ip"), render: (item) => item.ip ?? "—" },
+  ];
+
   return (
     <>
       {error && <div style={{ color: "var(--text-tertiary)" }}>{formatApiError(error)}</div>}
       {isLoading && <div>{t("common.loading")}</div>}
-      <table className="admin-table" style={{ opacity: isPlaceholderData ? 0.6 : 1 }}>
-        <thead>
-          <tr>
-            <th>{t("admin.audit.col.at")}</th>
-            <th>{t("admin.audit.col.actor")}</th>
-            <th>{t("admin.audit.col.action")}</th>
-            <th>{t("admin.audit.col.target")}</th>
-            <th>{t("admin.audit.col.diff")}</th>
-            <th>{t("admin.audit.col.reason")}</th>
-            <th>{t("admin.audit.col.ip")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data && data.items.length === 0 && (
-            <tr>
-              <td colSpan={7} style={{ textAlign: "center", color: "var(--text-tertiary)", padding: 24 }}>
-                {t("admin.audit.empty")}
-              </td>
-            </tr>
-          )}
-          {data?.items.map((item, i) => (
-            <tr key={`${item.at}-${item.action}-${item.target_id ?? ""}-${i}`}>
-              <td style={{ whiteSpace: "nowrap" }}>{formatDateTime(item.at)}</td>
-              <td>{item.actor_id ?? "—"}</td>
-              <td>{item.action}</td>
-              <td>
-                {item.target_type}
-                {item.target_id ? `:${item.target_id}` : ""}
-              </td>
-              <td>
-                <DiffPills before={item.before} after={item.after} />
-              </td>
-              <td>{item.reason ?? "—"}</td>
-              <td>{item.ip ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        caption={t("admin.audit.table_label")}
+        rows={data?.items ?? []}
+        columns={columns}
+        rowKey={(item) => `${item.at}-${item.action}-${item.target_id ?? ""}-${item.actor_id ?? ""}`}
+        emptyLabel={t("admin.audit.empty")}
+      />
       <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <AdminButton variant="secondary" disabled={pageIndex === 0} onClick={goPrev}>
           {t("admin.audit.pagination.prev")}

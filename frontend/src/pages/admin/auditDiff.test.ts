@@ -53,3 +53,29 @@ describe("formatDiffValue", () => {
     expect(formatDiffValue(42)).toBe("42");
   });
 });
+
+describe("row-list snapshots", () => {
+  // patch_standards / patch_weights replace a whole policy table, so their
+  // audit rows store an array of rows rather than one row's columns.
+  it("diffs a replaced policy table by row position", () => {
+    const before = [{ route_code: "R1", weight: 0.5 }];
+    const after = [{ route_code: "R1", weight: 1.5 }];
+    const entries = diffEntries(before, after);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].key).toBe("0");
+    expect(entries[0].changed).toBe(true);
+  });
+
+  it("renders a row as its contents rather than [object Object]", () => {
+    const rendered = formatDiffValue({ route_code: "R1", weight: 0.5 });
+    expect(rendered).not.toContain("[object Object]");
+    expect(rendered).toContain("R1");
+  });
+
+  it("reports rows added to the table", () => {
+    const entries = diffEntries([{ route_code: "R1" }], [{ route_code: "R1" }, { route_code: "R2" }]);
+    expect(entries.map((e) => e.key)).toEqual(["0", "1"]);
+    expect(entries[0].changed).toBe(false);
+    expect(entries[1].changed).toBe(true);
+  });
+});

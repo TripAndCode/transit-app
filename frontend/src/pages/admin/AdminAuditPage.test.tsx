@@ -88,6 +88,13 @@ describe("AdminAuditPage", () => {
     }));
   });
 
+  it("names the timeline for a screen reader instead of leaking the i18n key", () => {
+    // The caption is the table's accessible name; locale parity cannot
+    // catch a key that is missing from both files.
+    wrap(<AdminAuditPage />);
+    expect(screen.getByRole("table", { name: "Audit timeline" })).toBeTruthy();
+  });
+
   it("renders a before→after diff pill for a changed field", () => {
     wrap(<AdminAuditPage />);
     expect(screen.getByText(/role/)).toBeTruthy();

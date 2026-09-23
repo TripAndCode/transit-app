@@ -1251,6 +1251,7 @@
       "docs_empty": "No feature docs found."
     },
     "audit": {
+      "table_label": "Audit timeline",
       "title": "Audit log",
       "filter": {
         "actor_placeholder": "Actor ID",

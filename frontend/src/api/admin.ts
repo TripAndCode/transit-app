@@ -1,6 +1,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 
+/** What `admin_audit.before`/`after` can hold: one row's column map, or the
+ *  rows of a policy table replaced wholesale. Both shapes are stored. */
+export type AuditSnapshot = Record<string, unknown> | Record<string, unknown>[] | null;
+
 export type AdminUser = {
   user_id: number;
   email: string;
@@ -547,14 +551,14 @@ export type AdminAuditFilters = {
   to?: string;
 };
 
-type AdminAuditItem = {
+export type AdminAuditItem = {
   at: string;
   actor_id: number | null;
   action: string;
   target_type: string;
   target_id: string | null;
-  before: Record<string, unknown> | null;
-  after: Record<string, unknown> | null;
+  before: AuditSnapshot;
+  after: AuditSnapshot;
   reason: string | null;
   ip: string | null;
 };

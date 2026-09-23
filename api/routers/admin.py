@@ -351,10 +351,10 @@ async def bulk_patch_users(
             action="user.bulk_patched",
             target_type="user",
             target_id=",".join(str(i) for i in ids),
-            # The rows themselves, not the request body: the seam reports the
-            # union of a payload's field names, so wrapping the body would
-            # log "ids,patch" for every bulk action instead of naming the
-            # columns that actually moved.
+            # The rows themselves, not the request body: before/after are
+            # stored verbatim as the audit entry's values, so passing the
+            # body would record the request's shape rather than the columns
+            # that moved on each row.
             before=[
                 {
                     "user_id": r["user_id"],
@@ -492,15 +492,6 @@ async def patch_user(
             "SELECT user_id, email, name, avatar_url, role, suspended_at, llm_approved, created_at "
             "FROM users WHERE user_id=$1",
             uid,
-        )
-        await record_admin_action(
-            conn,
-            actor_id=admin.user_id,
-            action="user.patched",
-            target_type="user",
-            target_id=uid,
-            before={"role": old_role, "suspended": old_suspended, "llm_approved": old_llm_approved},
-            after={"role": new_role, "suspended": new_suspended, "llm_approved": new_llm_approved},
         )
     return UserRow(**dict(out))
 

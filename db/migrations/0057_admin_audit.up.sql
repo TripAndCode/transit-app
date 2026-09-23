@@ -15,3 +15,6 @@ CREATE TABLE IF NOT EXISTS admin_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_admin_audit_at ON admin_audit (at DESC);
 CREATE INDEX IF NOT EXISTS idx_admin_audit_target ON admin_audit (target_type, target_id);
+-- The filter matches either half, and a lookup by target_id alone cannot
+-- seek on the composite above, whose leading column is target_type.
+CREATE INDEX IF NOT EXISTS idx_admin_audit_target_id ON admin_audit (target_id);
