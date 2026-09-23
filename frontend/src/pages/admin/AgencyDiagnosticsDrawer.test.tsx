@@ -248,6 +248,18 @@ describe("AgencyDiagnosticsDrawer", () => {
     expect(screen.getByRole("button", { name: /^Restore$/ })).toBeTruthy();
   });
 
+  it("does not offer re-aggregation for a disabled agency", () => {
+    // The runner selects on `deleted_at IS NULL` and the endpoint answers 409,
+    // so an enabled button could only ever produce a failed request.
+    renderDrawer({ agency: { ...AGENCY, deleted_at: "2026-06-01T00:00:00Z" } });
+    expect(screen.getByRole("button", { name: /re-aggregate/i })).toHaveProperty("disabled", true);
+  });
+
+  it("offers re-aggregation for a live agency", () => {
+    renderDrawer();
+    expect(screen.getByRole("button", { name: /re-aggregate/i })).toHaveProperty("disabled", false);
+  });
+
   // ── editors ────────────────────────────────────────────────────────────
 
   it("saves an edited performance standard", async () => {

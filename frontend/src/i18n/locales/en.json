@@ -1172,6 +1172,7 @@
       "action_reload_static": "Reload static data",
       "action_reload_static_hint": "The static reload endpoint is not available yet.",
       "action_reanalyze": "Re-aggregate this agency only",
+      "action_reanalyze_disabled_hint": "A disabled agency is skipped by the aggregation run.",
       "probe_done": "Probe recorded ({{samples}} samples).",
       "reanalyze_started": "Re-aggregation started; it runs in the background.",
       "danger_section": "Danger zone",

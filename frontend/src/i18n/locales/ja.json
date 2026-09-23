@@ -1172,6 +1172,7 @@
       "action_reload_static": "静的データを再読込",
       "action_reload_static_hint": "静的データ再読込のエンドポイントはまだありません。",
       "action_reanalyze": "この事業者だけ再集計",
+      "action_reanalyze_disabled_hint": "無効化された事業者は集計対象から外れます。",
       "probe_done": "プローブを記録しました（標本 {{samples}}）。",
       "reanalyze_started": "再集計を開始しました。完了はしばらくお待ちください。",
       "danger_section": "危険操作",

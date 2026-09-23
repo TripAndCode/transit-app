@@ -579,7 +579,8 @@ export function AgencyDiagnosticsDrawer({
         </AdminButton>
         <AdminButton
           variant="secondary"
-          disabled={reanalyze.isPending}
+          disabled={reanalyze.isPending || agency.deleted_at != null}
+          title={agency.deleted_at == null ? undefined : t("admin.agency_diag.action_reanalyze_disabled_hint")}
           onClick={() => reanalyze.mutate(agency.agency_id)}
         >
           {t("admin.agency_diag.action_reanalyze")}
