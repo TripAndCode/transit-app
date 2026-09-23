@@ -318,7 +318,7 @@ async def patch_standards(
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
-            action="agency_standards_updated",
+            action="agency.standards_updated",
             target_type="agency",
             target_id=agency_id,
             before=before,
@@ -375,7 +375,7 @@ async def patch_weights(
         await record_admin_action(
             conn,
             actor_id=admin.user_id,
-            action="agency_weights_updated",
+            action="agency.weights_updated",
             target_type="agency",
             target_id=agency_id,
             before=before,
@@ -446,7 +446,7 @@ async def probe_agency_feed(
     await record_admin_action(
         conn,
         actor_id=admin.user_id,
-        action="agency_feed_probed",
+        action="agency.probed",
         target_type="agency",
         target_id=agency_id,
         after={"verdicts": verdicts, "sample_size": cov.get("stop_time_updates")},
@@ -486,7 +486,7 @@ async def reanalyze_agency(
     await record_admin_action(
         conn,
         actor_id=admin.user_id,
-        action="agency_reanalyze_requested",
+        action="agency.reanalyze_requested",
         target_type="agency",
         target_id=agency_id,
     )

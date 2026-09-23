@@ -38,9 +38,17 @@ class _Conn:
             "ingest_strategy": "direct_url",
             "deleted_at": deleted_at,
         }
+        self.audit: list[tuple[Any, ...]] = []
 
     async def fetchrow(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
         return self._row
+
+    async def execute(self, sql: str, *args: Any) -> str:
+        """The audit seam writes a real row now; capture it rather than
+        running it."""
+        assert "INSERT INTO admin_audit" in sql, f"unexpected execute: {sql}"
+        self.audit.append(args)
+        return "INSERT 1"
 
 
 def _client(conn: _Conn) -> TestClient:
@@ -80,7 +88,9 @@ def test_reanalyzing_a_disabled_agency_is_refused_rather_than_reported_started(q
 
 
 def test_reanalyzing_a_live_agency_is_accepted(queued):
-    response = _client(_Conn(deleted_at=None)).post("/api/admin/agencies/1/reanalyze")
+    conn = _Conn(deleted_at=None)
+    response = _client(conn).post("/api/admin/agencies/1/reanalyze")
     assert response.status_code == 202
     assert response.json() == {"status": "started"}
     assert queued == [1]
+    assert [call[1] for call in conn.audit] == ["agency.reanalyze_requested"]

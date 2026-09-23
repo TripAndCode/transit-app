@@ -38,10 +38,14 @@ describe("AdminLayout sub-nav", () => {
     }
   });
 
-  it("hides a group that has no destinations yet rather than showing a bare heading", () => {
+  it("shows the governance group now that the audit log gives it a destination", () => {
     wrap();
     const nav = screen.getByRole("navigation", { name: i18n.t("admin.nav.label") });
-    expect(within(nav).queryByText(i18n.t("admin.nav.group.governance"))).not.toBeInTheDocument();
+    expect(within(nav).getByText(i18n.t("admin.nav.group.governance"))).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: new RegExp(i18n.t("admin.nav.audit")) })).toHaveAttribute(
+      "href",
+      "/admin/audit",
+    );
   });
 
   it("puts the control board first, linking at the admin root", () => {
