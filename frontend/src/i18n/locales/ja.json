@@ -1120,6 +1120,7 @@
       "ops": "運用状況",
       "architecture": "アーキテクチャ",
 "audit": "監査ログ",
+"flags": "機能フラグ",
       "board": "管制盤",
       "group": {
         "operations": "運行",
@@ -1277,6 +1278,37 @@
       "export": {
         "csv": "CSVエクスポート",
         "loading": "エクスポート中…"
+      }
+    },
+    "flags": {
+      "table_label": "機能フラグ",
+      "empty": "登録されたフラグはありません。",
+      "title": "機能フラグ",
+      "col_flag": "フラグ",
+      "col_value": "値",
+      "col_source": "ソース",
+      "col_updated": "最終変更",
+      "source_env": "環境変数デフォルト",
+      "source_override": "上書き",
+      "updated_by": "ユーザー #{{id}} が変更",
+      "no_reason": "理由の記録なし",
+      "dialog_title_enable": "「{{label}}」を有効にしますか？",
+      "dialog_title_disable": "「{{label}}」を無効にしますか？",
+      "reason_label": "理由",
+      "reason_placeholder": "この変更の理由を入力してください",
+      "confirm": "保存",
+      "cancel": "キャンセル",
+      "load_error": "機能フラグを読み込めませんでした。",
+      "labels": {
+        "askRouterEnabled": "Ask: ルールルーター",
+        "askFollowupEnabled": "Ask: LLM フォローアップ",
+        "copilotInsightEnabled": "Copilot: 自動インサイト",
+        "askHistoryEnabled": "Ask: 会話履歴",
+        "askIntentCacheEnabled": "Ask: インテントキャッシュ",
+        "askQueryLogEnabled": "Ask: クエリログ",
+        "weatherIngestEnabled": "気象: 観測データ取り込み",
+        "openapiDocsEnabled": "API: OpenAPI ドキュメント",
+        "perfDebugEnabled": "API: パフォーマンスデバッグ面"
       }
     },
     "table": {

@@ -1120,6 +1120,7 @@
       "ops": "Ops",
       "architecture": "Architecture",
 "audit": "Audit log",
+"flags": "Flags",
       "board": "Control board",
       "group": {
         "operations": "Operations",
@@ -1277,6 +1278,37 @@
       "export": {
         "csv": "Export CSV",
         "loading": "Exporting…"
+      }
+    },
+    "flags": {
+      "table_label": "Feature flags",
+      "empty": "No flags registered.",
+      "title": "Feature flags",
+      "col_flag": "Flag",
+      "col_value": "Value",
+      "col_source": "Source",
+      "col_updated": "Last changed",
+      "source_env": "Env default",
+      "source_override": "Override",
+      "updated_by": "Changed by user #{{id}}",
+      "no_reason": "No reason recorded",
+      "dialog_title_enable": "Enable \"{{label}}\"?",
+      "dialog_title_disable": "Disable \"{{label}}\"?",
+      "reason_label": "Reason",
+      "reason_placeholder": "Why are you changing this flag?",
+      "confirm": "Save",
+      "cancel": "Cancel",
+      "load_error": "Couldn't load feature flags.",
+      "labels": {
+        "askRouterEnabled": "Ask: rules router",
+        "askFollowupEnabled": "Ask: LLM follow-up",
+        "copilotInsightEnabled": "Copilot: proactive insight",
+        "askHistoryEnabled": "Ask: conversation history",
+        "askIntentCacheEnabled": "Ask: intent cache",
+        "askQueryLogEnabled": "Ask: query log",
+        "weatherIngestEnabled": "Weather: observed-data ingest",
+        "openapiDocsEnabled": "API: OpenAPI docs",
+        "perfDebugEnabled": "API: perf debug surface"
       }
     },
     "table": {

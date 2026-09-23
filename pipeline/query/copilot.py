@@ -10,8 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 
+from pipeline.flags import flag
 from pipeline.query.chat import _completion_with_key
 from pipeline.query.copilot_templates import (
     NO_SIGNAL_TEMPLATE_ID,
@@ -36,7 +36,7 @@ def is_enabled() -> bool:
     app — the panel fires it on the default tab for every visitor — so it has
     to be opted into per deployment rather than shipped hot.
     """
-    return os.environ.get("COPILOT_INSIGHT_ENABLED", "false").lower() in ("1", "true", "yes")
+    return flag("copilot_insight_enabled", False)
 
 
 def _get_client():

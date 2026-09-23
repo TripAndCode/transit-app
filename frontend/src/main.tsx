@@ -62,6 +62,9 @@ const AdminAgenciesPage = lazy(() =>
 const AdminOpsPage = lazy(() =>
   import("./pages/admin/AdminOpsPage").then((m) => ({ default: m.AdminOpsPage }))
 );
+const AdminFlagsPage = lazy(() =>
+  import("./pages/admin/AdminFlagsPage").then((m) => ({ default: m.AdminFlagsPage }))
+);
 const AdminArchitecturePage = lazy(() =>
   import("./pages/admin/AdminArchitecturePage").then((m) => ({ default: m.AdminArchitecturePage }))
 );
@@ -150,6 +153,7 @@ const router = createBrowserRouter([
           { path: "ops", element: <AdminOpsPage /> },
           { path: "architecture", element: <AdminArchitecturePage /> },
           { path: "audit", element: <AdminAuditPage /> },
+          { path: "flags", element: <AdminFlagsPage /> },
         ],
       },
       { path: "*", element: <Navigate to="/" replace /> },

@@ -9,6 +9,7 @@ import pytest
 from httpx import ASGITransport
 
 from api.security import token_hash
+from pipeline.flags import invalidate as invalidate_flags
 from tests.conftest import TEST_ORIGIN, _test_pool
 
 
@@ -308,11 +309,16 @@ async def test_copilot_enabled_endpoint_reports_the_flag(copilot_client, monkeyp
     client, agency_id = copilot_client
 
     monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "true")
+    invalidate_flags()
     resp = await client.get(f"/api/{agency_id}/copilot/enabled")
     assert resp.status_code == 200
     assert resp.json() == {"enabled": True}
 
+    # The flag layer caches its resolution process-wide, so an env change
+    # mid-test is only visible once the cache is dropped -- which is what a
+    # PATCH to /admin/flags does in production.
     monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", "false")
+    invalidate_flags()
     resp = await client.get(f"/api/{agency_id}/copilot/enabled")
     assert resp.status_code == 200
     assert resp.json() == {"enabled": False}
