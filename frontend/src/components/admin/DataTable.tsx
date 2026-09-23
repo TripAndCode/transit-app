@@ -45,6 +45,10 @@ type DataTableProps<Row> = {
    *  or bookmark by those params directly. */
   activeView?: string;
   onSelectView?: (id: string) => void;
+  /** A newer page is in flight while the previous one stays rendered
+   *  (react-query's `keepPreviousData`). Dimmed rather than replaced, so a
+   *  reader is told the rows are stale instead of reading them as current. */
+  pending?: boolean;
   /** Rows this table must not offer for selection -- e.g. the signed-in
    *  operator's own row on a page whose bulk actions could lock them out.
    *  Their checkbox renders disabled, and they are excluded from the header
@@ -94,6 +98,7 @@ export function DataTable<Row>({
   savedViewParam = "view",
   emptyLabel,
   activeRowKey = null,
+  pending = false,
   activeView: controlledView,
   onSelectView,
   isRowSelectable,
@@ -154,7 +159,7 @@ export function DataTable<Row>({
   const allSelected = selectableList.length > 0 && selectableList.every((row) => selectedIds.has(rowKey(row)));
 
   return (
-    <div>
+    <div style={{ opacity: pending ? 0.6 : 1, transition: "opacity var(--transition)" }}>
       {savedViews && savedViews.length > 0 && (
         <div
           role="group"

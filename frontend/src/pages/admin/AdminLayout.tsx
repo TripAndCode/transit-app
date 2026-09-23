@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Building2, Users, Activity, Workflow, LayoutDashboard, type LucideIcon } from "lucide-react";
+import { Building2, Users, Activity, Workflow, LayoutDashboard, ScrollText, type LucideIcon } from "lucide-react";
 import { useAdminUsers } from "../../api/admin";
 
 type NavItem = { to: string; end?: boolean; labelKey: string; Icon: LucideIcon; badge?: "approvals" };
@@ -8,9 +8,7 @@ type NavItem = { to: string; end?: boolean; labelKey: string; Icon: LucideIcon; 
 /** Grouped by what an operator is doing, not by which table backs the page:
  *  running the service, managing who can use it, governing it, reading about
  *  it. A group with no destinations yet is declared here but not rendered —
- *  a heading with nothing under it reads as a broken nav, and `governance`
- *  appears the moment the audit log, feature flags or Ask ops page adds its
- *  entry. */
+ *  a heading with nothing under it reads as a broken nav. */
 const NAV_GROUPS: readonly { groupKey: string; items: readonly NavItem[] }[] = [
   {
     groupKey: "operations",
@@ -24,7 +22,10 @@ const NAV_GROUPS: readonly { groupKey: string; items: readonly NavItem[] }[] = [
     groupKey: "people",
     items: [{ to: "/admin/users", labelKey: "admin.nav.users", Icon: Users, badge: "approvals" }],
   },
-  { groupKey: "governance", items: [] },
+  {
+    groupKey: "governance",
+    items: [{ to: "/admin/audit", labelKey: "admin.nav.audit", Icon: ScrollText }],
+  },
   {
     groupKey: "reference",
     items: [{ to: "/admin/architecture", labelKey: "admin.nav.architecture", Icon: Workflow }],

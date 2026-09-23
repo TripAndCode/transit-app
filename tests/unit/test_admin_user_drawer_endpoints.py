@@ -44,6 +44,7 @@ class _FakeConn:
         self.api_keys = api_keys or []  # list of dict(id, owner_user_id, revoked_at)
         self._next_api_key_id = (max((k["id"] for k in self.api_keys), default=0)) + 1
         self.events: list[tuple] = []
+        self.audit: list[tuple] = []
 
     def transaction(self):
         """The handlers wrap their write and its audit entry together; this
@@ -121,6 +122,9 @@ class _FakeConn:
             return "DELETE 1"
         if "INSERT INTO login_events" in sql:
             self.events.append(args)
+            return "INSERT 1"
+        if "INSERT INTO admin_audit" in sql:
+            self.audit.append(args)
             return "INSERT 1"
         raise AssertionError(f"unexpected execute: {sql}")
 
@@ -354,3 +358,20 @@ def test_create_invite_rejects_invalid_role():
     conn = _FakeConn()
     r = _client(conn).post("/api/admin/invites", json={"email": "x@example.com", "role": "superadmin"}, headers=_ORIGIN)
     assert r.status_code == 400
+
+
+def test_issuing_a_key_audits_the_action_without_the_key_itself():
+    """The audit row is the durable record of who issued what. The raw key
+    is returned to the caller once and must not be recoverable from it."""
+    conn = _FakeConn(users={1: "admin@example.com", 2: "owner@example.com"})
+    r = _client(conn).post(
+        "/api/admin/api-keys", json={"owner_user_id": 2, "tier": "pro", "label": "cli"}, headers=_ORIGIN
+    )
+    assert r.status_code == 201
+    raw_key = r.json()["key"]
+
+    assert len(conn.audit) == 1
+    _actor_id, action, target_type, target_id, before, after, _reason = conn.audit[0]
+    assert action == "api_key.issued"
+    assert target_type == "user" and target_id == "2"
+    assert raw_key not in str(after) and raw_key not in str(before)
