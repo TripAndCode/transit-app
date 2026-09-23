@@ -9,6 +9,7 @@ import {
   type AdminApiKeyIssued,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
+import { formatDateTime } from "../../utils/format";
 import { AdminButton } from "./adminControls";
 
 const rowStyle = {
@@ -25,7 +26,7 @@ const rowStyle = {
 /** Sessions list for one user, with per-session revoke. Sessions are
  * identified only by a display-safe prefix -- the full id is never fetched. */
 export function SessionsSection({ uid }: { uid: number }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { data, isLoading, error } = useUserSessions(uid);
   const revoke = useRevokeSession(uid);
 
@@ -47,7 +48,7 @@ export function SessionsSection({ uid }: { uid: number }) {
             <code>{s.sid_prefix}…</code>
             <div style={{ color: "var(--text-tertiary)" }}>
               {t("admin.user_detail.session_last_seen", {
-                time: new Date(s.last_seen_at).toLocaleString(i18n.language),
+                time: formatDateTime(s.last_seen_at),
               })}
             </div>
           </div>

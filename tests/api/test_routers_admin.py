@@ -205,7 +205,7 @@ async def test_user_detail(admin_client, aconn):
     body = r.json()
     assert body["email"] == "detail@x"
     assert any(i["provider"] == "google" for i in body["identities"])
-<<<<<<< HEAD
+    assert body["byok_provider"] is None
 
 
 @pytest.mark.asyncio
@@ -393,8 +393,6 @@ async def test_bulk_patch_records_nothing_for_an_id_the_patch_does_not_change(ad
     assert r.status_code == 200
     count = await aconn.fetchval("SELECT count(*) FROM login_events WHERE user_id=$1", uid_already)
     assert count == 0
-=======
-    assert body["byok_provider"] is None
 
 
 @pytest.mark.asyncio
@@ -412,4 +410,3 @@ async def test_user_detail_reports_byok_provider_without_the_key(admin_client, a
     assert body["byok_provider"] == "openai"
     assert "key" not in body
     assert "abcd" not in str(body)
->>>>>>> 8a2999c (feat(admin): user drawer with sessions, API keys, login history, invites)

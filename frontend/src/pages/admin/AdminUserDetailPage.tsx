@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiGet, formatApiError } from "../../api/client";
+import { formatDateTime } from "../../utils/format";
 import { usePatchUser, useDeleteUser } from "../../api/admin";
 import { useSession } from "../../api/auth";
 import { AdminButton } from "./adminControls";
@@ -34,7 +35,7 @@ type Detail = {
  * see main.tsx). Escape/overlay-click/the back link all navigate back to
  * `/admin/users`, which unmounts this route and closes the drawer. */
 export function AdminUserDetailPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { uid } = useParams<{ uid: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -134,7 +135,7 @@ export function AdminUserDetailPage() {
               : t("admin.user_detail.byok_not_configured")}
           </div>
           <div>
-            {t("admin.user_detail.created_label")}: {new Date(data.created_at).toLocaleString(i18n.language)}
+            {t("admin.user_detail.created_label")}: {formatDateTime(data.created_at)}
           </div>
         </div>
 
@@ -226,7 +227,7 @@ export function AdminUserDetailPage() {
                 {e.kind} {e.provider ? `(${e.provider})` : ""}
               </div>
               <div style={{ color: "var(--text-tertiary)" }}>
-                {new Date(e.created_at).toLocaleString(i18n.language)}
+                {formatDateTime(e.created_at)}
               </div>
               {e.meta && <pre style={{ margin: "4px 0", fontSize: 12 }}>{JSON.stringify(e.meta)}</pre>}
             </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Modal } from "../../components/Modal";
 import { useCreateInvite } from "../../api/admin";
 import { formatApiError } from "../../api/client";
 
@@ -9,6 +10,8 @@ type Props = { open: boolean; onClose: () => void };
  * email that hasn't signed in yet. Honored by the OAuth callback on that
  * email's first login. */
 export function InviteDialog({ open, onClose }: Props) {
+  // Mounted only while open, so the form starts empty every time rather
+  // than showing the last invite's values.
   if (!open) return null;
   return <InviteDialogBody onClose={onClose} />;
 }
@@ -35,29 +38,7 @@ function InviteDialogBody({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      role="presentation"
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.2)", zIndex: 100 }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("admin.invite.dialog_title")}
-        style={{
-          position: "absolute",
-          top: "10%",
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: 360,
-          background: "var(--bg-surface)",
-          borderRadius: 8,
-          padding: 24,
-          boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
-        }}
-      >
+    <Modal open onClose={onClose} ariaLabel={t("admin.invite.dialog_title")} style={{ width: 360 }}>
         <h3 style={{ marginTop: 0 }}>{t("admin.invite.dialog_title")}</h3>
         <form onSubmit={handleSubmit}>
           <label style={{ display: "block", marginBottom: 12 }}>
@@ -133,7 +114,6 @@ function InviteDialogBody({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }
