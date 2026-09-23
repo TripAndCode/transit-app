@@ -12,26 +12,32 @@ Two lock domains, distinguished by what the caller is about to write:
    protect within one process's own batch, not across two processes racing
    the same feed).
 
-2. One agency's raw-poll append (``try_lock_agency_ingest``), used by the
-   collector push endpoint. That path only appends one already-fetched
-   protobuf to ClickHouse for a single agency; it touches no agg_* table and
-   shares no feed with any other agency, so two agencies pushing at once is
-   disjoint work that a single global key would serialize for nothing. The
-   collector polls every agency on its own dense interval, so the global key
-   turned every concurrent arrival into a 409 and dropped that poll -- the
-   two keys exist to keep same-agency retries mutually exclusive without
-   paying that cross-agency cost.
+2. One agency's `updates` rows (``try_lock_agency_ingest`` for a writer,
+   ``agency_ingest_lock`` for a reader that must see a stable set). Held by
+   the collector push endpoint around its append, and by analyze() for the
+   whole of its own run. Two *different* agencies never contend here: an
+   append for one touches no row and no agg_* table the other reads, so a
+   single global key serialized disjoint work, turning every concurrent
+   arrival on the collector's dense per-agency polling into a 409 that
+   dropped the poll.
 
-The two domains are deliberately NOT mutually exclusive: Postgres keeps
-single-argument and two-argument advisory locks in separate spaces, so a
-collector append can land while analyze() runs for that same agency. That is
-survivable precisely because analyze() decides what to rebuild from a
-per-date row-count ledger (agg_feed_health) rather than a high-water mark --
-a date whose ClickHouse count moved after analyze() read it is named by the
-next run's _dates_needing_rebuild and rebuilt then. The residual is one
-analyze cycle of staleness for that date, self-healing, not a lost or
-corrupted aggregate. Do not add a raw append to domain 1 to "fix" this: that
-reintroduces the cross-agency serialization the split exists to remove.
+Domain 2 covers analyze() as well as the append precisely BECAUSE Postgres
+keeps single-argument and two-argument advisory locks in separate spaces:
+holding domain 1 does not exclude a domain-2 append, so analyze() has to take
+the agency's domain-2 key itself to get that exclusion back. It needs it.
+analyze() reads `updates` from ClickHouse more than once per run at different
+times -- the deduped fact slice is loaded into a TEMP TABLE early, while
+agg_feed_health's raw per-date counts are a separate, later query -- and an
+append landing between those two reads writes a ledger that is NEWER than the
+aggregates it certifies. _dates_needing_rebuild compares that ledger against
+the live count, finds them equal, and never re-lists the date, so the other
+incremental tables stay permanently short those rows. Per-agency exclusion,
+not the ledger, is what makes this safe; the ledger cannot detect the one case
+that would need it to.
+
+Do not narrow domain 2 back to the append alone, and do not move the append
+into domain 1: the first reopens the skew above, the second restores the
+cross-agency serialization the split exists to remove.
 
 Best-effort, not job-level atomicity: production (scripts/fetch_and_ingest.sh,
 docs/deploy-railway.md's Railway sketch) invokes ingest/load_static/analyze
@@ -55,6 +61,9 @@ from seeing a half-replaced table -- the accepted residual is that analyze()
 may read a static schedule version that is about to be superseded mid-run,
 not table corruption.
 """
+
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 # Arbitrary, fixed -- only needs to be distinct from any other advisory
 # lock this codebase takes, and there are none as of this writing. Reused as
@@ -86,13 +95,13 @@ def try_lock_ingest_analyze(conn) -> bool:
 
 
 def try_lock_agency_ingest(conn, agency_id: int) -> bool:
-    """Non-blocking acquire of one agency's raw-append lock.
+    """Non-blocking acquire of one agency's `updates` lock.
 
+    For a writer that can afford to drop the work it is holding -- the
+    collector push endpoint, whose caller re-polls on its own interval, so
+    answering 409 costs one poll rather than blocking a request thread.
     Same session-level semantics and release-by-closing-`conn` contract as
-    try_lock_ingest_analyze; only the scope differs. Two agencies never
-    contend, and the caller must be appending raw polls only -- see this
-    module's docstring for why that restriction is what makes the narrower
-    scope sound, and why widening it would undo the point.
+    try_lock_ingest_analyze; only the scope differs.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -100,3 +109,31 @@ def try_lock_agency_ingest(conn, agency_id: int) -> bool:
             (INGEST_ANALYZE_LOCK_KEY, agency_id),
         )
         return cur.fetchone()[0]
+
+
+@contextmanager
+def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
+    """Hold one agency's `updates` lock for the duration of the block.
+
+    Blocking, unlike try_lock_agency_ingest, and released on the way out
+    rather than at connection close -- both because of who calls it.
+    analyze() cannot skip an agency just because a push is mid-flight (the
+    result would be an agency that goes unanalyzed for a reason invisible in
+    its output), and one long-lived connection analyzes every agency in turn,
+    so a lock left to connection teardown would still be held for agency N
+    while N+1..last are processed -- blocking that agency's pushes for the
+    whole fleet's run, which is the contention this key exists to avoid.
+
+    Waiting cannot deadlock against the append path: that path takes this key
+    with the non-blocking form above and takes no other lock, so it always
+    makes progress and releases. Callers of this one may hold
+    INGEST_ANALYZE_LOCK_KEY's single-argument lock at the same time (the cron
+    and CLI entrypoints do) without forming a cycle, for the same reason.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_lock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))
+    try:
+        yield
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))

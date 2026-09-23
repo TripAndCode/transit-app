@@ -1,7 +1,8 @@
 """DB-backed tests for pipeline.locks -- the cross-process ingest/analyze
 advisory lock shared by api/routers/internal.py's cron endpoint and
 gtfs_pipeline.py's ingest/ingest_live/analyze/analyze_all CLI commands, plus
-the narrower per-agency append lock the collector push endpoint takes."""
+the per-agency `updates` lock the collector push endpoint and analyze() both
+take."""
 
 import os
 import time
@@ -10,6 +11,7 @@ import psycopg2
 
 from pipeline.locks import (
     INGEST_ANALYZE_LOCK_KEY,
+    agency_ingest_lock,
     try_lock_agency_ingest,
     try_lock_ingest_analyze,
 )
@@ -134,12 +136,12 @@ def test_try_lock_agency_ingest_still_excludes_same_agency(pg_conn):
 
 
 def test_agency_and_global_locks_occupy_separate_spaces(pg_conn):
-    """Pins the documented trade-off rather than leaving it to be rediscovered:
-    Postgres keeps one-argument and two-argument advisory locks in separate
-    spaces, so an in-flight analyze() does NOT block a collector append. The
-    module docstring explains why that is survivable (analyze()'s per-date
-    row-count ledger re-rebuilds a date whose count moved), and this asserts
-    the behaviour that reasoning depends on.
+    """Postgres keeps one-argument and two-argument advisory locks in separate
+    spaces. This is the reason analyze() has to take the agency's two-argument
+    key itself (see agency_ingest_lock) rather than relying on the global key
+    its callers already hold -- holding domain 1 excludes nothing in domain 2.
+    Asserted so that a future reader deleting analyze()'s lock as "redundant
+    with the global one" fails here instead of shipping the skew.
 
     The agency argument is the global key's own value on purpose: if these two
     ever shared a space, that is the one agency id that would collide, so it
@@ -151,4 +153,56 @@ def test_agency_and_global_locks_occupy_separate_spaces(pg_conn):
         assert try_lock_agency_ingest(other, INGEST_ANALYZE_LOCK_KEY) is True
     finally:
         _unlock_global(pg_conn)
+        other.close()
+
+
+def test_agency_ingest_lock_blocks_a_concurrent_append_for_that_agency(pg_conn):
+    """The invariant analyze() depends on: while it holds an agency's key, no
+    append for that agency can land. analyze() reads `updates` at more than one
+    point per run, and a write landing between those reads leaves the ledger
+    newer than the aggregates it certifies -- a skew _dates_needing_rebuild
+    cannot see, because it is the ledger it compares against."""
+    other = psycopg2.connect(DATABASE_URL)
+    other.autocommit = True
+    try:
+        with agency_ingest_lock(pg_conn, 11):
+            assert try_lock_agency_ingest(other, 11) is False
+            # A different agency is still free -- exclusion is per agency, so
+            # analyzing one does not stall the rest of the fleet's pushes.
+            assert try_lock_agency_ingest(other, 12) is True
+            _unlock_agency(other, 12)
+    finally:
+        other.close()
+
+
+def test_agency_ingest_lock_releases_on_block_exit(pg_conn):
+    """Released on the way out, not at connection close: one long-lived
+    connection analyzes every agency in turn, so a lock surviving the block
+    would keep blocking that agency's pushes for the rest of the fleet's run."""
+    with agency_ingest_lock(pg_conn, 13):
+        pass
+    other = psycopg2.connect(DATABASE_URL)
+    other.autocommit = True
+    try:
+        assert try_lock_agency_ingest(other, 13) is True
+        _unlock_agency(other, 13)
+    finally:
+        other.close()
+
+
+def test_agency_ingest_lock_releases_when_the_block_raises(pg_conn):
+    """analyze() propagates after rolling back; the lock must not outlive that
+    failure, or one failed agency would block its pushes until the process
+    exits."""
+    other = psycopg2.connect(DATABASE_URL)
+    other.autocommit = True
+    try:
+        try:
+            with agency_ingest_lock(pg_conn, 14):
+                raise RuntimeError("analyze failed mid-run")
+        except RuntimeError:
+            pass
+        assert try_lock_agency_ingest(other, 14) is True
+        _unlock_agency(other, 14)
+    finally:
         other.close()
