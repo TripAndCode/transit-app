@@ -289,12 +289,14 @@ def get_flag_state(key: str) -> FlagState:
     with _cache_lock:
         cached = _cache.get(key)
         if cached is not None and not _force_sync_refresh:
-            stale = time.monotonic() >= _cache_expires_at
-            if not stale:
+            if time.monotonic() < _cache_expires_at:
                 return cached
         else:
+            # The marker is cleared by whichever refresh actually commits,
+            # not here: clearing it up front lets a second reader arriving
+            # moments later see it already satisfied and serve the value the
+            # write was supposed to replace.
             cached = None
-            _force_sync_refresh = False
 
     if cached is not None:
         # Expired: serve what we have and refresh behind it.
@@ -306,7 +308,14 @@ def get_flag_state(key: str) -> FlagState:
     # admin PATCH, not a hot path.
     _refresh()
     with _cache_lock:
-        return _cache[key]
+        resolved = _cache.get(key)
+    if resolved is not None:
+        return resolved
+    # The refresh was superseded before it could commit and nothing has ever
+    # been cached, so there is no override this process knows of. Resolve
+    # from the environment rather than raising: `flag()` is a kill switch
+    # read from request paths, and it is documented never to raise.
+    return _build_states({})[key]
 
 
 def flag(key: str, env_default: bool) -> bool:

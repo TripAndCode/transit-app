@@ -283,3 +283,24 @@ def test_a_refresh_that_began_before_a_write_cannot_overwrite_it(monkeypatch):
     state = flags.get_flag_state(key)
     assert state.reason == "after-the-write", "a refresh that predates the write overwrote it"
     assert state.value is False
+
+
+def test_a_superseded_first_refresh_resolves_from_env_rather_than_raising(monkeypatch):
+    """A refresh discards its result when a write supersedes it. If that
+    happens to the very first refresh in a process, nothing has ever been
+    cached -- and `flag()` is documented never to raise, because it is read
+    from request paths as a kill switch."""
+    monkeypatch.setattr(flags, "_cache", {})
+    monkeypatch.setattr(flags, "_committed_seq", 0)
+
+    def load_then_supersede():
+        # Stand in for an admin PATCH landing while this read is in flight.
+        flags.invalidate()
+        return {}
+
+    monkeypatch.setattr(flags, "_load_overrides", load_then_supersede)
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+
+    state = flags.get_flag_state("weather_ingest_enabled")
+    assert state.value is True
+    assert state.source == "env"
