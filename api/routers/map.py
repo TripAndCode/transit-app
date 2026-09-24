@@ -393,7 +393,7 @@ async def live_trip_progress(
     route_code = active_result.result_rows[0][0]
 
     progress_result = await ch.query(
-        """
+        f"""
         SELECT captured_at, file_name, winner.1 AS stop_sequence, winner.2 AS stop_id,
                winner.3 AS scheduled_time, winner.4 AS dep_delay
         FROM (
@@ -403,9 +403,10 @@ async def live_trip_progress(
                        toInt32(stop_sequence)
                    ) AS winner
             FROM updates
-            WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String}
+            WHERE agency_id = {{agency_id:UInt16}} AND trip_id = {{trip_id:String}}
               AND dep_delay IS NOT NULL
-              AND captured_at >= {latest_ts:DateTime64} - INTERVAL 6 HOUR
+              AND dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
+              AND captured_at >= {{latest_ts:DateTime64}} - INTERVAL 6 HOUR
             GROUP BY captured_at, file_name
         ) AS snapshots
         ORDER BY captured_at, file_name
