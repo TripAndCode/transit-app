@@ -273,7 +273,10 @@ ingest-weather:
 seed-agencies:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py seed_agencies $(if $(CSV),$(CSV),agencies.csv)
 
-# Idempotent: re-runnable, upserts on content_hash uniqueness.
+# Idempotent: re-runnable, upserts on content_hash uniqueness. Also the
+# re-index step after an embedding model or sentence-transformers major
+# change -- rows stamped with the old embedding_version are excluded from
+# Stage-2 search until this rebuilds them.
 build-rag-index:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py build_rag_index --all-agencies
 

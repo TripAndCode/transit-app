@@ -106,7 +106,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make check-aggs` | Detect stale aggregate tables |
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
-| `make build-rag-index` | Build the Ask RAG index for all agencies |
+| `make build-rag-index` | Build the Ask RAG index for all agencies (also the re-index after an embedder change) |
 | `make ask-eval` | CI gate: verify Ask builder coverage against the gold question set |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
