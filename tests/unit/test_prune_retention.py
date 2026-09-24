@@ -5,6 +5,8 @@ DB-free: these only build the DELETE text; `cmd_prune_pipeline_runs`/
 `cmd_prune_admin_audit` (not exercised here) open the real connection.
 """
 
+import pytest
+
 import gtfs_pipeline
 
 
@@ -42,3 +44,17 @@ def test_prune_admin_audit_subcommand_dispatches(monkeypatch):
     monkeypatch.setattr("sys.argv", ["gtfs_pipeline.py", "prune-admin-audit", "--days", "30"])
     gtfs_pipeline.main()
     assert called["days"] == 30
+
+
+def test_the_prune_builders_coerce_the_interval_they_interpolate():
+    """The day count reaches the SQL text by interpolation, not as a bind.
+
+    argparse coerces the CLI path, but these builders are importable and the
+    coercion is the only thing standing between a caller's value and a SQL
+    string. A non-numeric day count must not be able to reach the text at
+    all -- not be escaped, not be quoted, but fail.
+    """
+    for builder in (gtfs_pipeline.prune_pipeline_runs_sql, gtfs_pipeline.prune_admin_audit_sql):
+        assert "INTERVAL '7 days'" in builder("7"), "a numeric string is still a day count"
+        with pytest.raises(ValueError):
+            builder("1 days'; DROP TABLE admin_audit; --")

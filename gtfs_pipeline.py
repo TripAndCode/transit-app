@@ -629,14 +629,17 @@ def prune_pipeline_runs_sql(days: int) -> str:
 
     The interval is embedded as text rather than bound as a parameter,
     matching `cmd_prune_query_log`: asyncpg has no placeholder for an
-    INTERVAL literal, and `days` is already an `int()`-parsed CLI argument.
+    INTERVAL literal. `int()` here rather than trusting the annotation --
+    argparse coerces the CLI path, but this builder is importable and the
+    coercion is what makes the interpolation safe, so it belongs where the
+    string is built rather than one call site away.
     """
-    return f"DELETE FROM pipeline_runs WHERE started_at < now() - INTERVAL '{days} days'"
+    return f"DELETE FROM pipeline_runs WHERE started_at < now() - INTERVAL '{int(days)} days'"
 
 
 def prune_admin_audit_sql(days: int) -> str:
     """DELETE text for the `admin_audit` retention prune. See `prune_pipeline_runs_sql`."""
-    return f"DELETE FROM admin_audit WHERE at < now() - INTERVAL '{days} days'"
+    return f"DELETE FROM admin_audit WHERE at < now() - INTERVAL '{int(days)} days'"
 
 
 def cmd_prune_pipeline_runs(args):

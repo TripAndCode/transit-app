@@ -176,6 +176,11 @@ def parse_bound(value: str | None, *, end: bool) -> datetime | None:
             day_start = datetime.combine(d, time.min, tzinfo=_JST).astimezone(timezone.utc)
             if not end:
                 return day_start
+            # Inclusive, because the query compares `at <= $bound`. One
+            # microsecond is the smallest step `timestamptz` resolves, so this
+            # is the last instant of the day and nothing in it is missed --
+            # but the two have to move together: against a `<` the final
+            # microsecond would silently drop out of the range.
             return day_start + timedelta(days=1) - timedelta(microseconds=1)
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if dt.tzinfo is None:
