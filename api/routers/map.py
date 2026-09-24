@@ -41,6 +41,7 @@ from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import (
+    MAX_RANGE_DAYS,
     RangeCtx,
     TimeBand,
     build_agg_stop_filter,
@@ -52,6 +53,7 @@ from api.range import (
 )
 from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
 
@@ -200,6 +202,41 @@ async def _latest_route_observation(
     return _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
 
 
+# A poll can report several future stops for one trip. The lowest sequence in
+# the newest poll is the nearest reported stop and wins the final tie. Module
+# level (like `_HEATMAP_CLUSTER_PROJECTION_SQL` below) so its shape, including
+# the plausibility clamp, is unit-testable without ClickHouse. Clamped the
+# same way `pipeline.db.build_dedup_ch_sql` clamps every averaged surface
+# (see `MAX_PLAUSIBLE_DELAY_SEC`'s docstring) even though this endpoint reports
+# a single current value, not an average: a frozen feed can report the same
+# implausible reading either way -- map and aggregates must agree on
+# plausibility.
+_LIVE_DELAYS_DEDUP_SQL = f"""
+    SELECT trip_id, winner.1 AS route_code, winner.2 AS service_type,
+        winner.3 AS scheduled_time, winner.4 AS dep_delay,
+        winner.5 AS stop_id, winner.6 AS stop_sequence, captured_at
+    FROM (
+        SELECT u.trip_id AS trip_id,
+            argMax(
+                tuple(
+                    u.route_code, u.service_type, u.scheduled_time,
+                    u.dep_delay, u.stop_id, u.stop_sequence
+                ),
+                (u.captured_at, u.file_name, -toInt32(u.stop_sequence))
+            ) AS winner,
+            max(u.captured_at) AS captured_at
+        FROM updates AS u
+        WHERE u.agency_id = {{agency_id:UInt16}}
+          AND u.dep_delay IS NOT NULL
+          AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
+          AND u.captured_at >= {{latest_ts:DateTime64}} - INTERVAL 5 MINUTE
+        GROUP BY u.trip_id
+    ) AS grouped
+    ORDER BY trip_id
+    LIMIT {{limit:UInt32}}
+"""
+
+
 @router.get("/delays/live", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def live_delays(
@@ -214,32 +251,8 @@ async def live_delays(
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": []}
 
-    # A poll can report several future stops for one trip. The lowest sequence
-    # in the newest poll is the nearest reported stop and wins the final tie.
     rows_result = await ch.query(
-        """
-        SELECT trip_id, winner.1 AS route_code, winner.2 AS service_type,
-            winner.3 AS scheduled_time, winner.4 AS dep_delay,
-            winner.5 AS stop_id, winner.6 AS stop_sequence, captured_at
-        FROM (
-            SELECT u.trip_id AS trip_id,
-                argMax(
-                    tuple(
-                        u.route_code, u.service_type, u.scheduled_time,
-                        u.dep_delay, u.stop_id, u.stop_sequence
-                    ),
-                    (u.captured_at, u.file_name, -toInt32(u.stop_sequence))
-                ) AS winner,
-                max(u.captured_at) AS captured_at
-            FROM updates AS u
-            WHERE u.agency_id = {agency_id:UInt16}
-              AND u.dep_delay IS NOT NULL
-              AND u.captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE
-            GROUP BY u.trip_id
-        ) AS grouped
-        ORDER BY trip_id
-        LIMIT {limit:UInt32}
-        """,
+        _LIVE_DELAYS_DEDUP_SQL,
         parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit},
     )
     out_rows = []
@@ -685,6 +698,11 @@ async def today_route_summary(
 
 MAX_ROUTE_TRIPS = 400
 ROUTE_TRIPS_DATE_WINDOW_DAYS = 30
+# Total per-stop-row budget across the returned trips, independent of
+# MAX_ROUTE_TRIPS: a route whose trips each carry many stops could still ship
+# an unbounded number of stop rows -- and an unbounded polyline-drawing cost
+# on the frontend -- even while staying under the trip-count cap.
+MAX_ROUTE_TRIP_STOPS = 12000
 
 _CLOCK_RE = re.compile(r"^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$")
 
@@ -739,7 +757,8 @@ class RouteTripsResponse(BaseModel):
     time_band: TimeBand
     truncated: bool = Field(
         description=(
-            f"True when the route ran more than {MAX_ROUTE_TRIPS} trips that day and the "
+            f"True when the route ran more than {MAX_ROUTE_TRIPS} trips that day, or its "
+            f"kept trips together carry more than {MAX_ROUTE_TRIP_STOPS} stops, and the "
             "least-delayed tail was dropped."
         )
     )
@@ -787,6 +806,7 @@ def build_route_trips_sql(time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS) -> 
             FROM updates AS u
             WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
               AND u.dep_delay IS NOT NULL
+              AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
               AND toDate(u.captured_at, 'Asia/Tokyo') = {{target_date:Date}}{band_clause}
             GROUP BY u.trip_id, u.stop_sequence
         ),
@@ -811,6 +831,7 @@ def build_route_trips(
     # this only ever unpacks them by position.
     rows: Iterable[Sequence[Any]],
     limit: int = MAX_ROUTE_TRIPS,
+    stop_budget: int = MAX_ROUTE_TRIP_STOPS,
 ) -> tuple[list[RouteTripRow], bool]:
     """Group `build_route_trips_sql`'s rows into trips, worst-delayed first.
 
@@ -820,9 +841,20 @@ def build_route_trips(
     the drawing order of its polyline, so it is preserved as given rather than
     re-derived.
 
-    Returns the capped list and whether anything was dropped. The cap falls on
-    the least-delayed tail because the list is already promised worst-first, so
-    a truncated answer still leads with what the reader came for.
+    Two independent caps apply, in order: first ``limit`` trips (the existing
+    trip-count cap), then ``stop_budget`` total stop rows across whatever
+    trips that leaves. The stop budget walks the already worst-first-sorted
+    list and drops a trip in FULL, never mid-polyline, the moment including
+    it would cross the budget -- a route with many short trips could still
+    carry an unbounded number of stop rows under the trip-count cap alone.
+    The first trip is always kept even if its own stop count alone exceeds
+    the budget, so a legitimately huge single trip doesn't collapse the
+    response to empty.
+
+    Returns the capped list and whether either cap dropped anything. Both
+    caps fall on the least-delayed tail because the list is already promised
+    worst-first, so a truncated answer still leads with what the reader
+    came for.
     """
     per_trip: dict[str, dict] = defaultdict(lambda: {"clocks": [], "stops": []})
     for trip_id, stop_sequence, scheduled_time, dep_delay, stop_id, scheduled_sec in rows:
@@ -859,7 +891,20 @@ def build_route_trips(
     # trip_id breaks ties so the kept set matches the SQL's own ranking,
     # which orders by the same average and then by trip_id.
     trips.sort(key=lambda t: (t.avg_delay_sec is None, -(t.avg_delay_sec or 0), t.trip_id))
-    return trips[:limit], len(trips) > limit
+    trip_capped = trips[:limit]
+    trip_count_truncated = len(trips) > limit
+
+    total_stops = 0
+    stop_budget_truncated = False
+    stop_capped: list[RouteTripRow] = []
+    for trip in trip_capped:
+        if stop_capped and total_stops + len(trip.stops) > stop_budget:
+            stop_budget_truncated = True
+            break
+        total_stops += len(trip.stops)
+        stop_capped.append(trip)
+
+    return stop_capped, trip_count_truncated or stop_budget_truncated
 
 
 def attach_headsigns(trips: list[RouteTripRow], headsigns: dict[str, str | None]) -> None:
@@ -980,6 +1025,23 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
     }
 
 
+# argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
+# only one non-key column (dep_delay) is read off the winning row, so a single
+# argMax suffices. Module level (see `_LIVE_DELAYS_DEDUP_SQL` above) so its
+# shape, including the plausibility clamp, is unit-testable without
+# ClickHouse.
+_ROUTE_STOP_PROFILE_DEDUP_SQL = f"""
+    SELECT u.trip_id, u.stop_sequence,
+        argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+    FROM updates AS u
+    WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
+      AND u.dep_delay IS NOT NULL
+      AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
+      AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({{latest_ts:DateTime64}}, 'Asia/Tokyo')
+    GROUP BY u.trip_id, u.stop_sequence
+"""
+
+
 @router.get("/today/route/{route_code}/stop-profile", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def route_stop_profile(
@@ -1003,19 +1065,8 @@ async def route_stop_profile(
     if latest_ts is None:
         return {"date": None, "stops": []}
 
-    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
-    # only one non-key column (dep_delay) is read off the winning row, so a
-    # single argMax suffices.
     dedup_result = await ch.query(
-        """
-        SELECT u.trip_id, u.stop_sequence,
-            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
-        FROM updates AS u
-        WHERE u.agency_id = {agency_id:UInt16} AND u.route_code = {route:String}
-          AND u.dep_delay IS NOT NULL
-          AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({latest_ts:DateTime64}, 'Asia/Tokyo')
-        GROUP BY u.trip_id, u.stop_sequence
-        """,
+        _ROUTE_STOP_PROFILE_DEDUP_SQL,
         parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
     )
     dedup_rows = list(dedup_result.result_rows)
@@ -1327,6 +1378,20 @@ class DelayTimelineResponse(BaseModel):
     frames: list[TimelineFrame]
 
 
+def timeline_day_in_range(day: CalendarDate, today: CalendarDate) -> bool:
+    """True if ``day`` is no later than ``today`` and no more than
+    :data:`api.range.MAX_RANGE_DAYS` before it.
+
+    ``compute_delay_timeline`` is ``@async_lru_cache``d with a small
+    ``maxsize=16``, keyed by ``(agency_id, day, step_minutes)`` (see
+    ``pipeline.reports.timeline``). Without this bound, an anonymous,
+    reachable caller could iterate arbitrary calendar dates to evict every
+    real entry from that cache -- the same range window every other
+    analytical endpoint already enforces via :func:`api.range.clamp_range_ctx`.
+    """
+    return today - timedelta(days=MAX_RANGE_DAYS) <= day <= today
+
+
 @router.get("/delays/timeline", response_model=DelayTimelineResponse)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def delay_timeline(
@@ -1342,7 +1407,9 @@ async def delay_timeline(
     Backs the map's day-playback rail. ``date`` omitted resolves to the
     agency's latest observed JST day, so a caller with no prior knowledge of
     the agency's coverage still gets a day with data in it rather than an
-    empty rail for today-so-far.
+    empty rail for today-so-far. An explicit ``date`` outside
+    :func:`timeline_day_in_range`'s window is a 422, not a silently-served
+    (and cache-evicting) query -- see that function's docstring.
 
     Read-only, and served from ClickHouse `updates` joined against the static
     schedule for positions — not from the `agg_*` tables, whose finest
@@ -1360,6 +1427,12 @@ async def delay_timeline(
         if parsed is None:
             raise HTTPException(status_code=400, detail="date must be an ISO-8601 calendar date (YYYY-MM-DD)")
         day = parsed
+
+    if not timeline_day_in_range(day, jst_today()):
+        raise HTTPException(
+            status_code=422,
+            detail=f"date must be within the last {MAX_RANGE_DAYS} days and not in the future",
+        )
 
     frames = await compute_delay_timeline(agency_id, day, step, conn, ch)
     return DelayTimelineResponse(date=day.isoformat(), step_minutes=step, frames=frames)
