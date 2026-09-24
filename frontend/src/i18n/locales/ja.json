@@ -1396,7 +1396,6 @@
         "bypass": "バイパス"
       },
       "promote_action": "昇格",
-      "promote_confirm": "この質問の解釈をRAGインデックスに昇格しますか?",
       "promote_success": "昇格しました。",
       "promote_already": "すでに昇格済みです。",
       "promote_not_eligible": "昇格対象ではありません。",
@@ -1423,7 +1422,9 @@
         "not_run": "未実行",
         "score_label": "スコア",
         "generated_at_label": "時点"
-      }
+      },
+      "table_label": "Ask クエリログ",
+      "numeric_guard": "数値ガード"
     }
   },
   "copilot": {

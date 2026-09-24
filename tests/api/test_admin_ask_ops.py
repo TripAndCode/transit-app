@@ -1,19 +1,17 @@
 """Tests for GET/POST /api/admin/ask/* — admin Ask-ops query log, funnel,
 promote-to-intent-cache, and eval-result endpoints.
-
-DB-backed (transit_test via conftest's apply_schema); not runnable in an
-environment without Postgres/ClickHouse access. See CLAUDE.md's DB safety
-section — these were written for correctness but not executed there.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.security import token_hash
 from tests.conftest import _test_pool
 
 _EMBED_DIM = 384  # matches rag_chunks.embedding vector(384)
@@ -34,7 +32,7 @@ class _UnavailableEmbedder:
         raise RuntimeError("unavailable")
 
 
-async def _seed_admin_session(conn) -> str:
+async def _seed_admin_session(conn) -> tuple[int, str]:
     uid = (
         await conn.fetchrow(
             "INSERT INTO users (email, role) VALUES ($1, 'admin') RETURNING user_id",
@@ -43,8 +41,8 @@ async def _seed_admin_session(conn) -> str:
     )["user_id"]
     sid = f"sid-askops-{uid}"
     await conn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at) VALUES ($1, $2, $3)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+        token_hash(sid),
         uid,
         datetime.now(timezone.utc) + timedelta(days=1),
     )
@@ -61,7 +59,9 @@ async def ask_ops_client(apply_schema, monkeypatch):
     pool = await _test_pool()
     app.state.pool = pool
     async with pool.acquire() as conn:
-        await conn.execute("TRUNCATE agencies, sessions, users, ask_query_log, ask_intent_cache, rag_chunks CASCADE")
+        await conn.execute(
+            "TRUNCATE agencies, sessions, users, ask_query_log, ask_intent_cache, rag_chunks, admin_audit CASCADE"
+        )
         admin_uid, admin_sid = await _seed_admin_session(conn)
         agency_id = (
             await conn.fetchrow(
@@ -298,6 +298,14 @@ async def test_promote_success_marks_promoted_and_inserts_chunk(ask_ops_client):
         chunk = await conn.fetchrow("SELECT content FROM rag_chunks WHERE chunk_id='cache_eeeeeeeeeeeeeeee'")
         assert chunk is not None
         assert chunk["content"] == "遅延ランキング"
+        audit = await conn.fetchrow(
+            "SELECT actor_id, target_type, target_id, after FROM admin_audit WHERE action='ask.promote_intent_cache'"
+        )
+        assert audit is not None
+        assert audit["actor_id"] == _uid
+        assert audit["target_type"] == "intent_cache"
+        assert audit["target_id"] == "eeeeeeeeeeeeeeee"
+        assert json.loads(audit["after"]) == {"agency_id": agency_id, "query_log_id": log_id}
 
 
 @pytest.mark.asyncio

@@ -245,20 +245,26 @@ async def promote_query_log(
     if not embedder.available:
         raise HTTPException(503, "embedder unavailable — cannot promote right now")
 
-    ok = await promote_signature(conn, log_row["signature_hash"], log_row["agency_id"], embedder)
+    # One transaction over the chunk upsert, the promoted_at stamp and the
+    # audit entry: a promotion that committed without its audit row, or with
+    # only half the cache/index pair written, is the state this must not
+    # leave behind. It spans the embedding call, which is off the event loop
+    # but still inside the transaction — bounded by one short question.
+    async with conn.transaction():
+        ok = await promote_signature(conn, log_row["signature_hash"], log_row["agency_id"], embedder)
+        if ok:
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action="ask.promote_intent_cache",
+                target_type="intent_cache",
+                target_id=log_row["signature_hash"],
+                after={"agency_id": log_row["agency_id"], "query_log_id": body.query_log_id},
+            )
     if not ok:
         cache_row = await intent_cache.lookup(conn, log_row["signature_hash"], log_row["agency_id"])
         reason = "already_promoted" if cache_row and cache_row["promoted_at"] is not None else "not_eligible"
         return PromoteResponse(promoted=False, reason=reason)
-
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
-        action="ask.promote_intent_cache",
-        target_type="intent_cache",
-        target_id=log_row["signature_hash"],
-        after={"agency_id": log_row["agency_id"], "query_log_id": body.query_log_id},
-    )
     return PromoteResponse(promoted=True, chunk_id=f"cache_{log_row['signature_hash']}")
 
 

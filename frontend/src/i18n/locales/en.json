@@ -1396,7 +1396,6 @@
         "bypass": "Bypassed"
       },
       "promote_action": "Promote",
-      "promote_confirm": "Promote this question's interpretation into the RAG index?",
       "promote_success": "Promoted.",
       "promote_already": "Already promoted.",
       "promote_not_eligible": "Not eligible for promotion.",
@@ -1423,7 +1422,9 @@
         "not_run": "Not run yet",
         "score_label": "Score",
         "generated_at_label": "As of"
-      }
+      },
+      "table_label": "Ask query log",
+      "numeric_guard": "Numeric guard"
     }
   },
   "copilot": {

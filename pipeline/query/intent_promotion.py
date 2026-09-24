@@ -16,6 +16,7 @@ nearest-neighbor search can find promoted questions without modification.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -70,7 +71,9 @@ async def _promote_one(
 
     content = candidate["last_question"]
     chunk_id = f"cache_{candidate['signature_hash']}"
-    vec = embedder.embed(content, mode="passage")
+    # Off the event loop: `embed` is a synchronous model call, and this runs
+    # inside a request handler as well as in the batch job.
+    vec = await asyncio.to_thread(embedder.embed, content, mode="passage")
     new_hash = _content_hash(content)
 
     existing = await conn.fetchrow(

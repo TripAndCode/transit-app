@@ -5,30 +5,50 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
+import { formatDateTime } from "../../utils/format";
+import type { useAdminAskEval, useAdminAskFunnel, useAdminAskQueries } from "../../api/admin";
 import { AdminAskOpsPage } from "./AdminAskOpsPage";
 
 const promoteMutateAsync = vi.fn().mockResolvedValue({ promoted: true, reason: null, chunk_id: "cache_abc" });
 
-let queriesReturn: any;
-let funnelReturn: any;
-let evalReturn: any;
+type QueriesReturn = ReturnType<typeof useAdminAskQueries>;
+type FunnelReturn = ReturnType<typeof useAdminAskFunnel>;
+type EvalReturn = ReturnType<typeof useAdminAskEval>;
+
+/** Only the fields the page reads; the rest of react-query's result object
+ *  is irrelevant to these tests, so the mocks are partial. */
+let queriesReturn: Partial<QueriesReturn>;
+let funnelReturn: Partial<FunnelReturn>;
+let evalReturn: Partial<EvalReturn>;
+let lastQueriesArgs: Parameters<typeof useAdminAskQueries>[0] | undefined;
+let lastFunnelArgs: Parameters<typeof useAdminAskFunnel>[0] | undefined;
 
 vi.mock("../../api/admin", () => ({
-  useAdminAskQueries: () => queriesReturn,
-  useAdminAskFunnel: () => funnelReturn,
+  useAdminAskQueries: (params: Parameters<typeof useAdminAskQueries>[0]) => {
+    lastQueriesArgs = params;
+    return queriesReturn;
+  },
+  useAdminAskFunnel: (params: Parameters<typeof useAdminAskFunnel>[0]) => {
+    lastFunnelArgs = params;
+    return funnelReturn;
+  },
   useAdminAskEval: () => evalReturn,
   usePromoteAskQuery: () => ({ mutateAsync: promoteMutateAsync, isPending: false }),
 }));
 
-function wrap(ui: React.ReactElement) {
+function wrapAt(ui: React.ReactElement, path: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={qc}>
-        <MemoryRouter>{ui}</MemoryRouter>
+        <MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>
   );
+}
+
+function wrap(ui: React.ReactElement) {
+  return wrapAt(ui, "/admin/ask");
 }
 
 const baseRow = {
@@ -120,6 +140,41 @@ describe("AdminAskOpsPage", () => {
     evalReturn = { data: { generated_at: "2026-09-14T00:00:00Z", score: 0.87 }, isLoading: false, error: null };
     wrap(<AdminAskOpsPage />);
     expect(screen.getByText(/0.87/)).toBeTruthy();
+  });
+
+  it("formats created_at rather than printing the raw ISO string", () => {
+    wrap(<AdminAskOpsPage />);
+    expect(screen.queryByText(baseRow.created_at)).toBeNull();
+    expect(screen.getByText(formatDateTime(baseRow.created_at))).toBeTruthy();
+  });
+
+  it("shows a cache_outcome this build has no label for verbatim, not as a raw key", () => {
+    queriesReturn = {
+      data: { rows: [{ ...baseRow, cache_outcome: "revalidated" }], next_cursor: null },
+      isLoading: false,
+      error: null,
+    };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.getByText("revalidated")).toBeTruthy();
+    expect(screen.queryByText(/admin\.ask_ops\.cache_outcome/)).toBeNull();
+  });
+
+  it("reads the route filter from the URL so a filtered view is linkable", () => {
+    wrapAt(<AdminAskOpsPage />, "/admin/ask?route=rag");
+    const select = screen.getByLabelText(i18n.t("admin.ask_ops.col.route")) as HTMLSelectElement;
+    expect(select.value).toBe("rag");
+  });
+
+  it("passes the URL's date range to both the query list and the funnel", () => {
+    wrapAt(<AdminAskOpsPage />, "/admin/ask?from=2026-09-01&to=2026-09-07");
+    expect(lastQueriesArgs).toMatchObject({ from: "2026-09-01", to: "2026-09-07" });
+    expect(lastFunnelArgs).toMatchObject({ from: "2026-09-01", to: "2026-09-07" });
+  });
+
+  it("leaves the funnel unfiltered by route so it still shows every stage", () => {
+    wrapAt(<AdminAskOpsPage />, "/admin/ask?route=rag");
+    expect(lastQueriesArgs).toMatchObject({ route: "rag" });
+    expect("route" in (lastFunnelArgs ?? {})).toBe(false);
   });
 
   it("links the kill-switch summary to /admin/flags", () => {

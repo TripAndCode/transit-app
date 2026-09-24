@@ -652,7 +652,7 @@ export function usePatchFeatureFlag() {
 export type AskRoute = "rules" | "nn" | "rag" | "no_history";
 type AskStatus = "ok" | "error";
 
-type AskQueryLogRow = {
+export type AskQueryLogRow = {
   id: number;
   agency_id: number;
   agency_name: string;
