@@ -1,8 +1,14 @@
 """PreToolUse(Bash) hook body: block writes aimed at either dev store.
 
-Covers dev Postgres (:5433) and dev ClickHouse (:8123). Both hold real
-production data and are read-only for agents; the throwaway pair on :5544/:8124
-is where writes belong.
+Covers dev Postgres and dev ClickHouse. Both hold real production data and are
+read-only for agents; the throwaway pair on :5544/:8124 is where writes belong.
+
+Two Postgres ports, not one. `compose.yml` publishes :5433, but the container
+actually holding the dev dataset can be published elsewhere -- :5543 today --
+and the guard has to name every port the data is reachable on, not the one the
+compose file happens to declare. A port listed here that turns out to hold
+someone else's database is harmless: refusing to write to it is right either
+way. A port left out is the dataset.
 
 Reads the tool input JSON on stdin; exit 2 = block the tool call, 0 = allow.
 
@@ -28,7 +34,7 @@ import re
 import shlex
 import sys
 
-DEV_PORTS = ("5433", "8123")
+DEV_PORTS = ("5433", "5543", "8123")
 DEV_SERVICES = {"db", "clickhouse"}
 # Pinned container names, from before compose.yml dropped `container_name`.
 # Still carried by any container created back then, and both are live today.
@@ -118,7 +124,7 @@ def main() -> int:
         return 0
     if should_block(cmd):
         sys.stderr.write(
-            "BLOCKED: write against a dev store (Postgres :5433 / ClickHouse :8123) — "
+            "BLOCKED: write against a dev store (Postgres :5433/:5543 / ClickHouse :8123) — "
             "both hold real production data and are read-only. "
             "Use the throwaway :5544 / :8124 pair. See CLAUDE.md.\n"
         )

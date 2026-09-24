@@ -16,9 +16,13 @@ the task needs them.
 
 ## Database safety
 
-- Dev Postgres `localhost:5433/transit` and dev ClickHouse (`docker compose exec clickhouse`) contain real
+- Dev Postgres and dev ClickHouse (`docker compose exec clickhouse`) contain real
   data and are read-only for agents. SELECT/EXPLAIN is allowed; never run writes,
-  DDL, resets, down migrations, or destructive Make targets against them.
+  DDL, resets, down migrations, or destructive Make targets against them. Dev
+  Postgres is whichever port the live container publishes — `compose.yml` declares
+  `:5433`, but the instance holding the data can be published elsewhere, so read
+  `DATABASE_URL` rather than assuming. `.claude/hooks/guard_dev_db.py`'s
+  `DEV_PORTS` is the enforced list and must name every such port.
 - Tests use throwaway Postgres `:5544/transit_test` and ClickHouse `:8124`. Before a
   DB test, load `transit-app-gotchas` for the complete environment block and image
   requirements.

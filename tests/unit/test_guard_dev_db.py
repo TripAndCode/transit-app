@@ -28,6 +28,13 @@ BLOCKED = [
     pytest.param('psql -h localhost -p 5433 -U transit -c "DELETE FROM updates"', id="separated-host-port"),
     pytest.param('psql -h 127.0.0.1 -p 5433 -U transit -c "DELETE FROM updates"', id="loopback-ip"),
     pytest.param('PGPORT=5433 PGHOST=localhost psql -U transit -c "DELETE FROM updates"', id="env-port"),
+    # The dev dataset is not always on the port compose.yml declares -- the
+    # live container publishes :5543 -- and the guard has to cover the port
+    # the data is actually reachable on, not the documented one.
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5543/transit -c "DROP TABLE updates"', id="alt-dev-port-url"
+    ),
+    pytest.param('psql -h localhost -p 5543 -U transit -c "DELETE FROM updates"', id="alt-dev-port-separated"),
     pytest.param('docker compose exec db psql -U transit -c "TRUNCATE updates"', id="compose-exec"),
     pytest.param('docker compose run --rm db psql -h db -U transit -c "DROP TABLE updates"', id="compose-run"),
     pytest.param(
@@ -71,6 +78,10 @@ ALLOWED = [
         'psql postgresql://transit:transit@localhost:5433/transit -c "SELECT count(*) FROM updates"', id="dev-read"
     ),
     pytest.param("docker compose exec db psql -U transit -c 'EXPLAIN SELECT 1'", id="dev-explain"),
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5543/transit -c "SELECT count(*) FROM agencies"',
+        id="alt-dev-port-read",
+    ),
     pytest.param('psql postgresql://transit:transit@localhost:5544/transit_test -c "DROP TABLE updates"', id="test-db"),
     pytest.param('psql -h localhost -p 5544 -U transit -c "DELETE FROM updates"', id="test-db-separated"),
     pytest.param("ls -la", id="unrelated"),
