@@ -36,6 +36,16 @@ const STATUS_COLORS: Record<BoardCollector["status"], string> = {
  *  The timeline's axis is a JST civil day because the pipeline buckets on one
  *  and the server returns one; deriving it from the viewer's own timezone
  *  would slide every bar for an operator abroad. */
+/** Move focus to the element when it appears, and only then.
+ *
+ *  Declared at module scope so its identity is stable: React re-invokes a ref
+ *  callback whenever the callback itself changes, so an inline arrow would
+ *  re-focus on every render — and the board re-renders on every poll, which
+ *  would drag focus back from wherever the operator had moved it. */
+function focusOnMount(el: HTMLButtonElement | null): void {
+  el?.focus();
+}
+
 function jstDayStart(now: Date): Date {
   const jstNow = new Date(now.getTime() + JST_OFFSET_MS);
   return new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate()) - JST_OFFSET_MS);
@@ -186,13 +196,7 @@ export function AdminBoardPage() {
           <div style={{ display: "flex", gap: 8 }}>
             <button
               type="button"
-              // Focused on open so the keyboard path does not need a trap:
-              // this is a non-modal dialog with two buttons, and Tab reaches
-              // the other one. `autoFocus` rather than a ref callback: an
-              // inline callback is re-invoked on every render, and the board
-              // re-renders on every poll, which would drag focus back here
-              // from whatever the operator had moved to.
-              autoFocus
+              ref={focusOnMount}
               onClick={() => {
                 setConfirming(false);
                 trigger.mutate({ kind: "ingest" });
