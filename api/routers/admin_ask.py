@@ -260,6 +260,7 @@ async def promote_query_log(
                 target_type="intent_cache",
                 target_id=log_row["signature_hash"],
                 after={"agency_id": log_row["agency_id"], "query_log_id": body.query_log_id},
+                ip=request.client.host if request.client else None,
             )
     if not ok:
         cache_row = await intent_cache.lookup(conn, log_row["signature_hash"], log_row["agency_id"])

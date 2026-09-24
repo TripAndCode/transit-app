@@ -58,10 +58,16 @@ def test_migrate_down_and_up(pg_conn):
     rollback deterministic regardless of how many migrations exist
     above it; the unconditional migrate_up in `finally` ensures a clean
     schema even if the assertions fail.
+
+    `force_destructive=True` because the range spans every `-- DESTRUCTIVE`
+    down migration there is, and this database is thrown away between runs --
+    which is the case that flag exists for. Without it the gate refuses the
+    whole rollback, correctly: on anything but a disposable database, losing
+    what 0053 and 0056 discard is what it is there to prevent.
     """
     conn = psycopg2.connect(DATABASE_URL)
     try:
-        migrate_down("0002", conn)  # roll back everything above 0002
+        migrate_down("0002", conn, force_destructive=True)  # roll back everything above 0002
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='api_keys'")
             assert cur.fetchone() is None, "api_keys (0003) should be gone after rollback"
