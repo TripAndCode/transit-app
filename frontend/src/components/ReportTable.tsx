@@ -3,7 +3,7 @@ import type { TFunction } from "i18next";
 import { delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
-import { th, td } from "./tableStyles";
+import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
 
 const ROWS_CAP = 200;
@@ -181,7 +181,7 @@ export function ReportTable({ reportType, rows }: Props) {
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <table style={SHARED_TABLE}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
             <th style={th({ width: 40 })}>#</th>

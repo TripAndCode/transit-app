@@ -482,6 +482,30 @@ summary:focus-visible,
   box-shadow: var(--el-2);
   pointer-events: none;
 }
+/* `ThreadSidebar`'s conversation context menu (components/ThreadSidebar.tsx).
+   The highlight is a CSS state so the keyboard-focused item and the hovered
+   item look alike -- a JS hover handler can only ever light up the mouse's
+   item, leaving arrow-key navigation with no visible position. */
+.context-menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 7px var(--space-4);
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background var(--transition);
+}
+.context-menu__item--danger {
+  color: var(--color-danger);
+}
+.context-menu__item:hover,
+.context-menu__item:focus-visible {
+  background: var(--bg-soft);
+}
+
 /* `ExportMenu` (components/ExportMenu.tsx). A plain dropdown anchored to its
    trigger -- there is exactly one open at a time per page, so it needs no
    portal (unlike `Tooltip`, which can sit inside a clipping map overlay). */

@@ -34,10 +34,10 @@
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
 .focus-aside strong { font-size: 30px; color: var(--color-danger); }
 .focus-chart { width: 100%; height: 300px; min-height: 230px; }
+/* Table and cell styling come from `components/tableStyles.ts`, which every
+   table in the app shares; this class supplies only the horizontal scroll
+   these two need on a narrow viewport. */
 .focus-table-wrap { overflow-x: auto; }
-.focus-table { border-collapse: collapse; width: 100%; font-size: 14px; }
-.focus-table th, .focus-table td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border-soft); }
-.focus-table th { font-weight: 500; color: var(--text-secondary); }
 .focus-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border-subtle); }
 .focus-tabs button { background: none; color: var(--text-primary); border: 0; padding: 12px 0; border-bottom: 3px solid transparent; }
 .focus-tabs button[aria-pressed="true"], .focus-tabs button[aria-selected="true"] { border-color: var(--accent); font-weight: 700; }

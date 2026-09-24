@@ -66,7 +66,7 @@ describe("AdminFlagsPage", () => {
 
   it("renders one row per registered flag", () => {
     wrap();
-    const table = within(screen.getByRole("table"));
+    const table = within(screen.getByRole("grid"));
     expect(table.getAllByRole("row")).toHaveLength(3); // header + 2 flags
   });
 

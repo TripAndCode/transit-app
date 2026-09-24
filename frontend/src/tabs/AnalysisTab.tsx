@@ -28,7 +28,7 @@ import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
-import { th, td } from "../components/tableStyles";
+import { SHARED_TABLE, th, td } from "../components/tableStyles";
 import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
@@ -299,7 +299,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <table style={SHARED_TABLE}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
             <th style={th({ width: 40 })}>#</th>

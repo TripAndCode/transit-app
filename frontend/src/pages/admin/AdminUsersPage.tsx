@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { Link, Outlet, useNavigate, useSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,6 +15,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Z_INDEX } from "../../styles/zIndex";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
+import { Modal } from "../../components/Modal";
 import { InviteDialog } from "./InviteDialog";
 import { pageItems } from "./pageItems";
 
@@ -184,6 +185,9 @@ export function AdminUsersPage() {
     setSelected(new Set());
   }
 
+  const [bulkDeleteIds, setBulkDeleteIds] = useState<number[] | null>(null);
+  const bulkDeleteTitleId = useId();
+
   const [undo, setUndo] = useState<{ message: string; ids: number[]; inverse: UserPatchBody } | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -257,12 +261,20 @@ export function AdminUsersPage() {
     setUndo(null);
   }
 
-  async function handleBulkDelete(ids: number[]) {
-    for (const uid of ids.filter(isSelectable)) {
-      const row = rows.find((u) => u.user_id === uid);
-      if (!row) continue;
-      if (!confirm(t("admin.users.confirm_delete", { email: row.email }))) continue;
-      patch.reset();
+  // One dialog for the whole batch, naming every row it will anonymize. The
+  // per-row `confirm()` this replaces asked once per id, so deleting ten
+  // users meant answering ten identical prompts -- which trains an operator
+  // to dismiss the eleventh without reading it.
+  function requestBulkDelete(ids: number[]) {
+    const targets = ids.filter(isSelectable);
+    if (targets.length > 0) setBulkDeleteIds(targets);
+  }
+
+  async function confirmBulkDelete() {
+    const ids = bulkDeleteIds ?? [];
+    setBulkDeleteIds(null);
+    patch.reset();
+    for (const uid of ids) {
       await del.mutateAsync(uid);
     }
     setSelected(new Set());
@@ -501,6 +513,10 @@ export function AdminUsersPage() {
         onSelectionChange={(next) => setSelected(new Set([...next].map(Number)))}
         onOpen={(u) => navigate(`/admin/users/${u.user_id}`, { state: { listSearch: searchParams.toString() } })}
         onRowKeyDown={onRowKeyDown}
+        extraShortcuts={[
+          { keys: "a", description: t("admin.users.shortcut.approve") },
+          { keys: "/", description: t("admin.users.shortcut.search") },
+        ]}
         savedViews={savedViewChips}
         activeView={activeView}
         onSelectView={(id) => selectView(id as SavedView)}
@@ -587,7 +603,7 @@ export function AdminUsersPage() {
             <option value="admin">{t("account.role.admin")}</option>
             <option value="user">{t("account.role.user")}</option>
           </select>
-          <AdminButton variant="danger" disabled={bulkBusy} onClick={() => handleBulkDelete([...selected])}>
+          <AdminButton variant="danger" disabled={bulkBusy} onClick={() => requestBulkDelete([...selected])}>
             {t("admin.users.action.delete")}
           </AdminButton>
           <AdminButton variant="secondary" onClick={() => setSelected(new Set())}>
@@ -596,8 +612,10 @@ export function AdminUsersPage() {
         </div>
       )}
       {undo && (
+        // The live region is the message alone. With `role="status"` on the
+        // whole toast, the Undo button became part of the announcement and
+        // its label was read as if it were more of the message.
         <div
-          role="status"
           style={{
             position: "fixed",
             left: 24,
@@ -616,7 +634,7 @@ export function AdminUsersPage() {
             boxShadow: "0 4px 16px rgba(0,0,0,0.16)",
           }}
         >
-          <span>{undo.message}</span>
+          <span role="status">{undo.message}</span>
           <button
             type="button"
             onClick={handleUndo}
@@ -626,6 +644,38 @@ export function AdminUsersPage() {
           </button>
         </div>
       )}
+      <Modal
+        open={bulkDeleteIds !== null}
+        onClose={() => setBulkDeleteIds(null)}
+        labelledBy={bulkDeleteTitleId}
+        style={{
+          width: "min(460px, calc(100vw - 32px))",
+          padding: 20,
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius)",
+          boxShadow: "var(--el-2)",
+        }}
+      >
+        <h2 id={bulkDeleteTitleId} style={{ margin: "0 0 8px", fontSize: 16 }}>
+          {t("admin.users.bulk.delete_title")}
+        </h2>
+        <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--text-secondary)" }}>
+          {t("admin.users.bulk.delete_body", { count: bulkDeleteIds?.length ?? 0 })}
+        </p>
+        <ul style={{ margin: "0 0 16px", paddingLeft: 18, fontSize: 13, maxHeight: 200, overflowY: "auto" }}>
+          {(bulkDeleteIds ?? []).map((uid) => (
+            <li key={uid}>{rows.find((u) => u.user_id === uid)?.email ?? uid}</li>
+          ))}
+        </ul>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <AdminButton variant="secondary" onClick={() => setBulkDeleteIds(null)}>
+            {t("common.cancel")}
+          </AdminButton>
+          <AdminButton variant="danger" onClick={() => void confirmBulkDelete()}>
+            {t("admin.users.action.delete")}
+          </AdminButton>
+        </div>
+      </Modal>
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
       <Outlet />
     </div>

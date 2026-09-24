@@ -1069,7 +1069,13 @@
           "suspended": "{{count}} 件を停止しました",
           "promoted": "{{count}} 件を管理者にしました",
           "demoted": "{{count}} 件を一般ユーザーにしました"
-        }
+        },
+        "delete_title": "選択したユーザーを削除しますか？",
+        "delete_body": "{{count}} 件のユーザーを匿名化します。元に戻せません。"
+      },
+      "shortcut": {
+        "approve": "AI利用を承認",
+        "search": "検索へ移動"
       }
     },
     "user_detail": {
@@ -1316,7 +1322,15 @@
       "saved_views": "保存された表示",
       "empty": "該当する行がありません。",
       "select_all": "すべて選択",
-      "select_row": "{{label}} を選択"
+      "select_row": "{{label}} を選択",
+      "shortcuts": {
+        "trigger": "ショートカット",
+        "title": "キーボードショートカット",
+        "next": "次の行へ",
+        "prev": "前の行へ",
+        "select": "選択を切り替え",
+        "open": "行を開く"
+      }
     },
     "board": {
       "title": "管制盤",
