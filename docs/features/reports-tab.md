@@ -12,7 +12,7 @@ plus a link out to the full Analysis tab for deeper reports.
   `/agencies/:agencyId/reports/:reportType`, which redirects to the Analysis
   tab (see `docs/features/analysis-tab.md`) — only the bare `/reports` URL
   (no `:reportType`) renders this tab.
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx`'s
+- Sidebar nav link: `frontend/src/components/sidebarNavItems.ts`'s
   `SIDEBAR_NAV_ITEMS` (`reports` entry, labeled from the `design` i18n
   namespace's `reports` key — "Reports" / "レポート").
 - Top-level component: `frontend/src/tabs/ReportsHomeTab.tsx` — owns which
