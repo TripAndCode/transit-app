@@ -115,6 +115,12 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   installed.
 - A systemd timer invokes a single-flight `claude -p "/vps-loop-run"` wrapper; the command file owns
   orchestration. `NEXT_TASK.md` is local/untracked and missing or empty means no-op.
+  Whether the loop is meant to be running at all is declared by the
+  `VPS_LOOP_ENABLED` repository variable, which gates
+  `vps-heartbeat-watchdog.yml`; enabling or disabling the timer on the host
+  without also setting it leaves the watchdog either silently unarmed or
+  alerting about deliberate silence. `vps-heartbeat-watchdog.yml`'s header
+  owns the rationale and the exact commands.
   The wrapper is tracked at `deploy/vps/claude-loop.sh` and deployed
   to `/root/claude-loop.sh` on the VPS (only that deployed copy, plus the
   `deploy/systemd/claude-loop.{service,timer}` units, are VPS-local
