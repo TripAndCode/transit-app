@@ -51,6 +51,7 @@ class Embedder:
                 "Embedder unavailable (model=%s): %s — Stage 2 router will fall through to LLM",
                 self.model_id,
                 exc.__class__.__name__,
+                exc_info=True,
             )
 
     def embed(self, text: str, *, mode: Literal["query", "passage"]) -> list[float]:
