@@ -1300,6 +1300,8 @@
       "confirm": "Save",
       "cancel": "Cancel",
       "load_error": "Couldn't load feature flags.",
+      "clear_override": "Clear override",
+      "clear_error": "Couldn't clear the override.",
       "labels": {
         "askRouterEnabled": "Ask: rules router",
         "askFollowupEnabled": "Ask: LLM follow-up",

@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 
-from pipeline.flags import flag
+from pipeline.flags import aflag, flag
 from pipeline.query.chat import _completion_with_key
 from pipeline.query.copilot_templates import (
     NO_SIGNAL_TEMPLATE_ID,
@@ -37,6 +37,18 @@ def is_enabled() -> bool:
     to be opted into per deployment rather than shipped hot.
     """
     return flag("copilot_insight_enabled", False)
+
+
+async def ais_enabled() -> bool:
+    """:func:`is_enabled` for a caller on the event loop.
+
+    The synchronous read never blocks on Postgres once anything is cached,
+    but it also declines to perform a refresh that `invalidate()` has marked
+    owed -- it leaves that to an async reader. A handler that only ever calls
+    the sync form is therefore the reader that never arrives, and an operator
+    who just cleared or set this switch keeps being served the old value.
+    """
+    return await aflag("copilot_insight_enabled")
 
 
 def _get_client():

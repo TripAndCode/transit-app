@@ -32,6 +32,12 @@ _log = logging.getLogger(__name__)
 _SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
 _MAX_COLLECTOR_PAYLOAD = 10 * 1024 * 1024
 
+# How long a push waits for another push or analyze() run to release this
+# agency's lock before giving up and answering 409, same as an instant miss
+# used to. Well under the collector's own re-poll interval (300s), so a push
+# that still times out and gets retried costs at most one extra poll cycle.
+COLLECTOR_LOCK_WAIT_SECONDS = 20
+
 
 def _check_secret(request: Request) -> None:
     expected = os.environ.get("CRON_SECRET")
@@ -57,7 +63,7 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
 
     from pipeline.clickhouse import get_client
     from pipeline.ingest import ingest_live_payload
-    from pipeline.locks import try_lock_agency_ingest
+    from pipeline.locks import lock_agency_ingest_or_timeout
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -75,16 +81,26 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
             )
             if cur.fetchone() is None:
                 raise ValueError(f"Unknown or deleted agency_id={agency_id}")
-        if not try_lock_agency_ingest(conn, agency_id):
-            raise HTTPException(status_code=409, detail="A data ingest is already in progress for this agency")
+        # Off before the lock attempt: lock_agency_ingest_or_timeout's `SET
+        # LOCAL lock_timeout` needs an explicit transaction to bound anything
+        # -- under autocommit, each statement is its own implicit
+        # transaction and the setting would expire before the next one runs.
         conn.autocommit = False
+        if not lock_agency_ingest_or_timeout(conn, agency_id, COLLECTOR_LOCK_WAIT_SECONDS):
+            raise HTTPException(status_code=409, detail="A data ingest is already in progress for this agency")
         ch_client = get_client()
         return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
     finally:
-        if conn is not None:
-            conn.close()
-        if ch_client is not None:
-            ch_client.close()
+        # Nested try/finally: if conn.close() raises, ch_client.close() must
+        # still run -- an unguarded `conn.close(); ch_client.close()` would
+        # skip the ClickHouse close on a Postgres close error, leaking the
+        # client + its HTTP pool inside this long-lived API process.
+        try:
+            if conn is not None:
+                conn.close()
+        finally:
+            if ch_client is not None:
+                ch_client.close()
 
 
 @collector_router.post("/updates/{agency_id}")
