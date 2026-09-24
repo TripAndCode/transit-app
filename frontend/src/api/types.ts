@@ -217,8 +217,9 @@ export type RouteTrip = {
 export type RouteTripsResponse = {
   date: string | null;
   time_band: TimeBand;
-  /** True when the route ran more trips than the endpoint will return and the
-   *  least-delayed tail was dropped. */
+  /** True when the route ran more trips than the endpoint will return, or its
+   *  kept trips together carry more stops than its per-response stop budget,
+   *  and the least-delayed tail was dropped either way. */
   truncated: boolean;
   trips: RouteTrip[];
 };

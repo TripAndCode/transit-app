@@ -668,6 +668,19 @@ export function usePatchFeatureFlag() {
   });
 }
 
+/** Mutation: DELETE one flag's override, returning it to its env value.
+ *  Takes no reason — there is nothing to justify beyond "stop overriding",
+ *  and the server records the clear in the admin audit trail regardless. */
+export function useClearFeatureFlag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key }: { key: string }) => apiDelete<FeatureFlag>(`/api/admin/flags/${key}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminFlags"] });
+    },
+  });
+}
+
 /** Mutation: ask the server to run the ingest+analyze sweep now.
  *
  *  The 202 carries the run row the server has already opened, so the caller

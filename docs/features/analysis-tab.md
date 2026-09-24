@@ -18,10 +18,10 @@ with a proactive "Insight Panel" suggesting what to look at next.
   `/agencies/:agencyId/reports` URL (no `:reportType`) is a separate, live
   route rendering `ReportsHomeTab` — see `docs/features/reports-tab.md`.
 - This tab has no entry in the sidebar's main nav (`SIDEBAR_NAV_ITEMS` in
-  `frontend/src/components/Sidebar.tsx` lists only `overview`,
-  `route-analysis`, and `reports`); reach it by direct URL or from
-  `ReportsHomeTab`'s "Detailed reports" link (see
-  `docs/features/reports-tab.md`).
+  `frontend/src/components/sidebarNavItems.ts` lists `operations`,
+  `period-overview`, `route-analysis`, `network`, and `reports` — no
+  `analysis` entry); reach it by direct URL or from `ReportsHomeTab`'s
+  "Detailed reports" link (see `docs/features/reports-tab.md`).
 - Top-level component: `frontend/src/tabs/AnalysisTab.tsx` — owns which
   report type is selected (via the `:reportType` URL param) and composes the
   report list, the selected report's body, and the Insight Panel.
