@@ -93,7 +93,7 @@ start_containers() {
         -p "127.0.0.1:${pg_port}:5432" "$pg_image" >/dev/null 2>&1 \
       && docker run -d --name "$ch_name" \
         -e CLICKHOUSE_USER=transit -e CLICKHOUSE_PASSWORD=transit -e CLICKHOUSE_DB=transit_test \
-        -p "127.0.0.1:${ch_port}:8123" clickhouse/clickhouse-server:26.3 >/dev/null 2>&1
+        -p "127.0.0.1:${ch_port}:8123" clickhouse/clickhouse-server:26.8 >/dev/null 2>&1
     then
       return 0
     fi

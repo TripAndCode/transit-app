@@ -107,7 +107,7 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
 
 1. **+ New → Empty Service**. Name it `clickhouse`.
 2. `clickhouse` → **Settings → Source → Source Image**: set it to
-   `clickhouse/clickhouse-server:26.3` — the same tag `compose.yml` and the
+   `clickhouse/clickhouse-server:26.8` — the same tag `compose.yml` and the
    Makefile's `ch-test` pin locally, so dev and production run identical
    ClickHouse behavior.
 3. `clickhouse` → **Variables** (the official image's own bootstrap vars,

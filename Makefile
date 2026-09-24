@@ -186,7 +186,7 @@ ch-test:
 	@docker rm -f transit-test-ch 2>/dev/null || true
 	docker run -d --rm --name transit-test-ch \
 	  -e CLICKHOUSE_USER=transit -e CLICKHOUSE_PASSWORD=transit -e CLICKHOUSE_DB=transit_test \
-	  -p 127.0.0.1:8124:8123 clickhouse/clickhouse-server:26.3
+	  -p 127.0.0.1:8124:8123 clickhouse/clickhouse-server:26.8
 
 ch-test-down:
 	docker rm -f transit-test-ch 2>/dev/null || true
