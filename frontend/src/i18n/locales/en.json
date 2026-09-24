@@ -1119,8 +1119,8 @@
       "users": "Users",
       "ops": "Ops",
       "architecture": "Architecture",
-"audit": "Audit log",
-"flags": "Flags",
+      "audit": "Audit log",
+      "flags": "Flags",
       "board": "Control board",
       "group": {
         "operations": "Operations",
@@ -1317,9 +1317,6 @@
       "select_all": "Select all",
       "select_row": "Select {{label}}"
     },
-    "drawer": {
-      "close": "Close"
-    },
     "board": {
       "title": "Control board",
       "poll_note": "Refreshed every 10 seconds",
@@ -1332,7 +1329,7 @@
       "reanalyze_started": "Re-aggregation started. It will appear on the timeline.",
       "reanalyze_error": "Could not start the re-aggregation.",
       "runs_title": "Run timeline · today",
-      "runs_legend": "Lock waits and skips are dashed",
+      "runs_legend": "Skipped runs are dashed",
       "runs_empty": "Nothing has run yet today.",
       "runs_chart_label": "Today's run timeline ({{count}} runs)",
       "runs_now": "now",

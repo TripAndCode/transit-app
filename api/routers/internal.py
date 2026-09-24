@@ -274,7 +274,8 @@ def _ingest_and_analyze_sweep(
                 cur.execute("SELECT agency_id FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id")
             else:
                 cur.execute(
-                    "SELECT agency_id FROM agencies WHERE deleted_at IS NULL AND agency_id = ANY(%s) ORDER BY agency_id",
+                    "SELECT agency_id FROM agencies "
+                    "WHERE deleted_at IS NULL AND agency_id = ANY(%s) ORDER BY agency_id",
                     (requested_agency_ids,),
                 )
             agency_ids = [r[0] for r in cur.fetchall()]

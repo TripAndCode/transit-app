@@ -187,10 +187,12 @@ export function AdminBoardPage() {
             <button
               type="button"
               // Focused on open so the keyboard path does not need a trap:
-              // there are two buttons, and Tab reaches the other one.
-              ref={(el) => {
-                el?.focus();
-              }}
+              // this is a non-modal dialog with two buttons, and Tab reaches
+              // the other one. `autoFocus` rather than a ref callback: an
+              // inline callback is re-invoked on every render, and the board
+              // re-renders on every poll, which would drag focus back here
+              // from whatever the operator had moved to.
+              autoFocus
               onClick={() => {
                 setConfirming(false);
                 trigger.mutate({ kind: "ingest" });
@@ -363,7 +365,7 @@ export function AdminBoardPage() {
           style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 8 }}
         >
           <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.runs_title")}</h2>
-          <p style={{ margin: 0, fontSize: 11, color: "var(--text-tertiary)" }}>{t("admin.board.runs_legend")}</p>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--text-tertiary)" }}>{t("admin.board.runs_legend")}</p>
         </div>
         <RunTimeline runs={runs} dayStart={dayStart} now={now} />
       </section>

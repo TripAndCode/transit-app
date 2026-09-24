@@ -1309,7 +1309,6 @@ def _collector_reasons(documents: list[dict[str, Any]]) -> dict[str, str]:
         return {}
 
 
-
 async def _collect_documents() -> list[dict[str, Any]]:
     """Collector documents, or `[]` once the budget is spent.
 

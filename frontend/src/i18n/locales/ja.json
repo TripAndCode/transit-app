@@ -1119,8 +1119,8 @@
       "users": "ユーザー管理",
       "ops": "運用状況",
       "architecture": "アーキテクチャ",
-"audit": "監査ログ",
-"flags": "機能フラグ",
+      "audit": "監査ログ",
+      "flags": "機能フラグ",
       "board": "管制盤",
       "group": {
         "operations": "運行",
@@ -1317,9 +1317,6 @@
       "select_all": "すべて選択",
       "select_row": "{{label}} を選択"
     },
-    "drawer": {
-      "close": "閉じる"
-    },
     "board": {
       "title": "管制盤",
       "poll_note": "10 秒ごとに更新",
@@ -1332,7 +1329,7 @@
       "reanalyze_started": "再集計を開始しました。タイムラインに表示されます。",
       "reanalyze_error": "再集計を開始できませんでした。",
       "runs_title": "実行タイムライン · 今日",
-      "runs_legend": "ロック待ち・スキップは破線",
+      "runs_legend": "スキップした実行は破線",
       "runs_empty": "今日はまだ実行記録がありません。",
       "runs_chart_label": "今日の実行タイムライン（{{count}} 件）",
       "runs_now": "いま",
