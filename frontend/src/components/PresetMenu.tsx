@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { apiGet, apiPost, formatApiError } from "../api/client";
 import type { RangeCtx } from "../api/rangeContext";
+import { Tooltip } from "./Tooltip";
 import { Z_INDEX } from "../styles/zIndex";
 
 type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: RangeCtx };
@@ -42,9 +43,15 @@ export function PresetMenu({
 
   if (!session) {
     return (
-      <span title={t("presets.login_to_save_tooltip")} style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
-        {t("presets.label")}
-      </span>
+      <Tooltip label={t("presets.login_to_save_tooltip")}>
+        <span
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain label, not a control; keyboard-focusable only so the tooltip explaining why saving is disabled is reachable
+          tabIndex={0}
+          style={{ color: "var(--text-tertiary)", fontSize: 12 }}
+        >
+          {t("presets.label")}
+        </span>
+      </Tooltip>
     );
   }
 

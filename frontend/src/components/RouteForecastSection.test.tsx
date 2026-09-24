@@ -160,4 +160,37 @@ describe("RouteForecastSection", () => {
     const visible = lowConfBadges.filter((el) => !el.hasAttribute("hidden"));
     expect(visible.length).toBeGreaterThan(0);
   });
+
+  it("keyboard focus on a heatmap cell shows an anchored tooltip and updates the aria-live readout", () => {
+    renderSection(overview(), "100");
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const cell = screen.getAllByTestId("hm-cell")[0];
+
+    // Native title= tooltips were replaced by the shared, keyboard-reachable Tooltip.
+    expect(cell).not.toHaveAttribute("title");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    // fireEvent.focusIn/focusOut, not .focus()/.blur() or fireEvent.focus/blur:
+    // React's onFocus/onBlur are implemented on the bubbling focusin/focusout
+    // events, which a bare non-bubbling native "focus" event never fires.
+    fireEvent.focusIn(cell);
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent(cell.getAttribute("aria-label") ?? "");
+    expect(screen.getByTestId("hm-readout")).toHaveTextContent(cell.getAttribute("aria-label") ?? "");
+
+    fireEvent.focusOut(cell);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(screen.getByTestId("hm-readout")).toHaveTextContent("");
+  });
+
+  it("keyboard focus on a margin bar updates its own aria-live readout", () => {
+    renderSection(overview(), "100");
+    const bar = screen.getAllByTestId("dow-bar")[0];
+
+    expect(bar).not.toHaveAttribute("title");
+    fireEvent.focusIn(bar);
+    expect(screen.getByTestId("dow-bar-readout")).toHaveTextContent(bar.getAttribute("aria-label") ?? "");
+    fireEvent.focusOut(bar);
+    expect(screen.getByTestId("dow-bar-readout")).toHaveTextContent("");
+  });
 });

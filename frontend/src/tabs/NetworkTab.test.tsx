@@ -62,7 +62,15 @@ describe("NetworkTab", () => {
     expect(screen.getByText(/\+10\.0/)).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument(); // Hiroden's on-time %
     expect(screen.getByText("10.00%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
-    expect(screen.getByText("Behind")).toBeInTheDocument();
+    const staleBadge = screen.getByText("Behind");
+    expect(staleBadge).toBeInTheDocument();
+    // Native title= was replaced by the shared, keyboard-reachable Tooltip.
+    expect(staleBadge).not.toHaveAttribute("title");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.focusIn(staleBadge);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(/haven't caught up yet/);
+    fireEvent.focusOut(staleBadge);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
     // clamp dot boundary: present only for HiroBus (10%), absent for
     // Hiroden (0.14 < 1) and Aomori (null) — no secondary line at all for

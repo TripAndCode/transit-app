@@ -14,7 +14,7 @@
  * route chip in the shared Filters bar is the way back, matching how every
  * other tab's focused-route mode already works.
  */
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
@@ -23,6 +23,9 @@ import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { BandGrid, Legend } from "./charts/DowBandGrid";
+import { Card } from "./ui/Card";
+import { Tooltip } from "./Tooltip";
+import { onActivateKey } from "../utils/a11y";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber } from "../utils/format";
@@ -42,27 +45,40 @@ const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 type Tip = { x: number; y: number; text: string } | null;
 type View = "dow" | "hr" | null;
 
+/** Screen-reader-only: content that a sighted reader gets some other way
+ *  (here, the same text a hovered/focused cell already shows visibly). */
+const srOnly: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  margin: -1,
+  padding: 0,
+  overflow: "hidden",
+  clipPath: "inset(50%)",
+  whiteSpace: "nowrap",
+};
+
 /** Clickable-card props matching the Overview card pattern (role=button + keyboard). */
 function clickable(onClick: () => void) {
   return {
-    role: "button",
+    role: "button" as const,
     tabIndex: 0,
     onClick,
-    onKeyDown: (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onClick();
-      }
-    },
+    onKeyDown: onActivateKey(() => onClick()),
   };
 }
 
-function Tooltip({ tip }: { tip: Tip }) {
+/** Cursor-following readout for BandGrid's dense day×band grid (`DowBandGrid.tsx`,
+ *  unaffected by this component's own move to the anchored `Tooltip`): BandGrid
+ *  scans many cells under a moving pointer, so its text has to track the cursor
+ *  rather than anchor to one cell the way `Tooltip` does. */
+function CrosshairTip({ tip }: { tip: Tip }) {
   if (!tip) return null;
   const x = Math.min(tip.x + 14, window.innerWidth - 170);
   const y = Math.min(tip.y + 14, window.innerHeight - 36);
   return (
     <div
+      role="tooltip"
       style={{
         position: "fixed",
         left: x,
@@ -138,27 +154,33 @@ function HeatmapGrid({
   axisMin,
   dayLabel,
   ariaLabel,
-  onTip,
-  onLeave,
 }: {
   cells: ForecastHeatmapCell[];
   big: boolean;
   axisMin: string;
   dayLabel: (dow: number) => string;
-  ariaLabel?: string;
-  onTip: (e: React.MouseEvent, text: string) => void;
-  onLeave: () => void;
+  ariaLabel: string;
 }) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<string | null>(null);
+  const [readout, setReadout] = useState("");
   const byKey = new Map(cells.map((c) => [`${c.dow}-${c.hour}`, c]));
   const labelW = big ? 30 : 22;
   const cellH = big ? 26 : 13;
   const gap = big ? 3 : 2;
   const cols = `${labelW}px repeat(24, 1fr)`;
 
+  function focusCell(key: string, text: string) {
+    setHover(key);
+    setReadout(text);
+  }
+  function clearCell() {
+    setHover(null);
+    setReadout("");
+  }
+
   return (
-    <div role={ariaLabel ? "img" : undefined} aria-label={ariaLabel} onMouseLeave={() => { setHover(null); onLeave(); }}>
+    <div role="group" aria-label={ariaLabel} onMouseLeave={clearCell}>
       <div style={{ display: "grid", gridTemplateColumns: cols, gap, alignItems: "center" }}>
         {Array.from({ length: 7 }, (_, di) => {
           const dow = di + 1;
@@ -171,53 +193,73 @@ function HeatmapGrid({
               const v = c?.expected_avg_min ?? null;
               const key = `${dow}-${h}`;
               if (v == null || !c) {
+                const text = `${dayLabel(dow)} ${h}:00 · —`;
                 return (
-                  <div
-                    key={key}
-                    onMouseEnter={(e) => onTip(e, `${dayLabel(dow)} ${h}:00 · —`)}
-                    onMouseMove={(e) => onTip(e, `${dayLabel(dow)} ${h}:00 · —`)}
-                    style={{ height: cellH, borderRadius: 2, background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)" }}
-                  />
+                  <Tooltip key={key} label={text}>
+                    <div
+                      role="img"
+                      aria-label={text}
+                      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- read-only heatmap cell: keyboard-focusable so its value reaches the tooltip and the aria-live readout below, not a control
+                      tabIndex={0}
+                      onMouseEnter={() => focusCell(key, text)}
+                      onFocus={() => focusCell(key, text)}
+                      onMouseLeave={clearCell}
+                      onBlur={clearCell}
+                      style={{ height: cellH, borderRadius: 2, background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)" }}
+                    />
+                  </Tooltip>
                 );
               }
               const active = hover === key;
               const text = `${dayLabel(dow)} ${h}:00 · ${v.toFixed(1)}${axisMin}`;
+              const lowConfText = c.low_confidence ? t("forecast.lowSamples", { count: c.samples }) : null;
               return (
-                <div
-                  key={key}
-                  data-testid="hm-cell"
-                  onMouseEnter={(e) => { setHover(key); onTip(e, text); }}
-                  onMouseMove={(e) => onTip(e, text)}
-                  style={{
-                    position: "relative",
-                    height: cellH,
-                    borderRadius: 2,
-                    background: delayColor(v),
-                    opacity: c.low_confidence ? 0.5 : 1,
-                    outline: active ? "2px solid var(--accent)" : "none",
-                    outlineOffset: 1,
-                    boxShadow: active ? "0 0 0 3px var(--accent-soft)" : "none",
-                  }}
-                >
-                  {c.low_confidence && (
-                    <span
-                      data-testid="hm-cell-lowconf"
-                      title={t("forecast.lowSamples", { count: c.samples })}
-                      style={{
-                        position: "absolute",
-                        top: 1,
-                        right: 2,
-                        fontSize: "var(--text-xs)",
-                        fontWeight: 800,
-                        lineHeight: 1,
-                        color: "var(--color-warning)",
-                        pointerEvents: "none",
-                      }}
-                    >
-                      !
-                    </span>
-                  )}
-                </div>
+                <Tooltip key={key} label={text}>
+                  <div
+                    data-testid="hm-cell"
+                    role="img"
+                    aria-label={text}
+                    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- read-only heatmap cell: keyboard-focusable so its value reaches the tooltip and the aria-live readout below, not a control
+                    tabIndex={0}
+                    onMouseEnter={() => focusCell(key, text)}
+                    onFocus={() => focusCell(key, text)}
+                    onMouseLeave={clearCell}
+                    onBlur={clearCell}
+                    style={{
+                      position: "relative",
+                      height: cellH,
+                      borderRadius: 2,
+                      background: delayColor(v),
+                      opacity: c.low_confidence ? 0.5 : 1,
+                      outline: active ? "2px solid var(--accent)" : "none",
+                      outlineOffset: 1,
+                      boxShadow: active ? "0 0 0 3px var(--accent-soft)" : "none",
+                    }}
+                  >
+                    {lowConfText && (
+                      <Tooltip label={lowConfText}>
+                        <span
+                          data-testid="hm-cell-lowconf"
+                          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- glyph with real content (the low-sample warning); pointer-events stay off so hovering it still reads as hovering the cell, keyboard focus reaches it independently
+                          tabIndex={0}
+                          aria-label={lowConfText}
+                          style={{
+                            position: "absolute",
+                            top: 1,
+                            right: 2,
+                            fontSize: "var(--text-xs)",
+                            fontWeight: 800,
+                            lineHeight: 1,
+                            color: "var(--color-warning)",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          !
+                        </span>
+                      </Tooltip>
+                    )}
+                  </div>
+                </Tooltip>
               );
             }),
           ];
@@ -233,6 +275,7 @@ function HeatmapGrid({
           ))}
         </div>
       )}
+      <span data-testid="hm-readout" aria-live="polite" style={srOnly}>{readout}</span>
     </div>
   );
 }
@@ -244,8 +287,6 @@ function MarginBars({
   big,
   sparse,
   axisMin,
-  onTip,
-  onLeave,
 }: {
   values: (number | null)[];
   labels: string[];
@@ -253,26 +294,32 @@ function MarginBars({
   big: boolean;
   sparse: boolean;
   axisMin: string;
-  onTip: (e: React.MouseEvent, text: string) => void;
-  onLeave: () => void;
 }) {
+  const [readout, setReadout] = useState("");
   const max = Math.max(...values.filter((v): v is number => v != null), 1);
   return (
-    <div onMouseLeave={onLeave}>
+    <div onMouseLeave={() => setReadout("")}>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: big ? 150 : 64, borderBottom: "1px solid var(--border-soft)" }}>
-        {values.map((v, i) =>
-          v == null ? (
-            <span key={i} style={{ flex: 1 }} />
-          ) : (
-            <i
-              key={i}
-              data-testid={testid}
-              onMouseEnter={(e) => onTip(e, `${labels[i]} · ${v.toFixed(1)}${axisMin}`)}
-              onMouseMove={(e) => onTip(e, `${labels[i]} · ${v.toFixed(1)}${axisMin}`)}
-              style={{ flex: 1, display: "block", height: `${Math.max((v / max) * 100, 1)}%`, background: delayColor(v), borderRadius: "3px 3px 0 0" }}
-            />
-          ),
-        )}
+        {values.map((v, i) => {
+          if (v == null) return <span key={i} style={{ flex: 1 }} />;
+          const text = `${labels[i]} · ${v.toFixed(1)}${axisMin}`;
+          return (
+            <Tooltip key={i} label={text}>
+              <i
+                data-testid={testid}
+                role="img"
+                aria-label={text}
+                // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- read-only bar: keyboard-focusable so its value reaches the tooltip and the aria-live readout below, not a control
+                tabIndex={0}
+                onMouseEnter={() => setReadout(text)}
+                onFocus={() => setReadout(text)}
+                onMouseLeave={() => setReadout("")}
+                onBlur={() => setReadout("")}
+                style={{ flex: 1, display: "block", height: `${Math.max((v / max) * 100, 1)}%`, background: delayColor(v), borderRadius: "3px 3px 0 0" }}
+              />
+            </Tooltip>
+          );
+        })}
       </div>
       <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
         {labels.map((l, i) => (
@@ -281,6 +328,7 @@ function MarginBars({
           </span>
         ))}
       </div>
+      <span data-testid={`${testid}-readout`} aria-live="polite" style={srOnly}>{readout}</span>
     </div>
   );
 }
@@ -291,14 +339,17 @@ function StatStrip({ stats }: { stats: { label: string; value: string }[] }) {
       {stats.map((s) => (
         <div key={s.label} style={{ flex: 1, minWidth: 110, background: "var(--bg-soft)", borderRadius: 8, padding: "9px 12px" }}>
           <b style={{ display: "block", fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{s.value}</b>
-          <small style={{ fontSize: "var(--text-xs)", color: "var(--text-2, var(--text-secondary))" }}>{s.label}</small>
+          <small style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{s.label}</small>
         </div>
       ))}
     </div>
   );
 }
 
-function Card({ title, sublabel, action, testid, onOpen, children }: {
+/** Titled surface built on the shared `Card`; `onOpen` makes the whole card a
+ *  keyboard-operable control (see `clickable`), matching the Overview card
+ *  pattern this was migrated from. */
+function SectionCard({ title, sublabel, action, testid, onOpen, children }: {
   title: string;
   sublabel: string;
   action?: React.ReactNode;
@@ -306,16 +357,16 @@ function Card({ title, sublabel, action, testid, onOpen, children }: {
   onOpen?: () => void;
   children: React.ReactNode;
 }) {
-  const clickProps = onOpen ? clickable(onOpen) : {};
+  const activation = onOpen ? clickable(onOpen) : {};
   return (
-    <div className={onOpen ? "ov-card ov-clickable" : "ov-card"} data-testid={testid} aria-label={title} {...clickProps}>
+    <Card className={onOpen ? "ui-card--clickable" : undefined} data-testid={testid} aria-label={title} {...activation}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
         <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span>
         {action}
       </div>
       <p style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "0 0 10px" }}>{sublabel}</p>
       {children}
-    </div>
+    </Card>
   );
 }
 
@@ -380,6 +431,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
   const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
   const bandLabel = (b: Band) => t(`forecast.band_${b}`);
   const min1 = t("forecast.axis_min");
+  // Feeds BandGrid's own cursor-following tip only — see CrosshairTip.
   const onTip = (e: React.MouseEvent, text: string) => setTip({ x: e.clientX, y: e.clientY, text });
   const onLeave = () => setTip(null);
 
@@ -422,7 +474,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
         />
       )}
 
-      <Tooltip tip={tip} />
+      <CrosshairTip tip={tip} />
     </div>
   );
 }
@@ -483,16 +535,16 @@ function AgencyLanding({
         </div>
       )}
 
-      <Card title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
+      <SectionCard title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
         <BandGrid grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} colorFor={colorFor} onTip={onTip} onLeave={onLeave} />
         {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} colorFor={colorFor} />}
-      </Card>
+      </SectionCard>
 
       {data.routes.length > 0 && (
         <div style={{ marginTop: 16 }}>
-          <Card title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
+          <SectionCard title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
             <RankedRoutes routes={data.routes.slice(0, 8)} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
-          </Card>
+          </SectionCard>
         </div>
       )}
 
@@ -590,18 +642,18 @@ function RouteDetail({
         </div>
       )}
 
-      <Card title={t("forecast.overview_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
+      <SectionCard title={t("forecast.overview_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
         <BandGrid grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
         {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={bandColorFor} />}
-      </Card>
+      </SectionCard>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-        <Card title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
-          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
-        </Card>
-        <Card title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
-          <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
-        </Card>
+        <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
+          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} axisMin={axisMin} />
+        </SectionCard>
+        <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
+          <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse axisMin={axisMin} />
+        </SectionCard>
       </div>
 
       <button
@@ -613,7 +665,7 @@ function RouteDetail({
       </button>
       {showGrid && (
         <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">
-          <HeatmapGrid cells={cells} big axisMin={axisMin} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} onTip={onTip} onLeave={onLeave} />
+          <HeatmapGrid cells={cells} big axisMin={axisMin} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} />
           {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
         </div>
       )}
@@ -639,7 +691,7 @@ function RouteDetail({
                     { label: t("forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}
                 />
-                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
+                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={axisMin} />
               </>
             );
           })()}
