@@ -5,6 +5,24 @@ name: VPS Heartbeat Watchdog
 # failed scheduled workflow by default, so a failure here is the alert -
 # no third-party monitoring account needed. Offset off :00/:30 (GitHub
 # scheduled workflows queue up and lag around the top of the hour).
+#
+# Gated on the `VPS_LOOP_ENABLED` repository variable, because the loop is
+# something that gets switched off deliberately -- when its backlog is
+# empty, or while the VPS is being worked on -- and an alarm that fires
+# every 30 minutes for a condition someone chose is worse than no alarm:
+# it trains readers to ignore a red run. The variable is the one place that
+# says whether silence is expected, so turning the loop back on means
+# setting it to `true` as well as enabling the timer on the host:
+#
+#     gh variable set VPS_LOOP_ENABLED --body true
+#     ssh <vps> systemctl enable --now claude-loop.timer
+#
+# Unset is treated as disabled, so a fresh fork or a restored repo does not
+# start out alerting about a loop it has never run. A disabled run is green
+# but says so in its log on every firing, rather than being skipped -- the
+# way this gate can bite is someone re-enabling the timer on the host and
+# forgetting the variable, and a silent watchdog is indistinguishable from a
+# healthy one.
 on:
   schedule:
     - cron: "7,37 * * * *"
@@ -20,7 +38,24 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # Branching here rather than with a job-level `if:` so a disabled loop
+      # still leaves a run whose log says so. A skipped job records nothing,
+      # which reads the same as a watchdog that was never wired up -- the
+      # failure mode this gate is most likely to cause is someone re-enabling
+      # the loop on the host and forgetting the variable, and a visible
+      # "not checking" line every half hour is what makes that discoverable.
+      - name: Is the loop expected to be running?
+        id: gate
+        run: |
+          if [ "${{ vars.VPS_LOOP_ENABLED }}" = "true" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::VPS_LOOP_ENABLED is not 'true', so the autonomous loop is declared off and its silence is expected. Not checking the heartbeat. See this workflow's header to re-arm."
+          fi
+
       - name: Check last heartbeat age
+        if: steps.gate.outputs.armed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -57,6 +92,7 @@ jobs:
       # listener) to fail on it keeps the same guaranteed-email path the
       # heartbeat-age check above already relies on.
       - name: Check reported loop health from the last heartbeat
+        if: steps.gate.outputs.armed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
