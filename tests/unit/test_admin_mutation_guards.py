@@ -125,26 +125,42 @@ def _body_for_route(route: Any) -> dict[str, Any] | None:
     return _dummy_body(body_field.field_info.annotation)
 
 
-def _mutating_admin_routes(app: FastAPI) -> list[tuple[str, str, dict[str, Any] | None]]:
+def _mutating_admin_routes() -> list[tuple[str, str, dict[str, Any] | None]]:
+    """Every mutating `/api/admin` route, read off the routers themselves.
+
+    Not off a composed `app.routes`: FastAPI keeps an included router as one
+    opaque `_IncludedRouter` entry there rather than flattening its routes in,
+    so that walk finds no paths at all and every sweep built on it passes
+    having tested nothing. The routers already carry their own prefix, so
+    their `path` is the full one either way -- and reading them directly also
+    means this cannot drift with how the app happens to be composed.
+    """
     found: list[tuple[str, str, dict[str, Any] | None]] = []
-    for route in app.routes:
-        path = getattr(route, "path", "")
-        if not path.startswith("/api/admin"):
-            continue
-        methods = getattr(route, "methods", None) or set()
-        if not (methods & _MUTATING_METHODS):
-            continue
-        body = _body_for_route(route)
-        for method in sorted(methods & _MUTATING_METHODS):
-            found.append((method, path, body))
+    for router in _ADMIN_ROUTERS:
+        for route in router.routes:
+            path = getattr(route, "path", "")
+            if not path.startswith("/api/admin"):
+                continue
+            methods = getattr(route, "methods", None) or set()
+            if not (methods & _MUTATING_METHODS):
+                continue
+            body = _body_for_route(route)
+            for method in sorted(methods & _MUTATING_METHODS):
+                found.append((method, path, body))
     return found
 
 
 def test_the_route_walk_itself_finds_every_known_mutating_admin_route():
     """Canary on the walker: if this drops to zero (or far below what the
-    routers currently declare), the sweep below would silently pass having
-    tested nothing."""
-    routes = _mutating_admin_routes(_build_app())
+    routers currently declare), the sweeps below would silently pass having
+    tested nothing.
+
+    It has already earned its place once -- the first version of the walk read
+    `app.routes`, which under this FastAPI holds one opaque entry per included
+    router and no paths, so both sweeps were vacuous and only this assertion
+    said so.
+    """
+    routes = _mutating_admin_routes()
     assert len(routes) >= 14, routes
 
 
@@ -154,7 +170,7 @@ def test_every_mutating_admin_route_rejects_a_request_with_no_valid_origin():
     client = TestClient(app, raise_server_exceptions=False)
 
     failures = []
-    for method, path, body in _mutating_admin_routes(app):
+    for method, path, body in _mutating_admin_routes():
         response = client.request(method, _concrete_path(path), json=body if body is not None else {})
         if response.status_code != 403:
             failures.append((method, path, response.status_code, response.text))
@@ -175,7 +191,7 @@ def test_every_mutating_admin_route_rejects_an_authenticated_non_admin():
     client = TestClient(app, raise_server_exceptions=False)
 
     failures = []
-    for method, path, body in _mutating_admin_routes(app):
+    for method, path, body in _mutating_admin_routes():
         # A valid Origin so a failure here is attributable to the role
         # check, not to csrf_guard rejecting the request first.
         response = client.request(
