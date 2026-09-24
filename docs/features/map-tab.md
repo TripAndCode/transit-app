@@ -8,8 +8,11 @@ transportation operators. It answers four questions on one screen:
 3. At which reported stops did that delay grow or recover?
 4. Is the realtime feed fresh enough to trust?
 
-It deliberately does not provide a second historical-map mode. Historical
-questions belong in Analysis, linked from the mode switch in the page header.
+A day-playback mode (below) replays how delay moved across the whole service
+day on this same map, so a look back at "how did today unfold" never needs a
+second map screen. Deeper historical analysis — trend lines, route
+comparisons, forecasts — stays in Analysis; a delayed trip's row in the
+attention panel links straight to that route's Route analysis view.
 
 ## Location semantics
 
@@ -38,9 +41,10 @@ but are not plotted.
 ## User flow
 
 - The sidebar's first entry (`SIDEBAR_NAV_ITEMS` in
-  `frontend/src/components/Sidebar.tsx`, labeled from the `design:overview`
-  i18n key) opens `/agencies/:agencyId/operations`, the single mount point for
-  this tab. A bare `/agencies/:agencyId` lands here too.
+  `frontend/src/components/sidebarNavItems.ts`, labeled from the
+  `design:overview` i18n key) opens `/agencies/:agencyId/operations`, the
+  single mount point for this tab. A bare `/agencies/:agencyId` lands here
+  too.
 - `/agencies/:agencyId/overview`, `/agencies/:agencyId/map` and
   `/agencies/:agencyId/live` all redirect here, preserving the agency and
   query string. They render a redirect only — this component is mounted once,
@@ -48,8 +52,6 @@ but are not plotted.
   context.
 - The period-summary view at `/agencies/:agencyId/period-overview` is a
   different tab — see `docs/features/overview-tab.md`.
-- **Current** is the active mode. **Historical analysis** links to
-  `/agencies/:agencyId/analysis/trend`.
 - With all routes selected, the right panel lists routes from the latest
   observation by maximum delay instead of leaving the panel empty.
 - Selecting a route groups simultaneous trips by GTFS `direction_id`, falling
@@ -65,6 +67,36 @@ but are not plotted.
   protobuf into ClickHouse when the local-dev SSH transport is configured;
   environments without that transport use the agency's live feed URL as a
   fallback, then the client reads the newly persisted data.
+- A delayed trip's row in the attention panel links to
+  `/agencies/:agencyId/route-analysis?routes=<route_code>`, the one deep link
+  from this tab into a historical view.
+
+## Day playback
+
+`FilterDock`'s "Play the day" toggle switches the map from current
+observations to a replay of one whole service day, one hour at a time
+(`operations.playback.toggle_on`/`toggle_off`, `Clapperboard` icon).
+
+- `useDayPlayback` fetches `GET /api/{agency_id}/delays/timeline` once
+  playback is switched on and derives the playhead from elapsed wall-clock
+  time rather than incrementing per tick, so a delayed timer tick lands on the
+  frame the clock says it is instead of drifting behind.
+- With no `date` given, the endpoint resolves to the agency's latest observed
+  JST day. Frames cover the 05:00–24:00 service window in 60-minute buckets
+  (the endpoint also accepts a 15-minute step; the UI does not yet expose
+  choosing it); each bucket needs at least 3 observations at a stop before
+  that stop is drawn, and a frame is capped at 400 points.
+- `useTimelineLayers` hides the live trip layers for as long as playback is on
+  and instead draws the current frame's stops plus its two preceding frames as
+  a fading trail (`GHOST_OPACITY`), colored by delay severity the same way the
+  live markers are.
+- `PlaybackRail`, pinned to the bottom of the map, provides play/pause, a
+  scrubber whose track is pre-colored by each frame's own mean delay, a
+  1x/2x speed toggle, the current frame's clock and date, and an exit
+  control. Playback loops at the end of the day instead of stopping.
+- A viewer with `prefers-reduced-motion` gets step-forward/step-back buttons
+  instead of autoplay; the rail also answers arrow-key and Space input for
+  stepping/toggling.
 
 ## Data path
 
@@ -74,6 +106,7 @@ but are not plotted.
 | `useLiveTripProgress` | `GET /api/{agency_id}/delays/live-progress?trip_id=...` | Nearest reported stop per source snapshot for one trip, compacted to one report per sequence |
 | `useTodayRouteSummary` | `GET /api/{agency_id}/today/route-summary` | Historical route average and p90 baseline used to classify current route delay as normal, watch, or anomaly |
 | `useRouteShape` | `GET /api/{agency_id}/route-shape` | Static GTFS geometry for the selected route |
+| `useTimeline` | `GET /api/{agency_id}/delays/timeline` | One service day's worth of per-stop delay frames, backing day playback |
 
 `/delays/live` deduplicates the newest five-minute feed window relative to the
 agency's latest stored observation to one row per trip and returns at most 500
@@ -90,8 +123,14 @@ than claiming stale rows are physically operating now.
 | `frontend/src/tabs/map/currentRouteStatus.ts` | Current route aggregation and baseline classification |
 | `frontend/src/tabs/map/OperationsTripPanel.tsx` | Direction picker, concurrent trips, stop timeline, and delay trend |
 | `frontend/src/tabs/map/operationsMap.css` | Desktop and mobile workspace layout |
-| `frontend/src/api/hooks.ts` | Current report, route baseline, shape, and detail queries |
-| `api/routers/map.py` | Current report enrichment and map/detail endpoints |
+| `frontend/src/tabs/map/FilterDock.tsx` | Route/pattern filter control and the day-playback toggle |
+| `frontend/src/tabs/map/useDayPlayback.ts` | Playback clock/state: frame index, play/pause, speed |
+| `frontend/src/tabs/map/playbackFrames.ts` | Pure frame-index math and the timeline GeoJSON builder |
+| `frontend/src/tabs/map/PlaybackRail.tsx` | Playback transport UI pinned to the bottom of the map |
+| `frontend/src/tabs/map/useTimelineLayers.ts` | Playback map layer; hides/restores the live trip layers |
+| `frontend/src/api/hooks.ts` | Current report, route baseline, shape, timeline, and detail queries |
+| `api/routers/map.py` | Current report enrichment and map/detail/timeline endpoints |
+| `pipeline/reports/timeline.py` | `compute_delay_timeline()` — per-bucket positioned stop delays for one service day |
 
 MapLibre remains lazy-loaded through `MapTab` so it does not enter the main
 application chunk. Basemap switching uses `MapStyleControl`; overlay hooks must
@@ -111,6 +150,14 @@ Automated coverage:
 - `frontend/src/tabs/map/OperationsTripPanel.test.tsx` verifies direction,
   concurrent-trip selection, and stop progression.
 - `frontend/src/routes/legacyRedirects.test.tsx` verifies the `/live` redirect.
+- `frontend/src/tabs/map/playbackFrames.test.ts` verifies frame-index math
+  (advance, wrap, clamp) and the ghost-trail GeoJSON builder.
+- `frontend/src/tabs/map/useDayPlayback.test.ts` verifies the playback clock,
+  play/pause/step, speed changes, and index clamping when a shorter day loads.
+- `frontend/src/tabs/map/PlaybackRail.test.tsx` verifies the transport UI,
+  keyboard control, and the reduced-motion stepping fallback.
+- `frontend/src/tabs/map/useTimelineLayers.test.ts` verifies the playback
+  layer is a no-op while playback is off and restores the live layers on exit.
 
 Manual checks:
 
@@ -122,10 +169,9 @@ Manual checks:
 5. Select All routes and verify the route shape disappears.
 6. Switch basemaps and confirm markers and the route overlay reappear.
 7. Narrow the viewport to verify the trip panel stacks below the map on mobile.
-
-## Related historical map code
-
-The aggregate heatmap and hourly route visualization modules remain available
-for historical analysis work, but they are no longer composed by `MapTab`.
-New historical-map features should start from a clear analyst question and live
-under Analysis rather than add a second mode to Operations.
+8. Toggle "Play the day" and confirm the live layers disappear, the rail
+   appears with a pre-colored scrubber, and pressing play advances the clock
+   and the map's stop trail together; confirm it loops past the last frame
+   instead of stopping.
+9. With reduced motion enabled at the OS level, confirm the rail offers only
+   step buttons and never autoplays.
