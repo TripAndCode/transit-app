@@ -84,6 +84,7 @@ from pipeline.histogram import (
     bucket_case_sql,
     hist_array_sql,
 )
+from pipeline.locks import agency_ingest_lock
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
@@ -640,7 +641,22 @@ def _ch_build_and_insert(
 def analyze(agency_id: int, conn, ch_client) -> None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
-    Wipes this agency's agg_* rows, then INSERTs the freshly
+    Holds this agency's `updates` lock for the whole run. That is load-bearing,
+    not defensive: the body below reads `updates` from ClickHouse at more than
+    one point in time (the deduped slice into a TEMP TABLE up front,
+    agg_feed_health's raw per-date counts in their own later query), so a
+    concurrent append for this agency could otherwise be absent from the
+    aggregates while present in the ledger that decides whether they need
+    rebuilding. pipeline/locks.py's docstring owns why that skew is
+    undetectable afterwards; the lock is what keeps every read in one run
+    seeing one set of rows.
+    """
+    with agency_ingest_lock(conn, agency_id):
+        _analyze_locked(agency_id, conn, ch_client)
+
+
+def _analyze_locked(agency_id: int, conn, ch_client) -> None:
+    """Wipes this agency's agg_* rows, then INSERTs the freshly
     computed set, all in one transaction. A crash mid-run rolls back to
     the prior snapshot so the agency is never observed empty. Re-running
     is idempotent — same inputs produce the same final state.
@@ -649,6 +665,9 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     slice (the `updates` fact table now lives in ClickHouse); every
     aggregate builder below still reads the Postgres TEMP TABLE it's
     loaded into, unchanged.
+
+    Call analyze(), never this directly: it assumes the agency's lock is
+    already held for the duration.
     """
     _step_ms.clear()  # per-agency, so analyze-all reports each agency separately
     wall_t0 = time.perf_counter()

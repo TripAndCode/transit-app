@@ -57,7 +57,7 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
 
     from pipeline.clickhouse import get_client
     from pipeline.ingest import ingest_live_payload
-    from pipeline.locks import try_lock_ingest_analyze
+    from pipeline.locks import try_lock_agency_ingest
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -75,8 +75,8 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
             )
             if cur.fetchone() is None:
                 raise ValueError(f"Unknown or deleted agency_id={agency_id}")
-        if not try_lock_ingest_analyze(conn):
-            raise HTTPException(status_code=409, detail="A data ingest is already in progress")
+        if not try_lock_agency_ingest(conn, agency_id):
+            raise HTTPException(status_code=409, detail="A data ingest is already in progress for this agency")
         conn.autocommit = False
         ch_client = get_client()
         return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
