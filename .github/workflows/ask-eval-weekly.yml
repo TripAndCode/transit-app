@@ -16,7 +16,7 @@ jobs:
 
     services:
       clickhouse:
-        image: clickhouse/clickhouse-server:26.3
+        image: clickhouse/clickhouse-server:26.8
         env:
           CLICKHOUSE_USER: transit
           CLICKHOUSE_PASSWORD: transit

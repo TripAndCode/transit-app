@@ -35,7 +35,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   docker run -d --rm --name transit-test-pg -e POSTGRES_USER=transit \
     -e POSTGRES_PASSWORD=transit -e POSTGRES_DB=transit_test \
     -p 5544:5432 "$(docker build -q db/)"
-  make ch-test   # throwaway ClickHouse on :8124, matches CI's pinned 26.3
+  make ch-test   # throwaway ClickHouse on :8124, matches CI's pinned 26.8
   DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
     RUN_CH_INTEGRATION=1 CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8124 \
     CLICKHOUSE_USER=transit CLICKHOUSE_PASSWORD=transit CLICKHOUSE_DATABASE=transit_test \
