@@ -4,6 +4,7 @@ import { useRoutes } from "../../api/hooks";
 import { useRangeContext, type TimeBand, type DowFilter } from "../../api/rangeContext";
 import { ErrorBanner } from "../ErrorBanner";
 import { routeGroups, selectedGroup } from "./routeGroups";
+import { sameCodes } from "../../utils/sameCodes";
 
 export function PatternFilters({ agencyId, codes, onChange }: {
   agencyId: number | null; codes: string[]; onChange: (codes: string[]) => void;
@@ -104,10 +105,4 @@ export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
       )}
     </form>
   );
-}
-
-function sameCodes(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const seen = new Set(b);
-  return a.every((code) => seen.has(code));
 }

@@ -17,6 +17,7 @@ import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminC
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import { InviteDialog } from "./InviteDialog";
 import { pageItems } from "./pageItems";
+import { isTypingTarget } from "../../utils/isTypingTarget";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -45,14 +46,6 @@ const BULK_TOAST_KEY: Record<BulkAction, string> = {
   promote: "promoted",
   demote: "demoted",
 };
-
-/** True for an element that consumes plain-letter keystrokes as text input,
- * so the j/k/x/a// shortcuts below don't fire while the admin is typing. */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || target.isContentEditable;
-}
 
 /** The search box's own local-edit + debounce-commit state, extracted so the
  *  displayed value can track `q` for any reason it changes -- including a

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Clapperboard } from "lucide-react";
 import { PatternFilters } from "../../components/analysis/AnalysisFilters";
+import { sameCodes } from "../../utils/sameCodes";
 
 /** Deferred-commit route/pattern filters, mounted as a floating control on
  * the operations map.
@@ -83,10 +84,4 @@ export function FilterDock({ agencyId, applied, onApply, playback }: {
       )}
     </form>
   );
-}
-
-function sameCodes(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const seen = new Set(b);
-  return a.every((code) => seen.has(code));
 }
