@@ -119,7 +119,7 @@ def test_clearing_an_override_records_the_admin_action(store):
 
     assert r.status_code == 200
     assert len(conn.audit) == 1
-    actor_id, action, target_type, target_id, before, after, _reason = conn.audit[0]
+    actor_id, action, target_type, target_id, before, after, _reason, _ip = conn.audit[0]
     assert actor_id == _ADMIN.user_id
     assert action == "flag.cleared"
     assert target_type == "feature_flag"
