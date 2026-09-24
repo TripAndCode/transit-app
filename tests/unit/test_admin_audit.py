@@ -12,9 +12,29 @@ import json
 import logging
 from datetime import datetime, timezone
 
+import asyncpg
 import pytest
 
 from api.admin_audit import record_admin_action
+
+
+class _FakeTransaction:
+    """Stands in for `conn.transaction()`, recording that it was entered.
+
+    `record_admin_action` runs its insert inside one so a failure cannot
+    abort a caller's open transaction; a fake that did not offer this would
+    make these tests pass against an implementation that had dropped it.
+    """
+
+    def __init__(self, conn: "_RecordingConn | _BoomingConn"):
+        self._conn = conn
+
+    async def __aenter__(self) -> "_FakeTransaction":
+        self._conn.transactions_entered += 1
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
 
 
 class _RecordingConn:
@@ -22,6 +42,10 @@ class _RecordingConn:
 
     def __init__(self):
         self.calls: list[tuple] = []
+        self.transactions_entered = 0
+
+    def transaction(self) -> _FakeTransaction:
+        return _FakeTransaction(self)
 
     async def execute(self, sql, *args):
         self.calls.append((sql, args))
@@ -33,8 +57,17 @@ class _BoomingConn:
     connection or full disk: the caller's already-committed mutation is what
     must survive this, not the audit row."""
 
+    def __init__(self):
+        self.transactions_entered = 0
+
+    def transaction(self) -> _FakeTransaction:
+        return _FakeTransaction(self)
+
     async def execute(self, sql, *args):
-        raise RuntimeError("simulated admin_audit insert failure")
+        # A database error, not a bare RuntimeError: only operational
+        # failures are swallowed, so a fake raising something else would be
+        # testing a path the production code deliberately does not take.
+        raise asyncpg.PostgresConnectionError("simulated admin_audit insert failure")
 
 
 def _row(conn: _RecordingConn) -> dict:
@@ -171,3 +204,51 @@ async def test_runs_for_day_logs_and_returns_empty_on_query_failure(caplog):
     records = [r for r in caplog.records if r.name == "api.routers.admin"]
     assert records, "expected a warning log when the pipeline_runs query fails"
     assert any(r.exc_info for r in records), "expected exc_info=True so the traceback is captured"
+
+
+@pytest.mark.asyncio
+async def test_the_insert_runs_inside_a_nested_transaction():
+    """A savepoint, not a bare insert.
+
+    Swallowing the exception is not enough on its own: a statement that fails
+    inside a caller's open transaction aborts it at the server, so the
+    caller's next statement -- or its commit -- raises
+    `InFailedSQLTransactionError` and the change is lost anyway, with the real
+    cause only in the log. Rolling back to a savepoint is what confines the
+    failure to this insert.
+    """
+    conn = _RecordingConn()
+    await record_admin_action(conn, actor_id=1, action="user.patched", target_type="user", target_id=1)
+    assert conn.transactions_entered == 1, "the insert must be wrapped in conn.transaction()"
+
+
+@pytest.mark.asyncio
+async def test_a_failing_insert_still_enters_the_nested_transaction():
+    """The savepoint has to be open before the insert, or it protects nothing."""
+    conn = _BoomingConn()
+    await record_admin_action(conn, actor_id=1, action="user.patched", target_type="user", target_id=1)
+    assert conn.transactions_entered == 1
+
+
+@pytest.mark.asyncio
+async def test_a_call_site_bug_is_not_swallowed_as_an_operational_failure():
+    """Only database and connection failures are recoverable here.
+
+    A `TypeError`/`AttributeError` from a call site is a bug in this
+    repository. Catching it alongside a full disk would turn every such bug
+    into audit rows that silently stop being written -- the exact outcome the
+    swallow exists to make visible for operators and invisible for nobody
+    else.
+    """
+
+    class _NoTransactionConn:
+        """Missing `transaction()`, the way a hand-written fake or a wrong
+        object passed as `conn` would be."""
+
+        async def execute(self, sql, *args):  # pragma: no cover - never reached
+            raise AssertionError("should not get as far as the insert")
+
+    with pytest.raises(AttributeError):
+        await record_admin_action(
+            _NoTransactionConn(), actor_id=1, action="user.patched", target_type="user", target_id=1
+        )

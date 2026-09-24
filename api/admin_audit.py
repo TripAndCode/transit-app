@@ -87,26 +87,52 @@ async def record_admin_action(
     client address; unparsable or absent values are stored as ``NULL``
     rather than failing the insert.
 
-    Never raises: a failed insert is logged at WARNING and swallowed, per
-    this module's docstring invariant that a missed audit entry must not
-    turn an already-committed administrative change into a 500.
+    A failed insert is logged at WARNING and swallowed, per this module's
+    docstring invariant that a missed audit entry must not turn an
+    already-committed administrative change into a 500.
+
+    Swallowed means database and connection failures -- the recoverable case
+    the invariant is about. A `TypeError` or `AttributeError` from a call site
+    is a bug in this repository, not an operational hazard, and catching it
+    here would turn every such bug into audit rows that silently stop being
+    written. Those propagate.
+
+    The insert runs inside a nested transaction -- a savepoint -- because
+    swallowing alone does not deliver that promise. A statement that fails
+    inside a caller's open transaction aborts it at the server; catching the
+    Python exception leaves the connection in a state where the caller's next
+    statement, or its commit, raises `InFailedSQLTransactionError`. The
+    change is lost anyway and the operator gets that instead of the real
+    cause, which went to the log. Rolling back to a savepoint confines the
+    failure to this insert, so the caller's transaction stays usable and the
+    change it already made commits without its audit row.
+
+    The savepoint does not weaken the module's other invariant. It only
+    releases on success, so an audit row written here still rolls back with
+    the caller's transaction if that transaction later fails: the two are
+    still atomic in the direction that matters. What it gives up is the
+    reverse -- a change can now commit unaudited -- which is the trade this
+    module's docstring already names as the acceptable one.
     """
     try:
-        await conn.execute(
-            """
-            INSERT INTO admin_audit (actor_id, action, target_type, target_id, before, after, reason, ip)
-            VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::inet)
-            """,
-            actor_id,
-            action,
-            target_type,
-            None if target_id is None else str(target_id),
-            _to_jsonb(before),
-            _to_jsonb(after),
-            reason,
-            _to_inet(ip),
-        )
-    except Exception:
+        # Nested `transaction()` is a savepoint when one is already open, and
+        # a plain transaction when none is -- correct in both cases.
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO admin_audit (actor_id, action, target_type, target_id, before, after, reason, ip)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::inet)
+                """,
+                actor_id,
+                action,
+                target_type,
+                None if target_id is None else str(target_id),
+                _to_jsonb(before),
+                _to_jsonb(after),
+                reason,
+                _to_inet(ip),
+            )
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError):
         _log.warning(
             "admin_audit: failed to record action=%s target_type=%s target_id=%s",
             action,
