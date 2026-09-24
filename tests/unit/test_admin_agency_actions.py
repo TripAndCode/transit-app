@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from api.deps import get_conn
 from api.routers import admin_agencies
 from api.security import User, require_admin
+from pipeline.url_guard import FeedURLError
 
 _ADMIN = User(
     user_id=1,
@@ -96,3 +97,73 @@ def test_reanalyzing_a_live_agency_is_accepted(queued):
     assert response.json() == {"status": "started"}
     assert queued == [1]
     assert [call[1] for call in conn.audit] == ["agency.reanalyze_requested"]
+
+
+# ── POST /{agency_id}/probe ─────────────────────────────────────────────
+
+
+def test_probe_rejects_a_disallowed_feed_url(monkeypatch):
+    """`safe_urlopen` guards SSRF by raising `FeedURLError`; the endpoint
+    must surface that as a 422 naming the problem, not a 502 or 500."""
+    conn = _Conn(deleted_at=None)
+
+    def _boom(feed_url: str) -> dict[str, Any]:
+        raise FeedURLError("feed_url resolves to a private address")
+
+    monkeypatch.setattr(admin_agencies, "_fetch_and_measure", _boom)
+    response = _client(conn).post("/api/admin/agencies/1/probe")
+
+    assert response.status_code == 422
+    assert "private address" in response.json()["detail"]
+    assert conn.audit == []
+
+
+def test_probe_reports_502_on_a_generic_fetch_failure(monkeypatch):
+    """Any other fetch failure (timeout, DNS, 5xx from the feed) is reported
+    generically rather than leaking the underlying exception text."""
+    conn = _Conn(deleted_at=None)
+
+    def _boom(feed_url: str) -> dict[str, Any]:
+        raise TimeoutError("feed took too long")
+
+    monkeypatch.setattr(admin_agencies, "_fetch_and_measure", _boom)
+    response = _client(conn).post("/api/admin/agencies/1/probe")
+
+    assert response.status_code == 502
+    assert conn.audit == []
+
+
+def test_probe_rejects_an_empty_poll_as_409(monkeypatch):
+    """`record_field_coverage_probe` raises `ValueError` for a capture with
+    no stop_time_updates; that must not be recorded as a durable verdict."""
+    conn = _Conn(deleted_at=None)
+    cov = {"stop_time_updates": 0}
+
+    async def _empty(conn_arg, agency_id, cov_arg, feed_url):
+        raise ValueError("capture has no stop_time_updates")
+
+    monkeypatch.setattr(admin_agencies, "_fetch_and_measure", lambda feed_url: cov)
+    monkeypatch.setattr("pipeline.strategies.static_join.record_field_coverage_probe", _empty)
+    response = _client(conn).post("/api/admin/agencies/1/probe")
+
+    assert response.status_code == 409
+    assert conn.audit == []
+
+
+def test_probe_success_records_verdicts_and_audits_the_action(monkeypatch):
+    conn = _Conn(deleted_at=None)
+    cov = {"stop_time_updates": 42}
+    verdicts = {"stop_id": True, "arr_delay": False}
+
+    async def _recorded(conn_arg, agency_id, cov_arg, feed_url):
+        assert agency_id == 1
+        assert feed_url == "https://example.test/feed.pb"
+        return verdicts
+
+    monkeypatch.setattr(admin_agencies, "_fetch_and_measure", lambda feed_url: cov)
+    monkeypatch.setattr("pipeline.strategies.static_join.record_field_coverage_probe", _recorded)
+    response = _client(conn).post("/api/admin/agencies/1/probe")
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "recorded", "sample_size": 42, "fields": verdicts}
+    assert [call[1] for call in conn.audit] == ["agency.probed"]
