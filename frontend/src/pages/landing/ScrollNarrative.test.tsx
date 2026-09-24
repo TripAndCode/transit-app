@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -33,13 +35,14 @@ describe("ScrollNarrative", () => {
     expect(screen.getAllByText("Riverside Sta.").length).toBeGreaterThan(0);
   });
 
-  it("gives every section the reveal wrapper classes, visible without JS/IntersectionObserver support", () => {
+  it("gives every section the reveal wrapper, already revealed without IntersectionObserver support", () => {
+    expect(typeof IntersectionObserver).toBe("undefined");
     const { container } = renderNarrative();
     const sections = container.querySelectorAll(".landing-narrative-section");
     expect(sections.length).toBe(3);
     for (const section of sections) {
       expect(section.classList.contains("landing-reveal")).toBe(true);
-      expect(section.classList.contains("landing-reveal--pending")).toBe(true);
+      expect(section.classList.contains("landing-reveal--visible")).toBe(true);
     }
   });
 
@@ -49,5 +52,46 @@ describe("ScrollNarrative", () => {
   it("renders no brush control on the demo charts", () => {
     renderNarrative();
     expect(screen.queryByRole("slider")).toBeNull();
+  });
+});
+
+describe("landing reveal CSS", () => {
+  const css = readFileSync(resolve(process.cwd(), "src/pages/landing/ScrollNarrative.css"), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+
+  /** Body of the first rule whose selector text starts at `selector`. */
+  function ruleBody(selector: string): string {
+    const at = css.indexOf(selector);
+    if (at === -1) throw new Error(`selector not found: ${selector}`);
+    const open = css.indexOf("{", at + selector.length - 1);
+    let depth = 0;
+    for (let i = open; i < css.length; i++) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
+    }
+    throw new Error(`unbalanced braces after: ${selector}`);
+  }
+
+  function decl(body: string, prop: string): string | null {
+    const re = new RegExp(`(?:^|[;{\\s])${prop}\\s*:\\s*([^;]+);`, "g");
+    let last: string | null = null;
+    for (const m of body.matchAll(re)) last = m[1].replace(/\s+/g, " ").trim();
+    return last;
+  }
+
+  it("never parks a narrative section at opacity: 0 -- the offset is the whole animation", () => {
+    const pending = ruleBody(".landing-reveal.landing-reveal--pending {");
+    expect(decl(pending, "opacity")).toBeNull();
+    expect(decl(pending, "transform")).toBe("translateY(28px)");
+  });
+
+  it("transitions the transform only, inside a motion-allowed block", () => {
+    expect(css.match(/@media \(prefers-reduced-motion: no-preference\)/g)).toHaveLength(1);
+    const visible = ruleBody(".landing-reveal.landing-reveal--pending.landing-reveal--visible {");
+    expect(decl(visible, "opacity")).toBeNull();
+    expect(decl(visible, "transform")).toBe("translateY(0)");
+    expect(decl(visible, "transition")).toBe("transform var(--dur-3) var(--ease-out)");
   });
 });

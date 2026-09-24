@@ -17,7 +17,9 @@ const STEPS: readonly Step[] = [
  *  hasn't appeared yet -- the dashboard's own data fetches finish
  *  asynchronously, so a step's anchor (the filter dock, the observed-trips
  *  panel) isn't guaranteed to exist the instant this component mounts or a
- *  step advances. */
+ *  step advances. The poll exists only to find the anchor: once found it is
+ *  cleared, and the anchor's own ResizeObserver plus resize/scroll keep the
+ *  panel on it from then on. */
 const FIND_RETRY_MS = 250;
 
 /**
@@ -58,6 +60,13 @@ export function FirstRunTour() {
     // exists for, and a panel that appears three ticks later still has to
     // announce itself. Once per step -- a reposition is not a new arrival.
     let announced = false;
+    // Set the moment an anchor is found: the search is over, so the retry
+    // poll stops and the anchor's own box becomes the thing to watch.
+    let found = false;
+    let intervalId = 0;
+    const anchorResize =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => place());
+
     function place() {
       // A poll that forces layout on a tab nobody is looking at buys
       // nothing; the anchor cannot have moved under the visitor.
@@ -66,6 +75,14 @@ export function FirstRunTour() {
       if (!target || !panel) {
         if (panel) panel.hidden = true;
         return;
+      }
+      if (!found) {
+        found = true;
+        if (intervalId) {
+          window.clearInterval(intervalId);
+          intervalId = 0;
+        }
+        anchorResize?.observe(target);
       }
       const pos = computeTooltipPosition(
         target.getBoundingClientRect(),
@@ -86,11 +103,12 @@ export function FirstRunTour() {
       }
     }
     place();
-    const intervalId = window.setInterval(place, FIND_RETRY_MS);
+    if (!found) intervalId = window.setInterval(place, FIND_RETRY_MS);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => {
-      window.clearInterval(intervalId);
+      if (intervalId) window.clearInterval(intervalId);
+      anchorResize?.disconnect();
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };

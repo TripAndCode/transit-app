@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewHeroRow } from "./OverviewHeroRow";
+import { stubReducedMotion } from "../test/reducedMotion";
 import * as hooks from "../api/hooks";
 import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
 
@@ -64,6 +65,14 @@ function renderHero(overrides: {
 }
 
 describe("OverviewHeroRow", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders the eyebrow label and the primary avg-delay value", () => {
     mockHooks(38, 0.1);
     renderHero();
@@ -178,5 +187,21 @@ describe("OverviewHeroRow", () => {
     expect(value).not.toBeNull();
     expect(value!.className.split(/\s+/)).not.toContain("num");
     expect(value!.getAttribute("style") ?? "").not.toMatch(/tabular-nums/);
+  });
+
+  it("anchors the sparkline on the period mean, labelled in words", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderHero({ sparklinePoints: [2, 4, 6] });
+    // Without a reference the reader cannot tell a half-minute wobble from a
+    // ten-minute climb: the shape is auto-scaled to the window's own extremes.
+    expect(container.querySelector('[data-testid="sparkline-baseline"]')).not.toBeNull();
+    expect(screen.getByText("Period avg 4.0 min")).toBeInTheDocument();
+  });
+
+  it("drops the reference line when there is no series to average", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderHero({ sparklinePoints: [] });
+    expect(container.querySelector('[data-testid="sparkline-baseline"]')).toBeNull();
+    expect(screen.queryByText(/Period avg/)).toBeNull();
   });
 });

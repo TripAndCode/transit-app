@@ -5,6 +5,7 @@ import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
+import { periodMean } from "./periodMean";
 import { storySentence } from "./overview/storySentence";
 import { STALE_THRESHOLD_HOURS } from "./DataStalenessBanner";
 
@@ -66,6 +67,15 @@ export function OverviewHeroRow({
     }
   }
 
+  // The sparkline's y-scale spans only this window's own min..max, so its
+  // shape alone cannot say whether a climb is half a minute or ten. The
+  // reference is the period mean rather than a fixed 0 baseline: the absolute
+  // figure is already set in the largest type on the page right beside it,
+  // and pinning the axis at 0 would flatten a typical few-minutes series into
+  // a band at the top of the box, costing the day-to-day read that is the
+  // only thing this sparkline adds.
+  const sparklineMean = periodMean(sparklinePoints);
+
   const avgMinColor = headline.avg_min != null ? delayColor(headline.avg_min) : undefined;
   // Called unconditionally (hooks can't branch on headline.avg_min's
   // nullability) -- the "—" fallback below still renders in place of it when
@@ -93,6 +103,7 @@ export function OverviewHeroRow({
           preserveAspectRatio="none"
           showLabels={false}
           showEndDot={false}
+          baseline={sparklineMean ?? undefined}
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         />
         <div className="ov-hero-label">{t("overview.hero_row.avg_delay_label")}</div>
@@ -100,6 +111,11 @@ export function OverviewHeroRow({
           {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
           <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
         </div>
+        {sparklineMean != null && (
+          <div className="ov-hero-baseline">
+            {t("overview.hero_row.sparkline_baseline", { value: sparklineMean.toFixed(1) })}
+          </div>
+        )}
       </div>
       <div>
         {/* A div, not a <p>: InsightHint's root is a div, and a div is not

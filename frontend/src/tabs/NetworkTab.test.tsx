@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
+import { stubReducedMotion } from "../test/reducedMotion";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
 import { ApiError } from "../api/client";
@@ -41,7 +42,10 @@ function renderTab(agencyId = "1") {
 }
 
 describe("NetworkTab", () => {
-  beforeEach(async () => await i18n.changeLanguage("en"));
+  beforeEach(async () => {
+    stubReducedMotion();
+    await i18n.changeLanguage("en");
+  });
 
   it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({

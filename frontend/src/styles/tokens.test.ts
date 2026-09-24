@@ -507,6 +507,20 @@ describe("progressive reveal (RevealSection.tsx's useInView())", () => {
     expect(decl(inBody, "opacity")).toBeNull();
     expect(decl(inBody, "transform")).toBe("translateY(0)");
   });
+
+  it("staggers the sections of one group off --stagger, so a tab enters once", () => {
+    const allowed = motionAllowedBlocksContaining(".reveal {");
+    const body = ruleBody(allowed[0], ".reveal {");
+    expect(decl(body, "transition-delay")).toBe("calc(var(--stagger, 0) * var(--dur-1))");
+  });
+
+  it("keeps no per-child entrance classes for sections that already enter with their parent", () => {
+    // A bar that grows and a number that fades inside a section that is
+    // itself revealing is the same entrance played twice.
+    expect(globalCss).not.toContain(".ov-anim-fade");
+    expect(globalCss).not.toContain(".ov-anim-grow-x");
+    expect(globalCss).not.toContain("ov-grow-x");
+  });
 });
 
 describe("tooltip surface", () => {

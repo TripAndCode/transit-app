@@ -139,4 +139,69 @@ describe("FirstRunTour", () => {
       vi.useRealTimers();
     }
   });
+
+  // A 250 ms poll that keeps forcing layout for the whole life of the tour
+  // is work nothing consumes: once the anchor is found, resize, scroll and
+  // the anchor's own ResizeObserver cover every way it can move.
+  it("starts no retry poll when the anchor is already on the page", () => {
+    const setInterval = vi.spyOn(window, "setInterval");
+    renderTourWithAnchors();
+    expect(setInterval.mock.calls.filter(([, delay]) => delay === 250)).toHaveLength(0);
+  });
+
+  it("stops the retry poll as soon as a late anchor is found", async () => {
+    vi.useFakeTimers();
+    try {
+      const setInterval = vi.spyOn(window, "setInterval");
+      const clearInterval = vi.spyOn(window, "clearInterval");
+      const { container } = render(
+        <I18nextProvider i18n={i18n}>
+          <FirstRunTour />
+        </I18nextProvider>,
+      );
+      const pollIndex = setInterval.mock.calls.findIndex(([, delay]) => delay === 250);
+      expect(pollIndex).toBeGreaterThanOrEqual(0);
+      const intervalId = setInterval.mock.results[pollIndex].value;
+
+      const anchor = document.createElement("div");
+      anchor.setAttribute("data-tour", "filter-bar");
+      container.appendChild(anchor);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+
+      expect(clearInterval).toHaveBeenCalledWith(intervalId);
+      const before = document.querySelectorAll('[data-tour="filter-bar"]').length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(document.querySelectorAll('[data-tour="filter-bar"]').length).toBe(before);
+      expect(document.querySelector<HTMLElement>(".first-run-tour")?.hidden).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("watches the anchor's own box so a reflow under it moves the panel", () => {
+    const observed: Element[] = [];
+    const disconnect = vi.fn();
+    class FakeResizeObserver {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        observed.push(target);
+      }
+      unobserve() {}
+      disconnect = disconnect;
+      fire() {
+        this.callback([], this as unknown as ResizeObserver);
+      }
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    try {
+      renderTourWithAnchors();
+      expect(observed).toEqual([document.querySelector('[data-tour="filter-bar"]')]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

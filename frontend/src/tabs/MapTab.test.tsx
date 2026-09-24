@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
 import { MapTab } from "./MapTab";
+import { stubReducedMotion } from "../test/reducedMotion";
 import type { LiveTripsResponse, RouteSummaryResponse } from "../api/types";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
@@ -44,6 +45,10 @@ function renderMap(agencyId = "1") {
 }
 
 describe("MapTab", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

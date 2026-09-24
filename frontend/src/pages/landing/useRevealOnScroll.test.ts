@@ -47,16 +47,12 @@ describe("useRevealOnScroll", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reveals on the next frame when IntersectionObserver is unavailable", async () => {
+  it("starts revealed when IntersectionObserver is unavailable", () => {
     // jsdom has no IntersectionObserver -- this is the real default here,
-    // not a contrived case, and must fall open rather than hiding the
-    // section forever.
+    // not a contrived case. With no observer to clear the pending offset,
+    // the section must never enter it in the first place.
     expect(typeof IntersectionObserver).toBe("undefined");
     const { result } = renderHook(() => useRevealOnScroll<HTMLDivElement>());
-    expect(result.current[1]).toBe(false);
-    await act(async () => {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    });
     expect(result.current[1]).toBe(true);
   });
 

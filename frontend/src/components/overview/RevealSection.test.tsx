@@ -22,4 +22,31 @@ describe("RevealSection", () => {
     expect(wrapper?.className.split(/\s+/)).toContain("reveal");
     expect(wrapper?.getAttribute("style") ?? "").not.toMatch(/opacity/);
   });
+
+  it("carries its position in the tab's one staggered entrance group as --stagger", () => {
+    const { container } = render(
+      <RevealSection index={2}>
+        <p>content</p>
+      </RevealSection>,
+    );
+    expect((container.firstElementChild as HTMLElement).style.getPropertyValue("--stagger")).toBe("2");
+  });
+
+  it("caps the stagger index so a long tab still finishes entering", () => {
+    const { container } = render(
+      <RevealSection index={9}>
+        <p>content</p>
+      </RevealSection>,
+    );
+    expect((container.firstElementChild as HTMLElement).style.getPropertyValue("--stagger")).toBe("4");
+  });
+
+  it("defaults to the head of the group when no index is given", () => {
+    const { container } = render(
+      <RevealSection>
+        <p>content</p>
+      </RevealSection>,
+    );
+    expect((container.firstElementChild as HTMLElement).style.getPropertyValue("--stagger")).toBe("0");
+  });
 });

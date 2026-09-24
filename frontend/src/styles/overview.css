@@ -276,8 +276,9 @@
   border-color: var(--tooltip-bg) transparent transparent;
 }
 
-/* Entrance animations (.ov-anim-*, .ov-modal) live in global.css so every
-   tab can use them, not only this sheet. */
+/* Entrance animations (.ov-modal, .reveal) live in global.css so every tab
+   can use them, not only this sheet. A revealed section's children get none
+   of their own: .reveal is the entrance for everything inside it. */
 
 /* ---------- Click-to-expand modal ---------- */
 .ov-modal-backdrop {
@@ -465,6 +466,26 @@
   font-weight: 500;
   color: var(--text-secondary);
   margin-left: 6px;
+}
+/* Legend for the sparkline's dashed reference line. HTML rather than SVG
+   text: the chart behind it is stretched with preserveAspectRatio="none",
+   which would distort any glyph drawn inside it. Positioned for the same
+   reason .ov-hero-label is -- to paint over the absolutely-filled chart
+   rather than under it. */
+.ov-hero-baseline {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.ov-hero-baseline::before {
+  content: "";
+  width: 18px;
+  border-top: 1px dashed currentColor;
+  opacity: 0.6;
 }
 .ov-hero-story {
   font-family: var(--font-display);

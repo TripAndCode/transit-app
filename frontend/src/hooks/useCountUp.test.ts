@@ -43,10 +43,41 @@ describe("useCountUp", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not animate on first mount -- returns the initial value immediately", () => {
+  it("counts up from 0 on first paint when motion is allowed", () => {
+    const raf = mockRaf();
+    const { result } = renderHook(() => useCountUp(42, { duration: 600, decimals: 1 }));
+    // The figure arrives at 0 and climbs, rather than being printed at its
+    // final value before the tile it lives in has finished appearing.
+    expect(result.current).toBe(0);
+
+    raf.flush(0);
+    expect(result.current).toBe(0);
+    raf.flush(300);
+    expect(result.current).toBeGreaterThan(0);
+    expect(result.current).toBeLessThan(42);
+    raf.flush(600);
+    expect(result.current).toBe(42);
+  });
+
+  it("prints the value outright on first paint under prefers-reduced-motion: reduce", () => {
+    setReducedMotion(true);
     const raf = vi.spyOn(window, "requestAnimationFrame");
     const { result } = renderHook(() => useCountUp(42));
     expect(result.current).toBe(42);
+    expect(raf).not.toHaveBeenCalled();
+  });
+
+  it("prints the value outright on first paint when duration is 0", () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame");
+    const { result } = renderHook(() => useCountUp(42, { duration: 0 }));
+    expect(result.current).toBe(42);
+    expect(raf).not.toHaveBeenCalled();
+  });
+
+  it("schedules no frames on first paint for a value of 0 -- nothing to count up to", () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame");
+    const { result } = renderHook(() => useCountUp(0));
+    expect(result.current).toBe(0);
     expect(raf).not.toHaveBeenCalled();
   });
 

@@ -120,14 +120,14 @@ export function ServiceSplit({
                 <span className="ov-svc-label">
                   {t(`overview.service_split_label.${k}`, { defaultValue: k })}
                 </span>
-                <span className="ov-svc-num ov-anim-fade">
+                <span className="ov-svc-num">
                   {v.toFixed(1)}
                   {t("overview.hero_unit_min")}
                 </span>
               </div>
               <div className="ov-svc-track">
                 <div
-                  className="ov-svc-fill ov-anim-grow-x"
+                  className="ov-svc-fill"
                   style={{ width: `${pctOfMax}%` }}
                 />
               </div>

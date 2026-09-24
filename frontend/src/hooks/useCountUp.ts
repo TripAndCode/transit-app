@@ -24,10 +24,11 @@ function round(n: number, decimals: number): number {
 /**
  * Animates a displayed number toward `value` with an ease-out rAF loop, for a
  * large standalone figure (a KPI hero value, a stat tile, a per-row delay
- * figure) whose target changes after mount -- an agency switch, a filter
- * change, a live refresh. The first render never animates: there is nothing
- * to count up *from* yet, so it returns `value` immediately. Later changes to
- * `value` animate from whatever is currently displayed.
+ * figure). The count-up is an entrance effect first: on first paint the
+ * figure starts at 0 and climbs to `value`, arriving with the panel around
+ * it rather than being printed before the panel has finished appearing.
+ * Later changes to `value` -- an agency switch, a filter change, a live
+ * refresh -- animate from whatever is currently displayed.
  *
  * Jumps straight to `value` (no rAF loop at all) under
  * `prefers-reduced-motion: reduce`, and whenever `duration` is 0.
@@ -41,19 +42,20 @@ export function useCountUp(value: number, { duration = 600, decimals = 1 }: UseC
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const immediate = duration <= 0 || reducedMotion;
 
-  const [display, setDisplay] = useState(value);
-  // The last `value` `display` was synced to while in "immediate" mode.
-  // Comparing the incoming `value` against this (rather than against
-  // `display` itself, which drifts away from `value` mid-animation) is the
-  // standard adjust-state-when-a-prop-changes pattern: it lets the branch
-  // below re-sync during render, with no effect involved. A plain ref
-  // couldn't stand in for it -- a ref may only be written inside an effect
-  // or callback, never during render.
-  const [immediateTarget, setImmediateTarget] = useState(value);
-  const fromRef = useRef(value);
+  // 0 is the first-paint start, so the mount effect below has a real delta
+  // to animate across. Under reduced motion (or duration 0) there is no
+  // entrance to stage, so the figure is simply correct from the first frame.
+  const [display, setDisplay] = useState(() => (immediate ? value : 0));
+  const fromRef = useRef(immediate ? value : 0);
 
-  if (immediate && value !== immediateTarget) {
-    setImmediateTarget(value);
+  // The standard adjust-state-when-a-prop-changes pattern: re-sync during
+  // render, with no effect involved. "Immediate" is precisely the mode in
+  // which `display` must equal `value`, so `display` itself is the thing to
+  // compare -- including when motion is switched off mid-tween, which would
+  // otherwise strand the figure on whatever frame it had reached. Under
+  // motion `display` drifts away from `value` on purpose, and the guard
+  // keeps this branch out of that case entirely.
+  if (immediate && display !== value) {
     setDisplay(value);
   }
 

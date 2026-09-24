@@ -117,7 +117,7 @@ export function OverviewTab() {
             />
             <RoutesToCheckList routes={data.top_delayed.routes} />
             {data.concentration.top_routes.length > 0 && (
-              <RevealSection>
+              <RevealSection index={0}>
                 <ConcentrationBar
                   concentration={data.concentration}
                   movers={data.movers}
@@ -126,7 +126,7 @@ export function OverviewTab() {
               </RevealSection>
             )}
             {data.peak_hour != null && (
-              <RevealSection>
+              <RevealSection index={1}>
                 <PeakHourRibbon
                   peak_hour={data.peak_hour}
                   onClick={() => setOpen("peak_hour")}
@@ -135,7 +135,7 @@ export function OverviewTab() {
               </RevealSection>
             )}
             {Object.keys(data.service_split).length > 0 && (
-              <RevealSection>
+              <RevealSection index={2}>
                 <ServiceSplit
                   service_split={data.service_split}
                   onClick={() => setOpen("service_split")}
