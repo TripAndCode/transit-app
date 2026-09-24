@@ -6,7 +6,13 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: ["./src/test/setup.ts"],
+    // The .cjs shim first: `src/lint/eslintReactCompilerBans.test.ts` loads
+    // the real flat config, which pulls in typescript-eslint, which throws on
+    // TypeScript 7. A vite `resolve.alias` cannot reach it -- the package is
+    // externalized CJS, loaded through Node's own require rather than vite's
+    // transform -- so the same module-resolution rewrite the lint scripts
+    // apply has to run inside the worker. See that file for why it exists.
+    setupFiles: ["./scripts/ts6-for-eslint.cjs", "./src/test/setup.ts"],
     css: false,
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     // jsdom's CSS-color dependency ships ESM that the default `forks` pool
