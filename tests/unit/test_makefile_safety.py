@@ -112,3 +112,30 @@ def test_env_example_has_no_active_agency_id():
     lines = ENV_EXAMPLE.read_text().splitlines()
     active = [line for line in lines if line.startswith("AGENCY_ID=")]
     assert active == [], f"active AGENCY_ID silently scopes ingest/analyze: {active}"
+
+
+def test_database_url_has_no_hardcoded_default():
+    """An unset DATABASE_URL must stop Make, not resolve to some literal host.
+
+    `.env` is gitignored, so no git worktree has one. A literal default meant
+    every database target in a worktree aimed at whatever answered on that
+    port -- on a machine running more than one Postgres, another project's.
+    """
+    text = MAKEFILE.read_text()
+    assignment = next(line for line in text.splitlines() if line.startswith("DATABASE_URL ?="))
+    assert assignment.strip() == "DATABASE_URL ?=", (
+        f"DATABASE_URL must default to empty, not to a literal: {assignment!r}"
+    )
+
+
+def test_database_targets_go_through_the_guarded_expansion():
+    """Recipes must use `$(db_url)`, which errors when nothing is configured.
+
+    Naming `$(DATABASE_URL)` directly would pass the empty default straight
+    through and fail somewhere deeper, with a message about a connection
+    rather than about the missing configuration.
+    """
+    text = MAKEFILE.read_text()
+    assert "db_url = $(if $(DATABASE_URL)," in text, "the guarded expansion is gone"
+    direct = [line for line in text.splitlines() if "DATABASE_URL=$(DATABASE_URL)" in line]
+    assert direct == [], f"recipes must use $(db_url): {direct}"

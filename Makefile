@@ -10,7 +10,17 @@
 # its own :5544/:8124 block regardless of what the caller exports.
 export
 
-DATABASE_URL ?= postgresql://transit:transit@localhost:5433/transit
+# No literal fallback. This used to default to a hardcoded localhost port,
+# which is not where this project's data lives and, on a machine running more
+# than one Postgres, is somebody else's database -- and `.env` is gitignored,
+# so every git worktree lacks one. A missing `.env` therefore aimed `migrate`,
+# `analyze`, `ingest` and `seed-agencies` at whatever happened to answer on
+# that port. Unset now means a stopped Make, not a silent wrong target.
+DATABASE_URL ?=
+
+# Expanded per recipe, not at parse time, so targets that need no database
+# (lint, typecheck, frontend-*) still run without one.
+db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
 .PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build
@@ -117,9 +127,9 @@ git-cleanup-apply:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 # Runs against the throwaway :5544/:8124 stack via scripts/run_integration_tests.sh,
-# never this Makefile's own DATABASE_URL (which defaults to the real, read-only
-# dev database on :5433) -- see that script for why it force-sets its own block
-# instead of trusting the caller's environment.
+# never this Makefile's own DATABASE_URL (which points at the real, read-only dev
+# database) -- see that script for why it force-sets its own block instead of
+# trusting the caller's environment.
 
 test:
 	scripts/run_integration_tests.sh
@@ -147,7 +157,7 @@ serve:
 	if [ "$${LOCAL_RT_POLL:-0}" = "1" ]; then \
 		LOCAL_RT_POLL_INTERVAL_SEC=$${LOCAL_RT_POLL_INTERVAL_SEC:-30} bash scripts/dev/local_rt_poller.sh >>/tmp/transit-local-rt-poller.log 2>&1 & \
 	fi; \
-	DATABASE_URL=$(DATABASE_URL) poetry run uvicorn api.main:app --reload --port $(PORT) --no-access-log
+	DATABASE_URL=$(db_url) poetry run uvicorn api.main:app --reload --port $(PORT) --no-access-log
 
 # ── Database ─────────────────────────────────────────────────────────────────
 
@@ -155,7 +165,7 @@ db:
 	docker compose up -d --build
 	docker compose exec db sh -c 'until pg_isready -h localhost -U transit -d transit; do sleep 1; done'
 	docker compose exec clickhouse sh -c 'until wget --spider -q http://localhost:8123/ping; do sleep 1; done'
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py migrate up
 	@$(MAKE) ch-bootstrap
 
 db-down:
@@ -186,7 +196,7 @@ ch-bootstrap:
 	from db.clickhouse.bootstrap import apply_schema; apply_schema(get_client())"
 
 migrate:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate up
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py migrate up
 
 # Destructive: rolls back applied schema migrations. Requires CONFIRM=1 so a
 # stray `make migrate-down` (no confirmation, possibly against the wrong
@@ -195,10 +205,10 @@ migrate:
 migrate-down:
 	@if [ "$(CONFIRM)" != "1" ]; then \
 		echo "Refusing to roll back migrations without CONFIRM=1."; \
-		DATABASE_URL=$(DATABASE_URL) poetry run python -c 'from gtfs_pipeline import describe_target; import os; print("Target:", describe_target(os.environ["DATABASE_URL"]))'; \
+		DATABASE_URL=$(db_url) poetry run python -c 'from gtfs_pipeline import describe_target; import os; print("Target:", describe_target(os.environ["DATABASE_URL"]))'; \
 		exit 1; \
 	fi
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py migrate down $(if $(TARGET),--target $(TARGET),)
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py migrate down $(if $(TARGET),--target $(TARGET),)
 
 # ── Data fetch (pull from Oracle Cloud collection server) ────────────────────
 # Requires: ORACLE_HOST, ORACLE_USER, ORACLE_SSH_KEY or ORACLE_SSH_KEY_PATH
@@ -227,28 +237,28 @@ sync-r2:
 # Usage: make ingest FOLDER=./raw_archives AGENCY_ID=1
 
 ingest:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py ingest $(FOLDER) $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py ingest $(FOLDER) $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
 
 # Not named PATH: the Makefile's bare `export` directive would export a
 # command-line PATH=... override into every recipe's environment, clobbering
 # the real $PATH and breaking `poetry`/every other command in this recipe.
 load_static:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py load_static $(STATIC_PATH) $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py load_static $(STATIC_PATH) $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
 
 analyze:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py analyze $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py analyze $(if $(AGENCY_ID),--agency-id $(AGENCY_ID),)
 
 analyze-all:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py analyze_all
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py analyze_all
 
 check-aggs:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py check_aggs
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py check_aggs
 
 check-migrations:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py check_migrations
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py check_migrations
 
 digest:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py digest $(if $(DAY),--day $(DAY),) $(if $(LOCALE),--locale $(LOCALE),)
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py digest $(if $(DAY),--day $(DAY),) $(if $(LOCALE),--locale $(LOCALE),)
 
 # Observed daily weather for each agency's representative station. Idempotent:
 # re-runnable, upserts on (station_id, obs_date), and only fetches the
@@ -257,21 +267,21 @@ digest:
 # daily, since the source publishes its point observations for a short rolling
 # window only.
 ingest-weather:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py ingest_weather $(if $(DAYS),--days $(DAYS),)
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py ingest_weather $(if $(DAYS),--days $(DAYS),)
 
 # Idempotent: re-runnable, upserts on feed_url uniqueness.
 seed-agencies:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py seed_agencies $(if $(CSV),$(CSV),agencies.csv)
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py seed_agencies $(if $(CSV),$(CSV),agencies.csv)
 
 # Idempotent: re-runnable, upserts on content_hash uniqueness.
 build-rag-index:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py build_rag_index --all-agencies
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py build_rag_index --all-agencies
 
 promote-intent-cache:
-	DATABASE_URL=$(DATABASE_URL) poetry run python scripts/promote_intent_cache.py --agency-id $(AGENCY_ID)
+	DATABASE_URL=$(db_url) poetry run python scripts/promote_intent_cache.py --agency-id $(AGENCY_ID)
 
 prune-query-log:
-	DATABASE_URL=$(DATABASE_URL) poetry run python gtfs_pipeline.py prune_query_log --days 90
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune_query_log --days 90
 
 frontend-install:
 	cd frontend && npm install
@@ -323,4 +333,4 @@ hooks:
 # changes: poetry run python scripts/_gen_phase35_gold.py > tests/ask_eval/gold_questions.jsonl
 
 ask-eval:
-	DATABASE_URL=$(DATABASE_URL) poetry run python scripts/ask_eval.py
+	DATABASE_URL=$(db_url) poetry run python scripts/ask_eval.py
