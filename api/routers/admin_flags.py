@@ -102,33 +102,34 @@ async def patch_flag(
 
     before_value = (await aget_flag_state(key)).value
 
-    await conn.execute(
-        """
-        INSERT INTO feature_flags (key, value, reason, updated_by, updated_at)
-        VALUES ($1, $2, $3, $4, now())
-        ON CONFLICT (key) DO UPDATE
-        SET value = EXCLUDED.value,
-            reason = EXCLUDED.reason,
-            updated_by = EXCLUDED.updated_by,
-            updated_at = EXCLUDED.updated_at
-        """,
-        key,
-        body.value,
-        body.reason,
-        admin.user_id,
-    )
+    async with conn.transaction():
+        await conn.execute(
+            """
+            INSERT INTO feature_flags (key, value, reason, updated_by, updated_at)
+            VALUES ($1, $2, $3, $4, now())
+            ON CONFLICT (key) DO UPDATE
+            SET value = EXCLUDED.value,
+                reason = EXCLUDED.reason,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = EXCLUDED.updated_at
+            """,
+            key,
+            body.value,
+            body.reason,
+            admin.user_id,
+        )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="flag.set",
+            target_type="feature_flag",
+            target_id=key,
+            before={"value": before_value},
+            after={"value": body.value},
+            reason=body.reason,
+            ip=request.client.host if request.client else None,
+        )
     invalidate()
-
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
-        action="flag.set",
-        target_type="feature_flag",
-        target_id=key,
-        before={"value": before_value},
-        after={"value": body.value},
-        reason=body.reason,
-    )
 
     return _to_out(definition, await aget_flag_state(key))
 
@@ -173,6 +174,7 @@ async def clear_flag(
                 # Where the flag lands, which is the env resolution the
                 # removed override was masking.
                 after={"value": before.env_default},
+                ip=request.client.host if request.client else None,
             )
     invalidate()
 
