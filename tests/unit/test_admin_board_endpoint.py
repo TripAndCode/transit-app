@@ -46,6 +46,22 @@ _JOIN_ROWS = [
 ]
 _AGENCY_ONLY_ROWS = [{"agency_id": 1, "agency_name": "Hokuriku"}]
 
+_RUN_ROWS = [
+    {
+        "run_id": 1,
+        "kind": "analyze",
+        "agency_id": 1,
+        "agency_name": "Hokuriku",
+        "started_at": _NOW,
+        "finished_at": _NOW,
+        "status": "ok",
+        "rows": 10,
+        "lock_wait_ms": None,
+        "error": None,
+        "requested_by": None,
+    }
+]
+
 
 class _Conn:
     """Fake asyncpg connection answering each of the board's queries by shape."""
@@ -59,6 +75,8 @@ class _Conn:
     async def fetch(self, sql, *args):
         if "schema_migrations" in sql:
             return [{"version": "0001"}]
+        if "pipeline_runs" in sql:
+            return _RUN_ROWS
         if "agg_feed_health" in sql:
             if self.join_error is not None:
                 raise self.join_error

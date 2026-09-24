@@ -35,7 +35,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import re
 import time
 import urllib.error
@@ -46,6 +45,7 @@ from typing import Any
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
+from pipeline.flags import flag
 from pipeline.url_guard import FeedURLError, safe_urlopen
 
 logger = logging.getLogger(__name__)
@@ -485,7 +485,7 @@ def weather_ingest_enabled() -> bool:
     "not available" from the absence of rows, which is exactly what it already
     does for an agency with no representative station configured.
     """
-    return os.environ.get("WEATHER_INGEST_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+    return flag("weather_ingest_enabled", False)
 
 
 _STATIONS_SQL = """

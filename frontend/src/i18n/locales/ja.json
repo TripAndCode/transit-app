@@ -1119,14 +1119,16 @@
       "users": "ユーザー管理",
       "ops": "運用状況",
       "architecture": "アーキテクチャ",
-"audit": "監査ログ",
+      "audit": "監査ログ",
+      "flags": "機能フラグ",
       "board": "管制盤",
       "group": {
         "operations": "運行",
         "people": "人",
         "governance": "統制",
         "reference": "参照"
-      }
+      },
+      "ask_ops": "Ask 運用"
     },
     "ops": {
       "title": "運用状況",
@@ -1279,21 +1281,76 @@
         "loading": "エクスポート中…"
       }
     },
+    "flags": {
+      "table_label": "機能フラグ",
+      "empty": "登録されたフラグはありません。",
+      "title": "機能フラグ",
+      "col_flag": "フラグ",
+      "col_value": "値",
+      "col_source": "ソース",
+      "col_updated": "最終変更",
+      "source_env": "環境変数デフォルト",
+      "source_override": "上書き",
+      "updated_by": "ユーザー #{{id}} が変更",
+      "no_reason": "理由の記録なし",
+      "dialog_title_enable": "「{{label}}」を有効にしますか？",
+      "dialog_title_disable": "「{{label}}」を無効にしますか？",
+      "reason_label": "理由",
+      "reason_placeholder": "この変更の理由を入力してください",
+      "confirm": "保存",
+      "cancel": "キャンセル",
+      "load_error": "機能フラグを読み込めませんでした。",
+      "labels": {
+        "askRouterEnabled": "Ask: ルールルーター",
+        "askFollowupEnabled": "Ask: LLM フォローアップ",
+        "copilotInsightEnabled": "Copilot: 自動インサイト",
+        "askHistoryEnabled": "Ask: 会話履歴",
+        "askIntentCacheEnabled": "Ask: インテントキャッシュ",
+        "askQueryLogEnabled": "Ask: クエリログ",
+        "weatherIngestEnabled": "気象: 観測データ取り込み",
+        "openapiDocsEnabled": "API: OpenAPI ドキュメント",
+        "perfDebugEnabled": "API: パフォーマンスデバッグ面"
+      }
+    },
     "table": {
       "saved_views": "保存された表示",
       "empty": "該当する行がありません。",
       "select_all": "すべて選択",
       "select_row": "{{label}} を選択"
     },
-    "drawer": {
-      "close": "閉じる"
-    },
     "board": {
       "title": "管制盤",
       "poll_note": "10 秒ごとに更新",
       "load_error": "管制盤の取得に失敗しました。取得できた分のみ表示しています。",
       "reanalyze": "いま再集計",
-      "reanalyze_unavailable": "再集計の実行はまだ有効になっていません。",
+      "reanalyze_confirm_title": "いま再集計しますか？",
+      "reanalyze_confirm_body": "取り込みと集計を実行します。数分かかることがあり、実行中の結果はタイムラインに表示されます。",
+      "reanalyze_confirm": "実行する",
+      "reanalyze_cancel": "やめる",
+      "reanalyze_started": "再集計を開始しました。タイムラインに表示されます。",
+      "reanalyze_error": "再集計を開始できませんでした。",
+      "runs_title": "実行タイムライン · 今日",
+      "runs_legend": "スキップした実行は破線",
+      "runs_empty": "今日はまだ実行記録がありません。",
+      "runs_chart_label": "今日の実行タイムライン（{{count}} 件）",
+      "runs_now": "いま",
+      "run_lane": "{{kind}} · {{agency}}",
+      "run_lane_all": "{{kind}} · 全事業者",
+      "run_kind": {
+        "ingest": "取り込み",
+        "analyze": "集計",
+        "weather": "気象",
+        "static": "静的データ"
+      },
+      "run_status": {
+        "running": "実行中",
+        "ok": "完了",
+        "skipped": "スキップ",
+        "error": "失敗"
+      },
+      "run_tooltip": "{{lane}} · {{from}}–{{to}} · {{status}}",
+      "run_tooltip_rows": "{{count}} 行",
+      "run_tooltip_lock": "ロック待ちのためスキップ",
       "collectors_title": "収集器",
       "collector": {
         "oracle_crawler": "Oracle クローラ",
@@ -1332,6 +1389,69 @@
         "migrations_behind": "スキーマが {{count}} 件遅れています",
         "llm_approvals_pending": "AI 利用の承認待ち {{count}} 名"
       }
+    },
+    "ask_ops": {
+      "title": "Ask 運用",
+      "filter": {
+        "route_all": "すべてのルート",
+        "status_all": "すべてのステータス",
+        "from_label": "開始日",
+        "to_label": "終了日"
+      },
+      "route": {
+        "rules": "ルール",
+        "nn": "埋め込み(NN)",
+        "rag": "RAG(LLM)",
+        "no_history": "履歴なし"
+      },
+      "status": {
+        "ok": "成功",
+        "error": "エラー"
+      },
+      "col": {
+        "agency": "事業者",
+        "question": "質問",
+        "route": "ルート",
+        "status": "ステータス",
+        "tool": "ツール",
+        "cache": "キャッシュ",
+        "created": "日時"
+      },
+      "cache_outcome": {
+        "hit": "キャッシュヒット",
+        "miss": "キャッシュミス",
+        "bypass": "バイパス"
+      },
+      "promote_action": "昇格",
+      "promote_success": "昇格しました。",
+      "promote_already": "すでに昇格済みです。",
+      "promote_not_eligible": "昇格対象ではありません。",
+      "promote_error": "昇格に失敗しました。もう一度お試しください。",
+      "empty": "この条件に一致する質問はありません。",
+      "pagination": {
+        "prev": "前へ",
+        "next": "次へ"
+      },
+      "funnel": {
+        "title": "ルート別ファネル",
+        "total": "合計: {{count}}",
+        "success_of": "{{success}} / {{count}} 件成功",
+        "providers_title": "プロバイダー",
+        "providers_not_tracked": "プロバイダーは質問単位では記録されていません—記録されるのはルート段階のみです。"
+      },
+      "kill_switch": {
+        "title": "キルスイッチ",
+        "router_note": "ASK_ROUTER_ENABLED / ASK_QUERY_LOG_ENABLED でルーターとクエリログを制御します。",
+        "flags_link": "Feature flags で管理"
+      },
+      "eval": {
+        "title": "週次評価",
+        "not_run": "未実行",
+        "score_label": "スコア",
+        "generated_at_label": "時点"
+      },
+      "table_label": "Ask クエリログ",
+      "numeric_guard": "数値ガード"
     }
   },
   "copilot": {

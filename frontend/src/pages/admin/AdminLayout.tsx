@@ -1,6 +1,16 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Building2, Users, Activity, Workflow, LayoutDashboard, ScrollText, type LucideIcon } from "lucide-react";
+import {
+  Building2,
+  Users,
+  Activity,
+  Workflow,
+  LayoutDashboard,
+  MessageCircle,
+  ScrollText,
+  ToggleLeft,
+  type LucideIcon,
+} from "lucide-react";
 import { useAdminUsers } from "../../api/admin";
 
 type NavItem = { to: string; end?: boolean; labelKey: string; Icon: LucideIcon; badge?: "approvals" };
@@ -16,6 +26,7 @@ const NAV_GROUPS: readonly { groupKey: string; items: readonly NavItem[] }[] = [
       { to: "/admin", end: true, labelKey: "admin.nav.board", Icon: LayoutDashboard },
       { to: "/admin/agencies", labelKey: "admin.nav.agencies", Icon: Building2 },
       { to: "/admin/ops", labelKey: "admin.nav.ops", Icon: Activity },
+      { to: "/admin/ask", labelKey: "admin.nav.ask_ops", Icon: MessageCircle },
     ],
   },
   {
@@ -24,7 +35,10 @@ const NAV_GROUPS: readonly { groupKey: string; items: readonly NavItem[] }[] = [
   },
   {
     groupKey: "governance",
-    items: [{ to: "/admin/audit", labelKey: "admin.nav.audit", Icon: ScrollText }],
+    items: [
+      { to: "/admin/audit", labelKey: "admin.nav.audit", Icon: ScrollText },
+      { to: "/admin/flags", labelKey: "admin.nav.flags", Icon: ToggleLeft },
+    ],
   },
   {
     groupKey: "reference",

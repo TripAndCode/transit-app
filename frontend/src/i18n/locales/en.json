@@ -1119,14 +1119,16 @@
       "users": "Users",
       "ops": "Ops",
       "architecture": "Architecture",
-"audit": "Audit log",
+      "audit": "Audit log",
+      "flags": "Flags",
       "board": "Control board",
       "group": {
         "operations": "Operations",
         "people": "People",
         "governance": "Governance",
         "reference": "Reference"
-      }
+      },
+      "ask_ops": "Ask ops"
     },
     "ops": {
       "title": "Ops",
@@ -1279,21 +1281,76 @@
         "loading": "Exporting…"
       }
     },
+    "flags": {
+      "table_label": "Feature flags",
+      "empty": "No flags registered.",
+      "title": "Feature flags",
+      "col_flag": "Flag",
+      "col_value": "Value",
+      "col_source": "Source",
+      "col_updated": "Last changed",
+      "source_env": "Env default",
+      "source_override": "Override",
+      "updated_by": "Changed by user #{{id}}",
+      "no_reason": "No reason recorded",
+      "dialog_title_enable": "Enable \"{{label}}\"?",
+      "dialog_title_disable": "Disable \"{{label}}\"?",
+      "reason_label": "Reason",
+      "reason_placeholder": "Why are you changing this flag?",
+      "confirm": "Save",
+      "cancel": "Cancel",
+      "load_error": "Couldn't load feature flags.",
+      "labels": {
+        "askRouterEnabled": "Ask: rules router",
+        "askFollowupEnabled": "Ask: LLM follow-up",
+        "copilotInsightEnabled": "Copilot: proactive insight",
+        "askHistoryEnabled": "Ask: conversation history",
+        "askIntentCacheEnabled": "Ask: intent cache",
+        "askQueryLogEnabled": "Ask: query log",
+        "weatherIngestEnabled": "Weather: observed-data ingest",
+        "openapiDocsEnabled": "API: OpenAPI docs",
+        "perfDebugEnabled": "API: perf debug surface"
+      }
+    },
     "table": {
       "saved_views": "Saved views",
       "empty": "Nothing to show.",
       "select_all": "Select all",
       "select_row": "Select {{label}}"
     },
-    "drawer": {
-      "close": "Close"
-    },
     "board": {
       "title": "Control board",
       "poll_note": "Refreshed every 10 seconds",
       "load_error": "Couldn't load the control board — showing what's available.",
       "reanalyze": "Re-aggregate now",
-      "reanalyze_unavailable": "Running a re-aggregation isn't wired up yet.",
+      "reanalyze_confirm_title": "Re-aggregate now?",
+      "reanalyze_confirm_body": "This runs ingest and analyze. It can take several minutes; progress appears on the timeline.",
+      "reanalyze_confirm": "Run it",
+      "reanalyze_cancel": "Cancel",
+      "reanalyze_started": "Re-aggregation started. It will appear on the timeline.",
+      "reanalyze_error": "Could not start the re-aggregation.",
+      "runs_title": "Run timeline · today",
+      "runs_legend": "Skipped runs are dashed",
+      "runs_empty": "Nothing has run yet today.",
+      "runs_chart_label": "Today's run timeline ({{count}} runs)",
+      "runs_now": "now",
+      "run_lane": "{{kind}} · {{agency}}",
+      "run_lane_all": "{{kind}} · all agencies",
+      "run_kind": {
+        "ingest": "Ingest",
+        "analyze": "Analyze",
+        "weather": "Weather",
+        "static": "Static"
+      },
+      "run_status": {
+        "running": "Running",
+        "ok": "Done",
+        "skipped": "Skipped",
+        "error": "Failed"
+      },
+      "run_tooltip": "{{lane}} · {{from}}–{{to}} · {{status}}",
+      "run_tooltip_rows": "{{count}} rows",
+      "run_tooltip_lock": "Skipped: the ingest/analyze lock was held",
       "collectors_title": "Collectors",
       "collector": {
         "oracle_crawler": "Oracle crawler",
@@ -1332,6 +1389,69 @@
         "migrations_behind": "Schema behind by {{count}} migration(s)",
         "llm_approvals_pending": "{{count}} user(s) awaiting AI access approval"
       }
+    },
+    "ask_ops": {
+      "title": "Ask ops",
+      "filter": {
+        "route_all": "All routes",
+        "status_all": "All statuses",
+        "from_label": "From",
+        "to_label": "To"
+      },
+      "route": {
+        "rules": "Rules",
+        "nn": "Embedding (NN)",
+        "rag": "RAG (LLM)",
+        "no_history": "No history"
+      },
+      "status": {
+        "ok": "OK",
+        "error": "Error"
+      },
+      "col": {
+        "agency": "Agency",
+        "question": "Question",
+        "route": "Route",
+        "status": "Status",
+        "tool": "Tool",
+        "cache": "Cache",
+        "created": "Created"
+      },
+      "cache_outcome": {
+        "hit": "Cache hit",
+        "miss": "Cache miss",
+        "bypass": "Bypassed"
+      },
+      "promote_action": "Promote",
+      "promote_success": "Promoted.",
+      "promote_already": "Already promoted.",
+      "promote_not_eligible": "Not eligible for promotion.",
+      "promote_error": "Couldn't promote — try again.",
+      "empty": "No queries found for this filter.",
+      "pagination": {
+        "prev": "Previous",
+        "next": "Next"
+      },
+      "funnel": {
+        "title": "Route funnel",
+        "total": "Total: {{count}}",
+        "success_of": "{{success}} / {{count}} ok",
+        "providers_title": "Providers",
+        "providers_not_tracked": "Provider isn't recorded per query yet — only the route stage is logged."
+      },
+      "kill_switch": {
+        "title": "Kill switches",
+        "router_note": "ASK_ROUTER_ENABLED / ASK_QUERY_LOG_ENABLED gate the router and the query log.",
+        "flags_link": "Manage in Feature flags"
+      },
+      "eval": {
+        "title": "Weekly eval",
+        "not_run": "Not run yet",
+        "score_label": "Score",
+        "generated_at_label": "As of"
+      },
+      "table_label": "Ask query log",
+      "numeric_guard": "Numeric guard"
     }
   },
   "copilot": {

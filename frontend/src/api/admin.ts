@@ -280,12 +280,36 @@ export type BoardAlert = {
   href: string | null;
 };
 
+/** One `pipeline_runs` row: an ingest, analyze, weather or static job, from
+ *  the CLI or the cron path, including the ones the advisory lock displaced. */
+export type PipelineRun = {
+  run_id: number;
+  kind: "ingest" | "analyze" | "weather" | "static";
+  /** Null for a fleet-wide job, and for one displaced before it resolved
+   *  which agency it was for. */
+  agency_id: number | null;
+  agency_name: string | null;
+  started_at: string;
+  /** Null while `status` is `running`. */
+  finished_at: string | null;
+  status: "running" | "ok" | "skipped" | "error";
+  rows: number | null;
+  lock_wait_ms: number | null;
+  error: string | null;
+  requested_by: number | null;
+};
+
 export type AdminBoard = {
   collectors: BoardCollector[];
   freshness: BoardFreshnessRow[];
   migrations: { applied: string | null; latest: string | null; behind: number } | null;
   alerts: BoardAlert[];
+  /** Today's runs (JST), so one poll covers the whole board. Empty both when
+   *  nothing ran and when the table is unreadable. */
+  runs: PipelineRun[];
 };
+
+type AdminRuns = { date: string; runs: PipelineRun[] };
 
 /** The `/admin` entry page's single snapshot. Polled rather than pushed: the
  *  underlying collectors are themselves cached snapshots, so a short poll is
@@ -604,4 +628,154 @@ export async function fetchAllAdminAudit(filters: AdminAuditFilters, maxPages = 
     cursor = result.next_cursor;
   }
   return items;
+}
+
+// ── Feature flags ────────────────────────────────────────────────────────
+
+export type FeatureFlag = {
+  key: string;
+  label_key: string;
+  value: boolean;
+  source: "env" | "override";
+  env_default: boolean;
+  updated_by: number | null;
+  updated_at: string | null;
+  reason: string | null;
+};
+
+/** Every registered kill switch, resolved (DB override, else env). */
+export function useFeatureFlags() {
+  return useQuery({
+    queryKey: ["adminFlags"],
+    queryFn: ({ signal }) => apiGet<FeatureFlag[]>("/api/admin/flags", { signal }),
+  });
+}
+
+/** Mutation: PATCH one flag's override. `reason` is mandatory server-side —
+ * see `AdminFlagsPage`'s reason dialog, the only caller. */
+export function usePatchFeatureFlag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, value, reason }: { key: string; value: boolean; reason: string }) =>
+      apiPatch<FeatureFlag>(`/api/admin/flags/${key}`, { value, reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminFlags"] });
+    },
+  });
+}
+
+/** Mutation: ask the server to run the ingest+analyze sweep now.
+ *
+ *  The 202 carries the run row the server has already opened, so the caller
+ *  can draw its bar at once instead of waiting out a poll interval; the
+ *  board's own poll then takes over and shows the run finishing. */
+export function useTriggerRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { kind: "ingest" | "analyze"; agency_id?: number }) =>
+      apiPost<AdminRuns>("/api/admin/runs", body),
+    onSuccess: (started) => {
+      qc.setQueryData(["adminBoard"], (board: AdminBoard | undefined) => {
+        if (board == null) return board;
+        // Keyed by run_id rather than appended blindly: a poll that landed
+        // between the request and its response already carries the row.
+        const merged = new Map(board.runs.map((run) => [run.run_id, run]));
+        for (const run of started.runs) merged.set(run.run_id, run);
+        return { ...board, runs: [...merged.values()] };
+      });
+      qc.invalidateQueries({ queryKey: ["adminBoard"] });
+    },
+  });
+}
+
+// ── Ask ops (query log, route funnel, promote-to-intent-cache, eval) ─────
+//
+// "route" here is the Ask pipeline stage that answered a question (rules ->
+// nn (embedding nearest-neighbour) -> rag (Stage-3 LLM)), matching
+// CLAUDE.md's architecture naming, not a transit route/line. `no_history` is
+// the router's own early-exit case (a follow-up with nothing to continue).
+// See api/routers/admin_ask.py's module docstring for why there is no
+// "user" field and why `providers` below is always null: ask_query_log
+// carries neither identity nor a per-query provider/latency column.
+
+export type AskRoute = "rules" | "nn" | "rag" | "no_history";
+type AskStatus = "ok" | "error";
+
+export type AskQueryLogRow = {
+  id: number;
+  agency_id: number;
+  agency_name: string;
+  question: string;
+  route: AskRoute;
+  tool: string | null;
+  status: AskStatus;
+  cache_outcome: string | null;
+  numeric_guard_triggered: boolean | null;
+  created_at: string;
+  promotable: boolean;
+};
+
+type AskQueryLogPage = { rows: AskQueryLogRow[]; next_cursor: string | null };
+
+export function useAdminAskQueries(params: {
+  route?: string;
+  status?: string;
+  agencyId?: number;
+  from?: string;
+  to?: string;
+  cursor?: string | null;
+}) {
+  const qs = new URLSearchParams();
+  if (params.route) qs.set("route", params.route);
+  if (params.status) qs.set("status", params.status);
+  if (params.agencyId != null) qs.set("agency_id", String(params.agencyId));
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.cursor) qs.set("cursor", params.cursor);
+  return useQuery({
+    queryKey: ["adminAskQueries", params],
+    queryFn: ({ signal }) => apiGet<AskQueryLogPage>(`/api/admin/ask/queries?${qs}`, { signal }),
+    placeholderData: keepPreviousData,
+  });
+}
+
+type AskFunnelRoute = { route: AskRoute; count: number; success_count: number };
+type AskFunnel = { by_route: AskFunnelRoute[]; total: number; providers: null };
+
+export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to?: string }) {
+  const qs = new URLSearchParams();
+  if (params.agencyId != null) qs.set("agency_id", String(params.agencyId));
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  return useQuery({
+    queryKey: ["adminAskFunnel", params],
+    queryFn: ({ signal }) => apiGet<AskFunnel>(`/api/admin/ask/funnel?${qs}`, { signal }),
+  });
+}
+
+type PromoteResult = { promoted: boolean; reason: string | null; chunk_id: string | null };
+
+/** Mutation: promote one ask_query_log row's cached intent into rag_chunks.
+ * Invalidates the query list so the row's promoted state refreshes. */
+export function usePromoteAskQuery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (queryLogId: number) => apiPost<PromoteResult>("/api/admin/ask/promote", { query_log_id: queryLogId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminAskQueries"] });
+    },
+  });
+}
+
+type AskEvalResult = { generated_at: string | null; score: number | null } | null;
+
+/** Latest local weekly eval result, or null when none has been produced yet
+ * (rendered as "not run" rather than an error — see the backend endpoint's
+ * docstring for why null is the common case today). */
+export function useAdminAskEval() {
+  return useQuery({
+    queryKey: ["adminAskEval"],
+    queryFn: ({ signal }) => apiGet<AskEvalResult>("/api/admin/ask/eval", { signal }),
+    staleTime: 60_000,
+  });
 }
