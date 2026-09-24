@@ -197,7 +197,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
         onClick={() => setOpen((v) => !v)}
         style={{
           background: activeCount > 0 ? "var(--accent)" : "var(--bg-surface)",
-          color: activeCount > 0 ? "#fff" : "var(--text-primary)",
+          color: activeCount > 0 ? "var(--on-accent)" : "var(--text-primary)",
           border: `1px solid ${activeCount > 0 ? "var(--accent)" : "var(--border-subtle)"}`,
           borderRadius: 8,
           padding: "8px 16px",
@@ -217,7 +217,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
           <span
             style={{
               background: "rgba(255,255,255,0.25)",
-              color: "#fff",
+              color: "var(--on-accent)",
               fontSize: 12,
               borderRadius: 999,
               padding: "1px 8px",
@@ -372,7 +372,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
               disabled={!dirty}
               style={{
                 background: dirty ? "var(--accent)" : "var(--bg-soft)",
-                color: dirty ? "#fff" : "var(--text-tertiary)",
+                color: dirty ? "var(--on-accent)" : "var(--text-tertiary)",
                 border: "none",
                 borderRadius: 4,
                 padding: "6px 18px",

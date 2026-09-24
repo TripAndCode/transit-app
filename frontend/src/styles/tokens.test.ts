@@ -176,18 +176,26 @@ describe("motion tokens", () => {
 });
 
 describe("elevation tokens", () => {
-  it.each(["--el-1", "--el-2", "--el-3"])("%s is defined in both themes", (prop) => {
+  it.each(["--el-1", "--el-2", "--el-3", "--el-left"])("%s is defined in both themes", (prop) => {
     expect(decl(rootBlock, prop)).toBeTruthy();
     expect(decl(darkBlock, prop)).toBeTruthy();
   });
 
   it("the dark elevations are the hairline/inset treatment, not the light drop shadows", () => {
-    for (const prop of ["--el-1", "--el-2", "--el-3"]) {
+    for (const prop of ["--el-1", "--el-2", "--el-3", "--el-left"]) {
       const dark = decl(darkBlock, prop)!;
       expect(dark).toContain("inset");
       expect(dark).not.toBe(decl(rootBlock, prop));
     }
     expect(decl(darkBlock, "--el-3")).toMatch(/rgba\(0, ?0, ?0, ?0?\.[5-9]\d*\)/);
+  });
+
+  it("--el-left casts to the left (negative x-offset), not downward like --el-2/--el-3", () => {
+    // A right-anchored drawer's shadow has to fall onto the page it covers,
+    // not below itself -- see the SettingsDrawer.tsx boxShadow comment.
+    for (const block of [rootBlock, darkBlock]) {
+      expect(decl(block, "--el-left")).toMatch(/-\d+px 0/);
+    }
   });
 });
 
@@ -392,6 +400,16 @@ describe("--delay-severe clears AA on its own theme's surface", () => {
     // There is no build-time link between tokens.ts and global.css, so this
     // assertion is what keeps the hand-mirrored pair from drifting.
     expect(severeColorResolved()).toBe(lightSevere);
+  });
+});
+
+describe("--delay-ok mirrors tokens.ts's DELAY_RAMP.ok", () => {
+  it("is defined on the bare :root", () => {
+    expect(decl(rootBlock, "--delay-ok")).toBeTruthy();
+  });
+
+  it("matches DELAY_RAMP.ok — the same relationship --delay-severe has with SEVERE_FALLBACK, without the per-theme split (nothing renders text on this token)", () => {
+    expect(decl(rootBlock, "--delay-ok")!.toUpperCase()).toBe(DELAY_RAMP.ok);
   });
 });
 

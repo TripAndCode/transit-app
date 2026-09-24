@@ -51,3 +51,57 @@ describe("CJK type floor", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// The literal pixel values this fix removed from the files below: 12.5px (an
+// off-scale value -- no --text-* step is 12.5) and bare 13px/15px (on-scale,
+// but naming no token -- they happen to equal --text-sm/--text-base). Not the
+// whole --text-* scale: this fix did not touch every on-scale literal (e.g. a
+// pre-existing 17px/26px in these same files, which equal --text-md/--text-xl
+// but were out of its scope), so checking the full scale here would flag
+// those too.
+const BYPASSED_LITERALS_PX = [12.5, 13, 15];
+
+// Files a design-token-bypass audit converted from hardcoded scale-matching
+// literals (12.5px, an off-scale value that rounded a --text-xs/13px caption
+// down; bare 13px/15px, which happen to equal --text-sm/--text-base but named
+// no token) to `var(--text-*)`. Scoped to these files, not the whole tree:
+// dozens of other components still hardcode on-scale sizes like 13px/15px
+// coincidentally, and converting every one of those is a separate, much
+// larger effort than this fix, whose bug was specifically the 12.5/13/15
+// literals inside these files -- see the CJK type floor test above for the
+// tree-wide invariant (no size below the 12px floor) that check does cover.
+const TOKEN_BYPASS_AUDITED_FILES = [
+  "pages/admin/AdminBoardPage.tsx",
+  "pages/LoginPage.css",
+  "components/paramPills/RoutePickerPill.css",
+  "components/SettingsDrawer.tsx",
+  "pages/admin/AdminUsersPage.tsx",
+  "tabs/ask/investigation.css",
+  "tabs/ask/stopEvidence.css",
+  "tabs/map/operationsMap.css",
+  "pages/admin/AdminFlagsPage.tsx",
+  "components/Sidebar.tsx",
+];
+
+describe("type scale — audited files reference tokens, not scale-matching literals", () => {
+  it("declares no literal 12.5/13/15px font size in the files this fix converted", () => {
+    const offenders: string[] = [];
+    for (const relPath of TOKEN_BYPASS_AUDITED_FILES) {
+      const file = path.join(root, relPath);
+      const text = readFileSync(file, "utf8");
+      const lines = text.split("\n");
+      lines.forEach((line, i) => {
+        for (const re of PATTERNS) {
+          re.lastIndex = 0;
+          for (const m of line.matchAll(re)) {
+            const px = parseFloat(m[1]);
+            if (BYPASSED_LITERALS_PX.includes(px)) {
+              offenders.push(`${relPath}:${i + 1}: ${m[0].trim()}`);
+            }
+          }
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+});

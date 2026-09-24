@@ -96,7 +96,7 @@ function CollectorTile({ collector }: { collector: BoardCollector }) {
       data-testid="collector-tile"
       style={{
         border: "1px solid var(--border-subtle)",
-        borderRadius: "var(--radius-md, 10px)",
+        borderRadius: "var(--radius-lg)",
         background: "var(--surface-1)",
         padding: "12px 14px",
       }}
@@ -160,7 +160,7 @@ export function AdminBoardPage() {
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
             fontFamily: "inherit",
             padding: "6px 13px",
             borderRadius: 6,
@@ -184,13 +184,13 @@ export function AdminBoardPage() {
             display: "grid",
             gap: 8,
             padding: "12px 14px",
-            borderRadius: "var(--radius-md, 10px)",
+            borderRadius: "var(--radius-lg)",
             border: "1px solid var(--border-subtle)",
             background: "var(--surface-1)",
           }}
         >
-          <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.reanalyze_confirm_title")}</h2>
-          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)" }}>
+          <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>{t("admin.board.reanalyze_confirm_title")}</h2>
+          <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
             {t("admin.board.reanalyze_confirm_body")}
           </p>
           <div style={{ display: "flex", gap: 8 }}>
@@ -202,7 +202,7 @@ export function AdminBoardPage() {
                 trigger.mutate({ kind: "ingest" });
               }}
               style={{
-                fontSize: 12.5,
+                fontSize: "var(--text-xs)",
                 fontFamily: "inherit",
                 padding: "5px 12px",
                 borderRadius: 6,
@@ -218,7 +218,7 @@ export function AdminBoardPage() {
               type="button"
               onClick={() => setConfirming(false)}
               style={{
-                fontSize: 12.5,
+                fontSize: "var(--text-xs)",
                 fontFamily: "inherit",
                 padding: "5px 12px",
                 borderRadius: 6,
@@ -235,13 +235,13 @@ export function AdminBoardPage() {
       )}
 
       {trigger.error != null && (
-        <p role="alert" style={{ margin: 0, fontSize: 12.5, color: "var(--color-warning, #C99A2E)" }}>
+        <p role="alert" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-warning, #C99A2E)" }}>
           {t("admin.board.reanalyze_error")}
         </p>
       )}
 
       {trigger.isSuccess && (
-        <p role="status" style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)" }}>
+        <p role="status" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
           {t("admin.board.reanalyze_started")}
         </p>
       )}
@@ -252,7 +252,7 @@ export function AdminBoardPage() {
           style={{
             margin: 0,
             padding: "10px 14px",
-            borderRadius: "var(--radius-md, 10px)",
+            borderRadius: "var(--radius-lg)",
             background: "var(--surface-1)",
             color: "var(--color-warning, #C99A2E)",
             fontSize: 14,
@@ -274,7 +274,7 @@ export function AdminBoardPage() {
         aria-label={t("admin.board.freshness_title")}
         style={{
           border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md, 10px)",
+          borderRadius: "var(--radius-lg)",
           background: "var(--surface-1)",
           padding: "12px 14px",
         }}
@@ -286,10 +286,10 @@ export function AdminBoardPage() {
             gap: 12,
             flexWrap: "wrap",
             marginBottom: 10,
-            fontSize: 12.5,
+            fontSize: "var(--text-xs)",
           }}
         >
-          <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.freshness_title")}</h2>
+          <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>{t("admin.board.freshness_title")}</h2>
           <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", display: "flex", gap: 12 }}>
             <span>■ {t("admin.board.legend_fresh")}</span>
             <span>■ {t("admin.board.legend_stale")}</span>
@@ -298,7 +298,7 @@ export function AdminBoardPage() {
         </div>
         {freshness.length === 0 ? (
           !isPending && (
-            <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+            <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
               {t("admin.board.freshness_empty")}
             </p>
           )
@@ -360,7 +360,7 @@ export function AdminBoardPage() {
         aria-label={t("admin.board.runs_title")}
         style={{
           border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md, 10px)",
+          borderRadius: "var(--radius-lg)",
           background: "var(--surface-1)",
           padding: "12px 14px",
         }}
@@ -368,7 +368,7 @@ export function AdminBoardPage() {
         <div
           style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 8 }}
         >
-          <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.runs_title")}</h2>
+          <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>{t("admin.board.runs_title")}</h2>
           <p style={{ margin: 0, fontSize: 12, color: "var(--text-tertiary)" }}>{t("admin.board.runs_legend")}</p>
         </div>
         <RunTimeline runs={runs} dayStart={dayStart} now={now} />
@@ -378,14 +378,14 @@ export function AdminBoardPage() {
         aria-label={t("admin.board.alerts_title")}
         style={{
           border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md, 10px)",
+          borderRadius: "var(--radius-lg)",
           background: "var(--surface-1)",
           padding: "10px 14px",
         }}
       >
-        <h2 style={{ fontSize: 13, fontWeight: 700, margin: "0 0 6px" }}>{t("admin.board.alerts_title")}</h2>
+        <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: "0 0 6px" }}>{t("admin.board.alerts_title")}</h2>
         {alerts.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>{t("admin.board.alerts_none")}</p>
+          <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{t("admin.board.alerts_none")}</p>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {alerts.map((alert) => (
@@ -398,7 +398,7 @@ export function AdminBoardPage() {
                   gap: 10,
                   padding: "7px 0",
                   borderTop: "1px solid var(--surface-2)",
-                  fontSize: 12.5,
+                  fontSize: "var(--text-xs)",
                 }}
               >
                 <span

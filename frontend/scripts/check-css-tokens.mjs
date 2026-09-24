@@ -6,12 +6,15 @@
 // ladder in src/styles/zIndex.ts).
 //
 // 1. Every `var(--x)` reference (CSS, and inline style objects in TS/TSX)
-//    must resolve to a `--x: ...` declaration in styles/global.css, UNLESS
-//    the reference itself supplies a fallback (`var(--x, fallback)`) — a
-//    fallback usually means the property is set dynamically per-instance
-//    (e.g. inline `style={{ "--ops-queue-width": ... }}`) rather than
-//    declared globally, so global.css is deliberately not the source of
-//    truth for it.
+//    must resolve to a `--x: ...` declaration in styles/global.css. A
+//    reference with a fallback that is itself another token
+//    (`var(--x, var(--y))`) is exempt regardless, since it composes two
+//    named tokens. A reference with a *literal* fallback (`var(--x,
+//    <value>)`) is exempt only when `--x` is listed in
+//    DYNAMIC_PER_INSTANCE_PROPERTIES below (genuinely set per-instance at
+//    runtime, e.g. inline `style={{ "--ops-queue-width": ... }}`) — anything
+//    else with an unresolved name and a literal fallback is presumed to be a
+//    design token whose name was typo'd or renamed and must still resolve.
 // 2. Every `z-index:` declaration in a CSS file must be `var(--z-*)` — a
 //    bare number would bypass the shared stacking-order ladder entirely
 //    (see src/styles/zIndex.ts and its `--z-*` mirror in global.css).
@@ -54,6 +57,20 @@ function walk(dir, out = []) {
   return out;
 }
 
+// Custom properties that are genuinely set per-instance at runtime (an
+// inline `style.setProperty`/style-object write), never declared in
+// global.css by design — DailyChart/ChartEnter's measured stroke length,
+// HourlyHeatmap/DowBandGrid's per-cell data-driven opacity, and MapTab's
+// resizable queue-column width. A literal fallback on one of these means
+// "the instance hasn't set it yet", not "this design token is missing", so
+// these are exempt from the check below even though nothing in global.css
+// defines them. Anything else with an unresolved name and a literal
+// fallback is presumed to be a typo'd or renamed design token (e.g.
+// `var(--radius-md, 10px)` when only `--radius-lg` was ever defined) and
+// must still resolve — add a name here only for a genuinely dynamic,
+// per-instance property, never to silence this check for a real token.
+const DYNAMIC_PER_INSTANCE_PROPERTIES = new Set(["--len", "--cell-opacity", "--ops-queue-width"]);
+
 // A hand-rolled scan (not a single regex) because a fallback value can
 // itself contain parens (e.g. `var(--accent-soft, rgba(91, 108, 173,
 // 0.14))`) — a regex anchored on the first `)` would truncate that
@@ -85,11 +102,12 @@ function findVarRefs(text) {
     const inner = text.slice(nameAndFallbackStart, j - 1);
     const commaIndex = inner.indexOf(",");
     const name = (commaIndex === -1 ? inner : inner.slice(0, commaIndex)).trim();
+    const fallback = commaIndex === -1 ? null : inner.slice(commaIndex + 1).trim();
     // Skip anything that isn't a syntactically valid custom-property name
     // (e.g. a doc comment reading "var(--*)" to mean "any --x property") --
     // it was never a real reference to resolve in the first place.
     if (/^--[a-zA-Z0-9-]+$/.test(name)) {
-      refs.push({ name, hasFallback: commaIndex !== -1, index: i });
+      refs.push({ name, hasFallback: commaIndex !== -1, fallback, index: i });
     }
     i = j;
   }
@@ -126,16 +144,34 @@ for (const file of files) {
   const text = readFileSync(file, "utf8");
   const relPath = file.slice(SRC_DIR.length + 1);
 
-  for (const { name, hasFallback } of findVarRefs(stripComments(text))) {
-    if (hasFallback) continue;
-    if (!definedVars.has(name)) {
+  for (const { name, hasFallback, fallback } of findVarRefs(stripComments(text))) {
+    if (definedVars.has(name)) continue;
+    if (!hasFallback) {
       console.error(
         `check-css-tokens: FAIL — "${relPath}" references var(${name}) with no fallback, but ${name} is not ` +
           "defined anywhere in styles/global.css. Define it there, or give the reference a fallback " +
           `(var(${name}, <value>)) if it's meant to be set dynamically per-instance.`,
       );
       failed = true;
+      continue;
     }
+    // A fallback that is itself another var() reference composes two named
+    // tokens and needs no definition of its own (e.g. `var(--map-badge-bg,
+    // var(--bg-surface))`). A fallback that is a literal (colour, length,
+    // ...) only excuses an undefined name for a known dynamic, per-instance
+    // property — anything else is presumed to be a design token whose name
+    // was typo'd or renamed (this is exactly the bug `var(--radius-md,
+    // 10px)` was: no `--radius-md` was ever declared, and 10px is really
+    // `--radius-lg` by coincidence).
+    if (/^var\(/.test(fallback)) continue;
+    if (DYNAMIC_PER_INSTANCE_PROPERTIES.has(name)) continue;
+    console.error(
+      `check-css-tokens: FAIL — "${relPath}" references var(${name}, ${fallback}), but ${name} is not defined ` +
+        "anywhere in styles/global.css and its fallback is a literal value, not another token. Define " +
+        `${name} in global.css, or add it to DYNAMIC_PER_INSTANCE_PROPERTIES in this script if it is ` +
+        "genuinely set per-instance at runtime rather than being a design token.",
+    );
+    failed = true;
   }
 
   if (extname(file) === ".css") {

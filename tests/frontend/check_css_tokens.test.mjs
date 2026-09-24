@@ -66,8 +66,45 @@ test("var(--x, fallback) is exempt from the global.css definition requirement", 
 });
 
 test("fallback containing nested parens (e.g. rgba(...)) is parsed correctly, not truncated", () => {
+  // --accent-soft is declared (unlike the undefined-token cases below), so
+  // this exercises only the paren-depth parsing: a naive scan that stops at
+  // the first `)` would truncate the fallback inside `rgba(...)` and
+  // misidentify the outer var()'s closing paren.
+  const src = makeSrcTree(
+    {
+      "components/Widget.css": ".widget { background: var(--accent-soft, rgba(91, 108, 173, 0.14)); }",
+    },
+    { globalCss: `:root { --accent-soft: #e1f1f1; }` },
+  );
+  const result = run(src);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test("var(--x, <literal>) naming an undefined, non-dynamic token -> exit 1", () => {
+  // The actual bug this guards against: --radius-md was never declared
+  // anywhere in global.css (only --radius/--radius-lg/--radius-xl were), so
+  // its literal fallback silently masked the missing token instead of
+  // catching it.
   const src = makeSrcTree({
-    "components/Widget.css": ".widget { background: var(--accent-soft, rgba(91, 108, 173, 0.14)); }",
+    "components/Widget.tsx": `export const s = { borderRadius: "var(--radius-md, 10px)" };`,
+  });
+  const result = run(src);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /--radius-md/);
+  assert.match(result.stderr, /literal value, not another token/);
+});
+
+test("var(--x, var(--y)) stays exempt even when --x is undefined", () => {
+  const src = makeSrcTree({
+    "components/Widget.css": ".widget { background: var(--map-badge-bg, var(--bg-surface)); }",
+  });
+  const result = run(src);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test("a known dynamic per-instance property with a literal fallback stays exempt", () => {
+  const src = makeSrcTree({
+    "tabs/MapTab.css": ".ops-workspace { grid-template-columns: var(--ops-queue-width, 380px); }",
   });
   const result = run(src);
   assert.equal(result.status, 0, result.stdout + result.stderr);
