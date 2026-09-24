@@ -100,41 +100,42 @@ def app_server():
     # Keep the server's output instead of discarding it: a startup that dies
     # (a missing provider key, an unreachable DB) is otherwise indistinguishable
     # from one that is merely slow, and both surface as the timeout below. A
-    # file, not a PIPE, so a chatty startup cannot fill the buffer and wedge.
-    log = tempfile.NamedTemporaryFile("w+", suffix=".log", delete=False)
-    proc = subprocess.Popen(
-        # Not `poetry run`: it resolves its venv by cwd, so from a worktree it
-        # starts an interpreter without the project and this fixture reports a
-        # startup timeout instead of the real cause.
-        [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port), "--no-access-log"],
-        env={**os.environ, "ASK_INTENT_CACHE_ENABLED": "true"},
-        stdout=log,
-        stderr=subprocess.STDOUT,
-    )
+    # file, not a PIPE, so a chatty startup cannot fill the buffer and wedge;
+    # unnamed and closed in the `finally` because the runner this job uses is
+    # persistent, so a leaked temp file per run accumulates there forever.
+    with tempfile.TemporaryFile("w+") as log:
+        proc = subprocess.Popen(
+            # Not `poetry run`: it resolves its venv by cwd, so from a worktree it
+            # starts an interpreter without the project and this fixture reports a
+            # startup timeout instead of the real cause.
+            [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port), "--no-access-log"],
+            env={**os.environ, "ASK_INTENT_CACHE_ENABLED": "true"},
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
 
-    # Generous because ASK_INTENT_CACHE_ENABLED makes startup load the
-    # sentence-transformers embedder, which dominates it: even with the model
-    # already in the HuggingFace cache it revalidates revisions over the
-    # network before loading, and on a cold cache it downloads the model
-    # first. A tight bound here fails as "server did not start" on a slow
-    # link or a loaded runner, pointing at the wrong thing entirely.
-    deadline = time.time() + 180
-    started = False
-    while time.time() < deadline:
-        try:
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)
-            started = True
-            break
-        except Exception:
-            time.sleep(0.5)
+        # Generous because ASK_INTENT_CACHE_ENABLED makes startup load the
+        # sentence-transformers embedder, which dominates it: even with the model
+        # already in the HuggingFace cache it revalidates revisions over the
+        # network before loading, and on a cold cache it downloads the model
+        # first. A tight bound here fails as "server did not start" on a slow
+        # link or a loaded runner, pointing at the wrong thing entirely.
+        deadline = time.time() + 180
+        started = False
+        while time.time() < deadline:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)
+                started = True
+                break
+            except Exception:
+                time.sleep(0.5)
 
-    if not started:
-        proc.kill()
-        log.flush()
-        log.seek(0)
-        pytest.fail(f"API server did not start within 180 seconds. Server output:\n{log.read()}")
+        if not started:
+            proc.kill()
+            log.seek(0)
+            pytest.fail(f"API server did not start within 180 seconds. Server output:\n{log.read()}")
 
-    yield f"http://127.0.0.1:{port}"
+        yield f"http://127.0.0.1:{port}"
 
     proc.terminate()
     try:
