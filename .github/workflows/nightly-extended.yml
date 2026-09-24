@@ -66,8 +66,16 @@ jobs:
       - name: Install Poetry
         run: pip install poetry==1.8.5
 
+      # `--with embeddings`: that group is optional (pyproject.toml keeps torch
+      # et al out of the deploy image), and this job is the one that sets
+      # RUN_SLOW=1 and treats a skipped test_embeddings as a failure. Without
+      # it the embedder import raises ModuleNotFoundError, Embedder degrades to
+      # unavailable, and that test fails rather than skips — so the guard below
+      # cannot save a run that never had the dependency it demands. A
+      # persistent self-hosted runner can mask this by retaining the group from
+      # an earlier install; a rebuilt venv would not.
       - name: Install dependencies
-        run: poetry install
+        run: poetry install --with embeddings
 
       # RUN_I18N_SCAN and RUN_DASHBOARD_E2E_SCAN drive a real Chromium
       # against the built SPA (see those tests' own module docstrings) —
@@ -85,6 +93,15 @@ jobs:
         run: |
           npm ci
           npm run build
+
+      # `npm run build` writes frontend/dist; both gated tests open
+      # api/static/index.html. `make bake` is the one definition of that
+      # copy (it also strips the vite manifest), so this calls it rather
+      # than repeating a cp here and letting the two drift. Without this
+      # step the tests self-skip on a missing SPA and the guard below
+      # reports it as the suite being broken.
+      - name: Bake the SPA into api/static
+        run: make bake
 
       - name: Install Playwright's Chromium
         run: poetry run playwright install chromium

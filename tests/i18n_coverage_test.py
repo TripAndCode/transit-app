@@ -4,7 +4,10 @@ Skip by default (expensive — launches headless browser). Run with:
     RUN_I18N_SCAN=1 pytest tests/i18n_coverage_test.py -v
 
 Pre-requisite: build the SPA first so ``api/static/index.html`` exists.
-    cd frontend && npm run build   # output lands in api/static/
+Building alone is not enough — vite writes ``frontend/dist``, and ``make
+bake`` is what copies that into ``api/static``:
+    cd frontend && npm run build
+    make bake
 If ``api/static/index.html`` is absent the fixture skips with a clear
 message rather than failing opaquely.
 """
@@ -15,6 +18,8 @@ import os
 import re
 import socket
 import subprocess
+import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -86,27 +91,34 @@ def app_server():
     if not static_index.exists():
         pytest.skip(
             f"SPA not built — {_STATIC_INDEX} is missing. "
-            "Run `cd frontend && npm run build` first, then re-run with RUN_I18N_SCAN=1."
+            "Run `cd frontend && npm run build && cd .. && make bake` first "
+            "(the build alone writes frontend/dist; bake is what fills api/static), "
+            "then re-run with RUN_I18N_SCAN=1."
         )
 
     port = _free_port()
+    # Keep the server's output instead of discarding it: a startup that dies
+    # (a missing provider key, an unreachable DB) is otherwise indistinguishable
+    # from one that is merely slow, and both surface as the timeout below. A
+    # file, not a PIPE, so a chatty startup cannot fill the buffer and wedge.
+    log = tempfile.NamedTemporaryFile("w+", suffix=".log", delete=False)
     proc = subprocess.Popen(
-        [
-            "poetry",
-            "run",
-            "uvicorn",
-            "api.main:app",
-            "--port",
-            str(port),
-            "--no-access-log",
-        ],
+        # Not `poetry run`: it resolves its venv by cwd, so from a worktree it
+        # starts an interpreter without the project and this fixture reports a
+        # startup timeout instead of the real cause.
+        [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port), "--no-access-log"],
         env={**os.environ, "ASK_INTENT_CACHE_ENABLED": "true"},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log,
+        stderr=subprocess.STDOUT,
     )
 
-    # Wait up to 30 s for the server to accept connections.
-    deadline = time.time() + 30
+    # Generous because ASK_INTENT_CACHE_ENABLED makes startup load the
+    # sentence-transformers embedder, which dominates it: even with the model
+    # already in the HuggingFace cache it revalidates revisions over the
+    # network before loading, and on a cold cache it downloads the model
+    # first. A tight bound here fails as "server did not start" on a slow
+    # link or a loaded runner, pointing at the wrong thing entirely.
+    deadline = time.time() + 180
     started = False
     while time.time() < deadline:
         try:
@@ -118,7 +130,9 @@ def app_server():
 
     if not started:
         proc.kill()
-        pytest.fail("API server did not start within 30 seconds.")
+        log.flush()
+        log.seek(0)
+        pytest.fail(f"API server did not start within 180 seconds. Server output:\n{log.read()}")
 
     yield f"http://127.0.0.1:{port}"
 

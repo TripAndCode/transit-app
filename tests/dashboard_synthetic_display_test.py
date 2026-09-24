@@ -68,7 +68,8 @@ Skips by default (needs `RUN_CH_INTEGRATION=1`, a built SPA, and a real
 Chromium — the same tier as `tests/i18n_coverage_test.py`, which this
 module's `app_server`/`_free_port` fixtures are adapted from):
 
-    cd frontend && npm run build   # api/static/index.html must exist
+    cd frontend && npm run build   # writes frontend/dist, not api/static
+    make bake                      # api/static/index.html must exist
     DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \\
       RUN_CH_INTEGRATION=1 RUN_DASHBOARD_E2E_SCAN=1 \\
       CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8124 \\
@@ -103,6 +104,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -169,20 +171,35 @@ def app_server():
     """
     static_index = Path(__file__).parent.parent / _STATIC_INDEX
     if not static_index.exists():
-        pytest.skip(f"SPA not built — {_STATIC_INDEX} is missing. Run `cd frontend && npm run build` first.")
+        pytest.skip(
+            f"SPA not built — {_STATIC_INDEX} is missing. Run "
+            "`cd frontend && npm run build && cd .. && make bake` first (the build "
+            "alone writes frontend/dist; bake is what fills api/static)."
+        )
 
     port = _free_port()
+    # Keep the server's output instead of discarding it: a startup that dies
+    # (a missing provider key, an unreachable DB) is otherwise indistinguishable
+    # from one that is merely slow, and both surface as the timeout below. A
+    # file, not a PIPE, so a chatty startup cannot fill the buffer and wedge.
+    log = tempfile.NamedTemporaryFile("w+", suffix=".log", delete=False)
     proc = subprocess.Popen(
         # Not `poetry run`: it resolves its venv by cwd, so from a worktree it
         # starts an interpreter without the project and this fixture reports a
-        # 30s startup timeout instead of the real cause.
+        # startup timeout instead of the real cause.
         [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port), "--no-access-log"],
         env={**os.environ},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log,
+        stderr=subprocess.STDOUT,
     )
 
-    deadline = time.time() + 30
+    # Generous because startup loads the sentence-transformers embedder, which
+    # dominates it: even with the model already in the HuggingFace cache it
+    # revalidates revisions over the network before loading, and on a cold
+    # cache it downloads the model first. A tight bound here fails as "server
+    # did not start" on a slow link or a loaded runner, pointing at the wrong
+    # thing entirely.
+    deadline = time.time() + 180
     started = False
     while time.time() < deadline:
         try:
@@ -194,7 +211,9 @@ def app_server():
 
     if not started:
         proc.kill()
-        pytest.fail("API server did not start within 30 seconds.")
+        log.flush()
+        log.seek(0)
+        pytest.fail(f"API server did not start within 180 seconds. Server output:\n{log.read()}")
 
     yield f"http://127.0.0.1:{port}"
 
@@ -227,10 +246,19 @@ def test_overview_headline_matches_synthetic_ground_truth(seeded_agencies, app_s
     page = browser.new_page()
     try:
         for name, (agency_id, pattern) in seeded_agencies.items():
-            url = f"{base}/agencies/{agency_id}/overview?from={pattern.date}&to={pattern.date}"
+            # `period-overview`, not `overview`: the latter is a compatibility
+            # redirect to Operations (main.tsx), which renders no hero row, so
+            # scraping it waits for an element that will never appear.
+            url = f"{base}/agencies/{agency_id}/period-overview?from={pattern.date}&to={pattern.date}"
             page.goto(url, wait_until="networkidle", timeout=30_000)
-            page.wait_for_selector(".ov-kpi-row .ov-kpi-tile", timeout=15_000)
-            cell_text = page.locator(".ov-kpi-row .ov-kpi-tile").first.locator(".ov-kpi-value").inner_text()
+            # Anchored on the value element itself, not the layout wrappers
+            # around it: `.ov-kpi-value` is the class the rendered number is
+            # addressed by (OverviewHeroRow.tsx), while the row/figure
+            # containers are presentation and get restructured. `inner_text`
+            # includes the unit span nested inside it, which
+            # extract_leading_number is built to tolerate.
+            page.wait_for_selector(".ov-kpi-value", timeout=15_000)
+            cell_text = page.locator(".ov-kpi-value").first.inner_text()
             assert_avg_min_matches(
                 cell_text,
                 pattern.expected["agg_route_stats"]["avg_min"],
