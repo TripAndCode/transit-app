@@ -33,7 +33,7 @@
 .focus-trip { padding: 16px 0; border-bottom: 1px solid var(--border-soft); }
 .focus-trip button { display: flex; align-items: center; width: 100%; gap: 12px; border: 0; background: none; color: var(--text-primary); text-align: left; padding: 0; }
 .focus-trip small { display: block; margin: 7px 0; color: var(--text-secondary); }
-.focus-trip b { margin-left: auto; color: var(--color-danger); white-space: nowrap; }
+.focus-trip b { margin-left: auto; color: var(--delay-severe); white-space: nowrap; }
 .focus-trip a { font-size: 12px; }
 .focus-queue-inspect { margin-top: 20px; }
 /* BP.md */

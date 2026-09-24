@@ -38,7 +38,7 @@
 .ops-freshness > span { width: 8px; height: 8px; border-radius: 50%; background: var(--color-warning); box-shadow: 0 0 0 4px rgba(201,154,46,.12); }
 .ops-freshness--normal > span { background: #2ea87a; box-shadow: 0 0 0 4px rgba(46,168,122,.12); }
 .ops-freshness--delayed > span { background: var(--color-warning); box-shadow: 0 0 0 4px rgba(201,154,46,.12); }
-.ops-freshness--stale > span { background: var(--color-danger); box-shadow: 0 0 0 4px rgba(192,57,43,.12); }
+.ops-freshness--stale > span { background: var(--delay-severe); box-shadow: 0 0 0 4px color-mix(in srgb, var(--delay-severe) 12%, transparent); }
 /* Neutral, not amber: "unknown" means there is no reading to judge -- no
    timestamp at all, labelled "no update" -- which is a different fact from a
    feed that is lagging. Sharing the warning colour with `delayed` presented
@@ -199,7 +199,7 @@
 .ops-delay-insights { display: flex; flex-wrap: wrap; gap: 5px; }
 .ops-delay-insights span { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: var(--radius); font-size: var(--text-xs); }
 .ops-delay-insights .is-growth { color: var(--delay-flag); background: var(--delay-flag-soft); }
-.ops-delay-insights .is-recovery { color: var(--accent); background: var(--accent-soft); }
+.ops-delay-insights .is-recovery { color: var(--accent-strong); background: var(--accent-soft); }
 .ops-other-trips { min-height: 0; margin-top: 10px; overflow-y: auto; }
 .ops-other-trips h3 { margin: 0 0 6px; color: var(--text-tertiary); font-size: var(--text-xs); text-transform: uppercase; }
 .ops-other-trips button { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 15px; align-items: center; gap: 7px; width: 100%; margin-top: 5px; padding: 8px; border: 1px solid var(--card-border); border-radius: var(--radius); color: var(--text-primary); background: var(--bg-surface); text-align: left; }
@@ -207,7 +207,7 @@
 .ops-other-trips button span { display: flex; min-width: 0; flex-direction: column; }
 .ops-other-trips button strong { font-size: var(--text-xs); }
 .ops-other-trips button small { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
-.ops-other-trips button b { color: var(--color-warning); font-size: var(--text-xs); }
+.ops-other-trips button b { color: var(--color-warning-text); font-size: var(--text-xs); }
 
 /* Filter dock: a floating control on the map's top-left, in the same idiom as
    the legend and the style picker, rather than a card above the map. The

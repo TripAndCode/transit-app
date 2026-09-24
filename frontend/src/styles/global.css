@@ -58,6 +58,15 @@
      contrast comfortably on dark, matches the pre-existing (marginal) look
      on light — not changing the light-mode value here, out of scope. */
   --color-warning: #C99A2E;
+  /* Text-safe counterpart to --color-warning: the plain value is 2.3-2.6:1 as
+     text against --bg-surface/--bg-soft, well under WCAG AA. Darkened along
+     the same amber hue rather than desaturating to grey. Dark theme reuses
+     --color-warning itself -- see the dark declaration. */
+  --color-warning-text: #89691F;
+  /* Reserved for destructive-action buttons only (delete/remove controls) --
+     an alarm red the calm-UI rule otherwise rules out. Any other severity
+     signal (a stale feed, an error message, a danger-zone heading) uses
+     --delay-severe instead, which is per-theme and AA-passing as text. */
   --color-danger: #c0392b;
   /* Deepened variant of --accent for primary buttons/active states -- more
      confident at button weight than --accent reads on its own. Same hue
@@ -66,8 +75,8 @@
      text on both --bg-surface and --bg-soft. */
   --accent-strong: #115E62;
   /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
-     distinct from --delay-severe/--color-danger, which stay the map's own
-     per-point severity ramp; this is specifically for aggregate counts. */
+     distinct from --delay-severe, which stays the map's own per-point
+     severity ramp; this is specifically for aggregate counts. */
   --delay-flag: #C4501F;
   /* Fallback first for engines without color-mix() support (same reasoning as
      --map-badge-bg above); the mix itself tracks --delay-flag automatically
@@ -105,6 +114,15 @@
      of truth; its SEVERE_FALLBACK mirrors this light value by hand and is
      held to it by the same test. */
   --delay-severe: #A8391F;
+  /* Text-safe counterpart to the ok/mild/moderate delay-ramp fills
+     (tokens.ts's DELAY_RAMP), which are 2.6-3.8:1 as text against
+     --bg-surface -- under WCAG AA. Darkened along each fill's own hue rather
+     than desaturating to grey. The severe tier needs no text variant: it is
+     already per-theme and AA-passing (--delay-severe above). Dark-theme
+     values reuse the fills themselves -- see the dark declaration. */
+  --delay-text-ok: #248460;
+  --delay-text-mild: #916F21;
+  --delay-text-moderate: #BD5725;
   /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
      ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
@@ -221,6 +239,15 @@
      it clears 4.5:1 on this theme's --bg-surface — see the invariant on the
      light declaration. */
   --delay-severe: #F0837A;
+  /* The plain delay-ramp fills already clear 4.5:1 on this theme's
+     --bg-surface, so the dark text variants are the fills themselves — see
+     the light declaration for why light needs its own darkened set. */
+  --delay-text-ok: #2EA87A;
+  --delay-text-mild: #C99A2E;
+  --delay-text-moderate: #D4622A;
+  /* --color-warning itself already clears 4.5:1 on this theme's surfaces —
+     see the light declaration for why light needs a separate darkened value. */
+  --color-warning-text: #C99A2E;
   --trend-good: #4ade80;
   --trend-bad: #fbbf24;
   --trend-neutral: #94a3b8;

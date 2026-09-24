@@ -239,7 +239,7 @@ export function AdminUserDetailPage() {
         </section>
 
         <section>
-          <h2 style={{ fontSize: 16, marginBottom: 8, color: "var(--color-danger, #c0392b)" }}>
+          <h2 style={{ fontSize: 16, marginBottom: 8, color: "var(--delay-severe)" }}>
             {t("admin.user_detail.danger_zone_title")}
           </h2>
           <AdminButton variant="danger" disabled={isSelf || isMutating} onClick={handleDelete}>

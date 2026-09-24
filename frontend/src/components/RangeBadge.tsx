@@ -130,7 +130,7 @@ export function RangeBadge() {
                   borderRadius: 4,
                   fontSize: 13,
                   background: selected ? "var(--accent-soft)" : "transparent",
-                  color: selected ? "var(--accent)" : "var(--text-primary)",
+                  color: selected ? "var(--accent-strong)" : "var(--text-primary)",
                   fontWeight: selected ? 500 : 400,
                 }}
               >

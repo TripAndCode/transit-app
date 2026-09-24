@@ -182,7 +182,7 @@ export function DataTable<Row>({
                   fontFamily: "inherit",
                   border: `1px solid ${on ? "var(--accent)" : "var(--border-subtle)"}`,
                   background: on ? "var(--accent-soft)" : "transparent",
-                  color: on ? "var(--accent)" : "var(--text-secondary)",
+                  color: on ? "var(--accent-strong)" : "var(--text-secondary)",
                 }}
               >
                 {view.label}

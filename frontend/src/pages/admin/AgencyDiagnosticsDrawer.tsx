@@ -153,7 +153,7 @@ function EditorShell({
   return (
     <div style={{ display: "grid", gap: 8, fontSize: 12.5 }}>
       {children}
-      {!!error && <div style={{ color: "var(--color-warning)" }}>{formatApiError(error)}</div>}
+      {!!error && <div style={{ color: "var(--color-warning-text)" }}>{formatApiError(error)}</div>}
       <div style={{ display: "flex", gap: 8 }}>
         <AdminButton variant="primary" disabled={saveDisabled} onClick={onSave}>
           {t("admin.agency_diag.editor_save")}
@@ -442,7 +442,7 @@ export function AgencyDiagnosticsDrawer({
       </h4>
 
       {isLoading && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
-      {!!error && <div style={{ color: "var(--color-warning)", fontSize: 13 }}>{formatApiError(error)}</div>}
+      {!!error && <div style={{ color: "var(--color-warning-text)", fontSize: 13 }}>{formatApiError(error)}</div>}
 
       {data && (
         <>
@@ -587,7 +587,7 @@ export function AgencyDiagnosticsDrawer({
         </AdminButton>
       </div>
       {!!probe.error && (
-        <div style={{ color: "var(--color-warning)", fontSize: 12.5 }}>{formatApiError(probe.error)}</div>
+        <div style={{ color: "var(--color-warning-text)", fontSize: 12.5 }}>{formatApiError(probe.error)}</div>
       )}
       {probe.data && (
         <div style={{ color: "var(--text-tertiary)", fontSize: 12.5 }}>
@@ -595,7 +595,7 @@ export function AgencyDiagnosticsDrawer({
         </div>
       )}
       {!!reanalyze.error && (
-        <div style={{ color: "var(--color-warning)", fontSize: 12.5 }}>{formatApiError(reanalyze.error)}</div>
+        <div style={{ color: "var(--color-warning-text)", fontSize: 12.5 }}>{formatApiError(reanalyze.error)}</div>
       )}
       {reanalyze.data && (
         <div style={{ color: "var(--text-tertiary)", fontSize: 12.5 }}>

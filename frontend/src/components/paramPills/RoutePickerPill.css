@@ -152,7 +152,7 @@
   white-space: nowrap;
 }
 .rp-opt[aria-selected="true"] .rp-opt-name {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-weight: 600;
 }
 .rp-opt-code {

@@ -172,7 +172,7 @@ export function AdminFlagsPage() {
             padding: "10px 14px",
             borderRadius: "var(--radius-lg)",
             background: "var(--surface-1)",
-            color: "var(--color-warning, #C99A2E)",
+            color: "var(--color-warning-text, #89691F)",
             fontSize: 14,
           }}
         >

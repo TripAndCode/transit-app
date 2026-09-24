@@ -27,7 +27,7 @@ const CELL_STYLES: Record<BoardFreshnessDay["state"], React.CSSProperties> = {
 const STATUS_COLORS: Record<BoardCollector["status"], string> = {
   ok: "var(--accent)",
   warn: "var(--color-warning, #C99A2E)",
-  down: "var(--color-danger, #c0392b)",
+  down: "var(--delay-severe)",
   unknown: "var(--text-tertiary)",
 };
 
@@ -235,7 +235,7 @@ export function AdminBoardPage() {
       )}
 
       {trigger.error != null && (
-        <p role="alert" style={{ margin: 0, fontSize: 12.5, color: "var(--color-warning, #C99A2E)" }}>
+        <p role="alert" style={{ margin: 0, fontSize: 12.5, color: "var(--color-warning-text, #89691F)" }}>
           {t("admin.board.reanalyze_error")}
         </p>
       )}
@@ -254,7 +254,7 @@ export function AdminBoardPage() {
             padding: "10px 14px",
             borderRadius: "var(--radius-md, 10px)",
             background: "var(--surface-1)",
-            color: "var(--color-warning, #C99A2E)",
+            color: "var(--color-warning-text, #89691F)",
             fontSize: 14,
           }}
         >
