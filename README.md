@@ -141,7 +141,7 @@ make check
 
 `make test` always runs against the throwaway Postgres/ClickHouse instances on
 `:5544`/`:8124` via `scripts/run_integration_tests.sh`, never the real dev
-database on `:5433`, regardless of this Makefile's own `DATABASE_URL` default.
+database, regardless of whatever `DATABASE_URL` the caller has configured.
 That runner also exports `RUN_CH_INTEGRATION=1`, so the ClickHouse-gated tests
 actually run rather than silently skipping. `make check` runs `fmt-check`
 (verifies formatting, doesn't rewrite files), `lint`, `typecheck`, then `test`.
