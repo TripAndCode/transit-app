@@ -6,6 +6,7 @@ import {
   Activity,
   Workflow,
   LayoutDashboard,
+  MessageCircle,
   ScrollText,
   ToggleLeft,
   type LucideIcon,
@@ -25,6 +26,7 @@ const NAV_GROUPS: readonly { groupKey: string; items: readonly NavItem[] }[] = [
       { to: "/admin", end: true, labelKey: "admin.nav.board", Icon: LayoutDashboard },
       { to: "/admin/agencies", labelKey: "admin.nav.agencies", Icon: Building2 },
       { to: "/admin/ops", labelKey: "admin.nav.ops", Icon: Activity },
+      { to: "/admin/ask", labelKey: "admin.nav.ask_ops", Icon: MessageCircle },
     ],
   },
   {

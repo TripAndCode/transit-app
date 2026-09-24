@@ -1127,7 +1127,8 @@
         "people": "People",
         "governance": "Governance",
         "reference": "Reference"
-      }
+      },
+      "ask_ops": "Ask ops"
     },
     "ops": {
       "title": "Ops",
@@ -1388,6 +1389,69 @@
         "migrations_behind": "Schema behind by {{count}} migration(s)",
         "llm_approvals_pending": "{{count}} user(s) awaiting AI access approval"
       }
+    },
+    "ask_ops": {
+      "title": "Ask ops",
+      "filter": {
+        "route_all": "All routes",
+        "status_all": "All statuses",
+        "from_label": "From",
+        "to_label": "To"
+      },
+      "route": {
+        "rules": "Rules",
+        "nn": "Embedding (NN)",
+        "rag": "RAG (LLM)",
+        "no_history": "No history"
+      },
+      "status": {
+        "ok": "OK",
+        "error": "Error"
+      },
+      "col": {
+        "agency": "Agency",
+        "question": "Question",
+        "route": "Route",
+        "status": "Status",
+        "tool": "Tool",
+        "cache": "Cache",
+        "created": "Created"
+      },
+      "cache_outcome": {
+        "hit": "Cache hit",
+        "miss": "Cache miss",
+        "bypass": "Bypassed"
+      },
+      "promote_action": "Promote",
+      "promote_success": "Promoted.",
+      "promote_already": "Already promoted.",
+      "promote_not_eligible": "Not eligible for promotion.",
+      "promote_error": "Couldn't promote — try again.",
+      "empty": "No queries found for this filter.",
+      "pagination": {
+        "prev": "Previous",
+        "next": "Next"
+      },
+      "funnel": {
+        "title": "Route funnel",
+        "total": "Total: {{count}}",
+        "success_of": "{{success}} / {{count}} ok",
+        "providers_title": "Providers",
+        "providers_not_tracked": "Provider isn't recorded per query yet — only the route stage is logged."
+      },
+      "kill_switch": {
+        "title": "Kill switches",
+        "router_note": "ASK_ROUTER_ENABLED / ASK_QUERY_LOG_ENABLED gate the router and the query log.",
+        "flags_link": "Manage in Feature flags"
+      },
+      "eval": {
+        "title": "Weekly eval",
+        "not_run": "Not run yet",
+        "score_label": "Score",
+        "generated_at_label": "As of"
+      },
+      "table_label": "Ask query log",
+      "numeric_guard": "Numeric guard"
     }
   },
   "copilot": {

@@ -1127,7 +1127,8 @@
         "people": "人",
         "governance": "統制",
         "reference": "参照"
-      }
+      },
+      "ask_ops": "Ask 運用"
     },
     "ops": {
       "title": "運用状況",
@@ -1388,6 +1389,69 @@
         "migrations_behind": "スキーマが {{count}} 件遅れています",
         "llm_approvals_pending": "AI 利用の承認待ち {{count}} 名"
       }
+    },
+    "ask_ops": {
+      "title": "Ask 運用",
+      "filter": {
+        "route_all": "すべてのルート",
+        "status_all": "すべてのステータス",
+        "from_label": "開始日",
+        "to_label": "終了日"
+      },
+      "route": {
+        "rules": "ルール",
+        "nn": "埋め込み(NN)",
+        "rag": "RAG(LLM)",
+        "no_history": "履歴なし"
+      },
+      "status": {
+        "ok": "成功",
+        "error": "エラー"
+      },
+      "col": {
+        "agency": "事業者",
+        "question": "質問",
+        "route": "ルート",
+        "status": "ステータス",
+        "tool": "ツール",
+        "cache": "キャッシュ",
+        "created": "日時"
+      },
+      "cache_outcome": {
+        "hit": "キャッシュヒット",
+        "miss": "キャッシュミス",
+        "bypass": "バイパス"
+      },
+      "promote_action": "昇格",
+      "promote_success": "昇格しました。",
+      "promote_already": "すでに昇格済みです。",
+      "promote_not_eligible": "昇格対象ではありません。",
+      "promote_error": "昇格に失敗しました。もう一度お試しください。",
+      "empty": "この条件に一致する質問はありません。",
+      "pagination": {
+        "prev": "前へ",
+        "next": "次へ"
+      },
+      "funnel": {
+        "title": "ルート別ファネル",
+        "total": "合計: {{count}}",
+        "success_of": "{{success}} / {{count}} 件成功",
+        "providers_title": "プロバイダー",
+        "providers_not_tracked": "プロバイダーは質問単位では記録されていません—記録されるのはルート段階のみです。"
+      },
+      "kill_switch": {
+        "title": "キルスイッチ",
+        "router_note": "ASK_ROUTER_ENABLED / ASK_QUERY_LOG_ENABLED でルーターとクエリログを制御します。",
+        "flags_link": "Feature flags で管理"
+      },
+      "eval": {
+        "title": "週次評価",
+        "not_run": "未実行",
+        "score_label": "スコア",
+        "generated_at_label": "時点"
+      },
+      "table_label": "Ask クエリログ",
+      "numeric_guard": "数値ガード"
     }
   },
   "copilot": {
