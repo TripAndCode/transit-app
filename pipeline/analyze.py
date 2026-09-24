@@ -1855,6 +1855,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
 
         # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
+        # `analyzed_at` is `clock_timestamp()`, not `now()`: completion time,
+        # not transaction start — the board compares it to the civil day, and
+        # this transaction can span hours, long enough for a finished run to
+        # be stamped with the previous day and read as stale.
         # `analyzed_at`/`max_updates_captured_at` are audit only: the freshness
         # gate derives staleness from the aggs themselves, so they answer just
         # "when was this agency last analyzed". `static_fingerprint` IS
@@ -1867,7 +1871,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         with _step("agg_meta: upsert"), conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at, static_fingerprint) "
-                "VALUES (%s, now(), %s, %s) "
+                "VALUES (%s, clock_timestamp(), %s, %s) "
                 "ON CONFLICT (agency_id) DO UPDATE SET "
                 "analyzed_at = EXCLUDED.analyzed_at, "
                 "max_updates_captured_at = EXCLUDED.max_updates_captured_at, "

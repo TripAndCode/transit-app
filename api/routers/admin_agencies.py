@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from api import agency_diagnostics as ad
 from api.admin_audit import record_admin_action
+from api.admin_runs import INSERT_MANUAL_RUN_SQL, shape_run
 from api.deps import get_conn
 from api.range import jst_today
 from api.security import User, csrf_guard, require_admin
@@ -474,6 +475,11 @@ async def reanalyze_agency(
     scheduled run. Contention with a run already in flight is handled there
     (the poke is skipped and logged), which is why this returns 202 without
     waiting.
+
+    An umbrella run row is opened here first, the same way `POST
+    /api/admin/runs` does it: without one the operator's action draws no bar
+    at all, and the rows the sweep writes per agency have no run to belong
+    to. The background runner closes it on every path.
     """
     from api.routers.internal import _run_ingest_and_analyze
 
@@ -483,12 +489,24 @@ async def reanalyze_agency(
         # The runner selects on `deleted_at IS NULL`, so queueing this would
         # report "started" for work that finds no agency and does nothing.
         raise HTTPException(status_code=409, detail="This agency is disabled")
+
+    row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, "ingest", agency_id, admin.user_id)
+    if row is None:
+        raise HTTPException(status_code=503, detail="pipeline runs are not recordable in this environment")
+    run = shape_run(row)
+
     await record_admin_action(
         conn,
         actor_id=admin.user_id,
         action="agency.reanalyze_requested",
         target_type="agency",
         target_id=agency_id,
+        after={"run_id": run["run_id"]},
     )
-    background_tasks.add_task(_run_ingest_and_analyze, agency_ids=[agency_id], requested_by=admin.user_id)
+    background_tasks.add_task(
+        _run_ingest_and_analyze,
+        agency_ids=[agency_id],
+        requested_by=admin.user_id,
+        run_id=run["run_id"],
+    )
     return {"status": "started"}

@@ -53,9 +53,10 @@ _RUN_ROW = {
 class _Conn:
     """Fake asyncpg connection answering each query the runs routes make."""
 
-    def __init__(self, *, runs_error=None, agency_exists=True):
+    def __init__(self, *, runs_error=None, agency_exists=True, insert_unrecordable=False):
         self.runs_error = runs_error
         self.agency_exists = agency_exists
+        self.insert_unrecordable = insert_unrecordable
         self.inserted: list[tuple] = []
 
     async def fetch(self, sql, *args):
@@ -70,6 +71,8 @@ class _Conn:
     async def fetchrow(self, sql, *args):
         if "INSERT INTO pipeline_runs" in sql:
             self.inserted.append(args)
+            if self.insert_unrecordable:
+                return None
             return {**_RUN_ROW, "run_id": 77, "kind": args[0], "agency_id": args[1], "requested_by": args[2]}
         return None
 
@@ -118,6 +121,14 @@ def _no_real_collectors(monkeypatch):
     monkeypatch.setattr(admin_router, "_collect_documents", _none)
 
 
+@pytest.fixture(autouse=True)
+def _no_reaper(monkeypatch):
+    """The board sweeps abandoned runs on its own connection; a unit test
+    must not open one."""
+    monkeypatch.setattr(admin_router, "_last_reap_at", None, raising=False)
+    monkeypatch.setattr(admin_router, "reap_abandoned_runs_best_effort", lambda _db_url: 0, raising=False)
+
+
 def test_the_day_listing_returns_the_shaped_runs_for_the_requested_day():
     body = _client(_Conn()).get("/api/admin/runs?date=2026-09-21").json()
     assert body["date"] == "2026-09-21"
@@ -159,7 +170,30 @@ def test_triggering_a_run_opens_its_row_and_answers_202_with_that_id(scheduled, 
 
 def test_the_triggered_sweep_is_handed_the_requester_and_the_row_it_must_close(scheduled, audited):
     _client(_Conn()).post("/api/admin/runs", headers={"Origin": TEST_ORIGIN}, json={"kind": "ingest"})
-    assert scheduled == [{"kind": "ingest", "agency_ids": None, "requested_by": 9, "run_id": 77}]
+    assert scheduled == [{"kind": "ingest", "agency_ids": None, "requested_by": 9, "run_id": 77, "run_weather": False}]
+
+
+def test_a_manual_run_does_not_re_drive_the_fleet_weather_fetch(scheduled, audited):
+    """Observed weather is a third-party fetch on a fleet-wide schedule; an
+    operator asking for a re-aggregation has no reason to trigger one."""
+    _client(_Conn()).post("/api/admin/runs", headers={"Origin": TEST_ORIGIN}, json={"kind": "ingest"})
+    assert scheduled[0]["run_weather"] is False
+
+
+def test_an_environment_that_cannot_record_the_row_is_refused_not_silently_run(scheduled, audited):
+    """Without a run row the operator gets a bar-less 202 and no way to tell
+    whether anything happened, so the trigger declines instead."""
+    response = _client(_Conn(insert_unrecordable=True)).post(
+        "/api/admin/runs", headers={"Origin": TEST_ORIGIN}, json={"kind": "ingest"}
+    )
+    assert response.status_code == 503
+    assert scheduled == []
+
+
+def test_the_listing_publishes_the_lock_column_as_a_probe_cost(scheduled, audited):
+    run = _client(_Conn()).get("/api/admin/runs").json()["runs"][0]
+    assert "lock_probe_ms" in run
+    assert "lock_wait_ms" not in run
 
 
 def test_a_single_agency_request_restricts_the_sweep_to_that_agency(scheduled, audited):
