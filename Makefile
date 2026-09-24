@@ -23,7 +23,7 @@ DATABASE_URL ?=
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build prune-pipeline-runs prune-admin-audit
 
 # Default target — first-run setup.
 all: bootstrap
@@ -285,6 +285,12 @@ promote-intent-cache:
 
 prune-query-log:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune_query_log --days 90
+
+prune-pipeline-runs:
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune-pipeline-runs --days 90
+
+prune-admin-audit:
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune-admin-audit --days 400
 
 frontend-install:
 	cd frontend && npm install

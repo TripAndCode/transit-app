@@ -108,6 +108,8 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
 | `make build-rag-index` | Build the Ask RAG index for all agencies |
 | `make ask-eval` | CI gate: verify Ask builder coverage against the gold question set |
+| `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
+| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (matches the deploy's data-retention horizon) |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
 | `make verify-secrets` | On-demand gitleaks scan of the full git history |
