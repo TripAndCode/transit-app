@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from api import agency_diagnostics as ad
 from api.admin_audit import record_admin_action
 from api.deps import get_conn
+from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.range import jst_today
 from api.security import User, csrf_guard, require_admin
 
@@ -404,6 +405,7 @@ def _fetch_and_measure(feed_url: str) -> dict[str, Any]:
 
 
 @router.post("/{agency_id}/probe", status_code=202)
+@limiter.limit(ADMIN_ACTION_LIMIT)
 async def probe_agency_feed(
     agency_id: int,
     request: Request,
@@ -459,6 +461,7 @@ async def probe_agency_feed(
 
 
 @router.post("/{agency_id}/reanalyze", status_code=202)
+@limiter.limit(ADMIN_ACTION_LIMIT)
 async def reanalyze_agency(
     agency_id: int,
     request: Request,

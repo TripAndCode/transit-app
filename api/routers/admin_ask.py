@@ -93,7 +93,10 @@ async def list_ask_queries(
 ) -> AskQueryLogPage:
     """List ask_query_log rows newest-first, with route/status/agency/date
     filters and id-keyset pagination (stable under concurrent inserts,
-    unlike offset paging)."""
+    unlike offset paging).
+
+    `question` is the caller's raw, unredacted Ask input. It is
+    Internal-classified and retained 90 days by `prune-query-log`."""
     limit = max(1, min(_MAX_LIMIT, limit))
 
     where: list[str] = []
