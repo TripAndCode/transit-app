@@ -16,7 +16,7 @@ entry, labeled "Overview", opens the Operations map (see
   selection both land on Operations (`frontend/src/main.tsx`'s
   `<Navigate to="operations" replace />` and
   `frontend/src/components/OnboardingGate.tsx`).
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx`'s
+- Sidebar nav link: `frontend/src/components/sidebarNavItems.ts`'s
   `SIDEBAR_NAV_ITEMS` (`design:period_overview` i18n key, second entry —
   "Period overview" / "期間概況").
 - In development builds the sidebar also carries a dev-only prototype-preview
