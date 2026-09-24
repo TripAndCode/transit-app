@@ -161,3 +161,24 @@ def test_refspec_source_half_extraction_takes_the_local_branch_not_the_remote_na
     assert _bash_refspec_source_half("local-feature:renamed-remote-branch") == "local-feature"
     assert _bash_refspec_source_half("refs/heads/local-feature:refs/heads/renamed") == "local-feature"
     assert _bash_refspec_source_half("plain-branch") == "plain-branch"
+
+
+def _frontend_gate_block() -> str:
+    """The RUN_FRONTEND block: everything between its opening `if` and the
+    matching `fi` that closes it, right before the final `if [ "$FAIL" -ne 0
+    ]` gate."""
+    text = HOOK_PATH.read_text()
+    start = text.index('if [ "$RUN_FRONTEND" -eq 1 ]; then')
+    end = text.index('if [ "$FAIL" -ne 0 ]; then\n  echo "BLOCKED: git push — quality gate failed', start)
+    return text[start:end]
+
+
+def test_frontend_gate_runs_every_check_ci_runs():
+    """The local push gate must not silently omit a check CI enforces --
+    CI added deadcode, the CSS-tokens checker's own unit tests, and the
+    CSS-tokens static scan (frontend/.github/workflows/ci.yml), and this
+    gate is the only local signal for a push made from a worktree (see the
+    module docstring in the hook itself)."""
+    block = _frontend_gate_block()
+    for script in ("npm run deadcode", "npm run test:check-css-tokens", "npm run check:css-tokens"):
+        assert script in block, f"{script} missing from the RUN_FRONTEND gate block"

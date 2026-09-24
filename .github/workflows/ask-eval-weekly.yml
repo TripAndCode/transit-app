@@ -10,9 +10,30 @@ on:
     - cron: "0 3 * * 1" # Monday 03:00 UTC
   workflow_dispatch: {}
 
+# This repo's default GITHUB_TOKEN permissions are scoped down elsewhere
+# (see vps-heartbeat-watchdog.yml); this job only ever checks out the repo,
+# so read-only contents is enough.
+permissions:
+  contents: read
+
+# A manual re-dispatch landing on top of the Monday schedule would share the
+# same rate-limited `/ask` endpoint and the same Hiroden Postgres/ClickHouse
+# fixtures the eval seeds and then reads — running both at once would corrupt
+# each other's data, not just double the runner cost. Queue instead of
+# cancelling: a partway-through live-LLM eval is worth finishing, mirroring
+# nightly-extended.yml's own reasoning for a long, infrequently-run job.
+concurrency:
+  group: ask-eval-weekly
+  cancel-in-progress: false
+
 jobs:
   eval:
     runs-on: ubuntu-latest
+    # Generous relative to a normal run (poetry install + model download +
+    # ~148 golden-set requests paced at 1.1s apart is already several
+    # minutes): caps a hang (e.g. the API server never becoming healthy)
+    # well short of GitHub's 6-hour default instead of relying on that.
+    timeout-minutes: 45
 
     services:
       clickhouse:
@@ -122,19 +143,30 @@ jobs:
 
       # Scoped to the golden-set aggregate test only. This workflow's job is
       # automating that one (previously RUN_LLM_EVAL=1 by hand, never run in
-      # CI). test_followup_pagination_two_turns lives in the same file and
-      # is a separate, narrower pagination-continuation check; it failed in
-      # early runs of this workflow (turn-2 tool_call came back empty even
-      # with 2400+ real stops in the Hiroden fixture, so it wasn't a
-      # too-small-dataset artifact) and needs its own investigation — not
-      # something to fix or paper over here. Leaving it out of automated
-      # runs is the status quo, not a regression: it was never run
-      # automatically before this workflow existed either.
+      # CI).
       - name: Run the golden-set eval
         env:
           RUN_LLM_EVAL: "1"
           EVAL_API_BASE: http://localhost:8000
         run: poetry run pytest tests/ask_eval/test_baseline.py::test_golden_set_aggregate_score -v
+
+      # test_followup_pagination_two_turns lives in the same file as the
+      # golden-set test above and is a separate, narrower pagination-
+      # continuation check; it failed in early runs of this workflow
+      # (turn-2 tool_call came back empty even with 2400+ real stops in the
+      # Hiroden fixture, so it wasn't a too-small-dataset artifact) and
+      # needs its own router investigation this workflow isn't the place to
+      # do. `continue-on-error: true` runs it for visibility (a step
+      # summary/notification on every change) without gating the job on a
+      # router bug this workflow doesn't own fixing. Same worktree, server,
+      # and seeded data as the step above, so it must run before the
+      # numeric-ground-truth step below wipes both — never after.
+      - name: Run the follow-up pagination eval (non-blocking; known router gap)
+        continue-on-error: true
+        env:
+          RUN_LLM_EVAL: "1"
+          EVAL_API_BASE: http://localhost:8000
+        run: poetry run pytest tests/ask_eval/test_baseline.py::test_followup_pagination_two_turns -v
 
       # Verifies the Ask tab's numeric answers, not just its tool choice,
       # against synthetic ground truth. Must run after the golden-set eval

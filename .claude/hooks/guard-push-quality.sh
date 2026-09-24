@@ -570,8 +570,14 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n" || FAIL=1
     echo "== npm run lint:i18n-strings =="
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n-strings" || FAIL=1
+    echo "== npm run deadcode (knip; matches CI's dead-code gate) =="
+    run_with_timeout 60 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run deadcode" || FAIL=1
     echo "== npm run test:check-entry-chunk (fixture-based positive/negative controls for the checker itself) =="
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test:check-entry-chunk" || FAIL=1
+    echo "== npm run test:check-css-tokens (fixture-based positive/negative controls for the checker itself) =="
+    run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test:check-css-tokens" || FAIL=1
+    echo "== npm run check:css-tokens (static scan: var(--x) refs resolve, z-index uses the shared ladder) =="
+    run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run check:css-tokens" || FAIL=1
     if [ "${PUSH_GATE_SKIP_BUILD:-0}" = "1" ]; then
       echo "WARNING: PUSH_GATE_SKIP_BUILD=1 set — skipping npm run build:bundle + check:entry-chunk for this push (deliberate opt-out; MapLibre-in-entry regressions won't be caught locally)." >&2
     else
