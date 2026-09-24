@@ -280,12 +280,36 @@ export type BoardAlert = {
   href: string | null;
 };
 
+/** One `pipeline_runs` row: an ingest, analyze, weather or static job, from
+ *  the CLI or the cron path, including the ones the advisory lock displaced. */
+export type PipelineRun = {
+  run_id: number;
+  kind: "ingest" | "analyze" | "weather" | "static";
+  /** Null for a fleet-wide job, and for one displaced before it resolved
+   *  which agency it was for. */
+  agency_id: number | null;
+  agency_name: string | null;
+  started_at: string;
+  /** Null while `status` is `running`. */
+  finished_at: string | null;
+  status: "running" | "ok" | "skipped" | "error";
+  rows: number | null;
+  lock_wait_ms: number | null;
+  error: string | null;
+  requested_by: number | null;
+};
+
 export type AdminBoard = {
   collectors: BoardCollector[];
   freshness: BoardFreshnessRow[];
   migrations: { applied: string | null; latest: string | null; behind: number } | null;
   alerts: BoardAlert[];
+  /** Today's runs (JST), so one poll covers the whole board. Empty both when
+   *  nothing ran and when the table is unreadable. */
+  runs: PipelineRun[];
 };
+
+type AdminRuns = { date: string; runs: PipelineRun[] };
 
 /** The `/admin` entry page's single snapshot. Polled rather than pushed: the
  *  underlying collectors are themselves cached snapshots, so a short poll is
@@ -639,6 +663,31 @@ export function usePatchFeatureFlag() {
     },
   });
 }
+
+/** Mutation: ask the server to run the ingest+analyze sweep now.
+ *
+ *  The 202 carries the run row the server has already opened, so the caller
+ *  can draw its bar at once instead of waiting out a poll interval; the
+ *  board's own poll then takes over and shows the run finishing. */
+export function useTriggerRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { kind: "ingest" | "analyze"; agency_id?: number }) =>
+      apiPost<AdminRuns>("/api/admin/runs", body),
+    onSuccess: (started) => {
+      qc.setQueryData(["adminBoard"], (board: AdminBoard | undefined) => {
+        if (board == null) return board;
+        // Keyed by run_id rather than appended blindly: a poll that landed
+        // between the request and its response already carries the row.
+        const merged = new Map(board.runs.map((run) => [run.run_id, run]));
+        for (const run of started.runs) merged.set(run.run_id, run);
+        return { ...board, runs: [...merged.values()] };
+      });
+      qc.invalidateQueries({ queryKey: ["adminBoard"] });
+    },
+  });
+}
+
 // ── Ask ops (query log, route funnel, promote-to-intent-cache, eval) ─────
 //
 // "route" here is the Ask pipeline stage that answered a question (rules ->
