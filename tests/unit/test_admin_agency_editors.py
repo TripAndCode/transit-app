@@ -162,7 +162,7 @@ def test_patch_standards_records_before_and_after_in_the_audit_entry():
 
     assert response.status_code == 200
     assert len(conn.audit) == 1
-    actor_id, action, target_type, target_id, before_json, after_json, _reason = conn.audit[0]
+    actor_id, action, target_type, target_id, before_json, after_json, _reason, _ip = conn.audit[0]
     assert actor_id == _ADMIN.user_id
     assert action == "agency.standards_updated"
     assert target_type == "agency"
@@ -226,7 +226,7 @@ def test_patch_weights_records_before_and_after_in_the_audit_entry():
     response = _client(conn).patch("/api/admin/agencies/1/weights", json=body)
 
     assert response.status_code == 200
-    _actor_id, action, _target_type, _target_id, before_json, after_json, _reason = conn.audit[0]
+    _actor_id, action, _target_type, _target_id, before_json, after_json, _reason, _ip = conn.audit[0]
     assert action == "agency.weights_updated"
     assert json.loads(before_json) == [{"route_code": "A1", "weight": 2.0}]
     assert json.loads(after_json) == [{"route_code": "A1", "weight": 5.0}]
