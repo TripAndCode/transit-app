@@ -4,8 +4,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-  type RefObject,
 } from "react";
 import { useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -20,6 +18,8 @@ import { useTheme } from "../styles/useTheme";
 import { filterItems, type Searchable } from "./commandPaletteMatch";
 import { onActivateKey } from "../utils/a11y";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
+import { OverlayBase } from "./ui/OverlayBase";
+import { Z_INDEX } from "../styles/zIndex";
 import "./commandPalette.css";
 
 const RECENTS_KEY = "transit.commandPaletteRecents";
@@ -78,91 +78,6 @@ function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
-}
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-/**
- * Escape-to-close, a Tab-cycling focus trap, and restoring focus to
- * whatever was focused before opening — the three behaviors a native
- * `<dialog>` gives for free and a plain overlay `<div>` does not. Shared by
- * the palette and the shortcut sheet rather than duplicated, since neither
- * dialog in this app is available from another (still-unmerged) branch.
- */
-function Dialog({
-  onClose,
-  ariaLabel,
-  className,
-  initialFocusRef,
-  children,
-}: {
-  onClose: () => void;
-  ariaLabel: string;
-  className: string;
-  initialFocusRef?: RefObject<HTMLElement | null>;
-  children: ReactNode;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const toFocus = initialFocusRef?.current ?? containerRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? null;
-    toFocus?.focus();
-
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const container = containerRef.current;
-      if (!container) return;
-      const focusables = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-      if (focusables.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey) {
-        if (active === first || !container.contains(active)) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (active === last || !container.contains(active)) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prevOverflow;
-      previouslyFocused?.focus();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose/initialFocusRef intentionally read once per mount; this effect owns one dialog's lifetime, not a value that should reopen it
-  }, []);
-
-  return (
-    <div
-      className="cmdp-overlay"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div ref={containerRef} className={className} role="dialog" aria-modal="true" aria-label={ariaLabel}>
-        {children}
-      </div>
-    </div>
-  );
 }
 
 function buildAgencyItems(
@@ -425,121 +340,132 @@ export function CommandPalette() {
 
   return (
     <>
-      {open && (
-        <Dialog onClose={closePalette} ariaLabel={t("palette.aria_label")} className="cmdp-palette" initialFocusRef={inputRef}>
-          <div className="cmdp-input-row">
-            <Search size={16} strokeWidth={1.75} aria-hidden="true" className="cmdp-input-icon" />
-            <input
-              ref={inputRef}
-              type="text"
-              className="cmdp-input"
-              value={query}
-              placeholder={t("palette.placeholder")}
-              autoComplete="off"
-              role="combobox"
-              aria-expanded="true"
-              aria-controls="cmdp-listbox"
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setActiveIndex(0);
-              }}
-              onKeyDown={onInputKeyDown}
-            />
-          </div>
-          <ul id="cmdp-listbox" className="cmdp-list" role="listbox">
-            {visibleItems.length === 0 && <li className="cmdp-empty">{t("palette.no_results")}</li>}
-            {visibleItems.map((item, index) => {
-              const showHeader = lastGroup !== item.group;
-              lastGroup = item.group;
-              return (
-                <li key={item.id}>
-                  {showHeader && <div className="cmdp-group-label">{t(`palette.group.${item.group}`)}</div>}
-                  <div
-                    role="option"
-                    aria-selected={index === activeIndex}
-                    className="cmdp-item"
-                    // Not in the Tab sequence (tabIndex={-1} + the Dialog's
-                    // focus trap excludes it): the input owns keyboard focus
-                    // and arrow-key selection, matching the ARIA combobox
-                    // pattern. This is still a real activation target for a
-                    // screen reader user who navigates onto it directly.
-                    tabIndex={-1}
-                    onMouseEnter={() => setActiveIndex(index)}
-                    onClick={() => runItem(item)}
-                    onKeyDown={onActivateKey(() => runItem(item))}
-                  >
-                    <span className="cmdp-item-text">
-                      <span className="cmdp-item-label">{item.label}</span>
-                      {item.sublabel && <span className="cmdp-item-sublabel">{item.sublabel}</span>}
+      <OverlayBase
+        open={open}
+        onClose={closePalette}
+        ariaLabel={t("palette.aria_label")}
+        className="cmdp-palette"
+        scrimClassName="cmdp-overlay"
+        scrimZIndex={Z_INDEX.commandPalette}
+        initialFocusRef={inputRef}
+      >
+        <div className="cmdp-input-row">
+          <Search size={16} strokeWidth={1.75} aria-hidden="true" className="cmdp-input-icon" />
+          <input
+            ref={inputRef}
+            type="text"
+            className="cmdp-input"
+            value={query}
+            placeholder={t("palette.placeholder")}
+            autoComplete="off"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="cmdp-listbox"
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setActiveIndex(0);
+            }}
+            onKeyDown={onInputKeyDown}
+          />
+        </div>
+        <ul id="cmdp-listbox" className="cmdp-list" role="listbox">
+          {visibleItems.length === 0 && <li className="cmdp-empty">{t("palette.no_results")}</li>}
+          {visibleItems.map((item, index) => {
+            const showHeader = lastGroup !== item.group;
+            lastGroup = item.group;
+            return (
+              <li key={item.id}>
+                {showHeader && <div className="cmdp-group-label">{t(`palette.group.${item.group}`)}</div>}
+                <div
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  className="cmdp-item"
+                  // Not in the Tab sequence (tabIndex={-1} + the overlay's
+                  // focus trap excludes it): the input owns keyboard focus
+                  // and arrow-key selection, matching the ARIA combobox
+                  // pattern. This is still a real activation target for a
+                  // screen reader user who navigates onto it directly.
+                  tabIndex={-1}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onClick={() => runItem(item)}
+                  onKeyDown={onActivateKey(() => runItem(item))}
+                >
+                  <span className="cmdp-item-text">
+                    <span className="cmdp-item-label">{item.label}</span>
+                    {item.sublabel && <span className="cmdp-item-sublabel">{item.sublabel}</span>}
+                  </span>
+                  {item.keys && (
+                    <span className="cmdp-item-keys">
+                      {item.keys.map((k, i) => (
+                        <kbd key={i} className="cmdp-kbd">
+                          {k}
+                        </kbd>
+                      ))}
                     </span>
-                    {item.keys && (
-                      <span className="cmdp-item-keys">
-                        {item.keys.map((k, i) => (
-                          <kbd key={i} className="cmdp-kbd">
-                            {k}
-                          </kbd>
-                        ))}
-                      </span>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-          <div className="cmdp-footer">
-            <span>
-              <kbd className="cmdp-kbd">↑↓</kbd> {t("palette.footer.navigate")}
-            </span>
-            <span>
-              <kbd className="cmdp-kbd">↵</kbd> {t("palette.footer.select")}
-            </span>
-            <span>
-              <kbd className="cmdp-kbd">esc</kbd> {t("palette.footer.close")}
-            </span>
-          </div>
-        </Dialog>
-      )}
-      {sheetOpen && (
-        <Dialog onClose={() => setSheetOpen(false)} ariaLabel={t("palette.shortcuts.title")} className="cmdp-sheet">
-          <div className="cmdp-sheet-header">
-            <h2 className="cmdp-sheet-title">{t("palette.shortcuts.title")}</h2>
-            <button type="button" className="cmdp-sheet-close" onClick={() => setSheetOpen(false)} aria-label={t("common.close")}>
-              ×
-            </button>
-          </div>
-          <ul className="cmdp-sheet-list">
-            <li>
-              <span>{t("palette.shortcuts.open_palette")}</span>
-              <span className="cmdp-item-keys">
-                <kbd className="cmdp-kbd">⌘</kbd>
-                <kbd className="cmdp-kbd">K</kbd>
-              </span>
-            </li>
-            {GO_TO_TARGETS.map((target) => (
-              <li key={target.to}>
-                <span>{t("palette.shortcuts.go_to", { target: t(target.labelKey) })}</span>
-                <span className="cmdp-item-keys">
-                  <kbd className="cmdp-kbd">g</kbd>
-                  <kbd className="cmdp-kbd">{target.chordKey}</kbd>
-                </span>
+                  )}
+                </div>
               </li>
-            ))}
-            <li>
-              <span>{t("palette.shortcuts.open_shortcuts")}</span>
+            );
+          })}
+        </ul>
+        <div className="cmdp-footer">
+          <span>
+            <kbd className="cmdp-kbd">↑↓</kbd> {t("palette.footer.navigate")}
+          </span>
+          <span>
+            <kbd className="cmdp-kbd">↵</kbd> {t("palette.footer.select")}
+          </span>
+          <span>
+            <kbd className="cmdp-kbd">esc</kbd> {t("palette.footer.close")}
+          </span>
+        </div>
+      </OverlayBase>
+      <OverlayBase
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        ariaLabel={t("palette.shortcuts.title")}
+        className="cmdp-sheet"
+        scrimClassName="cmdp-overlay"
+        scrimZIndex={Z_INDEX.commandPalette}
+      >
+        <div className="cmdp-sheet-header">
+          <h2 className="cmdp-sheet-title">{t("palette.shortcuts.title")}</h2>
+          <button type="button" className="cmdp-sheet-close" onClick={() => setSheetOpen(false)} aria-label={t("common.close")}>
+            ×
+          </button>
+        </div>
+        <ul className="cmdp-sheet-list">
+          <li>
+            <span>{t("palette.shortcuts.open_palette")}</span>
+            <span className="cmdp-item-keys">
+              <kbd className="cmdp-kbd">⌘</kbd>
+              <kbd className="cmdp-kbd">K</kbd>
+            </span>
+          </li>
+          {GO_TO_TARGETS.map((target) => (
+            <li key={target.to}>
+              <span>{t("palette.shortcuts.go_to", { target: t(target.labelKey) })}</span>
               <span className="cmdp-item-keys">
-                <kbd className="cmdp-kbd">?</kbd>
+                <kbd className="cmdp-kbd">g</kbd>
+                <kbd className="cmdp-kbd">{target.chordKey}</kbd>
               </span>
             </li>
-            <li>
-              <span>{t("palette.shortcuts.extend_brush")}</span>
-              <span className="cmdp-item-keys">
-                <kbd className="cmdp-kbd">⇧</kbd>
-                <kbd className="cmdp-kbd">←/→</kbd>
-              </span>
-            </li>
-          </ul>
-        </Dialog>
-      )}
+          ))}
+          <li>
+            <span>{t("palette.shortcuts.open_shortcuts")}</span>
+            <span className="cmdp-item-keys">
+              <kbd className="cmdp-kbd">?</kbd>
+            </span>
+          </li>
+          <li>
+            <span>{t("palette.shortcuts.extend_brush")}</span>
+            <span className="cmdp-item-keys">
+              <kbd className="cmdp-kbd">⇧</kbd>
+              <kbd className="cmdp-kbd">←/→</kbd>
+            </span>
+          </li>
+        </ul>
+      </OverlayBase>
     </>
   );
 }

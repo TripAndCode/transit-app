@@ -1,6 +1,7 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
+import { OverlayBase } from "../ui/OverlayBase";
 import { Z_INDEX } from "../../styles/zIndex";
 
 type DrawerProps = {
@@ -19,41 +20,34 @@ type DrawerProps = {
  * Deliberately not modal: the operator is meant to keep scanning rows (and
  * moving through them with `j`/`k`) while a row's detail is open, so the rest
  * of the page stays reachable and focus is not trapped. Escape closes, and
- * focus returns to whatever opened the panel.
+ * focus returns to whatever opened the panel. That is `OverlayBase`'s
+ * `modal={false}`, which also rules out the scrim and the portal: a wash
+ * would cover the list this panel exists to sit beside, and `document.body`
+ * is not the containing block it is positioned against.
+ *
+ * Because nothing else on the page changes when it opens, the heading is a
+ * polite live region: a screen-reader user still working the list would
+ * otherwise get no signal that a detail panel had appeared next to it. The
+ * region is the heading alone, not the header row, so the announcement is
+ * the panel's name rather than its name plus a close button.
  */
 export function Drawer({ open, onClose, label, children }: DrawerProps) {
   const { t } = useTranslation();
-  const panelRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const opener = document.activeElement;
-    panelRef.current?.focus();
-    return () => {
-      if (opener instanceof HTMLElement && document.contains(opener)) opener.focus();
-    };
-  }, [open]);
-
-  // Listened for on the document rather than the panel: the drawer is the
-  // topmost transient surface while it is open, and focus may legitimately
-  // sit outside it (the operator is still moving through the list behind).
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
 
   return (
-    <div
-      ref={panelRef}
-      role="dialog"
-      aria-label={label}
-      tabIndex={-1}
+    <OverlayBase
+      open={open}
+      onClose={onClose}
+      ariaLabel={label}
+      modal={false}
+      scrim={false}
+      portal={false}
+      initialFocus="panel"
+      // `popover`, not the `drawer` rung: that one is paired with
+      // `drawerBackdrop` for a surface that covers the page, and this one
+      // deliberately does not. It is absolutely positioned inside the
+      // admin main area, so it only has to outrank the list behind it.
+      zIndex={Z_INDEX.popover}
       style={{
         position: "absolute",
         top: 0,
@@ -61,19 +55,15 @@ export function Drawer({ open, onClose, label, children }: DrawerProps) {
         bottom: 0,
         width: "min(380px, 100%)",
         overflow: "auto",
-        // `popover`, not the `drawer` rung: that one is paired with
-        // `drawerBackdrop` for a surface that covers the page, and this one
-        // deliberately does not. It is absolutely positioned inside the
-        // admin main area, so it only has to outrank the list behind it.
-        zIndex: Z_INDEX.popover,
         padding: "18px 20px",
         background: "var(--surface-1)",
         borderLeft: "1px solid var(--border-subtle)",
-        outline: "none",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>{label}</h2>
+        <h2 aria-live="polite" style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
+          {label}
+        </h2>
         <button
           type="button"
           onClick={onClose}
@@ -91,6 +81,6 @@ export function Drawer({ open, onClose, label, children }: DrawerProps) {
         </button>
       </div>
       <div style={{ marginTop: 12 }}>{children}</div>
-    </div>
+    </OverlayBase>
   );
 }

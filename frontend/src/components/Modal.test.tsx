@@ -122,6 +122,16 @@ describe("Modal", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("renders through the shared overlay base", () => {
+    render(
+      <Modal open onClose={() => {}} ariaLabel="Example">
+        content
+      </Modal>,
+    );
+    expect(screen.getByRole("dialog")).toHaveClass("ui-overlay-panel");
+    expect(screen.getByRole("presentation")).toHaveClass("ui-overlay-scrim");
+  });
+
   it("locks body scroll while open and restores it on close", async () => {
     const { rerender } = render(
       <Modal open onClose={() => {}} ariaLabel="Example">
