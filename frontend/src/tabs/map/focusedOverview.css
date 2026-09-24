@@ -24,7 +24,7 @@
    the workspace's border, so the column read as clipped rather than as a
    panel. The scrollbar this column can show sits inside that inset too. */
 .focus-live-queue { min-height: 0; overflow: auto; padding: 0 20px; border-left: 0; }
-.focus-live-queue h2 { margin: 8px 0 16px; font-size: 18px; }
+.focus-queue-title { margin: 8px 0 16px; font-size: 18px; }
 /* Wraps rather than compressing: this column is user-resizable, and three
    tiles held on one row would keep shrinking past the width their labels
    need. Whatever doesn't fit drops to the next row at a legible size. */
@@ -35,6 +35,6 @@
 .focus-trip small { display: block; margin: 7px 0; color: var(--text-secondary); }
 .focus-trip b { margin-left: auto; color: var(--color-danger); white-space: nowrap; }
 .focus-trip a { font-size: 12px; }
-.focus-live-queue details { margin-top: 20px; }
+.focus-queue-inspect { margin-top: 20px; }
 /* BP.md */
 @media (max-width: 900px) { .focused-overview .ops-workspace { grid-template-columns: 1fr; max-height: none; } .focused-overview .ops-map { height: 50dvh; } .focus-live-queue { padding: 16px 0; } .ops-resizer { display: none; } }

@@ -13,7 +13,6 @@ user's chosen window without having to mention it in the prompt.
 import asyncio
 import json
 import logging
-import os as _os
 from typing import Any, Literal
 
 import asyncpg
@@ -30,6 +29,7 @@ from api.range import (
     ctx_payload,
 )
 from api.security import User, csrf_guard
+from pipeline.flags import flag
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
@@ -168,9 +168,9 @@ async def ask(
 
     ctx_dict = ctx_payload(ctx)
 
-    history_enabled = _os.environ.get("ASK_HISTORY_ENABLED", "true").lower() != "false"
-    log_enabled = _os.environ.get("ASK_QUERY_LOG_ENABLED", "true").lower() != "false"
-    router_enabled = _os.environ.get("ASK_ROUTER_ENABLED", "true").lower() != "false"
+    history_enabled = flag("ask_history_enabled", True)
+    log_enabled = flag("ask_query_log_enabled", True)
+    router_enabled = flag("ask_router_enabled", True)
 
     # Follow-ups ("次の50件", "もっと") have no standalone tool mapping, so
     # they skip the stateless router and go straight to the LLM with the

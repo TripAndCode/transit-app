@@ -5,6 +5,7 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import { loginUrl } from "../api/auth";
 import { useConfig } from "../api/config";
 import { ApiError, apiPost } from "../api/client";
+import { Card } from "../components/ui/Card";
 import "./LoginPage.css";
 
 // `next` comes straight from the URL query string, so it's attacker-suppliable
@@ -86,7 +87,7 @@ export function LoginPage() {
     return (
       <div className="login-shell">
         <div className="login-shell__grid" aria-hidden="true" />
-        <main className="login-card">
+        <Card as="main" padded={false} className="login-card">
           <div className="login-card__brand">
             <span className="login-card__brand-title">{t("header.app_title")}</span>
             <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
@@ -110,7 +111,7 @@ export function LoginPage() {
               <Link to="/" style={{ color: "inherit" }}>{t("account.login.back_to_top")}</Link>
             </p>
           )}
-        </main>
+        </Card>
       </div>
     );
   }
@@ -118,7 +119,7 @@ export function LoginPage() {
   return (
     <div className="login-shell">
       <div className="login-shell__grid" aria-hidden="true" />
-      <main className="login-card">
+      <Card as="main" padded={false} className="login-card">
         <div className="login-card__brand">
           <span className="login-card__brand-title">{t("header.app_title")}</span>
           <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
@@ -221,7 +222,7 @@ export function LoginPage() {
           <a href="/privacy" target="_blank" rel="noreferrer">{t("account.login.privacy_link")}</a>
           {t("account.login.terms_suffix")}
         </p>
-      </main>
+      </Card>
     </div>
   );
 }

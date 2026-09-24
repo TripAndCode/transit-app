@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
-import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
+import { ctxToQueryString, useRangeContext, type RangeCtx } from "../api/rangeContext";
 import type { DwellRunPayload, TrendPayload } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
+import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
 import { InsightPanel } from "../components/InsightPanel";
@@ -13,7 +15,8 @@ import { SkeletonChart, SkeletonTable } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
 import { BandGrid, Legend } from "../components/charts/DowBandGrid";
-import { delayColor } from "../styles/tokens";
+import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
+import { accentRampColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
@@ -26,15 +29,9 @@ import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { th, td } from "../components/tableStyles";
+import { ReportList } from "../components/analysis/ReportList";
+import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
-
-/** "This week" = the 7 days ending today, in the ctx's from/to string
- *  format. Used by the "no data" EmptyState's recovery action to jump to a
- *  window likely to have real data, rather than leaving the user stuck on
- *  whatever empty range they'd filtered to. */
-function thisWeekRange(): { from: string; to: string } {
-  return { from: isoDaysAgo(6), to: todayISO() };
-}
 
 export function AnalysisTab() {
   const { t } = useTranslation();
@@ -42,6 +39,7 @@ export function AnalysisTab() {
   const id = useAgencyId();
   const navigate = useNavigate();
   const [ctx, update] = useRangeContext();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
   // Build the filter querystring from ctx so navigating between reports
   // carries only the filter dimensions — not unrelated keys like ?admin=1.
   const filterQS = ctxToQueryString(ctx);
@@ -50,20 +48,10 @@ export function AnalysisTab() {
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
 
-  const reportLabels: Record<string, string> = {
-    ranking: t("reports.type.ranking"),
-    ranking_best: t("reports.type.ranking_best"),
-    on_time: t("reports.type.on_time"),
-    worst_5min: t("reports.type.worst_5min"),
-    trend: t("reports.type.trend"),
-    compare_ranking: t("reports.type.compare_ranking"),
-    dow_weekday: t("reports.type.dow_weekday"),
-    dow_weekend: t("reports.type.dow_weekend"),
-    dwell_run: t("reports.type.dwell_run"),
-    route_forecast: t("reports.type.route_forecast"),
-    council_summary: t("reports.type.council_summary"),
-    delay_certificate: t("reports.type.delay_certificate"),
-  };
+  // `route_forecast` is served by its own endpoint, so the reports list never
+  // returns it -- it is appended here as list data rather than re-rendered as
+  // a second, hand-copied button underneath the list.
+  const listedTypes = [...(list.data ?? []).map((r) => r.report_type), "route_forecast"];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -97,54 +85,13 @@ export function AnalysisTab() {
             hint={t("reports.empty.hint")}
           />
         )}
-        {list.data?.map((r) => {
-          const active = r.report_type === reportType;
-          return (
-            <button
-              key={r.report_type}
-              type="button"
-              onClick={() => navigate(`/agencies/${id}/analysis/${r.report_type}${filterSuffix}`)}
-              aria-pressed={active}
-              style={{
-                appearance: "none",
-                font: "inherit",
-                textAlign: "left",
-                color: "inherit",
-                display: "block",
-                width: "100%",
-                padding: "10px 12px",
-                marginBottom: 4,
-                background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-                border: "1px solid var(--border-soft)",
-                borderRadius: "var(--radius)",
-                cursor: "pointer",
-              }}
-            >
-              <div style={{ fontWeight: 500 }}>{reportLabels[r.report_type] ?? r.report_type}</div>
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => navigate(`/agencies/${id}/analysis/route_forecast${filterSuffix}`)}
-          aria-pressed={reportType === "route_forecast"}
-          style={{
-            appearance: "none",
-            font: "inherit",
-            textAlign: "left",
-            color: "inherit",
-            display: "block",
-            width: "100%",
-            padding: "10px 12px",
-            marginBottom: 4,
-            background: reportType === "route_forecast" ? "var(--accent-soft)" : "var(--bg-surface)",
-            border: "1px solid var(--border-soft)",
-            borderRadius: "var(--radius)",
-            cursor: "pointer",
-          }}
-        >
-          <div style={{ fontWeight: 500 }}>{reportLabels.route_forecast}</div>
-        </button>
+        {list.data && (
+          <ReportList
+            types={listedTypes}
+            active={reportType ?? null}
+            onSelect={(type) => navigate(`/agencies/${id}/analysis/${type}${filterSuffix}`)}
+          />
+        )}
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -153,7 +100,7 @@ export function AnalysisTab() {
         )}
         {reportType === "route_forecast" && id != null && (
           <div>
-            <h2 style={{ margin: "0 0 16px" }}>{reportLabels.route_forecast}</h2>
+            <h2 style={{ margin: "0 0 16px" }}>{reportLabel(t, "route_forecast")}</h2>
             <RouteForecastSection aid={id} />
           </div>
         )}
@@ -164,7 +111,7 @@ export function AnalysisTab() {
         {reportType !== "route_forecast" && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-              <h2 style={{ margin: 0 }}>{reportLabels[detail.data.report_type] ?? detail.data.report_type}</h2>
+              <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
               {detail.data.report_type !== "trend" && (
                 <a
                   href={`/api/${id}/reports/${detail.data.report_type}?${new URLSearchParams({
@@ -210,7 +157,14 @@ export function AnalysisTab() {
               <EmptyState
                 title={t("reports.no_data.title")}
                 hint={t("reports.no_data.hint")}
-                action={{ label: t("reports.no_data.reset_action"), onClick: () => update(thisWeekRange()) }}
+                reasons={buildFilterCtxReasons(ctx, t)}
+                recoveries={buildFilterCtxRecoveries({
+                  ctx,
+                  onClearRoutes: () => update({ routes: null }),
+                  onResetService: () => update({ service: "all" }),
+                  jumpToLatestData,
+                  t,
+                })}
               />
             )}
             {/* Second, narrower metric panel (item 94) -- high-frequency
@@ -296,12 +250,16 @@ function TrendBlock({
     1,
     Math.round((new Date(ctx.to).getTime() - new Date(ctx.from).getTime()) / 86400000) + 1,
   );
+  // One provider over all three charts: hovering a mark in any of them dims
+  // the marks in the others that don't share its day, weekday or hour.
   return (
-    <div>
-      <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
-      <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
-      <HourlyHeatmap cells={payload.hourly} />
-    </div>
+    <TrendFocusProvider>
+      <div>
+        <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
+        <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
+        <HourlyHeatmap cells={payload.hourly} />
+      </div>
+    </TrendFocusProvider>
   );
 }
 
@@ -310,6 +268,8 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   const id = useAgencyId();
   const { format: formatRoute } = useRouteNames(id);
   const cappedRoutes = useCappedList(payload?.routes ?? [], 200, payload);
+  const [ctx, update] = useRangeContext();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
 
   if (!payload || !payload.available) {
     return <EmptyState title={t("reports.dwell_run.not_available")} />;
@@ -322,6 +282,14 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
       <EmptyState
         title={t("reports.no_data.title")}
         hint={t("reports.no_data.hint")}
+        reasons={buildFilterCtxReasons(ctx, t)}
+        recoveries={buildFilterCtxRecoveries({
+          ctx,
+          onClearRoutes: () => update({ routes: null }),
+          onResetService: () => update({ service: "all" }),
+          jumpToLatestData,
+          t,
+        })}
       />
     );
   }
@@ -413,11 +381,11 @@ function DowBandHeatmapCard({
             bandLabel={bandLabel}
             dayLabel={dayLabel}
             axisMin={axisMin}
-            colorFor={delayColor}
+            colorFor={accentRampColor}
             onTip={() => {}}
             onLeave={() => {}}
           />
-          <Legend min={min} max={max} unit={axisMin} colorFor={delayColor} />
+          <Legend min={min} max={max} unit={axisMin} colorFor={accentRampColor} />
         </>
       )}
     </div>

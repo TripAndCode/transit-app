@@ -38,8 +38,13 @@ def _app(middleware, fetchrow_result):
 # --- API keys -------------------------------------------------------------
 
 
-def _key_row(*, tier="pro", revoked_at=None, expires_at=None):
-    return {"tier": tier, "revoked_at": revoked_at, "expires_at": expires_at}
+def _key_row(*, tier="pro", revoked_at=None, expires_at=None, owner_suspended_at=None):
+    return {
+        "tier": tier,
+        "revoked_at": revoked_at,
+        "expires_at": expires_at,
+        "owner_suspended_at": owner_suspended_at,
+    }
 
 
 def test_no_api_key_is_free_tier_without_a_lookup():
@@ -66,6 +71,23 @@ def test_unknown_api_key_is_rejected():
     resp = TestClient(app).get("/probe", headers={"X-API-Key": "nope"})
     assert resp.status_code == 401
     assert resp.json()["detail"] == "Invalid API key"
+
+
+def test_a_suspended_owners_key_is_rejected():
+    """Suspending or soft-deleting a user kills their sessions; a key issued
+    to them must stop working on the same action, not outlive the account
+    until someone remembers to revoke it by hand."""
+    app, _ = _app(APIKeyMiddleware, _key_row(owner_suspended_at=NOW))
+    assert TestClient(app).get("/probe", headers={"X-API-Key": "sk_live"}).status_code == 401
+
+
+def test_a_legacy_key_with_no_owner_still_stands_on_its_own_columns():
+    """Hand-inserted rows predate owner_user_id; the LEFT JOIN leaves their
+    owner state NULL, which must not read as suspended."""
+    app, _ = _app(APIKeyMiddleware, _key_row(owner_suspended_at=None))
+    r = TestClient(app).get("/probe", headers={"X-API-Key": "sk_live"})
+    assert r.status_code == 200
+    assert r.json()["tier"] == "pro"
 
 
 def test_revoked_api_key_is_rejected():

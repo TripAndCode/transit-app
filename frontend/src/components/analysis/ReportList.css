@@ -1,0 +1,30 @@
+/* Grouped report list: the group heading is what tells a ranking apart from
+   a certificate before either is opened. */
+.report-list { display: grid; gap: 14px; }
+.report-list__group-title {
+  margin: 0 0 4px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.report-list__entry {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 8px 10px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.report-list__entry:hover { background: var(--bg-soft); }
+.report-list__entry[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.report-list__name { display: block; font-size: var(--text-sm); font-weight: 500; }
+.report-list__desc { display: block; margin-top: 2px; font-size: var(--text-xs); line-height: 1.45; color: var(--text-tertiary); }

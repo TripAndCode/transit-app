@@ -43,6 +43,12 @@ def two_agencies(apply_schema):
         yield active_id, deleted_id
     finally:
         with conn.cursor() as cur:
+            # The run rows first: `pipeline_runs.agency_id` references
+            # `agencies`, and the tests below drive the real sweep, which
+            # records one row per agency it touches. Leaving them behind
+            # would make this DELETE fail and strand both agencies, so the
+            # next run of this file collides on `feed_url`.
+            cur.execute("DELETE FROM pipeline_runs WHERE agency_id IN (%s, %s)", (active_id, deleted_id))
             cur.execute("DELETE FROM agencies WHERE agency_id IN (%s, %s)", (active_id, deleted_id))
         conn.commit()
         conn.close()

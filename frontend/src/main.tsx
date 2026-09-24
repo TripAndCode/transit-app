@@ -53,14 +53,26 @@ const AdminUserDetailPage = lazy(() =>
 const AdminLayout = lazy(() =>
   import("./pages/admin/AdminLayout").then((m) => ({ default: m.AdminLayout }))
 );
+const AdminBoardPage = lazy(() =>
+  import("./pages/admin/AdminBoardPage").then((m) => ({ default: m.AdminBoardPage }))
+);
 const AdminAgenciesPage = lazy(() =>
   import("./pages/admin/AdminAgenciesPage").then((m) => ({ default: m.AdminAgenciesPage }))
 );
 const AdminOpsPage = lazy(() =>
   import("./pages/admin/AdminOpsPage").then((m) => ({ default: m.AdminOpsPage }))
 );
+const AdminFlagsPage = lazy(() =>
+  import("./pages/admin/AdminFlagsPage").then((m) => ({ default: m.AdminFlagsPage }))
+);
 const AdminArchitecturePage = lazy(() =>
   import("./pages/admin/AdminArchitecturePage").then((m) => ({ default: m.AdminArchitecturePage }))
+);
+const AdminAuditPage = lazy(() =>
+  import("./pages/admin/AdminAuditPage").then((m) => ({ default: m.AdminAuditPage }))
+);
+const AdminAskOpsPage = lazy(() =>
+  import("./pages/admin/AdminAskOpsPage").then((m) => ({ default: m.AdminAskOpsPage }))
 );
 
 /** Wrap a lazy route element in its own Suspense fallback. Only the two
@@ -130,12 +142,22 @@ const router = createBrowserRouter([
         path: "admin",
         element: <RequireAdmin><AdminLayout /></RequireAdmin>,
         children: [
-          { index: true, element: <Navigate to="agencies" replace /> },
+          { index: true, element: <AdminBoardPage /> },
           { path: "agencies", element: <AdminAgenciesPage /> },
-          { path: "users", element: <AdminUsersPage /> },
-          { path: "users/:uid", element: <AdminUserDetailPage /> },
+          {
+            path: "users",
+            element: <AdminUsersPage />,
+            // Nested rather than a sibling route: AdminUsersPage renders the
+            // list plus an <Outlet/>, so navigating to users/:uid overlays
+            // the drawer on top of the still-mounted list instead of
+            // replacing it with a standalone detail page.
+            children: [{ path: ":uid", element: <AdminUserDetailPage /> }],
+          },
           { path: "ops", element: <AdminOpsPage /> },
+          { path: "ask", element: <AdminAskOpsPage /> },
           { path: "architecture", element: <AdminArchitecturePage /> },
+          { path: "audit", element: <AdminAuditPage /> },
+          { path: "flags", element: <AdminFlagsPage /> },
         ],
       },
       { path: "*", element: <Navigate to="/" replace /> },

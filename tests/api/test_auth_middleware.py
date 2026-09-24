@@ -33,7 +33,7 @@ def test_no_api_key_allows_request():
 
 
 def test_valid_api_key_allows_request():
-    mock_row = {"tier": "pro", "revoked_at": None, "expires_at": None}
+    mock_row = {"tier": "pro", "revoked_at": None, "expires_at": None, "owner_suspended_at": None}
     app = _make_app(fetchrow_result=mock_row)
     client = TestClient(app)
     response = client.get("/test", headers={"X-API-Key": "valid-key"})

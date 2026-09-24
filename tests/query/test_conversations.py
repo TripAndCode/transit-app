@@ -256,6 +256,47 @@ async def test_get_message_raises_permission_denied_for_wrong_owner(pool_with_us
 
 
 @pytest.mark.asyncio
+async def test_append_message_persists_and_returns_conditions(pool_with_users):
+    """`conditions` -- the dow/time_band/service a dispatch actually ran under --
+    round-trips through both append_message's own return value and a later
+    list_messages read, and is None when the caller doesn't pass one (e.g. a
+    user message, or a dispatch-free LLM follow-up)."""
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        user_msg = await append_message(
+            c,
+            conv["conversation_id"],
+            role="user",
+            chip_id=None,
+            tool=None,
+            args=None,
+            signature_hash=None,
+            result=None,
+            rendered_summary="質問",
+        )
+        assistant_msg = await append_message(
+            c,
+            conv["conversation_id"],
+            role="assistant",
+            chip_id=None,
+            tool="top_n",
+            args={"metric": "avg_delay", "n": 10},
+            signature_hash="abcdef0123456789",
+            result={"kind": "table"},
+            rendered_summary="遅延ランキングTOP10: ...",
+            conditions={"dow": "weekend", "time_band": "morning", "service": "all"},
+        )
+    assert user_msg["conditions"] is None
+    assert assistant_msg["conditions"] == {"dow": "weekend", "time_band": "morning", "service": "all"}
+
+    async with pool.acquire() as c:
+        msgs = await list_messages(c, conv["conversation_id"], user_id=u1, agency_id=agency)
+    assert msgs[0]["conditions"] is None
+    assert msgs[1]["conditions"] == {"dow": "weekend", "time_band": "morning", "service": "all"}
+
+
+@pytest.mark.asyncio
 async def test_migrate_anon_threads_idempotent(pool_with_users):
     """Migrating the same anonymous payload twice should not create duplicates."""
     pool, agency, u1, _ = pool_with_users

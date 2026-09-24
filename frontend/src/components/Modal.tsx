@@ -1,5 +1,6 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { Z_INDEX } from "../styles/zIndex";
+import { focusableIn } from "../utils/focusable";
 
 type LabelProps = { labelledBy: string; ariaLabel?: undefined } | { ariaLabel: string; labelledBy?: undefined };
 
@@ -15,19 +16,6 @@ type Props = {
   className?: string;
   style?: CSSProperties;
 } & LabelProps;
-
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
-
-function focusableIn(panel: HTMLElement): HTMLElement[] {
-  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-}
 
 const BASE_PANEL_STYLE: Record<"modal" | "drawer", CSSProperties> = {
   modal: {

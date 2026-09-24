@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import i18n from "../i18n";
@@ -35,7 +35,11 @@ describe("RouteError", () => {
     await screen.findByRole("alert");
     // RouteError's own console.error call must have actually run (inside an
     // effect after commit) -- proving the log happens post-render rather
-    // than being removed outright.
-    expect(spy.mock.calls.some((call) => call[0] instanceof Error && call[0].message === "boom")).toBe(true);
+    // than being removed outright. Waited for rather than asserted outright:
+    // the alert is in the DOM as soon as the commit lands, which is before
+    // React has necessarily flushed the passive effect that does the logging.
+    await waitFor(() => {
+      expect(spy.mock.calls.some((call) => call[0] instanceof Error && call[0].message === "boom")).toBe(true);
+    });
   });
 });

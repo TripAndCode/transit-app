@@ -39,6 +39,7 @@ import clickhouse_connect
 from fastapi import HTTPException
 
 from api.range import RangeCtx
+from pipeline.flags import flag
 from pipeline.query.hallucination_guard import verify_numeric_claims
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
@@ -63,7 +64,7 @@ _log = logging.getLogger(__name__)
 
 def _cache_enabled() -> bool:
     """Return True when the intent-cache feature flag is on."""
-    return os.environ.get("ASK_INTENT_CACHE_ENABLED", "false").lower() in ("1", "true", "yes")
+    return flag("ask_intent_cache_enabled", False)
 
 
 def _allowed_providers() -> set[str] | None:

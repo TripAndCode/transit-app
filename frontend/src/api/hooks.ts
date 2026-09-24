@@ -7,7 +7,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
-import { ctxToQueryString, type RangeCtx } from "./rangeContext";
+import { ctxToQueryString, type RangeCtx, type TimeBand } from "./rangeContext";
 import { conversationsAnon } from "./conversationsAnon";
 import type {
   Agency,
@@ -16,6 +16,7 @@ import type {
   AskResponse,
   ConvMessage,
   Conversation,
+  DelayTimelineResponse,
   FilterCtx,
   ForecastHeatmap,
   ForecastOverview,
@@ -259,17 +260,30 @@ export function useRouteShape(
   });
 }
 
+/** Per-trip, per-stop delay for one route on one day.
+ *
+ *  `date` defaults to the route's own latest observed day, which is what the
+ *  Marey diagram anchors on: the range filter's end date is often a day the
+ *  route did not run, and an empty diagram teaches nothing.
+ */
 export function useRouteTrips(
   agencyId: number | null,
   routeCode: string | null,
+  options: { date?: string | null; timeBand?: TimeBand } = {},
 ): UseQueryResult<RouteTripsResponse> {
+  const { date = null, timeBand = "all" } = options;
   return useQuery({
-    queryKey: ["route_trips", agencyId, routeCode],
-    queryFn: ({ signal }) =>
-      apiGet<RouteTripsResponse>(
-        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips`,
+    queryKey: ["route_trips", agencyId, routeCode, date, timeBand],
+    queryFn: ({ signal }) => {
+      const qs = new URLSearchParams();
+      if (date) qs.set("date", date);
+      if (timeBand !== "all") qs.set("time_band", timeBand);
+      const query = qs.toString();
+      return apiGet<RouteTripsResponse>(
+        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips${query ? `?${query}` : ""}`,
         { signal },
-      ),
+      );
+    },
     enabled: agencyId != null && !!routeCode,
     staleTime: 60 * 1000,
   });
@@ -287,6 +301,13 @@ export function useRouteStopProfile(
       ),
     enabled: agencyId != null && !!routeCode,
     staleTime: 60 * 1000,
+    // Feeds the operations map's delay gradient beside live trip positions.
+    // staleTime alone never refetches on its own, so without an interval the
+    // gradient would freeze at selection time while the trips beside it keep
+    // moving. Slower than those trip layers on purpose: this is an average
+    // over the whole service day so far, which moves far less per minute
+    // than a position does, and recomputing it rescans the day.
+    refetchInterval: 60_000,
   });
 }
 
@@ -311,6 +332,21 @@ export function useLiveTrips(
     queryFn: ({ signal }) => apiGet<LiveTripsResponse>(`/api/${agencyId}/delays/live`, { signal }),
     enabled: agencyId != null,
     refetchInterval: options.autoRefresh ? 30_000 : false,
+  });
+}
+
+/** One service day of playback frames. The server resolves the day (its
+ *  latest observed JST date) so the client never has to guess which day has
+ *  coverage; `staleTime` is generous because a finished day never changes. */
+export function useTimeline(
+  agencyId: number | null,
+  enabled: boolean,
+): UseQueryResult<DelayTimelineResponse> {
+  return useQuery({
+    queryKey: ["delay_timeline", agencyId],
+    queryFn: ({ signal }) => apiGet<DelayTimelineResponse>(`/api/${agencyId}/delays/timeline`, { signal }),
+    enabled: agencyId != null && enabled,
+    staleTime: 10 * 60 * 1000,
   });
 }
 

@@ -2,9 +2,9 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, useSearchParams } from "react-router-dom";
 import * as hooks from "./hooks";
-import { useDefaultRangeAnchor } from "./defaultRangeAnchor";
+import { latestDataWindow, useDefaultRangeAnchor, useJumpToLatestDataRange } from "./defaultRangeAnchor";
 import { useAnonymousFilterPersistence } from "./anonymousFilterPersistence";
-import { isoDaysAgo } from "./rangeContext";
+import { DEFAULT_RANGE_DAYS, isoDaysAgo, isoDaysBefore } from "./rangeContext";
 import type { Agency } from "./types";
 
 const useSessionMock = vi.fn();
@@ -161,5 +161,82 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
     const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
     expect(stored.dow).toBe("weekend");
     expect(stored.time_band).toBe("evening");
+  });
+});
+
+describe("latestDataWindow", () => {
+  it("returns null when the agency id or agencies list is unavailable", () => {
+    expect(latestDataWindow(null, [agency()])).toBeNull();
+    expect(latestDataWindow(1, undefined)).toBeNull();
+  });
+
+  it("returns null when the agency has no data at all", () => {
+    expect(latestDataWindow(1, [agency({ latest_data_date: null })])).toBeNull();
+  });
+
+  it("returns a DEFAULT_RANGE_DAYS window ending at latest_data_date, regardless of today's date", () => {
+    const range = latestDataWindow(1, [agency({ latest_data_date: "2026-05-01" })]);
+    expect(range).toEqual({ from: isoDaysBefore("2026-05-01", DEFAULT_RANGE_DAYS - 1), to: "2026-05-01" });
+  });
+
+  it("returns the same window even when latest_data_date already falls inside today's default window", () => {
+    // Unlike computeAnchorRange, this is a manual "take me to real data"
+    // recovery -- it must not defer to "today's window already covers it"
+    // when the reason the current view is empty has nothing to do with the
+    // date range (e.g. a route/service filter with no matching rows).
+    const recent = isoDaysAgo(2);
+    const range = latestDataWindow(1, [agency({ latest_data_date: recent })]);
+    expect(range).toEqual({ from: isoDaysBefore(recent, DEFAULT_RANGE_DAYS - 1), to: recent });
+  });
+});
+
+describe("useJumpToLatestDataRange", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function JumpProbe({ agencyId }: { agencyId: number | null }) {
+    const jump = useJumpToLatestDataRange(agencyId);
+    const [params] = useSearchParams();
+    return (
+      <div>
+        <div data-testid="params">{params.toString()}</div>
+        {jump && (
+          <button type="button" onClick={jump}>
+            jump
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  it("returns null (renders no control) when the agency has no latest data date", async () => {
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [agency({ latest_data_date: null })],
+      isPending: false,
+    } as never);
+    render(
+      <MemoryRouter initialEntries={["/agencies/1/analysis?from=2020-01-01&to=2020-01-07"]}>
+        <JumpProbe agencyId={1} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("overwrites an existing explicit from/to with the agency's latest-data window on click", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [agency({ latest_data_date: "2026-05-01" })],
+      isPending: false,
+    } as never);
+    render(
+      <MemoryRouter initialEntries={["/agencies/1/analysis?from=2020-01-01&to=2020-01-07&dow=weekend"]}>
+        <JumpProbe agencyId={1} />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button"));
+    const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
+    expect(params.get("to")).toBe("2026-05-01");
+    expect(params.get("from")).toBe(isoDaysBefore("2026-05-01", DEFAULT_RANGE_DAYS - 1));
+    // Unrelated params survive the rewrite.
+    expect(params.get("dow")).toBe("weekend");
   });
 });

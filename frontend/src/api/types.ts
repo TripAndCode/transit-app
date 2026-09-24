@@ -1,3 +1,5 @@
+import type { TimeBand } from "./rangeContext";
+
 export type Agency = {
   agency_id: number;
   agency_name: string;
@@ -6,7 +8,7 @@ export type Agency = {
   latest_data_date: string | null;
 };
 
-export type RouteBucket = "anomaly" | "watch" | "normal" | "no_baseline";
+type RouteBucket = "anomaly" | "watch" | "normal" | "no_baseline";
 
 export type RouteSummary = {
   route_code: string;
@@ -55,7 +57,7 @@ export type LiveTrip = {
   direction_id?: number | null;
 };
 
-export type LiveTripProgressStop = {
+type LiveTripProgressStop = {
   stop_sequence: number;
   stop_id: string | null;
   stop_name: string | null;
@@ -73,6 +75,33 @@ export type LiveTripProgressResponse = {
   direction_id: number | null;
   latest_captured_at: string | null;
   stops: LiveTripProgressStop[];
+};
+
+/** One stop's pooled delay inside one day-playback frame. `samples` counts
+ *  observed trip visits to this stop in the bucket, not feed polls. */
+type TimelinePoint = {
+  stop_id: string;
+  stop_name: string | null;
+  lon: number;
+  lat: number;
+  avg_delay_min: number;
+  samples: number;
+};
+
+/** One time bucket of the service day. Frames are dense over 05:00–24:00, so
+ *  an empty `points` is a statement about that hour, not a gap in the list;
+ *  `mean_delay_min` is null exactly then. */
+export type TimelineFrame = {
+  t: string;
+  points: TimelinePoint[];
+  mean_delay_min: number | null;
+  samples: number;
+};
+
+export type DelayTimelineResponse = {
+  date: string;
+  step_minutes: number;
+  frames: TimelineFrame[];
 };
 
 export type LiveTripsResponse = {
@@ -96,7 +125,7 @@ export type RouteShapeStop = {
 
 /** Stop on the chosen shape with no observations in the current window —
  *  rendered as a hollow marker so the route topology stays visible. */
-export type UnobservedStop = {
+type UnobservedStop = {
   stop_sequence: number;
   stop_name: string;
   stop_id?: string | null;
@@ -122,7 +151,7 @@ export type RouteShapeResponse = {
   unobserved_stops?: UnobservedStop[];
 };
 
-export type PeakHourBreakdownRoute = {
+type PeakHourBreakdownRoute = {
   route_code: string;
   service_type: string;
   avg_min: number;
@@ -135,7 +164,7 @@ export type PeakHourBreakdown = {
   routes: PeakHourBreakdownRoute[];
 };
 
-export type ResponseCtx = {
+type ResponseCtx = {
   from: string;
   to: string;
   dow: string;
@@ -160,15 +189,37 @@ export type ReportType =
   | "council_summary"
   | "delay_certificate";
 
+/** One observed stop of one trip, as a point on a time-distance diagram. */
+type RouteTripStop = {
+  stop_id: string | null;
+  stop_sequence: number;
+  /** Seconds since the service day's 00:00, not a clock string: a GTFS
+   *  post-midnight continuation (25:30) has no same-day "HH:MM" form, and a
+   *  time axis needs a number anyway. Null when the row carries no usable
+   *  scheduled time. */
+  scheduled_sec: number | null;
+  /** `scheduled_sec + delay_sec`; null whenever `scheduled_sec` is. */
+  observed_sec: number | null;
+  delay_sec: number;
+};
+
 export type RouteTrip = {
   trip_id: string;
   scheduled_time: string | null;
   headsign: string | null;
   avg_delay_sec: number;
   samples: number;
+  /** Ordered by stop_sequence — this is the drawing order of the trip's
+   *  polyline in the Marey diagram. */
+  stops: RouteTripStop[];
 };
+
 export type RouteTripsResponse = {
   date: string | null;
+  time_band: TimeBand;
+  /** True when the route ran more trips than the endpoint will return and the
+   *  least-delayed tail was dropped. */
+  truncated: boolean;
   trips: RouteTrip[];
 };
 export type RouteStopProfileRow = {
@@ -220,7 +271,7 @@ export type DefinitionMeta = {
  *  rows` is an untyped `list` on the Python side, so a bare `Decimal` is
  *  serialised as a JSON *string* while the plain `int` columns beside it stay
  *  JSON numbers. Coerce with `Number()` before arithmetic or formatting. */
-export type DecimalCell = number | string;
+type DecimalCell = number | string;
 
 /** `ranking` and `ranking_best` -- same columns, opposite sort order.
  *  `p50_min`/`p90_min` are null when the merged histogram can't resolve a
@@ -237,7 +288,7 @@ export type RankingRow = [
 /** `on_time`. The trailing `low_confidence` flag is appended by
  *  pipeline/stats.py's annotate_on_time_pct_confidence as a display-layer
  *  caveat (95% Wilson interval too wide to trust `on_time_pct`). */
-export type OnTimeRow = [
+type OnTimeRow = [
   route_code: string,
   service_type: string | null,
   on_time_pct: DecimalCell,
@@ -247,7 +298,7 @@ export type OnTimeRow = [
 ];
 
 /** `worst_5min` -- routes ranked by count of severely-late observations. */
-export type Worst5MinRow = [
+type Worst5MinRow = [
   route_code: string,
   service_type: string | null,
   late5_count: number,
@@ -259,7 +310,7 @@ export type Worst5MinRow = [
  *  absolute difference. Carries no service_type: the comparison drops the
  *  service filter on purpose (a weekday-schedule service never runs on a
  *  weekend, so the pairing would always be empty). */
-export type CompareRankingRow = [
+type CompareRankingRow = [
   route_code: string,
   weekday_avg_min: DecimalCell,
   weekend_avg_min: DecimalCell,
@@ -269,7 +320,7 @@ export type CompareRankingRow = [
 
 /** `dow_weekday` and `dow_weekend`. `dow_label` is the backend's own
  *  Japanese group label for the half the rows were restricted to. */
-export type DowRankingRow = [
+type DowRankingRow = [
   route_code: string,
   service_type: string | null,
   dow_label: string,
@@ -307,7 +358,7 @@ export type DelayCertificateRow = [
  *  cell's exact raw-seconds total, null until the aggregate row has been
  *  rebuilt since the column was introduced -- only a caller pooling several
  *  cells needs it. */
-export type TrendHourlyCell = {
+type TrendHourlyCell = {
   date: string;
   hour: number;
   avg_min: number | null;
@@ -317,7 +368,7 @@ export type TrendHourlyCell = {
 
 /** The dow × band grid the trend report reuses from the forecast summariser,
  *  minus the forecast-specific route ranking and disclaimer. */
-export type TrendDowBand = {
+type TrendDowBand = {
   grid: ForecastOverviewGridCell[];
   worst: ForecastOverviewWorst | null;
 };
@@ -360,7 +411,7 @@ export type ReportResponse =
  *  variation / long-gap rate over the request's range (item 94) -- see
  *  pipeline/reports/headway_quality.py's compute_headway_quality. A
  *  non-high-frequency route never appears in this list at all. */
-export type HeadwayQualityRow = {
+type HeadwayQualityRow = {
   route_code: string;
   ewt_sec: number | null;
   cov: number | null;
@@ -408,7 +459,7 @@ export type PerformanceStandardsResponse = {
  *  pipeline/reports/weather.py for why this is one station rather than an
  *  area average. `note` is the operator's own record of why this station
  *  represents the service area. */
-export type WeatherStation = {
+type WeatherStation = {
   station_id: string;
   station_name: string;
   note: string | null;
@@ -418,7 +469,7 @@ export type WeatherStation = {
  *  pooled over every delay measurement on that side's days and is `null`
  *  exactly when the side has no days/samples; `avg_precip_mm` counts each
  *  matched day once, however many routes ran on it. */
-export type WeatherDelayGroup = {
+type WeatherDelayGroup = {
   days: number;
   samples: number;
   avg_delay_sec: number | null;
@@ -504,7 +555,7 @@ export type TrendDay = {
  *  service-quality change. */
 export type RevisionBoundaries = string[];
 
-export type DwellRunRoute = {
+type DwellRunRoute = {
   route_code: string;
   service_type: string | null;
   dwell_samples: number;
@@ -555,7 +606,7 @@ export type AskResponse = {
 
 // Canonical intent + guided UX
 
-export type CacheOutcome = "hit" | "miss" | "bypass";
+type CacheOutcome = "hit" | "miss" | "bypass";
 
 export type FilterCtx = {
   dow?: "all" | "weekday" | "weekend";
@@ -595,6 +646,12 @@ export type ConvMessage = {
     pairs: unknown | null;
   } | null;
   rendered_summary: string | null;
+  /** The dow/time_band/service the message's dispatch actually ran under —
+   *  distinct from `args` (the tool's own arguments) and from the live,
+   *  editable conversation `filter_ctx`, which can change after this
+   *  message was sent. `null` for user messages and for a dispatch-free
+   *  assistant reply (e.g. an LLM-grounded follow-up). */
+  conditions?: { dow: string; time_band: string; service: string } | null;
   created_at: string;
 };
 
@@ -714,7 +771,7 @@ export type OverviewHeadline = {
   window_to: string;
 };
 
-export type OverviewMover = {
+type OverviewMover = {
   route_code: string;
   route_short_name: string | null;
   delta_min: number;
@@ -734,7 +791,7 @@ export type OverviewMovers = {
   better: OverviewMover[];
 };
 
-export type OverviewConcentrationTopRoute = {
+type OverviewConcentrationTopRoute = {
   route_code: string;
   route_short_name: string | null;
   share_pct: number;
@@ -752,7 +809,7 @@ export type OverviewTopDelayedRoute = {
   avg_min: number;
 };
 
-export type OverviewTopDelayed = {
+type OverviewTopDelayed = {
   routes: OverviewTopDelayedRoute[];
   delayed_count: number;
 };

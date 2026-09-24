@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useAdminOps, type AgencyFreshnessItem } from "../../api/admin";
 import { StatusChip } from "./adminControls";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 function formatAge(t: ReturnType<typeof useTranslation>["t"], ageHours: number | null): string {
   if (ageHours === null) return t("admin.ops.unknown");
@@ -71,7 +72,7 @@ export function AdminOpsPage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.ops.title")}</h1>
+      <PageHeader title={t("admin.ops.title")} />
 
       {error && (
         <p

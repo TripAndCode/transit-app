@@ -159,4 +159,12 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // The entry module bootstraps the app through createRoot and exports
+    // nothing on purpose, so Fast Refresh never applies to it. The rule's
+    // advice there ("move your components to a separate file") is about a
+    // capability this file cannot have.
+    files: ['src/main.tsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 )

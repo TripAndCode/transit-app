@@ -2,10 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiGet, formatApiError } from "../../api/client";
+import { formatDateTime } from "../../utils/format";
 import { usePatchUser, useDeleteUser } from "../../api/admin";
 import { useSession } from "../../api/auth";
 import { AdminButton } from "./adminControls";
-import { formatDateTime } from "../../utils/format";
+import { Drawer } from "../../components/admin/Drawer";
+import { ApiKeysSection, SessionsSection } from "./UserDrawerSections";
 
 type Detail = {
   user_id: number;
@@ -24,9 +26,16 @@ type Detail = {
     meta: Record<string, unknown> | null;
     created_at: string;
   }[];
+  byok_provider: string | null;
 };
 
-/** Admin: detail view for a single user with identities, recent audit events, and inline role/suspend/delete actions. */
+/** Admin user drawer: identity, role/LLM-approval/BYOK status, sessions,
+ * API keys, login history, and a danger zone -- rendered as a right-hand
+ * panel over `AdminUsersPage` (mounted via the nested `users/:uid` route;
+ * see main.tsx). Escape and the back link both navigate to `/admin/users`,
+ * which unmounts this route and closes the drawer. There is no overlay to
+ * click: the shared Drawer is deliberately non-modal so the list behind it
+ * stays readable and scrollable. */
 export function AdminUserDetailPage() {
   const { t } = useTranslation();
   const { uid } = useParams<{ uid: string }>();
@@ -42,26 +51,28 @@ export function AdminUserDetailPage() {
   const patch = usePatchUser();
   const del = useDeleteUser();
 
+  function handleClose() {
+    navigate(backToUsers);
+  }
+
   const backLink = (
     <Link to={backToUsers} style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
       ← {t("admin.user_detail.back_to_users")}
     </Link>
   );
 
-  if (isLoading) {
+  if (isLoading || !data) {
     return (
-      <div style={{ padding: 24 }}>
-        {backLink}
-        <div style={{ marginTop: 12 }}>{t("common.loading")}</div>
-      </div>
-    );
-  }
-  if (!data) {
-    return (
-      <div style={{ padding: 24 }}>
-        {backLink}
-        <div style={{ marginTop: 12 }}>{t("admin.user_detail.error", { msg: formatApiError(error) })}</div>
-      </div>
+      // Named for what the panel is, not for a section it has not loaded:
+      // "Actions" would be the accessible name while this shows a spinner.
+      <Drawer open onClose={handleClose} label={t("admin.user_detail.panel_label")}>
+        <div style={{ padding: 24 }}>
+          {backLink}
+          <div style={{ marginTop: 12 }}>
+            {isLoading ? t("common.loading") : t("admin.user_detail.error", { msg: formatApiError(error) })}
+          </div>
+        </div>
+      </Drawer>
     );
   }
 
@@ -91,112 +102,151 @@ export function AdminUserDetailPage() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 920 }}>
-      {backLink}
-      <h1 style={{ fontSize: 22, margin: "12px 0 16px" }}>{data.email}</h1>
-      {error && (
-        <div role="alert" style={{ marginBottom: 16, padding: 8, background: "var(--surface-2)",
-                                    borderRadius: 4, fontSize: 13, color: "var(--text-tertiary)" }}>
-          {t("admin.user_detail.error", { msg: formatApiError(error) })}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-        <div style={{ flex: 2, minWidth: 280 }}>
-          <div style={{ marginBottom: 24 }}>
-            <div>{t("admin.user_detail.name_label")}: {data.name ?? "-"}</div>
-            <div>
-              {t("admin.user_detail.status_label")}:{" "}
-              {data.suspended_at ? t("admin.users.status.suspended") : t("admin.users.status.active")}
-            </div>
-            <div>
-              {t("admin.users.col.llm_approved")}:{" "}
-              {data.llm_approved ? t("admin.users.llm_approved.yes") : t("admin.users.llm_approved.no")}
-            </div>
-            <div>
-              {t("admin.user_detail.created_label")}: {formatDateTime(data.created_at)}
-            </div>
+    <Drawer open onClose={handleClose} label={data.email}>
+      <div style={{ padding: 24 }}>
+        {backLink}
+        {error && (
+          <div
+            role="alert"
+            style={{
+              marginBottom: 16,
+              padding: 8,
+              background: "var(--surface-2)",
+              borderRadius: 4,
+              fontSize: 13,
+              color: "var(--text-tertiary)",
+            }}
+          >
+            {t("admin.user_detail.error", { msg: formatApiError(error) })}
           </div>
-          <section style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("account.linked_providers")}</h2>
-            <ul>
-              {data.identities.map((idn) => (
-                <li key={`${idn.provider}-${idn.provider_sub}`}>
-                  {idn.provider} ({t("admin.user_detail.email_at_link", { email: idn.email_at_link ?? "?" })})
-                </li>
-              ))}
-            </ul>
-          </section>
-          <section>
-            <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("admin.user_detail.recent_events")}</h2>
-            {data.recent_events.map((e) => (
-              <div key={e.event_id} style={{ padding: 8, background: "var(--surface-1)",
-                                              borderRadius: 4, marginBottom: 4, fontSize: 13 }}>
-                <div>{e.kind} {e.provider ? `(${e.provider})` : ""}</div>
-                <div style={{ color: "var(--text-tertiary)" }}>
-                  {formatDateTime(e.created_at)}
-                </div>
-                {e.meta && <pre style={{ margin: "4px 0", fontSize: 12 }}>{JSON.stringify(e.meta)}</pre>}
-              </div>
+        )}
+        <div style={{ marginTop: 16, marginBottom: 24 }}>
+          <div>
+            {t("admin.user_detail.name_label")}: {data.name ?? "-"}
+          </div>
+          <div>
+            {t("admin.user_detail.status_label")}:{" "}
+            {data.suspended_at ? t("admin.users.status.suspended") : t("admin.users.status.active")}
+          </div>
+          <div>
+            {t("admin.users.col.llm_approved")}:{" "}
+            {data.llm_approved ? t("admin.users.llm_approved.yes") : t("admin.users.llm_approved.no")}
+          </div>
+          <div>
+            {t("admin.user_detail.byok_label")}:{" "}
+            {data.byok_provider
+              ? t("admin.user_detail.byok_configured", { provider: data.byok_provider })
+              : t("admin.user_detail.byok_not_configured")}
+          </div>
+          <div>
+            {t("admin.user_detail.created_label")}: {formatDateTime(data.created_at)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            fontSize: 12,
+            textTransform: "uppercase",
+            letterSpacing: "0.03em",
+            color: "var(--text-secondary)",
+            marginBottom: 10,
+          }}
+        >
+          {t("admin.user_detail.actions_title")}
+        </div>
+        {isSelf && (
+          <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 10 }}>
+            {t("admin.user_detail.self_hint")}
+          </div>
+        )}
+        <label htmlFor="detail-role" style={{ display: "block", marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4 }}>
+            {t("account.role_label")}
+          </div>
+          <select
+            id="detail-role"
+            value={data.role}
+            style={{ width: "100%" }}
+            disabled={isSelf || isMutating}
+            onChange={(e) => handleRoleChange(e.target.value)}
+          >
+            <option value="user">{t("account.role.user")}</option>
+            <option value="admin">{t("account.role.admin")}</option>
+          </select>
+        </label>
+        <AdminButton
+          variant="secondary"
+          style={{ marginBottom: 8, marginRight: 8 }}
+          disabled={isSelf || isMutating}
+          onClick={handleLlmApprovedToggle}
+        >
+          {data.llm_approved ? t("admin.users.action.revoke_llm") : t("admin.users.action.approve_llm")}
+        </AdminButton>
+        <AdminButton
+          variant="secondary"
+          style={{ marginBottom: 24 }}
+          disabled={isSelf || isMutating}
+          onClick={handleSuspendToggle}
+        >
+          {data.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
+        </AdminButton>
+        {(patch.error || del.error) && (
+          <div
+            role="alert"
+            style={{
+              marginBottom: 16,
+              padding: 8,
+              background: "var(--surface-2)",
+              borderRadius: 4,
+              fontSize: 13,
+              color: "var(--text-tertiary)",
+            }}
+          >
+            {formatApiError(patch.error || del.error)}
+          </div>
+        )}
+
+        <SessionsSection uid={data.user_id} />
+        <ApiKeysSection uid={data.user_id} />
+
+        <section style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("account.linked_providers")}</h2>
+          <ul>
+            {data.identities.map((idn) => (
+              <li key={`${idn.provider}-${idn.provider_sub}`}>
+                {idn.provider} ({t("admin.user_detail.email_at_link", { email: idn.email_at_link ?? "?" })})
+              </li>
             ))}
-          </section>
-        </div>
-        <div style={{ flex: 1, minWidth: 220, borderLeft: "1px solid var(--surface-2)", paddingLeft: 24 }}>
-          <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em",
-                        color: "var(--text-secondary)", marginBottom: 10 }}>
-            {t("admin.user_detail.actions_title")}
-          </div>
-          {isSelf && (
-            <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 10 }}>
-              {t("admin.user_detail.self_hint")}
-            </div>
-          )}
-          <label htmlFor="detail-role" style={{ display: "block", marginBottom: 10 }}>
-            <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4 }}>
-              {t("account.role_label")}
-            </div>
-            <select
-              id="detail-role"
-              value={data.role}
-              style={{ width: "100%" }}
-              disabled={isSelf || isMutating}
-              onChange={(e) => handleRoleChange(e.target.value)}
+          </ul>
+        </section>
+
+        <section style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("admin.user_detail.recent_events")}</h2>
+          {data.recent_events.map((e) => (
+            <div
+              key={e.event_id}
+              style={{ padding: 8, background: "var(--surface-1)", borderRadius: 4, marginBottom: 4, fontSize: 13 }}
             >
-              <option value="user">{t("account.role.user")}</option>
-              <option value="admin">{t("account.role.admin")}</option>
-            </select>
-          </label>
-          <AdminButton
-            variant="secondary"
-            style={{ width: "100%", marginBottom: 8, justifyContent: "center" }}
-            disabled={isSelf || isMutating}
-            onClick={handleLlmApprovedToggle}
-          >
-            {data.llm_approved ? t("admin.users.action.revoke_llm") : t("admin.users.action.approve_llm")}
-          </AdminButton>
-          <AdminButton
-            variant="secondary"
-            style={{ width: "100%", marginBottom: 8, justifyContent: "center" }}
-            disabled={isSelf || isMutating}
-            onClick={handleSuspendToggle}
-          >
-            {data.suspended_at ? t("admin.users.action.resume") : t("admin.users.action.suspend")}
-          </AdminButton>
-          <AdminButton
-            variant="danger"
-            style={{ width: "100%", justifyContent: "center" }}
-            disabled={isSelf || isMutating}
-            onClick={handleDelete}
-          >
+              <div>
+                {e.kind} {e.provider ? `(${e.provider})` : ""}
+              </div>
+              <div style={{ color: "var(--text-tertiary)" }}>
+                {formatDateTime(e.created_at)}
+              </div>
+              {e.meta && <pre style={{ margin: "4px 0", fontSize: 12 }}>{JSON.stringify(e.meta)}</pre>}
+            </div>
+          ))}
+        </section>
+
+        <section>
+          <h2 style={{ fontSize: 16, marginBottom: 8, color: "var(--color-danger, #c0392b)" }}>
+            {t("admin.user_detail.danger_zone_title")}
+          </h2>
+          <AdminButton variant="danger" disabled={isSelf || isMutating} onClick={handleDelete}>
             {t("admin.users.action.delete")}
           </AdminButton>
-          {(patch.error || del.error) && (
-            <div role="alert" style={{ marginTop: 10, padding: 8, background: "var(--surface-2)",
-                                        borderRadius: 4, fontSize: 13, color: "var(--text-tertiary)" }}>
-              {formatApiError(patch.error || del.error)}
-            </div>
-          )}
-        </div>
+        </section>
       </div>
-    </div>
+    </Drawer>
   );
 }

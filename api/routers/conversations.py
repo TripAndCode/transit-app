@@ -429,6 +429,7 @@ async def append_message_endpoint(
             signature_hash=sig_hash,
             result=result_dict,
             rendered_summary=rendered,
+            conditions={"dow": ctx_obj.dow, "time_band": ctx_obj.time_band, "service": ctx_obj.service},
         )
     return {"user": user_msg, "assistant": assistant_msg}
 

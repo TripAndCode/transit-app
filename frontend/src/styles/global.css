@@ -81,19 +81,14 @@
      which flips light-to-dark and would otherwise break tooltip contrast. */
   --tooltip-bg: #2a2a2a;
   --tooltip-fg: #ffffff;
-  /* Same theme-invariant reasoning as --tooltip-bg/--tooltip-fg above, for
-     map overlay chrome that hardcodes a white pill background (so it reads
-     over any basemap, including dark aerial imagery) instead of using
-     --bg-surface: MapStyleControl. Pairing that fixed
-     white with --text-primary/--text-secondary/--accent broke contrast in
-     dark mode (those tokens assume a dark surface) — e.g. dark --text-primary
-     (#DDD9F3) on white computed to 1.37:1. These values equal the light
-     theme's --text-primary/--text-secondary/--accent and are defined once,
-     not overridden in the dark block, so both themes render the same
-     dark-on-white chip regardless of app theme. */
-  --chip-text-primary: #2a2a2a;
-  --chip-text-secondary: #6a6a6a;
-  --chip-accent: #187b80;
+  /* Floating map chrome (filter dock, legend, basemap switcher, fit-all
+     button): a translucent, blurred fill so the control reads as sitting on
+     the map rather than punched through it, on any basemap including dark
+     aerial imagery. Derived from --bg-surface/--card-border (not a fixed
+     white, which is what these replaced) so the chrome follows the app
+     theme instead of always rendering a light-mode pill in a dark app. */
+  --glass: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  --glass-line: var(--card-border);
   /* Severe-delay tone (DELAY_RAMP.severe / delayColor(>=5)) — the deep end of
      the warm ramp, not an alarm red: it is the loudest colour in the product
      and still has to sit in a calm interface.
@@ -181,11 +176,13 @@
   --z-popover: 30;
   --z-sticky: 40;
   --z-tooltip: 60;
+  --z-coach-mark: 70;
   --z-drawer-backdrop: 300;
   --z-drawer: 301;
   --z-modal-backdrop: 400;
   --z-modal: 401;
   --z-context-menu: 500;
+  --z-command-palette: 550;
   --z-toast: 600;
   /* Identity moments only: the brand wordmark, the Welcome headline, and a
      single-sentence "story" line. Everything else — body copy, tables,
@@ -250,6 +247,13 @@
           0 8px 24px rgba(0, 0, 0, 0.40);
   --el-3: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
           0 24px 60px rgba(0, 0, 0, 0.60);
+  /* More translucent than the light value: a near-black --bg-surface mixed
+     at the same 82% reads as a near-opaque card rather than glass, which
+     defeats the point over a bright basemap (aerial photo, GSI std). The
+     hairline needs its own lighter line for the same reason --card-border
+     (a light-grey literal) does not read on a dark surface. */
+  --glass: color-mix(in srgb, var(--bg-surface) 62%, transparent);
+  --glass-line: rgba(255, 255, 255, 0.16);
 }
 
 /* One global reduced-motion regime, so a stylesheet does not have to remember
@@ -351,6 +355,26 @@ html, body, #root { height: 100%; margin: 0; }
 
 .app-notice-stack > *:not([data-activity-strip]):first-child {
   margin-top: 16px;
+}
+
+/* BP.sm: Sidebar's bottom tab bar becomes `position: fixed` at this
+   breakpoint (Sidebar.tsx's `MOBILE_TABBAR_HEIGHT_PX` -- keep this 56px in
+   sync with that constant) and no longer claims layout space as a flex
+   sibling, so the content column needs the same height reserved at its own
+   bottom edge or the tab bar sits on top of whatever the active tab last
+   renders instead of below it. */
+@media (max-width: 640px) {
+  /* border-box, not the default content-box: main's height is a flex
+     stretch value (its parent, .app-shell, is the 100dvh row), so an
+     content-box padding would grow main taller than that stretch target
+     instead of eating into it, pushing the whole shell past the viewport. */
+  .app-main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+  /* TabFilterBar's shared filter row (Overview/Analysis/Reports): wrapping
+     at this width pushes the preset menu and chips onto several lines
+     before the tab content even starts. A single scrollable row keeps every
+     control one thumb-swipe away instead. */
+  .tab-filter-bar-row { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab-filter-bar-row > * { flex-shrink: 0; }
 }
 
 body {
@@ -458,6 +482,72 @@ summary:focus-visible,
   box-shadow: var(--el-2);
   pointer-events: none;
 }
+/* `ExportMenu` (components/ExportMenu.tsx). A plain dropdown anchored to its
+   trigger -- there is exactly one open at a time per page, so it needs no
+   portal (unlike `Tooltip`, which can sit inside a clipping map overlay). */
+.export-menu {
+  position: relative;
+  display: inline-flex;
+}
+.export-menu__panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--z-dropdown);
+  margin-top: 6px;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--el-2);
+}
+.export-menu__panel button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.export-menu__panel button:hover {
+  background: var(--hover-tint);
+}
+.export-menu__status {
+  margin-left: 8px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.export-menu__fallback {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--z-dropdown);
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--el-2);
+}
+.export-menu__fallback label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.export-menu__fallback input {
+  min-width: 260px;
+}
+
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
@@ -492,6 +582,16 @@ summary::-webkit-details-marker { display: none; }
     50%      { opacity: 0.62; }
   }
   .skeleton { animation: skeleton-pulse calc(var(--dur-4) * 1.5) var(--ease-in-out) infinite; }
+}
+
+/* The resting value of a cell whose opacity is data-driven (a low-confidence
+   forecast cell, a crossfiltered one). Declared before the motion block below
+   and at equal specificity, so a reduced-motion viewer -- who gets none of the
+   entrance classes -- still sees that opacity, while under motion
+   `.chart-cell-enter`'s `opacity: 0` is declared later and wins the start of
+   the fade. */
+.chart-cell-opacity {
+  opacity: var(--cell-opacity, 1);
 }
 
 /* ---------- Shared entrance animations ----------
@@ -543,6 +643,41 @@ summary::-webkit-details-marker { display: none; }
   .chart-cell-enter.chart-cell-enter--in {
     opacity: var(--cell-opacity, 1);
   }
+
+  /* TrendFocusContext's crossfilter: a mark that disagrees with the hovered
+     day/weekday/hour recedes. On a grid cell the dim rides `fill-opacity`,
+     a channel the entrance fade above does not touch -- sharing `opacity`
+     would make the hover response inherit that cell's staggered entrance
+     delay. */
+  .chart-focus-dimmable {
+    transition:
+      opacity var(--dur-2) var(--ease-out),
+      fill-opacity var(--dur-2) var(--ease-out);
+  }
+  .chart-cell-enter.chart-focus-dimmable {
+    transition:
+      opacity var(--dur-3) var(--ease-out),
+      fill-opacity var(--dur-2) var(--ease-out);
+  }
+
+  /* RevealSection.tsx's useInView(): a section starts fully visible, only
+     offset downward -- transform only, never opacity: 0 -- so it stays
+     readable before the observer's first callback (or without JS at all). */
+  .reveal {
+    transform: translateY(16px);
+    transition: transform var(--dur-3) var(--ease-out);
+  }
+  .reveal.reveal--in {
+    transform: translateY(0);
+  }
+}
+
+/* The daily chart's plot is a keyboard-operable range control: arrows move
+   the read-out cursor, Shift+arrows extend the selection. */
+.chart-brush-surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
 }
 
 /* HelpPage renders the user manual (a fetched .md asset) via react-markdown,
@@ -602,4 +737,18 @@ summary::-webkit-details-marker { display: none; }
 }
 .user-manual-content a {
   color: var(--accent);
+}
+
+/* Shared print stylesheet: strips the app chrome so `window.print()` (from
+   `ExportMenu`) prints just the tab's content, on any page -- not only the
+   `.focus-page` tabs this originally shipped with. Declared once, here,
+   because it targets the app shell and generic control classes that exist
+   app-wide, not anything page-specific. */
+@media print {
+  body { background: white; }
+  .app-shell { display: block !important; height: auto !important; }
+  .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack, .export-menu { display: none !important; }
+  main { overflow: visible !important; }
+  .focus-page { color: black; }
+  .focus-page svg { break-inside: avoid; }
 }

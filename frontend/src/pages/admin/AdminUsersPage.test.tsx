@@ -10,20 +10,28 @@ import { ApiError } from "../../api/client";
 
 const patchMutate = vi.fn();
 const patchReset = vi.fn();
-const delMutate = vi.fn();
+const delMutate = vi.fn().mockResolvedValue(undefined);
 const delReset = vi.fn();
+const bulkMutate = vi.fn((_vars: unknown, opts?: { onSuccess?: () => void }) => opts?.onSuccess?.());
 const useAdminUsersMock = vi.fn();
 const useSessionMock = vi.fn();
-// Mutable so a single test can inject a mutation error without needing a
-// fresh vi.mock factory per test (vi.mock's factory is hoisted and bound
-// once for the whole file's static `import { AdminUsersPage }` above).
+
 let patchMutationError: unknown = null;
-let delMutationError: unknown = null;
+let bulkPending = false;
+let bulkVariables: { ids: number[]; patch: unknown } | undefined;
 
 vi.mock("../../api/admin", () => ({
   useAdminUsers: (params: unknown) => useAdminUsersMock(params),
   usePatchUser: () => ({ mutate: patchMutate, reset: patchReset, error: patchMutationError, isPending: false, variables: undefined }),
-  useDeleteUser: () => ({ mutate: delMutate, reset: delReset, error: delMutationError, isPending: false, variables: undefined }),
+  useDeleteUser: () => ({
+    mutate: delMutate,
+    mutateAsync: delMutate,
+    reset: delReset,
+    error: null,
+    isPending: false,
+    variables: undefined,
+  }),
+  useBulkPatchUsers: () => ({ mutate: bulkMutate, error: null, isPending: bulkPending, variables: bulkVariables }),
 }));
 
 // A signed-in admin who is not one of the two rendered users (user_id 999),
@@ -43,6 +51,7 @@ function twoUsers() {
           avatar_url: null,
           role: "admin",
           suspended_at: null,
+          llm_approved: false,
           created_at: "2026-06-01T00:00:00Z",
         },
         {
@@ -52,6 +61,7 @@ function twoUsers() {
           avatar_url: null,
           role: "user",
           suspended_at: "2026-06-10T00:00:00Z",
+          llm_approved: false,
           created_at: "2026-05-01T00:00:00Z",
         },
       ],
@@ -75,10 +85,6 @@ function wrap(initialEntries = ["/admin/users"]) {
   );
 }
 
-/** Same page, but with an in-app navigation button so a single mounted
- *  instance can move to a different `?q=` the way browser back/forward would
- *  -- i.e. a URL change AdminUsersPage did not itself just commit via its
- *  own debounce -- without needing a real browser history stack. */
 function wrapWithExternalNav(initialEntries: string[]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Harness() {
@@ -101,18 +107,26 @@ function wrapWithExternalNav(initialEntries: string[]) {
   );
 }
 
+/** The table's body rows, without the header row. Row focus is real DOM
+ *  focus, so a keyboard test has to start from a focused row. */
+function dataRows(): HTMLElement[] {
+  return screen.getAllByRole("row").slice(1);
+}
+
 describe("AdminUsersPage", () => {
   beforeEach(() => {
+    patchMutationError = null;
+    bulkPending = false;
+    bulkVariables = undefined;
     useAdminUsersMock.mockReset();
     useAdminUsersMock.mockReturnValue(twoUsers());
     useSessionMock.mockReset();
     useSessionMock.mockReturnValue({ data: { user_id: 999, role: "admin" } });
-    patchMutationError = null;
-    delMutationError = null;
     patchMutate.mockClear();
     patchReset.mockClear();
     delMutate.mockClear();
     delReset.mockClear();
+    bulkMutate.mockClear();
   });
 
   it("shows a colored Active chip for a user with no suspended_at", () => {
@@ -239,12 +253,277 @@ describe("AdminUsersPage", () => {
       fireEvent.click(screen.getByRole("button", { name: "4" }));
       vi.advanceTimersByTime(500);
       // Bug was: the qInput-debounce effect re-armed on this URL change and
-      // deleted `page` 300ms later, reverting the fetch to offset 0.
-      expect(useAdminUsersMock).not.toHaveBeenCalledWith(expect.objectContaining({ offset: 0 }));
+      // deleted `page` 300ms later, reverting the fetch to offset 0. Scoped
+      // to the main list's param shape (via `role`) so it isn't coincidentally
+      // tripped by the separate, always-offset-0 pending-approvals badge query.
+      expect(useAdminUsersMock).not.toHaveBeenCalledWith(expect.objectContaining({ role: "", offset: 0 }));
       expect(useAdminUsersMock).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 150 }));
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("disables role/suspend/delete on the signed-in admin's own row, not on other rows", () => {
+    useSessionMock.mockReturnValue({ data: { user_id: 1, role: "admin" } });
+    wrap();
+    const rows = screen.getAllByRole("row").slice(1); // drop the header row
+    const ownRow = within(rows[0]); // user_id 1
+    expect(ownRow.getByRole("combobox")).toHaveProperty("disabled", true);
+    expect(ownRow.getByRole("button", { name: "Suspend" })).toHaveProperty("disabled", true);
+    expect(ownRow.getByRole("button", { name: "Delete" })).toHaveProperty("disabled", true);
+    const otherRow = within(rows[1]); // user_id 2, already suspended
+    expect(otherRow.getByRole("button", { name: "Resume" })).toHaveProperty("disabled", false);
+  });
+
+  it("asks for confirmation before promoting a row to admin, then mutates", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const user = userEvent.setup();
+    wrap();
+    const rows = screen.getAllByRole("row").slice(1);
+    await user.selectOptions(within(rows[1]).getByRole("combobox"), "admin"); // user_id 2, role user
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(delReset).toHaveBeenCalled();
+    expect(patchMutate).toHaveBeenCalledWith({ uid: 2, body: { role: "admin" } });
+    confirmSpy.mockRestore();
+  });
+
+  it("does not mutate when the promote confirmation is declined", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const user = userEvent.setup();
+    wrap();
+    const rows = screen.getAllByRole("row").slice(1);
+    await user.selectOptions(within(rows[1]).getByRole("combobox"), "admin");
+    expect(patchMutate).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  describe("bulk selection and undo", () => {
+    it("disables the checkbox for the signed-in admin's own row only", () => {
+      useSessionMock.mockReturnValue({ data: { user_id: 1, role: "admin" } });
+      wrap();
+      expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("checkbox", { name: "Select suspended@example.com" })).toHaveProperty(
+        "disabled",
+        false,
+      );
+    });
+
+    it("shows the floating bulk bar with a selected count once a row is checked", async () => {
+      const user = userEvent.setup();
+      wrap();
+      expect(screen.queryByText("1 selected")).toBeNull();
+      await user.click(screen.getByRole("checkbox", { name: "Select active@example.com" }));
+      expect(screen.getByText("1 selected")).toBeTruthy();
+    });
+
+    it("select-all checks every selectable row and bulk-clear unchecks them", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+      expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", true);
+      expect(screen.getByRole("checkbox", { name: "Select suspended@example.com" })).toHaveProperty(
+        "checked",
+        true,
+      );
+      await user.click(screen.getByRole("button", { name: "Clear selection" }));
+      expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", false);
+    });
+
+    it("bulk-approves the selected ids and shows an undo toast with the inverse patch ready", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select active@example.com" }));
+      const bulkBar = within(screen.getByTestId("admin-users-bulk-bar"));
+      await user.click(bulkBar.getByRole("button", { name: "Approve AI access" }));
+      expect(bulkMutate).toHaveBeenCalledWith(
+        { ids: [1], patch: { llm_approved: true } },
+        expect.objectContaining({ onSuccess: expect.any(Function) }),
+      );
+      expect(await screen.findByText("Approved AI access for 1")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+    });
+
+    it("clicking undo sends the inverse patch and hides the toast", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select active@example.com" }));
+      await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Approve AI access" }));
+      bulkMutate.mockClear();
+      await user.click(screen.getByRole("button", { name: "Undo" }));
+      expect(bulkMutate).toHaveBeenCalledWith({ ids: [1], patch: { llm_approved: false } });
+      expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    });
+
+    it("bulk-suspends the selection via the bulk bar", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select active@example.com" }));
+      await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Suspend" }));
+      expect(bulkMutate).toHaveBeenCalledWith(
+        { ids: [1], patch: { suspended: true } },
+        expect.objectContaining({ onSuccess: expect.any(Function) }),
+      );
+    });
+
+    it("bulk-promotes via the role change control in the bulk bar", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select suspended@example.com" }));
+      await user.selectOptions(screen.getByRole("combobox", { name: "Change role" }), "admin");
+      expect(bulkMutate).toHaveBeenCalledWith(
+        { ids: [2], patch: { role: "admin" } },
+        expect.objectContaining({ onSuccess: expect.any(Function) }),
+      );
+    });
+
+    it("routes bulk delete through the existing per-user confirm flow for each selected id", async () => {
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+      await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Delete" }));
+      await vi.waitFor(() => expect(delMutate).toHaveBeenCalledTimes(2));
+      expect(delMutate).toHaveBeenCalledWith(1);
+      expect(delMutate).toHaveBeenCalledWith(2);
+      confirmSpy.mockRestore();
+    });
+
+    it("skips a selected id when its delete confirm is declined", async () => {
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select active@example.com" }));
+      await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Delete" }));
+      expect(delMutate).not.toHaveBeenCalled();
+      confirmSpy.mockRestore();
+    });
+  });
+
+  describe("saved views", () => {
+    it("shows the pending-approval badge count from the separate always-offset-0 query", () => {
+      useAdminUsersMock.mockImplementation((params: { llmApproved?: string }) =>
+        params.llmApproved === "false" ? { data: { users: [], total: 2 }, isLoading: false, error: null } : twoUsers(),
+      );
+      wrap();
+      expect(screen.getByText("2")).toBeTruthy();
+    });
+
+    it("selecting the pending-approval view sets llm_approved=false and clears role/suspended", async () => {
+      const user = userEvent.setup();
+      wrap(["/admin/users?role=admin&suspended=true"]);
+      useAdminUsersMock.mockClear();
+      await user.click(screen.getByRole("button", { name: /Pending approval/ }));
+      expect(useAdminUsersMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ role: "", suspended: "", llmApproved: "false" }),
+      );
+    });
+
+    it("marks the admins view active from the role=admin URL param", () => {
+      wrap(["/admin/users?role=admin"]);
+      expect(screen.getByRole("button", { name: "Admins" })).toHaveAttribute("aria-pressed", "true");
+    });
+  });
+
+  it("names the table for a screen reader instead of leaking the i18n key", () => {
+    // The caption is the table's accessible name; key parity between
+    // locales cannot catch a key that exists in neither.
+    wrap();
+    expect(screen.getByRole("table", { name: "Users" })).toBeTruthy();
+  });
+
+  it("navigates once when the email link is clicked, so Back returns to the list", async () => {
+    // The row is clickable as a whole now, and Link does not stop
+    // propagation on its own.
+    const user = userEvent.setup();
+    wrap();
+    const before = window.history.length;
+    await user.click(screen.getByRole("link", { name: "active@example.com" }));
+    expect(window.history.length - before).toBeLessThanOrEqual(1);
+  });
+
+  describe("keyboard navigation", () => {
+    it("j moves focus down and x toggles selection on the focused row", () => {
+      wrap();
+      const [first, second] = dataRows();
+      first.focus();
+      fireEvent.keyDown(first, { key: "j" });
+      expect(second).toHaveFocus();
+      fireEvent.keyDown(second, { key: "x" });
+      expect(screen.getByRole("checkbox", { name: "Select suspended@example.com" })).toHaveProperty(
+        "checked",
+        true,
+      );
+      expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", false);
+    });
+
+    it("k does not move focus above the first row", () => {
+      wrap();
+      const [first] = dataRows();
+      first.focus();
+      fireEvent.keyDown(first, { key: "k" });
+      expect(first).toHaveFocus();
+      fireEvent.keyDown(first, { key: "x" });
+      expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", true);
+    });
+
+    it("disables the bulk bar's own controls while a batch is in flight", async () => {
+      // A second click sends the same ids again and lets whichever request
+      // lands second decide the outcome.
+      const user = userEvent.setup();
+      bulkPending = true;
+      bulkVariables = { ids: [1], patch: { llm_approved: true } };
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+      const bar = within(screen.getByTestId("admin-users-bulk-bar"));
+      expect(bar.getByRole("button", { name: "Suspend" })).toHaveProperty("disabled", true);
+      expect(bar.getByRole("combobox")).toHaveProperty("disabled", true);
+    });
+
+    it("locks the row a bulk request is mutating even when nothing is selected", () => {
+      // The `a` shortcut acts on one unselected row, so a guard reading the
+      // page's selection would leave that row's own controls live.
+      bulkPending = true;
+      bulkVariables = { ids: [1], patch: { llm_approved: true } };
+      wrap();
+      const row = within(dataRows()[0]);
+      expect(row.getByRole("button", { name: /Delete/ })).toHaveProperty("disabled", true);
+    });
+
+    it("a approves the focused row when nothing is selected", () => {
+      wrap();
+      const [first] = dataRows();
+      first.focus();
+      fireEvent.keyDown(first, { key: "a" });
+      expect(bulkMutate).toHaveBeenCalledWith(
+        { ids: [1], patch: { llm_approved: true } },
+        expect.objectContaining({ onSuccess: expect.any(Function) }),
+      );
+    });
+
+    it("/ focuses the search input", () => {
+      wrap();
+      fireEvent.keyDown(document, { key: "/" });
+      expect(screen.getByRole("searchbox")).toHaveFocus();
+    });
+
+    it("does not react to row keys while typing in the search box", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("searchbox"));
+      fireEvent.keyDown(screen.getByRole("searchbox"), { key: "x" });
+      expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", false);
+    });
+
+    it("lets / be typed into the search box instead of re-focusing it", async () => {
+      // `/` is the one shortcut still bound on the document, so it is the
+      // one that can still swallow a character the operator meant to type.
+      const user = userEvent.setup();
+      wrap();
+      const box = screen.getByRole("searchbox");
+      await user.click(box);
+      await user.type(box, "a/b");
+      expect(box).toHaveValue("a/b");
+    });
   });
 
   it("updates the displayed search value when the URL's q changes externally (e.g. browser back/forward)", () => {
@@ -289,39 +568,5 @@ describe("AdminUsersPage", () => {
     // its own calm copy -- the old raw formatApiError(error) rendering had no
     // such special-casing, just the generic status-code text in a plain div.
     expect(screen.getByRole("status")).toBeTruthy();
-  });
-
-  it("disables role/suspend/delete on the signed-in admin's own row, not on other rows", () => {
-    useSessionMock.mockReturnValue({ data: { user_id: 1, role: "admin" } });
-    wrap();
-    const rows = screen.getAllByRole("row").slice(1); // drop the header row
-    const ownRow = within(rows[0]); // user_id 1
-    expect(ownRow.getByRole("combobox")).toHaveProperty("disabled", true);
-    expect(ownRow.getByRole("button", { name: "Suspend" })).toHaveProperty("disabled", true);
-    expect(ownRow.getByRole("button", { name: "Delete" })).toHaveProperty("disabled", true);
-    const otherRow = within(rows[1]); // user_id 2, already suspended
-    expect(otherRow.getByRole("button", { name: "Resume" })).toHaveProperty("disabled", false);
-  });
-
-  it("asks for confirmation before promoting a row to admin, then mutates", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    const user = userEvent.setup();
-    wrap();
-    const rows = screen.getAllByRole("row").slice(1);
-    await user.selectOptions(within(rows[1]).getByRole("combobox"), "admin"); // user_id 2, role user
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(delReset).toHaveBeenCalled();
-    expect(patchMutate).toHaveBeenCalledWith({ uid: 2, body: { role: "admin" } });
-    confirmSpy.mockRestore();
-  });
-
-  it("does not mutate when the promote confirmation is declined", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const user = userEvent.setup();
-    wrap();
-    const rows = screen.getAllByRole("row").slice(1);
-    await user.selectOptions(within(rows[1]).getByRole("combobox"), "admin");
-    expect(patchMutate).not.toHaveBeenCalled();
-    confirmSpy.mockRestore();
   });
 });

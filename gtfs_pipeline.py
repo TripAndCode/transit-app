@@ -9,7 +9,8 @@ from urllib.parse import urlsplit
 
 import psycopg2
 
-from pipeline.locks import try_lock_ingest_analyze
+from pipeline import runs as pipeline_runs
+from pipeline.locks import try_lock_ingest_analyze_timed
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,19 @@ def _get_conn(require_schema: bool = True):
     return conn
 
 
-def _lock_or_skip_agency(conn, cmd: str) -> None:
+def _record_displaced(conn, kind: str, agency_id: int | None, lock_wait_ms: int) -> None:
+    """Leave a `skipped` pipeline_runs row for a job the lock turned away.
+
+    The whole reason this table exists: a displaced job produces no data and
+    therefore no other trace, so without this row a fleet losing every other
+    scheduled run looks exactly like a healthy one on the control board.
+    Best-effort like every other write in pipeline/runs.py -- it never changes
+    the exit code the caller is about to take.
+    """
+    pipeline_runs.start_run(conn, kind, agency_id=agency_id, status="skipped", lock_wait_ms=lock_wait_ms)
+
+
+def _lock_or_skip_agency(conn, cmd: str, kind: str, agency_id: int | None = None) -> None:
     """Exit(EX_TEMPFAIL) if another ingest/analyze process holds the lock.
 
     For `ingest` and `analyze` -- the single-agency commands
@@ -148,14 +161,16 @@ def _lock_or_skip_agency(conn, cmd: str) -> None:
     failure and skip just this agency this run, instead of the whole
     remaining loop aborting under `set -euo pipefail`.
     """
-    if try_lock_ingest_analyze(conn):
+    got, lock_wait_ms = try_lock_ingest_analyze_timed(conn)
+    if got:
         return
     logger.warning("%s: another ingest/analyze process is already running; skipping this agency this run.", cmd)
+    _record_displaced(conn, kind, agency_id, lock_wait_ms)
     conn.close()
     sys.exit(EX_TEMPFAIL)
 
 
-def _lock_or_exit(conn, cmd: str) -> None:
+def _lock_or_exit(conn, cmd: str, kind: str) -> None:
     """Exit(1) if another ingest/analyze process holds the lock.
 
     For `analyze_all` and `ingest_live` -- the whole-fleet commands that no
@@ -165,11 +180,24 @@ def _lock_or_exit(conn, cmd: str) -> None:
     are documented as fail-loud ("partial run can't pass silently" --
     CLAUDE.md); a silent no-op would violate that contract for no benefit.
     """
-    if try_lock_ingest_analyze(conn):
+    got, lock_wait_ms = try_lock_ingest_analyze_timed(conn)
+    if got:
         return
     logger.error("%s: another ingest/analyze process is already running; refusing to start.", cmd)
+    _record_displaced(conn, kind, None, lock_wait_ms)
     conn.close()
     sys.exit(1)
+
+
+def _args_agency_id(args) -> int | None:
+    """The agency the command was asked for, before the DB is consulted.
+
+    The lock is taken (and a displaced run recorded) before `_require_agency`
+    can infer a sole agency from the database, so a skipped run knows only
+    what the caller named. `None` means "not named", not "every agency".
+    """
+    raw = getattr(args, "agency_id", None)
+    return int(raw) if raw else None
 
 
 def _require_agency(args, conn) -> int:
@@ -302,10 +330,11 @@ def cmd_ingest(args):
     from pipeline.ingest import ingest
 
     conn = _get_conn()
-    _lock_or_skip_agency(conn, "ingest")
+    _lock_or_skip_agency(conn, "ingest", "ingest", _args_agency_id(args))
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
-    ingest(args.folder, agency_id, conn, ch_client)
+    with pipeline_runs.record_run(conn, "ingest", agency_id=agency_id) as run:
+        run.rows = ingest(args.folder, agency_id, conn, ch_client)
     conn.close()
 
 
@@ -315,7 +344,8 @@ def cmd_load_static(args):
 
     conn = _get_conn()
     agency_id = _require_agency(args, conn)
-    load_static(args.path, agency_id, conn)
+    with pipeline_runs.record_run(conn, "static", agency_id=agency_id):
+        load_static(args.path, agency_id, conn)
     conn.close()
 
 
@@ -348,10 +378,11 @@ def cmd_analyze(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
-    _lock_or_skip_agency(conn, "analyze")
+    _lock_or_skip_agency(conn, "analyze", "analyze", _args_agency_id(args))
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
-    analyze(agency_id, conn, ch_client)
+    with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id):
+        analyze(agency_id, conn, ch_client)
     conn.close()
 
 
@@ -366,7 +397,7 @@ def cmd_analyze_all(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
-    _lock_or_exit(conn, "analyze-all")
+    _lock_or_exit(conn, "analyze-all", "analyze")
     ch_client = get_client()
     with conn.cursor() as cur:
         cur.execute(ACTIVE_AGENCY_IDS_SQL)
@@ -379,7 +410,8 @@ def cmd_analyze_all(args):
     for aid in agency_ids:
         try:
             logger.info(f"--- analyze agency_id={aid} ---")
-            analyze(aid, conn, ch_client)
+            with pipeline_runs.record_run(conn, "analyze", agency_id=aid):
+                analyze(aid, conn, ch_client)
         except Exception:
             logger.exception(f"analyze failed for agency {aid}")
             failed.append(aid)
@@ -466,10 +498,11 @@ def cmd_ingest_live(args):
     from pipeline.ingest import ingest_live
 
     conn = _get_conn()
-    _lock_or_exit(conn, "ingest-live")
+    _lock_or_exit(conn, "ingest-live", "ingest")
     ch_client = get_client()
     if args.agency_id is not None:
-        ingest_live(int(args.agency_id), conn, ch_client)
+        with pipeline_runs.record_run(conn, "ingest", agency_id=int(args.agency_id)) as run:
+            run.rows = ingest_live(int(args.agency_id), conn, ch_client)
         conn.close()
         return
 
@@ -484,7 +517,8 @@ def cmd_ingest_live(args):
     for aid in agency_ids:
         try:
             logger.info(f"--- Ingesting agency_id={aid} ---")
-            ingest_live(aid, conn, ch_client)
+            with pipeline_runs.record_run(conn, "ingest", agency_id=aid) as run:
+                run.rows = ingest_live(aid, conn, ch_client)
         except Exception:
             logger.exception(f"ingest-live failed for agency {aid}")
             conn.rollback()
@@ -587,7 +621,11 @@ def cmd_ingest_weather(args):
     days = PUBLICATION_WINDOW_DAYS if args.days is None else int(args.days)
     conn = _get_conn()
     try:
-        written, considered, failed = ingest_weather(conn, days=days)
+        # Fleet-wide, not per-agency: the pass covers every configured
+        # station, and several agencies may share one.
+        with pipeline_runs.record_run(conn, "weather") as run:
+            written, considered, failed = ingest_weather(conn, days=days)
+            run.rows = written
     finally:
         conn.close()
     if failed:

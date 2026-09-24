@@ -37,7 +37,7 @@ def test_single_agency_cmd_exits_tempfail_and_never_calls_the_work_when_lock_is_
     conn = MagicMock()
     with (
         patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
-        patch("gtfs_pipeline.try_lock_ingest_analyze", return_value=False),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=False),
         patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
         patch(target) as fake_work,
     ):
@@ -61,7 +61,7 @@ def test_whole_fleet_cmd_exits_1_and_never_calls_the_work_when_lock_is_held(cmd,
     conn = MagicMock()
     with (
         patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
-        patch("gtfs_pipeline.try_lock_ingest_analyze", return_value=False),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=False),
         patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
         patch(target) as fake_work,
     ):
@@ -86,7 +86,7 @@ def test_cmd_proceeds_when_lock_is_free(cmd, args, target):
     conn.cursor.return_value.__enter__.return_value.fetchall.return_value = [(1, "Agency")]
     with (
         patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
-        patch("gtfs_pipeline.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
         patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
         patch(target) as fake_work,
     ):
@@ -100,7 +100,7 @@ def test_cmd_analyze_all_proceeds_when_lock_is_free():
     conn.cursor.return_value.__enter__.return_value.fetchall.return_value = [(1,), (2,)]
     with (
         patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
-        patch("gtfs_pipeline.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
         patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
         patch("pipeline.analyze.analyze") as fake_analyze,
     ):

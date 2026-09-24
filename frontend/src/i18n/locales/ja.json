@@ -3,14 +3,19 @@
     "ask": "質問",
     "collapse_sidebar": "サイドバーを折りたたむ",
     "expand_sidebar": "サイドバーを開く",
-    "open_menu": "メニューを開く",
-    "mobile_menu_title": "ナビゲーションメニュー",
     "account_menu": "アカウントメニュー",
     "help": "ヘルプ",
     "prototype_section_label": "プロトタイプ",
     "prototype_onboarding": "初回ログイン画面",
     "prototype_stale_feed": "フィード遅延状態",
-    "prototype_no_data": "データなし状態"
+    "prototype_no_data": "データなし状態",
+    "mobile_tabbar_label": "メインナビゲーション",
+    "more": "その他",
+    "more_menu_label": "その他のメニュー",
+    "close_menu": "メニューを閉じる"
+  },
+  "sheet": {
+    "handle": "シートの持ち手"
   },
   "onboarding": {
     "subtitle": "あなたの事業者を選んでください",
@@ -22,38 +27,38 @@
       "subtitle": "各事業者の最新報告停留所、現在の遅延、履歴分析、事業者間の比較をまとめて確認できます。",
       "guest_cta": "ゲストとして利用する"
     },
-    "preview": {
-      "heading": "中身をのぞいてみる",
-      "route_label": "{{code}}系統",
-      "agency": {
-        "riverside": "リバーサイド交通",
-        "harborline": "ハーバーライン",
-        "hillcrest": "ヒルクレスト交通"
+    "narrative": {
+      "route": {
+        "title": "路線に沿って遅延が積み重なる",
+        "body": "分析画面と同じ停留所ごとのチャートを、サンプルデータで — 停留所を進むごとに遅延が積み重なる様子を、落ち着いた前週比較と並べて確認できます。"
       },
-      "overview": {
-        "filter_all": "すべての路線",
-        "filter_on_time": "定刻",
-        "filter_delayed": "遅延"
+      "trend": {
+        "title": "日ごとに比べる",
+        "body": "レポート画面と同じ日次トレンドチャートを、サンプルの日付で — 荒れた1日も、周囲の移動平均と並べればはっきり見えます。"
       },
       "ask": {
-        "q1": "今、遅れている路線はどれ?",
-        "a1": "H9系統は現在平均4.4分の遅延で、本日最も遅れています。",
-        "q2": "この事業者は他と比べてどう?",
-        "a2": "この事業者の定時運行率は92%で、ネットワーク平均を上回っています。",
-        "q3": "この路線はいつ遅れやすい?",
-        "a3": "遅延は夕方の通勤時間帯、18時前後にピークを迎える傾向があります。",
-        "generic_reply": "質問に基づいた簡単な回答です — ご自身の事業者の実データについて質問するにはログインしてください。",
-        "empty_hint": "下の候補を試すか、自由に質問してください。",
-        "input_label": "質問を入力",
-        "input_placeholder": "遅延、路線、定時運行率について質問…",
-        "send": "送信"
-      },
-      "map": {
-        "style_standard": "標準",
-        "style_muted": "ミュート",
-        "legend_on_time": "定刻運行の路線",
-        "legend_delayed": "遅延中の路線"
+        "title": "質問して、根拠を見る",
+        "body": "質問機能が実際の回答で表示するのと同じ根拠ビューです — スクリーンショットではありません。下の停留所を選んで試せます。"
       }
+    }
+  },
+  "tour": {
+    "step_of": "{{step}} / {{total}} ステップ",
+    "next": "次へ",
+    "done": "完了",
+    "later": "後で",
+    "dismiss": "このツアーを閉じる",
+    "filters": {
+      "title": "表示範囲を絞り込む",
+      "body": "路線・曜日・時間帯で絞り込むと、下の内容すべてが連動して更新されます。"
+    },
+    "map": {
+      "title": "現在運行中の便を確認する",
+      "body": "観測されたすべての便がここに一覧表示されます — 選ぶとリアルタイムの進行状況を確認できます。"
+    },
+    "ask": {
+      "title": "質問する",
+      "body": "遅延・路線・定時運行率について自然な言葉で質問すると、根拠付きの回答が返ってきます。"
     }
   },
   "forecast": {
@@ -128,7 +133,10 @@
     "col_vehicle_km_delivered": "走行キロ達成率",
     "help_vehicle_km_delivered": "現行ダイヤの計画走行キロのうち実際に運行された割合です。shapes.txtが未読み込みの場合や運休を報告しないフィードでは「—」と表示されます（「運行達成率」も参照）。",
     "planned_trip_count_fallback": "計画本数 {{count}} 本（走行キロは算出不可）",
-    "schedule_version_title": "静的ダイヤバージョン: {{version}}"
+    "schedule_version_title": "静的ダイヤバージョン: {{version}}",
+    "col_agency": "事業者",
+    "axis_caption": "共通軸 · 0〜{{max}} 分",
+    "definition_disclosure": "集計条件を見る"
   },
   "definitionMeta": {
     "tolerance_line": "定時判定: {{preset}}（早着許容 ≤ {{early}}、遅延許容 ≤ {{late}}）",
@@ -175,7 +183,6 @@
       "avg_delay_label": "ネットワーク平均遅延",
       "baseline_hint_title": "先週比について",
       "baseline_hint_body": "選択した期間の平均遅延を、その直前の同じ日数分の期間と比較しています。",
-      "avg_delay_compared": "先週比 {{sign}}{{min}}分",
       "avg_delay_no_baseline": "比較データなし",
       "delayed_count_label": "遅延中の路線",
       "delayed_count_value": "{{count}} / {{total}}路線",
@@ -184,11 +191,21 @@
       "feed_status_stale": "データ遅延あり",
       "feed_status_updated": "最終更新 {{when}}"
     },
+    "story": {
+      "behind_one": "先週より{{delta}}分遅く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "behind_other": "先週より{{delta}}分遅く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "behind_short": "先週より{{delta}}分遅くなっています。",
+      "ahead_one": "先週より{{delta}}分早く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "ahead_other": "先週より{{delta}}分早く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "ahead_short": "先週より{{delta}}分早くなっています。",
+      "flat_one": "遅延は先週とほぼ同じ水準で、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "flat_other": "遅延は先週とほぼ同じ水準で、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "flat_short": "遅延は先週とほぼ同じ水準です。"
+    },
     "routes_to_check": {
       "title": "今すぐ確認すべき路線",
       "empty": "確認が必要な路線はありません"
     },
-    "details_toggle": "詳細を表示",
     "concentration": {
       "single_route": "{{name}} が全体の 100% を占めています (観測は1路線のみ)。",
       "lorenz_label": "ローレンツ曲線 — 遅延の累積構成比",
@@ -471,6 +488,21 @@
     "empty": {
       "title": "現在表示できる便がありません",
       "hint": "最新のTripUpdateを待っています。受信後、自動的に表示します。"
+    },
+    "playback": {
+      "aria_label": "1日の再生",
+      "play": "再生",
+      "pause": "一時停止",
+      "step_back": "1つ前の時間帯へ",
+      "step_forward": "次の時間帯へ",
+      "scrubber": "時間帯を選ぶ",
+      "speed": "再生速度 {{speed}}倍",
+      "speed_label": "{{speed}}×",
+      "exit": "再生を終了して現在の運行に戻る",
+      "loading": "1日分のデータを読み込んでいます",
+      "empty": "この日の観測データはありません",
+      "toggle_on": "1日の動きを再生",
+      "toggle_off": "現在の運行に戻る"
     }
   },
   "map": {
@@ -485,7 +517,8 @@
       "pale": "淡色",
       "std": "標準",
       "photo": "航空写真",
-      "layers": "レイヤー"
+      "layers": "レイヤー",
+      "dim_label": "地図の暗さ"
     },
     "heatmapMode": {
       "avg": "平均遅延",
@@ -534,7 +567,34 @@
       "samples": "観測 {{count}}件",
       "unit": "単位：分・ゼロより下は早発",
       "caveat": "停留所順序で集計し、名称は代表便から取得しています。この集計だけでは遅延の原因は分かりません。",
-      "recorded": "取得したデータ・記録された引数を見る"
+      "recorded": "取得したデータ・記録された引数を見る",
+      "tool_label": {
+        "route_stop_patterns": "停留所別の停車パターン",
+        "segment_hotspots": "停留所別の遅延ホットスポット",
+        "on_time_rate": "定時率ランキング"
+      },
+      "window_range": "{{from}} 〜 {{to}}",
+      "conditions_all": "条件なし（すべて）",
+      "chip": {
+        "morning_peak": "朝ピークだけで見る",
+        "view_map": "地図で見る",
+        "compare_previous": "先々週と比べる",
+        "export_png": "PNGで保存"
+      },
+      "badge": {
+        "sql": "SQLのみ",
+        "llm": "LLM"
+      },
+      "disclosure_title": "この答えの出どころ",
+      "disclosure_route": "路線",
+      "disclosure_conditions": "条件",
+      "disclosure_aggregation": "集計",
+      "disclosure_confidence": "確からしさ",
+      "confidence": {
+        "sql": "確定（集計から直接算出）",
+        "llm": "生成AIによる要約（既存の取得結果のみを参照）"
+      },
+      "sample_count": "観測 {{count}}件"
     },
     "workspace": {
       "investigations": "これまでの調査",
@@ -730,8 +790,8 @@
       }
     },
     "landing": {
-      "header_title": "路線インテリジェンス",
-      "header_subtitle": "ルール → 埋め込みNN → RAGの3段階で回答します",
+      "header_title": "遅延について聞いてみましょう",
+      "header_subtitle": "路線や停留所を選ぶだけで、すぐに答えが返ってきます",
       "cards_title": "こんな質問ができます",
       "pills_title": "その他の質問"
     }
@@ -803,8 +863,7 @@
     },
     "no_data": {
       "title": "該当データがありません",
-      "hint": "期間や条件を変更してください",
-      "reset_action": "今週を表示"
+      "hint": "期間や条件を変更してください"
     },
     "heatmap": {
       "empty": "時間帯別データがありません。",
@@ -812,13 +871,12 @@
       "subtitle": "縦: 時間 (0-23) ・ 横: 日付 ・ クリックで絞り込み",
       "legend_aria": "凡例を表示",
       "delay_label": "遅延:",
-      "band_lt": "< {{min}}分",
-      "band_range": "{{min}} – {{max}}分",
-      "band_gt": "> {{min}}分",
-      "legend_explainer": "・ 濃さ=サンプル数 ・ 行→時間帯 ・ 列→日付",
+      "legend_explainer": "・行 → 時間帯 ・列 → 日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
       "tooltip_hour": "{{hour}}時 ・ 平均",
-      "tooltip_metrics": "{{min}}分 ・ {{count}}件"
+      "tooltip_metrics": "{{min}}分 ・ {{count}}件",
+      "ramp_max": "{{min}}分以上",
+      "severe_outline": "枠線 = {{min}}分以上"
     },
     "dow_band": {
       "title": "いつもの遅れ方",
@@ -834,7 +892,13 @@
       "worst_label": "悪化:",
       "offender": "路線{{code}}({{min}}分)",
       "revision_boundary_label": "ダイヤ改正",
-      "revision_boundary_aria": "{{date}}にダイヤ改正が反映されました"
+      "revision_boundary_aria": "{{date}}にダイヤ改正が反映されました",
+      "brush_hint": "ドラッグで期間を絞り込み",
+      "brush_reset": "期間をリセット",
+      "brush_aria": "日次チャートの期間選択。矢印キーでカーソル移動、Shift+矢印キーで範囲を拡張、Enterで適用します。",
+      "brush_range": "{{from}} 〜 {{to}}",
+      "severe_band_label": "重大 ({{min}}分以上)",
+      "worst_day_label": "最も遅い日"
     },
     "dwell_run": {
       "not_available": "この事業者のフィードは到着遅延を送信しないため、滞留・走行時間の内訳は利用できません。",
@@ -904,6 +968,27 @@
         "sample_count": "{{count}}件",
         "bar_aria": "{{label}}: {{value}}、{{count}}件"
       }
+    },
+    "group": {
+      "ranking": "順位",
+      "punctuality": "定時性",
+      "pattern": "傾向",
+      "forecast": "予測・証明",
+      "other": "その他"
+    },
+    "desc": {
+      "ranking": "遅れの大きい系統から順に並べます。",
+      "ranking_best": "時刻表どおりに運行できている系統を並べます。",
+      "on_time": "定時基準内に収まった出発の割合を系統別に見ます。",
+      "worst_5min": "5分以上の遅れが多い系統を抽出します。",
+      "trend": "日ごと・時間帯ごと・曜日ごとの遅れの推移を見ます。",
+      "compare_ranking": "同じ順位を前期と比べます。",
+      "dow_weekday": "平日の一日を時間帯別に見ます。",
+      "dow_weekend": "土日祝の一日を時間帯別に見ます。",
+      "dwell_run": "停留所での停車時間と走行時間の内訳を見ます。",
+      "route_forecast": "指定日の系統別の遅れを予測します。",
+      "council_summary": "議会・取締役会向けの期間まとめです。",
+      "delay_certificate": "特定の遅延便を証明する書類です。"
     }
   },
   "insight_panel": {
@@ -921,6 +1006,7 @@
     "aggregate_not_ready": "このビューのデータはこの環境ではまだ準備されていません。データの整備が完了すると表示されます。",
     "generic_status": "読み込みに失敗しました ({{status}})",
     "network": "通信が一時的に途切れました。再試行してください。",
+    "timeout": "応答に時間がかかっています。もう一度お試しください。",
     "generic": "読み込みに失敗しました。",
     "followup_too_long": "質問が長すぎます。短くしてもう一度お試しください。",
     "followup_rate_limit": "アクセスが集中しています。少し待って再試行してください。",
@@ -930,6 +1016,7 @@
   },
   "admin": {
     "users": {
+      "table_label": "ユーザー一覧",
       "title": "ユーザー管理",
       "search_placeholder": "メール / 名前で検索",
       "col": {
@@ -965,25 +1052,83 @@
       "pagination": {
         "prev": "前へ",
         "next": "次へ"
+      },
+      "view": {
+        "all": "すべて",
+        "pending": "承認待ち",
+        "admin": "管理者",
+        "suspended": "停止中"
+      },
+      "bulk": {
+        "selected_count": "{{count}} 件選択中",
+        "clear": "選択を解除",
+        "undo": "取り消す",
+        "role_label": "ロールを変更",
+        "toast": {
+          "approved": "{{count}} 件のAI利用を承認しました",
+          "suspended": "{{count}} 件を停止しました",
+          "promoted": "{{count}} 件を管理者にしました",
+          "demoted": "{{count}} 件を一般ユーザーにしました"
+        }
       }
     },
     "user_detail": {
+      "panel_label": "ユーザー詳細",
       "error": "エラー: {{msg}}",
       "name_label": "名前",
       "status_label": "状態",
       "created_label": "作成",
       "email_at_link": "連携時メール: {{email}}",
-      "recent_events": "最近のイベント",
+      "recent_events": "ログイン履歴",
       "back_to_users": "ユーザー一覧に戻る",
       "actions_title": "操作",
-      "self_hint": "自分自身のアカウントはここでは変更できません。"
+      "self_hint": "自分自身のアカウントはここでは変更できません。",
+      "byok_label": "BYOK",
+      "byok_configured": "{{provider}} キー設定済み",
+      "byok_not_configured": "未設定",
+      "sessions_title": "セッション",
+      "sessions_empty": "有効なセッションはありません。",
+      "session_revoke": "失効",
+      "session_last_seen": "最終アクセス: {{time}}",
+      "api_keys_title": "APIキー",
+      "api_keys_empty": "発行済みのAPIキーはありません。",
+      "api_key_issue": "発行",
+      "api_key_revoke": "失効",
+      "api_key_revoked_label": "失効済み",
+      "api_key_issued_notice": "このキーは今すぐコピーしてください。二度と表示されません。",
+      "api_key_copy": "コピー",
+      "api_key_copied": "コピーしました",
+      "danger_zone_title": "危険な操作"
+    },
+    "drawer": {
+      "close": "閉じる"
+    },
+    "invite": {
+      "trigger": "＋ 招待",
+      "dialog_title": "ユーザーを招待",
+      "email_label": "メールアドレス",
+      "role_label": "ロール",
+      "llm_approved_label": "AI利用を事前承認",
+      "submit": "招待を送信",
+      "success": "{{email}} 宛の招待を作成しました。",
+      "error": "エラー: {{msg}}"
     },
     "nav": {
       "label": "管理ナビゲーション",
       "agencies": "事業者管理",
       "users": "ユーザー管理",
       "ops": "運用状況",
-      "architecture": "アーキテクチャ"
+      "architecture": "アーキテクチャ",
+      "audit": "監査ログ",
+      "flags": "機能フラグ",
+      "board": "管制盤",
+      "group": {
+        "operations": "運行",
+        "people": "人",
+        "governance": "統制",
+        "reference": "参照"
+      },
+      "ask_ops": "Ask 運用"
     },
     "ops": {
       "title": "運用状況",
@@ -1014,15 +1159,8 @@
       "search_placeholder": "事業者名で検索",
       "empty": "該当する事業者がありません。",
       "col_name": "事業者名",
-      "col_feed_url": "フィードURL",
-      "col_strategy": "取得方式",
-      "col_status": "状態",
-      "status_active": "有効",
       "status_deleted": "削除済",
       "action_edit": "編集",
-      "action_delete": "削除",
-      "action_restore": "復元",
-      "confirm_delete": "「{{name}}」を削除しますか？取込・集計から除外されます。",
       "form_title_add": "事業者を追加",
       "form_title_edit": "事業者を編集",
       "form_name": "事業者名",
@@ -1034,7 +1172,78 @@
       "form_submit_add": "追加",
       "form_submit_edit": "更新",
       "form_submitting": "保存中...",
-      "form_error_feed_url": "フィードURLが無効です"
+      "form_error_feed_url": "フィードURLが無効です",
+      "col_freshness": "鮮度",
+      "col_last_capture": "最終取得",
+      "col_rt_coverage": "RT 被覆",
+      "col_clamp": "clamp 率 · 14日",
+      "col_static_version": "静的版",
+      "table_label": "事業者一覧",
+      "freshness_fresh": "最新",
+      "freshness_stale": "遅れ",
+      "freshness_unknown": "不明",
+      "view_all": "すべて",
+      "view_stale": "遅れあり",
+      "view_rt_incomplete": "RT 被覆に欠け",
+      "rt_summary": "{{present}}/{{total}} 項目",
+      "rt_unprobed": "未計測",
+      "health_error": "健全性の取得に失敗しました。基本情報のみ表示しています。"
+    },
+    "agency_diag": {
+      "drawer_label": "事業者の詳細",
+      "feed": "フィード",
+      "strategy": "取得方式",
+      "last_capture": "最終取得",
+      "aggregation": "集計",
+      "clamp": "clamp 率 · 14日",
+      "rt_section": "RT フィールド診断（直近プローブ）",
+      "rt_scope_note": "計測対象は TripUpdate の stop_time_update 項目です。VehiclePosition と Alerts は取り込んでいません。",
+      "rt_present": "あり",
+      "rt_absent": "なし",
+      "rt_unprobed": "未計測",
+      "rt_expired": "期限切れ",
+      "rt_detail": "被覆 {{pct}}% · 標本 {{samples}}",
+      "static_section": "静的データ",
+      "static_current": "現行",
+      "static_detail": "路線 {{routes}} · 便 {{trips}}",
+      "static_calendar": "カレンダー 〜{{date}}",
+      "static_empty": "静的データの版はまだ記録されていません。",
+      "policy_section": "基準とウェイト",
+      "standards": "性能基準",
+      "standards_summary": "{{count}} 系統に設定",
+      "weights": "乗車人員ウェイト",
+      "weights_summary": "{{withWeights}}/{{total}} 系統",
+      "station": "気象観測所",
+      "station_value": "{{name}}（{{id}}）",
+      "station_none": "未設定",
+      "edit": "編集",
+      "edit_standards": "性能基準を編集",
+      "edit_weights": "乗車人員ウェイトを編集",
+      "actions_section": "操作",
+      "action_probe": "フィードを今すぐ確認",
+      "action_reload_static": "静的データを再読込",
+      "action_reload_static_hint": "静的データ再読込のエンドポイントはまだありません。",
+      "action_reanalyze": "この事業者だけ再集計",
+      "action_reanalyze_disabled_hint": "無効化された事業者は集計対象から外れます。",
+      "probe_done": "プローブを記録しました（標本 {{samples}}）。",
+      "reanalyze_started": "再集計を開始しました。完了はしばらくお待ちください。",
+      "danger_section": "危険操作",
+      "danger_hint": "無効化すると取り込みが止まり、公開画面から消えます。復元は可能です。",
+      "confirm_label": "確認のため事業者名を入力",
+      "disable": "無効化",
+      "restore": "復元",
+      "disabled_note": "この事業者は無効化されています。",
+      "purge_unavailable": "恒久削除は用意していません。無効化は取り消せます。",
+      "editor_route": "系統コード",
+      "editor_metric": "指標",
+      "editor_threshold": "しきい値",
+      "editor_rate": "加減算レート",
+      "editor_weight": "ウェイト",
+      "editor_default_route": "既定（全系統）",
+      "editor_add": "行を追加",
+      "editor_remove": "行を削除",
+      "editor_save": "保存",
+      "editor_empty": "設定はまだありません。"
     },
     "architecture": {
       "title": "アーキテクチャ",
@@ -1042,6 +1251,207 @@
       "docs_title": "機能ドキュメント",
       "docs_nav_label": "機能ドキュメント一覧",
       "docs_empty": "機能ドキュメントが見つかりません。"
+    },
+    "audit": {
+      "table_label": "監査タイムライン",
+      "title": "監査ログ",
+      "filter": {
+        "actor_placeholder": "実行者ID",
+        "target_placeholder": "対象の種別またはID",
+        "action_placeholder": "操作",
+        "from": "開始日",
+        "to": "終了日"
+      },
+      "col": {
+        "at": "日時",
+        "actor": "実行者",
+        "action": "操作",
+        "target": "対象",
+        "diff": "変更内容",
+        "reason": "理由",
+        "ip": "IP"
+      },
+      "empty": "該当する監査ログがありません。",
+      "pagination": {
+        "prev": "前へ",
+        "next": "次へ"
+      },
+      "export": {
+        "csv": "CSVエクスポート",
+        "loading": "エクスポート中…"
+      }
+    },
+    "flags": {
+      "table_label": "機能フラグ",
+      "empty": "登録されたフラグはありません。",
+      "title": "機能フラグ",
+      "col_flag": "フラグ",
+      "col_value": "値",
+      "col_source": "ソース",
+      "col_updated": "最終変更",
+      "source_env": "環境変数デフォルト",
+      "source_override": "上書き",
+      "updated_by": "ユーザー #{{id}} が変更",
+      "no_reason": "理由の記録なし",
+      "dialog_title_enable": "「{{label}}」を有効にしますか？",
+      "dialog_title_disable": "「{{label}}」を無効にしますか？",
+      "reason_label": "理由",
+      "reason_placeholder": "この変更の理由を入力してください",
+      "confirm": "保存",
+      "cancel": "キャンセル",
+      "load_error": "機能フラグを読み込めませんでした。",
+      "labels": {
+        "askRouterEnabled": "Ask: ルールルーター",
+        "askFollowupEnabled": "Ask: LLM フォローアップ",
+        "copilotInsightEnabled": "Copilot: 自動インサイト",
+        "askHistoryEnabled": "Ask: 会話履歴",
+        "askIntentCacheEnabled": "Ask: インテントキャッシュ",
+        "askQueryLogEnabled": "Ask: クエリログ",
+        "weatherIngestEnabled": "気象: 観測データ取り込み",
+        "openapiDocsEnabled": "API: OpenAPI ドキュメント",
+        "perfDebugEnabled": "API: パフォーマンスデバッグ面"
+      }
+    },
+    "table": {
+      "saved_views": "保存された表示",
+      "empty": "該当する行がありません。",
+      "select_all": "すべて選択",
+      "select_row": "{{label}} を選択"
+    },
+    "board": {
+      "title": "管制盤",
+      "poll_note": "10 秒ごとに更新",
+      "load_error": "管制盤の取得に失敗しました。取得できた分のみ表示しています。",
+      "reanalyze": "いま再集計",
+      "reanalyze_confirm_title": "いま再集計しますか？",
+      "reanalyze_confirm_body": "取り込みと集計を実行します。数分かかることがあり、実行中の結果はタイムラインに表示されます。",
+      "reanalyze_confirm": "実行する",
+      "reanalyze_cancel": "やめる",
+      "reanalyze_started": "再集計を開始しました。タイムラインに表示されます。",
+      "reanalyze_error": "再集計を開始できませんでした。",
+      "runs_title": "実行タイムライン · 今日",
+      "runs_legend": "スキップした実行は破線",
+      "runs_empty": "今日はまだ実行記録がありません。",
+      "runs_chart_label": "今日の実行タイムライン（{{count}} 件）",
+      "runs_now": "いま",
+      "run_lane": "{{kind}} · {{agency}}",
+      "run_lane_all": "{{kind}} · 全事業者",
+      "run_kind": {
+        "ingest": "取り込み",
+        "analyze": "集計",
+        "weather": "気象",
+        "static": "静的データ"
+      },
+      "run_status": {
+        "running": "実行中",
+        "ok": "完了",
+        "skipped": "スキップ",
+        "error": "失敗"
+      },
+      "run_tooltip": "{{lane}} · {{from}}–{{to}} · {{status}}",
+      "run_tooltip_rows": "{{count}} 行",
+      "run_tooltip_lock": "ロック待ちのためスキップ",
+      "collectors_title": "収集器",
+      "collector": {
+        "oracle_crawler": "Oracle クローラ",
+        "r2": "R2 同期",
+        "vps_loop": "VPS ループ",
+        "github": "CI (GitHub)"
+      },
+      "status": {
+        "ok": "正常",
+        "warn": "遅延",
+        "down": "停止",
+        "unknown": "不明"
+      },
+      "last_success": "最終成功 {{when}}",
+      "never": "成功の記録なし",
+      "sparkline_label": "直近 24 時間のうち {{ok}} 時間で稼働を確認",
+      "freshness_title": "集計の鮮度 · 事業者 × 直近 14 日",
+      "freshness_empty": "事業者が登録されていません。",
+      "agency_column": "事業者",
+      "legend_fresh": "集計済み",
+      "legend_stale": "遅れ",
+      "legend_missing": "欠測",
+      "state": {
+        "fresh": "集計済み",
+        "stale": "遅れ",
+        "missing": "欠測"
+      },
+      "cell_tooltip": "{{agency}} · {{date}} · {{state}}",
+      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · クランプ {{pct}}%",
+      "alerts_title": "警告",
+      "alerts_none": "対応が必要な項目はありません。",
+      "alert_open": "開く",
+      "alert": {
+        "agency_stale": "{{agency}}：集計が {{days}} 日遅れ",
+        "clamp_high": "{{agency}}：{{date}} のサンプルの {{pct}}% を異常値として除外",
+        "migrations_behind": "スキーマが {{count}} 件遅れています",
+        "llm_approvals_pending": "AI 利用の承認待ち {{count}} 名"
+      }
+    },
+    "ask_ops": {
+      "title": "Ask 運用",
+      "filter": {
+        "route_all": "すべてのルート",
+        "status_all": "すべてのステータス",
+        "from_label": "開始日",
+        "to_label": "終了日"
+      },
+      "route": {
+        "rules": "ルール",
+        "nn": "埋め込み(NN)",
+        "rag": "RAG(LLM)",
+        "no_history": "履歴なし"
+      },
+      "status": {
+        "ok": "成功",
+        "error": "エラー"
+      },
+      "col": {
+        "agency": "事業者",
+        "question": "質問",
+        "route": "ルート",
+        "status": "ステータス",
+        "tool": "ツール",
+        "cache": "キャッシュ",
+        "created": "日時"
+      },
+      "cache_outcome": {
+        "hit": "キャッシュヒット",
+        "miss": "キャッシュミス",
+        "bypass": "バイパス"
+      },
+      "promote_action": "昇格",
+      "promote_success": "昇格しました。",
+      "promote_already": "すでに昇格済みです。",
+      "promote_not_eligible": "昇格対象ではありません。",
+      "promote_error": "昇格に失敗しました。もう一度お試しください。",
+      "empty": "この条件に一致する質問はありません。",
+      "pagination": {
+        "prev": "前へ",
+        "next": "次へ"
+      },
+      "funnel": {
+        "title": "ルート別ファネル",
+        "total": "合計: {{count}}",
+        "success_of": "{{success}} / {{count}} 件成功",
+        "providers_title": "プロバイダー",
+        "providers_not_tracked": "プロバイダーは質問単位では記録されていません—記録されるのはルート段階のみです。"
+      },
+      "kill_switch": {
+        "title": "キルスイッチ",
+        "router_note": "ASK_ROUTER_ENABLED / ASK_QUERY_LOG_ENABLED でルーターとクエリログを制御します。",
+        "flags_link": "Feature flags で管理"
+      },
+      "eval": {
+        "title": "週次評価",
+        "not_run": "未実行",
+        "score_label": "スコア",
+        "generated_at_label": "時点"
+      },
+      "table_label": "Ask クエリログ",
+      "numeric_guard": "数値ガード"
     }
   },
   "copilot": {
@@ -1052,5 +1462,47 @@
     "ask_step_back": "こちらで会話が続いています。",
     "followup_placeholder": "続けて質問…",
     "followup_submit": "質問する"
+  },
+  "palette": {
+    "placeholder": "事業者・系統・レポート・時間帯・操作を検索…",
+    "aria_label": "コマンドパレット",
+    "no_results": "一致する項目がありません",
+    "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
+    "hint": "コマンド",
+    "hint_aria": "コマンドパレットを開く（⌘K）",
+    "group": {
+      "recent": "最近使った項目",
+      "nav": "移動",
+      "agency": "事業者",
+      "route": "系統",
+      "report": "レポート",
+      "timeband": "時間帯",
+      "action": "操作"
+    },
+    "action": {
+      "toggle_theme": "テーマを切り替える",
+      "toggle_theme_sublabel": "システム / ライト / ダーク",
+      "shortcuts": "ショートカット一覧"
+    },
+    "footer": {
+      "navigate": "移動",
+      "select": "実行",
+      "close": "閉じる"
+    },
+    "shortcuts": {
+      "title": "キーボードショートカット",
+      "open_palette": "コマンドパレットを開く",
+      "go_to": "{{target}}へ移動",
+      "open_shortcuts": "このショートカット一覧を表示",
+      "extend_brush": "日次チャートの選択範囲を拡張"
+    }
+  },
+  "empty_state": {
+    "reason_format": "{{label}}: {{value}}",
+    "recovery": {
+      "clear_routes": "路線指定を外す",
+      "reset_service": "運行種別をすべてに戻す",
+      "jump_latest_data": "最新のデータに移動する"
+    }
   }
 }

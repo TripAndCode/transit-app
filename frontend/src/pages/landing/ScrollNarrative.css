@@ -1,0 +1,62 @@
+/* Landing page: the post-hero scroll narrative (ScrollNarrative.tsx). */
+
+.landing-narrative {
+  display: flex;
+  flex-direction: column;
+  gap: 64px;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 64px 24px 96px;
+}
+
+.landing-narrative-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.landing-narrative-section__text h2 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.landing-narrative-section__text p {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.landing-narrative-section__figure {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--card-radius);
+  box-shadow: var(--el-1);
+  padding: 20px;
+  overflow-x: auto;
+}
+
+/* Base state: always fully visible. A reduced-motion viewer, an environment
+   with no IntersectionObserver, or CSS that failed to load all leave a
+   section exactly here -- the "pending" hidden state below only ever
+   applies on top of it, and only when motion is allowed. */
+.landing-reveal {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .landing-reveal.landing-reveal--pending {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  .landing-reveal.landing-reveal--pending.landing-reveal--visible {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out);
+  }
+}

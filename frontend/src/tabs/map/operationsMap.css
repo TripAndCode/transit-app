@@ -63,7 +63,7 @@
    pinned at a fixed `top` on the opposite side of the map, anchored to
    nothing; it is the same kind of content, so it lives here. Padded on the
    right for the hide button that overlaps the corner. */
-.ops-map-ref { position: absolute; top: 70px; left: 12px; z-index: var(--z-map-overlay); max-width: calc(100% - 24px); padding: 7px 26px 7px 12px; border: 1px solid var(--card-border); border-radius: var(--card-radius); background: var(--bg-surface); box-shadow: var(--el-1); }
+.ops-map-ref { position: absolute; top: 70px; left: 12px; z-index: var(--z-map-overlay); max-width: calc(100% - 24px); padding: 7px 26px 7px 12px; border-radius: var(--card-radius); }
 .ops-map-ref__legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .ops-map-ref__note { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--border-soft); color: var(--text-secondary); font-size: var(--text-xs); line-height: 1.45; }
 .ops-map-ref__note svg { flex: 0 0 auto; color: var(--accent-strong); }
@@ -75,8 +75,59 @@
 .ops-map-ref__peek:hover { background: var(--bg-soft); }
 /* Sits clear of MapLibre's bottom-right attribution strip, which is always
    present and would otherwise paint over this button's lower half. */
-.ops-map-fit { position: absolute; right: 14px; bottom: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--card-border); border-radius: var(--card-radius); color: var(--text-primary); background: var(--bg-surface); box-shadow: var(--el-1); font-size: var(--text-xs); font-weight: 700; }
+.ops-map-fit { position: absolute; right: 14px; bottom: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: var(--card-radius); color: var(--text-primary); font-size: var(--text-xs); font-weight: 700; }
 .ops-map-fit:disabled { color: var(--text-tertiary); box-shadow: none; cursor: default; }
+
+/* Shared floating-control chrome: one glass fill/blur/border/elevation for
+   every control docked on the map (filter dock, legend, basemap switcher,
+   fit-all button) so they read as one system regardless of which component
+   defines them, plus an exported `.map-chrome` class other map controls
+   (e.g. a route-inspect card) can adopt directly. Glass rather than an
+   opaque card: a solid panel wide enough to hold real text would occlude
+   the basemap underneath it, and this screen is watched for long stretches,
+   not scanned once. */
+.map-chrome,
+.ops-dock,
+.ops-map-ref,
+.ops-map-fit {
+  background: var(--glass);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--el-2);
+}
+/* Engines without backdrop-filter get the same geometry on an opaque fill --
+   a translucent panel with no blur behind it would leave map detail showing
+   through the control's own text. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .map-chrome,
+  .ops-dock,
+  .ops-map-ref,
+  .ops-map-fit {
+    background: var(--bg-surface);
+  }
+}
+
+/* Basemap switcher: a collapsed entry (current-style thumbnail + label) that
+   expands into a row of style tiles plus the basemap-dim slider. Both the
+   entry and the panel carry `.map-chrome`; this block is layout only. */
+.ops-style-control { position: absolute; left: 12px; bottom: 28px; z-index: var(--z-map-overlay); display: flex; align-items: flex-end; gap: 8px; }
+.ops-style-control__entry,
+.ops-style-control__panel {
+  border-radius: var(--radius-xl);
+}
+.ops-style-control__entry { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 10px; cursor: pointer; }
+.ops-style-control__panel { display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; max-width: 70vw; }
+.ops-style-control__tiles { display: flex; gap: 14px; overflow-x: auto; }
+.ops-style-control__tile { display: flex; flex-direction: column; align-items: center; gap: 5px; width: 44px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.ops-style-control__thumb { border-radius: 12px; object-fit: cover; border: 1px solid var(--card-border); }
+.ops-style-control__thumb--active { border-color: transparent; outline: 3px solid var(--accent); outline-offset: -1px; }
+.ops-style-control__label { font-size: var(--text-xs); line-height: 1.1; font-weight: 500; color: var(--text-secondary); text-align: center; }
+.ops-style-control__label--active { font-weight: 700; color: var(--accent); }
+.ops-style-control__entry-label { font-size: var(--text-xs); font-weight: 700; color: var(--text-primary); }
+.ops-style-control__dim { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--card-border); font-size: var(--text-xs); color: var(--text-secondary); }
+.ops-style-control__dim input[type="range"] { flex: 1 1 auto; accent-color: var(--accent); }
+.ops-style-control__dim output { min-width: 3ch; text-align: right; }
 
 /* Trip panel. Every colour here resolves through a token, and deliberately so:
    this block used to carry its own dark theme -- a navy gradient plus dozens
@@ -167,14 +218,11 @@
 
    z-index is explicit because .ops-map__empty and .ops-map__loading cover the
    same corner: DOM order already puts the dock on top, but a later reorder
-   shouldn't be able to bury a control behind a decorative overlay. */
-.ops-dock { position: absolute; top: 12px; left: 12px; z-index: var(--z-map-overlay); display: flex; align-items: stretch; max-width: calc(100% - 24px); border: 1px solid var(--card-border); border-radius: var(--radius-xl); background: color-mix(in srgb, var(--bg-surface) 82%, transparent); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3); box-shadow: var(--el-2); overflow: hidden; transition: border-color var(--transition), box-shadow var(--transition); }
-/* Engines without backdrop-filter get the same geometry on an opaque fill --
-   a translucent panel with no blur behind it would leave map detail showing
-   through the selected route names. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .ops-dock { background: var(--bg-surface); }
-}
+   shouldn't be able to bury a control behind a decorative overlay.
+
+   Fill/blur/border/shadow come from the shared `.map-chrome` rule above; this
+   rule only carries the dock's own layout and its hover/dirty transition. */
+.ops-dock { position: absolute; top: 12px; left: 12px; z-index: var(--z-map-overlay); display: flex; align-items: stretch; max-width: calc(100% - 24px); border-radius: var(--radius-xl); overflow: hidden; transition: border-color var(--transition), box-shadow var(--transition); }
 
 /* The select carries a real minimum height rather than collapsing to its
    text: stripping its chrome left the control's own box 21px tall inside a
@@ -253,3 +301,110 @@
    filters: narrowing the view and taking the data away are different actions,
    and the CSV is exactly the rows those tiles count. */
 .ops-queue__export { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 16px; padding: 7px 11px; font-size: 12px; }
+
+/* ── Day playback ──────────────────────────────────────────────────────────
+   The rail spans the map's bottom edge rather than floating in a corner: it
+   is a transport for the whole map, and its scrubber has to be long enough
+   that one hour of a nineteen-hour day is a comfortable target.
+
+   Glass chrome matching .ops-dock above (same mix ratio, blur, border and
+   elevation), so the map's controls read as one family. */
+.ops-playback { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: var(--z-map-overlay); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--card-border); border-radius: var(--radius-xl); background: color-mix(in srgb, var(--bg-surface) 82%, transparent); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3); box-shadow: var(--el-2); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ops-playback { background: var(--bg-surface); }
+}
+
+.ops-playback__transport { display: flex; gap: 4px; }
+.ops-playback__button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 32px; height: 32px; padding: 0 8px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-secondary); cursor: pointer; transition: background var(--transition), color var(--transition); }
+.ops-playback__button:hover:not(:disabled) { background: var(--hover-tint); color: var(--text-primary); }
+.ops-playback__button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ops-playback__button:disabled { opacity: .45; cursor: default; }
+.ops-playback__button--primary { color: var(--on-accent); background: var(--accent); }
+.ops-playback__button--primary:hover:not(:disabled) { color: var(--on-accent); background: var(--accent-strong); }
+.ops-playback__speed { font-size: var(--text-xs); font-weight: 600; }
+
+/* The load bar IS the scrubber's track: one band per frame, coloured by that
+   frame's own mean delay, so the shape of the day is readable before anything
+   is played. The native track is made transparent and the input laid over the
+   bands rather than beside them — two parallel strips would invite reading
+   them as two different quantities. */
+.ops-playback__track { position: relative; flex: 1 1 220px; min-width: 0; height: 22px; display: flex; align-items: center; }
+.ops-playback__load { position: absolute; inset: 7px 0; display: flex; gap: 1px; overflow: hidden; border-radius: 4px; }
+.ops-playback__load span { flex: 1 1 0; }
+.ops-playback__scrub { position: relative; width: 100%; height: 22px; margin: 0; background: transparent; appearance: none; -webkit-appearance: none; cursor: pointer; }
+.ops-playback__scrub::-webkit-slider-runnable-track { height: 8px; background: transparent; }
+.ops-playback__scrub::-moz-range-track { height: 8px; background: transparent; }
+.ops-playback__scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 4px; height: 20px; margin-top: -6px; border: 1px solid var(--bg-surface); border-radius: 2px; background: var(--text-primary); }
+.ops-playback__scrub::-moz-range-thumb { width: 4px; height: 20px; border: 1px solid var(--bg-surface); border-radius: 2px; background: var(--text-primary); }
+.ops-playback__scrub:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--radius); }
+
+.ops-playback__clock { display: flex; flex-direction: column; margin: 0; line-height: 1.15; }
+.ops-playback__clock b { font-size: var(--text-md); color: var(--text-primary); }
+.ops-playback__clock small { font-size: var(--text-xs); color: var(--text-tertiary); }
+.ops-playback__status { flex: 1 1 200px; margin: 0; font-size: var(--text-sm); color: var(--text-tertiary); }
+
+.ops-dock__playback { display: inline-flex; align-items: center; gap: 5px; align-self: center; margin-right: 10px; padding: 5px 10px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-size: var(--text-xs); font-weight: 600; white-space: nowrap; cursor: pointer; transition: background var(--transition), color var(--transition); }
+.ops-dock__playback:hover { background: var(--hover-tint); color: var(--text-primary); }
+.ops-dock__playback:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ops-dock__playback--on { color: var(--on-accent); background: var(--accent); }
+.ops-dock__playback--on:hover { color: var(--on-accent); background: var(--accent-strong); }
+
+/* BP.sm */
+@media (max-width: 640px) {
+  .ops-playback { left: 8px; right: 8px; bottom: 8px; gap: 8px; }
+  .ops-playback__clock { order: -1; }
+}
+
+/* BP.sm phone shell: the map fills the remaining height below the tab bar,
+   the legend collapses to one scrollable row instead of wrapping over the
+   map, and the queue/inspect/timeline content that the desktop grid gives a
+   side column moves into a bottom sheet layered over the map instead. */
+@media (max-width: 640px) {
+  .focused-overview.operations-page { height: 100%; }
+  .focused-overview .ops-workspace { display: block; height: 100%; max-height: none; position: relative; }
+  .focused-overview .ops-map { position: absolute; inset: 0; height: 100%; }
+  .ops-resizer { display: none; }
+  .ops-map-ref__legend { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* The map fills the whole workspace here, so every piece of bottom-anchored
+     map chrome shares an edge with the sheet -- and the same z-index rung, so
+     the later-painted sheet wins. Each keeps its own offset but measures it
+     from the sheet's resting top rather than the viewport bottom. The 14vh
+     mirrors SNAP_HEIGHT_VH.peek in bottomSheetSnap.ts (tokens.test.ts fails
+     if they drift); dragging the sheet above peek deliberately trades this
+     chrome away for queue height. */
+  .ops-map-fit { bottom: calc(14vh + 44px); }
+  .ops-style-control { bottom: calc(14vh + 28px); }
+  .ops-playback { bottom: calc(14vh + 12px); }
+}
+
+/* Layered over the map rather than a sibling column: the map already fills
+   the workspace's full box above, so the sheet has to overlay it, not push
+   it, to stay reachable at every snap point. Safe-area padding keeps the
+   handle and the first row clear of a phone's home-indicator gesture bar. */
+.bottom-sheet {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  /* Map chrome like the dock and the legend, so it takes their rung. A
+     shared rung leaves DOM order to break ties, so anything else anchored
+     to this same bottom edge is positioned clear of the sheet's resting
+     height rather than stacked against it. */
+  z-index: var(--z-map-overlay);
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: var(--el-3);
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bottom-sheet { background: var(--bg-surface); }
+}
+.bottom-sheet__handle { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 100%; height: 28px; padding: 0; border: 0; color: var(--text-tertiary); background: transparent; touch-action: none; cursor: grab; }
+.bottom-sheet__handle:active { cursor: grabbing; }
+.bottom-sheet__body { min-height: 0; padding: 0 20px 12px; overflow-y: auto; }

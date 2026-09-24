@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CityMapHero } from "./landing/CityMapHero";
-import { DashboardPreview } from "./landing/DashboardPreview";
+import { ScrollNarrative } from "./landing/ScrollNarrative";
 import "./LandingPage.css";
 
 /** Pre-authentication marketing/landing page -- a cinematic first
@@ -10,11 +10,10 @@ import "./LandingPage.css";
  *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). The hero
  *  (animated scene + headline + sign-in CTA, plus a lower-emphasis "continue
  *  as a guest" link to the already-guest-accessible root route) is the
- *  entry point; below it, `DashboardPreview` renders a shell structurally
- *  matching the real
- *  `Sidebar.tsx` + `App.tsx` (collapsible sidebar, real nav set, full-bleed
- *  Map tab, functional controls throughout) rather than a scrolling,
- *  top-nav-style marketing page. */
+ *  entry point; below it, `ScrollNarrative` mounts three real, working
+ *  chart components (fed by static fixtures, not live data) telling the
+ *  product's story, rather than the retired `DashboardPreview` mocked
+ *  sidebar shell. */
 export function LandingPage() {
   const { t } = useTranslation();
   return (
@@ -49,7 +48,7 @@ export function LandingPage() {
           </Link>
         </div>
       </section>
-      <DashboardPreview />
+      <ScrollNarrative />
     </div>
   );
 }

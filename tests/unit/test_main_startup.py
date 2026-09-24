@@ -1,6 +1,5 @@
 """Tests for module-level startup validators in ``api.main``."""
 
-import importlib
 import pathlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -10,28 +9,6 @@ import pytest
 import api.main
 from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_llm_providers, _validate_session_signing_key
 from pipeline.query.llm_client import ProviderConfig
-
-
-@pytest.fixture
-def rebuilt_app(monkeypatch):
-    """Rebuild ``api.main`` under the current env, then put the module back.
-
-    ``api.main.app`` is a process-wide singleton that several fixtures
-    re-import at call time, so a reload left in place hands every later test
-    an app built from this test's environment. Teardown undoes the env changes
-    and reloads once more, so the module is rebuilt from the session's real
-    environment -- a different object than before, necessarily, but one
-    configured identically. Reloads that were never retired have bitten this
-    suite before; see the historical note in ``tests/api/test_oauth_flow.py``.
-    """
-
-    def _rebuild():
-        importlib.reload(api.main)
-        return api.main.app
-
-    yield _rebuild
-    monkeypatch.undo()
-    importlib.reload(api.main)
 
 
 def test_validate_cors_origins_rejects_wildcard_with_credentials():
@@ -128,15 +105,28 @@ def test_env_example_enables_docs_for_local_dev():
     assert "\nOPENAPI_DOCS_ENABLED=true" in env_example
 
 
-def test_app_wires_the_gate_into_every_docs_url(rebuilt_app, monkeypatch):
-    """The resolver is only useful if all three URLs actually follow it."""
-    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", "false")
-    app = rebuilt_app()
-    assert (app.docs_url, app.redoc_url, app.openapi_url) == (None, None, None)
+def test_app_disables_the_builtin_docs_urls():
+    """The built-ins are always off -- the app registers its own /docs,
+    /redoc and /openapi.json routes instead, each gated per-request by
+    `_require_docs_enabled` (see the tests below), since FastAPI's own
+    `docs_url`/`redoc_url`/`openapi_url` are fixed for the process's whole
+    lifetime once passed to the constructor and can't reflect a `flags`
+    override without a restart."""
+    assert (api.main.app.docs_url, api.main.app.redoc_url, api.main.app.openapi_url) == (None, None, None)
 
+
+def test_require_docs_enabled_blocks_when_flag_off(monkeypatch):
+    monkeypatch.setenv("OPENAPI_DOCS_ENABLED", "false")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(Exception) as exc_info:
+        api.main._require_docs_enabled()
+    assert exc_info.value.status_code == 404
+
+
+def test_require_docs_enabled_allows_when_flag_on(monkeypatch):
     monkeypatch.setenv("OPENAPI_DOCS_ENABLED", "true")
-    app = rebuilt_app()
-    assert (app.docs_url, app.redoc_url, app.openapi_url) == ("/docs", "/redoc", "/openapi.json")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    api.main._require_docs_enabled()  # must not raise
 
 
 def test_dockerfile_cmd_trusts_railway_proxy_headers():

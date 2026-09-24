@@ -1,7 +1,11 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 
-type AdminUser = {
+/** What `admin_audit.before`/`after` can hold: one row's column map, or the
+ *  rows of a policy table replaced wholesale. Both shapes are stored. */
+export type AuditSnapshot = Record<string, unknown> | Record<string, unknown>[] | null;
+
+export type AdminUser = {
   user_id: number;
   email: string;
   name: string | null;
@@ -14,11 +18,14 @@ type AdminUser = {
 
 type AdminUserList = { users: AdminUser[]; total: number };
 
-/** Paginated/filterable admin user list (q, role, suspended, limit/offset). */
+export type UserPatchBody = { role?: string; suspended?: boolean; llm_approved?: boolean };
+
+/** Paginated/filterable admin user list (q, role, suspended, llmApproved, limit/offset). */
 export function useAdminUsers(params: {
   q?: string;
   role?: string;
   suspended?: string;
+  llmApproved?: string;
   limit?: number;
   offset?: number;
 }) {
@@ -26,6 +33,7 @@ export function useAdminUsers(params: {
   if (params.q) qs.set("q", params.q);
   if (params.role) qs.set("role", params.role);
   if (params.suspended) qs.set("suspended", params.suspended);
+  if (params.llmApproved) qs.set("llm_approved", params.llmApproved);
   if (params.limit != null) qs.set("limit", String(params.limit));
   if (params.offset != null) qs.set("offset", String(params.offset));
   return useQuery({
@@ -36,7 +44,7 @@ export function useAdminUsers(params: {
   });
 }
 
-async function patchUser(uid: number, body: { role?: string; suspended?: boolean; llm_approved?: boolean }) {
+async function patchUser(uid: number, body: UserPatchBody) {
   return apiPatch<AdminUser>(`/api/admin/users/${uid}`, body);
 }
 
@@ -44,18 +52,34 @@ async function deleteUser(uid: number) {
   await apiDelete(`/api/admin/users/${uid}`);
 }
 
+async function bulkPatchUsers(ids: number[], patch: UserPatchBody) {
+  return apiPatch<AdminUser[]>("/api/admin/users/bulk", { ids, patch });
+}
+
 /** Mutation: PATCH a user's role/suspended flag; invalidates the user list and detail queries on success. */
 export function usePatchUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (
-      { uid, body }: { uid: number; body: { role?: string; suspended?: boolean; llm_approved?: boolean } },
-    ) => patchUser(uid, body),
+    mutationFn: ({ uid, body }: { uid: number; body: UserPatchBody }) => patchUser(uid, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminUsers"] });
       // Prefix match — at most one detail query is ever mounted, so this is
       // cheap, and it doesn't depend on the detail page's uid key staying a
       // string (unlike reconstructing ["adminUser", String(uid)] here).
+      qc.invalidateQueries({ queryKey: ["adminUser"] });
+    },
+  });
+}
+
+/** Mutation: PATCH one patch across many users in a single transaction;
+ * invalidates the user list and detail queries on success. The undo flow
+ * (AdminUsersPage) re-invokes this with the inverse patch over the same ids. */
+export function useBulkPatchUsers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, patch }: { ids: number[]; patch: UserPatchBody }) => bulkPatchUsers(ids, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminUsers"] });
       qc.invalidateQueries({ queryKey: ["adminUser"] });
     },
   });
@@ -218,5 +242,540 @@ export function useArchitectureDoc(slug: string | null) {
       apiGet<ArchitectureDoc>(`/api/admin/architecture/docs/${encodeURIComponent(slug ?? "")}`, { signal }),
     enabled: slug != null,
     staleTime: 30_000,
+  });
+}
+
+// ── Control board ────────────────────────────────────────────────────────
+
+export type BoardCollector = {
+  key: string;
+  /** Server-side fallback name, used when the UI has no translation for `key`. */
+  label: string;
+  status: "ok" | "warn" | "down" | "unknown";
+  last_success_at: string | null;
+  detail: string | null;
+  /** 24 hourly cells, oldest first: 1 where the collector was still known good. */
+  history: number[];
+};
+
+export type BoardFreshnessDay = {
+  date: string;
+  state: "fresh" | "stale" | "missing";
+  clamp_pct: number | null;
+};
+
+type BoardFreshnessRow = {
+  agency_id: number;
+  agency_name: string;
+  days: BoardFreshnessDay[];
+};
+
+export type BoardAlert = {
+  level: "warn" | "info";
+  /** Translated as `admin.board.alert.<code>`; `text` is the untranslated
+   *  server summary, rendered as-is for a code this build doesn't know. */
+  code: string;
+  params: Record<string, unknown>;
+  text: string;
+  href: string | null;
+};
+
+/** One `pipeline_runs` row: an ingest, analyze, weather or static job, from
+ *  the CLI or the cron path, including the ones the advisory lock displaced. */
+export type PipelineRun = {
+  run_id: number;
+  kind: "ingest" | "analyze" | "weather" | "static";
+  /** Null for a fleet-wide job, and for one displaced before it resolved
+   *  which agency it was for. */
+  agency_id: number | null;
+  agency_name: string | null;
+  started_at: string;
+  /** Null while `status` is `running`. */
+  finished_at: string | null;
+  status: "running" | "ok" | "skipped" | "error";
+  rows: number | null;
+  lock_wait_ms: number | null;
+  error: string | null;
+  requested_by: number | null;
+};
+
+export type AdminBoard = {
+  collectors: BoardCollector[];
+  freshness: BoardFreshnessRow[];
+  migrations: { applied: string | null; latest: string | null; behind: number } | null;
+  alerts: BoardAlert[];
+  /** Today's runs (JST), so one poll covers the whole board. Empty both when
+   *  nothing ran and when the table is unreadable. */
+  runs: PipelineRun[];
+};
+
+type AdminRuns = { date: string; runs: PipelineRun[] };
+
+/** The `/admin` entry page's single snapshot. Polled rather than pushed: the
+ *  underlying collectors are themselves cached snapshots, so a short poll is
+ *  as fresh as the data can be. */
+export function useAdminBoard() {
+  return useQuery({
+    queryKey: ["adminBoard"],
+    queryFn: ({ signal }) => apiGet<AdminBoard>("/api/admin/board", { signal }),
+    refetchInterval: 10_000,
+  });
+}
+
+// ── Agency diagnostics (admin agency page) ───────────────────────────────
+
+/** One entry of `rt_field_coverage_probes`. `probed` separates "never
+ *  measured" from "measured and refuted"; `expired` marks a verdict past its
+ *  TTL, which the read-side gate treats exactly like a missing one. */
+export type RtFieldCoverage = {
+  present: boolean;
+  coverage_pct: number | null;
+  sample_size: number | null;
+  probed_at: string | null;
+  expired: boolean;
+  probed: boolean;
+};
+
+export type AgencyClampDay = { date: string; clamp_pct: number | null };
+
+type AgencyStaticVersion = {
+  version: string;
+  loaded_at: string | null;
+  trips: number | null;
+  vehicle_km: number | null;
+  /** Null for a superseded version: the raw static rows a route count needs
+   *  are replaced wholesale on every load, so only the current one has them. */
+  routes: number | null;
+  calendar_until: string | null;
+  is_current: boolean;
+};
+
+export type AgencyStandard = {
+  route_code: string;
+  metric_type: string;
+  threshold_value: number;
+  bonus_malus_rate: number;
+};
+
+/** A `route_code` of null is the agency's default weight row. */
+export type AgencyWeight = { route_code: string | null; weight: number };
+
+type AgencyDiagnostics = {
+  agency_id: number;
+  agency_name: string;
+  feed_url: string;
+  static_url: string | null;
+  ingest_strategy: string | null;
+  deleted_at: string | null;
+  freshness: "fresh" | "stale" | "unknown";
+  last_analyzed_at: string | null;
+  latest_data_date: string | null;
+  last_capture_at: string | null;
+  rt_coverage: { fields: Record<string, RtFieldCoverage>; complete: boolean; last_probed_at: string | null };
+  static_versions: AgencyStaticVersion[];
+  clamp_history: AgencyClampDay[];
+  weather_station: { station_id: string; station_name: string; source: string; note: string | null } | null;
+  standards: AgencyStandard[];
+  standards_count: number;
+  weights: AgencyWeight[];
+  weights_coverage: { routes_with_weights: number; routes_total: number };
+};
+
+export type AgencyHealthRow = {
+  agency_id: number;
+  agency_name: string;
+  feed_url: string;
+  ingest_strategy: string | null;
+  deleted_at: string | null;
+  freshness: "fresh" | "stale" | "unknown";
+  latest_data_date: string | null;
+  last_analyzed_at: string | null;
+  last_capture_at: string | null;
+  rt_coverage: {
+    complete: boolean;
+    present_count: number;
+    field_count: number;
+    probed: boolean;
+    last_probed_at: string | null;
+  };
+  clamp_history: AgencyClampDay[];
+  static_version: { version: string; loaded_at: string | null } | null;
+};
+
+/** Health columns for every agency in one request — the list must not cost one
+ *  diagnostics call per row. */
+export function useAgenciesHealth() {
+  return useQuery({
+    queryKey: ["adminAgenciesHealth"],
+    queryFn: ({ signal }) => apiGet<AgencyHealthRow[]>("/api/admin/agencies/health", { signal }),
+    staleTime: 30_000,
+  });
+}
+
+/** The full diagnostics bundle for one agency, fetched only once its drawer
+ *  is open. */
+export function useAgencyDiagnostics(agencyId: number | null) {
+  return useQuery({
+    queryKey: ["adminAgencyDiagnostics", agencyId],
+    queryFn: ({ signal }) =>
+      apiGet<AgencyDiagnostics>(`/api/admin/agencies/${agencyId}/diagnostics`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 30_000,
+  });
+}
+
+type StandardsPatch = { upsert?: AgencyStandard[]; delete?: AgencyStandard[] };
+type WeightsPatch = { upsert?: AgencyWeight[]; delete?: AgencyWeight[] };
+
+function invalidateAgencyDiagnostics(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["adminAgencyDiagnostics"] });
+  qc.invalidateQueries({ queryKey: ["adminAgenciesHealth"] });
+}
+
+/** Mutation: replace/remove `route_performance_standards` rows for an agency. */
+export function usePatchAgencyStandards() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: StandardsPatch }) =>
+      apiPatch<AgencyStandard[]>(`/api/admin/agencies/${id}/standards`, body),
+    onSuccess: () => invalidateAgencyDiagnostics(qc),
+  });
+}
+
+/** Mutation: replace/remove `ridership_weights` rows for an agency. */
+export function usePatchAgencyWeights() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: WeightsPatch }) =>
+      apiPatch<AgencyWeight[]>(`/api/admin/agencies/${id}/weights`, body),
+    onSuccess: () => invalidateAgencyDiagnostics(qc),
+  });
+}
+
+/** Mutation: run one live RT field-coverage probe and record the verdict. */
+export function useProbeAgencyFeed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiPost<{ status: string; sample_size: number | null; fields: Record<string, boolean> }>(
+        `/api/admin/agencies/${id}/probe`,
+        {}
+      ),
+    onSuccess: () => invalidateAgencyDiagnostics(qc),
+  });
+}
+
+/** Mutation: re-run ingest + analyze for this agency alone, in the background. */
+export function useReanalyzeAgency() {
+  return useMutation({
+    mutationFn: (id: number) => apiPost<{ status: string }>(`/api/admin/agencies/${id}/reanalyze`, {}),
+  });
+}
+
+// ── User drawer: sessions ─────────────────────────────────────────────────
+
+type AdminSession = {
+  sid_prefix: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  user_agent: string | null;
+  ip: string | null;
+};
+
+/** Active sessions for one user, identified only by a display-safe prefix
+ * -- the full session id is a bearer credential and is never fetched. */
+export function useUserSessions(uid: number) {
+  return useQuery({
+    queryKey: ["adminUserSessions", uid],
+    queryFn: ({ signal }) => apiGet<AdminSession[]>(`/api/admin/users/${uid}/sessions`, { signal }),
+  });
+}
+
+/** Mutation: revoke one session by its prefix; refetches the session list. */
+export function useRevokeSession(uid: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sidPrefix: string) => apiDelete(`/api/admin/users/${uid}/sessions/${sidPrefix}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminUserSessions", uid] }),
+  });
+}
+
+// ── User drawer: API keys ─────────────────────────────────────────────────
+
+export type AdminApiKey = {
+  id: number;
+  owner_user_id: number | null;
+  tier: string;
+  label: string | null;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+};
+
+export type AdminApiKeyIssued = AdminApiKey & { key: string };
+
+/** API keys issued (via the admin drawer) for one user. */
+export function useApiKeys(ownerUserId: number) {
+  return useQuery({
+    queryKey: ["adminApiKeys", ownerUserId],
+    queryFn: ({ signal }) =>
+      apiGet<AdminApiKey[]>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
+  });
+}
+
+/** Mutation: issue a new API key for a user. The raw key is returned only
+ * in this response -- callers must show it once and never refetch it. */
+export function useIssueApiKey(ownerUserId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { tier?: string; label?: string | null }) =>
+      apiPost<AdminApiKeyIssued>("/api/admin/api-keys", { owner_user_id: ownerUserId, ...body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminApiKeys", ownerUserId] }),
+  });
+}
+
+/** Mutation: revoke an API key by id; refetches the owner's key list. */
+export function useRevokeApiKey(ownerUserId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiDelete(`/api/admin/api-keys/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminApiKeys", ownerUserId] }),
+  });
+}
+
+// ── Invites ────────────────────────────────────────────────────────────────
+
+type InviteCreateBody = { email: string; role: "user" | "admin"; llm_approved: boolean };
+
+type AdminInvite = {
+  invite_id: number;
+  email: string;
+  role: "user" | "admin";
+  llm_approved: boolean;
+  created_at: string;
+  expires_at: string;
+};
+
+/** Mutation: pre-approve a role (+ optional LLM access) for an email that
+ * hasn't signed in yet; the OAuth callback honors it on first login. */
+export function useCreateInvite() {
+  return useMutation({
+    mutationFn: (body: InviteCreateBody) => apiPost<AdminInvite>("/api/admin/invites", body),
+  });
+}
+
+// ── Unified audit log ────────────────────────────────────────────────────
+
+export type AdminAuditFilters = {
+  actor?: string;
+  target?: string;
+  action?: string;
+  from?: string;
+  to?: string;
+};
+
+export type AdminAuditItem = {
+  at: string;
+  actor_id: number | null;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  before: AuditSnapshot;
+  after: AuditSnapshot;
+  reason: string | null;
+  ip: string | null;
+};
+
+type AdminAuditPage = { items: AdminAuditItem[]; next_cursor: string | null };
+
+const AUDIT_PAGE_SIZE = 50;
+
+function auditQueryString(filters: AdminAuditFilters, cursor: string | null): string {
+  const qs = new URLSearchParams();
+  if (filters.actor) qs.set("actor", filters.actor);
+  if (filters.target) qs.set("target", filters.target);
+  if (filters.action) qs.set("action", filters.action);
+  if (filters.from) qs.set("from", filters.from);
+  if (filters.to) qs.set("to", filters.to);
+  qs.set("limit", String(AUDIT_PAGE_SIZE));
+  if (cursor) qs.set("cursor", cursor);
+  return qs.toString();
+}
+
+/** One page of the merged admin_audit + login_events timeline. */
+export function useAdminAudit(filters: AdminAuditFilters, cursor: string | null) {
+  return useQuery({
+    queryKey: ["adminAudit", filters, cursor],
+    queryFn: ({ signal }) => apiGet<AdminAuditPage>(`/api/admin/audit?${auditQueryString(filters, cursor)}`, { signal }),
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+  });
+}
+
+/** Fetches every page matching `filters` for CSV export, up to `maxPages`
+ * (an internal audit log can be very long; this keeps a click from firing
+ * an unbounded number of requests). */
+export async function fetchAllAdminAudit(filters: AdminAuditFilters, maxPages = 40): Promise<AdminAuditItem[]> {
+  const items: AdminAuditItem[] = [];
+  let cursor: string | null = null;
+  for (let i = 0; i < maxPages; i++) {
+    const result: AdminAuditPage = await apiGet<AdminAuditPage>(
+      `/api/admin/audit?${auditQueryString(filters, cursor)}`,
+    );
+    items.push(...result.items);
+    if (!result.next_cursor) break;
+    cursor = result.next_cursor;
+  }
+  return items;
+}
+
+// ── Feature flags ────────────────────────────────────────────────────────
+
+export type FeatureFlag = {
+  key: string;
+  label_key: string;
+  value: boolean;
+  source: "env" | "override";
+  env_default: boolean;
+  updated_by: number | null;
+  updated_at: string | null;
+  reason: string | null;
+};
+
+/** Every registered kill switch, resolved (DB override, else env). */
+export function useFeatureFlags() {
+  return useQuery({
+    queryKey: ["adminFlags"],
+    queryFn: ({ signal }) => apiGet<FeatureFlag[]>("/api/admin/flags", { signal }),
+  });
+}
+
+/** Mutation: PATCH one flag's override. `reason` is mandatory server-side —
+ * see `AdminFlagsPage`'s reason dialog, the only caller. */
+export function usePatchFeatureFlag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, value, reason }: { key: string; value: boolean; reason: string }) =>
+      apiPatch<FeatureFlag>(`/api/admin/flags/${key}`, { value, reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminFlags"] });
+    },
+  });
+}
+
+/** Mutation: ask the server to run the ingest+analyze sweep now.
+ *
+ *  The 202 carries the run row the server has already opened, so the caller
+ *  can draw its bar at once instead of waiting out a poll interval; the
+ *  board's own poll then takes over and shows the run finishing. */
+export function useTriggerRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { kind: "ingest" | "analyze"; agency_id?: number }) =>
+      apiPost<AdminRuns>("/api/admin/runs", body),
+    onSuccess: (started) => {
+      qc.setQueryData(["adminBoard"], (board: AdminBoard | undefined) => {
+        if (board == null) return board;
+        // Keyed by run_id rather than appended blindly: a poll that landed
+        // between the request and its response already carries the row.
+        const merged = new Map(board.runs.map((run) => [run.run_id, run]));
+        for (const run of started.runs) merged.set(run.run_id, run);
+        return { ...board, runs: [...merged.values()] };
+      });
+      qc.invalidateQueries({ queryKey: ["adminBoard"] });
+    },
+  });
+}
+
+// ── Ask ops (query log, route funnel, promote-to-intent-cache, eval) ─────
+//
+// "route" here is the Ask pipeline stage that answered a question (rules ->
+// nn (embedding nearest-neighbour) -> rag (Stage-3 LLM)), matching
+// CLAUDE.md's architecture naming, not a transit route/line. `no_history` is
+// the router's own early-exit case (a follow-up with nothing to continue).
+// See api/routers/admin_ask.py's module docstring for why there is no
+// "user" field and why `providers` below is always null: ask_query_log
+// carries neither identity nor a per-query provider/latency column.
+
+export type AskRoute = "rules" | "nn" | "rag" | "no_history";
+type AskStatus = "ok" | "error";
+
+export type AskQueryLogRow = {
+  id: number;
+  agency_id: number;
+  agency_name: string;
+  question: string;
+  route: AskRoute;
+  tool: string | null;
+  status: AskStatus;
+  cache_outcome: string | null;
+  numeric_guard_triggered: boolean | null;
+  created_at: string;
+  promotable: boolean;
+};
+
+type AskQueryLogPage = { rows: AskQueryLogRow[]; next_cursor: string | null };
+
+export function useAdminAskQueries(params: {
+  route?: string;
+  status?: string;
+  agencyId?: number;
+  from?: string;
+  to?: string;
+  cursor?: string | null;
+}) {
+  const qs = new URLSearchParams();
+  if (params.route) qs.set("route", params.route);
+  if (params.status) qs.set("status", params.status);
+  if (params.agencyId != null) qs.set("agency_id", String(params.agencyId));
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.cursor) qs.set("cursor", params.cursor);
+  return useQuery({
+    queryKey: ["adminAskQueries", params],
+    queryFn: ({ signal }) => apiGet<AskQueryLogPage>(`/api/admin/ask/queries?${qs}`, { signal }),
+    placeholderData: keepPreviousData,
+  });
+}
+
+type AskFunnelRoute = { route: AskRoute; count: number; success_count: number };
+type AskFunnel = { by_route: AskFunnelRoute[]; total: number; providers: null };
+
+export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to?: string }) {
+  const qs = new URLSearchParams();
+  if (params.agencyId != null) qs.set("agency_id", String(params.agencyId));
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  return useQuery({
+    queryKey: ["adminAskFunnel", params],
+    queryFn: ({ signal }) => apiGet<AskFunnel>(`/api/admin/ask/funnel?${qs}`, { signal }),
+  });
+}
+
+type PromoteResult = { promoted: boolean; reason: string | null; chunk_id: string | null };
+
+/** Mutation: promote one ask_query_log row's cached intent into rag_chunks.
+ * Invalidates the query list so the row's promoted state refreshes. */
+export function usePromoteAskQuery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (queryLogId: number) => apiPost<PromoteResult>("/api/admin/ask/promote", { query_log_id: queryLogId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminAskQueries"] });
+    },
+  });
+}
+
+type AskEvalResult = { generated_at: string | null; score: number | null } | null;
+
+/** Latest local weekly eval result, or null when none has been produced yet
+ * (rendered as "not run" rather than an error — see the backend endpoint's
+ * docstring for why null is the common case today). */
+export function useAdminAskEval() {
+  return useQuery({
+    queryKey: ["adminAskEval"],
+    queryFn: ({ signal }) => apiGet<AskEvalResult>("/api/admin/ask/eval", { signal }),
+    staleTime: 60_000,
   });
 }

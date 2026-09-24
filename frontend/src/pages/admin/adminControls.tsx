@@ -108,13 +108,18 @@ export function StatusChip({ tone, children }: { tone: "good" | "warn" | "neutra
 }
 
 /** Search input with a leading icon, replacing the bare <input type="search">
- *  used by AdminUsersPage. */
-export function AdminSearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+ *  used by AdminUsersPage. Accepts `ref` as a plain prop (React 19) so a
+ *  caller can imperatively focus the underlying `<input>` -- e.g. the users
+ *  page's `/` keyboard shortcut. */
+export function AdminSearchInput({
+  ref,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & { ref?: React.Ref<HTMLInputElement> }) {
   useAdminStyles();
   return (
     <div className="admin-search">
       <Search size={14} strokeWidth={2} aria-hidden="true" />
-      <input type="search" {...props} />
+      <input type="search" ref={ref} {...props} />
     </div>
   );
 }
