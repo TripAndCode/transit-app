@@ -12,6 +12,7 @@ import {
 import { useSession } from "../../api/auth";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { useToast } from "../../components/ui/toastContext";
 import { Z_INDEX } from "../../styles/zIndex";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
@@ -111,11 +112,12 @@ function AdminUserSearchBox({
 }
 
 /** Admin: searchable, filterable, paginated user list with bulk selection (checkbox
- *  column, floating bulk-action bar, 8s undo), saved views, keyboard navigation
+ *  column, floating bulk-action bar, undo toast), saved views, keyboard navigation
  *  (j/k move focus, x toggles selection, a approves, / focuses search, Enter opens),
  *  and inline role / suspend / delete controls. */
 export function AdminUsersPage() {
   const { t } = useTranslation();
+  const toast = useToast();
   const [inviteOpen, setInviteOpen] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -184,14 +186,6 @@ export function AdminUsersPage() {
     setSelected(new Set());
   }
 
-  const [undo, setUndo] = useState<{ message: string; ids: number[]; inverse: UserPatchBody } | null>(null);
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    };
-  }, []);
-
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   function isSelectable(uid: number) {
@@ -227,9 +221,10 @@ export function AdminUsersPage() {
   const bulkBusy = bulkPatch.isPending || del.isPending;
 
   function showUndo(message: string, ids: number[], inverse: UserPatchBody) {
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    setUndo({ message, ids, inverse });
-    undoTimerRef.current = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    toast.show(message, {
+      durationMs: UNDO_WINDOW_MS,
+      action: { label: t("admin.users.bulk.undo"), onClick: () => bulkPatch.mutate({ ids, patch: inverse }) },
+    });
   }
 
   function runBulkAction(action: BulkAction, ids: number[]) {
@@ -248,13 +243,6 @@ export function AdminUsersPage() {
         },
       },
     );
-  }
-
-  function handleUndo() {
-    if (!undo) return;
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    bulkPatch.mutate({ ids: undo.ids, patch: undo.inverse });
-    setUndo(null);
   }
 
   async function handleBulkDelete(ids: number[]) {
@@ -593,37 +581,6 @@ export function AdminUsersPage() {
           <AdminButton variant="secondary" onClick={() => setSelected(new Set())}>
             {t("admin.users.bulk.clear")}
           </AdminButton>
-        </div>
-      )}
-      {undo && (
-        <div
-          role="status"
-          style={{
-            position: "fixed",
-            left: 24,
-            bottom: 24,
-            background: "var(--text-primary)",
-            color: "var(--surface-1)",
-            borderRadius: 6,
-            padding: "8px 14px",
-            display: "flex",
-            gap: 12,
-            alignItems: "center",
-            fontSize: 13,
-            // Above the selection bar it shares a corner with: undoing is
-            // the one action still worth taking while both are on screen.
-            zIndex: Z_INDEX.toast,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.16)",
-          }}
-        >
-          <span>{undo.message}</span>
-          <button
-            type="button"
-            onClick={handleUndo}
-            style={{ color: "var(--accent)", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}
-          >
-            {t("admin.users.bulk.undo")}
-          </button>
         </div>
       )}
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />

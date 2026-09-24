@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -92,7 +92,7 @@ const BOARD: AdminBoard = {
   ],
 };
 
-let mockQuery: { data?: AdminBoard; error: unknown; isPending: boolean };
+let mockQuery: { data?: AdminBoard; error: unknown; isPending: boolean; refetch: () => void };
 let mockTrigger: { mutate: ReturnType<typeof vi.fn>; isPending: boolean; isSuccess: boolean; error: unknown };
 
 vi.mock("../../api/admin", async (importOriginal) => ({
@@ -114,7 +114,7 @@ function wrap(ui: React.ReactElement) {
 
 describe("AdminBoardPage", () => {
   beforeEach(() => {
-    mockQuery = { data: BOARD, error: null, isPending: false };
+    mockQuery = { data: BOARD, error: null, isPending: false, refetch: vi.fn() };
     mockTrigger = { mutate: vi.fn(), isPending: false, isSuccess: false, error: null };
     // The timeline is anchored to the current JST day, so the fixture's runs
     // only land on the axis with the clock pinned inside that day.
@@ -183,13 +183,14 @@ describe("AdminBoardPage", () => {
       },
       error: null,
       isPending: false,
+      refetch: vi.fn(),
     };
     wrap(<AdminBoardPage />);
     expect(screen.getByText("Something new happened")).toBeInTheDocument();
   });
 
   it("says so when there is nothing to act on", () => {
-    mockQuery = { data: { ...BOARD, alerts: [] }, error: null, isPending: false };
+    mockQuery = { data: { ...BOARD, alerts: [] }, error: null, isPending: false, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
     expect(screen.getByText(i18n.t("admin.board.alerts_none"))).toBeInTheDocument();
   });
@@ -224,7 +225,7 @@ describe("AdminBoardPage", () => {
   });
 
   it("says so when nothing has run today instead of drawing an empty chart", () => {
-    mockQuery = { data: { ...BOARD, runs: [] }, error: null, isPending: false };
+    mockQuery = { data: { ...BOARD, runs: [] }, error: null, isPending: false, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
     expect(screen.getByText(i18n.t("admin.board.runs_empty"))).toBeInTheDocument();
     expect(screen.queryByTestId("run-timeline")).not.toBeInTheDocument();
@@ -260,16 +261,62 @@ describe("AdminBoardPage", () => {
     expect(screen.getByText(i18n.t("admin.board.reanalyze_error"))).toBeInTheDocument();
   });
 
-  it("surfaces a load failure without blanking the page", () => {
-    mockQuery = { data: undefined, error: new Error("boom"), isPending: false };
+  it("surfaces a load failure through the shared error banner without blanking the page", () => {
+    mockQuery = { data: undefined, error: new Error("boom"), isPending: false, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
-    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("admin.board.load_error"));
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+    expect(screen.getByRole("button", { name: i18n.t("common.retry") })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: i18n.t("admin.board.title") })).toBeInTheDocument();
   });
 
   it("does not claim an empty heatmap while the first fetch is still in flight", () => {
-    mockQuery = { data: undefined, error: null, isPending: true };
+    mockQuery = { data: undefined, error: null, isPending: true, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
     expect(screen.queryByText(i18n.t("admin.board.freshness_empty"))).not.toBeInTheDocument();
+  });
+
+  it("holds the board's own shape with skeletons while the first fetch is in flight", () => {
+    mockQuery = { data: undefined, error: null, isPending: true, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    expect(screen.getByTestId("admin-board")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getAllByTestId("skeleton-kpi-tile").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("skeleton-table-row").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("collector-tile")).not.toBeInTheDocument();
+  });
+
+  it("drops the busy flag and the skeletons once the board has loaded", () => {
+    wrap(<AdminBoardPage />);
+    expect(screen.getByTestId("admin-board")).toHaveAttribute("aria-busy", "false");
+    expect(screen.queryByTestId("skeleton-kpi-tile")).not.toBeInTheDocument();
+  });
+
+  it("says why re-aggregating is unavailable while no runs have loaded", () => {
+    mockQuery = { data: undefined, error: null, isPending: true, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    const button = screen.getByRole("button", { name: i18n.t("admin.board.reanalyze") });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+
+    act(() => {
+      button.focus();
+    });
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveTextContent(i18n.t("admin.board.reanalyze_unavailable_reason"));
+    expect(button.getAttribute("aria-describedby")).toBe(tip.id);
+  });
+
+  it("does not trigger a run from the unavailable re-aggregate control", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockQuery = { data: undefined, error: null, isPending: true, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    await user.click(screen.getByRole("button", { name: i18n.t("admin.board.reanalyze") }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockTrigger.mutate).not.toHaveBeenCalled();
+  });
+
+  it("uses the shared empty state, not a bare paragraph, when nothing needs acting on", () => {
+    mockQuery = { data: { ...BOARD, alerts: [] }, error: null, isPending: false, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    const empty = screen.getByText(i18n.t("admin.board.alerts_none"));
+    expect(empty.tagName).not.toBe("P");
   });
 });

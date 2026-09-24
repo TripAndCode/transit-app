@@ -67,3 +67,52 @@
   gap: 8px;
 }
 .ui-toolbar--end { justify-content: flex-end; }
+
+/* Transient confirmations. The viewport itself is inert (`pointer-events:
+   none`) so a stack sitting in the corner never swallows clicks meant for the
+   page under it; each toast turns them back on for its own box. */
+.ui-toast-viewport {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 48px));
+  pointer-events: none;
+}
+.ui-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--el-2);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.ui-toast__message { flex: 1; min-width: 0; }
+.ui-toast__action {
+  flex-shrink: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.ui-toast__action:hover { color: var(--accent-strong); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-toast { animation: ui-toast-in var(--dur-2) var(--ease-out); }
+}
+@keyframes ui-toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
