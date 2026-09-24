@@ -26,14 +26,13 @@ function tt(t: TFunction, key: string, options?: Record<string, unknown>): strin
  *  (e.g. the Ask evidence card's provenance disclosure) -- one canonical
  *  mapping from the query-contract value to display text. */
 export function serviceValueLabel(service: string, t: TFunction): string {
-  if (service === "平日") return tt(t, "filters.service.weekday"); // i18n-ignore: query contract
-  if (service === "土日祝") return tt(t, "filters.service.weekend"); // i18n-ignore: query contract
+  if (service === "平日" || service === "土日祝") return tt(t, `common.service_value.${service}`); // i18n-ignore: query contract
   return service;
 }
 
 export function dowValueLabel(dow: string, t: TFunction): string {
-  if (dow === "weekday") return tt(t, "filters.dow.weekday");
-  if (dow === "weekend") return tt(t, "filters.dow.weekend");
+  if (dow === "weekday") return tt(t, "common.service_value.平日"); // i18n-ignore: query contract
+  if (dow === "weekend") return tt(t, "common.service_value.土日祝"); // i18n-ignore: query contract
   return dow;
 }
 

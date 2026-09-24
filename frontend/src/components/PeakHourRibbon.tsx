@@ -16,6 +16,9 @@ type Props = {
   onHourClick?: (hour: number) => void;
 };
 
+const WEEKDAY_KEY = "平日"; // i18n-ignore: GTFS service-type key
+const WEEKEND_KEY = "土日祝"; // i18n-ignore: GTFS service-type key
+
 const W = 660;
 const H = 140;
 const PAD_TOP = 28; // headroom for max-label callout
@@ -317,7 +320,7 @@ export function PeakHourRibbon({
         <div className="ov-peak-dow-stack">
           <div>
             <p className="ov-peak-dow-panel-title">
-              {t("overview.peak_hour.weekday_label")}
+              {t(`common.service_value.${WEEKDAY_KEY}`)}
             </p>
             {peak_hour_weekday ? (
               <PeakHourChart peak_hour={peak_hour_weekday} />
@@ -329,7 +332,7 @@ export function PeakHourRibbon({
           </div>
           <div>
             <p className="ov-peak-dow-panel-title">
-              {t("overview.peak_hour.weekend_label")}
+              {t(`common.service_value.${WEEKEND_KEY}`)}
             </p>
             {peak_hour_weekend ? (
               <PeakHourChart peak_hour={peak_hour_weekend} />

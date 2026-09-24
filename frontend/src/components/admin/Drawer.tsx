@@ -77,7 +77,7 @@ export function Drawer({ open, onClose, label, children }: DrawerProps) {
         <button
           type="button"
           onClick={onClose}
-          aria-label={t("admin.drawer.close")}
+          aria-label={t("common.close")}
           style={{
             border: 0,
             background: "transparent",

@@ -303,7 +303,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
             <th style={th({ width: 40 })}>#</th>
-            <th style={th()}>{t("reports.col.route")}</th>
+            <th style={th()}>{t("common.route")}</th>
             <th style={th()}>{t("reports.col.service")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_avg")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p50")}</th>

@@ -51,7 +51,7 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
-                <th style={th({ align: "left" })}>{t("reports.headway_quality.col.route")}</th>
+                <th style={th({ align: "left" })}>{t("common.route")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.ewt")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.cov")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.long_gap_rate")}</th>

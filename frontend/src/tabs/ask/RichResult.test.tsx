@@ -151,7 +151,7 @@ describe("RichResult evidence card", () => {
     );
     expect(screen.getByText(t("ask.evidence.disclosure_title"))).toBeInTheDocument();
     expect(screen.getByText("A05")).toBeInTheDocument();
-    expect(screen.getByText(t("filters.dow.weekend"))).toBeInTheDocument();
+    expect(screen.getByText(t("common.service_value.土日祝"))).toBeInTheDocument();
     expect(screen.getAllByText(t("ask.evidence.tool_label.segment_hotspots")).length).toBeGreaterThan(0);
     expect(screen.getByText(t("ask.evidence.confidence.sql"))).toBeInTheDocument();
   });

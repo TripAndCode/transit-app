@@ -9,6 +9,7 @@ import {
   type ServiceFilter,
   type TimeBand,
 } from "../api/rangeContext";
+import { Glossary } from "./Glossary";
 import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
 import { RoutesPicker } from "./RoutesPicker";
@@ -40,15 +41,15 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
 
   const dowOptions: { value: DowFilter; label: string }[] = [
     { value: "all", label: t("filters.dow.all") },
-    { value: "weekday", label: t("filters.dow.weekday") },
-    { value: "weekend", label: t("filters.dow.weekend") },
+    { value: "weekday", label: t("common.service_value.平日") }, // i18n-ignore: query contract
+    { value: "weekend", label: t("common.service_value.土日祝") }, // i18n-ignore: query contract
   ];
 
   const serviceOptions: { value: ServiceFilter; label: string }[] = [
     { value: "all", label: t("filters.service.all") },
     // value stays as the raw JP string (URL query value); only the label is translated
-    { value: "平日", label: t("filters.service.weekday") }, // i18n-ignore: query contract
-    { value: "土日祝", label: t("filters.service.weekend") }, // i18n-ignore: query contract
+    { value: "平日", label: t("common.service_value.平日") }, // i18n-ignore: query contract
+    { value: "土日祝", label: t("common.service_value.土日祝") }, // i18n-ignore: query contract
   ];
 
   const timeBandOptions = buildTimeBandOptions(t);
@@ -311,7 +312,9 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <span style={groupLabel}>{t("filters.service.label_gtfs")}</span>
+            <span style={groupLabel}>
+              {t("filters.service.label")} (<Glossary term="GTFS" explanation={t("glossary.gtfs")} />)
+            </span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {serviceOptions.map((o) => (
                 <button
@@ -392,8 +395,8 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
 }
 
 function dowLabel(d: DowFilter, t: (key: string) => string): string {
-  if (d === "weekday") return t("filters.dow.weekday");
-  if (d === "weekend") return t("filters.dow.weekend");
+  if (d === "weekday") return t("common.service_value.平日"); // i18n-ignore: query contract
+  if (d === "weekend") return t("common.service_value.土日祝"); // i18n-ignore: query contract
   return t("filters.dow.all");
 }
 

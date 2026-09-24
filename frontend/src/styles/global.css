@@ -482,6 +482,21 @@ summary:focus-visible,
   box-shadow: var(--el-2);
   pointer-events: none;
 }
+/* `Glossary` (components/Glossary.tsx). Inline trigger for a technical term
+   kept visible on an operator-facing page; the tooltip carries the plain-
+   language explanation. Reset to plain text rather than button chrome, with
+   a dotted underline as the only affordance that it's interactive. */
+.glossary-term {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+  border-bottom: 1px dotted var(--text-secondary);
+}
+
 /* `ExportMenu` (components/ExportMenu.tsx). A plain dropdown anchored to its
    trigger -- there is exactly one open at a time per page, so it needs no
    portal (unlike `Tooltip`, which can sit inside a clipping map overlay). */

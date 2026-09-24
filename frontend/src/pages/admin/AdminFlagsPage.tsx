@@ -63,7 +63,7 @@ function FlagReasonDialog({
         />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
           <AdminButton variant="secondary" onClick={onCancel} disabled={isPending}>
-            {t("admin.flags.cancel")}
+            {t("common.cancel")}
           </AdminButton>
           <AdminButton
             variant="primary"

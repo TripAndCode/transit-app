@@ -118,7 +118,7 @@ export function ServiceSplit({
             <div className="ov-svc-row" key={k}>
               <div className="ov-svc-head">
                 <span className="ov-svc-label">
-                  {t(`overview.service_split_label.${k}`, { defaultValue: k })}
+                  {t(`common.service_value.${k}`, { defaultValue: k })}
                 </span>
                 <span className="ov-svc-num ov-anim-fade">
                   {v.toFixed(1)}
@@ -263,14 +263,14 @@ function ServiceSplitDailyChart({
             className="ov-svc-daily-legend-swatch"
             style={{ background: "var(--trend-neutral)" }}
           />
-          {t("overview.service_split.weekday_label")}
+          {t(`common.service_value.${WEEKDAY_KEY}`)}
         </span>
         <span>
           <span
             className="ov-svc-daily-legend-swatch"
             style={{ background: "var(--text-tertiary)" }}
           />
-          {t("overview.service_split.weekend_label")}
+          {t(`common.service_value.${WEEKEND_KEY}`)}
         </span>
       </div>
       <svg
@@ -361,10 +361,10 @@ function ServiceSplitDailyChart({
         >
           {hover.label} —{" "}
           {hover.weekday != null
-            ? `${t("overview.service_split.weekday_label")} ${hover.weekday.toFixed(1)}${t("overview.hero_unit_min")}`
+            ? `${t(`common.service_value.${WEEKDAY_KEY}`)} ${hover.weekday.toFixed(1)}${t("overview.hero_unit_min")}`
             : "—"}
           {hover.weekend != null
-            ? `, ${t("overview.service_split.weekend_label")} ${hover.weekend.toFixed(1)}${t("overview.hero_unit_min")}`
+            ? `, ${t(`common.service_value.${WEEKEND_KEY}`)} ${hover.weekend.toFixed(1)}${t("overview.hero_unit_min")}`
             : ""}
         </div>
       )}

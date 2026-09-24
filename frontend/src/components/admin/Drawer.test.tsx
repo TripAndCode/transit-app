@@ -73,7 +73,7 @@ describe("Drawer", () => {
     const onClose = vi.fn();
     wrap(<Harness onClose={onClose} />);
     await user.click(screen.getByRole("button", { name: "open" }));
-    await user.click(screen.getByRole("button", { name: i18n.t("admin.drawer.close") }));
+    await user.click(screen.getByRole("button", { name: i18n.t("common.close") }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

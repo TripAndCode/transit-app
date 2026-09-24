@@ -175,10 +175,6 @@
     "section_peak_hour": "Worst hour of day",
     "peak_hour_callout": "Peak: {{hour}}-{{next_hour}} ({{avg}} min avg).",
     "section_service_split": "By service day",
-    "service_split_label": {
-      "平日": "Weekday",
-      "土日祝": "Weekend/Holiday"
-    },
     "hero_row": {
       "avg_delay_label": "Network avg delay",
       "baseline_hint_title": "About the vs. last week comparison",
@@ -216,15 +212,11 @@
       "story_weekday_higher": "Weekdays are {{ratio}}× the weekend delay.",
       "story_weekend_higher": "Weekends are {{ratio}}× the weekday delay.",
       "story_same": "Weekday and weekend nearly identical.",
-      "weekday_label": "Weekday",
-      "weekend_label": "Weekend/Holiday",
       "daily_label": "Daily weekday vs weekend trend"
     },
     "peak_hour": {
       "max_label": "Max {{avg}} min",
       "avg_label": "Avg",
-      "weekday_label": "Weekday",
-      "weekend_label": "Weekend/Holiday",
       "weekday_empty": "No weekday data.",
       "weekend_empty": "No weekend data."
     },
@@ -303,16 +295,19 @@
     "service_value": {
       "平日": "Weekday",
       "土日祝": "Weekend/Holiday"
-    }
+    },
+    "route": "Route"
   },
   "help": {
     "title": "User Manual",
     "sections_nav": "Manual sections",
-    "search_placeholder": "Search the manual (coming soon)",
+    "search_placeholder": "Search the manual",
     "category_shortcut_label": "Jump to: {{title}}",
     "hint_text": "New here? Check out the User Manual for a walkthrough.",
     "hint_cta": "View Help",
-    "hint_dismiss_aria": "Dismiss help hint"
+    "hint_dismiss_aria": "Dismiss help hint",
+    "search_result_count_one": "{{count}} section found",
+    "search_result_count_other": "{{count}} sections found"
   },
   "account": {
     "admin_link": "Admin",
@@ -329,7 +324,6 @@
       "status_shared": "Using the shared free tier",
       "status_own": "Using your own {{provider}} key · ****{{suffix}}",
       "input_label": "API key",
-      "save": "Save",
       "remove": "Remove",
       "rejected": "Key rejected — check it and try again.",
       "remove_error": "Couldn't remove the key. Please check your connection and try again."
@@ -392,16 +386,11 @@
     },
     "dow": {
       "all": "All days",
-      "weekday": "Weekday",
-      "weekend": "Weekend/Holiday",
       "label": "Day"
     },
     "service": {
       "all": "All services",
-      "weekday": "Weekday",
-      "weekend": "Weekend/Holiday",
-      "label": "Service",
-      "label_gtfs": "Service (GTFS)"
+      "label": "Service"
     },
     "time_band": {
       "all": "All hours",
@@ -724,7 +713,6 @@
     "filter_bar": {
       "edit": "Edit",
       "apply": "Apply",
-      "cancel": "Cancel",
       "label_date_range": "Date range",
       "label_dow": "DOW",
       "label_time_band": "Time band",
@@ -817,7 +805,6 @@
       "delay_certificate": "Delay certificate"
     },
     "col": {
-      "route": "Route",
       "service": "Service",
       "avg": "Avg",
       "median": "Median",
@@ -826,8 +813,6 @@
       "dow": "Day",
       "on_time_pct": "On-time %",
       "over_5min_count": "≥5 min late",
-      "weekday": "Weekday",
-      "weekend": "Weekend/Holiday",
       "diff": "Diff",
       "direction": "Direction",
       "confidence": "Confidence",
@@ -919,7 +904,6 @@
       "subtitle": "Excess Waiting Time, spacing consistency, and long-gap rate for this agency's high-frequency routes (scheduled headway of 12 minutes or better).",
       "empty": "No high-frequency route has enough data in this range yet.",
       "col": {
-        "route": "Route",
         "ewt": "Excess wait",
         "cov": "Spacing CoV",
         "long_gap_rate": "Long-gap rate",
@@ -931,7 +915,6 @@
       "simulation_badge": "Internal simulation — not an invoice",
       "subtitle": "Estimated achievement rate and bonus/deduction against each route's configured minimum performance standard.",
       "col": {
-        "route": "Route",
         "metric": "Metric",
         "threshold": "Threshold",
         "actual": "Actual",
@@ -1099,9 +1082,6 @@
       "api_key_copy": "Copy",
       "api_key_copied": "Copied",
       "danger_zone_title": "Danger zone"
-    },
-    "drawer": {
-      "close": "Close"
     },
     "invite": {
       "trigger": "+ Invite",
@@ -1298,7 +1278,6 @@
       "reason_label": "Reason",
       "reason_placeholder": "Why are you changing this flag?",
       "confirm": "Save",
-      "cancel": "Cancel",
       "load_error": "Couldn't load feature flags.",
       "labels": {
         "askRouterEnabled": "Ask: rules router",
@@ -1486,8 +1465,7 @@
     },
     "footer": {
       "navigate": "Navigate",
-      "select": "Select",
-      "close": "Close"
+      "select": "Select"
     },
     "shortcuts": {
       "title": "Keyboard shortcuts",
@@ -1504,5 +1482,8 @@
       "reset_service": "Reset service type to all",
       "jump_latest_data": "Jump to the latest data"
     }
+  },
+  "glossary": {
+    "gtfs": "GTFS: the standard transit-data format for schedules and real-time positions."
   }
 }

@@ -41,8 +41,8 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
 
   // Day-of-week
   if (fc.dow && fc.dow !== "all") {
-    const dowKey = fc.dow === "weekday" ? "filters.dow.weekday" : "filters.dow.weekend";
-    parts.push(t(dowKey));
+    const wireValue = fc.dow === "weekday" ? "平日" : "土日祝"; // i18n-ignore: query contract
+    parts.push(t(`common.service_value.${wireValue}`));
   }
 
   // Time band
