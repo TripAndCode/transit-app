@@ -90,6 +90,30 @@ export default tseslint.config(
           message: "Do not hardcode zIndex — use a rung from Z_INDEX (src/styles/zIndex.ts) instead.",
         },
         {
+          // A local binding named `window` or `document` shadows the DOM
+          // global of the same name for the whole of its scope, so every
+          // later reference there resolves to the local value instead. The
+          // mistake is invisible until something in that scope wants the real
+          // global (a `window.matchMedia` call, a `document.querySelector`),
+          // at which point it fails at runtime far from its cause. Name the
+          // local for what it holds instead.
+          selector: 'VariableDeclarator[id.name=/^(window|document)$/]',
+          message:
+            'Do not name a local binding `window` or `document` — it shadows the DOM global for the rest of the scope. Use a descriptive name (e.g. `viewWindow`).',
+        },
+        {
+          // The same hazard introduced through a parameter, which the
+          // VariableDeclarator selector above cannot see. A destructured or
+          // rest parameter is not an `Identifier` in `params` and so is out of
+          // reach of this selector, but it also cannot bind the bare names
+          // `window`/`document` without a property alias that reads as the
+          // shadow it is.
+          selector:
+            ':matches(FunctionDeclaration, FunctionExpression, ArrowFunctionExpression, TSDeclareFunction, TSFunctionType, TSMethodSignature) > Identifier.params[name=/^(window|document)$/]',
+          message:
+            'Do not name a parameter `window` or `document` — it shadows the DOM global for the whole function body. Use a descriptive name (e.g. `viewWindow`).',
+        },
+        {
           // `Number.prototype.toLocaleString`/`Date.prototype.toLocaleDateString`/
           // `toLocaleTimeString`/`toLocaleString` silently default to the
           // runtime's locale rather than the active UI language, so ja/en
