@@ -30,6 +30,14 @@ _ADMIN = User(
 )
 
 
+class _Txn:
+    async def __aenter__(self) -> "_Txn":
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
 class _Conn:
     def __init__(self, deleted_at: datetime | None):
         self._row = {
@@ -40,6 +48,12 @@ class _Conn:
             "deleted_at": deleted_at,
         }
         self.audit: list[tuple[Any, ...]] = []
+
+    def transaction(self) -> "_Txn":
+        """`record_admin_action` wraps its insert in a savepoint so a failure
+        cannot abort the caller's transaction; without this the fake raises
+        `AttributeError` there, which the audit write no longer swallows."""
+        return _Txn()
 
     async def fetchrow(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
         return self._row
