@@ -22,7 +22,7 @@ import { ApiError, apiPost } from "../api/client";
 import { hhmm } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
 import { FILTER_SEPARATOR } from "../utils/format";
-import { buildStyle, getMapStyleOverride, readMapDimPref, readMapStylePref, writeMapDimPref } from "../styles/mapStyle";
+import { buildStyle, getMapStyleOverride, MAP_STYLE_IDS, readMapDimPref, readMapStylePref, writeMapDimPref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -111,7 +111,7 @@ export function MapTab() {
   // new style writes both, so the next fresh visit (no URL override) picks
   // it up too.
   const [persistedStyleId, setPersistedStyleId] = useMapStylePref();
-  const [styleId, setStyleIdParam] = useUrlState("style", persistedStyleId);
+  const [styleId, setStyleIdParam] = useUrlState("style", persistedStyleId, MAP_STYLE_IDS);
   function setStyleId(next: typeof persistedStyleId) {
     setPersistedStyleId(next);
     setStyleIdParam(next);
