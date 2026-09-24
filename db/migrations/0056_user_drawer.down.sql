@@ -1,3 +1,11 @@
+-- DESTRUCTIVE: deletes the login_events audit rows of the five kinds this
+-- migration introduced, and drops user_invites and its rows entirely.
+--
+-- api_keys.id is BIGSERIAL: dropping and later re-adding it (a down/up
+-- cycle) restarts the sequence from 1, so any admin-UI reference built from
+-- an old id no longer points at the same key -- or at any key at all --
+-- after the cycle.
+--
 -- The rows first: restoring the narrower CHECK while the five kinds this
 -- migration introduced are still present fails the constraint outright.
 DELETE FROM login_events WHERE kind IN (

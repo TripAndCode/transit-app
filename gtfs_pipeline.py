@@ -540,7 +540,7 @@ def cmd_migrate(args):
     if args.direction == "up":
         migrate_up(conn)
     else:
-        migrate_down(args.target, conn)
+        migrate_down(args.target, conn, force_destructive=args.force_destructive)
     conn.close()
 
 
@@ -683,6 +683,11 @@ def main():
         "--target",
         default=None,
         help="Roll back to (not including) this version, e.g. --target 0002",
+    )
+    p_migrate.add_argument(
+        "--force-destructive",
+        action="store_true",
+        help="Allow rolling back a down migration marked `-- DESTRUCTIVE` (see db/migrations/README.md)",
     )
 
     p_rag = sub.add_parser("build_rag_index", help="Embed golden_set.jsonl into rag_chunks")
