@@ -172,8 +172,10 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
    `APP_BASE_URL` for the cron and `PUBLIC_BASE_URL` for SSO.
 6. First deploy: promote `main` to `production` now (see the "Updates"
    section below) to actually trigger it. The pre-deploy `migrate up` runs
-   first; watch **Deploy Logs** for `applied migration 0001 … 0016`, then
-   the uvicorn boot line.
+   first; watch **Deploy Logs** for its `Applied N migration(s).` line (see
+   `db/migrations/README.md` for how migrations are numbered — the count
+   grows over time, so no specific range is quoted here), then the uvicorn
+   boot line.
 
 Smoke test:
 

@@ -324,6 +324,7 @@ async def patch_standards(
             target_id=agency_id,
             before=before,
             after=after,
+            ip=request.client.host if request.client else None,
         )
     return [StandardRow(**r) for r in after]
 
@@ -381,6 +382,7 @@ async def patch_weights(
             target_id=agency_id,
             before=before,
             after=after,
+            ip=request.client.host if request.client else None,
         )
     return [WeightRow(**r) for r in after]
 
@@ -439,20 +441,21 @@ async def probe_agency_feed(
         raise HTTPException(status_code=502, detail="The feed could not be fetched") from None
 
     try:
-        verdicts = await record_field_coverage_probe(conn, agency_id, cov, feed_url)
+        async with conn.transaction():
+            verdicts = await record_field_coverage_probe(conn, agency_id, cov, feed_url)
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action="agency.probed",
+                target_type="agency",
+                target_id=agency_id,
+                after={"verdicts": verdicts, "sample_size": cov.get("stop_time_updates")},
+                ip=request.client.host if request.client else None,
+            )
     except ValueError as exc:
         # An empty poll proves nothing; recording it would turn "probed
         # outside service hours" into a durable refutation.
         raise HTTPException(status_code=409, detail=str(exc)) from None
-
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
-        action="agency.probed",
-        target_type="agency",
-        target_id=agency_id,
-        after={"verdicts": verdicts, "sample_size": cov.get("stop_time_updates")},
-    )
     return {
         "status": "recorded",
         "sample_size": cov.get("stop_time_updates"),
@@ -492,6 +495,7 @@ async def reanalyze_agency(
         action="agency.reanalyze_requested",
         target_type="agency",
         target_id=agency_id,
+        ip=request.client.host if request.client else None,
     )
     background_tasks.add_task(_run_ingest_and_analyze, agency_ids=[agency_id], requested_by=admin.user_id)
     return {"status": "started"}
