@@ -15,7 +15,12 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "useDefineForClassFields": true
+    "useDefineForClassFields": true,
+    // TypeScript >= 6 no longer pulls every `node_modules/@types` package
+    // into the global scope automatically. Only Node is needed here: the
+    // Node-API test files read the repo off disk, and `vite/client` is
+    // pulled in by an explicit reference in src/vite-env.d.ts.
+    "types": ["node"]
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
