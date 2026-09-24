@@ -56,6 +56,7 @@ from api.admin_runs import (
     today_jst,
 )
 from api.deps import get_ch, get_conn
+from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin, token_hash
 from api.sqlutil import escape_like
@@ -1407,6 +1408,7 @@ class RunRequest(BaseModel):
 
 
 @router.post("/runs", response_model=AdminRuns, status_code=202)
+@limiter.limit(ADMIN_ACTION_LIMIT)
 async def trigger_run(
     body: RunRequest,
     request: Request,
