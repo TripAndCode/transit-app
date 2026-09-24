@@ -5,6 +5,7 @@ are applied in filename order inside a transaction (rollback on failure).
 Driven by `gtfs_pipeline.py migrate up|down`.
 """
 
+import functools
 import logging
 import pathlib
 
@@ -20,9 +21,29 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 
+@functools.lru_cache(maxsize=1)
 def _versions_on_disk() -> list[str]:
+    """On-disk migration versions, in order.
+
+    Cached: the migration directory is fixed for the life of the process
+    (nothing in it changes without a deploy), but this is read on every
+    board/ops poll (pipeline.health.migration_status) as well as every
+    `migrate up`/`pending_migrations` call, so an uncached glob turns an
+    O(1) health check into an O(migration count) directory scan on a hot
+    path.
+    """
     files = sorted(_MIGRATIONS_DIR.glob("*.up.sql"))
     return [f.name.split("_")[0] for f in files]
+
+
+def reset_for_tests() -> None:
+    """Drop the cached on-disk migration list.
+
+    A test that points `_MIGRATIONS_DIR` at a temporary directory needs this
+    to see its own files instead of whatever the first call in the process
+    already cached.
+    """
+    _versions_on_disk.cache_clear()
 
 
 def _applied_versions(conn) -> set[str]:

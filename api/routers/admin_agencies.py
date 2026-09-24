@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -226,21 +226,54 @@ async def agencies_health(
 @router.get("/{agency_id}/diagnostics", response_model=AgencyDiagnostics)
 async def agency_diagnostics(
     agency_id: int,
+    request: Request,
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> AgencyDiagnostics:
-    """Everything the agency drawer renders, in one round of queries."""
+    """Everything the agency drawer renders, in one round of queries.
+
+    The seven reads below have no dependency on each other, so they run
+    concurrently, each on its own connection acquired from the pool: a
+    single asyncpg connection cannot multiplex queries, so awaiting them one
+    at a time on the request's shared ``conn`` would serialize seven round
+    trips for no reason. Only the header lookup uses the request-scoped
+    ``conn`` -- it has to run first anyway, to 404 before spending pool
+    connections on an agency that doesn't exist.
+    """
     header = await _load_agency(conn, agency_id)
     today = jst_today()
     window_start = today - timedelta(days=ad.CLAMP_HISTORY_DAYS - 1)
 
-    probe_rows = await conn.fetch(ad.RT_COVERAGE_SQL, agency_id)
-    clamp_rows = await conn.fetch(ad.CLAMP_HISTORY_SQL, agency_id, window_start, today)
-    version_rows = await conn.fetch(ad.STATIC_VERSIONS_SQL, agency_id)
-    station = await conn.fetchrow(ad.WEATHER_STATION_SQL, agency_id)
-    standard_rows = await conn.fetch(ad.STANDARDS_SQL, agency_id)
-    weight_rows = await conn.fetch(ad.WEIGHTS_SQL, agency_id)
-    coverage_row = await conn.fetchrow(ad.WEIGHTS_COVERAGE_SQL, agency_id)
+    pool = request.app.state.pool
+
+    async def _fetch(sql: str, *args: Any) -> list[asyncpg.Record]:
+        async with pool.acquire() as c:
+            return await c.fetch(sql, *args)
+
+    async def _fetchrow(sql: str, *args: Any) -> asyncpg.Record | None:
+        async with pool.acquire() as c:
+            return await c.fetchrow(sql, *args)
+
+    # Indexed with explicit casts rather than unpacked straight off
+    # asyncio.gather(...): past a handful of arguments its typeshed overload
+    # falls back to a single collapsed element type for every result, losing
+    # each one's real list/Record-or-None type.
+    gathered = await asyncio.gather(
+        _fetch(ad.RT_COVERAGE_SQL, agency_id),
+        _fetch(ad.CLAMP_HISTORY_SQL, agency_id, window_start, today),
+        _fetch(ad.STATIC_VERSIONS_SQL, agency_id),
+        _fetchrow(ad.WEATHER_STATION_SQL, agency_id),
+        _fetch(ad.STANDARDS_SQL, agency_id),
+        _fetch(ad.WEIGHTS_SQL, agency_id),
+        _fetchrow(ad.WEIGHTS_COVERAGE_SQL, agency_id),
+    )
+    probe_rows = cast("list[asyncpg.Record]", gathered[0])
+    clamp_rows = cast("list[asyncpg.Record]", gathered[1])
+    version_rows = cast("list[asyncpg.Record]", gathered[2])
+    station = cast("asyncpg.Record | None", gathered[3])
+    standard_rows = cast("list[asyncpg.Record]", gathered[4])
+    weight_rows = cast("list[asyncpg.Record]", gathered[5])
+    coverage_row = cast("asyncpg.Record | None", gathered[6])
 
     latest_data_date: date | None = header["latest_data_date"]
     analyzed_at = header["analyzed_at"]
@@ -303,16 +336,21 @@ async def patch_standards(
 
     before = [dict(r) for r in await conn.fetch(ad.STANDARDS_SQL, agency_id)]
     async with conn.transaction():
-        for item in deletes:
-            await conn.execute(ad.DELETE_STANDARD_SQL, agency_id, item["route_code"].strip(), item["metric_type"])
-        for item in upserts:
+        if deletes:
             await conn.execute(
-                ad.UPSERT_STANDARD_SQL,
+                ad.BATCH_DELETE_STANDARD_SQL,
                 agency_id,
-                item["route_code"].strip(),
-                item["metric_type"],
-                item["threshold_value"],
-                item["bonus_malus_rate"],
+                [item["route_code"].strip() for item in deletes],
+                [item["metric_type"] for item in deletes],
+            )
+        if upserts:
+            await conn.execute(
+                ad.BATCH_UPSERT_STANDARD_SQL,
+                agency_id,
+                [item["route_code"].strip() for item in upserts],
+                [item["metric_type"] for item in upserts],
+                [item["threshold_value"] for item in upserts],
+                [item["bonus_malus_rate"] for item in upserts],
             )
         after = [dict(r) for r in await conn.fetch(ad.STANDARDS_SQL, agency_id)]
         await record_admin_action(
@@ -358,18 +396,30 @@ async def patch_weights(
         for r in await conn.fetch(ad.WEIGHTS_SQL, agency_id)
     ]
     async with conn.transaction():
-        for item in deletes:
-            code = item["route_code"]
-            if code is None:
-                await conn.execute(ad.DELETE_DEFAULT_WEIGHT_SQL, agency_id)
-            else:
-                await conn.execute(ad.DELETE_ROUTE_WEIGHT_SQL, agency_id, code.strip())
-        for item in upserts:
-            code = item["route_code"]
-            if code is None:
-                await conn.execute(ad.UPSERT_DEFAULT_WEIGHT_SQL, agency_id, item["weight"])
-            else:
-                await conn.execute(ad.UPSERT_ROUTE_WEIGHT_SQL, agency_id, code.strip(), item["weight"])
+        if deletes:
+            # NULL (the default row) survives unnest and is matched by
+            # BATCH_DELETE_WEIGHT_SQL's IS NOT DISTINCT FROM join, so one
+            # statement covers both kinds of delete.
+            await conn.execute(
+                ad.BATCH_DELETE_WEIGHT_SQL,
+                agency_id,
+                [item["route_code"].strip() if item["route_code"] is not None else None for item in deletes],
+            )
+        route_upserts = [item for item in upserts if item["route_code"] is not None]
+        default_upsert = next((item for item in upserts if item["route_code"] is None), None)
+        if route_upserts:
+            await conn.execute(
+                ad.BATCH_UPSERT_ROUTE_WEIGHT_SQL,
+                agency_id,
+                [item["route_code"].strip() for item in route_upserts],
+                [item["weight"] for item in route_upserts],
+            )
+        if default_upsert is not None:
+            # ridership_weights' default-row arbiter is a different partial
+            # unique index (WHERE route_code IS NULL) than the route-code
+            # one above, so ON CONFLICT can't target both in one statement;
+            # validate_weight_edits already guarantees at most one such row.
+            await conn.execute(ad.UPSERT_DEFAULT_WEIGHT_SQL, agency_id, default_upsert["weight"])
         rows = await conn.fetch(ad.WEIGHTS_SQL, agency_id)
         after = [{"route_code": r["route_code"], "weight": float(r["weight"])} for r in rows]
         await record_admin_action(
