@@ -14,6 +14,7 @@ requester so its rows are attributable.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import pytest
@@ -58,6 +59,17 @@ class _Conn:
         self.agency_exists = agency_exists
         self.insert_unrecordable = insert_unrecordable
         self.inserted: list[tuple] = []
+
+    def transaction(self):
+        """The trigger route wraps its row-open and its audit entry
+        together; this fake has no rollback to model, so the block just
+        runs -- same pattern as ``tests/unit/test_admin_user_drawer_endpoints.py``."""
+
+        @asynccontextmanager
+        async def _noop():
+            yield
+
+        return _noop()
 
     async def fetch(self, sql, *args):
         if "pipeline_runs" in sql:

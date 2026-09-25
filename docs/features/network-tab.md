@@ -10,7 +10,7 @@ compares to the whole network at a glance.
   (`React.lazy`-loaded). A legacy bare `/network` bookmark still works via
   `frontend/src/routes/networkRedirect.tsx: RedirectNetworkToAgencyNetwork`,
   which forwards to the current agency's `/agencies/{id}/network`.
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx`'s
+- Sidebar nav link: `frontend/src/components/sidebarNavItems.ts`'s
   `SIDEBAR_NAV_ITEMS`. Unlike its siblings the label comes from the default
   `translation` namespace (`network.title`), not `design:` — the string
   already existed there as the tab's own heading.

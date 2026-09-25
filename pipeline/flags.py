@@ -14,10 +14,30 @@ each request/job run, so a PATCH override or an env change takes effect
 without a process restart. Callers that used to read their env var once at
 import time must move the read into their request/job path for this to hold
 -- see `api.main`'s OpenAPI docs gate for an example.
+
+The read path comes in two shapes, and which one a caller must use follows
+from where it runs:
+
+- `aflag`/`aget_flag_state` are for anything running on the event loop --
+  every `async def` handler. They are the only callers that may perform the
+  blocking refresh, and they do it via `asyncio.to_thread`, never inline.
+- `flag`/`get_flag_state` are for pipeline and CLI callers, and for the
+  synchronous FastAPI dependencies the framework already runs in its
+  threadpool. They block on the database only when nothing is cached at
+  all; otherwise they serve the cache and let someone else refresh it.
+
+The trade-off that split buys: after `invalidate()` the owed refresh belongs
+to the next async caller, so a synchronous caller may keep seeing the old
+value for up to `_CACHE_TTL_SECONDS`. In a process with no async readers at
+all (a CLI run) it sees the old value until the next `warm()`. Correctness
+for the admin surface is unaffected -- the PATCH/DELETE handlers are async
+and resolve their own response through the async path, so the write is
+visible in the response that reports it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import threading
@@ -95,7 +115,7 @@ _cache: dict[str, FlagState] = {}
 _cache_expires_at = 0.0
 _cache_lock = threading.Lock()
 _refresh_thread: threading.Thread | None = None
-_force_sync_refresh = False
+_refresh_owed = False
 #: Bumped by `invalidate()`; a refresh that began under an older value read
 #: the database before the write it is meant to pick up.
 _generation = 0
@@ -214,7 +234,7 @@ def _refresh() -> None:
 
     overrides = _load_overrides()
 
-    global _cache, _cache_expires_at, _force_sync_refresh, _committed_seq
+    global _cache, _cache_expires_at, _refresh_owed, _committed_seq
     with _cache_lock:
         # Two refreshes can be in flight at once -- a background one from an
         # expiry, and a synchronous one forced by an admin write. Last to
@@ -230,7 +250,7 @@ def _refresh() -> None:
         # read must see this" promise -- otherwise a startup warm leaves the
         # first request to redo the same blocking read. A superseded read
         # returns above without clearing it, so the promise survives.
-        _force_sync_refresh = False
+        _refresh_owed = False
         if overrides is None:
             # Transient read failure: carry forward only the entries an
             # operator actually overrode. An override exists to switch
@@ -251,10 +271,10 @@ def _refresh() -> None:
 def _start_background_refresh() -> None:
     """Refresh behind the readers, who keep seeing the cached values.
 
-    `flag()` is called from `async def` handlers, so a refresh must never
-    run on the caller's thread. The expiry is pushed out before the thread
-    starts so arrivals during a slow refresh read the cache rather than
-    queueing more refreshes.
+    A refresh must never run on a reader's own thread, so an expiry is
+    absorbed here rather than charged to whoever happened to arrive first.
+    The expiry is pushed out before the thread starts so arrivals during a
+    slow refresh read the cache rather than queueing more refreshes.
     """
     global _refresh_thread, _cache_expires_at
     with _cache_lock:
@@ -269,53 +289,103 @@ def warm() -> None:
     """Resolve every flag now, so no request has to.
 
     Blocking, and meant for startup, off the event loop. Without it the
-    first flag touched would do this read inline on whichever request got
-    there first -- the one place it must not happen.
+    first flag touched pays for the read: an async caller hands it to a
+    worker thread, but a synchronous one does it inline, and a synchronous
+    one with nothing cached has no cached value to fall back on.
     """
     _refresh()
 
 
-def get_flag_state(key: str) -> FlagState:
-    """Return the full resolved state (value + provenance) for `key`.
+#: What a reader must do about the cache entry it just looked at.
+_FRESH = "fresh"  # inside the TTL window; use it
+_EXPIRED = "expired"  # serve it, refresh behind the reader
+_OWED = "owed"  # nothing cached, or an `invalidate()` promised a re-read
 
-    Raises `KeyError` for a key not in `REGISTRY` -- every caller of `flag()`
-    is expected to pass a registered key, and a typo here should fail loud
-    rather than silently always resolving to its literal `env_default`.
+
+def _peek(key: str) -> tuple[FlagState | None, str]:
+    """Look up `key` and classify what the caller owes the cache.
+
+    Split out of the read paths because the classification is identical for
+    a synchronous and an asynchronous reader -- only what they are allowed
+    to do about `_OWED` differs.
     """
-    global _force_sync_refresh
     if key not in _BY_KEY:
         raise KeyError(f"unknown feature flag: {key!r}")
-
     with _cache_lock:
         cached = _cache.get(key)
-        if cached is not None and not _force_sync_refresh:
-            if time.monotonic() < _cache_expires_at:
-                return cached
-        else:
-            # The marker is cleared by whichever refresh actually commits,
-            # not here: clearing it up front lets a second reader arriving
-            # moments later see it already satisfied and serve the value the
-            # write was supposed to replace.
-            cached = None
+        if cached is None:
+            return None, _OWED
+        # The marker is cleared by whichever refresh actually commits, not
+        # here: clearing it up front lets a second reader arriving moments
+        # later see it already satisfied and serve the value the write was
+        # supposed to replace.
+        if _refresh_owed:
+            return cached, _OWED
+        if time.monotonic() < _cache_expires_at:
+            return cached, _FRESH
+        return cached, _EXPIRED
 
-    if cached is not None:
-        # Expired: serve what we have and refresh behind it.
-        _start_background_refresh()
-        return cached
 
-    # Nothing cached, or an override was just written and the caller was
-    # promised it would be visible. Read on this thread -- startup and the
-    # admin PATCH, not a hot path.
-    _refresh()
+def _resolve_after_refresh(key: str, cached: FlagState | None) -> FlagState:
+    """The state to answer with once a refresh this caller waited on is done."""
     with _cache_lock:
         resolved = _cache.get(key)
     if resolved is not None:
         return resolved
+    if cached is not None:
+        return cached
     # The refresh was superseded before it could commit and nothing has ever
     # been cached, so there is no override this process knows of. Resolve
     # from the environment rather than raising: `flag()` is a kill switch
     # read from request paths, and it is documented never to raise.
     return _build_states({})[key]
+
+
+def get_flag_state(key: str) -> FlagState:
+    """Return the full resolved state (value + provenance) for `key`.
+
+    The synchronous read path, for pipeline/CLI callers and for synchronous
+    FastAPI dependencies (which the framework runs in its threadpool). It
+    blocks on Postgres only when this process has never resolved `key` at
+    all; with anything cached it answers from the cache, so an `async def`
+    handler that reaches here by mistake stalls the event loop for no longer
+    than a dict lookup. A refresh owed by `invalidate()` is left for an
+    async caller -- see the module docstring for the staleness this admits.
+
+    Raises `KeyError` for a key not in `REGISTRY` -- every caller of `flag()`
+    is expected to pass a registered key, and a typo here should fail loud
+    rather than silently always resolving to its literal `env_default`.
+    """
+    cached, state = _peek(key)
+    if state == _FRESH:
+        assert cached is not None
+        return cached
+    if cached is not None:
+        if state == _EXPIRED:
+            _start_background_refresh()
+        return cached
+    _refresh()
+    return _resolve_after_refresh(key, cached)
+
+
+async def aget_flag_state(key: str) -> FlagState:
+    """`get_flag_state` for callers on the event loop.
+
+    The one read path allowed to perform the blocking refresh, because it is
+    the one that can hand it to a worker thread. That makes it also the path
+    that keeps `invalidate()`'s promise: after an admin write, the first
+    async reader does the re-read and everyone else sees the new value.
+    """
+    cached, state = _peek(key)
+    if state == _FRESH:
+        assert cached is not None
+        return cached
+    if state == _EXPIRED:
+        assert cached is not None
+        _start_background_refresh()
+        return cached
+    await asyncio.to_thread(_refresh)
+    return _resolve_after_refresh(key, cached)
 
 
 def flag(key: str, env_default: bool) -> bool:
@@ -330,16 +400,26 @@ def flag(key: str, env_default: bool) -> bool:
     return get_flag_state(key).value
 
 
-def invalidate() -> None:
-    """Drop the cache so the next `flag()`/`get_flag_state()` call re-reads
-    the DB immediately, instead of waiting out the TTL.
+async def aflag(key: str, /) -> bool:
+    """`flag()` for callers on the event loop.
 
-    Called after a PATCH to `/api/admin/flags/:key` so the API's own next GET
-    -- and the very next gated request anywhere in the process -- sees the
-    new value without delay. Also used by the test suite to keep flag state
-    from leaking between tests that monkeypatch env vars.
+    Takes no `env_default`: the registry is the only source of that fallback,
+    and a second copy at the call site is one more thing that can drift.
     """
-    global _cache_expires_at, _force_sync_refresh, _generation
+    return (await aget_flag_state(key)).value
+
+
+def invalidate() -> None:
+    """Mark the cache stale so the next *async* read re-reads the DB
+    immediately, instead of waiting out the TTL.
+
+    Called after a write to `/api/admin/flags/:key` so the API's own next
+    GET -- and the very next gated request anywhere in the process -- sees
+    the new value without delay. The owed read is deliberately an async
+    caller's to perform: it is a blocking psycopg2 round trip, and only the
+    async path can put it on a worker thread rather than the event loop.
+    """
+    global _cache_expires_at, _refresh_owed, _generation
     with _cache_lock:
         # Anything already reading is now reading pre-write data.
         _generation += 1
@@ -353,11 +433,29 @@ def invalidate() -> None:
         # new value, so it re-reads on the calling thread rather than
         # serving a stale entry while a background refresh catches up. The
         # callers are the admin PATCH and the test suite, not a hot path.
-        _force_sync_refresh = True
+        _refresh_owed = True
+
+
+def reset_cache() -> None:
+    """Forget every entry, leaving the cache as it was at process start.
+
+    Distinct from `invalidate()`, which keeps the entries precisely so a
+    live override survives a failed re-read -- and, since a synchronous
+    reader is served those entries, keeps answering with them. That is the
+    right production behaviour and the wrong one for a caller asking for a
+    clean slate, which is what a between-test fixture and the debug
+    cache-reset endpoint both mean.
+    """
+    global _cache, _cache_expires_at, _generation, _refresh_owed
+    with _cache_lock:
+        _generation += 1
+        _cache = {}
+        _cache_expires_at = 0.0
+        _refresh_owed = False
 
 
 # Reuse pipeline.cache's existing "clear every cache" registry (wired into
 # the per-test autouse fixture and the perf-debug reset endpoint) so this
 # module's cache is swept alongside every other one, without every caller
 # needing to know this module exists.
-_REGISTERED_CLEARS.append(invalidate)
+_REGISTERED_CLEARS.append(reset_cache)

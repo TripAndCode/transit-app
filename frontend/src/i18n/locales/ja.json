@@ -1300,6 +1300,8 @@
       "confirm": "保存",
       "cancel": "キャンセル",
       "load_error": "機能フラグを読み込めませんでした。",
+      "clear_override": "上書きを解除",
+      "clear_error": "上書きを解除できませんでした。",
       "labels": {
         "askRouterEnabled": "Ask: ルールルーター",
         "askFollowupEnabled": "Ask: LLM フォローアップ",
