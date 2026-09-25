@@ -698,16 +698,10 @@ summary::-webkit-details-marker { display: none; }
     from { opacity: 0; transform: translateY(2px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  @keyframes ov-grow-x {
-    from { transform: scaleX(0); }
-    to   { transform: scaleX(1); }
-  }
   @keyframes ov-modal-in {
     from { opacity: 0; transform: translateY(6px) scale(0.99); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
-  .ov-anim-fade   { animation: ov-fade-in var(--dur-3) var(--ease-out) forwards; }
-  .ov-anim-grow-x { animation: ov-grow-x var(--dur-3) var(--ease-out) var(--dur-2) backwards; }
   .ov-modal       { animation: ov-modal-in var(--dur-2) var(--ease-out); }
   /* Every route change fades its content in over the outgoing tab, which
      startTransition keeps painted until the next chunk resolves. */
@@ -757,10 +751,16 @@ summary::-webkit-details-marker { display: none; }
 
   /* RevealSection.tsx's useInView(): a section starts fully visible, only
      offset downward -- transform only, never opacity: 0 -- so it stays
-     readable before the observer's first callback (or without JS at all). */
+     readable before the observer's first callback (or without JS at all).
+
+     --stagger is the section's place in its tab's one entrance group, set
+     inline by RevealSection and capped there, so a tab arrives as a single
+     orchestrated sweep instead of every section (and every child inside it)
+     animating on its own clock. */
   .reveal {
     transform: translateY(16px);
     transition: transform var(--dur-3) var(--ease-out);
+    transition-delay: calc(var(--stagger, 0) * var(--dur-1));
   }
   .reveal.reveal--in {
     transform: translateY(0);

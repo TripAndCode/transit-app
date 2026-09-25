@@ -185,7 +185,8 @@
       "feed_status_label": "フィード状況",
       "feed_status_ok": "正常稼働中",
       "feed_status_stale": "データ遅延あり",
-      "feed_status_updated": "最終更新 {{when}}"
+      "feed_status_updated": "最終更新 {{when}}",
+      "sparkline_baseline": "期間平均 {{value}}分"
     },
     "story": {
       "behind_one": "先週より{{delta}}分遅く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",

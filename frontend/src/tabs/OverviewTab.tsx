@@ -119,32 +119,53 @@ export function OverviewTab() {
               concentration={data.concentration}
             />
             <RoutesToCheckList routes={data.top_delayed.routes} />
-            {data.concentration.top_routes.length > 0 && (
-              <RevealSection>
-                <ConcentrationBar
-                  concentration={data.concentration}
-                  movers={data.movers}
-                  onClick={() => setOpen("concentration")}
-                />
-              </RevealSection>
-            )}
-            {data.peak_hour != null && (
-              <RevealSection>
-                <PeakHourRibbon
-                  peak_hour={data.peak_hour}
-                  onClick={() => setOpen("peak_hour")}
-                  onHourClick={(hour) => setPeakHourSel({ hour, dow: null })}
-                />
-              </RevealSection>
-            )}
-            {Object.keys(data.service_split).length > 0 && (
-              <RevealSection>
-                <ServiceSplit
-                  service_split={data.service_split}
-                  onClick={() => setOpen("service_split")}
-                />
-              </RevealSection>
-            )}
+            {/* The stagger index counts the sections that actually render.
+                Any of these can be absent for an agency, and a fixed index
+                would hand whichever one appears first a delay with nothing
+                in front of it to follow. */}
+            {[
+              data.concentration.top_routes.length > 0
+                ? {
+                    key: "concentration",
+                    node: (
+                      <ConcentrationBar
+                        concentration={data.concentration}
+                        movers={data.movers}
+                        onClick={() => setOpen("concentration")}
+                      />
+                    ),
+                  }
+                : null,
+              data.peak_hour != null
+                ? {
+                    key: "peak_hour",
+                    node: (
+                      <PeakHourRibbon
+                        peak_hour={data.peak_hour}
+                        onClick={() => setOpen("peak_hour")}
+                        onHourClick={(hour) => setPeakHourSel({ hour, dow: null })}
+                      />
+                    ),
+                  }
+                : null,
+              Object.keys(data.service_split).length > 0
+                ? {
+                    key: "service_split",
+                    node: (
+                      <ServiceSplit
+                        service_split={data.service_split}
+                        onClick={() => setOpen("service_split")}
+                      />
+                    ),
+                  }
+                : null,
+            ]
+              .filter((section) => section !== null)
+              .map((section, index) => (
+                <RevealSection key={section.key} index={index}>
+                  {section.node}
+                </RevealSection>
+              ))}
           </>
           )}
         </AsyncSection>

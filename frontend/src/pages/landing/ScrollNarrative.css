@@ -40,23 +40,25 @@
   overflow-x: auto;
 }
 
-/* Base state: always fully visible. A reduced-motion viewer, an environment
+/* Base state: at rest, in place. A reduced-motion viewer, an environment
    with no IntersectionObserver, or CSS that failed to load all leave a
-   section exactly here -- the "pending" hidden state below only ever
-   applies on top of it, and only when motion is allowed. */
+   section exactly here -- the "pending" offset below only ever applies on
+   top of it, and only when motion is allowed. */
 .landing-reveal {
-  opacity: 1;
   transform: translateY(0);
 }
 
+/* A section that has not been revealed yet is offset, never hidden: content
+   parked at opacity 0 is content a visitor loses outright the moment the
+   observer does not fire -- a stalled callback, a section the fold never
+   reaches, an environment without IntersectionObserver at all. The transform
+   is the whole animation. */
 @media (prefers-reduced-motion: no-preference) {
   .landing-reveal.landing-reveal--pending {
-    opacity: 0;
     transform: translateY(28px);
   }
   .landing-reveal.landing-reveal--pending.landing-reveal--visible {
-    opacity: 1;
     transform: translateY(0);
-    transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out);
+    transition: transform var(--dur-3) var(--ease-out);
   }
 }

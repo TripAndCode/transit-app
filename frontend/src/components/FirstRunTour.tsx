@@ -18,7 +18,9 @@ const STEPS: readonly Step[] = [
  *  hasn't appeared yet -- the dashboard's own data fetches finish
  *  asynchronously, so a step's anchor (the filter dock, the observed-trips
  *  panel) isn't guaranteed to exist the instant this component mounts or a
- *  step advances. */
+ *  step advances. The poll exists only to find the anchor: once found it is
+ *  cleared, and the anchor's own ResizeObserver plus resize/scroll keep the
+ *  panel on it from then on. */
 const FIND_RETRY_MS = 250;
 
 /**
@@ -81,6 +83,15 @@ export function FirstRunTour() {
     // here, on the tick it becomes visible -- once, since a reposition is
     // not a new arrival.
     let announced = false;
+    // The anchor currently being watched. Once found, the retry poll stops
+    // and the anchor's own box becomes the thing to watch; if it unmounts
+    // (e.g. the layout crosses the mobile breakpoint) the search resumes, so
+    // a remounted anchor is a new node that gets observed afresh.
+    let observed: Element | null = null;
+    let intervalId = 0;
+    const anchorResize =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => place());
+
     function place({ mayAnnounce = true } = {}) {
       // A poll that forces layout on a tab nobody is looking at buys
       // nothing; the anchor cannot have moved under the visitor.
@@ -88,7 +99,21 @@ export function FirstRunTour() {
       const target = document.querySelector(step.selector);
       if (!target || !panel) {
         if (panel) panel.hidden = true;
+        if (observed) {
+          anchorResize?.disconnect();
+          observed = null;
+          if (!intervalId) intervalId = window.setInterval(reposition, FIND_RETRY_MS);
+        }
         return;
+      }
+      if (target !== observed) {
+        anchorResize?.disconnect();
+        anchorResize?.observe(target);
+        observed = target;
+        if (intervalId) {
+          window.clearInterval(intervalId);
+          intervalId = 0;
+        }
       }
       const pos = computeTooltipPosition(
         target.getBoundingClientRect(),
@@ -105,13 +130,14 @@ export function FirstRunTour() {
         if (mayAnnounce) panel.querySelector<HTMLElement>("button")?.focus();
       }
     }
-    place({ mayAnnounce: false });
     const reposition = () => place();
-    const intervalId = window.setInterval(reposition, FIND_RETRY_MS);
+    place({ mayAnnounce: false });
+    if (!observed) intervalId = window.setInterval(reposition, FIND_RETRY_MS);
     window.addEventListener("resize", reposition);
     window.addEventListener("scroll", reposition, true);
     return () => {
-      window.clearInterval(intervalId);
+      if (intervalId) window.clearInterval(intervalId);
+      anchorResize?.disconnect();
       window.removeEventListener("resize", reposition);
       window.removeEventListener("scroll", reposition, true);
     };
