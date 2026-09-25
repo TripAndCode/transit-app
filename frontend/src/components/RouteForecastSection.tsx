@@ -36,8 +36,7 @@ import {
   type ForecastOverviewRoute,
   type ForecastOverviewWorst,
 } from "../api/types";
-
-const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+import { WEEK } from "../utils/week";
 
 type Tip = { x: number; y: number; text: string } | null;
 type View = "dow" | "hr" | null;

@@ -12,7 +12,7 @@ import {
   type AgencyHealthRow,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
-import { formatDateTime } from "../../utils/format";
+import { formatDateTime, EM_DASH } from "../../utils/format";
 import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -22,8 +22,6 @@ import { AgencyDiagnosticsDrawer } from "./AgencyDiagnosticsDrawer";
 import { ClampSparkline } from "./ClampSparkline";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
-
-const EM_DASH = "—";
 
 /** URL search param backing the saved-view chips, so a view survives a reload
  *  and can be linked to. */
