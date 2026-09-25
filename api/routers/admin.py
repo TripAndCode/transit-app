@@ -1298,7 +1298,7 @@ class AdminBoard(BaseModel):
 
 
 def _collect_all() -> list[dict[str, Any]]:
-    """The four ops collectors, imported lazily.
+    """The three ops collectors, imported lazily.
 
     `scripts/` is not part of the installed package set, and the collectors
     reach for `gh`/`aws` and the filesystem, so importing them at module scope

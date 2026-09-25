@@ -124,7 +124,7 @@ install, and again after any rollback, before trusting the deployed state:
 poetry run python3 scripts/ops_smoke_check.py
 ```
 
-Exit 0 means all four components were returned by
+Exit 0 means all three components were returned by
 `scripts/ops_status_page.collect_all` and every one validates against the
 shared `scripts/ops_status.py` contract — `unknown` is an expected state
 right after a fresh install and does not fail the check on its own. A
@@ -158,7 +158,7 @@ clean slate). Delete either by hand only if a token itself needs rotating or
 a corrupted state file needs discarding.
 
 After rolling back, run the smoke check (section 6) against the *previous*
-deployed checkout to confirm the four collectors still work there, and
+deployed checkout to confirm the three collectors still work there, and
 `journalctl -u ops-status.service -u ops-alerts.service --since "-10min"`
 to confirm no stray process from the rolled-back units is still running.
 
