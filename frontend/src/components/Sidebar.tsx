@@ -241,10 +241,10 @@ export function Sidebar() {
                   justifyContent: collapsedFlag ? "center" : "flex-start",
                   gap: 9,
                   color: isActive ? "var(--accent)" : "var(--text-secondary)",
-                  fontSize: 13,
+                  fontSize: "var(--text-sm)",
                   border: `1px dashed ${isActive ? "var(--accent)" : "var(--border-soft)"}`,
                   textDecoration: "none",
-                  transition: "all var(--transition)",
+                  transition: "color var(--transition), border-color var(--transition)",
                 })}
               >
                 <HelpCircle size={16} strokeWidth={1.5} aria-hidden="true" />
@@ -406,12 +406,12 @@ export function Sidebar() {
           flexShrink: 0,
           borderRadius: 8,
           background: "var(--accent)",
-          color: "#fff",
+          color: "var(--on-accent)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           fontWeight: 700,
-          fontSize: 15,
+          fontSize: "var(--text-base)",
         }}
       >
         {t("header.app_title").slice(0, 1)}
@@ -422,7 +422,7 @@ export function Sidebar() {
             style={{
               fontFamily: "var(--font-display)",
               fontWeight: 600,
-              fontSize: 15,
+              fontSize: "var(--text-base)",
               letterSpacing: "0.01em",
             }}
           >

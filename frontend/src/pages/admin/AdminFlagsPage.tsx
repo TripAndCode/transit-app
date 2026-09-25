@@ -45,8 +45,8 @@ function FlagReasonDialog({
       initialFocusRef={textareaRef}
       style={{ width: "min(420px, 92vw)" }}
     >
-        <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 700 }}>{title}</h3>
-        <label style={{ display: "block", fontSize: 13, color: "var(--text-secondary)", marginBottom: 6 }}>
+        <h3 style={{ margin: "0 0 14px", fontSize: "var(--text-base)", fontWeight: 700 }}>{title}</h3>
+        <label style={{ display: "block", fontSize: "var(--text-sm)", color: "var(--text-secondary)", marginBottom: 6 }}>
           {t("admin.flags.reason_label")}
         </label>
         <textarea
@@ -61,7 +61,7 @@ function FlagReasonDialog({
             borderRadius: 6,
             border: "1px solid var(--border-subtle)",
             padding: "8px 10px",
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
             fontFamily: "inherit",
             boxSizing: "border-box",
           }}
@@ -103,6 +103,9 @@ function FlagToggle({ flag, onRequestChange }: { flag: FeatureFlag; onRequestCha
         flexShrink: 0,
       }}
     >
+      {/* The knob tracks the state rather than staying one colour: it has to
+          read against `--accent` when on and `--surface-2` when off, and no
+          single token contrasts with both in both themes. */}
       <span
         aria-hidden="true"
         style={{
@@ -112,8 +115,8 @@ function FlagToggle({ flag, onRequestChange }: { flag: FeatureFlag; onRequestCha
           width: 18,
           height: 18,
           borderRadius: "50%",
-          background: "#fff",
-          transition: "left 120ms ease",
+          background: flag.value ? "var(--bg-surface)" : "var(--text-tertiary)",
+          transition: "left var(--dur-1) var(--ease-out)",
         }}
       />
     </button>
@@ -168,7 +171,7 @@ export function AdminFlagsPage() {
       header: t("admin.flags.col_updated"),
       render: (f) =>
         f.source === "override" ? (
-          <span style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
+          <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-sm)" }}>
             {f.updated_by !== null && <div>{t("admin.flags.updated_by", { id: f.updated_by })}</div>}
             <div>{formatUpdatedAt(f.updated_at)}</div>
             <div>{f.reason ?? t("admin.flags.no_reason")}</div>
