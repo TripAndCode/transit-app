@@ -165,6 +165,11 @@
   --text-xl: 26px;
   --text-2xl: 34px;
   --text-3xl: 46px;
+  /* The one wash behind an overlay, in both themes. A scrim is a property of
+     the theme, not of whichever overlay happens to be open: two overlays
+     picking their own literal drift apart the moment either theme is
+     retuned, and they are routinely seen one over the other. */
+  --scrim: rgba(15, 17, 25, 0.32);
   /* Stacking-order ladder -- mirrors src/styles/zIndex.ts's Z_INDEX exactly
      (zIndex.test.ts enforces it) for CSS files that can't import the TS
      constant. Keep both in sync: add/change a rung in Z_INDEX first, then
@@ -254,6 +259,9 @@
      (a light-grey literal) does not read on a dark surface. */
   --glass: color-mix(in srgb, var(--bg-surface) 62%, transparent);
   --glass-line: rgba(255, 255, 255, 0.16);
+  /* Deeper than the light wash: on a near-black page a 32% ink wash barely
+     separates the panel from what it covers. */
+  --scrim: rgba(0, 0, 0, 0.55);
 }
 
 /* One global reduced-motion regime, so a stylesheet does not have to remember

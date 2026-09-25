@@ -328,6 +328,14 @@ describe("Sidebar", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
+    it("renders through the shared overlay base", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("dialog")).toHaveClass("ui-overlay-panel");
+      expect(screen.getByRole("presentation")).toHaveClass("ui-overlay-scrim");
+    });
+
     it("closes when the backdrop is clicked", async () => {
       const user = userEvent.setup();
       renderSidebar();
