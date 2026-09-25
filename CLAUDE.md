@@ -157,15 +157,13 @@ the task needs them.
 - `/vps-loop-run` is the canonical state machine. `NEXT_TASK.md` is its untracked
   input and status log; one run advances at most one item.
 - The loop may create worktrees, commit, push feature branches, open draft PRs,
-  mark its own PR ready, and squash-merge it once the required `/review-branch`
-  pass is clean, GitHub reports the PR mergeable/clean, AND `main` hasn't
-  advanced since that pass ran (Step 5 gates this unconditionally before Step
-  6 runs; Step 6 re-checks the `main` SHA immediately before merging, since a
-  non-conflicting advance is invisible to `mergeable`/`mergeStateStatus` alone)
-  — then run `/cleanup-merged` to remove the now-stale branch/worktree. It never
-  pushes directly to `main` (only via a reviewed, merged PR), never force-pushes,
-  and never bypasses the review gate, a `CONFLICTING` merge state, or a
-  `main` that moved on to force a merge through.
+  mark its own PR ready, and squash-merge it under the full merge gate in
+  `## Git and pull requests` above (review pass clean, mergeable/clean, CI green
+  on the head, `main` unmoved since the pass; Step 5 gates this before Step 6
+  runs, and Step 6 re-checks the `main` SHA immediately before merging) — then
+  run `/cleanup-merged` to remove the now-stale branch/worktree. It never pushes
+  directly to `main` (only via a reviewed, merged PR), never force-pushes, and
+  never bypasses any part of that gate to force a merge through.
 - Shared hooks apply on the VPS. VPS-only permissions live in ignored
   `.claude/settings.local.json` and must never be committed.
 - Operational setup, non-interactive-shell environment rules, and current timeout

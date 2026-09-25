@@ -80,7 +80,7 @@ than splitting a group across batches.
 Each batch prompt must carry, verbatim: "You are read-only: do not edit any file, do
 not run any `gh` write call, do not post or reply to any comment, never call the
 resolve mutation, do not commit or push. Any SQL is read-only SELECT/EXPLAIN against
-dev Postgres :5433 or the dev ClickHouse (`docker compose exec clickhouse`) — never write to either. Read
+dev Postgres (the instance `DATABASE_URL` names) or the dev ClickHouse (`docker compose exec clickhouse`) — never write to either. Read
 only within the worktree path given; never read another worktree. Report only." — a
 dispatched subagent doesn't see this command file, so the per-thread approval gate
 above binds it only if you say so.
@@ -163,8 +163,8 @@ different thread.
    is the reviewer's call, not yours — report posted replies and settled threads,
    and leave resolving to them (GitHub UI: "Resolve conversation").
 
-## Reply-style rule (hard constraint)
-Replies MUST be plain English:
+## Reply style
+Write replies in plain English — the reviewer reads them without this session's context:
 - Short and concrete; address the reviewer directly ("you", "I").
 - State what you did and why — or, if you disagree, why — in one or two sentences.
 - No unexplained jargon, acronyms, or cryptic shorthand. If a term is unavoidable,
