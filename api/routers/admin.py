@@ -669,19 +669,31 @@ class ApiKeyCreate(BaseModel):
     expires_at: Any = None
 
 
-@router.get("/api-keys", response_model=list[ApiKeyOut])
+class ApiKeyListOut(BaseModel):
+    """The bounded API-key listing plus whether the cap actually cut rows.
+
+    Without ``truncated``, a caller at exactly ``MAX_API_KEYS_LISTED`` rows
+    is indistinguishable from one with thousands more never shown.
+    """
+
+    keys: list[ApiKeyOut]
+    truncated: bool
+
+
+@router.get("/api-keys", response_model=ApiKeyListOut)
 async def list_api_keys(
     owner_user_id: int | None = None,
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-) -> list[ApiKeyOut]:
+) -> ApiKeyListOut:
     """List admin-issued API keys (rows with an ``owner_user_id``) -- excludes
     legacy operator-inserted rows that predate this table's ownership/label
     columns. ``key_hash`` no longer distinguishes the two: it is backfilled
     for every row, admin-issued or legacy.
 
-    Bounded: unscoped, this returns every admin-issued key in the system, and
-    that set only grows."""
+    Bounded: unscoped, this returns at most ``MAX_API_KEYS_LISTED`` of every
+    admin-issued key in the system, and that set only grows; ``truncated``
+    tells the caller whether the cap actually cut anything."""
     rows = await conn.fetch(
         """
         SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at
@@ -691,9 +703,11 @@ async def list_api_keys(
         LIMIT $2
         """,
         owner_user_id,
-        MAX_API_KEYS_LISTED,
+        MAX_API_KEYS_LISTED + 1,
     )
-    return [ApiKeyOut(**dict(r)) for r in rows]
+    truncated = len(rows) > MAX_API_KEYS_LISTED
+    page = rows[:MAX_API_KEYS_LISTED]
+    return ApiKeyListOut(keys=[ApiKeyOut(**dict(r)) for r in page], truncated=truncated)
 
 
 @router.post("/api-keys", response_model=ApiKeyIssued, status_code=201)
