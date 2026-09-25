@@ -47,13 +47,21 @@ export function useUrlPatch(): (patch: UrlPatch) => void {
  *
  * Only for a key that moves on its own. Use `useUrlPatch` when one action
  * changes several keys; see its note on why per-key setters do not compose.
+ *
+ * `allowed`, when given, is the closed set the key may hold. A URL carrying
+ * anything else — a typo, a value renamed since an old link was shared, a
+ * hand-edited param — reads as the default instead, so the declared `T` stays
+ * a guarantee rather than a cast over whatever the query string contained.
+ * Omit it for a free-form key (a route code, a stop sequence).
  */
 export function useUrlState<T extends string>(
   key: string,
   defaultValue: T,
+  allowed?: readonly T[],
 ): [T, (value: T) => void] {
   const [params, setParams] = useSearchParams();
-  const value = (params.get(key) as T | null) ?? defaultValue;
+  const raw = params.get(key) as T | null;
+  const value = raw != null && (allowed == null || allowed.includes(raw)) ? raw : defaultValue;
 
   function set(next: T) {
     setParams(

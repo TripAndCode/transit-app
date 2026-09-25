@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import i18n from "../i18n";
-import { formatNumber, formatDateTime, FILTER_SEPARATOR } from "./format";
+import { formatNumber, formatDateTime, FILTER_SEPARATOR, EM_DASH, fmtPct, fmtRatioPct } from "./format";
 
 describe("formatNumber", () => {
   afterEach(async () => {
@@ -61,5 +61,34 @@ describe("formatDateTime", () => {
 describe("FILTER_SEPARATOR", () => {
   it("is a locale-neutral middle dot with surrounding spaces", () => {
     expect(FILTER_SEPARATOR).toBe(" · ");
+  });
+});
+
+describe("EM_DASH", () => {
+  it("is a single em dash", () => {
+    expect(EM_DASH).toBe("—");
+  });
+});
+
+describe("fmtPct", () => {
+  const noopT = ((key: string) => key) as unknown as Parameters<typeof fmtPct>[1];
+
+  it("formats a value already on a 0-100 scale, without rescaling", () => {
+    expect(fmtPct(42.5, noopT)).toBe("42.5%");
+  });
+
+  it("returns the em dash for null/non-finite input", () => {
+    expect(fmtPct(null, noopT)).toBe(EM_DASH);
+    expect(fmtPct(NaN, noopT)).toBe(EM_DASH);
+  });
+});
+
+describe("fmtRatioPct", () => {
+  it("scales a 0..1 ratio up to a percentage", () => {
+    expect(fmtRatioPct(0.5)).toBe("50.0%");
+  });
+
+  it("returns the em dash for null", () => {
+    expect(fmtRatioPct(null)).toBe(EM_DASH);
   });
 });

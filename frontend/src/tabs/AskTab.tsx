@@ -10,7 +10,7 @@
  *
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useEffectEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -76,12 +76,15 @@ export function AskTab() {
   // Anon → authed migration: fire once when an authenticated user actually has
   // local threads to import. Gating on the local count (not just a ref) means a
   // remount on agency switch can't re-fire it once localStorage has been cleared.
-  useEffect(() => {
-    if (authed && !migratedRef.current && id != null && conversationsAnon.exportAll().length > 0) {
+  const migrateIfNeeded = useEffectEvent(() => {
+    if (!migratedRef.current && id != null && conversationsAnon.exportAll().length > 0) {
       migratedRef.current = true;
       migrateAnon.mutate();
     }
-  }, [authed, id]); // eslint-disable-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    if (authed && id != null) migrateIfNeeded();
+  }, [authed, id]);
 
   const convQuery = useConversation(id ?? 0, activeId);
   const createConv = useCreateConversation(id ?? 0);

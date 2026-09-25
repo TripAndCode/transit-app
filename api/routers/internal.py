@@ -24,6 +24,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
+from pipeline.url_guard import redact_urls_in_text
 
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
 collector_router = APIRouter(prefix="/internal/collector", tags=["internal"], include_in_schema=False)
@@ -184,6 +185,7 @@ def _run_ingest_and_analyze(
     kind: str = "ingest",
     agency_ids: list[int] | None = None,
     requested_by: int | None = None,
+    run_weather: bool = True,
     run_id: int | None = None,
 ) -> None:
     """Run the sweep and close the operator's umbrella run row after it.
@@ -202,10 +204,20 @@ def _run_ingest_and_analyze(
         _log.error("cron: DATABASE_URL not set; skipping ingest")
         return
     try:
-        status = _ingest_and_analyze_sweep(db_url, kind=kind, agency_ids=agency_ids, requested_by=requested_by)
+        status = _ingest_and_analyze_sweep(
+            db_url,
+            kind=kind,
+            agency_ids=agency_ids,
+            requested_by=requested_by,
+            run_weather=run_weather,
+            run_id=run_id,
+        )
     except Exception as exc:
         _log.exception("cron: ingest+analyze run failed")
-        _finish_manual_run(db_url, run_id, "error", error=f"{type(exc).__name__}: {exc}")
+        # Redacted: a feed fetch's failure quotes the URL it was given, and
+        # that URL routinely carries an API key. This row is read by every
+        # operator with the board open.
+        _finish_manual_run(db_url, run_id, "error", error=redact_urls_in_text(f"{type(exc).__name__}: {exc}"))
         return
     _finish_manual_run(db_url, run_id, status)
 
@@ -216,6 +228,8 @@ def _ingest_and_analyze_sweep(
     kind: str = "ingest",
     agency_ids: list[int] | None = None,
     requested_by: int | None = None,
+    run_weather: bool = True,
+    run_id: int | None = None,
 ) -> str:
     """Pull live GTFS-RT for every agency, then refresh aggregations.
 
@@ -237,6 +251,15 @@ def _ingest_and_analyze_sweep(
     re-analyze has no reason to re-drive a third-party fetch for the whole
     fleet. Scoped or not, the roster is filtered through `deleted_at IS
     NULL`: a disabled agency is not work this is allowed to do.
+
+    ``run_weather=False`` is the operator-triggered path saying the fleet-wide
+    weather fetch is not part of what was asked for; the scheduled poke leaves
+    it at ``True``.
+
+    ``run_id`` is the caller's own umbrella row, already open and closed by
+    the caller. It is passed in only so this function knows not to open a
+    second row for the same action when the advisory lock turns the sweep
+    away.
     """
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 
@@ -281,9 +304,15 @@ def _ingest_and_analyze_sweep(
         conn.autocommit = False
         if not got_lock:
             _log.warning("cron: another ingest+analyze run is already in flight; skipping this poke")
-            # The displaced sweep's only trace. Without it a deployment whose
-            # pokes always collide looks identical to a healthy one.
-            pipeline_runs.start_run(conn, kind, status="skipped", lock_wait_ms=lock_wait_ms, requested_by=requested_by)
+            if run_id is None:
+                # The displaced sweep's only trace. Without it a deployment
+                # whose pokes always collide looks identical to a healthy
+                # one. Skipped when the caller already owns a row: that one
+                # is closed as `skipped` by the caller, and a second would
+                # draw two bars for one action.
+                pipeline_runs.start_run(
+                    conn, kind, status="skipped", lock_wait_ms=lock_wait_ms, requested_by=requested_by
+                )
             return "skipped"
         with conn.cursor() as cur:
             if requested_agency_ids is None:
@@ -365,7 +394,9 @@ def _ingest_and_analyze_sweep(
     # re-aggregated, and the weather pass is a fetch from a third party with
     # nothing to do with aggregation. Skipped for a scoped run for the same
     # reason in reverse: observed weather is per station, not per agency.
-    if kind == "ingest" and requested_agency_ids is None:
+    # Skipped whenever the caller said so: a fleet-wide third-party fetch is
+    # not what an operator asked for by pressing one button.
+    if run_weather and kind == "ingest" and requested_agency_ids is None:
         _run_weather_ingest(db_url)
     return "ok"
 

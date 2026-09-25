@@ -51,14 +51,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Free disk space on the runner
-        if: runner.environment == 'github-hosted'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
-            /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
-          df -h /
-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -164,3 +156,44 @@ jobs:
       - name: Stop and remove the Postgres container
         if: always()
         run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
+
+  # `poetry install` everywhere else in CI deliberately skips the optional
+  # `embeddings` group (pyproject.toml: several GB of torch/transformers,
+  # unused until a RAG index exists, and `pipeline.query.embeddings.Embedder`
+  # already tolerates it being absent by falling through to the LLM-only
+  # path) -- so nothing in the push/PR-gated `ci.yml` ever proves the group
+  # still installs cleanly or that the model it pulls in still loads and
+  # embeds. A silent break here would surface only as Stage 2 of the Ask
+  # router quietly falling through to the LLM every time, in production. No
+  # database/API server needed, and no interaction with the `test_embeddings`
+  # RUN_SLOW gate in the python-extended job above (a separate, existing
+  # check on the same module) -- this is a standalone install/import/embed
+  # smoke test, scheduled here rather than on every push because both the
+  # `--with embeddings` install and the model download are minutes of extra
+  # runner time not worth paying on every change.
+  embeddings-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.5
+
+      - name: Install dependencies (including the optional embeddings group)
+        run: poetry install --with embeddings
+
+      - name: Import pipeline.query.embeddings and embed one string
+        run: |
+          poetry run python -c "
+          from pipeline.query.embeddings import Embedder
+
+          e = Embedder()
+          assert e.available, 'Embedder unavailable after installing the embeddings group'
+          vec = e.embed('what routes are in the data?', mode='query')
+          assert len(vec) == e.dim, f'expected a {e.dim}-dim vector, got {len(vec)}'
+          "

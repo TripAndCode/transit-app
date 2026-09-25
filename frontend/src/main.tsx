@@ -24,6 +24,7 @@ import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
 import { RouteError } from "./components/RouteError";
+import { ToastProvider } from "./components/ui/Toast";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import "./styles/global.css";
 
@@ -168,7 +169,9 @@ const router = createBrowserRouter([
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} future={{ v7_startTransition: true }} />
+      <ToastProvider>
+        <RouterProvider router={router} future={{ v7_startTransition: true }} />
+      </ToastProvider>
     </QueryClientProvider>
   </React.StrictMode>,
 );

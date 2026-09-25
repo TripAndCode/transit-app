@@ -74,6 +74,12 @@
      in both themes, so it needs no separate dark-block entry. */
   --delay-flag-soft: var(--bg-soft);
   --delay-flag-soft: color-mix(in srgb, var(--delay-flag) 10%, transparent);
+  /* Low tier of the delay ramp (DELAY_RAMP.ok / delayColor(<1.5)), mirrored
+     from tokens.ts's BASE_RAMP.ok by hand -- the same relationship
+     --delay-severe below has with SEVERE_FALLBACK. Unlike --delay-severe this
+     tier never carries text on top of it, so it needs no per-theme AA split:
+     same value in both themes. */
+  --delay-ok: #2EA87A;
   --card-border: #E4E7EC;
   --card-radius: var(--radius-lg);
   /* Tooltip is intentionally theme-invariant (always a dark chip with white
@@ -153,6 +159,13 @@
   --el-1: 0 1px 3px rgba(17, 24, 39, 0.05), 0 0 0 1px rgba(17, 24, 39, 0.04);
   --el-2: 0 4px 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
   --el-3: 0 24px 60px rgba(17, 24, 39, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  /* Leftward counterpart of --el-2, for a panel anchored to the right edge
+     (a drawer) whose shadow has to cast onto the page it covers rather than
+     downward -- the scale above is downward-only, so an edge-anchored panel
+     can't reuse it without losing the direction that separates it from the
+     content it covers. Same weight and opacity as --el-2, offset to the left
+     instead of down. */
+  --el-left: -4px 0 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
   /* Type scale. --text-xs (12px) is the floor for any DOM text: below it CJK
      glyphs lose stroke separation and Japanese labels stop being readable.
      SVG chart tick labels are the one exception and set their size as an
@@ -165,6 +178,11 @@
   --text-xl: 26px;
   --text-2xl: 34px;
   --text-3xl: 46px;
+  /* The one wash behind an overlay, in both themes. A scrim is a property of
+     the theme, not of whichever overlay happens to be open: two overlays
+     picking their own literal drift apart the moment either theme is
+     retuned, and they are routinely seen one over the other. */
+  --scrim: rgba(15, 17, 25, 0.32);
   /* Stacking-order ladder -- mirrors src/styles/zIndex.ts's Z_INDEX exactly
      (zIndex.test.ts enforces it) for CSS files that can't import the TS
      constant. Keep both in sync: add/change a rung in Z_INDEX first, then
@@ -190,6 +208,10 @@
   --font-display: "Noto Serif JP", "Times New Roman", serif;
   --font-body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
                "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+  /* Identifiers that are read character by character — a user id, a route
+     code, a hash — where proportional digits and an ambiguous 1/l/I cost the
+     reader a second look. Not for anything with prose in it. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root[data-theme="dark"] {
@@ -247,6 +269,11 @@
           0 8px 24px rgba(0, 0, 0, 0.40);
   --el-3: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
           0 24px 60px rgba(0, 0, 0, 0.60);
+  /* Same hairline ring and top inset highlight as el-2 above -- depth on a
+     near-black page still has to come from the edge, not the shadow -- with
+     the drop cast to the left instead of down. */
+  --el-left: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
+             -8px 0 24px rgba(0, 0, 0, 0.40);
   /* More translucent than the light value: a near-black --bg-surface mixed
      at the same 82% reads as a near-opaque card rather than glass, which
      defeats the point over a bright basemap (aerial photo, GSI std). The
@@ -254,6 +281,9 @@
      (a light-grey literal) does not read on a dark surface. */
   --glass: color-mix(in srgb, var(--bg-surface) 62%, transparent);
   --glass-line: rgba(255, 255, 255, 0.16);
+  /* Deeper than the light wash: on a near-black page a 32% ink wash barely
+     separates the panel from what it covers. */
+  --scrim: rgba(0, 0, 0, 0.55);
 }
 
 /* One global reduced-motion regime, so a stylesheet does not have to remember
@@ -482,6 +512,30 @@ summary:focus-visible,
   box-shadow: var(--el-2);
   pointer-events: none;
 }
+/* `ThreadSidebar`'s conversation context menu (components/ThreadSidebar.tsx).
+   The highlight is a CSS state so the keyboard-focused item and the hovered
+   item look alike -- a JS hover handler can only ever light up the mouse's
+   item, leaving arrow-key navigation with no visible position. */
+.context-menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 7px var(--space-4);
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background var(--transition);
+}
+.context-menu__item--danger {
+  color: var(--color-danger);
+}
+.context-menu__item:hover,
+.context-menu__item:focus-visible {
+  background: var(--bg-soft);
+}
+
 /* `ExportMenu` (components/ExportMenu.tsx). A plain dropdown anchored to its
    trigger -- there is exactly one open at a time per page, so it needs no
    portal (unlike `Tooltip`, which can sit inside a clipping map overlay). */

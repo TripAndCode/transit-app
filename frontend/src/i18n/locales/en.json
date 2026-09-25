@@ -309,6 +309,7 @@
     "title": "User Manual",
     "sections_nav": "Manual sections",
     "search_placeholder": "Search the manual (coming soon)",
+    "search_disabled_reason": "Searching the manual isn't available yet — pick a section from the list.",
     "category_shortcut_label": "Jump to: {{title}}",
     "hint_text": "New here? Check out the User Manual for a walkthrough.",
     "hint_cta": "View Help",
@@ -1069,7 +1070,13 @@
           "suspended": "Suspended {{count}}",
           "promoted": "Made {{count}} admin",
           "demoted": "Changed {{count}} to standard user"
-        }
+        },
+        "delete_title": "Delete the selected users?",
+        "delete_body": "{{count}} users will be anonymized. This cannot be undone."
+      },
+      "shortcut": {
+        "approve": "Approve AI access",
+        "search": "Jump to search"
       }
     },
     "user_detail": {
@@ -1299,7 +1306,8 @@
       "reason_placeholder": "Why are you changing this flag?",
       "confirm": "Save",
       "cancel": "Cancel",
-      "load_error": "Couldn't load feature flags.",
+      "clear_override": "Clear override",
+      "clear_error": "Couldn't clear the override.",
       "labels": {
         "askRouterEnabled": "Ask: rules router",
         "askFollowupEnabled": "Ask: LLM follow-up",
@@ -1316,12 +1324,19 @@
       "saved_views": "Saved views",
       "empty": "Nothing to show.",
       "select_all": "Select all",
-      "select_row": "Select {{label}}"
+      "select_row": "Select {{label}}",
+      "shortcuts": {
+        "trigger": "Shortcuts",
+        "title": "Keyboard shortcuts",
+        "next": "Next row",
+        "prev": "Previous row",
+        "select": "Toggle selection",
+        "open": "Open row"
+      }
     },
     "board": {
       "title": "Control board",
       "poll_note": "Refreshed every 10 seconds",
-      "load_error": "Couldn't load the control board — showing what's available.",
       "reanalyze": "Re-aggregate now",
       "reanalyze_confirm_title": "Re-aggregate now?",
       "reanalyze_confirm_body": "This runs ingest and analyze. It can take several minutes; progress appears on the timeline.",
@@ -1329,6 +1344,8 @@
       "reanalyze_cancel": "Cancel",
       "reanalyze_started": "Re-aggregation started. It will appear on the timeline.",
       "reanalyze_error": "Could not start the re-aggregation.",
+      "reanalyze_busy_reason": "A re-aggregation is already running — wait for it to finish.",
+      "reanalyze_unavailable_reason": "Re-aggregating needs the board's run history, which hasn't loaded yet.",
       "runs_title": "Run timeline · today",
       "runs_legend": "Skipped runs are dashed",
       "runs_empty": "Nothing has run yet today.",
@@ -1436,7 +1453,6 @@
         "title": "Route funnel",
         "total": "Total: {{count}}",
         "success_of": "{{success}} / {{count}} ok",
-        "providers_title": "Providers",
         "providers_not_tracked": "Provider isn't recorded per query yet — only the route stage is logged."
       },
       "kill_switch": {

@@ -1,4 +1,5 @@
 import type { LngLatBoundsLike, LngLatLike, Map as MLMap } from "maplibre-gl";
+import { prefersReducedMotion } from "../../utils/motion";
 
 /**
  * Every camera move on the operations map, in one place.
@@ -61,12 +62,6 @@ export function easeOutCamera(progress: number): number {
     else high = t;
   }
   return bezier(t, EASE_Y1, EASE_Y2);
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined"
-    && typeof window.matchMedia === "function"
-    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 /** Duration and curve for one move, or an instant cut under reduced motion.

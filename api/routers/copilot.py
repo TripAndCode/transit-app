@@ -14,7 +14,7 @@ from pydantic import BaseModel, field_validator
 from api.deps import get_agency, get_current_user_optional, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.security import User, csrf_guard, require_llm_approved
-from pipeline.query.copilot import NoInsightAvailable, generate_proactive_insight, is_enabled
+from pipeline.query.copilot import NoInsightAvailable, ais_enabled, generate_proactive_insight
 from pipeline.query.user_llm_keys import get_user_llm_key
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["copilot"])
@@ -58,7 +58,7 @@ async def copilot_insight(
     user: User | None = Depends(get_current_user_optional),
 ) -> CopilotInsightResponse:
     csrf_guard(request)
-    if not is_enabled():
+    if not await ais_enabled():
         # Short-circuit ahead of the approval gate: a disabled feature must
         # not 403 an unapproved caller, and the panel hides itself off the
         # ``/copilot/enabled`` flag rather than relying on this response.
@@ -97,4 +97,4 @@ async def copilot_enabled_endpoint(
     agency_id: int = Depends(get_agency),  # implicit auth scope
 ) -> dict[str, bool]:
     """Public flag check so the panel knows whether to render at all."""
-    return {"enabled": is_enabled()}
+    return {"enabled": await ais_enabled()}

@@ -98,7 +98,7 @@ describe("AdminAuditPage", () => {
       error: null,
     });
     wrap(<AdminAuditPage />);
-    const dimmed = screen.getByRole("table", { name: "Audit timeline" }).closest<HTMLElement>("div[style*=opacity]");
+    const dimmed = screen.getByRole("grid", { name: "Audit timeline" }).closest<HTMLElement>("div[style*=opacity]");
     expect(dimmed).not.toBeNull();
     expect(dimmed).toHaveStyle({ opacity: "0.6" });
   });
@@ -107,7 +107,7 @@ describe("AdminAuditPage", () => {
     // The caption is the table's accessible name; locale parity cannot
     // catch a key that is missing from both files.
     wrap(<AdminAuditPage />);
-    expect(screen.getByRole("table", { name: "Audit timeline" })).toBeTruthy();
+    expect(screen.getByRole("grid", { name: "Audit timeline" })).toBeTruthy();
   });
 
   it("renders a before→after diff pill for a changed field", () => {

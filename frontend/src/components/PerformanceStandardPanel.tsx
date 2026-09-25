@@ -18,7 +18,7 @@ import { useTranslation } from "react-i18next";
 import { usePerformanceStandards } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
 import type { RangeCtx } from "../api/rangeContext";
-import { th, td } from "./tableStyles";
+import { SHARED_TABLE, th, td } from "./tableStyles";
 import type { PerformanceStandardRow } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -70,7 +70,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {data && data.rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={SHARED_TABLE}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
                 <th style={th({ align: "left" })}>{t("reports.performance_standard.col.route")}</th>
