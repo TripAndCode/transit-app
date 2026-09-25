@@ -4,8 +4,7 @@ description: Read-only review of a pull request you did not author, materialized
 ---
 
 Review the pull request named in $ARGUMENTS. `$ARGUMENTS` is a PR number, a PR URL, or
-a head branch name. This is **someone else's** PR — including one that
-`/vps-loop-run` opened on a `vps-loop/item-*` branch. The output is findings, not a
+a head branch name. This is **someone else's** PR. The output is findings, not a
 cleaned-up branch.
 
 ## Boundaries (hard constraints)
@@ -24,9 +23,7 @@ cleaned-up branch.
 1. `gh pr view <arg> --json number,url,title,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeStateStatus`,
    and resolve your own login once with `gh api user --jq .login`.
 2. If `author.login` equals your own login, stop and point at `/review-branch` (own
-   branch) or `/address-my-pr-comments` (own PR's threads) instead. A `/vps-loop-run`
-   PR counts as someone else's work even though the account matches; say which case
-   you decided and why in one line, then continue.
+   branch) or `/address-my-pr-comments` (own PR's threads) instead.
 3. Flag a `baseRefName` other than `main`, and record `headRefOid` as the expected
    head for the rest of the run.
 4. Open the report with the PR's `url` and `number`, and state up front when `isDraft`

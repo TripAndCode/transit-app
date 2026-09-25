@@ -339,6 +339,15 @@ _DATE_OVERRIDE_PROPS = {
     "to": {"type": "string", "format": "date", "description": "ISO YYYY-MM-DD end (override)."},
 }
 
+_ROUTE_PROP = {
+    "type": "string",
+    "description": (
+        "route_code (4-5 digits, e.g. '16071'), or the alias / Japanese route name "
+        "the user wrote ('路線5', '中央大橋線'); dispatch resolves aliases to a route_code "
+        "and answers with candidates when the name is ambiguous."
+    ),
+}
+
 
 TOOLS: list[dict] = [
     {
@@ -354,7 +363,7 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string", "description": "route_code, digits only e.g. '16071'"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -397,13 +406,16 @@ TOOLS: list[dict] = [
         "function": {
             "name": "compare_segments",
             "description": (
-                "Side-by-side delay comparison for one route, splitting on weekday "
-                "vs weekend (dimension=dow) or service_type. Use for '平日と土日祝の比較'."
+                "Weekday vs weekend/holiday delay comparison (dimension=dow) or a "
+                "per-service_type split (dimension=service_type). With dimension=dow, "
+                "omit route to rank every route by the weekday/weekend gap, or set it "
+                "to compare one route. dimension=service_type requires route. "
+                "Use for '平日と土日祝の比較'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     "dimension": {"type": "string", "enum": ["dow", "service_type"]},
                     **_DATE_OVERRIDE_PROPS,
                 },
@@ -422,7 +434,10 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string", "description": "Optional — if set, filter to this route_code."},
+                    "route": {
+                        **_ROUTE_PROP,
+                        "description": "Optional; narrows the series to one route. " + _ROUTE_PROP["description"],
+                    },
                     **_DATE_OVERRIDE_PROPS,
                 },
             },
@@ -457,7 +472,7 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                 },
                 "required": ["route"],
             },
@@ -475,7 +490,7 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -494,7 +509,7 @@ TOOLS: list[dict] = [
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"route": {"type": "string"}},
+                "properties": {"route": _ROUTE_PROP},
                 "required": ["route"],
             },
         },
@@ -512,7 +527,7 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -531,7 +546,7 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -1207,6 +1222,8 @@ _HANDLERS = {
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
+    # Guided-card only (``__build__``); deliberately absent from TOOLS so the
+    # LLM never selects it on its own.
     "route_stop_patterns": _tool_route_stop_patterns,
     "time_pattern": _tool_time_pattern,
     "schedule_realism": _tool_schedule_realism,

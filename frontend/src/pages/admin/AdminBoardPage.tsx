@@ -275,7 +275,7 @@ export function AdminBoardPage() {
 
       <section aria-label={t("admin.board.collectors_title")}>
         {isPending ? (
-          <SkeletonKpiRow tiles={4} />
+          <SkeletonKpiRow tiles={3} />
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
             {collectors.map((collector) => (

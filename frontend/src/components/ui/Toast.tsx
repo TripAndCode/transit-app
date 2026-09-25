@@ -86,13 +86,17 @@ function ToastItem({ toast, onDismiss }: { toast: ToastRecord; onDismiss: (id: n
   return (
     <div
       className="ui-toast"
-      role="status"
       onMouseEnter={() => setPointerOver(true)}
       onMouseLeave={() => setPointerOver(false)}
       onFocus={() => setFocusWithin(true)}
       onBlur={() => setFocusWithin(false)}
     >
-      <span className="ui-toast__message">{toast.message}</span>
+      {/* The live region is the message alone. Covering the whole toast makes
+          the action button part of the announcement, so its label is read as
+          if it were more of the message. */}
+      <span className="ui-toast__message" role="status">
+        {toast.message}
+      </span>
       {toast.action && (
         <button
           type="button"

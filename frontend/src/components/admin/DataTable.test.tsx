@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useSearchParams } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
@@ -21,6 +21,7 @@ function Harness(props: {
   onOpen?: (row: Row) => void;
   selectable?: boolean;
   savedViews?: { id: string; label: string; count?: number }[];
+  extraShortcuts?: { keys: string; description: string }[];
 }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [params] = useSearchParams();
@@ -38,6 +39,7 @@ function Harness(props: {
         onSelectionChange={setSelected}
         onOpen={props.onOpen}
         savedViews={props.savedViews}
+        extraShortcuts={props.extraShortcuts}
       />
     </>
   );
@@ -52,12 +54,68 @@ function wrap(ui: React.ReactElement, initialEntries = ["/admin/agencies"]) {
 }
 
 describe("DataTable", () => {
-  it("renders one focusable row per record under an accessible name", () => {
+  it("renders one row per record under an accessible name", () => {
     wrap(<Harness />);
-    expect(screen.getByRole("table", { name: "Agencies" })).toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: "Agencies" })).toBeInTheDocument();
     const rows = screen.getAllByRole("row").slice(1);
     expect(rows).toHaveLength(3);
-    for (const row of rows) expect(row).toHaveAttribute("tabindex", "0");
+  });
+
+  it("exposes the rows and cells as grid structure", () => {
+    wrap(<Harness />);
+    const grid = screen.getByRole("grid", { name: "Agencies" });
+    expect(within(grid).getAllByRole("columnheader")).toHaveLength(1);
+    expect(within(grid).getAllByRole("gridcell")).toHaveLength(3);
+  });
+
+  it("declares itself multi-selectable only while rows can be selected", () => {
+    const plain = wrap(<Harness />);
+    expect(screen.getByRole("grid")).not.toHaveAttribute("aria-multiselectable");
+    for (const row of screen.getAllByRole("row").slice(1)) {
+      expect(row).not.toHaveAttribute("aria-selected");
+    }
+    plain.unmount();
+
+    wrap(<Harness selectable />);
+    expect(screen.getByRole("grid")).toHaveAttribute("aria-multiselectable", "true");
+    expect(screen.getAllByRole("row")[1]).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("keeps exactly one row in the tab order and moves it with row focus", async () => {
+    const user = userEvent.setup();
+    wrap(<Harness />);
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(rows.map((row) => row.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
+
+    rows[0].focus();
+    await user.keyboard("j");
+    expect(rows[1]).toHaveFocus();
+    expect(rows.map((row) => row.getAttribute("tabindex"))).toEqual(["-1", "0", "-1"]);
+  });
+
+  it("lists the row shortcuts behind a toolbar hint chip", async () => {
+    const user = userEvent.setup();
+    wrap(<Harness />);
+    const chip = screen.getByRole("button", { name: "Shortcuts" });
+    expect(chip).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(chip);
+    expect(chip).toHaveAttribute("aria-expanded", "true");
+    const panel = screen.getByRole("group", { name: "Keyboard shortcuts" });
+    expect(within(panel).getAllByRole("term").map((k) => k.textContent)).toEqual(["j", "k", "x", "Enter"]);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("group", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    expect(chip).toHaveFocus();
+  });
+
+  it("appends the caller's own shortcuts to the hint chip", async () => {
+    const user = userEvent.setup();
+    wrap(<Harness extraShortcuts={[{ keys: "a", description: "Approve" }]} />);
+    await user.click(screen.getByRole("button", { name: "Shortcuts" }));
+    const panel = screen.getByRole("group", { name: "Keyboard shortcuts" });
+    expect(within(panel).getAllByRole("term").map((k) => k.textContent)).toEqual(["j", "k", "x", "Enter", "a"]);
+    expect(within(panel).getByText("Approve")).toBeInTheDocument();
   });
 
   it("moves row focus with j and k without wrapping past the ends", async () => {
@@ -155,6 +213,8 @@ describe("DataTable", () => {
       </I18nextProvider>,
     );
     expect(screen.getByText("Nothing")).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+    // Nothing to navigate, so the shortcut hint stays out of the way.
+    expect(screen.queryByRole("button", { name: "Shortcuts" })).not.toBeInTheDocument();
   });
 });

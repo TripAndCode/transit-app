@@ -58,3 +58,27 @@ def test_dockerfile_node_major_matches_ci():
         f"Dockerfile builds the frontend on Node {image_major.group(1)} but CI "
         f"uses Node {ci_major.group(1)}; the image would ship a bundle no CI run tested"
     )
+
+
+def test_dockerfile_python_minor_matches_ci():
+    """The image's runtime must be the Python CI actually tests on.
+
+    The Node stage above has had this guard for a while; the Python stage is
+    the same hazard and the more consequential one, since it is what serves
+    production rather than what produced a bundle. Without it a base-image
+    bump reports green off a test run that never touched the new interpreter.
+
+    Matched to the minor, not just the major: 3.12 and 3.14 are as different
+    to a C extension as two majors are anywhere else.
+    """
+    dockerfile = (_REPO_ROOT / "Dockerfile").read_text()
+    workflow = (_REPO_ROOT / ".github/workflows/ci.yml").read_text()
+
+    image_version = re.search(r"^FROM python:(\d+\.\d+)", dockerfile, re.MULTILINE)
+    ci_version = re.search(r"""python-version:\s*["']?(\d+\.\d+)""", workflow)
+    assert image_version, "Dockerfile has no `FROM python:<major>.<minor>` runtime stage"
+    assert ci_version, "ci.yml no longer declares a python-version"
+    assert image_version.group(1) == ci_version.group(1), (
+        f"Dockerfile runs the API on Python {image_version.group(1)} but CI "
+        f"tests on {ci_version.group(1)}; the image would ship a runtime no CI run exercised"
+    )

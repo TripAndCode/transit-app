@@ -18,6 +18,7 @@ import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { FILTER_SEPARATOR } from "../utils/format";
+import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import "../styles/focusedAnalysis.css";
 
 const daysColumns: CsvColumn<TrendDay>[] = [
@@ -100,8 +101,8 @@ export function ReportsHomeTab() {
         ["definition", JSON.stringify(ranking.data?.definition)], [], ...buildCsv(rows, rankingColumns, ctx),
       ])}>{t("csv")}</button></div></div>
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
-        {() => <div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("pattern")}</th><th>{t("days")}</th><th>{t("mean")}</th><th>{t("samples")}</th><th /></tr></thead><tbody>
-          {rows.map((row, i) => <tr key={`${row[0]}-${row[1]}-${i}`}><td>{names.format(String(row[0]))}</td><td>{String(row[1] ?? "—")}</td><td>{row[2] == null ? "—" : Number(row[2]).toFixed(1)}</td><td>{String(row[5] ?? "—")}</td><td>
+        {() => <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("days")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th><th style={th()} /></tr></thead><tbody>
+          {rows.map((row, i) => <tr key={`${row[0]}-${row[1]}-${i}`}><td style={td()}>{names.format(String(row[0]))}</td><td style={td()}>{String(row[1] ?? "—")}</td><td style={td()}>{row[2] == null ? "—" : Number(row[2]).toFixed(1)}</td><td style={td()}>{String(row[5] ?? "—")}</td><td style={td()}>
             <Link to={`/agencies/${id}/route-analysis?${(() => { const next = new URLSearchParams(queryString); next.set("routes", String(row[0])); if (row[1] === "平日" || row[1] === "土日祝") next.set("service", row[1]); return next.toString(); })()}`}>{t("open")}</Link>{/* i18n-ignore: query contract */}
           </td></tr>)}
         </tbody></table></div>}

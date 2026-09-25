@@ -134,21 +134,21 @@ describe("AdminUsersPage", () => {
 
   it("shows a colored Active chip for a user with no suspended_at", () => {
     wrap();
-    const chip = within(screen.getByRole("table")).getByText("Active");
+    const chip = within(screen.getByRole("grid")).getByText("Active");
     expect(chip.style.color).toBe("var(--accent)");
     expect(chip.style.background).toBe("var(--accent-soft)");
   });
 
   it("shows a colored Suspended chip for a user with suspended_at set", () => {
     wrap();
-    const chip = within(screen.getByRole("table")).getByText("Suspended");
+    const chip = within(screen.getByRole("grid")).getByText("Suspended");
     expect(chip.style.color).toBe("var(--color-warning, #C99A2E)");
     expect(chip.style.background).toBe("var(--surface-2)");
   });
 
   it("renders every row with exactly one status chip (no bare em-dash for active users)", () => {
     wrap();
-    const table = within(screen.getByRole("table"));
+    const table = within(screen.getByRole("grid"));
     expect(table.queryByText("—")).toBeNull();
     expect(table.getAllByText("Active")).toHaveLength(1);
     expect(table.getAllByText("Suspended")).toHaveLength(1);
@@ -379,26 +379,47 @@ describe("AdminUsersPage", () => {
       );
     });
 
-    it("routes bulk delete through the existing per-user confirm flow for each selected id", async () => {
-      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    it("confirms a bulk delete once, in a dialog naming every selected row", async () => {
+      const confirmSpy = vi.spyOn(window, "confirm");
       const user = userEvent.setup();
       wrap();
       await user.click(screen.getByRole("checkbox", { name: "Select all" }));
       await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Delete" }));
+
+      const dialog = screen.getByRole("dialog", { name: "Delete the selected users?" });
+      expect(within(dialog).getByText("2 users will be anonymized. This cannot be undone.")).toBeTruthy();
+      expect(within(dialog).getByText("active@example.com")).toBeTruthy();
+      expect(within(dialog).getByText("suspended@example.com")).toBeTruthy();
+      expect(confirmSpy).not.toHaveBeenCalled();
+
+      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
       await vi.waitFor(() => expect(delMutate).toHaveBeenCalledTimes(2));
       expect(delMutate).toHaveBeenCalledWith(1);
       expect(delMutate).toHaveBeenCalledWith(2);
+      expect(screen.queryByRole("dialog")).toBeNull();
       confirmSpy.mockRestore();
     });
 
-    it("skips a selected id when its delete confirm is declined", async () => {
-      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    it("deletes nothing when the bulk delete dialog is cancelled", async () => {
       const user = userEvent.setup();
       wrap();
       await user.click(screen.getByRole("checkbox", { name: "Select active@example.com" }));
       await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Delete" }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
       expect(delMutate).not.toHaveBeenCalled();
-      confirmSpy.mockRestore();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("announces the undo message without pulling the Undo button into the live region", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select active@example.com" }));
+      await user.click(
+        within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Approve AI access" }),
+      );
+      const message = await screen.findByText("Approved AI access for 1");
+      expect(message).toHaveAttribute("role", "status");
+      expect(screen.getByRole("button", { name: "Undo" }).closest('[role="status"]')).toBeNull();
     });
   });
 
@@ -431,7 +452,7 @@ describe("AdminUsersPage", () => {
     // The caption is the table's accessible name; key parity between
     // locales cannot catch a key that exists in neither.
     wrap();
-    expect(screen.getByRole("table", { name: "Users" })).toBeTruthy();
+    expect(screen.getByRole("grid", { name: "Users" })).toBeTruthy();
   });
 
   it("navigates once when the email link is clicked, so Back returns to the list", async () => {
