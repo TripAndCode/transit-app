@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/renderWithProviders";
+import i18n from "../i18n";
 import { HelpPage } from "./HelpPage";
 
 // Two top-level (`## `) sections -- enough to exercise the sidebar without a
@@ -53,6 +54,19 @@ describe("HelpPage", () => {
     // so it doesn't fire hashchange/reload) -- reset it so one test's
     // selection can't leak into the next test's initial-hash match.
     window.history.replaceState(null, "", window.location.pathname);
+  });
+
+  it("explains why the manual search cannot be used yet", async () => {
+    renderWithProviders(<HelpPage />);
+    const search = await screen.findByRole("searchbox", { name: i18n.t("help.search_placeholder") });
+    expect(search).toHaveAttribute("aria-disabled", "true");
+
+    act(() => {
+      search.focus();
+    });
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveTextContent(i18n.t("help.search_disabled_reason"));
+    expect(search.getAttribute("aria-describedby")).toBe(tip.id);
   });
 
   it("fetches the English manual for the active locale and renders its first section", async () => {

@@ -131,6 +131,19 @@ describe("AdminAskOpsPage", () => {
     expect(screen.getByText(/recorded per query/i)).toBeTruthy();
   });
 
+  it("states the provider gap as one muted caption, not a titled block", () => {
+    wrap(<AdminAskOpsPage />);
+    const caption = screen.getByText(/recorded per query/i);
+    expect(caption).toHaveTextContent(i18n.t("admin.ask_ops.funnel.providers_not_tracked"));
+    expect(caption.querySelector("strong")).toBeNull();
+  });
+
+  it("routes a query-log failure through the shared error banner", () => {
+    queriesReturn = { data: undefined, isLoading: false, error: new Error("boom") };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+  });
+
   it("shows the eval result as not-run when null", () => {
     wrap(<AdminAskOpsPage />);
     expect(screen.getByText(/not run yet/i)).toBeTruthy();

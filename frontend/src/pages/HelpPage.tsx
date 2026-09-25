@@ -7,6 +7,7 @@ import rehypeSlug from "rehype-slug";
 import { ApiError } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { SidebarNavList } from "../components/SidebarNavList";
+import { Tooltip } from "../components/Tooltip";
 import { PageHeader } from "../components/ui/PageHeader";
 
 const MANUAL_BASE = "/user-manual";
@@ -236,22 +237,28 @@ export function HelpPage() {
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 0 64px" }}>
       <PageHeader title={t("help.title")} />
-      <input
-        type="search"
-        placeholder={t("help.search_placeholder")}
-        aria-label={t("help.search_placeholder")}
-        disabled
-        style={{
-          width: "100%",
-          padding: "11px 14px",
-          fontSize: 13,
-          border: "1px solid var(--card-border)",
-          borderRadius: "var(--card-radius)",
-          background: "var(--bg-soft)",
-          color: "var(--text-secondary)",
-          marginBottom: 18,
-        }}
-      />
+      {/* `aria-disabled` + `readOnly` rather than `disabled`: a natively
+          disabled field takes no focus and fires no pointer events, so the
+          tooltip saying why it does nothing yet would be unreachable. */}
+      <Tooltip label={t("help.search_disabled_reason")}>
+        <input
+          type="search"
+          placeholder={t("help.search_placeholder")}
+          aria-label={t("help.search_placeholder")}
+          aria-disabled="true"
+          readOnly
+          style={{
+            width: "100%",
+            padding: "11px 14px",
+            fontSize: 13,
+            border: "1px solid var(--card-border)",
+            borderRadius: "var(--card-radius)",
+            background: "var(--bg-soft)",
+            color: "var(--text-secondary)",
+            marginBottom: 18,
+          }}
+        />
+      </Tooltip>
       {content != null && categorySections.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 24 }}>
           {categorySections.map(({ section, i }) => (

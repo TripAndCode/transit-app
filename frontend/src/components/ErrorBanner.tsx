@@ -7,6 +7,11 @@ import { classifyError, type ErrorClass } from "../api/errorClass";
 type Props = {
   error: unknown;
   onRetry?: () => void;
+  /** Overrides the class-derived text. For a failure whose meaning is the
+   *  action rather than the transport -- "couldn't clear the override" says
+   *  more than "server error" -- so that such a case can still use this
+   *  banner instead of hand-rolling one beside it. */
+  message?: string;
 };
 
 // Machine-readable detail codes from the Ask follow-up endpoint (see
@@ -72,20 +77,9 @@ function CalmStatus({ children }: { children: ReactNode }) {
   );
 }
 
-export function ErrorBanner({ error, onRetry }: Props) {
+/** The loud branch: something went wrong and saying so is the point. */
+function Alert({ children, onRetry }: { children: ReactNode; onRetry?: () => void }) {
   const { t } = useTranslation();
-  const cls = classifyError(error);
-
-  // Admin-approval-required 403 (Copilot insight, Ask follow-up) — a standing
-  // condition until an admin flips users.llm_approved, not a service problem
-  // or something signing in again fixes, so this gets a calm explanation with
-  // no login link and no retry button.
-  if (cls === "not_approved") return <CalmStatus>{t("errors.llm_not_approved")}</CalmStatus>;
-
-  // Aggregates-not-built (503) is persistent, not transient: explain it calmly
-  // in a neutral tone and offer no retry (retrying can't build the data).
-  if (cls === "not_ready") return <CalmStatus>{t("errors.aggregate_not_ready")}</CalmStatus>;
-
   return (
     <div
       role="alert"
@@ -101,7 +95,7 @@ export function ErrorBanner({ error, onRetry }: Props) {
         margin: "0 0 16px",
       }}
     >
-      <span style={{ flex: 1 }}>{messageFor(error, cls, t)}</span>
+      <span style={{ flex: 1 }}>{children}</span>
       {onRetry && (
         <button
           type="button"
@@ -119,4 +113,26 @@ export function ErrorBanner({ error, onRetry }: Props) {
       )}
     </div>
   );
+}
+
+export function ErrorBanner({ error, onRetry, message }: Props) {
+  const { t } = useTranslation();
+  const cls = classifyError(error);
+
+  // An explicit message wins over every branch below, including the calm
+  // ones: a caller that names the failure knows something the error class
+  // cannot.
+  if (message != null) return <Alert onRetry={onRetry}>{message}</Alert>;
+
+  // Admin-approval-required 403 (Copilot insight, Ask follow-up) — a standing
+  // condition until an admin flips users.llm_approved, not a service problem
+  // or something signing in again fixes, so this gets a calm explanation with
+  // no login link and no retry button.
+  if (cls === "not_approved") return <CalmStatus>{t("errors.llm_not_approved")}</CalmStatus>;
+
+  // Aggregates-not-built (503) is persistent, not transient: explain it calmly
+  // in a neutral tone and offer no retry (retrying can't build the data).
+  if (cls === "not_ready") return <CalmStatus>{t("errors.aggregate_not_ready")}</CalmStatus>;
+
+  return <Alert onRetry={onRetry}>{messageFor(error, cls, t)}</Alert>;
 }
