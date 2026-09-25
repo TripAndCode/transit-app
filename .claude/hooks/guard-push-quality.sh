@@ -518,8 +518,8 @@ if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ]; then
   RUN_BACKEND=1
 fi
 
-# Backend tests need the throwaway Postgres on :5544 (see CLAUDE.md — NEVER
-# point this at dev DB :5433). If Python changed (or scope is unknown) and
+# Backend tests need the throwaway Postgres on :5544 (see CLAUDE.md; never
+# point this at the dev DB). If Python changed (or scope is unknown) and
 # the DB isn't reachable, that's treated as a failed check, not a skip —
 # PUSH_GATE_SKIP_TESTS=1 is the explicit, visible opt-out for a deliberate
 # local bypass.
