@@ -28,5 +28,9 @@ export function useMediaQuery(query: string): boolean {
       return () => mql.removeEventListener("change", onChange);
     },
     () => window.matchMedia(query).matches,
+    // No `window` to match against outside a browser; false is the safer
+    // default (renders the desktop/no-preference variant rather than
+    // assuming mobile or reduced motion).
+    () => false,
   );
 }

@@ -195,18 +195,55 @@ describe("motion tokens", () => {
 });
 
 describe("elevation tokens", () => {
-  it.each(["--el-1", "--el-2", "--el-3"])("%s is defined in both themes", (prop) => {
+  it.each(["--el-1", "--el-2", "--el-3", "--el-left"])("%s is defined in both themes", (prop) => {
     expect(decl(rootBlock, prop)).toBeTruthy();
     expect(decl(darkBlock, prop)).toBeTruthy();
   });
 
   it("the dark elevations are the hairline/inset treatment, not the light drop shadows", () => {
-    for (const prop of ["--el-1", "--el-2", "--el-3"]) {
+    for (const prop of ["--el-1", "--el-2", "--el-3", "--el-left"]) {
       const dark = decl(darkBlock, prop)!;
       expect(dark).toContain("inset");
       expect(dark).not.toBe(decl(rootBlock, prop));
     }
     expect(decl(darkBlock, "--el-3")).toMatch(/rgba\(0, ?0, ?0, ?0?\.[5-9]\d*\)/);
+  });
+
+  it("--el-left casts to the left (negative x-offset), not downward like --el-2/--el-3", () => {
+    // A right-anchored drawer's shadow has to fall onto the page it covers,
+    // not below itself, so the offset is on the x axis and negative.
+    for (const block of [rootBlock, darkBlock]) {
+      expect(decl(block, "--el-left")).toMatch(/-\d+px 0/);
+    }
+  });
+});
+
+// One wash behind every overlay. A scrim is a theme decision, not a
+// per-overlay one: two overlays that pick their own literal drift apart the
+// moment either theme is retuned, and the dark theme needs a deeper wash
+// than the light one to separate the panel from the page at all.
+describe("scrim token", () => {
+  it("is defined on the bare :root", () => {
+    expect(decl(rootBlock, "--scrim")).toBe("rgba(15, 17, 25, 0.32)");
+  });
+
+  it("deepens under the dark theme, where the light wash would not separate the panel", () => {
+    expect(decl(darkBlock, "--scrim")).toBe("rgba(0, 0, 0, 0.55)");
+  });
+
+  it("is what the shared overlay paints, so no overlay carries its own literal", () => {
+    const overlayBase = readFileSync(resolve(process.cwd(), "src/components/ui/OverlayBase.tsx"), "utf8");
+    expect(overlayBase).toContain("var(--scrim)");
+    for (const file of ["src/components/Modal.tsx", "src/components/Sidebar.tsx", "src/components/commandPalette.css"]) {
+      expect(
+        readFileSync(resolve(process.cwd(), file), "utf8"),
+        `${file} still hardcodes a scrim colour`,
+      ).not.toMatch(/background:\s*rgba\(/);
+    }
+  });
+
+  it("leaves no dead backdrop rule behind in overview.css", () => {
+    expect(overviewCss).not.toContain("ov-modal-backdrop");
   });
 });
 
@@ -499,6 +536,16 @@ describe("--color-danger is retired outside destructive-action buttons", () => {
     });
 
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("--delay-ok mirrors tokens.ts's DELAY_RAMP.ok", () => {
+  it("is defined on the bare :root", () => {
+    expect(decl(rootBlock, "--delay-ok")).toBeTruthy();
+  });
+
+  it("matches DELAY_RAMP.ok — the same relationship --delay-severe has with SEVERE_FALLBACK, without the per-theme split (nothing renders text on this token)", () => {
+    expect(decl(rootBlock, "--delay-ok")!.toUpperCase()).toBe(DELAY_RAMP.ok);
   });
 });
 

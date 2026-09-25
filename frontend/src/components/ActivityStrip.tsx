@@ -1,7 +1,7 @@
 /**
  * ActivityStrip — in-context loading signal rendered beneath the header.
  *
- * Shows a soft lavender band with three pulsing dots and a translated
+ * Shows a soft accent-tinted band with three pulsing dots and a translated
  * "Loading…" label whenever any mutation is in flight. Replaces the
  * 3 px TopProgressBar that lived at the top of the viewport; the
  * in-content context is where the user's attention already is.
@@ -27,8 +27,10 @@ import "./ActivityStrip.css";
  * Horizontal activity strip that signals in-flight mutations to the user.
  *
  * Renders an always-present 24 px row in the App shell. The row is visually
- * transparent when idle and transitions to a soft lavender band with animated
- * dots when `useIsMutating()` reports one or more active mutations.
+ * transparent when idle and transitions to a soft --accent-soft band with
+ * animated dots when `useIsMutating()` reports one or more active mutations.
+ * Themed through --accent/--accent-soft (not a hardcoded colour) so the band
+ * follows the active theme instead of always rendering the light-mode tint.
  */
 export function ActivityStrip() {
   const mutating = useIsMutating();
@@ -53,9 +55,9 @@ export function ActivityStrip() {
       style={{
         height: 24,
         flexShrink: 0,
-        background: visible ? "rgba(91, 108, 173, 0.06)" : "transparent",
+        background: visible ? "var(--accent-soft)" : "transparent",
         borderBottom: visible
-          ? "1px solid rgba(91, 108, 173, 0.25)"
+          ? "1px solid color-mix(in srgb, var(--accent) 25%, transparent)"
           : "1px solid transparent",
         display: visible ? "flex" : "none",
         alignItems: "center",

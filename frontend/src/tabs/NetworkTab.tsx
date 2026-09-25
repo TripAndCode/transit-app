@@ -177,7 +177,17 @@ function AgencyRow({
             {a.clamp_pct.toFixed(2)}%
           </span>
         )}
-        {a.is_stale && <span className="network-row__stale" title={t("network.help_freshness")}>{t("network.stale_badge")}</span>}
+        {a.is_stale && (
+          <Tooltip label={t("network.help_freshness")}>
+            <span
+              className="network-row__stale"
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain badge, not a control; keyboard-focusable only so the tooltip explaining staleness is reachable
+              tabIndex={0}
+            >
+              {t("network.stale_badge")}
+            </span>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

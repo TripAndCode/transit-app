@@ -1,4 +1,3 @@
-// frontend/src/components/PeakHourRibbon.tsx
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 

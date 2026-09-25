@@ -228,7 +228,7 @@ export function RoutesPicker({
                         <span
                           style={{
                             color: "var(--text-tertiary)",
-                            fontFamily: "ui-monospace, monospace",
+                            fontFamily: "var(--font-mono)",
                             fontSize: "var(--text-xs)",
                           }}
                         >

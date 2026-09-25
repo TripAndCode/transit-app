@@ -6,6 +6,7 @@ import { formatNumber } from "../../utils/format";
 import { exportSvgAsPng } from "./chartPng";
 import { buildNextStepChips, type NextStepAction } from "./nextStepChips";
 import { conditionsLabel, formatWindow, provenancePath, sampleCount, toolLabel } from "./provenance";
+import { SHARED_TABLE } from "../../components/tableStyles";
 
 type Conditions = { dow?: string; time_band?: string; service?: string } | null;
 
@@ -91,7 +92,11 @@ function ResultTable({
   const lowConfIdx = cols.findIndex((c) => c === "low_confidence");
   return (
     <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      {/* The element style is the shared one. The cells are not: this table
+          is a compact inline result inside an answer, so its headers stay
+          sentence-case and tighter than the uppercase `th()` every page-level
+          table uses. */}
+      <table style={SHARED_TABLE}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
             {cols.map((c) => (

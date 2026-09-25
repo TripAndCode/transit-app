@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -9,7 +10,7 @@ import { AdminButton } from "./adminControls";
 import { Drawer } from "../../components/admin/Drawer";
 import { ApiKeysSection, SessionsSection } from "./UserDrawerSections";
 
-type Detail = {
+type AdminUserDetail = {
   user_id: number;
   email: string;
   name: string | null;
@@ -45,7 +46,7 @@ export function AdminUserDetailPage() {
   const backToUsers = { pathname: "/admin/users", search: listSearch ? `?${listSearch}` : "" };
   const { data, isLoading, error } = useQuery({
     queryKey: ["adminUser", uid],
-    queryFn: ({ signal }) => apiGet<Detail>(`/api/admin/users/${uid}`, { signal }),
+    queryFn: ({ signal }) => apiGet<AdminUserDetail>(`/api/admin/users/${uid}`, { signal }),
   });
   const { data: me } = useSession();
   const patch = usePatchUser();
@@ -76,33 +77,70 @@ export function AdminUserDetailPage() {
     );
   }
 
-  const isSelf = me?.user_id === data.user_id;
+  return (
+    <AdminUserDetailBody
+      data={data}
+      isSelf={me?.user_id === data.user_id}
+      patch={patch}
+      del={del}
+      error={error}
+      backLink={backLink}
+      onClose={handleClose}
+      onDeleted={() => navigate(backToUsers, { replace: true })}
+    />
+  );
+}
+
+/** The loaded drawer body, split out so `data` is a required prop instead of
+ *  the parent's `Detail | undefined` -- narrowing the parent's early-return
+ *  guard doesn't carry into closures defined later in the same component, so
+ *  every mutation handler down here would otherwise need a `data!` assertion. */
+function AdminUserDetailBody({
+  data,
+  isSelf,
+  patch,
+  del,
+  error,
+  backLink,
+  onClose,
+  onDeleted,
+}: {
+  data: AdminUserDetail;
+  isSelf: boolean;
+  patch: ReturnType<typeof usePatchUser>;
+  del: ReturnType<typeof useDeleteUser>;
+  error: Error | null;
+  backLink: ReactNode;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const { t } = useTranslation();
   const isMutating = patch.isPending || del.isPending;
 
   function handleRoleChange(nextRole: string) {
-    if (nextRole === "admin" && !confirm(t("admin.users.confirm_promote", { email: data!.email }))) return;
+    if (nextRole === "admin" && !confirm(t("admin.users.confirm_promote", { email: data.email }))) return;
     del.reset();
-    patch.mutate({ uid: data!.user_id, body: { role: nextRole } });
+    patch.mutate({ uid: data.user_id, body: { role: nextRole } });
   }
 
   function handleSuspendToggle() {
     del.reset();
-    patch.mutate({ uid: data!.user_id, body: { suspended: !data!.suspended_at } });
+    patch.mutate({ uid: data.user_id, body: { suspended: !data.suspended_at } });
   }
 
   function handleLlmApprovedToggle() {
     del.reset();
-    patch.mutate({ uid: data!.user_id, body: { llm_approved: !data!.llm_approved } });
+    patch.mutate({ uid: data.user_id, body: { llm_approved: !data.llm_approved } });
   }
 
   function handleDelete() {
-    if (!confirm(t("admin.users.confirm_delete", { email: data!.email }))) return;
+    if (!confirm(t("admin.users.confirm_delete", { email: data.email }))) return;
     patch.reset();
-    del.mutate(data!.user_id, { onSuccess: () => navigate(backToUsers, { replace: true }) });
+    del.mutate(data.user_id, { onSuccess: onDeleted });
   }
 
   return (
-    <Drawer open onClose={handleClose} label={data.email}>
+    <Drawer open onClose={onClose} label={data.email}>
       <div style={{ padding: 24 }}>
         {backLink}
         {error && (

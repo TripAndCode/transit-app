@@ -29,7 +29,7 @@ from api.range import (
     ctx_payload,
 )
 from api.security import User, csrf_guard
-from pipeline.flags import flag
+from pipeline.flags import aflag
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
@@ -168,9 +168,9 @@ async def ask(
 
     ctx_dict = ctx_payload(ctx)
 
-    history_enabled = flag("ask_history_enabled", True)
-    log_enabled = flag("ask_query_log_enabled", True)
-    router_enabled = flag("ask_router_enabled", True)
+    history_enabled = await aflag("ask_history_enabled")
+    log_enabled = await aflag("ask_query_log_enabled")
+    router_enabled = await aflag("ask_router_enabled")
 
     # Follow-ups ("次の50件", "もっと") have no standalone tool mapping, so
     # they skip the stateless router and go straight to the LLM with the

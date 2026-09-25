@@ -12,14 +12,12 @@ import {
   type RtFieldCoverage,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
-import { formatDateTime } from "../../utils/format";
+import { formatDateTime, EM_DASH } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
 import { ClampSparkline } from "./ClampSparkline";
 import { useRowDrafts } from "./useRowDrafts";
 
 const METRIC_TYPES = ["ewt_sec", "vehicle_km_delivered_pct"] as const;
-
-const EM_DASH = "—";
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (

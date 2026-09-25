@@ -28,6 +28,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # `typescript-6` (package.json) is a deliberate `npm:typescript@6.0.3`
+      # alias pinned for dual-version testing/compat, not a dependency meant
+      # to track latest -- an update PR here would just bump the pin away
+      # from the version it exists to test against.
+      - dependency-name: "typescript-6"
 
   # Covers Poetry: the pip ecosystem reads pyproject.toml/poetry.lock, and
   # this repo has no requirements.txt.
@@ -57,6 +63,58 @@ updates:
     rebase-strategy: "disabled"
     groups:
       github-actions-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Base-image bumps for the app image + `compose.yml` (node:22-alpine,
+  # python:3.12-slim, clickhouse/clickhouse-server).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "saturday"
+      time: "03:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
+    rebase-strategy: "disabled"
+    groups:
+      docker-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # db/Dockerfile (postgres:14 base) -- kept separate from "/" above so a
+  # bump here doesn't get grouped with the app image/compose bumps, which
+  # have an unrelated release cadence.
+  - package-ecosystem: "docker"
+    directory: "/db"
+    schedule:
+      interval: "weekly"
+      day: "saturday"
+      time: "03:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
+    rebase-strategy: "disabled"
+    groups:
+      docker-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # tools/geosql/compose.yml (dekartxyz/dekart) -- a standalone local tool,
+  # not part of the deployed app.
+  - package-ecosystem: "docker"
+    directory: "/tools/geosql"
+    schedule:
+      interval: "weekly"
+      day: "saturday"
+      time: "03:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
+    rebase-strategy: "disabled"
+    groups:
+      docker-minor-and-patch:
         update-types:
           - "minor"
           - "patch"

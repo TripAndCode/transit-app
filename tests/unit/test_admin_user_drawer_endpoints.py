@@ -239,7 +239,7 @@ def test_list_api_keys_never_includes_raw_key_or_hash():
     )
     r = _client(conn).get("/api/admin/api-keys")
     assert r.status_code == 200
-    body = r.json()[0]
+    body = r.json()["keys"][0]
     assert "key" not in body
     assert "key_hash" not in body
 
@@ -264,7 +264,7 @@ def test_list_api_keys_excludes_legacy_operator_inserted_rows():
     )
     r = _client(conn).get("/api/admin/api-keys")
     assert r.status_code == 200
-    assert r.json() == []
+    assert r.json() == {"keys": [], "truncated": False}
 
 
 def test_list_api_keys_filters_by_owner():
@@ -295,7 +295,32 @@ def test_list_api_keys_filters_by_owner():
     r = _client(conn).get("/api/admin/api-keys", params={"owner_user_id": 2})
     assert r.status_code == 200
     body = r.json()
-    assert [row["id"] for row in body] == [2]
+    assert [row["id"] for row in body["keys"]] == [2]
+    assert body["truncated"] is False
+
+
+def test_list_api_keys_reports_truncated_when_more_rows_than_the_cap_exist(monkeypatch):
+    monkeypatch.setattr(admin_router, "MAX_API_KEYS_LISTED", 2)
+    conn = _FakeConn(
+        api_keys=[
+            {
+                "id": i,
+                "owner_user_id": 1,
+                "tier": "pro",
+                "label": None,
+                "created_at": None,
+                "expires_at": None,
+                "revoked_at": None,
+                "key_hash": f"h{i}",
+            }
+            for i in range(1, 4)
+        ]
+    )
+    r = _client(conn).get("/api/admin/api-keys")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["keys"]) == 2
+    assert body["truncated"] is True
 
 
 def test_revoke_api_key_sets_revoked_at():
@@ -371,7 +396,7 @@ def test_issuing_a_key_audits_the_action_without_the_key_itself():
     raw_key = r.json()["key"]
 
     assert len(conn.audit) == 1
-    _actor_id, action, target_type, target_id, before, after, _reason = conn.audit[0]
+    _actor_id, action, target_type, target_id, before, after, _reason, _ip = conn.audit[0]
     assert action == "api_key.issued"
     assert target_type == "user" and target_id == "2"
     assert raw_key not in str(after) and raw_key not in str(before)

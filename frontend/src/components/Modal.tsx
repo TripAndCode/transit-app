@@ -1,6 +1,6 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { type CSSProperties, type ReactNode, type RefObject } from "react";
+import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
-import { focusableIn } from "../utils/focusable";
 
 type LabelProps = { labelledBy: string; ariaLabel?: undefined } | { ariaLabel: string; labelledBy?: undefined };
 
@@ -24,25 +24,33 @@ const BASE_PANEL_STYLE: Record<"modal" | "drawer", CSSProperties> = {
     left: "50%",
     transform: "translate(-50%, -50%)",
     background: "var(--bg-surface)",
-    zIndex: Z_INDEX.modal,
   },
   drawer: {
     position: "fixed",
     top: 0,
     bottom: 0,
     background: "var(--bg-surface)",
-    zIndex: Z_INDEX.drawer,
   },
 };
 
+// Each variant sits on its own rung. The ladder separates drawer (300/301)
+// from modal (400/401) so a modal opened over a drawer layers above it;
+// pinning both to the modal rungs would leave DOM order to decide, which is
+// what the ladder exists to stop.
+const RUNGS: Record<"modal" | "drawer", { panel: number; scrim: number }> = {
+  modal: { panel: Z_INDEX.modal, scrim: Z_INDEX.modalBackdrop },
+  drawer: { panel: Z_INDEX.drawer, scrim: Z_INDEX.drawerBackdrop },
+};
+
 /**
- * Shared accessible overlay: Escape and backdrop click both close, Tab is
- * trapped between the panel's first and last focusable descendants, focus
- * moves into the panel on open (to `initialFocusRef` when given) and back to
- * whatever was focused beforehand on close, and body scroll is locked while
- * open. Callers own the panel's visual size/position via `className`/`style`
- * layered on top of the `variant` base (centered card, or a full-height side
- * sheet for drawer-style overlays like the mobile nav and settings panel).
+ * The centered-card and side-sheet overlays, over the shared `OverlayBase`.
+ * Callers own the panel's visual size/position via `className`/`style`
+ * layered on top of the `variant` base; everything else -- scrim, Escape and
+ * backdrop close, focus trap and restore, scroll lock -- belongs to the base.
+ *
+ * Focus lands on the panel itself rather than its first control (unless a
+ * caller names one with `initialFocusRef`), so a screen reader reads the
+ * dialog from its top instead of starting part-way through it.
  */
 export function Modal({
   open,
@@ -55,83 +63,24 @@ export function Modal({
   labelledBy,
   ariaLabel,
 }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const previouslyFocused = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-
-    previouslyFocused.current = document.activeElement as HTMLElement | null;
-    const toFocus = initialFocusRef?.current ?? panelRef.current;
-    toFocus?.focus();
-
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      const focusable = focusableIn(panel);
-      if (focusable.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prevOverflow;
-      previouslyFocused.current?.focus();
-    };
-  }, [open, onClose, initialFocusRef]);
-
-  if (!open) return null;
-
+  const rungs = RUNGS[variant];
+  // Re-narrowed rather than spread: the base takes the same either/or label
+  // contract, and spreading both keys would hand it `ariaLabel: undefined`
+  // alongside `labelledBy`, which the union does not admit.
+  const label: LabelProps = labelledBy != null ? { labelledBy } : { ariaLabel: ariaLabel! };
   return (
-    <div
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.3)",
-        // Each variant sits on its own rung. The ladder separates drawer
-        // (300/301) from modal (400/401) so a modal opened over a drawer
-        // layers above it; pinning both to the modal rungs would leave DOM
-        // order to decide, which is what the ladder exists to stop.
-        zIndex: variant === "drawer" ? Z_INDEX.drawerBackdrop : Z_INDEX.modalBackdrop,
-      }}
+    <OverlayBase
+      open={open}
+      onClose={onClose}
+      zIndex={rungs.panel}
+      scrimZIndex={rungs.scrim}
+      initialFocus="panel"
+      initialFocusRef={initialFocusRef}
+      className={className}
+      style={{ ...BASE_PANEL_STYLE[variant], ...style }}
+      {...label}
     >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={labelledBy}
-        aria-label={ariaLabel}
-        tabIndex={-1}
-        className={className}
-        style={{ ...BASE_PANEL_STYLE[variant], outline: "none", ...style }}
-      >
-        {children}
-      </div>
-    </div>
+      {children}
+    </OverlayBase>
   );
 }

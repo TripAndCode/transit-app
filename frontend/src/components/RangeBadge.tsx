@@ -76,7 +76,7 @@ export function RangeBadge() {
         onClick={() => setOpen((v) => !v)}
         style={{
           background: active ? "var(--accent)" : "var(--bg-surface)",
-          color: active ? "#fff" : "var(--text-primary)",
+          color: active ? "var(--on-accent)" : "var(--text-primary)",
           border: `1px solid ${active ? "var(--accent)" : "var(--border-subtle)"}`,
           borderRadius: 8,
           padding: "8px 16px",
