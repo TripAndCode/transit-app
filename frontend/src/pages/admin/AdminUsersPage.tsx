@@ -546,12 +546,12 @@ export function AdminUsersPage() {
             background: "var(--surface-1)",
             border: "1px solid var(--border-subtle)",
             borderRadius: 999,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+            boxShadow: "var(--el-2)",
             padding: "8px 8px 8px 16px",
             display: "flex",
             gap: 8,
             alignItems: "center",
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
             zIndex: Z_INDEX.sticky,
           }}
         >
@@ -609,11 +609,11 @@ export function AdminUsersPage() {
             display: "flex",
             gap: 12,
             alignItems: "center",
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
             // Above the selection bar it shares a corner with: undoing is
             // the one action still worth taking while both are on screen.
             zIndex: Z_INDEX.toast,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.16)",
+            boxShadow: "var(--el-2)",
           }}
         >
           <span>{undo.message}</span>

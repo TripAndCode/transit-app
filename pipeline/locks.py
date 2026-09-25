@@ -12,14 +12,27 @@ Two lock domains, distinguished by what the caller is about to write:
    protect within one process's own batch, not across two processes racing
    the same feed).
 
-2. One agency's `updates` rows (``try_lock_agency_ingest`` for a writer,
-   ``agency_ingest_lock`` for a reader that must see a stable set). Held by
-   the collector push endpoint around its append, and by analyze() for the
-   whole of its own run. Two *different* agencies never contend here: an
-   append for one touches no row and no agg_* table the other reads, so a
-   single global key serialized disjoint work, turning every concurrent
-   arrival on the collector's dense per-agency polling into a 409 that
-   dropped the poll.
+2. One agency's `updates` rows (``lock_agency_ingest_or_timeout`` for the
+   collector push endpoint's writer, ``agency_ingest_lock`` for a reader that
+   must see a stable set, and ``try_lock_agency_ingest`` for a caller that
+   wants the same key with no wait at all -- a sibling of the first, not a
+   layer beneath it; each issues its own acquire). Held by the collector push endpoint around
+   its append, and by analyze() for the whole of its own run. Two
+   *different* agencies never contend here: an append for one touches no
+   row and no agg_* table the other reads, so a single global key serialized
+   disjoint work would have turned every concurrent arrival on the
+   collector's dense per-agency polling into a dropped poll; the per-agency
+   key keeps that contention scoped to genuine same-agency overlap, which
+   the push endpoint now waits out (see ``lock_agency_ingest_or_timeout``)
+   instead of dropping.
+
+   The collector's own pushes and the cron sweep's ``ingest_live`` can also
+   both be mid-flight for the same agency, serialized by this same key --
+   but even before either acquires it, the two write disjoint file-name
+   spaces (the collector's durable ``oracle/...`` source path vs.
+   ``ingest_live``'s generated ``live_...`` timestamp), so
+   ``recent_file_name_exists``'s dedup guard never mistakes one producer's
+   row for the other's and drops it as a false-duplicate poll.
 
 Domain 2 covers analyze() as well as the append precisely BECAUSE Postgres
 keeps single-argument and two-argument advisory locks in separate spaces:
@@ -65,6 +78,8 @@ not table corruption.
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+
+import psycopg2.errors
 
 # Arbitrary, fixed -- only needs to be distinct from any other advisory
 # lock this codebase takes, and there are none as of this writing. Reused as
@@ -112,9 +127,12 @@ def try_lock_ingest_analyze(conn) -> bool:
 def try_lock_agency_ingest(conn, agency_id: int) -> bool:
     """Non-blocking acquire of one agency's `updates` lock.
 
-    For a writer that can afford to drop the work it is holding -- the
-    collector push endpoint, whose caller re-polls on its own interval, so
-    answering 409 costs one poll rather than blocking a request thread.
+    An instant answer with no wait at all, for a caller that can afford to
+    walk away from the work outright rather than wait any bounded amount for
+    it. `lock_agency_ingest_or_timeout` is the bounded-wait sibling, not a
+    wrapper around this -- it issues its own acquire. No production caller
+    takes this form today; `tests/pipeline/test_locks.py` uses it to pin the
+    per-agency key's semantics, which is what keeps it honest.
     Same session-level semantics and release-by-closing-`conn` contract as
     try_lock_ingest_analyze; only the scope differs.
     """
@@ -124,6 +142,43 @@ def try_lock_agency_ingest(conn, agency_id: int) -> bool:
             (INGEST_ANALYZE_LOCK_KEY, agency_id),
         )
         return cur.fetchone()[0]
+
+
+def lock_agency_ingest_or_timeout(conn, agency_id: int, timeout_seconds: int) -> bool:
+    """Blocking acquire of one agency's `updates` lock, bounded by a wait.
+
+    For the collector push endpoint: a poll that arrives while another push
+    or analyze() run holds this agency's key should wait out that overlap --
+    the collector re-polls on its own interval, so dropping every poll that
+    lands mid-overlap to an instant 409 (the non-blocking
+    try_lock_agency_ingest's behavior) discarded work that a short wait would
+    have delivered. The wait is bounded by `SET LOCAL lock_timeout`, applied
+    only to the transaction that contains the acquire attempt, so it cannot
+    also cap unrelated statements a caller runs on `conn` afterward; `conn`
+    must not be in autocommit mode when this is called, or `SET LOCAL` would
+    apply to a one-statement implicit transaction of its own and have no
+    effect on the SELECT that follows it. Returns False, without raising, if
+    `timeout_seconds` elapses first -- the caller answers 409 in that case,
+    same as it did for the old non-blocking miss.
+
+    Same session-level semantics and release-by-closing-`conn` contract as
+    try_lock_ingest_analyze; unlike that function's non-blocking counterpart,
+    a timed-out attempt here rolls back the wrapping transaction (clean up
+    after the timeout error) but does not affect the advisory lock itself,
+    which was never acquired.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SET LOCAL lock_timeout = %s", (f"{timeout_seconds}s",))
+        try:
+            cur.execute(
+                "SELECT pg_advisory_lock(%s, %s)",
+                (INGEST_ANALYZE_LOCK_KEY, agency_id),
+            )
+        except psycopg2.errors.LockNotAvailable:
+            conn.rollback()
+            return False
+    conn.commit()
+    return True
 
 
 @contextmanager
@@ -139,11 +194,13 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
     while N+1..last are processed -- blocking that agency's pushes for the
     whole fleet's run, which is the contention this key exists to avoid.
 
-    Waiting cannot deadlock against the append path: that path takes this key
-    with the non-blocking form above and takes no other lock, so it always
-    makes progress and releases. Callers of this one may hold
-    INGEST_ANALYZE_LOCK_KEY's single-argument lock at the same time (the cron
-    and CLI entrypoints do) without forming a cycle, for the same reason.
+    Waiting cannot deadlock against the append path, even though that path
+    now waits too: it takes this one key and no other, so it has nothing to
+    hold while waiting and a cycle needs at least two resources. Callers of
+    this one may hold INGEST_ANALYZE_LOCK_KEY's single-argument lock at the
+    same time (the cron and CLI entrypoints do) without forming a cycle for
+    the same reason -- the append path never takes that key. What bounds the
+    append path's wait is its own `lock_timeout`, not the shape of the graph.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_lock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))

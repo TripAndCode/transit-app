@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
@@ -10,6 +10,7 @@ import {
   type BoardCollector,
   type BoardFreshnessDay,
 } from "../../api/admin";
+import { Modal } from "../../components/Modal";
 import { RunTimeline } from "./RunTimeline";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
@@ -36,16 +37,6 @@ const STATUS_COLORS: Record<BoardCollector["status"], string> = {
  *  The timeline's axis is a JST civil day because the pipeline buckets on one
  *  and the server returns one; deriving it from the viewer's own timezone
  *  would slide every bar for an operator abroad. */
-/** Move focus to the element when it appears, and only then.
- *
- *  Declared at module scope so its identity is stable: React re-invokes a ref
- *  callback whenever the callback itself changes, so an inline arrow would
- *  re-focus on every render — and the board re-renders on every poll, which
- *  would drag focus back from wherever the operator had moved it. */
-function focusOnMount(el: HTMLButtonElement | null): void {
-  el?.focus();
-}
-
 function jstDayStart(now: Date): Date {
   const jstNow = new Date(now.getTime() + JST_OFFSET_MS);
   return new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate()) - JST_OFFSET_MS);
@@ -96,7 +87,7 @@ function CollectorTile({ collector }: { collector: BoardCollector }) {
       data-testid="collector-tile"
       style={{
         border: "1px solid var(--border-subtle)",
-        borderRadius: "var(--radius-md, 10px)",
+        borderRadius: "var(--radius-lg)",
         background: "var(--surface-1)",
         padding: "12px 14px",
       }}
@@ -133,6 +124,7 @@ export function AdminBoardPage() {
   const { data, error, isPending } = useAdminBoard();
   const trigger = useTriggerRun();
   const [confirming, setConfirming] = useState(false);
+  const confirmRef = useRef<HTMLButtonElement>(null);
 
   // Read once per render rather than held in state: the board re-renders on
   // every poll, so the marker and any open run's bar advance on their own
@@ -160,7 +152,7 @@ export function AdminBoardPage() {
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
             fontFamily: "inherit",
             padding: "6px 13px",
             borderRadius: 6,
@@ -176,72 +168,73 @@ export function AdminBoardPage() {
         </button>
       </header>
 
-      {confirming && (
-        <div
-          role="dialog"
-          aria-label={t("admin.board.reanalyze_confirm_title")}
-          style={{
-            display: "grid",
-            gap: 8,
-            padding: "12px 14px",
-            borderRadius: "var(--radius-md, 10px)",
-            border: "1px solid var(--border-subtle)",
-            background: "var(--surface-1)",
-          }}
-        >
-          <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.reanalyze_confirm_title")}</h2>
-          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)" }}>
-            {t("admin.board.reanalyze_confirm_body")}
-          </p>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              ref={focusOnMount}
-              onClick={() => {
-                setConfirming(false);
-                trigger.mutate({ kind: "ingest" });
-              }}
-              style={{
-                fontSize: 12.5,
-                fontFamily: "inherit",
-                padding: "5px 12px",
-                borderRadius: 6,
-                border: "1px solid var(--accent)",
-                background: "var(--accent)",
-                color: "var(--on-accent, #fff)",
-                cursor: "pointer",
-              }}
-            >
-              {t("admin.board.reanalyze_confirm")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirming(false)}
-              style={{
-                fontSize: 12.5,
-                fontFamily: "inherit",
-                padding: "5px 12px",
-                borderRadius: 6,
-                border: "1px solid var(--border-subtle)",
-                background: "transparent",
-                color: "var(--text-primary)",
-                cursor: "pointer",
-              }}
-            >
-              {t("admin.board.reanalyze_cancel")}
-            </button>
-          </div>
+      <Modal
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        labelledBy="board-reanalyze-confirm-title"
+        initialFocusRef={confirmRef}
+        style={{
+          display: "grid",
+          gap: 8,
+          width: "min(420px, calc(100vw - 32px))",
+          padding: "14px 16px",
+          borderRadius: "var(--radius-lg)",
+          border: "1px solid var(--border-subtle)",
+          boxShadow: "var(--el-3)",
+        }}
+      >
+        <h2 id="board-reanalyze-confirm-title" style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>
+          {t("admin.board.reanalyze_confirm_title")}
+        </h2>
+        <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{t("admin.board.reanalyze_confirm_body")}</p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            ref={confirmRef}
+            onClick={() => {
+              setConfirming(false);
+              trigger.mutate({ kind: "ingest" });
+            }}
+            style={{
+              fontSize: "var(--text-xs)",
+              fontFamily: "inherit",
+              padding: "5px 12px",
+              borderRadius: 6,
+              border: "1px solid var(--accent)",
+              background: "var(--accent)",
+              color: "var(--on-accent, #fff)",
+              cursor: "pointer",
+            }}
+          >
+            {t("admin.board.reanalyze_confirm")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            style={{
+              fontSize: "var(--text-xs)",
+              fontFamily: "inherit",
+              padding: "5px 12px",
+              borderRadius: 6,
+              border: "1px solid var(--border-subtle)",
+              background: "transparent",
+              color: "var(--text-primary)",
+              cursor: "pointer",
+            }}
+          >
+            {t("admin.board.reanalyze_cancel")}
+          </button>
         </div>
-      )}
+      </Modal>
 
       {trigger.error != null && (
-        <p role="alert" style={{ margin: 0, fontSize: 12.5, color: "var(--color-warning, #C99A2E)" }}>
+        <p role="alert" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-warning, #C99A2E)" }}>
           {t("admin.board.reanalyze_error")}
         </p>
       )}
 
       {trigger.isSuccess && (
-        <p role="status" style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)" }}>
+        <p role="status" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
           {t("admin.board.reanalyze_started")}
         </p>
       )}
@@ -252,7 +245,7 @@ export function AdminBoardPage() {
           style={{
             margin: 0,
             padding: "10px 14px",
-            borderRadius: "var(--radius-md, 10px)",
+            borderRadius: "var(--radius-lg)",
             background: "var(--surface-1)",
             color: "var(--color-warning, #C99A2E)",
             fontSize: 14,
@@ -274,7 +267,7 @@ export function AdminBoardPage() {
         aria-label={t("admin.board.freshness_title")}
         style={{
           border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md, 10px)",
+          borderRadius: "var(--radius-lg)",
           background: "var(--surface-1)",
           padding: "12px 14px",
         }}
@@ -286,10 +279,10 @@ export function AdminBoardPage() {
             gap: 12,
             flexWrap: "wrap",
             marginBottom: 10,
-            fontSize: 12.5,
+            fontSize: "var(--text-xs)",
           }}
         >
-          <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.freshness_title")}</h2>
+          <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>{t("admin.board.freshness_title")}</h2>
           <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", display: "flex", gap: 12 }}>
             <span>■ {t("admin.board.legend_fresh")}</span>
             <span>■ {t("admin.board.legend_stale")}</span>
@@ -298,7 +291,7 @@ export function AdminBoardPage() {
         </div>
         {freshness.length === 0 ? (
           !isPending && (
-            <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+            <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
               {t("admin.board.freshness_empty")}
             </p>
           )
@@ -360,7 +353,7 @@ export function AdminBoardPage() {
         aria-label={t("admin.board.runs_title")}
         style={{
           border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md, 10px)",
+          borderRadius: "var(--radius-lg)",
           background: "var(--surface-1)",
           padding: "12px 14px",
         }}
@@ -368,7 +361,7 @@ export function AdminBoardPage() {
         <div
           style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 8 }}
         >
-          <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{t("admin.board.runs_title")}</h2>
+          <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>{t("admin.board.runs_title")}</h2>
           <p style={{ margin: 0, fontSize: 12, color: "var(--text-tertiary)" }}>{t("admin.board.runs_legend")}</p>
         </div>
         <RunTimeline runs={runs} dayStart={dayStart} now={now} />
@@ -378,14 +371,14 @@ export function AdminBoardPage() {
         aria-label={t("admin.board.alerts_title")}
         style={{
           border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius-md, 10px)",
+          borderRadius: "var(--radius-lg)",
           background: "var(--surface-1)",
           padding: "10px 14px",
         }}
       >
-        <h2 style={{ fontSize: 13, fontWeight: 700, margin: "0 0 6px" }}>{t("admin.board.alerts_title")}</h2>
+        <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: "0 0 6px" }}>{t("admin.board.alerts_title")}</h2>
         {alerts.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>{t("admin.board.alerts_none")}</p>
+          <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>{t("admin.board.alerts_none")}</p>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {alerts.map((alert) => (
@@ -398,7 +391,7 @@ export function AdminBoardPage() {
                   gap: 10,
                   padding: "7px 0",
                   borderTop: "1px solid var(--surface-2)",
-                  fontSize: 12.5,
+                  fontSize: "var(--text-xs)",
                 }}
               >
                 <span

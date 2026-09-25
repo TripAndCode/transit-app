@@ -16,15 +16,26 @@ DB-free: the connection is a stub that records the statements it was given.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
-from pipeline.runs import MAX_ERROR_CHARS, RUN_KINDS, RUN_STATUSES, finish_run, record_run, start_run
+from pipeline.runs import (
+    MAX_ERROR_CHARS,
+    RUN_KINDS,
+    RUN_STATUSES,
+    finish_run,
+    reap_abandoned_runs,
+    record_run,
+    start_run,
+)
 
 
 class _Cursor:
     def __init__(self, conn, result):
         self.conn = conn
         self._result = result
+        self.rowcount = conn.rowcount
 
     def __enter__(self):
         return self
@@ -45,11 +56,12 @@ class _Cursor:
 class _Conn:
     """Stub psycopg2 connection recording normalized SQL and commit order."""
 
-    def __init__(self, *, run_id=7, fail_on=None):
+    def __init__(self, *, run_id=7, fail_on=None, rowcount=0):
         self.statements: list[tuple[str, object]] = []
         self.events: list[str] = []
         self.run_id = run_id
         self.fail_on = fail_on
+        self.rowcount = rowcount
         self.broken = False
 
     def cursor(self):
@@ -152,3 +164,55 @@ def test_record_run_still_runs_the_work_when_the_row_could_not_be_opened():
         ran = True
     assert ran is True
     assert conn.statements == []
+
+
+# ── Reaping runs nothing will ever close ──────────────────────────────────
+
+_NOW = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+
+
+def test_the_reaper_closes_only_rows_still_open_past_the_cutoff():
+    conn = _Conn(rowcount=3)
+    assert reap_abandoned_runs(conn, older_than=timedelta(hours=2), now=_NOW) == 3
+    sql, params = conn.statements[0]
+    assert sql == (
+        "UPDATE pipeline_runs SET status = 'error', error = 'abandoned', finished_at = %s "
+        "WHERE status = 'running' AND finished_at IS NULL AND started_at < %s"
+    )
+    # finished_at is the reap moment, not the cutoff: the row says when it
+    # was given up on, and the cutoff only decides which rows qualify.
+    assert params == (_NOW, _NOW - timedelta(hours=2))
+    assert conn.events == ["commit"]
+
+
+def test_the_reaper_defaults_to_a_two_hour_grace_so_a_long_sweep_is_left_alone():
+    conn = _Conn()
+    reap_abandoned_runs(conn, now=_NOW)
+    _, params = conn.statements[0]
+    assert params == (_NOW, _NOW - timedelta(hours=2))
+
+
+def test_the_reaper_dates_itself_when_no_clock_is_supplied():
+    conn = _Conn()
+    before = datetime.now(timezone.utc)
+    reap_abandoned_runs(conn)
+    _, params = conn.statements[0]
+    assert before <= params[0] <= datetime.now(timezone.utc)
+
+
+def test_a_schema_without_the_table_costs_the_reap_and_nothing_else():
+    conn = _Conn(fail_on="UPDATE pipeline_runs")
+    assert reap_abandoned_runs(conn, now=_NOW) == 0
+    assert conn.events == ["rollback"]
+    assert conn.broken is False
+
+
+def test_a_stored_error_never_carries_the_feed_credential_that_caused_it():
+    conn = _Conn(run_id=5)
+    with pytest.raises(RuntimeError):
+        with record_run(conn, "ingest", agency_id=1):
+            raise RuntimeError("fetch failed: https://user:pass@feeds.test/rt.pb?apikey=SECRET")
+    error = conn.statements[1][1][2]
+    assert "SECRET" not in error
+    assert "user:pass" not in error
+    assert "https://feeds.test/rt.pb" in error

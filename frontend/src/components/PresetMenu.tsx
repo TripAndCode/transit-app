@@ -101,7 +101,7 @@ export function PresetMenu({
             onClick={() => create.mutate(name.trim())}
             style={{
               background: saveDisabled ? "var(--bg-soft)" : "var(--accent)",
-              color: saveDisabled ? "var(--text-tertiary)" : "#fff",
+              color: saveDisabled ? "var(--text-tertiary)" : "var(--on-accent)",
               border: "none",
               borderRadius: 4,
               fontSize: 13,
