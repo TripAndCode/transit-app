@@ -570,24 +570,34 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n" || FAIL=1
     echo "== npm run lint:i18n-strings =="
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n-strings" || FAIL=1
-    echo "== npm run deadcode (knip; matches CI's dead-code gate) =="
-    # knip parses through oxc-parser's platform-specific native binary, which
-    # npm's optional-dependency resolution drops often enough to expect it
-    # (npm/cli#4828). A missing binary is a broken install, not dead code:
-    # treating it as a gate failure would block every push from this checkout
-    # until someone reinstalled node_modules, behind a stack trace that names
-    # neither the cause nor the cure. CI installs cleanly and still enforces
-    # the gate, so degrading to a warning here loses local coverage only.
+    echo "== npm run deadcode (knip, JSON reporter; same analysis CI's dead-code gate runs) =="
+    # Two different failures both come out of `knip` as a non-zero exit: dead
+    # code, which must block, and a toolchain that cannot run knip at all,
+    # which must not. The second is common rather than exotic -- knip needs a
+    # newer Node than an ambient install often provides, and it parses through
+    # oxc-parser's platform-specific native binary, which npm's
+    # optional-dependency resolution drops often enough to expect (npm/cli#4828).
+    # This gate runs against the main checkout for every push in the
+    # repository, so a broken local toolchain would block all of them behind a
+    # stack trace that names neither the cause nor the cure.
+    #
+    # The two are told apart structurally rather than by matching error text:
+    # knip that ran writes a report, and knip that could not start writes
+    # nothing parseable. Hence the JSON reporter -- the analysis is the one CI
+    # runs, only the output shape differs, and that shape is what makes the
+    # distinction decidable.
     deadcode_out="$(mktemp)"
-    if ! run_with_timeout 60 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run deadcode" >"$deadcode_out" 2>&1; then
-      if grep -q "Cannot find native binding" "$deadcode_out"; then
-        echo "WARNING: npm run deadcode could not run — oxc-parser's native binding is missing from $CLAUDE_PROJECT_DIR/frontend/node_modules, so the local dead-code gate is skipped for this push. Reinstall it to restore the check; CI enforces it either way." >&2
-      else
+    deadcode_err="$(mktemp)"
+    if ! run_with_timeout 90 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run --silent deadcode -- --reporter json" \
+      >"$deadcode_out" 2>"$deadcode_err"; then
+      if node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$deadcode_out" 2>/dev/null; then
         FAIL=1
+      else
+        echo "WARNING: npm run deadcode produced no report — this checkout's toolchain cannot run knip (check node's version against knip's \`engines\`, and that oxc-parser's native binding is installed in $CLAUDE_PROJECT_DIR/frontend/node_modules). The local dead-code gate is skipped for this push; CI enforces it either way." >&2
       fi
     fi
-    cat "$deadcode_out"
-    rm -f "$deadcode_out"
+    cat "$deadcode_out" "$deadcode_err"
+    rm -f "$deadcode_out" "$deadcode_err"
     echo "== npm run test:check-entry-chunk (fixture-based positive/negative controls for the checker itself) =="
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test:check-entry-chunk" || FAIL=1
     echo "== npm run test:check-css-tokens (fixture-based positive/negative controls for the checker itself) =="

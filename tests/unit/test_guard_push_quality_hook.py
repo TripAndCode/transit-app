@@ -184,16 +184,17 @@ def test_frontend_gate_runs_every_check_ci_runs():
         assert script in block, f"{script} missing from the RUN_FRONTEND gate block"
 
 
-def test_a_missing_oxc_native_binding_warns_instead_of_blocking_every_push():
-    """knip's parser needs a platform-specific native binary that npm's
-    optional-dependency resolution drops often enough to expect. That is a
-    broken install rather than dead code, and this gate runs against the
-    main checkout for every push in the repository, so treating it as a
-    failure would block all of them at once. Nothing else about a knip
-    failure may be downgraded."""
+def test_a_toolchain_that_cannot_run_knip_warns_instead_of_blocking_every_push():
+    """A knip that cannot start (Node too old for its `engines`, oxc-parser's
+    native binary missing) exits non-zero exactly like one that found dead
+    code. This gate runs against the main checkout for every push in the
+    repository, so failing on a broken toolchain would block all of them.
+    The two are separated by whether a report came out, which is why the
+    JSON reporter is what the gate runs -- so only a real finding blocks."""
     block = _frontend_gate_block()
     deadcode = block[block.index("npm run deadcode") : block.index("npm run test:check-entry-chunk")]
-    assert "Cannot find native binding" in deadcode
-    guarded, _, unguarded = deadcode.partition("Cannot find native binding")
-    assert "FAIL=1" not in guarded, "the deadcode check must not fail before the native-binding case is excluded"
-    assert "FAIL=1" in unguarded, "every other deadcode failure must still block the push"
+    assert "--reporter json" in deadcode, "the classifier needs a machine-readable report to key on"
+    assert "JSON.parse" in deadcode
+    parsed, _, unparsed = deadcode.partition("JSON.parse")
+    assert "FAIL=1" not in parsed, "the deadcode check must not fail before it knows knip actually ran"
+    assert "FAIL=1" in unparsed, "a knip run that produced a report must still block the push"
