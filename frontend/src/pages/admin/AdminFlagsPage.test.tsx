@@ -61,6 +61,13 @@ function wrap() {
 }
 
 describe("AdminFlagsPage", () => {
+  it("routes a load failure through the shared error banner", () => {
+    useFeatureFlagsMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error("boom"), refetch: vi.fn() });
+    wrap();
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+    expect(screen.getByRole("button", { name: i18n.t("common.retry") })).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     useFeatureFlagsMock.mockReset();
     useFeatureFlagsMock.mockReturnValue(twoFlags());

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ErrorBanner } from "../../components/ErrorBanner";
 import { Modal } from "../../components/Modal";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import {
@@ -130,7 +131,7 @@ function formatUpdatedAt(iso: string | null): string {
 
 export function AdminFlagsPage() {
   const { t } = useTranslation();
-  const { data, error } = useFeatureFlags();
+  const { data, error, refetch } = useFeatureFlags();
   const patch = usePatchFeatureFlag();
   const clear = useClearFeatureFlag();
   const [pending, setPending] = useState<PendingChange | null>(null);
@@ -184,37 +185,8 @@ export function AdminFlagsPage() {
     <div style={{ padding: 24, maxWidth: 900 }}>
       <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.flags.title")}</h1>
 
-      {clear.error !== null && (
-        <p
-          role="alert"
-          style={{
-            marginBottom: 16,
-            padding: "10px 14px",
-            borderRadius: "var(--radius-lg)",
-            background: "var(--surface-1)",
-            color: "var(--color-warning, #C99A2E)",
-            fontSize: 14,
-          }}
-        >
-          {t("admin.flags.clear_error")}
-        </p>
-      )}
-
-      {error && (
-        <p
-          role="alert"
-          style={{
-            marginBottom: 16,
-            padding: "10px 14px",
-            borderRadius: "var(--radius-lg)",
-            background: "var(--surface-1)",
-            color: "var(--color-warning, #C99A2E)",
-            fontSize: 14,
-          }}
-        >
-          {t("admin.flags.load_error")}
-        </p>
-      )}
+      {clear.error !== null && <ErrorBanner error={clear.error} message={t("admin.flags.clear_error")} />}
+      {error != null && <ErrorBanner error={error} onRetry={refetch} />}
 
       <DataTable
         caption={t("admin.flags.table_label")}
