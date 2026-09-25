@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import secrets
+import time
 from collections.abc import Iterator
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -64,6 +65,7 @@ from pipeline.admin_users import session_id_prefix, unique_prefix_match
 from pipeline.audit import record_event
 from pipeline.query import admin_audit as _admin_audit
 from pipeline.query import agencies as _agencies
+from pipeline.runs import reap_abandoned_runs_best_effort
 
 _log = logging.getLogger(__name__)
 
@@ -1215,7 +1217,7 @@ _BOARD_FRESHNESS_SQL = """
     SELECT a.agency_id, a.agency_name, m.analyzed_at, h.date, h.raw_samples, h.clamp_count
     FROM agencies a
     LEFT JOIN agg_meta m ON m.agency_id = a.agency_id
-    LEFT JOIN agg_feed_health h ON h.agency_id = a.agency_id AND h.date >= $1
+    LEFT JOIN agg_feed_health h ON h.agency_id = a.agency_id AND h.date >= $1 AND h.date < $2
     WHERE a.deleted_at IS NULL
     ORDER BY a.agency_id, h.date
 """
@@ -1268,7 +1270,9 @@ class PipelineRunOut(BaseModel):
     finished_at: str | None
     status: str  # running | ok | skipped | error
     rows: int | None
-    lock_wait_ms: int | None
+    #: What the non-blocking lock acquire cost, for a run displaced by it.
+    #: A probe round trip, not time queued -- there is no queue.
+    lock_probe_ms: int | None
     error: str | None
     requested_by: int | None
 
@@ -1364,11 +1368,16 @@ async def _collect_documents() -> list[dict[str, Any]]:
 _collector_task: asyncio.Task[list[dict[str, Any]]] | None = None
 
 
-async def _freshness_rows(conn: asyncpg.Connection, window_start: date) -> list[Any]:
+async def _freshness_rows(conn: asyncpg.Connection, window_start: date, window_end: date) -> list[Any]:
     """Agency x day feed-health rows, falling back to the bare agency list
     when the aggregate tables are absent (a freshly migrated environment), so
-    the heatmap still shows who exists with every day missing."""
-    for sql, args in ((_BOARD_FRESHNESS_SQL, (window_start,)), (_BOARD_AGENCIES_SQL, ())):
+    the heatmap still shows who exists with every day missing.
+
+    ``window_end`` is exclusive and bounds the join at the top as well as the
+    bottom: the heatmap draws completed days only, so a future-dated
+    feed-health row is fetched on every poll and then discarded.
+    """
+    for sql, args in ((_BOARD_FRESHNESS_SQL, (window_start, window_end)), (_BOARD_AGENCIES_SQL, ())):
         try:
             return list(await conn.fetch(sql, *args))
         except Exception:
@@ -1414,7 +1423,13 @@ async def list_runs(
 
 
 class RunRequest(BaseModel):
-    """What the board's "re-aggregate now" button sends."""
+    """What the board's "re-aggregate now" button sends.
+
+    A run triggered here never fetches weather, whatever its scope: observed
+    weather is per station on a fleet-wide schedule, so one operator's
+    re-aggregation has no reason to re-drive a third-party fetch for
+    everyone.
+    """
 
     kind: str = "ingest"
     #: Restrict the sweep to one agency; omitted, it covers every live agency.
@@ -1465,6 +1480,7 @@ async def trigger_run(
         kind=body.kind,
         agency_ids=[body.agency_id] if body.agency_id is not None else None,
         requested_by=admin.user_id,
+        run_weather=False,
         run_id=run["run_id"],
     )
     return AdminRuns(date=today_jst(datetime.now(timezone.utc)).isoformat(), runs=[PipelineRunOut(**run)])
@@ -1476,6 +1492,7 @@ def _start_manual_run(
     kind: str,
     agency_ids: list[int] | None,
     requested_by: int,
+    run_weather: bool,
     run_id: int,
 ) -> None:
     """Queue the cron sweep behind the response.
@@ -1492,8 +1509,40 @@ def _start_manual_run(
         kind=kind,
         agency_ids=agency_ids,
         requested_by=requested_by,
+        run_weather=run_weather,
         run_id=run_id,
     )
+
+
+#: How often at most a board poll pays for the abandoned-run sweep. Every
+#: operator with the page open polls it every few seconds, and a run only
+#: becomes reapable after hours, so anything finer is pure cost.
+_REAP_INTERVAL_SEC = 600.0
+
+#: Monotonic stamp of this process's last sweep. Module-level because the
+#: throttle is per process, not per request.
+_last_reap_at: float | None = None
+
+
+async def _maybe_reap_abandoned_runs() -> None:
+    """Close runs whose process died, at most once per interval.
+
+    Startup alone is not enough: this process is long-lived, and the worker
+    that dies mid-sweep is usually a background task inside it. Never allowed
+    to cost the board its answer -- an unreapable table is a missing tidy-up,
+    not a broken page.
+    """
+    global _last_reap_at
+    stamped = time.monotonic()
+    if _last_reap_at is not None and stamped - _last_reap_at < _REAP_INTERVAL_SEC:
+        return
+    # Stamped before the sweep, not after: two concurrent polls must not both
+    # decide they are the one that runs it.
+    _last_reap_at = stamped
+    try:
+        await asyncio.to_thread(reap_abandoned_runs_best_effort, os.environ.get("DATABASE_URL"))
+    except Exception:
+        _log.warning("board: abandoned-run sweep failed", exc_info=True)
 
 
 @router.get("/board", response_model=AdminBoard)
@@ -1504,13 +1553,18 @@ async def admin_board(
     """The admin entry page's one snapshot: collectors, freshness, alerts."""
     from pipeline.health import migration_status
 
+    await _maybe_reap_abandoned_runs()
+
     now = datetime.now(timezone.utc)
     today = now.astimezone(ZoneInfo("Asia/Tokyo")).date()
 
     documents = await _collect_documents()
     collectors = collector_tiles(documents, now, reasons=_collector_reasons(documents))
 
-    freshness = board_freshness(await _freshness_rows(conn, board_window(today)[0]), today)
+    # The window's exclusive end is `today`: the heatmap draws completed days
+    # only, so the join has nothing to gain from today's partial row or any
+    # future-dated one.
+    freshness = board_freshness(await _freshness_rows(conn, board_window(today)[0], today), today)
 
     mig: MigrationStatusOut | None = None
     migrations = None
