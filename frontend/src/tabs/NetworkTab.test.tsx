@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
@@ -42,6 +42,10 @@ function renderTab(agencyId = "1") {
 
 describe("NetworkTab", () => {
   beforeEach(async () => await i18n.changeLanguage("en"));
+  // One test below switches to Japanese to check the locale-aware separator;
+  // restore English so later test files in this run don't inherit "ja" as
+  // their starting locale.
+  afterAll(async () => await i18n.changeLanguage("en"));
 
   it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
