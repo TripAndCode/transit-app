@@ -147,7 +147,15 @@ export default tseslint.config(
           // selector is the dependency-free equivalent: it flags an
           // ImportDeclaration that has an earlier non-import sibling in the
           // same module body.
-          selector: 'Program > :not(ImportDeclaration) ~ ImportDeclaration',
+          //
+          // Two kinds of sibling do not count. A directive prologue
+          // (`"use client"`) *must* come first, so flagging the import after
+          // it would demand a move with nowhere to move to. A re-export with
+          // a source (`export { x } from "./x"`) is part of the same
+          // dependency list an import belongs to, which is how `import/first`
+          // treats it too.
+          selector:
+            'Program > :not(ImportDeclaration, ExportNamedDeclaration[source], ExportAllDeclaration, ExpressionStatement[expression.type="Literal"][expression.value=/^use /]) ~ ImportDeclaration',
           message: 'Move this import above the module\'s other top-level statements — imports are hoisted regardless of where they appear, so keep them together at the top.',
         },
       ],
