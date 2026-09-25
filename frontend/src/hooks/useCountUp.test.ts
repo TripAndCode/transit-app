@@ -74,6 +74,25 @@ describe("useCountUp", () => {
     expect(raf).not.toHaveBeenCalled();
   });
 
+  it("prints the value outright on first paint with entrance: false, then animates later changes", () => {
+    const raf = mockRaf();
+    const { result, rerender } = renderHook(
+      ({ value }) => useCountUp(value, { duration: 600, decimals: 1, entrance: false }),
+      { initialProps: { value: 42 } },
+    );
+    expect(result.current).toBe(42);
+    raf.flush(0);
+    expect(result.current).toBe(42);
+
+    rerender({ value: 10 });
+    raf.flush(0);
+    raf.flush(300);
+    expect(result.current).toBeGreaterThan(10);
+    expect(result.current).toBeLessThan(42);
+    raf.flush(600);
+    expect(result.current).toBe(10);
+  });
+
   it("schedules no frames on first paint for a value of 0 -- nothing to count up to", () => {
     const raf = vi.spyOn(window, "requestAnimationFrame");
     const { result } = renderHook(() => useCountUp(0));

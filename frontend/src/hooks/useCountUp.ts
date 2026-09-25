@@ -6,6 +6,11 @@ type UseCountUpOptions = {
   duration?: number;
   /** Decimal places the intermediate displayed value is rounded to. */
   decimals?: number;
+  /** Climb from 0 on first paint. Pass false for figures repeated down a
+   *  list, where one rAF loop per row on mount would cost the first render
+   *  and read as noise rather than an entrance; those still animate later
+   *  changes. */
+  entrance?: boolean;
 };
 
 // 1 - (1-t)^3 -- decelerates hard, matching --ease-out's cubic-bezier(.22, 1,
@@ -23,10 +28,11 @@ function round(n: number, decimals: number): number {
 
 /**
  * Animates a displayed number toward `value` with an ease-out rAF loop, for a
- * large standalone figure (a KPI hero value, a stat tile, a per-row delay
- * figure). The count-up is an entrance effect first: on first paint the
- * figure starts at 0 and climbs to `value`, arriving with the panel around
- * it rather than being printed before the panel has finished appearing.
+ * large figure (a KPI hero value, a stat tile, a per-row delay figure). The
+ * count-up is an entrance effect first: on first paint the figure starts at
+ * 0 and climbs to `value`, arriving with the panel around it rather than
+ * being printed before the panel has finished appearing (unless `entrance`
+ * is false).
  * Later changes to `value` -- an agency switch, a filter change, a live
  * refresh -- animate from whatever is currently displayed.
  *
@@ -38,15 +44,19 @@ function round(n: number, decimals: number): number {
  * `n.toLocaleString(i18n.language)` over a bare `toLocaleString()` at the
  * call site so digit grouping follows the active UI language.
  */
-export function useCountUp(value: number, { duration = 600, decimals = 1 }: UseCountUpOptions = {}): number {
+export function useCountUp(
+  value: number,
+  { duration = 600, decimals = 1, entrance = true }: UseCountUpOptions = {},
+): number {
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const immediate = duration <= 0 || reducedMotion;
+  const initial = immediate || !entrance ? value : 0;
 
   // 0 is the first-paint start, so the mount effect below has a real delta
   // to animate across. Under reduced motion (or duration 0) there is no
   // entrance to stage, so the figure is simply correct from the first frame.
-  const [display, setDisplay] = useState(() => (immediate ? value : 0));
-  const fromRef = useRef(immediate ? value : 0);
+  const [display, setDisplay] = useState(initial);
+  const fromRef = useRef(initial);
 
   // Re-sync during render: in immediate mode `display` must equal `value`, so
   // comparing the two also catches motion being switched off mid-tween, which

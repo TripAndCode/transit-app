@@ -237,4 +237,48 @@ describe("FirstRunTour", () => {
       vi.unstubAllGlobals();
     }
   });
+  it("resumes the search and watches the new node when the anchor unmounts and remounts", async () => {
+    vi.useFakeTimers();
+    const observed: Element[] = [];
+    class FakeResizeObserver {
+      observe(target: Element) {
+        observed.push(target);
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    try {
+      const { container } = render(
+        <I18nextProvider i18n={i18n}>
+          <FirstRunTour />
+        </I18nextProvider>,
+      );
+      const first = document.createElement("div");
+      first.setAttribute("data-tour", "filter-bar");
+      container.appendChild(first);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+      expect(observed).toEqual([first]);
+
+      first.remove();
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      expect(document.querySelector<HTMLElement>(".first-run-tour")?.hidden).toBe(true);
+
+      const second = document.createElement("div");
+      second.setAttribute("data-tour", "filter-bar");
+      container.appendChild(second);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+      expect(observed).toEqual([first, second]);
+      expect(document.querySelector<HTMLElement>(".first-run-tour")?.hidden).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
 });

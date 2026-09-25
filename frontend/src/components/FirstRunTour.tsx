@@ -83,9 +83,11 @@ export function FirstRunTour() {
     // here, on the tick it becomes visible -- once, since a reposition is
     // not a new arrival.
     let announced = false;
-    // Set the moment an anchor is found: the search is over, so the retry
-    // poll stops and the anchor's own box becomes the thing to watch.
-    let found = false;
+    // The anchor currently being watched. Once found, the retry poll stops
+    // and the anchor's own box becomes the thing to watch; if it unmounts
+    // (e.g. the layout crosses the mobile breakpoint) the search resumes, so
+    // a remounted anchor is a new node that gets observed afresh.
+    let observed: Element | null = null;
     let intervalId = 0;
     const anchorResize =
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => place());
@@ -97,15 +99,21 @@ export function FirstRunTour() {
       const target = document.querySelector(step.selector);
       if (!target || !panel) {
         if (panel) panel.hidden = true;
+        if (observed) {
+          anchorResize?.disconnect();
+          observed = null;
+          if (!intervalId) intervalId = window.setInterval(reposition, FIND_RETRY_MS);
+        }
         return;
       }
-      if (!found) {
-        found = true;
+      if (target !== observed) {
+        anchorResize?.disconnect();
+        anchorResize?.observe(target);
+        observed = target;
         if (intervalId) {
           window.clearInterval(intervalId);
           intervalId = 0;
         }
-        anchorResize?.observe(target);
       }
       const pos = computeTooltipPosition(
         target.getBoundingClientRect(),
@@ -122,9 +130,9 @@ export function FirstRunTour() {
         if (mayAnnounce) panel.querySelector<HTMLElement>("button")?.focus();
       }
     }
-    place({ mayAnnounce: false });
     const reposition = () => place();
-    if (!found) intervalId = window.setInterval(reposition, FIND_RETRY_MS);
+    place({ mayAnnounce: false });
+    if (!observed) intervalId = window.setInterval(reposition, FIND_RETRY_MS);
     window.addEventListener("resize", reposition);
     window.addEventListener("scroll", reposition, true);
     return () => {
