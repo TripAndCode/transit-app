@@ -71,6 +71,7 @@ class _Conn:
         self.join_error = join_error
         self.agency_error = agency_error
         self.fetchval_error = fetchval_error
+        self.freshness_args: tuple = ()
 
     async def fetch(self, sql, *args):
         if "schema_migrations" in sql:
@@ -78,6 +79,7 @@ class _Conn:
         if "pipeline_runs" in sql:
             return _RUN_ROWS
         if "agg_feed_health" in sql:
+            self.freshness_args = args
             if self.join_error is not None:
                 raise self.join_error
             return _JOIN_ROWS
@@ -116,6 +118,21 @@ _REAL_COLLECT_DOCUMENTS = admin_router._collect_documents
 def _no_real_collectors(monkeypatch):
     """A unit test must never shell out to the real collectors."""
     monkeypatch.setattr(admin_router, "_collect_documents", _stub_documents([]))
+
+
+@pytest.fixture(autouse=True)
+def reaped(monkeypatch) -> list[str | None]:
+    """Capture the board's abandoned-run sweep rather than opening a
+    connection to whatever `DATABASE_URL` happens to name."""
+    calls: list[str | None] = []
+    monkeypatch.setattr(admin_router, "_last_reap_at", None, raising=False)
+    monkeypatch.setattr(
+        admin_router,
+        "reap_abandoned_runs_best_effort",
+        lambda db_url: calls.append(db_url) or 0,
+        raising=False,
+    )
+    return calls
 
 
 def test_board_returns_every_section():
@@ -265,3 +282,37 @@ def test_the_collectors_read_the_repo_the_environment_points_at(monkeypatch, tmp
     monkeypatch.delenv(admin_router._OPS_STATUS_REPO_ENV)
     admin_router._collect_all()
     assert "local_repo" not in seen
+
+
+def test_the_freshness_join_is_bounded_at_both_ends_of_the_window():
+    """Unbounded at the top, the join drags in every future-dated feed-health
+    row — days the heatmap never draws — on every poll."""
+    conn = _Conn()
+    _client(conn).get("/api/admin/board")
+    window_start, window_end = conn.freshness_args
+    assert window_end - window_start == timedelta(days=BOARD_WINDOW_DAYS)
+    assert "h.date >= $1" in admin_router._BOARD_FRESHNESS_SQL
+    assert "h.date < $2" in admin_router._BOARD_FRESHNESS_SQL
+
+
+def test_the_board_reaps_runs_nothing_will_ever_close(reaped):
+    _client(_Conn()).get("/api/admin/board")
+    assert len(reaped) == 1
+
+
+def test_a_polled_board_does_not_pay_for_the_reap_on_every_request(reaped):
+    """Operators poll this page every few seconds; a run only becomes
+    reapable after hours."""
+    client = _client(_Conn())
+    client.get("/api/admin/board")
+    client.get("/api/admin/board")
+    client.get("/api/admin/board")
+    assert len(reaped) == 1
+
+
+def test_a_failing_reap_never_costs_the_board_its_answer(monkeypatch, reaped):
+    def _boom(_db_url):
+        raise RuntimeError("pipeline_runs is unreadable")
+
+    monkeypatch.setattr(admin_router, "reap_abandoned_runs_best_effort", _boom)
+    assert _client(_Conn()).get("/api/admin/board").status_code == 200

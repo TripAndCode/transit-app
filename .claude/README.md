@@ -84,12 +84,18 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
 
 - DB safety: any SQL is read-only against the dev Postgres and dev ClickHouse;
   tests point at throwaway `transit_test`@5544 and ClickHouse @8124.
-  `hooks/guard-dev-db.sh` is a partial net, not a guarantee: it only fires when the
-  command text *literally* names the dev port or container AND carries a write/DDL
-  keyword. An env-var write, a Makefile target, or a Python script reading
-  `DATABASE_URL` is not caught, and ClickHouse isn't covered at all. It also
-  false-positives on prose that merely mentions those names. Treat the rule in
-  `CLAUDE.md` as the protection, not the hook.
+  `hooks/guard-dev-db.sh` (a thin wrapper around `hooks/guard_dev_db.py`) is a
+  partial net, not a guarantee: it shlex-tokenizes the command and blocks only
+  when a dev-store target — a dev Postgres/ClickHouse port or container name,
+  `docker compose exec`/`run` against the dev service, or a `migrate-down`/
+  `db-reset` Make target with no throwaway port in the same command — appears
+  alongside a write/DDL keyword, or a `psql -f`/`--file` invocation whose
+  script contents it can't read. It has no visibility into a script's
+  contents beyond that, or into a `DATABASE_URL` set outside the command line
+  it sees, and it deliberately still blocks prose that merely names a dev
+  store next to a write-sounding word — a false block only costs a rephrase,
+  a missed write costs the dataset. Treat the rule in `CLAUDE.md` as the
+  protection, not the hook.
 - No command here commits or pushes without explicit user go-ahead, except
   `/vps-loop-run`, which runs unattended: it may push feature branches, open,
   ready, and squash-merge PRs once the required `/review-branch` pass is
