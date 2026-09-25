@@ -10,6 +10,15 @@ import { readAnalyses, saveAnalysis } from "./savedAnalyses";
 import { downloadCsv } from "./csv";
 import { useReport, useRouteShape } from "../../api/hooks";
 
+// Real timers and pointer-events checks make every click here wait out
+// userEvent's default per-action delay -- across the number of interactions
+// in this file that adds up to real wall-clock time, tipping into vitest's
+// per-test timeout under load. None of these tests assert on pointer-events
+// CSS, so both are safe to disable.
+function setupUser() {
+  return userEvent.setup({ delay: null, pointerEventsCheck: 0 });
+}
+
 const mapMounts = vi.fn();
 const mapProps = vi.fn();
 vi.mock("./AnalysisMap", () => ({
@@ -18,6 +27,19 @@ vi.mock("./AnalysisMap", () => ({
     useEffect(() => { mapMounts(); }, []);
     return <div>Map</div>;
   },
+}));
+// StopChart/MareyDiagram/PeriodChart render real, non-trivial SVGs from the
+// fixture data; no test here asserts on their contents (StopChart's stop
+// data is checked via the CSV export instead), so mounting the real
+// components only adds render cost without adding coverage.
+vi.mock("./StopChart", () => ({
+  StopChart: () => <div>StopChart</div>,
+}));
+vi.mock("../charts/MareyDiagram", () => ({
+  MareyDiagram: () => <div>MareyDiagram</div>,
+}));
+vi.mock("./PeriodChart", () => ({
+  PeriodChart: () => <div>PeriodChart</div>,
 }));
 // `buildCsv`/`csvText` stay real (pure, deterministic) -- only `downloadCsv`
 // (which touches the DOM to trigger a file download) is replaced.
@@ -61,7 +83,7 @@ function show(tab: "route-analysis" | "reports", search = "") {
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
 it("keeps pattern and period in exported observations and saved analysis", async () => {
   show("route-analysis");
-  const user = userEvent.setup();
+  const user = setupUser();
   await user.click(screen.getByRole("button", { name: "Download CSV" }));
   const rows = vi.mocked(downloadCsv).mock.calls[0][1];
   // Pattern: a per-row column. Period: consolidated into one `buildCsv`
@@ -82,7 +104,7 @@ it("changing keito scopes both report queries and CSV to the selected code", asy
   // The pick alone must not reach the queries -- that is the point of the
   // pattern -- so it is asserted before the apply as well as after.
   show("reports");
-  const user = userEvent.setup();
+  const user = setupUser();
   await user.click(screen.getByRole("button", { name: /Filters/ }));
   // The picker labels routes by display name, not code: "1 Coast" is 101 and
   // "9 Coast" is 999 (short name + long name, per routeDisplayName).
@@ -104,14 +126,14 @@ it("saved analyses stay agency-scoped and open with their original filters", asy
   show("reports", "&view=saved");
   expect(screen.queryByText("Other agency")).toBeNull();
   expect(screen.getByRole("link", { name: "Coast mornings" }).getAttribute("href")).toContain("compare=1");
-  await userEvent.setup().click(screen.getByRole("button", { name: "Delete: Coast mornings" }));
+  await setupUser().click(screen.getByRole("button", { name: "Delete: Coast mornings" }));
   expect(readAnalyses()).toHaveLength(1);
   expect(readAnalyses()[0].agencyId).toBe(8);
 });
 
 it("the header export menu's CSV item exports the report data, not just the filter-metadata prefix", async () => {
   show("reports");
-  const user = userEvent.setup();
+  const user = setupUser();
   // The trend and ranking sections each export just their own dataset
   // ("changing keito scopes both report queries and CSV to the selected
   // code" covers those); only the header ExportMenu's CSV item combines both.
@@ -128,7 +150,7 @@ it("defers the analysis filters until Apply instead of querying mid-selection", 
   // step dropped it into its empty state mid-selection. The selection must
   // therefore not reach the shape query until Apply.
   show("route-analysis");
-  const user = userEvent.setup();
+  const user = setupUser();
   // The tab calls useRouteShape twice per render -- once for the period and
   // once for the comparison window, which passes null while compare is off --
   // so the last non-null argument is the route actually being requested.
@@ -146,7 +168,7 @@ it("defers the analysis filters until Apply instead of querying mid-selection", 
 
 it("keeps the route map mounted across tab switches instead of recreating its WebGL context", async () => {
   show("route-analysis");
-  const user = userEvent.setup();
+  const user = setupUser();
   await user.click(screen.getByRole("tab", { name: "Map" }));
   // The map is a lazy chunk behind a Suspense boundary, so its first mount
   // lands a tick after the click that reveals it.
@@ -163,6 +185,6 @@ it("keeps the route map mounted across tab switches instead of recreating its We
 
 it("gives the route map a real height rather than leaving it at the collapsed default", async () => {
   show("route-analysis");
-  await userEvent.setup().click(screen.getByRole("tab", { name: "Map" }));
+  await setupUser().click(screen.getByRole("tab", { name: "Map" }));
   await waitFor(() => expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ height: 420 })));
 });

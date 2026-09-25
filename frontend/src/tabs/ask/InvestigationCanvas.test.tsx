@@ -72,4 +72,22 @@ describe("investigation canvas", () => {
     rerender(<InvestigationCanvas agencyId={9} messages={[...messages, message(5, "user", "Weekends?")]} formatRoute={formatRoute} />);
     expect(screen.getByRole("button", { name: "3. Weekends?" })).toHaveAttribute("aria-current", "step");
   });
+
+  it("replaces the native title on the heading and step nav with a keyboard-reachable Tooltip", () => {
+    renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute} />);
+    const heading = screen.getByRole("heading", { name: "Evening?" });
+    expect(heading).not.toHaveAttribute("title");
+    fireEvent.focusIn(heading);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Evening?");
+    fireEvent.focusOut(heading);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/Investigation steps ·/));
+    const step = screen.getByRole("button", { name: "1. Morning?" });
+    expect(step).not.toHaveAttribute("title");
+    fireEvent.focusIn(step);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Morning?");
+    fireEvent.focusOut(step);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
 });
