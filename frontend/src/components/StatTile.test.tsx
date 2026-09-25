@@ -1,8 +1,17 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StatTile } from "./StatTile";
+import { stubReducedMotion } from "../test/reducedMotion";
 
 describe("StatTile", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders the label and value", () => {
     render(<StatTile label="観測便" value="3" />);
     expect(screen.getByText("観測便")).toBeInTheDocument();

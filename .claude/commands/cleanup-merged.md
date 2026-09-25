@@ -13,12 +13,10 @@ Run the standard post-merge cleanup. Local cleanup is the default. Optional argu
 
 1. Record `git status --porcelain`, the current branch, and `git worktree list
    --porcelain`. Path names may be shown; never print credential-file contents.
-2. A dirty worktree is never deleted. `NEXT_TASK.md` may remain untracked in the
-   persistent checkout; preserve it exactly.
+2. A dirty worktree is never deleted.
 3. If the current branch is not `main`, query its exact head with `gh pr list --head
    <branch> --state all`. Switch the persistent checkout to `main` only when its PR is
-   `MERGED`, no open PR exists, and the checkout has no changes except the preserved
-   `NEXT_TASK.md`. Otherwise leave the current branch checked out and continue; the
+   `MERGED`, no open PR exists, and the checkout has no changes. Otherwise leave the current branch checked out and continue; the
    cleanup script will retain it.
 
 ## 2. Sync the base without rewriting work
@@ -26,7 +24,7 @@ Run the standard post-merge cleanup. Local cleanup is the default. Optional argu
 1. Run `git fetch --prune origin`.
 2. Compare `main...origin/main`. If local `main` is ahead, stop: those commits need
    human inspection. If `main` is checked out in a worktree, require that worktree to
-   be clean except for `NEXT_TASK.md`, then fast-forward it with `git merge --ff-only
+   be clean, then fast-forward it with `git merge --ff-only
    origin/main`. If it is not checked out, advance the ref only when it is strictly
    behind `origin/main`.
 3. Do not sync `production`; it is a deliberate deployment-promotion branch.

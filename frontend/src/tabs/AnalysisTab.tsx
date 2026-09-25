@@ -24,12 +24,13 @@ import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
 import { formatNumber } from "../utils/format";
+import { serviceValueLabel } from "../utils/filterValueLabels";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
-import { th, td } from "../components/tableStyles";
+import { SHARED_TABLE, th, td } from "../components/tableStyles";
 import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
@@ -208,7 +209,7 @@ export function AnalysisTab() {
                       padding: 12,
                       marginTop: 8,
                       whiteSpace: "pre-wrap",
-                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                      fontFamily: "var(--font-mono)",
                       fontSize: 12,
                       lineHeight: 1.6,
                       maxWidth: 920,
@@ -298,11 +299,11 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <table style={SHARED_TABLE}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
             <th style={th({ width: 40 })}>#</th>
-            <th style={th()}>{t("reports.col.route")}</th>
+            <th style={th()}>{t("common.route")}</th>
             <th style={th()}>{t("reports.col.service")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_avg")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p50")}</th>
@@ -319,7 +320,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
             <tr key={`${r.route_code}-${r.service_type ?? ""}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td(), color: "var(--text-tertiary)", textAlign: "right" }}>{i + 1}</td>
               <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
-              <td style={td()}>{r.service_type ? t(`common.service_value.${r.service_type}`, { defaultValue: r.service_type }) : "—"}</td>
+              <td style={td()}>{r.service_type ? serviceValueLabel(r.service_type, t) : "—"}</td>
               <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_avg_sec)}</td>
               <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_p50_sec)}</td>
               <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_p90_sec)}</td>

@@ -113,7 +113,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
                 display: "block",
                 width: "100%",
                 background: opt.value === value ? "var(--accent-soft, rgba(74,138,170,0.12))" : "transparent",
-                color: opt.value === value ? "var(--accent)" : "var(--text-primary)",
+                color: opt.value === value ? "var(--accent-strong)" : "var(--text-primary)",
                 border: "none",
                 borderRadius: 4,
                 padding: "5px 10px",

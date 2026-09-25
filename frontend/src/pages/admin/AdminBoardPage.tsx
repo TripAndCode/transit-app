@@ -32,7 +32,7 @@ const CELL_STYLES: Record<BoardFreshnessDay["state"], React.CSSProperties> = {
 const STATUS_COLORS: Record<BoardCollector["status"], string> = {
   ok: "var(--accent)",
   warn: "var(--color-warning, #C99A2E)",
-  down: "var(--color-danger, #c0392b)",
+  down: "var(--delay-severe)",
   unknown: "var(--text-tertiary)",
 };
 
@@ -260,7 +260,7 @@ export function AdminBoardPage() {
       </Modal>
 
       {trigger.error != null && (
-        <p role="alert" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-warning, #C99A2E)" }}>
+        <p role="alert" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-warning-text, #89691F)" }}>
           {t("admin.board.reanalyze_error")}
         </p>
       )}
@@ -275,7 +275,7 @@ export function AdminBoardPage() {
 
       <section aria-label={t("admin.board.collectors_title")}>
         {isPending ? (
-          <SkeletonKpiRow tiles={4} />
+          <SkeletonKpiRow tiles={3} />
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
             {collectors.map((collector) => (

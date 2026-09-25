@@ -8,7 +8,7 @@ import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { PageHeader } from "../components/ui/PageHeader";
-import { delayColor } from "../styles/tokens";
+import { delayColor, delayTextColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { formatNumber } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
@@ -63,10 +63,10 @@ function ScheduleVersionTooltip({
  *  refetches. */
 function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
   const { t } = useTranslation();
-  const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1 });
+  const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1, entrance: false });
   if (avgDelayMin == null) return <>—</>;
   return (
-    <span style={{ color: delayColor(avgDelayMin) }}>
+    <span style={{ color: delayTextColor(avgDelayMin) }}>
       {avgDelayMin >= 0 ? "+" : ""}
       {displayed.toFixed(1)}
       <span className="network-row__unit">{t("network.delay_unit")}</span>
@@ -177,7 +177,17 @@ function AgencyRow({
             {a.clamp_pct.toFixed(2)}%
           </span>
         )}
-        {a.is_stale && <span className="network-row__stale" title={t("network.help_freshness")}>{t("network.stale_badge")}</span>}
+        {a.is_stale && (
+          <Tooltip label={t("network.help_freshness")}>
+            <span
+              className="network-row__stale"
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain badge, not a control; keyboard-focusable only so the tooltip explaining staleness is reachable
+              tabIndex={0}
+            >
+              {t("network.stale_badge")}
+            </span>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

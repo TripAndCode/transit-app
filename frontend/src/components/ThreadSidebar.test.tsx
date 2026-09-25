@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ThreadSidebar } from "./ThreadSidebar";
@@ -48,6 +48,15 @@ describe("ThreadSidebar", () => {
     expect(screen.getByRole("status")).toHaveTextContent("No matching investigations");
     fireEvent.change(search, { target: { value: "" } });
     expect(screen.getByText("Evening service")).toBeInTheDocument();
+  });
+  it("summarises a conversation's day filter with the shared day label", () => {
+    mockConversations([
+      conv({ title: "Weekend delays", filter_ctx: { dow: "weekend" } }),
+      conv({ conversation_id: "c2", title: "Weekday delays", filter_ctx: { dow: "weekday" } }),
+    ]);
+    render();
+    expect(screen.getByText(/Weekend\/Holiday/)).toBeInTheDocument();
+    expect(screen.getByText(/Weekday$/)).toBeInTheDocument();
   });
   it("shows the empty state when there are no conversations", () => {
     mockConversations([]);
@@ -131,6 +140,68 @@ describe("ThreadSidebar", () => {
   });
 
   describe("context menu", () => {
+    it("is a menu of menuitems and takes focus when it opens", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      fireEvent.click(screen.getByRole("button", { name: "More options" }));
+      const menu = screen.getByRole("menu");
+      const items = within(menu).getAllByRole("menuitem");
+      expect(items.map((i) => i.textContent)).toEqual(["Rename", "Pin", "Delete"]);
+      expect(items[0]).toHaveFocus();
+    });
+
+    it("walks its items with the arrow keys, wrapping at both ends", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      fireEvent.click(screen.getByRole("button", { name: "More options" }));
+      const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+
+      fireEvent.keyDown(items[0], { key: "ArrowDown" });
+      expect(items[1]).toHaveFocus();
+      fireEvent.keyDown(items[1], { key: "ArrowUp" });
+      expect(items[0]).toHaveFocus();
+      fireEvent.keyDown(items[0], { key: "ArrowUp" });
+      expect(items[2]).toHaveFocus();
+      fireEvent.keyDown(items[2], { key: "ArrowDown" });
+      expect(items[0]).toHaveFocus();
+    });
+
+    it("returns focus to the control that opened it when Escape closes it", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      fireEvent.click(kebab);
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(kebab).toHaveFocus();
+    });
+
+    it("returns focus to the control that opened it when an item is chosen", () => {
+      // Choosing an item unmounts the menuitem that had focus. Escape is not
+      // the only exit that has to put the operator back on the kebab.
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      fireEvent.click(kebab);
+      const pin = within(screen.getByRole("menu"))
+        .getAllByRole("menuitem")
+        .find((item) => /pin/i.test(item.textContent ?? ""))!;
+
+      fireEvent.click(pin);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(kebab).toHaveFocus();
+    });
+
+    it("styles its items by class rather than by mutating inline style on hover", () => {
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      fireEvent.click(screen.getByRole("button", { name: "More options" }));
+      const item = within(screen.getByRole("menu")).getAllByRole("menuitem")[0];
+      expect(item).toHaveClass("context-menu__item");
+      fireEvent.mouseEnter(item);
+      expect(item.style.background).toBe("");
+    });
+
     it("closes on Escape", () => {
       mockConversations([conv({ title: "Morning delays" })]);
       render();

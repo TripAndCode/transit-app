@@ -422,7 +422,7 @@ export function CommandPalette() {
               <kbd className="cmdp-kbd">↵</kbd> {t("palette.footer.select")}
             </span>
             <span>
-              <kbd className="cmdp-kbd">esc</kbd> {t("palette.footer.close")}
+              <kbd className="cmdp-kbd">esc</kbd> {t("common.close")}
             </span>
           </div>
       </OverlayBase>

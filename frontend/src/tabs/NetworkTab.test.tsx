@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
+import { stubReducedMotion } from "../test/reducedMotion";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
 import { ApiError } from "../api/client";
@@ -41,7 +42,14 @@ function renderTab(agencyId = "1") {
 }
 
 describe("NetworkTab", () => {
-  beforeEach(async () => await i18n.changeLanguage("en"));
+  beforeEach(async () => {
+    stubReducedMotion();
+    await i18n.changeLanguage("en");
+  });
+  // One test below switches to Japanese to check the locale-aware separator;
+  // restore English so later test files in this run don't inherit "ja" as
+  // their starting locale.
+  afterAll(async () => await i18n.changeLanguage("en"));
 
   it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
@@ -62,7 +70,15 @@ describe("NetworkTab", () => {
     expect(screen.getByText(/\+10\.0/)).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument(); // Hiroden's on-time %
     expect(screen.getByText("10.00%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
-    expect(screen.getByText("Behind")).toBeInTheDocument();
+    const staleBadge = screen.getByText("Behind");
+    expect(staleBadge).toBeInTheDocument();
+    // Native title= was replaced by the shared, keyboard-reachable Tooltip.
+    expect(staleBadge).not.toHaveAttribute("title");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.focusIn(staleBadge);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(/haven't caught up yet/);
+    fireEvent.focusOut(staleBadge);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
     // clamp dot boundary: present only for HiroBus (10%), absent for
     // Hiroden (0.14 < 1) and Aomori (null) — no secondary line at all for

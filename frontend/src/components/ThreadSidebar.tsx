@@ -15,6 +15,8 @@ import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
 import { Z_INDEX } from "../styles/zIndex";
 import { FILTER_SEPARATOR } from "../utils/format";
+import { dowValueLabel } from "../utils/filterValueLabels";
+import { menuItems, nextMenuItem } from "./menuKeys";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -40,10 +42,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
   if (range) parts.push(range);
 
   // Day-of-week
-  if (fc.dow && fc.dow !== "all") {
-    const dowKey = fc.dow === "weekday" ? "filters.dow.weekday" : "filters.dow.weekend";
-    parts.push(t(dowKey));
-  }
+  if (fc.dow && fc.dow !== "all") parts.push(dowValueLabel(fc.dow, t));
 
   // Time band
   if (fc.time_band && fc.time_band !== "all") {
@@ -83,6 +82,9 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  // The control the menu was opened from, so Escape can hand focus back to
+  // it instead of dropping the keyboard user at the top of the document.
+  const menuTriggerRef = useRef<HTMLElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   // Close menu on outside click
@@ -97,14 +99,31 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     return () => document.removeEventListener("mousedown", handleClick);
   }, [menu]);
 
+  /** Every way out of the menu goes through here. Choosing an item unmounts
+   *  the menuitem that had focus, so without this the keyboard user is left
+   *  on `<body>` -- Escape is not the only exit that has to put them back. */
+  function closeMenu() {
+    setMenu(null);
+    menuTriggerRef.current?.focus();
+  }
+
   // Close menu on Escape.
   useEffect(() => {
     if (!menu) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setMenu(null);
+      if (e.key !== "Escape") return;
+      closeMenu();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [menu]);
+
+  // Focus enters the menu as it opens: an operator who reached the kebab by
+  // keyboard must not have to Tab through the rest of the sidebar to get to
+  // the items it just put in front of them.
+  useEffect(() => {
+    if (!menu) return;
+    menuItems(menuRef.current)[0]?.focus();
   }, [menu]);
 
   // Clamp the menu to the viewport once its real size is known -- its
@@ -134,8 +153,17 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   function openMenu(e: ReactMouseEvent<HTMLElement>, convId: string) {
     e.preventDefault();
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const trigger = e.currentTarget as HTMLElement;
+    menuTriggerRef.current = trigger;
+    const rect = trigger.getBoundingClientRect();
     setMenu({ convId, x: rect.right, y: rect.top });
+  }
+
+  function onMenuKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const target = nextMenuItem(menuItems(menuRef.current), document.activeElement, e.key);
+    if (!target) return;
+    e.preventDefault();
+    target.focus();
   }
 
   function handleRename(conv: Conversation) {
@@ -154,12 +182,12 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   }
 
   function handleTogglePin(conv: Conversation) {
-    setMenu(null);
+    closeMenu();
     updateConv.mutate({ id: conv.conversation_id, patch: { pinned: !conv.pinned } });
   }
 
   function handleDelete(conv: Conversation) {
-    setMenu(null);
+    closeMenu();
     if (window.confirm(t("ask.sidebar.delete_confirm"))) {
       deleteConv.mutate(conv.conversation_id);
       if (activeId === conv.conversation_id) onSelect(null);
@@ -295,6 +323,20 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const contextMenu = menu && activeConv && (
     <div
       ref={menuRef}
+      role="menu"
+      aria-label={t("ask.sidebar.more_options_aria")}
+      // Programmatically focusable only: the container is never a tab stop,
+      // but it owns the arrow-key handling for the items inside it.
+      tabIndex={-1}
+      onKeyDown={onMenuKeyDown}
+      // Tab past the last item and the menu is gone. Escape and an outside
+      // click already close it, but neither fires when focus simply walks off
+      // the end, leaving a mounted `role="menu"` behind the user.
+      onBlur={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && menuRef.current?.contains(next)) return;
+        setMenu(null);
+      }}
       style={{
         position: "fixed",
         top: menu.y,
@@ -506,29 +548,16 @@ type ContextMenuItemProps = {
   danger?: boolean;
 };
 
+/** Highlight comes from `:hover, :focus-visible` on the class, not from
+ *  writing `style.background` on the node: a mouse-only hover handler leaves
+ *  the keyboard-focused item looking identical to the rest of the menu. */
 function ContextMenuItem({ label, onClick, danger }: ContextMenuItemProps) {
   return (
     <button
       type="button"
+      role="menuitem"
+      className={danger ? "context-menu__item context-menu__item--danger" : "context-menu__item"}
       onClick={onClick}
-      style={{
-        display: "block",
-        width: "100%",
-        textAlign: "left",
-        background: "none",
-        border: "none",
-        padding: "7px var(--space-4)",
-        fontSize: 13,
-        cursor: "pointer",
-        color: danger ? "var(--color-danger)" : "var(--text-primary)",
-        transition: "background var(--transition)",
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "none";
-      }}
     >
       {label}
     </button>

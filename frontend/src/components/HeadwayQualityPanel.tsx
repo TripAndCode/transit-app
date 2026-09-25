@@ -14,7 +14,7 @@ import { useRouteNames } from "../api/useRouteNames";
 import type { RangeCtx } from "../api/rangeContext";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
-import { th, td } from "./tableStyles";
+import { SHARED_TABLE, th, td } from "./tableStyles";
 import { formatNumber, fmtRatioPct } from "../utils/format";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
@@ -44,10 +44,10 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }
       )}
       {data && data.rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={SHARED_TABLE}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
-                <th style={th({ align: "left" })}>{t("reports.headway_quality.col.route")}</th>
+                <th style={th({ align: "left" })}>{t("common.route")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.ewt")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.cov")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.long_gap_rate")}</th>

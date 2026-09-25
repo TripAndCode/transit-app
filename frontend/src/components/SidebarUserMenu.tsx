@@ -39,7 +39,7 @@ const popItemStyle: CSSProperties = {
  *  currently resolves to the same theme they could pick explicitly. */
 const selectedItemStyle: CSSProperties = {
   ...popItemStyle,
-  color: "var(--accent)",
+  color: "var(--accent-strong)",
   background: "var(--accent-soft)",
 };
 
@@ -190,7 +190,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             borderRadius: "50%",
             flexShrink: 0,
             background: "var(--accent-soft)",
-            color: "var(--accent)",
+            color: "var(--accent-strong)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",

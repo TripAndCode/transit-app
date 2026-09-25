@@ -65,52 +65,36 @@ identical math on both tables) and `samples` (an exact count, identical on
 both tables) are checked.
 
 Skips by default (needs `RUN_CH_INTEGRATION=1`, a built SPA, and a real
-Chromium — the same tier as `tests/i18n_coverage_test.py`, which this
-module's `app_server`/`_free_port` fixtures are adapted from):
+Chromium — the same tier as `tests/i18n_coverage_test.py`, whose
+`app_server` fixture shares `tests.fixtures.uvicorn_server` with this one):
 
-    cd frontend && npm run build   # api/static/index.html must exist
+    cd frontend && npm run build   # writes frontend/dist, not api/static
+    make bake                      # api/static/index.html must exist
     DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \\
       RUN_CH_INTEGRATION=1 RUN_DASHBOARD_E2E_SCAN=1 \\
       CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8124 \\
       CLICKHOUSE_USER=transit CLICKHOUSE_PASSWORD=transit CLICKHOUSE_DATABASE=transit_test \\
       poetry run pytest tests/dashboard_synthetic_display_test.py -v
 
-Verify item 22's own "not a vacuous pass" requirement by temporarily
+Confirm this is not a vacuous pass by temporarily
 swapping/corrupting one delay value in one of
 `tests.fixtures.synthetic_gtfs`'s pattern builders (or monkeypatching one
 `expected["agg_route_stats"]["avg_min"]` in a scratch copy) and confirming
 this test goes red, then reverting and confirming it's green again — see
 `tests/unit/test_dashboard_value_check.py` for a fast, offline, always-run
 version of the same corruption check against the pure comparison helper.
-
-Provisioning history, kept for context: the implementing session could not
-launch this test at all (no `poetry install`/`npm install` in its Bash
-allowlist, and `frontend/node_modules` was missing the `mermaid` package),
-so every selector/query-param/column-index/rounding rule above was traced by
-hand against source instead. A later, fully-provisioned interactive session
-closed that gap for real: built the SPA, installed Playwright's Chromium,
-and ran the command block above against the live throwaway Postgres/
-ClickHouse stack — both tests passed, and the corruption check above was
-performed for real (temporarily forced `uniform_delays`'s `avg_min` from 0.5
-to 99.9 in `tests/fixtures/synthetic_gtfs.py`, confirmed both tests failed
-with a clear mismatch message, then reverted and reconfirmed green). See
-`docs/refactor-log.md` for the full command line and output summary.
 """
 
 from __future__ import annotations
 
 import os
-import socket
-import subprocess
-import sys
-import time
-import urllib.request
 from pathlib import Path
 
 import pytest
 
 from tests.fixtures.dashboard_value_check import assert_avg_min_matches, assert_samples_matches
 from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, SyntheticPattern, run_pattern
+from tests.fixtures.uvicorn_server import start_uvicorn
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_DASHBOARD_E2E_SCAN") != "1",
@@ -127,13 +111,6 @@ except ImportError:
     )
 
 _STATIC_INDEX = Path("api/static/index.html")
-
-
-def _free_port() -> int:
-    """Bind to port 0 and return the OS-assigned port number."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 @pytest.fixture
@@ -161,48 +138,22 @@ def app_server():
     CLICKHOUSE_* read straight from the environment — see this module's
     docstring for the full required env block). Requires
     `api/static/index.html` to exist (build the SPA first); skips with a
-    clear message if not. Adapted from `tests/i18n_coverage_test.py`'s
-    identical-shape fixture, including its `scope="module"` — this module's
+    clear message if not. Module-scoped like `tests/i18n_coverage_test.py`'s
+    fixture of the same shape — this module's
     two test functions don't need a fresh server per test (neither depends
     on any per-test DB-isolation fixture), so module scope halves the
     subprocess boot/health-poll/teardown cost instead of paying it twice.
     """
     static_index = Path(__file__).parent.parent / _STATIC_INDEX
     if not static_index.exists():
-        pytest.skip(f"SPA not built — {_STATIC_INDEX} is missing. Run `cd frontend && npm run build` first.")
+        pytest.skip(
+            f"SPA not built — {_STATIC_INDEX} is missing. Run "
+            "`cd frontend && npm run build && cd .. && make bake` first (the build "
+            "alone writes frontend/dist; bake is what fills api/static)."
+        )
 
-    port = _free_port()
-    proc = subprocess.Popen(
-        # Not `poetry run`: it resolves its venv by cwd, so from a worktree it
-        # starts an interpreter without the project and this fixture reports a
-        # 30s startup timeout instead of the real cause.
-        [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port), "--no-access-log"],
-        env={**os.environ},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    deadline = time.time() + 30
-    started = False
-    while time.time() < deadline:
-        try:
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)
-            started = True
-            break
-        except Exception:
-            time.sleep(0.5)
-
-    if not started:
-        proc.kill()
-        pytest.fail("API server did not start within 30 seconds.")
-
-    yield f"http://127.0.0.1:{port}"
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    with start_uvicorn() as base_url:
+        yield base_url
 
 
 @pytest.fixture(scope="module")
@@ -227,10 +178,19 @@ def test_overview_headline_matches_synthetic_ground_truth(seeded_agencies, app_s
     page = browser.new_page()
     try:
         for name, (agency_id, pattern) in seeded_agencies.items():
-            url = f"{base}/agencies/{agency_id}/overview?from={pattern.date}&to={pattern.date}"
+            # `period-overview`, not `overview`: the latter is a compatibility
+            # redirect to Operations (main.tsx), which renders no hero row, so
+            # scraping it waits for an element that will never appear.
+            url = f"{base}/agencies/{agency_id}/period-overview?from={pattern.date}&to={pattern.date}"
             page.goto(url, wait_until="networkidle", timeout=30_000)
-            page.wait_for_selector(".ov-kpi-row .ov-kpi-tile", timeout=15_000)
-            cell_text = page.locator(".ov-kpi-row .ov-kpi-tile").first.locator(".ov-kpi-value").inner_text()
+            # Anchored on the value element itself, not the layout wrappers
+            # around it: `.ov-kpi-value` is the class the rendered number is
+            # addressed by (OverviewHeroRow.tsx), while the row/figure
+            # containers are presentation and get restructured. `inner_text`
+            # includes the unit span nested inside it, which
+            # extract_leading_number is built to tolerate.
+            page.wait_for_selector(".ov-kpi-value", timeout=15_000)
+            cell_text = page.locator(".ov-kpi-value").first.inner_text()
             assert_avg_min_matches(
                 cell_text,
                 pattern.expected["agg_route_stats"]["avg_min"],
