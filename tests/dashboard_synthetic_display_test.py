@@ -65,8 +65,8 @@ identical math on both tables) and `samples` (an exact count, identical on
 both tables) are checked.
 
 Skips by default (needs `RUN_CH_INTEGRATION=1`, a built SPA, and a real
-Chromium — the same tier as `tests/i18n_coverage_test.py`, which this
-module's `app_server`/`_free_port` fixtures are adapted from):
+Chromium — the same tier as `tests/i18n_coverage_test.py`, whose
+`app_server` fixture shares `tests.fixtures.uvicorn_server` with this one):
 
     cd frontend && npm run build   # writes frontend/dist, not api/static
     make bake                      # api/static/index.html must exist
@@ -101,18 +101,13 @@ with a clear mismatch message, then reverted and reconfirmed green). See
 from __future__ import annotations
 
 import os
-import socket
-import subprocess
-import sys
-import tempfile
-import time
-import urllib.request
 from pathlib import Path
 
 import pytest
 
 from tests.fixtures.dashboard_value_check import assert_avg_min_matches, assert_samples_matches
 from tests.fixtures.synthetic_gtfs import ALL_PATTERNS, SyntheticPattern, run_pattern
+from tests.fixtures.uvicorn_server import start_uvicorn
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_DASHBOARD_E2E_SCAN") != "1",
@@ -129,13 +124,6 @@ except ImportError:
     )
 
 _STATIC_INDEX = Path("api/static/index.html")
-
-
-def _free_port() -> int:
-    """Bind to port 0 and return the OS-assigned port number."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 @pytest.fixture
@@ -163,8 +151,8 @@ def app_server():
     CLICKHOUSE_* read straight from the environment — see this module's
     docstring for the full required env block). Requires
     `api/static/index.html` to exist (build the SPA first); skips with a
-    clear message if not. Adapted from `tests/i18n_coverage_test.py`'s
-    identical-shape fixture, including its `scope="module"` — this module's
+    clear message if not. Module-scoped like `tests/i18n_coverage_test.py`'s
+    fixture of the same shape — this module's
     two test functions don't need a fresh server per test (neither depends
     on any per-test DB-isolation fixture), so module scope halves the
     subprocess boot/health-poll/teardown cost instead of paying it twice.
@@ -177,52 +165,8 @@ def app_server():
             "alone writes frontend/dist; bake is what fills api/static)."
         )
 
-    port = _free_port()
-    # Keep the server's output instead of discarding it: a startup that dies
-    # (a missing provider key, an unreachable DB) is otherwise indistinguishable
-    # from one that is merely slow, and both surface as the timeout below. A
-    # file, not a PIPE, so a chatty startup cannot fill the buffer and wedge;
-    # unnamed and closed on the way out because the runner this job uses is
-    # persistent, so a leaked temp file per run accumulates there forever.
-    with tempfile.TemporaryFile("w+") as log:
-        proc = subprocess.Popen(
-            # Not `poetry run`: it resolves its venv by cwd, so from a worktree it
-            # starts an interpreter without the project and this fixture reports a
-            # startup timeout instead of the real cause.
-            [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port), "--no-access-log"],
-            env={**os.environ},
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
-
-        # Generous because startup loads the sentence-transformers embedder, which
-        # dominates it: even with the model already in the HuggingFace cache it
-        # revalidates revisions over the network before loading, and on a cold
-        # cache it downloads the model first. A tight bound here fails as "server
-        # did not start" on a slow link or a loaded runner, pointing at the wrong
-        # thing entirely.
-        deadline = time.time() + 180
-        started = False
-        while time.time() < deadline:
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)
-                started = True
-                break
-            except Exception:
-                time.sleep(0.5)
-
-        if not started:
-            proc.kill()
-            log.seek(0)
-            pytest.fail(f"API server did not start within 180 seconds. Server output:\n{log.read()}")
-
-        yield f"http://127.0.0.1:{port}"
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    with start_uvicorn() as base_url:
+        yield base_url
 
 
 @pytest.fixture(scope="module")

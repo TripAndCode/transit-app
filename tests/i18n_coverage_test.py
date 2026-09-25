@@ -16,15 +16,11 @@ from __future__ import annotations
 
 import os
 import re
-import socket
-import subprocess
-import sys
-import tempfile
-import time
-import urllib.request
 from pathlib import Path
 
 import pytest
+
+from tests.fixtures.uvicorn_server import start_uvicorn
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_I18N_SCAN") != "1",
@@ -68,13 +64,6 @@ def _load_allowlist() -> set[str]:
     }
 
 
-def _free_port() -> int:
-    """Bind to port 0 and return the OS-assigned port number."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -96,52 +85,8 @@ def app_server():
             "then re-run with RUN_I18N_SCAN=1."
         )
 
-    port = _free_port()
-    # Keep the server's output instead of discarding it: a startup that dies
-    # (a missing provider key, an unreachable DB) is otherwise indistinguishable
-    # from one that is merely slow, and both surface as the timeout below. A
-    # file, not a PIPE, so a chatty startup cannot fill the buffer and wedge;
-    # unnamed and closed on the way out because the runner this job uses is
-    # persistent, so a leaked temp file per run accumulates there forever.
-    with tempfile.TemporaryFile("w+") as log:
-        proc = subprocess.Popen(
-            # Not `poetry run`: it resolves its venv by cwd, so from a worktree it
-            # starts an interpreter without the project and this fixture reports a
-            # startup timeout instead of the real cause.
-            [sys.executable, "-m", "uvicorn", "api.main:app", "--port", str(port), "--no-access-log"],
-            env={**os.environ, "ASK_INTENT_CACHE_ENABLED": "true"},
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
-
-        # Generous because ASK_INTENT_CACHE_ENABLED makes startup load the
-        # sentence-transformers embedder, which dominates it: even with the model
-        # already in the HuggingFace cache it revalidates revisions over the
-        # network before loading, and on a cold cache it downloads the model
-        # first. A tight bound here fails as "server did not start" on a slow
-        # link or a loaded runner, pointing at the wrong thing entirely.
-        deadline = time.time() + 180
-        started = False
-        while time.time() < deadline:
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)
-                started = True
-                break
-            except Exception:
-                time.sleep(0.5)
-
-        if not started:
-            proc.kill()
-            log.seek(0)
-            pytest.fail(f"API server did not start within 180 seconds. Server output:\n{log.read()}")
-
-        yield f"http://127.0.0.1:{port}"
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    with start_uvicorn({"ASK_INTENT_CACHE_ENABLED": "true"}) as base_url:
+        yield base_url
 
 
 # ---------------------------------------------------------------------------

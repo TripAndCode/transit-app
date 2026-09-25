@@ -157,20 +157,18 @@ jobs:
         if: always()
         run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
 
-  # `poetry install` everywhere else in CI deliberately skips the optional
-  # `embeddings` group (pyproject.toml: several GB of torch/transformers,
-  # unused until a RAG index exists, and `pipeline.query.embeddings.Embedder`
-  # already tolerates it being absent by falling through to the LLM-only
-  # path) -- so nothing in the push/PR-gated `ci.yml` ever proves the group
-  # still installs cleanly or that the model it pulls in still loads and
-  # embeds. A silent break here would surface only as Stage 2 of the Ask
-  # router quietly falling through to the LLM every time, in production. No
-  # database/API server needed, and no interaction with the `test_embeddings`
-  # RUN_SLOW gate in the python-extended job above (a separate, existing
-  # check on the same module) -- this is a standalone install/import/embed
-  # smoke test, scheduled here rather than on every push because both the
-  # `--with embeddings` install and the model download are minutes of extra
-  # runner time not worth paying on every change.
+  # The push/PR-gated `ci.yml` deliberately skips the optional `embeddings`
+  # group (pyproject.toml: several GB of torch/transformers, unused until a RAG
+  # index exists, and `pipeline.query.embeddings.Embedder` tolerates it being
+  # absent by falling through to the LLM-only path). The python-extended job
+  # above installs it for the RUN_SLOW `test_embeddings` gate, but on a
+  # persistent runner whose venv may already hold the group from an earlier
+  # install. This job is the clean-runner check: a fresh `--with embeddings`
+  # install, then import and embed, with no database or API server. A silent
+  # break here would otherwise surface only as Stage 2 of the Ask router
+  # quietly falling through to the LLM every time, in production. Scheduled
+  # here rather than on every push because the install and model download are
+  # minutes of extra runner time not worth paying on every change.
   embeddings-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
