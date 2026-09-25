@@ -79,9 +79,6 @@ export function ReportsHomeTab() {
         }}
       />}
     </header>
-    {/* aria-pressed, not the tabs pattern: these two buttons toggle which
-        report body is shown without the arrow-key roving focus a tablist
-        owns (see RouteAnalysisTab's sub-tabs for that). */}
     <div className="focus-tabs">{(["summary", "saved"] as const).map((v) => <button key={v} aria-pressed={view === v} onClick={() => { setSaved(readAnalyses()); setView(v); }}>{t(v === "saved" ? "savedAnalyses" : "summary")}</button>)}</div>
     {notice && <p role="status">{notice}</p>}
     {savedTab ? <section><p className="focus-muted">{t("localOnly")}</p>
