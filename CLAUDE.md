@@ -88,16 +88,15 @@ the task needs them.
 - Open PRs as drafts. Mark ready only after the required `/review-branch` pass
   is clean. Once ready and GitHub reports the PR mergeable/clean (no conflicts)
   AND CI is green on the PR's head AND `main` has not advanced since that pass
-  ran, it may be squash-merged
-  — by an interactive session or by `/vps-loop-run` itself — then run
-  `/cleanup-merged` to remove the now-stale branch/worktree. GitHub's
-  `mergeable`/`mergeStateStatus` alone does NOT catch a `main` that moved on
-  without a textual conflict (this repo has no branch-protection "must be
-  up to date" rule to surface that as `BEHIND`) — check the actual SHA. Either a
+  ran, it may be squash-merged — then run `/cleanup-merged` to remove the
+  now-stale branch/worktree. GitHub's `mergeable`/`mergeStateStatus` alone does
+  NOT catch a `main` that moved on without a textual conflict (this repo has no
+  branch-protection "must be up to date" rule to surface that as `BEHIND`) —
+  check the actual SHA. Either a
   `CONFLICTING`/`DIRTY` state or `main` having advanced at all requires the same
   fix: merge latest `main`, resolve any conflicts, and re-run the review pass
   on the result before readying or merging. Every PR body states `**Origin:**
-  Interactive session` or `**Origin:** Autonomous VPS loop (item N)`.
+  Interactive session`.
 - CI must be green on the PR's head before it merges. Branch commits carry no
   `[skip ci]`: every push to a PR runs CI, which is what the gate reads. Only
   the squash-merge commit keeps the trailer, so `main` does not re-run what the
@@ -147,39 +146,4 @@ the task needs them.
   of rows") is fine when it adds real intuition, a specific decaying number is not.
 - Do not commit a markdown file that is a log of a past dev/refactor session (dated
   entries, "found X, fixed Y", slice-by-slice narrative) as permanent repo content —
-  that belongs in the PR body or commit message, not a tracked file. `docs/refactor-
-  log.md` is the one deliberate exception: it is `/vps-loop-run`'s own required
-  operational trail (see `.claude/commands/vps-loop-run.md`), not free-standing dev
-  narration, and stays out of this rule.
-
-## Autonomous VPS loop
-
-- `/vps-loop-run` is the canonical state machine. `NEXT_TASK.md` is its untracked
-  input and status log; one run advances at most one item.
-- The loop may create worktrees, commit, push feature branches, open draft PRs,
-  mark its own PR ready, and squash-merge it under the full merge gate in
-  `## Git and pull requests` above (review pass clean, mergeable/clean, CI green
-  on the head, `main` unmoved since the pass; Step 5 gates this before Step 6
-  runs, and Step 6 re-checks the `main` SHA immediately before merging) — then
-  run `/cleanup-merged` to remove the now-stale branch/worktree. It never pushes
-  directly to `main` (only via a reviewed, merged PR), never force-pushes, and
-  never bypasses any part of that gate to force a merge through.
-- Shared hooks apply on the VPS. VPS-only permissions live in ignored
-  `.claude/settings.local.json` and must never be committed.
-- Operational setup, non-interactive-shell environment rules, and current timeout
-  limitations are documented in `.claude/README.md`, not repeated in every session.
-- For a `NEXT_TASK.md`-tracked backlog item, the VPS loop is the default place
-  that work happens, not an interactive session (this doesn't apply to ordinary
-  interactive feature work outside the backlog, e.g. work requested directly in
-  a session — see `## Git and pull requests` above). Prefer reporting status and
-  letting the next tick continue over fixing/finishing a stuck or blocked item
-  yourself; only take over in-progress worker state when explicitly asked to. A
-  specific ask to intervene ("if it stops, resolve it" / "fix the root cause")
-  authorizes that one intervention — not a chain into full interactive
-  development of everything downstream. After finishing the thing that was
-  actually asked for, check whether the loop's next tick can plausibly continue
-  from here; if so, stop and let it, rather than proactively continuing the
-  chain of related fixes yourself. (This is a session-discipline rule, not a
-  code-enforceable one, so it skips the usual skill-first promotion ladder in
-  `## Process rules` — there's no existing skill for session behavior to have
-  captured it in.)
+  that belongs in the PR body or commit message, not a tracked file.

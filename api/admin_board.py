@@ -35,8 +35,8 @@ _JST = ZoneInfo("Asia/Tokyo")
 
 #: Tile order on the board, reading left to right. Fixed here rather than
 #: taken from the collectors' own order so a collector that fails to run at
-#: all still holds its place instead of shifting the other three sideways.
-COLLECTOR_ORDER: tuple[str, ...] = ("oracle_crawler", "r2", "vps_loop", "github")
+#: all still holds its place instead of shifting the others sideways.
+COLLECTOR_ORDER: tuple[str, ...] = ("oracle_crawler", "r2", "github")
 
 #: Fallback display names. The UI prefers its own ``admin.board.collector.*``
 #: translations and falls back to these, so a collector added upstream before
@@ -44,7 +44,6 @@ COLLECTOR_ORDER: tuple[str, ...] = ("oracle_crawler", "r2", "vps_loop", "github"
 COLLECTOR_LABELS: Mapping[str, str] = {
     "oracle_crawler": "Oracle crawler",
     "r2": "R2 sync",
-    "vps_loop": "VPS loop",
     "github": "CI (GitHub)",
 }
 

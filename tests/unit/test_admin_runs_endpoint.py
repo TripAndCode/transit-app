@@ -167,7 +167,7 @@ def test_the_board_carries_todays_runs_so_one_poll_covers_the_whole_page():
 def test_a_board_whose_runs_table_is_missing_still_renders_every_other_section():
     body = _client(_Conn(runs_error=RuntimeError("no pipeline_runs"))).get("/api/admin/board").json()
     assert body["runs"] == []
-    assert len(body["collectors"]) == 4
+    assert len(body["collectors"]) == 3
 
 
 def test_triggering_a_run_opens_its_row_and_answers_202_with_that_id(scheduled, audited):

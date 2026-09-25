@@ -283,7 +283,7 @@ def test_validate_details_rejects_key_with_trailing_newline():
 
 def _status(**overrides):
     fields = dict(
-        component="vps_loop",
+        component="github",
         state="healthy",
         observed_at=T0,
         last_success_at=T0,
@@ -321,7 +321,7 @@ def test_validate_component_status_rejects_non_string_component_with_ops_status_
     # `TypeError` instead of the module's own `OpsStatusError` unless the type
     # is checked first, mirroring `validate_document`'s same guard.
     with pytest.raises(OpsStatusError, match="component must be a string"):
-        ops_status.validate_component_status(_status(component=["vps_loop"]))
+        ops_status.validate_component_status(_status(component=["github"]))
 
 
 def test_validate_component_status_rejects_unknown_state():
@@ -396,8 +396,8 @@ def test_validate_component_status_enforces_max_payload_size_even_when_details_p
         ops_status.validate_component_status(_status(details=details))
 
 
-def test_all_four_named_components_are_accepted():
-    for component in ("vps_loop", "github", "oracle_crawler", "r2"):
+def test_all_named_components_are_accepted():
+    for component in ("github", "oracle_crawler", "r2"):
         ops_status.validate_component_status(_status(component=component))
 
 
@@ -506,7 +506,7 @@ def test_validate_document_rejects_non_string_component_with_ops_status_error():
     # A list is unhashable, so `in COMPONENTS` (a frozenset) would raise a raw
     # `TypeError` instead of the module's own `OpsStatusError` unless the type
     # is checked first -- and `main()` only catches `OpsStatusError`.
-    document = _document(component=["vps_loop"])
+    document = _document(component=["github"])
     with pytest.raises(OpsStatusError, match="component must be a string"):
         ops_status.validate_document(document)
 
