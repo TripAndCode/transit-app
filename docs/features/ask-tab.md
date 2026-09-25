@@ -282,7 +282,12 @@ so it is a separate mechanism to build, not a knob to turn on.
    `"embedding"` instead of always falling to Stage 3:
    `poetry run python gtfs_pipeline.py build_rag_index --agency-id 1`
    (or `make build-rag-index` for all agencies). Without this,
-   `rag_chunks` is empty and Stage 2 never dispatches.
+   `rag_chunks` is empty and Stage 2 never dispatches. Every row is
+   stamped with `embedding_version` (`<model id>@<sentence-transformers
+   version>`); Stage 2 reads only rows matching the running embedder (plus
+   unstamped legacy rows) and logs a one-off "re-index required" warning
+   when other-version rows are present, so re-run the same command after
+   changing `EMBEDDING_MODEL_ID` or bumping the library's major.
 4. Open the app — the default route lands on Operations, the map
    (`/agencies/{id}/operations`; a fresh/remembered agency selection
    redirects there too). Click "Ask" in the sidebar to reach this tab.

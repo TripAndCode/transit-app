@@ -39,7 +39,7 @@ function renderSidebar(path = "/agencies/1/operations") {
 describe("Sidebar", () => {
   it("renders the five nav destinations, including Period overview and Network", () => {
     renderSidebar();
-    expect(screen.getByText("Overview")).toBeTruthy();
+    expect(screen.getByText("Operations")).toBeTruthy();
     expect(screen.getByText("Period overview")).toBeTruthy();
     expect(screen.getByText("Segment analysis")).toBeTruthy();
     expect(screen.getByText("Compare agencies")).toBeTruthy();
@@ -53,15 +53,15 @@ describe("Sidebar", () => {
     expect(screen.getByText("Ask")).toBeTruthy();
   });
 
-  it("folds the former Live view into Overview", () => {
+  it("folds the former Live view into Operations", () => {
     renderSidebar("/agencies/8/operations");
-    expect(screen.getByRole("link", { name: "Overview" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Operations" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /Latest observations/ })).toBeNull();
   });
 
-  it("points Overview at the current agency's operations route, preserving the filter query string", () => {
+  it("points Operations at the current agency's operations route, preserving the filter query string", () => {
     renderSidebar("/agencies/8/operations?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: "Overview" });
+    const link = screen.getByRole("link", { name: "Operations" });
     expect(link).toHaveAttribute("href", "/agencies/8/operations?from=2026-06-01&to=2026-06-07");
   });
 
@@ -77,7 +77,7 @@ describe("Sidebar", () => {
     expect(link.getAttribute("href")).toMatch(/^\/agencies\/8\/network/);
   });
 
-  it("does not render Overview outside any agency context", () => {
+  it("does not render Operations outside any agency context", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <I18nextProvider i18n={i18n}>
@@ -87,12 +87,12 @@ describe("Sidebar", () => {
         </I18nextProvider>
       </QueryClientProvider>
     );
-    expect(screen.queryByRole("link", { name: /Overview/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Operations/ })).toBeNull();
   });
 
   it("marks the current route's nav link as active", () => {
     renderSidebar("/agencies/1/operations");
-    const mapLink = screen.getByRole("link", { name: "Overview" });
+    const mapLink = screen.getByRole("link", { name: "Operations" });
     expect(mapLink.getAttribute("aria-current")).toBe("page");
   });
 
@@ -135,7 +135,7 @@ describe("Sidebar", () => {
     );
     expect(screen.getByText("Delay Dashboard")).toBeTruthy();
     expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
-    expect(screen.queryByText("Overview")).toBeNull();
+    expect(screen.queryByText("Operations")).toBeNull();
   });
 
   it("renders the dev-only PROTOTYPE section with all three state links", () => {
@@ -173,10 +173,10 @@ describe("Sidebar", () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-      expect(screen.queryByText("Overview")).toBeNull();
+      expect(screen.queryByText("Operations")).toBeNull();
       expect(screen.queryByText("What's happening right now")).toBeNull();
       expect(screen.queryByText("PROTOTYPE")).toBeNull();
-      expect(screen.getByRole("link", { name: "Overview" })).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Operations" })).toBeTruthy();
     });
 
     it("shows an expand toggle once collapsed, which restores the labels when clicked", async () => {
@@ -184,13 +184,13 @@ describe("Sidebar", () => {
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
-      expect(screen.getByText("Overview")).toBeTruthy();
+      expect(screen.getByText("Operations")).toBeTruthy();
     });
 
     it("persists the collapsed state to localStorage and restores it on remount", () => {
       localStorage.setItem("transit.sidebarCollapsed", "1");
       renderSidebar();
-      expect(screen.queryByText("Overview")).toBeNull();
+      expect(screen.queryByText("Operations")).toBeNull();
       expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
     });
 
@@ -226,7 +226,7 @@ describe("Sidebar", () => {
       // width. Conditionally rendering on isMobile means it's now absent
       // entirely on a wide viewport.
       expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
-      expect(screen.getAllByRole("link", { name: /Overview/ }).length).toBe(1);
+      expect(screen.getAllByRole("link", { name: /Operations/ }).length).toBe(1);
     });
 
     it("renders the bottom tab bar (no desktop rail) on a narrow viewport", () => {
@@ -251,18 +251,17 @@ describe("Sidebar", () => {
     it("renders the four destinations (three tabs plus Ask) as labelled links", () => {
       renderSidebar();
       const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-      expect(within(nav).getByRole("link", { name: /Overview/ })).toBeTruthy();
+      expect(within(nav).getByRole("link", { name: /Operations/ })).toBeTruthy();
       expect(within(nav).getByRole("link", { name: /Segment analysis/ })).toBeTruthy();
       expect(within(nav).getByRole("link", { name: /Reports/ })).toBeTruthy();
       expect(within(nav).getByRole("link", { name: /Ask/ })).toBeTruthy();
     });
 
     it("marks the active tab", () => {
-      // `operations` is where Overview lives; `/overview` only redirects
-      // there, so a tab never matches it.
+      // `/overview` only redirects to `operations`, so a tab never matches it.
       renderSidebar("/agencies/1/operations");
       const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-      expect(within(nav).getByRole("link", { name: /Overview/ })).toHaveAttribute("aria-current", "page");
+      expect(within(nav).getByRole("link", { name: /Operations/ })).toHaveAttribute("aria-current", "page");
     });
 
     it("does not render the four destinations outside any agency context", () => {
@@ -275,7 +274,7 @@ describe("Sidebar", () => {
           </I18nextProvider>
         </QueryClientProvider>
       );
-      expect(screen.queryByRole("link", { name: /Overview/ })).toBeNull();
+      expect(screen.queryByRole("link", { name: /Operations/ })).toBeNull();
       expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
     });
 
@@ -317,7 +316,7 @@ describe("Sidebar", () => {
       expect(await within(dialog).findByRole("button", { name: "Account menu" })).toBeTruthy();
       // The nav destinations already live in the tab bar underneath; the
       // sheet must not repeat them.
-      expect(within(dialog).queryByRole("link", { name: /Overview/ })).toBeNull();
+      expect(within(dialog).queryByRole("link", { name: /Operations/ })).toBeNull();
     });
 
     it("closes when the close button inside it is clicked", async () => {

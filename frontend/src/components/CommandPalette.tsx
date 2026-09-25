@@ -17,7 +17,9 @@ import { REPORT_TYPE_IDS, buildReportTypeLabels } from "../tabs/reportTypes";
 import { useTheme } from "../styles/useTheme";
 import { filterItems, type Searchable } from "./commandPaletteMatch";
 import { onActivateKey } from "../utils/a11y";
+import { modifierKeyLabel } from "../utils/platform";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
+import { GO_TO_TARGETS } from "./paletteNavTargets";
 import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
 import "./commandPalette.css";
@@ -25,20 +27,6 @@ import "./commandPalette.css";
 const RECENTS_KEY = "transit.commandPaletteRecents";
 const MAX_RECENTS = 8;
 const GO_CHORD_TIMEOUT_MS = 900;
-
-/** The four keyboard-reachable destinations, doubling as the palette's
- *  "移動" group and the `g` + letter chords. A separate table from
- *  Sidebar.tsx's SIDEBAR_NAV_ITEMS rather than reusing it directly: three of
- *  the four (all but "ask", which the sidebar renders as a distinct CTA, not
- *  a nav item) would still need a second, palette-only table for the chord
- *  key and search sublabel, so a from-scratch table of all four together is
- *  the simpler single source for this list specifically. */
-const GO_TO_TARGETS = [
-  { to: "operations", chordKey: "o", labelKey: "design:overview", sublabelKey: "design:live" },
-  { to: "route-analysis", chordKey: "a", labelKey: "design:analysis", sublabelKey: "design:investigate" },
-  { to: "reports", chordKey: "r", labelKey: "design:reports", sublabelKey: "design:summary" },
-  { to: "ask", chordKey: "q", labelKey: "nav.ask", sublabelKey: "palette.nav_ask_sublabel" },
-] as const;
 
 type PaletteGroup = "recent" | "nav" | "agency" | "route" | "report" | "timeband" | "action";
 
@@ -125,6 +113,27 @@ function buildReportItems(t: TFunction, agencyId: number | null, goToReport: (id
   }));
 }
 
+type PaletteRun = { group: PaletteGroup; entries: { item: PaletteItem; index: number }[] };
+
+/** Chunk `items` into consecutive same-group runs, keeping each entry's
+ *  original index into `items` — that index is the option's id suffix and
+ *  the value arrow-key navigation and `aria-activedescendant` track, so it
+ *  must survive the regrouping. A search query can interleave groups (items
+ *  are ranked by match score, not by group), so runs are not one per group
+ *  overall — the same group can recur in more than one run. */
+function groupIntoRuns(items: PaletteItem[]): PaletteRun[] {
+  const runs: PaletteRun[] = [];
+  items.forEach((item, index) => {
+    const last = runs[runs.length - 1];
+    if (last && last.group === item.group) {
+      last.entries.push({ item, index });
+    } else {
+      runs.push({ group: item.group, entries: [{ item, index }] });
+    }
+  });
+  return runs;
+}
+
 function buildTimeBandItems(t: TFunction, agencyId: number | null, goToTimeBand: (band: TimeBand) => void): PaletteItem[] {
   if (agencyId == null) return [];
   return buildTimeBandOptions(t)
@@ -183,7 +192,7 @@ export function CommandPalette() {
   }
 
   function goToAgency(id: number) {
-    navigate(`/agencies/${id}/${tabParam ?? "overview"}`);
+    navigate(`/agencies/${id}/${tabParam ?? "operations"}${ctxSuffix}`);
   }
 
   function goToRoute(code: string) {
@@ -210,7 +219,7 @@ export function CommandPalette() {
     id: `nav:${target.to}`,
     group: "nav",
     label: t(target.labelKey),
-    sublabel: t(target.sublabelKey),
+    sublabel: target.sublabelKey ? t(target.sublabelKey) : undefined,
     keys: ["g", target.chordKey],
     run: () => goToNav(target.to),
   }));
@@ -336,8 +345,6 @@ export function CommandPalette() {
     }
   }
 
-  let lastGroup: PaletteGroup | null = null;
-
   return (
     <>
       <OverlayBase
@@ -349,76 +356,80 @@ export function CommandPalette() {
         scrimZIndex={Z_INDEX.commandPalette}
         initialFocusRef={inputRef}
       >
-        <div className="cmdp-input-row">
-          <Search size={16} strokeWidth={1.75} aria-hidden="true" className="cmdp-input-icon" />
-          <input
-            ref={inputRef}
-            type="text"
-            className="cmdp-input"
-            value={query}
-            placeholder={t("palette.placeholder")}
-            autoComplete="off"
-            role="combobox"
-            aria-expanded="true"
-            aria-controls="cmdp-listbox"
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setActiveIndex(0);
-            }}
-            onKeyDown={onInputKeyDown}
-          />
-        </div>
-        <ul id="cmdp-listbox" className="cmdp-list" role="listbox">
-          {visibleItems.length === 0 && <li className="cmdp-empty">{t("palette.no_results")}</li>}
-          {visibleItems.map((item, index) => {
-            const showHeader = lastGroup !== item.group;
-            lastGroup = item.group;
-            return (
-              <li key={item.id}>
-                {showHeader && <div className="cmdp-group-label">{t(`palette.group.${item.group}`)}</div>}
-                <div
-                  role="option"
-                  aria-selected={index === activeIndex}
-                  className="cmdp-item"
-                  // Not in the Tab sequence (tabIndex={-1} + the overlay's
-                  // focus trap excludes it): the input owns keyboard focus
-                  // and arrow-key selection, matching the ARIA combobox
-                  // pattern. This is still a real activation target for a
-                  // screen reader user who navigates onto it directly.
-                  tabIndex={-1}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => runItem(item)}
-                  onKeyDown={onActivateKey(() => runItem(item))}
-                >
-                  <span className="cmdp-item-text">
-                    <span className="cmdp-item-label">{item.label}</span>
-                    {item.sublabel && <span className="cmdp-item-sublabel">{item.sublabel}</span>}
-                  </span>
-                  {item.keys && (
-                    <span className="cmdp-item-keys">
-                      {item.keys.map((k, i) => (
-                        <kbd key={i} className="cmdp-kbd">
-                          {k}
-                        </kbd>
-                      ))}
-                    </span>
-                  )}
+          <div className="cmdp-input-row">
+            <Search size={16} strokeWidth={1.75} aria-hidden="true" className="cmdp-input-icon" />
+            <input
+              ref={inputRef}
+              type="text"
+              className="cmdp-input"
+              value={query}
+              placeholder={t("palette.placeholder")}
+              autoComplete="off"
+              role="combobox"
+              aria-expanded="true"
+              aria-autocomplete="list"
+              aria-controls="cmdp-listbox"
+              aria-activedescendant={visibleItems.length > 0 ? `cmdp-option-${activeIndex}` : undefined}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setActiveIndex(0);
+              }}
+              onKeyDown={onInputKeyDown}
+            />
+          </div>
+          <div id="cmdp-listbox" className="cmdp-list" role="listbox">
+            {visibleItems.length === 0 && <div className="cmdp-empty">{t("palette.no_results")}</div>}
+            {groupIntoRuns(visibleItems).map((run) => (
+              <div key={`${run.group}-${run.entries[0].index}`} role="group" aria-label={t(`palette.group.${run.group}`)}>
+                <div className="cmdp-group-label" aria-hidden="true">
+                  {t(`palette.group.${run.group}`)}
                 </div>
-              </li>
-            );
-          })}
-        </ul>
-        <div className="cmdp-footer">
-          <span>
-            <kbd className="cmdp-kbd">↑↓</kbd> {t("palette.footer.navigate")}
-          </span>
-          <span>
-            <kbd className="cmdp-kbd">↵</kbd> {t("palette.footer.select")}
-          </span>
-          <span>
-            <kbd className="cmdp-kbd">esc</kbd> {t("palette.footer.close")}
-          </span>
-        </div>
+                {run.entries.map(({ item, index }) => (
+                  <div
+                    key={item.id}
+                    id={`cmdp-option-${index}`}
+                    role="option"
+                    aria-selected={index === activeIndex}
+                    className="cmdp-item"
+                    // Not in the Tab sequence (tabIndex={-1} + the overlay's
+                    // focus trap excludes it): the input owns keyboard focus
+                    // and arrow-key selection, matching the ARIA combobox
+                    // pattern. This is still a real activation target for a
+                    // screen reader user who navigates onto it directly.
+                    tabIndex={-1}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    onClick={() => runItem(item)}
+                    onKeyDown={onActivateKey(() => runItem(item))}
+                  >
+                    <span className="cmdp-item-text">
+                      <span className="cmdp-item-label">{item.label}</span>
+                      {item.sublabel && <span className="cmdp-item-sublabel">{item.sublabel}</span>}
+                    </span>
+                    {item.keys && (
+                      <span className="cmdp-item-keys">
+                        {item.keys.map((k, i) => (
+                          <kbd key={i} className="cmdp-kbd">
+                            {k}
+                          </kbd>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="cmdp-footer">
+            <span>
+              <kbd className="cmdp-kbd">↑↓</kbd> {t("palette.footer.navigate")}
+            </span>
+            <span>
+              <kbd className="cmdp-kbd">↵</kbd> {t("palette.footer.select")}
+            </span>
+            <span>
+              <kbd className="cmdp-kbd">esc</kbd> {t("palette.footer.close")}
+            </span>
+          </div>
       </OverlayBase>
       <OverlayBase
         open={sheetOpen}
@@ -428,43 +439,43 @@ export function CommandPalette() {
         scrimClassName="cmdp-overlay"
         scrimZIndex={Z_INDEX.commandPalette}
       >
-        <div className="cmdp-sheet-header">
-          <h2 className="cmdp-sheet-title">{t("palette.shortcuts.title")}</h2>
-          <button type="button" className="cmdp-sheet-close" onClick={() => setSheetOpen(false)} aria-label={t("common.close")}>
-            ×
-          </button>
-        </div>
-        <ul className="cmdp-sheet-list">
-          <li>
-            <span>{t("palette.shortcuts.open_palette")}</span>
-            <span className="cmdp-item-keys">
-              <kbd className="cmdp-kbd">⌘</kbd>
-              <kbd className="cmdp-kbd">K</kbd>
-            </span>
-          </li>
-          {GO_TO_TARGETS.map((target) => (
-            <li key={target.to}>
-              <span>{t("palette.shortcuts.go_to", { target: t(target.labelKey) })}</span>
+          <div className="cmdp-sheet-header">
+            <h2 className="cmdp-sheet-title">{t("palette.shortcuts.title")}</h2>
+            <button type="button" className="cmdp-sheet-close" onClick={() => setSheetOpen(false)} aria-label={t("common.close")}>
+              ×
+            </button>
+          </div>
+          <ul className="cmdp-sheet-list">
+            <li>
+              <span>{t("palette.shortcuts.open_palette")}</span>
               <span className="cmdp-item-keys">
-                <kbd className="cmdp-kbd">g</kbd>
-                <kbd className="cmdp-kbd">{target.chordKey}</kbd>
+                <kbd className="cmdp-kbd">{modifierKeyLabel()}</kbd>
+                <kbd className="cmdp-kbd">K</kbd>
               </span>
             </li>
-          ))}
-          <li>
-            <span>{t("palette.shortcuts.open_shortcuts")}</span>
-            <span className="cmdp-item-keys">
-              <kbd className="cmdp-kbd">?</kbd>
-            </span>
-          </li>
-          <li>
-            <span>{t("palette.shortcuts.extend_brush")}</span>
-            <span className="cmdp-item-keys">
-              <kbd className="cmdp-kbd">⇧</kbd>
-              <kbd className="cmdp-kbd">←/→</kbd>
-            </span>
-          </li>
-        </ul>
+            {GO_TO_TARGETS.map((target) => (
+              <li key={target.to}>
+                <span>{t("palette.shortcuts.go_to", { target: t(target.labelKey) })}</span>
+                <span className="cmdp-item-keys">
+                  <kbd className="cmdp-kbd">g</kbd>
+                  <kbd className="cmdp-kbd">{target.chordKey}</kbd>
+                </span>
+              </li>
+            ))}
+            <li>
+              <span>{t("palette.shortcuts.open_shortcuts")}</span>
+              <span className="cmdp-item-keys">
+                <kbd className="cmdp-kbd">?</kbd>
+              </span>
+            </li>
+            <li>
+              <span>{t("palette.shortcuts.extend_brush")}</span>
+              <span className="cmdp-item-keys">
+                <kbd className="cmdp-kbd">⇧</kbd>
+                <kbd className="cmdp-kbd">←/→</kbd>
+              </span>
+            </li>
+          </ul>
       </OverlayBase>
     </>
   );

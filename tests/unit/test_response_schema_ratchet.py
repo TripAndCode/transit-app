@@ -68,6 +68,7 @@ PENDING = {
 # instead of quietly rejoining the undescribed set PENDING is allowed to hold.
 # Grow this whenever an endpoint is promoted out of PENDING.
 TYPED = {
+    "DELETE /api/admin/flags/{key}",
     "GET /api/{agency_id}/delays/timeline",
     "GET /api/{agency_id}/today/route/{route_code}/trips",
 }

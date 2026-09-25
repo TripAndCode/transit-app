@@ -21,9 +21,13 @@ def _clear_compute_caches():
     has to be reset even here: its 30s TTL would otherwise leak a value
     resolved (or an env fallback taken) by one test into the next, since
     pytest runs the whole unit suite well inside that window.
-    """
-    from pipeline.flags import invalidate
 
-    invalidate()
+    `reset_cache()` rather than `invalidate()`: the latter keeps the entries
+    on purpose, and a synchronous reader is served them, so it does not give
+    the next test a clean slate.
+    """
+    from pipeline.flags import reset_cache
+
+    reset_cache()
     yield
-    invalidate()
+    reset_cache()

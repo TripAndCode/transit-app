@@ -42,7 +42,11 @@ playwright = "^1.60.0"
 optional = true
 
 [tool.poetry.group.embeddings.dependencies]
-sentence-transformers = ">=3,<7"
+# Pinned to the major the vectors in `rag_chunks` were built with: an embedder
+# change invalidates the whole index (see `pipeline.query.embeddings.
+# embedding_version`), so a major bump is a deliberate re-index, not a
+# resolver decision.
+sentence-transformers = "^6"
 
 [build-system]
 requires = ["poetry-core"]

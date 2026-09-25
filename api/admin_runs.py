@@ -91,7 +91,10 @@ def shape_run(row: Mapping[str, Any]) -> dict[str, Any]:
         "finished_at": _iso(row["finished_at"]),
         "status": row["status"],
         "rows": row["rows"],
-        "lock_wait_ms": row["lock_wait_ms"],
+        # The stored column is the cost of the non-blocking acquire attempt,
+        # not time spent queueing -- there is no queue. Published under a
+        # name that says so; the column keeps its historical one.
+        "lock_probe_ms": row["lock_wait_ms"],
         "error": row["error"],
         "requested_by": row["requested_by"],
     }
