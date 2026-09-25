@@ -156,7 +156,7 @@
   font-weight: 600;
 }
 .rp-opt-code {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-tertiary, #999);
 }

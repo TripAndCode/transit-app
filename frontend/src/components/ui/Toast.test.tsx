@@ -55,8 +55,13 @@ function renderHarness(onUndo?: () => void) {
 describe("Toast", () => {
   it("announces the message from a portal on document.body", () => {
     renderHarness();
-    const toast = screen.getByRole("status");
-    expect(toast).toHaveTextContent(MESSAGE);
+    // The live region is the message span, not the toast box around it, so
+    // the action button's label is never read as more of the message.
+    const message = screen.getByRole("status");
+    expect(message).toHaveTextContent(MESSAGE);
+    expect(message).toHaveClass("ui-toast__message");
+    const toast = message.parentElement as HTMLElement;
+    expect(toast).toHaveClass("ui-toast");
     const viewport = toast.parentElement as HTMLElement;
     expect(viewport).toHaveClass("ui-toast-viewport");
     expect(viewport.parentElement).toBe(document.body);

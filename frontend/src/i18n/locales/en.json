@@ -1070,7 +1070,13 @@
           "suspended": "Suspended {{count}}",
           "promoted": "Made {{count}} admin",
           "demoted": "Changed {{count}} to standard user"
-        }
+        },
+        "delete_title": "Delete the selected users?",
+        "delete_body": "{{count}} users will be anonymized. This cannot be undone."
+      },
+      "shortcut": {
+        "approve": "Approve AI access",
+        "search": "Jump to search"
       }
     },
     "user_detail": {
@@ -1318,7 +1324,15 @@
       "saved_views": "Saved views",
       "empty": "Nothing to show.",
       "select_all": "Select all",
-      "select_row": "Select {{label}}"
+      "select_row": "Select {{label}}",
+      "shortcuts": {
+        "trigger": "Shortcuts",
+        "title": "Keyboard shortcuts",
+        "next": "Next row",
+        "prev": "Previous row",
+        "select": "Toggle selection",
+        "open": "Open row"
+      }
     },
     "board": {
       "title": "Control board",
