@@ -294,7 +294,9 @@ export type PipelineRun = {
   finished_at: string | null;
   status: "running" | "ok" | "skipped" | "error";
   rows: number | null;
-  lock_wait_ms: number | null;
+  /** What the non-blocking lock acquire cost, for a run displaced by it. A
+   *  probe round trip, not time queued -- there is no queue. */
+  lock_probe_ms: number | null;
   error: string | null;
   requested_by: number | null;
 };

@@ -1,34 +1,49 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useEffectEvent, useRef, type RefObject } from "react";
 import { focusableIn } from "../utils/focusable";
 
 /**
- * Local focus-trap primitive for an overlay that has no shared `Modal` to
- * depend on yet: while `active`, focus moves into the container (its first
- * focusable descendant, or the container itself), Tab wraps between the
- * container's first and last focusable descendants, Escape invokes
- * `onEscape` instead of doing nothing, the page behind stops scrolling, and
- * focus returns to whatever was focused before activation once `active` goes
- * false again. The scroll lock belongs with the trap rather than with each
- * caller: an overlay that holds Tab inside itself but lets a wheel or a
- * touch-drag move the page underneath is the same escape by another input.
+ * The app's one focus-trap primitive, behind every surface that behaves like
+ * a dialog (`Modal`, the command palette, the map's full sheet, the mobile
+ * more-sheet). While `active`, focus moves into the container
+ * (`initialFocusRef` when given, else its first focusable descendant, else
+ * the container itself), Tab stays inside it, Escape invokes `onEscape`
+ * instead of doing nothing, the page behind stops scrolling, and focus
+ * returns to whatever was focused before activation once `active` goes false
+ * again. The scroll lock belongs with the trap rather than with each caller:
+ * an overlay that holds Tab inside itself but lets a wheel or a touch-drag
+ * move the page underneath is the same escape by another input.
  *
- * Distinct from a dismiss-on-Escape-only overlay (`SettingsDrawer`,
- * `PeakHourModal`): those never trap Tab, so a keyboard user can tab straight
- * through them into the page behind. This is for the one caller that
- * genuinely covers the screen while active.
+ * Tab also pulls focus back in from outside the container, not only at the
+ * container's own edges: focus that started outside -- a click on the page
+ * behind, or a container still hidden when the trap activated -- would
+ * otherwise tab on through the page with the overlay still up.
+ *
+ * Distinct from a dismiss-on-Escape-only popover (the filter popover, the
+ * export menu, the sidebar user menu): those deliberately never trap Tab,
+ * because they annotate the page rather than cover it, and tabbing out of
+ * one is a normal way to leave it. Trap only what a user is meant to finish
+ * or cancel before touching the page again.
  *
  * Only the topmost trap reacts to a keypress. Several can be active at once
- * -- the map's sheet at "full" while the tab bar's more-menu opens over it --
- * and each listens on `document`, where `stopPropagation` does not reach a
- * sibling listener on the same target. Without the stack, one Escape would
- * dismiss every open overlay at once instead of the one on top.
+ * -- the map's sheet at "full" while the tab bar's more-menu opens over it,
+ * a `Modal` over either -- and each listens on `document`, where
+ * `stopPropagation` does not reach a sibling listener on the same target.
+ * Without the stack, one Escape would dismiss every open overlay at once
+ * instead of the one on top.
+ *
+ * `onEscape` is read through an effect event so that a caller passing an
+ * inline closure does not re-run the trap on every render: re-running
+ * re-captures the restore target -- by then the trap's own panel -- and drags
+ * focus back to the panel's first control from wherever the user had moved it.
  */
 export function useFocusTrap(
   active: boolean,
   containerRef: RefObject<HTMLElement | null>,
   onEscape: () => void,
+  initialFocusRef?: RefObject<HTMLElement | null>,
 ): void {
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  const escape = useEffectEvent(() => onEscape());
 
   useEffect(() => {
     if (!active) return;
@@ -36,8 +51,8 @@ export function useFocusTrap(
     if (!container) return;
 
     previouslyFocused.current = document.activeElement as HTMLElement | null;
-    const [first] = focusableIn(container);
-    (first ?? container).focus();
+    const [firstOnActivate] = focusableIn(container);
+    (initialFocusRef?.current ?? firstOnActivate ?? container).focus();
 
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -49,7 +64,7 @@ export function useFocusTrap(
       if (ACTIVE_TRAPS[ACTIVE_TRAPS.length - 1] !== token) return;
       if (e.key === "Escape") {
         e.stopPropagation();
-        onEscape();
+        escape();
         return;
       }
       if (e.key !== "Tab" || !container) return;
@@ -60,10 +75,12 @@ export function useFocusTrap(
       }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
+      const focused = document.activeElement;
+      const outside = !container.contains(focused);
+      if (e.shiftKey && (outside || focused === first)) {
         e.preventDefault();
         last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
+      } else if (!e.shiftKey && (outside || focused === last)) {
         e.preventDefault();
         first.focus();
       }
@@ -77,8 +94,7 @@ export function useFocusTrap(
       document.body.style.overflow = prevOverflow;
       previouslyFocused.current?.focus();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- container identity, not a dep the effect should re-run for
-  }, [active, onEscape]);
+  }, [active, containerRef, initialFocusRef]);
 }
 
 /** Activation order, so the last entry is whichever trap is on top. Overlays

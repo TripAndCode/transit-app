@@ -14,7 +14,7 @@ export type RunBar = {
    *  which a solid bar of the same width would look exactly like. */
   dashed: boolean;
   rows: number | null;
-  lockWaitMs: number | null;
+  lockProbeMs: number | null;
   error: string | null;
 };
 
@@ -84,7 +84,7 @@ export function runsToBars(runs: readonly PipelineRun[], dayStart: Date, now: Da
       status: run.status,
       dashed: run.status === "skipped",
       rows: run.rows,
-      lockWaitMs: run.lock_wait_ms,
+      lockProbeMs: run.lock_probe_ms,
       error: run.error,
     });
     lanes.set(key, lane);
