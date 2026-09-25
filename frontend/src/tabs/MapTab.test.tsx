@@ -34,9 +34,9 @@ function mockCommonHooks() {
   });
 }
 
-function renderMap(agencyId = "1") {
+function renderMap(agencyId = "1", search = "") {
   renderWithProviders(
-    <MemoryRouter initialEntries={[`/agencies/${agencyId}/map`]}>
+    <MemoryRouter initialEntries={[`/agencies/${agencyId}/map${search}`]}>
       <Routes>
         <Route path="/agencies/:agencyId/map" element={<MapTab />} />
       </Routes>
@@ -95,5 +95,35 @@ describe("MapTab", () => {
     renderMap();
     expect(screen.queryByText("No current trips to display")).not.toBeInTheDocument();
     expect(screen.getByText("1", { exact: true })).toBeInTheDocument();
+  });
+});
+
+describe("MapTab basemap style from the URL", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function renderWithStyle(search: string) {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    renderMap("1", search);
+    const entry = screen.getByRole("button", { name: "Map style" });
+    return entry.querySelector("img")?.getAttribute("src") ?? "";
+  }
+
+  it("honours a style id the catalog defines", () => {
+    expect(renderWithStyle("?style=photo")).toContain("/seamlessphoto/");
+  });
+
+  it("falls back to the default basemap for a style id the catalog does not define", () => {
+    const src = renderWithStyle("?style=garbage");
+    expect(src).toContain("/pale/");
+    expect(src).not.toContain("tile.openstreetmap.org");
   });
 });

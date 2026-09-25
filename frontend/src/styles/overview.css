@@ -281,18 +281,6 @@
    of their own: .reveal is the entrance for everything inside it. */
 
 /* ---------- Click-to-expand modal ---------- */
-.ov-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  z-index: var(--z-modal-backdrop);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-}
 .ov-modal {
   background: var(--bg-surface);
   border-radius: var(--radius-xl);
@@ -409,7 +397,6 @@
   .ov-hero { grid-template-columns: 1fr; }
   .ov-pareto-row { grid-template-columns: 1fr 2fr 50px; gap: 6px; font-size: 12px; }
   .ov-pareto-label { white-space: normal; }
-  .ov-modal-backdrop { padding: 0; }
   .ov-modal {
     width: 100%;
     max-height: 100vh;

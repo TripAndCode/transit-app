@@ -103,6 +103,39 @@ describe("FirstRunTour", () => {
     outside.remove();
   });
 
+  it("closes on Escape the same way the x control does, and hands focus back", async () => {
+    const outside = document.createElement("button");
+    outside.textContent = "outside";
+    document.body.appendChild(outside);
+    outside.focus();
+
+    renderTourWithAnchors();
+    await screen.findByRole("dialog");
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(readTourSeen()).toBe("seen");
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it("keeps Tab inside the tour card", async () => {
+    // The card is portalled to the end of <body>: without a trap, Tab out of
+    // its last control lands on whatever the app shell renders first, with
+    // the tour still on screen.
+    const user = userEvent.setup();
+    renderTourWithAnchors();
+    const dialog = await screen.findByRole("dialog");
+
+    within(dialog).getByRole("button", { name: "Next" }).focus();
+    await user.tab();
+    expect(within(dialog).getByRole("button", { name: "Dismiss this tour" })).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(within(dialog).getByRole("button", { name: "Next" })).toHaveFocus();
+  });
+
   it("stays away when the store cannot remember a dismissal", () => {
     // Otherwise the tour reappears on every single mount, forever.
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {

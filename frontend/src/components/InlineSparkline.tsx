@@ -1,4 +1,3 @@
-// frontend/src/components/InlineSparkline.tsx
 import { useRef, type CSSProperties } from "react";
 import { useDrawOn } from "./charts/ChartEnter";
 

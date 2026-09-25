@@ -5,9 +5,12 @@ one place for the raw-`updates` SQL shape, so ingest and analyze can't drift.
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 import clickhouse_connect
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 # Column order matches every ingest strategy's row-tuple shape (see
 # pipeline/strategies/*.py parse_feed docstrings), minus agency_id which
@@ -120,11 +123,33 @@ def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
     return summary.written_rows
 
 
-def distinct_file_names(client, agency_id: int) -> set[str]:
-    result = client.query(
-        "SELECT DISTINCT file_name FROM updates WHERE agency_id = {agency_id:UInt16}",
-        parameters={"agency_id": agency_id},
-    )
+def distinct_file_names(client, agency_id: int, since: date | None = None) -> set[str]:
+    """Every `file_name` already ingested for the agency — an archive ingest's
+    skip-list, so a re-run doesn't re-insert a file (`updates` has no unique
+    constraint to absorb that).
+
+    Unbounded, this reads every row the agency has. *since* narrows it to rows
+    captured on or after that JST calendar day, which is served off the
+    `(agency_id, captured_at, ...)` sort key.
+
+    Bounding is the CALLER's proof obligation, not a hint: a file whose rows
+    fall before the bound is absent from the result, reads as new, and is
+    ingested a second time. Pass *since* only when every file key about to be
+    tested against the result is known to carry a captured_at at or after it;
+    pass None whenever even one of them cannot be placed (see
+    `pipeline.ingest._archive_since`).
+
+    The bound is JST midnight of *since* expressed in UTC, because the archive
+    layout names JST calendar days while `captured_at` is stored in UTC — a
+    UTC-midnight bound would sit nine hours late and hide every file captured
+    in that day's first nine JST hours.
+    """
+    where = "agency_id = {agency_id:UInt16}"
+    parameters: dict = {"agency_id": agency_id}
+    if since is not None:
+        where += " AND captured_at >= {since:DateTime64}"
+        parameters["since"] = datetime.combine(since, time.min, tzinfo=_JST).astimezone(timezone.utc)
+    result = client.query(f"SELECT DISTINCT file_name FROM updates WHERE {where}", parameters=parameters)
     return {row[0] for row in result.result_rows}
 
 

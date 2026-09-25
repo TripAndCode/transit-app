@@ -22,7 +22,7 @@ import { ApiError, apiPost } from "../api/client";
 import { hhmm } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
 import { FILTER_SEPARATOR } from "../utils/format";
-import { buildStyle, getMapStyleOverride, readMapDimPref, readMapStylePref, writeMapDimPref } from "../styles/mapStyle";
+import { buildStyle, getMapStyleOverride, MAP_STYLE_IDS, readMapDimPref, readMapStylePref, writeMapDimPref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -48,6 +48,8 @@ import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
 import { useCappedList } from "../hooks/useCappedList";
+import { fitAll, focusRoute as frameRoute, inspectTrip } from "./map/cameraChoreography";
+import { InspectCard } from "./map/InspectCard";
 
 const DELAYED_TRIPS_CAP = 200;
 
@@ -55,8 +57,6 @@ const DELAYED_TRIPS_CAP = 200;
 // sooner (e.g. an idle map with no live rows, or a system clock jump) --
 // scheduling only ever exact boundaries would otherwise never re-check.
 const STALENESS_SAFETY_TICK_MS = 60_000;
-import { fitAll, focusRoute as frameRoute, inspectTrip } from "./map/cameraChoreography";
-import { InspectCard } from "./map/InspectCard";
 
 /** Clusters stop expanding here: past it MapLibre's own clusterMaxZoom has
  *  already broken them into individual vehicles, so a further step would move
@@ -111,7 +111,7 @@ export function MapTab() {
   // new style writes both, so the next fresh visit (no URL override) picks
   // it up too.
   const [persistedStyleId, setPersistedStyleId] = useMapStylePref();
-  const [styleId, setStyleIdParam] = useUrlState("style", persistedStyleId);
+  const [styleId, setStyleIdParam] = useUrlState("style", persistedStyleId, MAP_STYLE_IDS);
   function setStyleId(next: typeof persistedStyleId) {
     setPersistedStyleId(next);
     setStyleIdParam(next);
@@ -482,7 +482,8 @@ export function MapTab() {
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
   const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
   const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
-  const cappedDelayedRows = useCappedList(delayedRows, DELAYED_TRIPS_CAP, liveRows);
+  const delayedRowsResetKey = `${id ?? "none"}:${liveQuery.dataUpdatedAt}:${ctx.routes.join(",")}`;
+  const cappedDelayedRows = useCappedList(delayedRows, DELAYED_TRIPS_CAP, delayedRowsResetKey);
 
   // A hovered vehicle always wins the card: the pointer is the more recent
   // intent. Dropping the hover restores whatever was pinned, so a preview
