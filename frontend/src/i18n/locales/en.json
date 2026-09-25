@@ -1350,7 +1350,6 @@
       "collector": {
         "oracle_crawler": "Oracle crawler",
         "r2": "R2 sync",
-        "vps_loop": "VPS loop",
         "github": "CI (GitHub)"
       },
       "status": {

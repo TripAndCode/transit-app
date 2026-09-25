@@ -176,7 +176,7 @@ def test_collect_oracle_status_rejects_a_document_that_fails_contract_validation
 
 def test_collect_oracle_status_rejects_a_contract_valid_document_for_another_component(tmp_path: Path):
     cache = tmp_path / "watermark.json"
-    other_component_doc = make_document(T0, state_kwargs={"component": "vps_loop"})
+    other_component_doc = make_document(T0, state_kwargs={"component": "github"})
     with pytest.raises(OracleStatusUnavailable, match="expected 'oracle_crawler'"):
         collect_oracle_status(cache_path=cache, log_fetcher=fetcher_returning(log_with(other_component_doc)))
     assert not cache.exists()
@@ -223,8 +223,8 @@ def test_default_log_fetcher_reports_unavailable_when_no_run_exists(monkeypatch)
             self.stderr = stderr
 
     # `gh run list -q '.[0].databaseId'` resolves to the literal string
-    # "null" when the result list is empty, matching vps-heartbeat-
-    # watchdog.yml's own documented handling of this exact `gh`/`jq` quirk.
+    # "null" when the result list is empty (a `gh`/`jq` quirk), not an empty
+    # string.
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: FakeCompleted(0, "null\n", ""))
     with pytest.raises(OracleStatusUnavailable, match=r"no oracle-heartbeat-listener\.yml run"):
         module.default_log_fetcher("TripAndCode/transit-app")

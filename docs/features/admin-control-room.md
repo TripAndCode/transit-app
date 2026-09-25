@@ -16,9 +16,9 @@ Endpoint: `GET /api/admin/board`. Reads `agencies`, `agg_meta`, and
 `agg_feed_health` for the collector tiles and freshness heatmap, plus
 `pipeline_runs` for the day's run timeline (empty, not an error, when any of
 these tables is absent or unreadable — each panel degrades on its own).
-The four ops collectors (`vps_loop`, `github`, `oracle_crawler`, `r2`, run
+The three ops collectors (`github`, `oracle_crawler`, `r2`, run
 via `scripts/ops_status_page.py`) run off the request path in a worker
-thread under a wall-clock budget; `vps_loop` and `github` read a git
+thread under a wall-clock budget; `github` reads a git
 checkout at the path `OPS_STATUS_REPO` names (see `README.md` and
 `.env.example`), not the database.
 

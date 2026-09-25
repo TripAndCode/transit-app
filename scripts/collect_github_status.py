@@ -2,8 +2,8 @@
 """Collect the GitHub operations-status snapshot for the `github` component of
 `ops_status.py`'s `ComponentStatus` contract.
 
-Reuses the VPS's existing `gh` CLI authentication (the same one `/vps-loop-run` and
-`scripts/cleanup_git_state.py`/`reconcile_next_task.py` already rely on) rather than
+Reuses the VPS's existing `gh` CLI authentication (the same one
+`scripts/cleanup_git_state.py` already relies on) rather than
 managing a separate credential. Two bounded, single-page API calls per collection --
 `gh pr list` for open PRs (draft state, mergeability, CI-check rollup) and one
 `repos/{slug}/branches` page for branch protection flags -- plus one local `git
@@ -49,8 +49,11 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def _load_sibling(name: str):
-    """Load another `scripts/*.py` module by file path (see `collect_vps_status.py`'s
-    identical rationale: `scripts/` has no `__init__.py`)."""
+    """Load another `scripts/*.py` module by file path.
+
+    `scripts/` has no `__init__.py` and is not guaranteed to be importable as a
+    package from wherever this script is invoked, so this avoids depending on
+    `sys.path` layout."""
 
     spec = importlib.util.spec_from_file_location(name, _SCRIPT_DIR / f"{name}.py")
     assert spec and spec.loader
@@ -68,8 +71,8 @@ DEFAULT_BRANCH_LIMIT = 100
 DEFAULT_STALE_BRANCH_DAYS = 30.0
 DEFAULT_POLL_INTERVAL_SECONDS = 3600.0
 # Healthy immediately after a fresh success; past this, a cached document is aging
-# but still plausibly fine. Mirrors collect_vps_status.py's tick-interval-multiplier
-# pattern so a missed poll or two doesn't itself read as a problem.
+# but still plausibly fine. Thresholds are multiples of the poll interval so a
+# missed poll or two doesn't itself read as a problem.
 DEFAULT_HEALTHY_MULTIPLIER = 1.5
 DEFAULT_STALE_MULTIPLIER = 6.0
 DEFAULT_ALWAYS_PROTECTED = frozenset({"main", "production"})
@@ -382,8 +385,7 @@ class GithubFacts:
     """Every raw fact `build_github_status` needs, gathered once by `collect_github_facts`.
 
     Kept separate from the gathering step so state-transition tests can construct this
-    directly instead of mocking subprocess calls (see `collect_vps_status.py`'s
-    identical `VpsFacts` split)."""
+    directly instead of mocking subprocess calls."""
 
     now: datetime
     prs: list[dict] | None
@@ -590,8 +592,8 @@ def collect_github_status(
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point: prints the `github` component's status document as JSON.
 
-    Exit code: 0 when `healthy`/`degraded`, 1 when `stale`/`failed`/`unknown` (mirrors
-    `collect_vps_status.py`'s "1 means this needs attention" convention), 2 on a hard
+    Exit code: 0 when `healthy`/`degraded`, 1 when `stale`/`failed`/`unknown` ("1 means
+    this needs attention"), 2 on a hard
     error (a status document that fails contract validation -- collection failures
     themselves never raise; they degrade to `unknown` or a cached fallback instead).
     """

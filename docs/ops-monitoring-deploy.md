@@ -17,8 +17,7 @@ every unit file's own header comment.
 Both run as `User=root` under `WorkingDirectory=/root/transit-app`, matching
 every other VPS-side automation this repo already runs that way (see
 `.claude/README.md`'s "VPS operations" section — the persistent clone itself
-is provisioned and owned as `root`, and `claude-loop.service` already runs
-as `root` against the same checkout). Splitting these two units onto a
+is provisioned and owned as `root`). Splitting these two units onto a
 separate, narrower system user would need re-provisioning the checkout's own
 ownership without affecting every other root-run VPS unit that reads/writes
 the same tree — out of scope here; least-privilege for this feature instead
@@ -36,8 +35,8 @@ never commit it.
 Nothing else on the VPS side needed a new or broadened credential:
 
 - **GitHub** (`scripts/collect_github_status.py`): shells out to the `gh`
-  CLI, reusing whatever `gh auth` session already exists for
-  `/vps-loop-run` — no separate token, and no new scope requested.
+  CLI, reusing whatever `gh auth` session already exists on the
+  VPS — no separate token, and no new scope requested.
 - **Oracle** (`scripts/collect_oracle_status.py`): reads a heartbeat
   relayed through GitHub Actions run logs. The VPS never holds an Oracle
   credential of any kind, and specifically never the Oracle SSH private key
@@ -116,8 +115,8 @@ under test.
 
 ## 6. Smoke check
 
-`scripts/ops_smoke_check.py` verifies the four collectors (`vps_loop`,
-`github`, `oracle_crawler`, `r2`) are wired correctly — not that the
+`scripts/ops_smoke_check.py` verifies the three collectors (`github`,
+`oracle_crawler`, `r2`) are wired correctly — not that the
 underlying systems they observe are currently healthy. Run it right after
 install, and again after any rollback, before trusting the deployed state:
 
@@ -125,7 +124,7 @@ install, and again after any rollback, before trusting the deployed state:
 poetry run python3 scripts/ops_smoke_check.py
 ```
 
-Exit 0 means all four components were returned by
+Exit 0 means all three components were returned by
 `scripts/ops_status_page.collect_all` and every one validates against the
 shared `scripts/ops_status.py` contract — `unknown` is an expected state
 right after a fresh install and does not fail the check on its own. A
@@ -159,7 +158,7 @@ clean slate). Delete either by hand only if a token itself needs rotating or
 a corrupted state file needs discarding.
 
 After rolling back, run the smoke check (section 6) against the *previous*
-deployed checkout to confirm the four collectors still work there, and
+deployed checkout to confirm the three collectors still work there, and
 `journalctl -u ops-status.service -u ops-alerts.service --since "-10min"`
 to confirm no stray process from the rolled-back units is still running.
 
