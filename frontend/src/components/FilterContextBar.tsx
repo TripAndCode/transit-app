@@ -274,7 +274,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
             cursor: pending ? "not-allowed" : "pointer",
           }}
         >
-          {t("ask.filter_bar.cancel")}
+          {t("common.cancel")}
         </button>
         <button
           type="button"

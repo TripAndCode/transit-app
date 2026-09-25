@@ -15,6 +15,7 @@ import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
 import { Z_INDEX } from "../styles/zIndex";
 import { FILTER_SEPARATOR } from "../utils/format";
+import { dowValueLabel } from "../utils/filterValueLabels";
 import { menuItems, nextMenuItem } from "./menuKeys";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -41,10 +42,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
   if (range) parts.push(range);
 
   // Day-of-week
-  if (fc.dow && fc.dow !== "all") {
-    const dowKey = fc.dow === "weekday" ? "filters.dow.weekday" : "filters.dow.weekend";
-    parts.push(t(dowKey));
-  }
+  if (fc.dow && fc.dow !== "all") parts.push(dowValueLabel(fc.dow, t));
 
   // Time band
   if (fc.time_band && fc.time_band !== "all") {

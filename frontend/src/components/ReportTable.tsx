@@ -30,7 +30,7 @@ type Schema = {
 // Sentinel reference for the route column. The render path uses reference
 // equality (`c === ROUTE_COL`) to swap in route-name formatting, so every
 // schema below must reuse this exact instance.
-const ROUTE_COL: Schema = { index: 0, labelKey: "reports.col.route", align: "left" };
+const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left" };
 
 // ranking + ranking_best share columns; only the API sort order differs.
 const RANKING_COLS: Schema[] = [
@@ -74,8 +74,8 @@ const SCHEMAS: Record<string, Schema[]> = {
   ],
   compare_ranking: [
     ROUTE_COL,
-    { index: 1, labelKey: "reports.col.weekday", align: "right", format: (v, t) => fmtMin(v, t) },
-    { index: 2, labelKey: "reports.col.weekend", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 1, labelKey: "common.service_value.平日", align: "right", format: (v, t) => fmtMin(v, t) }, // i18n-ignore: query contract
+    { index: 2, labelKey: "common.service_value.土日祝", align: "right", format: (v, t) => fmtMin(v, t) }, // i18n-ignore: query contract
     { index: 3, labelKey: "reports.col.diff", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
     {
       index: 4,
@@ -108,7 +108,7 @@ const SCHEMAS: Record<string, Schema[]> = {
   // useRouteNames formatting is keyed to index 0 by reference equality).
   delay_certificate: [
     { index: 0, labelKey: "reports.col.agency_name", align: "left" },
-    { index: 1, labelKey: "reports.col.route", align: "left" },
+    { index: 1, labelKey: "common.route", align: "left" },
     { index: 2, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
     { index: 3, labelKey: "reports.col.date", align: "left" },
     { index: 4, labelKey: "reports.col.scheduled_time", align: "left" },
