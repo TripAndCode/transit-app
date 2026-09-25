@@ -51,15 +51,50 @@ class Embedder:
                 "Embedder unavailable (model=%s): %s — Stage 2 router will fall through to LLM",
                 self.model_id,
                 exc.__class__.__name__,
+                exc_info=True,
             )
 
     def embed(self, text: str, *, mode: Literal["query", "passage"]) -> list[float]:
         if not self.available or self._model is None:
             raise RuntimeError(f"Embedder unavailable (model={self.model_id})")
         truncated = (text or "")[:_MAX_CHARS]
+        # e5's query/passage asymmetry is expressed by these literal prefixes
+        # and nothing else. They must never be combined with
+        # sentence-transformers' own ``prompt_name=`` / ``encode_query()``,
+        # which prepend a prompt of their own: the doubled prefix embeds as
+        # different text than every vector already in the index.
         prefix = "query: " if mode == "query" else "passage: "
         vec = self._model.encode(prefix + truncated, normalize_embeddings=True)
         return [float(x) for x in vec]
+
+
+def _library_version() -> str:
+    """Installed ``sentence-transformers`` version, or ``"absent"``.
+
+    Read from distribution metadata rather than ``sentence_transformers.
+    __version__`` so stamping and the reader's version filter cost nothing
+    when the (multi-GB) library is not already imported. The two values are
+    the same string.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("sentence-transformers")
+    except PackageNotFoundError:
+        return "absent"
+
+
+def embedding_version(model_id: str | None = None) -> str:
+    """Identity of the embedder that produced a vector: ``"<model>@<library>"``.
+
+    Vectors from two different models — or from two library versions whose
+    pooling or normalization differ — share no coordinate system, so cosine
+    distance between them is meaningless rather than merely worse. Writers
+    stamp this on every row they embed and readers refuse rows carrying a
+    different stamp, which turns an invisible relevance collapse into a
+    logged "re-index required".
+    """
+    return f"{model_id or os.environ.get('EMBEDDING_MODEL_ID', _DEFAULT_MODEL)}@{_library_version()}"
 
 
 _singleton: Embedder | None = None

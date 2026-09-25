@@ -8,11 +8,14 @@ import i18n from "../../i18n";
 import { AdminFlagsPage } from "./AdminFlagsPage";
 
 const patchMutate = vi.fn();
+const clearMutate = vi.fn();
+const clearState = { mutate: clearMutate, isPending: false, error: null as Error | null };
 const useFeatureFlagsMock = vi.fn();
 
 vi.mock("../../api/admin", () => ({
   useFeatureFlags: () => useFeatureFlagsMock(),
   usePatchFeatureFlag: () => ({ mutate: patchMutate, isPending: false, error: null }),
+  useClearFeatureFlag: () => clearState,
 }));
 
 function twoFlags() {
@@ -62,6 +65,9 @@ describe("AdminFlagsPage", () => {
     useFeatureFlagsMock.mockReset();
     useFeatureFlagsMock.mockReturnValue(twoFlags());
     patchMutate.mockClear();
+    clearMutate.mockClear();
+    clearState.isPending = false;
+    clearState.error = null;
   });
 
   it("renders one row per registered flag", () => {
@@ -79,7 +85,8 @@ describe("AdminFlagsPage", () => {
   it("shows an override-source pill plus the updated-by/reason provenance line", () => {
     wrap();
     const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
-    expect(within(row).getByText(/override/i)).toBeTruthy();
+    // Exact text: the same row now also carries a "Clear override" button.
+    expect(within(row).getByText("Override")).toBeTruthy();
     expect(within(row).getByText(/7/)).toBeTruthy();
     expect(within(row).getByText(/rollout for pilot agencies/)).toBeTruthy();
   });
@@ -135,5 +142,46 @@ describe("AdminFlagsPage", () => {
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(patchMutate).not.toHaveBeenCalled();
+  });
+
+  it("offers a clear-override action only on rows that carry an override", () => {
+    wrap();
+    const overridden = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    const fromEnv = screen.getByText("Ask: rules router").closest("tr")!;
+
+    expect(within(overridden).getByRole("button", { name: /clear override/i })).toBeTruthy();
+    expect(within(fromEnv).queryByRole("button", { name: /clear override/i })).toBeNull();
+  });
+
+  it("clears the override for the row that was clicked", async () => {
+    const user = userEvent.setup();
+    wrap();
+    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /clear override/i }));
+
+    expect(clearMutate).toHaveBeenCalledWith({ key: "copilot_insight_enabled" });
+    expect(patchMutate).not.toHaveBeenCalled();
+  });
+
+  it("does not open the reason dialog when clearing", async () => {
+    const user = userEvent.setup();
+    wrap();
+    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /clear override/i }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("disables the clear action while one is in flight", () => {
+    clearState.isPending = true;
+    wrap();
+    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    expect(within(row).getByRole("button", { name: /clear override/i })).toBeDisabled();
+  });
+
+  it("surfaces a failed clear as an alert", () => {
+    clearState.error = new Error("nope");
+    wrap();
+    expect(screen.getByRole("alert").textContent).toMatch(/clear/i);
   });
 });
