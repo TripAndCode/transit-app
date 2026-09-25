@@ -17,6 +17,7 @@ import { saveAnalysis } from "../components/analysis/savedAnalyses";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
+import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
@@ -178,8 +179,8 @@ export function RouteAnalysisTab() {
               </Suspense>
             </div>}
             {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>
-              <div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("stop")}</th><th>{t("mean")}</th><th>{t("samples")}</th></tr></thead><tbody>
-                {stops.map((s) => <tr key={s.stop_sequence}><td>{s.stop_name}</td><td>{s.avg_min ?? t("missing")}</td><td>{s.samples}</td></tr>)}
+              <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("stop")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th></tr></thead><tbody>
+                {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min ?? t("missing")}</td><td style={td()}>{s.samples}</td></tr>)}
               </tbody></table></div>
             </div>}
             <p className="focus-muted">{t("caveat")}</p>
