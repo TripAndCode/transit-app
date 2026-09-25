@@ -111,7 +111,7 @@ export function ApiKeysSection({ uid }: { uid: number }) {
               value={justIssued.key}
               aria-label={t("admin.user_detail.api_key_issued_notice")}
               onFocus={(e) => e.currentTarget.select()}
-              style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
+              style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12 }}
             />
             <AdminButton variant="secondary" onClick={handleCopy}>
               {copied ? t("admin.user_detail.api_key_copied") : t("admin.user_detail.api_key_copy")}

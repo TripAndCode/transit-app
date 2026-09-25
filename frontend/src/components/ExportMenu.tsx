@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { Download, Link2, Printer, Image as ImageIcon } from "lucide-react";
@@ -129,8 +129,19 @@ export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint
     window.print();
   }
 
+  // Tab out of the last item and the menu is gone. Escape and an outside
+  // click already close it, but neither fires when focus simply walks off the
+  // end -- leaving a mounted `role="menu"` and an `aria-expanded="true"`
+  // trigger describing something the user has left behind.
+  function handleFocusOut(event: ReactFocusEvent<HTMLDivElement>) {
+    if (!open) return;
+    const next = event.relatedTarget;
+    if (next instanceof Node && rootRef.current?.contains(next)) return;
+    setOpen(false);
+  }
+
   return (
-    <div className="export-menu" ref={rootRef}>
+    <div className="export-menu" ref={rootRef} onBlur={handleFocusOut}>
       <button
         ref={triggerRef}
         type="button"

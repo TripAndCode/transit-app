@@ -79,6 +79,30 @@ describe("ExportMenu", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("closes when focus leaves it entirely, as Tab off the last item does", () => {
+    // Escape and an outside click both fire; walking off the end fires
+    // neither, and leaves a mounted role="menu" with aria-expanded still
+    // true behind a user who has already moved on.
+    renderMenu("/agencies/1/reports");
+    openMenu();
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+
+    fireEvent.blur(screen.getByRole("menu"), { relatedTarget: outside });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /export/i })).toHaveAttribute("aria-expanded", "false");
+    outside.remove();
+  });
+
+  it("stays open while focus moves between its own items", () => {
+    renderMenu("/agencies/1/reports");
+    openMenu();
+    const items = screen.getAllByRole("menuitem");
+
+    fireEvent.blur(screen.getByRole("menu"), { relatedTarget: items[1] });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
   it("moves focus onto the first item when the menu opens", () => {
     renderMenu("/agencies/1/reports");
     openMenu();

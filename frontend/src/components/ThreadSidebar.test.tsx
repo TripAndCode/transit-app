@@ -167,6 +167,22 @@ describe("ThreadSidebar", () => {
       expect(kebab).toHaveFocus();
     });
 
+    it("returns focus to the control that opened it when an item is chosen", () => {
+      // Choosing an item unmounts the menuitem that had focus. Escape is not
+      // the only exit that has to put the operator back on the kebab.
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      fireEvent.click(kebab);
+      const pin = within(screen.getByRole("menu"))
+        .getAllByRole("menuitem")
+        .find((item) => /pin/i.test(item.textContent ?? ""))!;
+
+      fireEvent.click(pin);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(kebab).toHaveFocus();
+    });
+
     it("styles its items by class rather than by mutating inline style on hover", () => {
       mockConversations([conv({ title: "Morning delays" })]);
       render();

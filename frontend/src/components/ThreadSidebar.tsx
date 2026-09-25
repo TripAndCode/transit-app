@@ -101,13 +101,20 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     return () => document.removeEventListener("mousedown", handleClick);
   }, [menu]);
 
+  /** Every way out of the menu goes through here. Choosing an item unmounts
+   *  the menuitem that had focus, so without this the keyboard user is left
+   *  on `<body>` -- Escape is not the only exit that has to put them back. */
+  function closeMenu() {
+    setMenu(null);
+    menuTriggerRef.current?.focus();
+  }
+
   // Close menu on Escape.
   useEffect(() => {
     if (!menu) return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      setMenu(null);
-      menuTriggerRef.current?.focus();
+      closeMenu();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -177,12 +184,12 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   }
 
   function handleTogglePin(conv: Conversation) {
-    setMenu(null);
+    closeMenu();
     updateConv.mutate({ id: conv.conversation_id, patch: { pinned: !conv.pinned } });
   }
 
   function handleDelete(conv: Conversation) {
-    setMenu(null);
+    closeMenu();
     if (window.confirm(t("ask.sidebar.delete_confirm"))) {
       deleteConv.mutate(conv.conversation_id);
       if (activeId === conv.conversation_id) onSelect(null);
@@ -324,6 +331,14 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
       // but it owns the arrow-key handling for the items inside it.
       tabIndex={-1}
       onKeyDown={onMenuKeyDown}
+      // Tab past the last item and the menu is gone. Escape and an outside
+      // click already close it, but neither fires when focus simply walks off
+      // the end, leaving a mounted `role="menu"` behind the user.
+      onBlur={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && menuRef.current?.contains(next)) return;
+        setMenu(null);
+      }}
       style={{
         position: "fixed",
         top: menu.y,

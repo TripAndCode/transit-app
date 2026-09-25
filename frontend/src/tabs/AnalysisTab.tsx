@@ -208,7 +208,7 @@ export function AnalysisTab() {
                       padding: 12,
                       marginTop: 8,
                       whiteSpace: "pre-wrap",
-                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                      fontFamily: "var(--font-mono)",
                       fontSize: 12,
                       lineHeight: 1.6,
                       maxWidth: 920,

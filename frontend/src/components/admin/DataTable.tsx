@@ -97,9 +97,13 @@ function focusSiblingRow(from: HTMLElement, direction: 1 | -1): void {
  * interactive and selectable, and `aria-selected` on a row is only
  * meaningful inside a grid that declares `aria-multiselectable`.
  *
- * Exactly one row holds the tab stop at a time (roving tabindex), so Tab
- * crosses the table in a single step and `j`/`k`/arrow keys move within it,
- * instead of every row of a 50-row page being its own tab stop.
+ * Exactly one *row* holds the tab stop at a time (roving tabindex), and
+ * `j`/`k`/arrow keys move it, instead of every row of a 50-row page being
+ * its own tab stop. Controls a caller renders inside a cell -- the selection
+ * checkbox, a link, a role picker -- keep their own tab stops, so Tab from
+ * the focused row walks that row's controls before leaving the grid. Taking
+ * those out of the tab order would need an explicit enter-the-cell key to
+ * give them back, which is a bigger contract than this table has today.
  *
  * Selection is lifted to the caller: the pages that use this own bulk
  * actions and undo, and both need the selected set to outlive the table.
