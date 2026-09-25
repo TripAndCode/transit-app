@@ -26,6 +26,10 @@ __all__ = [
     "AGENCY_HEADER_SQL",
     "ALL_CLAMP_HISTORY_SQL",
     "ALL_RT_COVERAGE_SQL",
+    "BATCH_DELETE_STANDARD_SQL",
+    "BATCH_DELETE_WEIGHT_SQL",
+    "BATCH_UPSERT_ROUTE_WEIGHT_SQL",
+    "BATCH_UPSERT_STANDARD_SQL",
     "CLAMP_HISTORY_DAYS",
     "CLAMP_HISTORY_SQL",
     "CURRENT_STATIC_VERSION_SQL",
@@ -224,6 +228,54 @@ UPSERT_DEFAULT_WEIGHT_SQL = """
 DELETE_ROUTE_WEIGHT_SQL = "DELETE FROM ridership_weights WHERE agency_id = $1 AND route_code = $2"
 
 DELETE_DEFAULT_WEIGHT_SQL = "DELETE FROM ridership_weights WHERE agency_id = $1 AND route_code IS NULL"
+
+# Batched editor statements (patch_standards / patch_weights): one round trip
+# for the whole payload instead of one per row, via unnest($n::type[], ...)
+# turning the parameter arrays into a row set the DELETE/INSERT can join or
+# select from directly.
+
+BATCH_DELETE_STANDARD_SQL = """
+    DELETE FROM route_performance_standards rps
+    USING unnest($2::text[], $3::text[]) AS d(route_code, metric_type)
+    WHERE rps.agency_id = $1
+      AND rps.route_code = d.route_code
+      AND rps.metric_type = d.metric_type
+"""
+
+BATCH_UPSERT_STANDARD_SQL = """
+    INSERT INTO route_performance_standards
+        (agency_id, route_code, metric_type, threshold_value, bonus_malus_rate)
+    SELECT $1, u.route_code, u.metric_type, u.threshold_value, u.bonus_malus_rate
+    FROM unnest($2::text[], $3::text[], $4::double precision[], $5::double precision[])
+        AS u(route_code, metric_type, threshold_value, bonus_malus_rate)
+    ON CONFLICT (agency_id, route_code, metric_type) DO UPDATE SET
+        threshold_value  = EXCLUDED.threshold_value,
+        bonus_malus_rate = EXCLUDED.bonus_malus_rate
+"""
+
+# route_code can be NULL (the agency default row), and `route_code = NULL` is
+# never true, so the join uses IS NOT DISTINCT FROM to also match it -- the
+# one statement covers both the default row and every per-route delete.
+BATCH_DELETE_WEIGHT_SQL = """
+    DELETE FROM ridership_weights w
+    USING unnest($2::text[]) AS d(route_code)
+    WHERE w.agency_id = $1
+      AND w.route_code IS NOT DISTINCT FROM d.route_code
+"""
+
+# Covers only route_code IS NOT NULL rows: ridership_weights' two arbiters
+# (idx_ridership_weights_agency_route / _agency_default) differ by predicate,
+# and ON CONFLICT can only target one per statement. The at-most-one default
+# row in a batch still goes through UPSERT_DEFAULT_WEIGHT_SQL on its own --
+# unlike the per-route rows, its count in one payload can't grow with the
+# route list, so it was never the per-row-loop cost this batching targets.
+BATCH_UPSERT_ROUTE_WEIGHT_SQL = """
+    INSERT INTO ridership_weights (agency_id, route_code, weight)
+    SELECT $1, u.route_code, u.weight
+    FROM unnest($2::text[], $3::numeric[]) AS u(route_code, weight)
+    ON CONFLICT (agency_id, route_code) WHERE route_code IS NOT NULL
+    DO UPDATE SET weight = EXCLUDED.weight
+"""
 
 
 def freshness_state(latest_data_date: date | None, today: date) -> str:

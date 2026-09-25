@@ -125,10 +125,10 @@ export function ApiKeysSection({ uid }: { uid: number }) {
           {formatApiError(error)}
         </div>
       )}
-      {data?.length === 0 && !justIssued && (
+      {data?.keys.length === 0 && !justIssued && (
         <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>{t("admin.user_detail.api_keys_empty")}</div>
       )}
-      {data?.map((k) => (
+      {data?.keys.map((k) => (
         <div key={k.id} style={rowStyle}>
           <div>
             {k.label ?? k.tier}

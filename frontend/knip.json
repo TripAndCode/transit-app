@@ -1,7 +1,5 @@
 {
-  "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["src/**/*.test.{ts,tsx}", "scripts/*.mjs"],
-  "project": ["src/**/*.{ts,tsx}"],
-  "ignoreBinaries": ["python3"],
-  "ignoreDependencies": ["babel-plugin-react-compiler"]
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["scripts/*.mjs"],
+  "project": ["src/**/*.{ts,tsx}"]
 }

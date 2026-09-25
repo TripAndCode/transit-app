@@ -57,6 +57,29 @@ def test_shape_run_renders_timestamps_as_utc_iso_strings():
     assert shaped["agency_name"] == "Hokuriku"
 
 
+def test_the_lock_column_is_published_as_a_probe_cost_not_as_time_spent_waiting():
+    """The acquire is non-blocking, so the stored milliseconds are the round
+    trip that discovered the lock was held, never a queue the job sat in.
+    The column keeps its historical name; the API field states what it is."""
+    shaped = shape_run(
+        {
+            "run_id": 6,
+            "kind": "ingest",
+            "agency_id": None,
+            "agency_name": None,
+            "started_at": datetime(2026, 9, 21, 6, 0, tzinfo=timezone.utc),
+            "finished_at": datetime(2026, 9, 21, 6, 0, tzinfo=timezone.utc),
+            "status": "skipped",
+            "rows": None,
+            "lock_wait_ms": 4,
+            "error": None,
+            "requested_by": None,
+        }
+    )
+    assert shaped["lock_probe_ms"] == 4
+    assert "lock_wait_ms" not in shaped
+
+
 def test_shape_run_keeps_a_fleet_wide_run_nameless_rather_than_inventing_one():
     shaped = shape_run(
         {

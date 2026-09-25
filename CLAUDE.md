@@ -13,6 +13,15 @@ the task needs them.
   ClickHouse.
 - Ask routing is rules → embedding nearest-neighbour → RAG LLM. Only the third stage
   calls an LLM.
+- Admin control room: `api/routers/admin*.py` (board, agencies, users, audit, flags,
+  ask ops) behind `RequireAdmin`/`require_admin`. See `docs/features/admin-control-
+  room.md` for routes, endpoints, and tables per section.
+- `pipeline/flags.py` is the one read path for feature kill switches: a DB
+  `feature_flags` override wins over the env default, cached process-wide for 30s,
+  invalidated immediately on a PATCH. Never read a flag's env var directly.
+- `pipeline/runs.py` records pipeline jobs into `pipeline_runs`; `api/admin_audit.py`
+  records every admin mutation into `admin_audit`. Both feed the admin board/audit log
+  and never let bookkeeping failure break the underlying job or request.
 
 ## Database safety
 
@@ -39,7 +48,8 @@ the task needs them.
   inherit the default `:5433` URL; point it at `:5544`. `make fmt` rewrites files
   rather than reporting, so it does not verify formatting.
 - Frontend: `npm run typecheck`, `npm run test`, `npm run lint`, `npm run lint:i18n`,
-  `npm run lint:i18n-strings`, `npm run test:check-entry-chunk`, then
+  `npm run lint:i18n-strings`, `npm run deadcode`, `npm run test:check-entry-chunk`,
+  `npm run test:check-css-tokens`, `npm run check:css-tokens`, then
   `npm run build:bundle && npm run check:entry-chunk`.
 - Run the smallest relevant check during iteration and the required complete check
   once before completion. Capture verbose output to a file and surface only the

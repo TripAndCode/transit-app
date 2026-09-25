@@ -16,6 +16,12 @@ from starlette.requests import Request
 FREE_LIMIT = "60/minute"
 PRO_LIMIT = "600/minute"
 
+#: Budget for admin-triggered pipeline/agency actions (manual run trigger,
+#: feed probe, reanalyze) -- generous enough that an operator working a board
+#: isn't throttled, tight enough to blunt a scripted retry loop against a
+#: route that queues real pipeline work.
+ADMIN_ACTION_LIMIT = "20/minute"
+
 
 def _key_func(request: Request) -> str:
     # get_remote_address() reads request.client.host, which uvicorn's
