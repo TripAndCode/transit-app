@@ -13,7 +13,7 @@ const PADDING: Record<PillSize, string> = {
 export function pill(active: boolean, size: PillSize = "md"): CSSProperties {
   return {
     background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-    color: active ? "var(--accent)" : "var(--text-secondary)",
+    color: active ? "var(--accent-strong)" : "var(--text-secondary)",
     border: `1px solid ${active ? "var(--accent)" : "var(--border-soft)"}`,
     borderRadius: 999,
     padding: PADDING[size],

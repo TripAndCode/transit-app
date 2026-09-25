@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { delayColor } from "../styles/tokens";
+import { delayColor, delayTextColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
@@ -212,10 +212,14 @@ export function ReportTable({ reportType, rows }: Props) {
                   const max = maxes.get(c.index) ?? 1;
                   const v = Number(raw);
                   const ratio = isFinite(v) ? Math.min(1, Math.abs(v) / max) : 0;
+                  // The bar fill can stay the plain ramp colour (it's a mark, not
+                  // text); the label sitting on top needs the text-safe variant,
+                  // since delayColor()'s ok/mild/moderate fall short of AA as text.
                   const color = c.bar === "delay" ? delayColor(v) : "var(--accent)";
+                  const textColor = c.bar === "delay" ? delayTextColor(v) : "var(--accent)";
                   return (
                     <td key={c.labelKey} style={{ ...td(), textAlign: c.align ?? "right", minWidth: 110 }}>
-                      <BarCell text={text} ratio={ratio} color={color} />
+                      <BarCell text={text} ratio={ratio} color={color} textColor={textColor} />
                     </td>
                   );
                 }
@@ -238,7 +242,17 @@ export function ReportTable({ reportType, rows }: Props) {
   );
 }
 
-function BarCell({ text, ratio, color }: { text: string; ratio: number; color: string }) {
+function BarCell({
+  text,
+  ratio,
+  color,
+  textColor,
+}: {
+  text: string;
+  ratio: number;
+  color: string;
+  textColor: string;
+}) {
   return (
     <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
       <div
@@ -255,7 +269,7 @@ function BarCell({ text, ratio, color }: { text: string; ratio: number; color: s
           pointerEvents: "none",
         }}
       />
-      <span style={{ position: "relative", color }}>{text}</span>
+      <span style={{ position: "relative", color: textColor }}>{text}</span>
     </div>
   );
 }

@@ -117,7 +117,7 @@ function AgencyFormModal({
             style={{ width: "100%" }}
           />
           {form.feed_url && !form.feed_url.startsWith("http://") && !form.feed_url.startsWith("https://") && (
-            <div style={{ color: "var(--color-warning)", fontSize: 12, marginTop: 2 }}>
+            <div style={{ color: "var(--color-warning-text)", fontSize: 12, marginTop: 2 }}>
               {t("admin.agencies.form_error_feed_url")}
             </div>
           )}
@@ -153,7 +153,7 @@ function AgencyFormModal({
           />
         </Field>
         {!!error && (
-          <div style={{ color: "var(--color-warning)", fontSize: 13 }}>
+          <div style={{ color: "var(--color-warning-text)", fontSize: 13 }}>
             {formatApiError(error)}
           </div>
         )}

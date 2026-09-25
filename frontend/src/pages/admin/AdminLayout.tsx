@@ -101,7 +101,7 @@ export function AdminLayout() {
                         gap: 10,
                         padding: "9px 20px",
                         textDecoration: "none",
-                        color: isActive ? "var(--accent)" : "var(--text-secondary)",
+                        color: isActive ? "var(--accent-strong)" : "var(--text-secondary)",
                         fontWeight: isActive ? 600 : 400,
                         fontSize: 14,
                         background: isActive ? "var(--accent-soft)" : "transparent",

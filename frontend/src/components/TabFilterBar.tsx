@@ -427,7 +427,7 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
         alignItems: "center",
         gap: 6,
         background: "var(--accent-soft)",
-        color: "var(--accent)",
+        color: "var(--accent-strong)",
         border: "1px solid var(--accent)",
         borderRadius: 999,
         padding: "3px 10px 3px 12px",

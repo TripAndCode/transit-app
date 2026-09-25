@@ -146,7 +146,7 @@ export function AccountPage() {
       </button>
       {logout.isError && (
         <div role="alert" style={{ marginTop: 8, padding: 8, background: "var(--surface-2)",
-                                    borderRadius: 4, fontSize: 13, color: "var(--color-danger, #c0392b)" }}>
+                                    borderRadius: 4, fontSize: 13, color: "var(--delay-severe)" }}>
           {t("account.logout_error")}
         </div>
       )}

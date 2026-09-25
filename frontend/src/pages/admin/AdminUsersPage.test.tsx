@@ -135,14 +135,16 @@ describe("AdminUsersPage", () => {
   it("shows a colored Active chip for a user with no suspended_at", () => {
     wrap();
     const chip = within(screen.getByRole("grid")).getByText("Active");
-    expect(chip.style.color).toBe("var(--accent)");
+    // The deepened --accent-strong, not --accent: this text sits directly on
+    // --accent-soft, where plain --accent falls short of WCAG AA (4.32:1).
+    expect(chip.style.color).toBe("var(--accent-strong)");
     expect(chip.style.background).toBe("var(--accent-soft)");
   });
 
   it("shows a colored Suspended chip for a user with suspended_at set", () => {
     wrap();
     const chip = within(screen.getByRole("grid")).getByText("Suspended");
-    expect(chip.style.color).toBe("var(--color-warning, #C99A2E)");
+    expect(chip.style.color).toBe("var(--color-warning-text, #89691F)");
     expect(chip.style.background).toBe("var(--surface-2)");
   });
 
