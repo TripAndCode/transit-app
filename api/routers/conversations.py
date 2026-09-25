@@ -478,7 +478,7 @@ async def followup_endpoint(
     """
     csrf_guard(request)
 
-    if not _followup.is_enabled():
+    if not await _followup.ais_enabled():
         # Short-circuit ahead of the approval gate: a disabled feature must
         # not 403 an unapproved caller before reporting itself as off.
         raise HTTPException(status_code=503, detail="followup_disabled")
@@ -561,6 +561,6 @@ async def followup_enabled_endpoint(
     Also exposes ``max_question_chars`` so the client's input cap can't drift
     from :data:`pipeline.query.followup.MAX_QUESTION_CHARS`."""
     return {
-        "enabled": _followup.is_enabled(),
+        "enabled": await _followup.ais_enabled(),
         "max_question_chars": _followup.MAX_QUESTION_CHARS,
     }

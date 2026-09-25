@@ -1,6 +1,6 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { Z_INDEX } from "../styles/zIndex";
-import { focusableIn } from "../utils/focusable";
 
 type LabelProps = { labelledBy: string; ariaLabel?: undefined } | { ariaLabel: string; labelledBy?: undefined };
 
@@ -36,13 +36,14 @@ const BASE_PANEL_STYLE: Record<"modal" | "drawer", CSSProperties> = {
 };
 
 /**
- * Shared accessible overlay: Escape and backdrop click both close, Tab is
- * trapped between the panel's first and last focusable descendants, focus
- * moves into the panel on open (to `initialFocusRef` when given) and back to
- * whatever was focused beforehand on close, and body scroll is locked while
- * open. Callers own the panel's visual size/position via `className`/`style`
- * layered on top of the `variant` base (centered card, or a full-height side
- * sheet for drawer-style overlays like the mobile nav and settings panel).
+ * Shared accessible overlay: backdrop click closes, and `useFocusTrap`
+ * supplies the dialog semantics -- Escape closes (the topmost surface only),
+ * Tab is trapped inside the panel, focus moves into it on open (to
+ * `initialFocusRef` when given) and back to whatever was focused beforehand
+ * on close, and body scroll is locked while open. Callers own the panel's
+ * visual size/position via `className`/`style` layered on top of the
+ * `variant` base (centered card, or a full-height side sheet for
+ * drawer-style overlays like the mobile nav and settings panel).
  */
 export function Modal({
   open,
@@ -56,50 +57,11 @@ export function Modal({
   ariaLabel,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const previouslyFocused = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-
-    previouslyFocused.current = document.activeElement as HTMLElement | null;
-    const toFocus = initialFocusRef?.current ?? panelRef.current;
-    toFocus?.focus();
-
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      const focusable = focusableIn(panel);
-      if (focusable.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prevOverflow;
-      previouslyFocused.current?.focus();
-    };
-  }, [open, onClose, initialFocusRef]);
+  // The panel itself is the default landing spot rather than its first
+  // control: a dialog that announces its own label before its contents is
+  // what a screen reader user needs to know what just opened.
+  useFocusTrap(open, panelRef, onClose, initialFocusRef ?? panelRef);
 
   if (!open) return null;
 

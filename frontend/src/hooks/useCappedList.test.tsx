@@ -76,3 +76,34 @@ describe("useCappedList", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(400);
   });
 });
+
+describe("resetKey identity", () => {
+  const items = Array.from({ length: 10 }, (_, i) => i);
+
+  it("keeps a raised cap when an equal primitive key is passed again", async () => {
+    // The operations-page fix depends on this: a key rebuilt from the same
+    // parts on every render has to compare equal, or the cap never stays up.
+    const user = userEvent.setup();
+    const { rerender } = render(<Probe items={items} cap={2} listKey="agency-1:1700:" />);
+
+    await user.click(screen.getByRole("button"));
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+
+    rerender(<Probe items={items} cap={2} listKey={`agency-${1}:${1700}:`} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+  });
+
+  it("resets the cap on every render when the key is freshly allocated", async () => {
+    // What MapTab used to pass: the derived array itself. `Object.is` never
+    // matches, so the cap cannot stay raised -- and since the reset runs
+    // during render, React sees a render that always schedules another.
+    const user = userEvent.setup();
+    const { rerender } = render(<Probe items={items} cap={2} listKey={[...items]} />);
+
+    await user.click(screen.getByRole("button"));
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+
+    rerender(<Probe items={items} cap={2} listKey={[...items]} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+});

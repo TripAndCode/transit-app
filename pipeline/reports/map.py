@@ -15,6 +15,7 @@ from typing import Any
 
 from api.clickhouse import max_captured_at
 from api.range import RangeCtx, build_updates_filter_ch
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 
 
 async def route_exists(conn, agency_id: int, route_code: str) -> bool:
@@ -42,6 +43,46 @@ async def route_exists(conn, agency_id: int, route_code: str) -> bool:
             route_code,
         )
     ) is not None
+
+
+def _route_shape_vote_dedup_sql(ch_where_frag: str) -> str:
+    """Per-(trip, stop) dedup used to weight `compute_route_shape`'s shape vote.
+
+    Broken out as a pure builder — like `api.routers.map.build_route_trips_sql`
+    — so its shape, including the plausibility clamp, is unit-testable without
+    ClickHouse. Clamps `dep_delay` the same way `pipeline.db.build_dedup_ch_sql`
+    does (see `MAX_PLAUSIBLE_DELAY_SEC`'s docstring): map and aggregates must
+    agree on plausibility, so a frozen feed can't tip the shape vote either.
+    """
+    return f"""
+        SELECT u.trip_id, u.stop_sequence,
+            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+        FROM updates AS u
+        WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
+          AND u.dep_delay IS NOT NULL
+          AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
+          AND {ch_where_frag}
+        GROUP BY u.trip_id, u.stop_sequence
+    """
+
+
+def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> str:
+    """Per-(trip, stop) dedup backing `compute_route_shape`'s per-stop delay stats.
+
+    Same clamp and pure-builder rationale as `_route_shape_vote_dedup_sql`.
+    """
+    return f"""
+        SELECT u.trip_id, u.stop_sequence,
+            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+        FROM updates AS u
+        WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
+          AND u.dep_delay IS NOT NULL
+          AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
+          {trip_filter_sql}
+          AND {ch_where_frag}
+        GROUP BY u.trip_id, u.stop_sequence
+        ORDER BY u.trip_id, u.stop_sequence
+    """
 
 
 async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCtx) -> dict[str, Any]:
@@ -122,15 +163,7 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
     # for a busy route over a wide window that's easily >200k rows, past the
     # async client's result_overflow_mode="throw" cap (api/clickhouse.py),
     # 500ing the endpoint instead of degrading.
-    dedup_cte_sql = f"""
-        SELECT u.trip_id, u.stop_sequence,
-            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
-        FROM updates AS u
-        WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
-          AND u.dep_delay IS NOT NULL
-          AND {ch_where_frag}
-        GROUP BY u.trip_id, u.stop_sequence
-    """
+    dedup_cte_sql = _route_shape_vote_dedup_sql(ch_where_frag)
     vote_result = await ch.query(
         f"WITH dedup AS ({dedup_cte_sql}) SELECT trip_id, count() AS n FROM dedup GROUP BY trip_id",
         parameters={"agency_id": agency_id, "route": str(route), **ch_params},
@@ -256,17 +289,7 @@ async def compute_route_shape(conn, ch, agency_id: int, route: str, ctx: RangeCt
     if chosen_shape_id is not None:
         stats_params["shape_trip_ids"] = shape_trip_ids
     stats_result = await ch.query(
-        f"""
-        SELECT u.trip_id, u.stop_sequence,
-            argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
-        FROM updates AS u
-        WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
-          AND u.dep_delay IS NOT NULL
-          {trip_filter_sql}
-          AND {ch_where_frag}
-        GROUP BY u.trip_id, u.stop_sequence
-        ORDER BY u.trip_id, u.stop_sequence
-        """,
+        _route_shape_stats_dedup_sql(ch_where_frag, trip_filter_sql),
         parameters=stats_params,
     )
     dedup_rows = list(stats_result.result_rows)

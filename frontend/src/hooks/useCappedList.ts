@@ -22,6 +22,14 @@ type CappedList<T> = {
  * Reset happens during render rather than in an effect: React re-runs the
  * component immediately with the new state and never commits the stale one,
  * and `react-hooks/set-state-in-effect` is an error in this repo.
+ *
+ * That is also why `resetKey` must be a primitive, or at least a value that
+ * is stable across renders of the same list. It is compared with
+ * `Object.is`, so a freshly allocated array or object -- the derived list
+ * itself, say -- is a new key every render, which resets during every
+ * render, which re-renders. React stops that loop by throwing, and the page
+ * lands on its error screen. Derive a string from the things that actually
+ * identify the list instead.
  */
 export function useCappedList<T>(items: T[], initialCap: number, resetKey: unknown): CappedList<T> {
   const [state, setState] = useState({ cap: initialCap, key: resetKey });

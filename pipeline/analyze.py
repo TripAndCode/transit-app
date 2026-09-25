@@ -89,6 +89,15 @@ from pipeline.strategies.static_join import RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
+# The generation of the builders in this module. Nothing observes a change to a
+# builder's SQL, a bucket width, or a threshold, so this number is how such a
+# change tells the incremental path that every already-built date is stale:
+# it is folded into the fingerprint recorded with each build
+# (:func:`_static_fingerprint`), and a run finding a different one rebuilds
+# every date. Bump it in the same commit as any change to what a builder
+# produces.
+ANALYZE_LOGIC_VERSION = 1
+
 # SQL that bins dep_delay exactly like histogram.bucketize() — kept in lockstep
 # with the read path by deriving both from the same LO/HI/WIDTH constants.
 # Operands are non-negative inside the inner range, so SQL integer division
@@ -173,6 +182,21 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # survives `static_loader.load_static()` overwriting the raw static_* tables
 # on the next reload — see the migration's own docstring and the dedicated
 # section below for why deleting it every run would defeat its purpose.
+
+# Aggregates spanning the whole history, built from `_analyze_alltime`. They
+# carry no `date` column, so unlike _INCREMENTAL_AGG_TABLES they can never be
+# rebuilt in part — but a run where NO date changed would rebuild them to
+# exactly what already stands, because each is a pure function of that slice
+# plus constants the fingerprint covers (:func:`_static_fingerprint`), and the
+# slice is a pure function of rows the ledger just proved unchanged. Such a run
+# therefore skips their purge and their build together, and with them the
+# full-history ClickHouse scan that feeds them — the largest single read a run
+# makes, paid today to reproduce a byte-identical result.
+_ALLTIME_AGG_TABLES = frozenset({"agg_route_stats", "agg_route_hour", "agg_route_hour_dow"})
+
+# What a run with no changed date may leave standing: a date-scoped table with
+# no date to rebuild, or an all-time table whose whole input is unchanged.
+_NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _ALLTIME_AGG_TABLES
 
 
 # ── Step timing ──────────────────────────────────────────────────────────
@@ -295,12 +319,19 @@ def _insert_agg(table: str, col_names: list, rows: list, conn) -> None:
         psycopg2.extras.execute_batch(cur, sql, rows)
 
 
-def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn) -> None:
+def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn, rebuild_dates: list | None = None) -> None:
     """Run *sql*, insert the result into *table*, and log the row count.
 
     Shared by the query/dedup/rank-style aggregate builders below, which all
     follow the same run-then-insert-then-log shape.
+
+    A caller passing *rebuild_dates* gets :func:`_nothing_to_rebuild`'s skip,
+    the same one :func:`_ch_build_and_insert` applies. A caller omitting it
+    always builds.
     """
+    if _nothing_to_rebuild(table, rebuild_dates):
+        logger.info(f"  {table}: unchanged, not rebuilt")
+        return
     with _step(f"{table}: build"):
         rows = _run_query(sql, p, conn)
     _insert_agg(table, col_names, rows, conn)  # times itself
@@ -334,7 +365,7 @@ _STATIC_DEPENDENCY_COLUMNS: dict[str, tuple[str, ...]] = {
 
 
 def _static_fingerprint(agency_id: int, conn, has_static: bool) -> str:
-    """A value that changes whenever the static schedule the aggregates read does.
+    """A value that changes whenever anything but the RT rows themselves does.
 
     The date ledger below sees rows arriving in ClickHouse and nothing else,
     but several per-date aggregates also read the Postgres static schedule. A
@@ -345,6 +376,27 @@ def _static_fingerprint(agency_id: int, conn, has_static: bool) -> str:
     keeps an incremental result equal to a full rebuild across a static
     reload: a changed fingerprint means every date is stale, not just the ones
     that received rows.
+
+    Two module constants join the schedule for the same reason, and they are
+    why this value is never empty:
+
+    ``MAX_PLAUSIBLE_DELAY_SEC`` is the clamp every builder's source slice is
+    filtered by (see ``build_dedup_ch_sql``), so moving it changes which rows
+    each already-built date was aggregated from without adding or removing a
+    row anywhere.
+
+    :data:`ANALYZE_LOGIC_VERSION` stands for the builders themselves — their
+    SQL, their bucket widths, their thresholds. Nothing can observe a change
+    to those, so bumping it is how a builder change declares that every
+    already-built date is stale. **Bump it in the same commit as any change to
+    what a builder produces**; leaving it alone ships aggregates that mix the
+    old logic's dates with the new logic's.
+
+    One blind spot survives all of this: the ledger compares per-date row
+    COUNTS, so a date whose rows were replaced by exactly as many different
+    rows reads as unchanged and keeps its stale aggregates. Only a deliberate
+    full rebuild (``make analyze-all``, with ``make check-aggs``) recovers
+    from that.
 
     An order-independent sum of per-row hashes plus a row count, not an ordered
     digest: the sum is one sequential scan of tables holding at most a few
@@ -373,17 +425,18 @@ def _static_fingerprint(agency_id: int, conn, has_static: bool) -> str:
     only flipped between them. NUL itself is not available — Postgres `text`
     cannot hold it.
 
-    Without a loaded schedule there is nothing to fingerprint: every
+    Without a loaded schedule the schedule half is simply absent: every
     aggregate that reads the static tables is inside a ``has_static`` branch
     of :func:`analyze`, so a schedule change has nothing to invalidate, and
     querying those tables anyway would turn the missing-``static_*``-tables
-    case ``_static_loaded`` deliberately tolerates into a hard failure. The
-    empty string is still a distinct value, so an agency gaining or losing a
-    schedule crosses it in either direction and rebuilds in full.
+    case ``_static_loaded`` deliberately tolerates into a hard failure. Its
+    absence is still a distinct value, so an agency gaining or losing a
+    schedule crosses it in either direction and rebuilds in full — while the
+    constants above keep invalidating an agency that never had one.
     """
+    parts = [f"logic:{ANALYZE_LOGIC_VERSION}", f"clamp:{MAX_PLAUSIBLE_DELAY_SEC}"]
     if not has_static:
-        return ""
-    parts = []
+        return "|".join(parts)
     with conn.cursor() as cur:
         for table, columns in _STATIC_DEPENDENCY_COLUMNS.items():
             rendered = " || E'\\x1f' || ".join(f"coalesce({c}::text, E'\\x1e')" for c in columns)
@@ -519,14 +572,18 @@ def _text_dated_tables(conn) -> frozenset[str]:
 
 
 def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
-    """True when *table* is incremental and no date changed.
+    """True when no date changed and *table* already holds what a rebuild would produce.
 
     The run where nothing changed is the common one, and without this the
     query still goes to ClickHouse carrying an empty date list — costing a
     round trip, and for the headway scan a good deal more, to be told what the
     ledger already established.
+
+    Membership in :data:`_NOOP_SKIPPABLE_AGG_TABLES` is what makes the answer
+    safe, and it binds the purge as well as the build: a table whose build is
+    skipped must not have its rows deleted, or the run empties it.
     """
-    return rebuild_dates == [] and table in _INCREMENTAL_AGG_TABLES
+    return rebuild_dates == [] and table in _NOOP_SKIPPABLE_AGG_TABLES
 
 
 def _load_temp_table(
@@ -697,12 +754,15 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
     date_where, date_params = _date_filter(rebuild_dates, agency_id)
     try:
         # ── Purge stale rows for this agency ─────────────────────────────
-        # Scoped for the incremental tables, whole for the rest. The scope must
-        # match what each table's build below produces; see
-        # _INCREMENTAL_AGG_TABLES for why the two cannot diverge.
+        # Scoped for the incremental tables, whole for the rest, skipped for
+        # whatever this run is not going to rebuild. The scope must match what
+        # each table's build below produces; see _INCREMENTAL_AGG_TABLES and
+        # _NOOP_SKIPPABLE_AGG_TABLES for why the two cannot diverge.
         text_dated = _text_dated_tables(conn) if rebuild_dates else frozenset()
         with _step("purge: DELETE prior rows"), conn.cursor() as cur:
             for tbl in _AGG_TABLES_ORDERED:
+                if _nothing_to_rebuild(tbl, rebuild_dates):
+                    continue
                 if rebuild_dates is None or tbl not in _INCREMENTAL_AGG_TABLES:
                     cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
                 elif rebuild_dates:
@@ -735,6 +795,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ),
                 ch_sql=build_dedup_ch_sql(extra_where="u.service_type IS NOT NULL"),
                 parameters={"agency_id": agency_id},
+                # An empty rebuild list means no date's rows moved, so this
+                # slice would come back identical and the three aggregates
+                # over it are already standing at that answer — see
+                # _ALLTIME_AGG_TABLES. Skipping the scan skips a read of the
+                # agency's whole history, not just of the dates in question.
+                load=rebuild_dates != [],
                 label="alltime",
             )
             _load_temp_table(
@@ -840,6 +906,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             ],
             p,
             conn,
+            rebuild_dates,
         )
 
         # ── agg_route_hour ───────────────────────────────────────────────
@@ -883,6 +950,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             ],
             p,
             conn,
+            rebuild_dates,
         )
 
         # ── agg_route_hour_dow ───────────────────────────────────────────
@@ -918,6 +986,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             ["agency_id", "route_code", "service_type", "dow", "hour", "avg_min", "samples", "sum_delay_sec"],
             p,
             conn,
+            rebuild_dates,
         )
 
         # ── agg_daily_trend ──────────────────────────────────────────────
@@ -1184,6 +1253,14 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # non-trivial ClickHouse round-trip (a second full scan of the
             # agency's keys, not a cheap add-on) is the correctness-over-perf
             # trade this table's semantics require.
+            #
+            # The same property is why this scan runs on EVERY run, including
+            # one where no date needs rebuilding (see
+            # _NOOP_SKIPPABLE_AGG_TABLES): the ledger that answers "no date
+            # changed" counts only rows carrying a dep_delay, so an ingest made
+            # up entirely of delay-less rows leaves it unmoved while adding
+            # exactly the keys this table exists to keep. It cannot be gated on
+            # a signal that cannot see its own input.
             with conn.cursor() as cur:
                 cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
                 cur.execute(
@@ -1855,6 +1932,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
 
         # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
+        # `analyzed_at` is `clock_timestamp()`, not `now()`: completion time,
+        # not transaction start — the board compares it to the civil day, and
+        # this transaction can span hours, long enough for a finished run to
+        # be stamped with the previous day and read as stale.
         # `analyzed_at`/`max_updates_captured_at` are audit only: the freshness
         # gate derives staleness from the aggs themselves, so they answer just
         # "when was this agency last analyzed". `static_fingerprint` IS
@@ -1867,7 +1948,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         with _step("agg_meta: upsert"), conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at, static_fingerprint) "
-                "VALUES (%s, now(), %s, %s) "
+                "VALUES (%s, clock_timestamp(), %s, %s) "
                 "ON CONFLICT (agency_id) DO UPDATE SET "
                 "analyzed_at = EXCLUDED.analyzed_at, "
                 "max_updates_captured_at = EXCLUDED.max_updates_captured_at, "

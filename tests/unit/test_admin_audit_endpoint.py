@@ -145,6 +145,21 @@ def test_invalid_cursor_is_422():
     assert resp.status_code == 422
 
 
+def test_cursor_with_a_string_id_is_422():
+    """A well-formed but wrong-typed cursor must not reach the SQL bind,
+    where `id` is compared against an integer column."""
+    conn = _FakeConn()
+    cursor = aa.encode_cursor({"at": T0, "source": "audit", "id": 1})
+    import base64
+    import json
+
+    payload = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+    payload["id"] = "1"
+    tampered = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    resp = _client(conn).get("/api/admin/audit", params={"cursor": tampered})
+    assert resp.status_code == 422
+
+
 def test_valid_cursor_is_accepted():
     conn = _FakeConn()
     cursor = aa.encode_cursor({"at": T0, "source": "audit", "id": 1})
