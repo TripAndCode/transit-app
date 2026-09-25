@@ -136,6 +136,28 @@ export default tseslint.config(
           selector: 'CallExpression[callee.property.name=/^toLocale(String|DateString|TimeString)$/]',
           message: 'Do not call toLocale*() directly — use formatNumber()/formatDateTime() from src/utils/format.ts, which read the active UI language.',
         },
+        {
+          // An import declaration that isn't hoisted above the module's other
+          // top-level statements reads as if it were conditionally loaded or
+          // ordering-sensitive, when in fact every import is hoisted to the
+          // top by the module system regardless of where it's written — a
+          // `const`/function declaration between two imports is just visual
+          // noise that makes the module's dependency list harder to scan.
+          // `eslint-plugin-import`'s `import/first` isn't installed; this
+          // selector is the dependency-free equivalent: it flags an
+          // ImportDeclaration that has an earlier non-import sibling in the
+          // same module body.
+          //
+          // Two kinds of sibling do not count. A directive prologue
+          // (`"use client"`) *must* come first, so flagging the import after
+          // it would demand a move with nowhere to move to. A re-export with
+          // a source (`export { x } from "./x"`) is part of the same
+          // dependency list an import belongs to, which is how `import/first`
+          // treats it too.
+          selector:
+            'Program > :not(ImportDeclaration, ExportNamedDeclaration[source], ExportAllDeclaration, ExpressionStatement[expression.type="Literal"][expression.value=/^use /]) ~ ImportDeclaration',
+          message: 'Move this import above the module\'s other top-level statements — imports are hoisted regardless of where they appear, so keep them together at the top.',
+        },
       ],
       // Closes the aliased-import hole the syntax selectors above can't see
       // (e.g. `import { useMemo as m } from "react"`). Only matches *named*
