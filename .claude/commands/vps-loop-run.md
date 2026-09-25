@@ -3,11 +3,8 @@ name: vps-loop-run
 description: Coordinator for the autonomous VPS loop — checks repo/PR state, dispatches an isolated worker sub-agent for the next actionable NEXT_TASK.md backlog item, verifies via /review-branch, and only then pushes/opens a PR.
 ---
 
-Coordinator for one autonomous-loop run. (A design spec exists at
-`docs/superpowers/specs/2026-08-27-vps-loop-coordinator-worker-verifier-design.md`;
-`docs/superpowers/**` IS gitignored, so it won't exist on the VPS clone — this file is
-self-contained, don't block on reading it. Note `docs/refactor-log.md` is *not* ignored:
-`.gitignore` negates it and it's tracked, so Steps 4 and 6 can and must write it.) Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
+Coordinator for one autonomous-loop run; this file is self-contained. `docs/refactor-log.md`
+is tracked, and Steps 4 and 6 must write it. Backlog lives in `NEXT_TASK.md` at the repo root. Follow the steps in order; never
 skip ahead.
 
 ## Status log writes — always through the lock helper
@@ -615,7 +612,8 @@ Give the worker ONLY:
 - The exact text of backlog item N, copied verbatim from `NEXT_TASK.md`.
 - This instruction, verbatim: "Implement this on a new branch named
   `vps-loop/item-<N>`, following this repo's normal CLAUDE.md conventions
-  (tests, `make check`-scoped checks, `[skip ci]` in the commit trailer).
+  (tests, `make check`-scoped checks; branch commits carry no `[skip ci]`
+  trailer, so every push runs the CI the merge gate reads).
   Before starting any lengthy test or review preparation, create a durable
   local checkpoint commit containing the current implementation. Create another
   checkpoint whenever a substantial fix is complete. This protects the work if

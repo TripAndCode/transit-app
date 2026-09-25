@@ -200,13 +200,10 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   a *new* invocation is willing to retry after the previous one stopped
   without progress. `deploy/systemd/claude-loop.service`'s `TimeoutStartSec`
   was raised (see that file's own comment for the exact arithmetic) to fit a
-  full chain of ticks, not just one — this deliberately breaks the old
-  invariant that the timer's cadence exceeded the wrapper's hard timeout
-  (previously the only thing preventing two overlapping runs, before `flock`
-  was even reached). A long chain can now still be running when the next
-  hourly firing lands; overlap is prevented purely by `flock` plus systemd's
-  own refusal to start a second instance of an already-active `Type=oneshot`
-  unit, not by timing the two intervals apart anymore.
+  full chain of ticks, not just one, so a long chain can still be running
+  when the next hourly firing lands. Overlap is prevented by `flock` plus
+  systemd's refusal to start a second instance of an already-active
+  `Type=oneshot` unit; the timer's cadence is not a guard.
 - Every heartbeat also carries `scripts/vps_loop_health.py`'s report (last
   successful tick, current item, `last_tick_outcome`, blocker class, pause
   state, and its own `repeated_without_progress`/`stale_pause` alert flags

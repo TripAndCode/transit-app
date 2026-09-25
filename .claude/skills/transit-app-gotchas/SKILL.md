@@ -11,8 +11,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   Postgres `updates` table still exists as a rollback safety net but has zero
   production readers.
   `agg_*`/OLTP/PostGIS/pgvector stay on Postgres.
-- Dev Postgres read-only rule (`postgresql://transit:transit@localhost:5433/transit`,
-  wiped twice): canonical in `CLAUDE.md`. Too big to clone whole — to demo on
+- Dev Postgres read-only rule, and which port actually holds the data (read
+  `DATABASE_URL`; it need not be `compose.yml`'s `:5433`): canonical in `CLAUDE.md`. Too big to clone whole — to demo on
   real data, slice one agency + a few days via read-only
   `\copy (SELECT … WHERE agency_id=… AND captured_at::date IN (…)) TO …` into a
   throwaway DB on a spare port, then migrate + analyze there.
@@ -152,14 +152,11 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   (not retargets) the dependent PR.
 - `git stash` is repo-wide, not worktree-scoped — a stash pushed from one
   worktree is visible (and droppable) from every other worktree and the main
-  checkout. A freshly-dispatched VPS-loop worker finding a prior tick's
-  stash explicitly held for human review, reusing its content, then running
-  `git stash drop` on it without authorization can be irreversible: a
-  dropped stash is only reachable until `git gc --prune=now` runs, which
-  eventually will. Never run `git stash
-  drop`/`clear`/`pop` against a stash you didn't create in the current
-  session/tick; `vps-loop-run.md`'s Step 4 worker prompt says this
-  explicitly.
+  checkout, and a dropped stash is recoverable only until `git gc` prunes it.
+  Another session or an earlier tick may be holding one for human review, so
+  never run `git stash drop`/`clear`/`pop` against a stash you didn't create
+  in the current session/tick; `vps-loop-run.md`'s Step 4 worker prompt
+  repeats this for workers.
 - Whether a push runs CI is decided by ONE commit: the tip of that push.
   GitHub evaluates the skip trailer once per push event against that
   message alone — not retroactively across the push's other commits — so a
