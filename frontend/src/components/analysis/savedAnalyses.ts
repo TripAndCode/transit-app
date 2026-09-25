@@ -1,4 +1,5 @@
 import { ctxToQueryString, type RangeCtx } from "../../api/rangeContext";
+import { uuid } from "../../utils/uuid";
 
 type SavedAnalysis = { id: string; agencyId: number; title: string; query: string; savedAt: string };
 const STORAGE_ID = "transit.savedAnalyses.v1";
@@ -8,10 +9,6 @@ export function readAnalyses(): SavedAnalysis[] {
     if (!Array.isArray(value)) return [];
     return value.filter((v): v is SavedAnalysis => v && typeof v.id === "string" && Number.isInteger(v.agencyId) && typeof v.title === "string" && typeof v.query === "string" && typeof v.savedAt === "string");
   } catch { return []; }
-}
-function uuid(): string {
-  // crypto.randomUUID requires a secure context; fall back where it's absent.
-  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 }
 
 /** Saves an analysis. Returns whether it was persisted -- `false` (rather

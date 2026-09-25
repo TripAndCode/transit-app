@@ -1,4 +1,3 @@
-// frontend/src/components/ConcentrationBar.tsx
 import { useTranslation } from "react-i18next";
 
 import type { OverviewConcentration, OverviewMovers } from "../api/types";
