@@ -58,6 +58,15 @@
      contrast comfortably on dark, matches the pre-existing (marginal) look
      on light — not changing the light-mode value here, out of scope. */
   --color-warning: #C99A2E;
+  /* Text-safe counterpart to --color-warning: the plain value is 2.3-2.6:1 as
+     text against --bg-surface/--bg-soft, well under WCAG AA. Darkened along
+     the same amber hue rather than desaturating to grey. Dark theme reuses
+     --color-warning itself -- see the dark declaration. */
+  --color-warning-text: #89691F;
+  /* Reserved for destructive-action buttons only (delete/remove controls) --
+     an alarm red the calm-UI rule otherwise rules out. Any other severity
+     signal (a stale feed, an error message, a danger-zone heading) uses
+     --delay-severe instead, which is per-theme and AA-passing as text. */
   --color-danger: #c0392b;
   /* Deepened variant of --accent for primary buttons/active states -- more
      confident at button weight than --accent reads on its own. Same hue
@@ -66,8 +75,8 @@
      text on both --bg-surface and --bg-soft. */
   --accent-strong: #115E62;
   /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
-     distinct from --delay-severe/--color-danger, which stay the map's own
-     per-point severity ramp; this is specifically for aggregate counts. */
+     distinct from --delay-severe, which stays the map's own per-point
+     severity ramp; this is specifically for aggregate counts. */
   --delay-flag: #C4501F;
   /* Fallback first for engines without color-mix() support (same reasoning as
      --map-badge-bg above); the mix itself tracks --delay-flag automatically
@@ -111,6 +120,15 @@
      of truth; its SEVERE_FALLBACK mirrors this light value by hand and is
      held to it by the same test. */
   --delay-severe: #A8391F;
+  /* Text-safe counterpart to the ok/mild/moderate delay-ramp fills
+     (tokens.ts's DELAY_RAMP), which are 2.6-3.8:1 as text against
+     --bg-surface -- under WCAG AA. Darkened along each fill's own hue rather
+     than desaturating to grey. The severe tier needs no text variant: it is
+     already per-theme and AA-passing (--delay-severe above). Each theme's
+     values are tuned per tier to clear AA on every surface they land on. */
+  --delay-text-ok: #217857;
+  --delay-text-mild: #85661E;
+  --delay-text-moderate: #AC4F22;
   /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
      ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
@@ -208,6 +226,10 @@
   --font-display: "Noto Serif JP", "Times New Roman", serif;
   --font-body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
                "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+  /* Identifiers that are read character by character — a user id, a route
+     code, a hash — where proportional digits and an ambiguous 1/l/I cost the
+     reader a second look. Not for anything with prose in it. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root[data-theme="dark"] {
@@ -239,6 +261,14 @@
      it clears 4.5:1 on this theme's --bg-surface — see the invariant on the
      light declaration. */
   --delay-severe: #F0837A;
+  /* Tuned per tier to clear 4.5:1 on this theme's page, --accent-soft and
+     current-row surfaces; only mild coincides with its ramp fill. */
+  --delay-text-ok: #31B483;
+  --delay-text-mild: #C99A2E;
+  --delay-text-moderate: #E08A61;
+  /* --color-warning itself already clears 4.5:1 on this theme's surfaces —
+     see the light declaration for why light needs a separate darkened value. */
+  --color-warning-text: #C99A2E;
   --trend-good: #4ade80;
   --trend-bad: #fbbf24;
   --trend-neutral: #94a3b8;
@@ -508,6 +538,45 @@ summary:focus-visible,
   box-shadow: var(--el-2);
   pointer-events: none;
 }
+/* `Glossary` (components/Glossary.tsx). Inline trigger for a technical term
+   kept visible on an operator-facing page; the tooltip carries the plain-
+   language explanation. Reset to plain text rather than button chrome, with
+   a dotted underline as the only affordance that it's interactive. */
+.glossary-term {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+  border-bottom: 1px dotted var(--text-secondary);
+}
+
+/* `ThreadSidebar`'s conversation context menu (components/ThreadSidebar.tsx).
+   The highlight is a CSS state so the keyboard-focused item and the hovered
+   item look alike -- a JS hover handler can only ever light up the mouse's
+   item, leaving arrow-key navigation with no visible position. */
+.context-menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 7px var(--space-4);
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background var(--transition);
+}
+.context-menu__item--danger {
+  color: var(--color-danger);
+}
+.context-menu__item:hover,
+.context-menu__item:focus-visible {
+  background: var(--bg-soft);
+}
+
 /* `ExportMenu` (components/ExportMenu.tsx). A plain dropdown anchored to its
    trigger -- there is exactly one open at a time per page, so it needs no
    portal (unlike `Tooltip`, which can sit inside a clipping map overlay). */

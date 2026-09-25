@@ -1,4 +1,4 @@
-"""Tests for the daily git hygiene job (local, remote, backup-branch, and venv cleanup)."""
+"""Tests for the daily git hygiene job (local branch/worktree and venv cleanup)."""
 
 from __future__ import annotations
 
@@ -33,37 +33,6 @@ def git(repo: Path, *args: str) -> str:
         capture_output=True,
         text=True,
     ).stdout.strip()
-
-
-def commit_at(repo: Path, message: str, when: str) -> None:
-    """Create an empty commit whose author and committer date are both `when` (ISO-8601)."""
-
-    subprocess.run(
-        ("git", "-C", str(repo), "commit", "--allow-empty", "-m", message),
-        check=True,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when},
-    )
-
-
-def create_backup_branch_at(repo: Path, branch: str, start_point: str, when: str) -> None:
-    """Create a local branch whose own reflog creation entry is timestamped `when` (ISO-8601).
-
-    Mirrors `commit_at`'s `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` technique, but applied to a
-    ref update instead of a commit: a reflog entry always records the *committer* identity
-    and timestamp for whichever command touched the ref, `git branch` just as much as `git
-    commit`, so this backdates the branch's OWN creation time -- deliberately not the
-    backing commit's, which is exactly the distinction under test throughout this file.
-    """
-
-    subprocess.run(
-        ("git", "-C", str(repo), "branch", branch, start_point),
-        check=True,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when},
-    )
 
 
 @pytest.fixture
@@ -151,181 +120,6 @@ def test_run_local_cleanup_logs_deleted_local_branches_after_apply(
 
 
 # ---------------------------------------------------------------------------
-# Remote branch decision table
-# ---------------------------------------------------------------------------
-
-
-def test_merged_branch_with_matching_tip_and_no_dependent_pr_is_deletable():
-    """A branch whose remote tip exactly matches its merged PR's head is safe to delete."""
-
-    decision = hygiene.decide_remote_branch(
-        "vps-loop/item-7",
-        "a" * 40,
-        (cleanup.PullRequest(70, "MERGED", "a" * 40),),
-        (),
-    )
-
-    assert decision.action == "delete"
-    assert "#70" in decision.reason
-
-
-def test_merged_branch_with_mismatched_tip_is_retained():
-    """A merged PR exists, but the branch's current tip is not that PR's exact head --
-    real commits may have landed after the merge, so this is not provably recoverable
-    the same way `cleanup_git_state.decide_branch` refuses to delete a local branch
-    whose tip differs from its merged PR's head_oid.
-    """
-
-    decision = hygiene.decide_remote_branch(
-        "vps-loop/item-7",
-        "b" * 40,
-        (cleanup.PullRequest(70, "MERGED", "a" * 40),),
-        (),
-    )
-
-    assert decision.action == "keep"
-    assert "tip differs" in decision.reason
-
-
-def test_merged_branch_with_open_dependent_pr_is_retained():
-    """A stacked PR still open against this branch as its base blocks deletion."""
-
-    decision = hygiene.decide_remote_branch(
-        "vps-loop/item-7",
-        "a" * 40,
-        (cleanup.PullRequest(70, "MERGED", "a" * 40),),
-        (71,),
-    )
-
-    assert decision.action == "keep"
-    assert "#71" in decision.reason
-
-
-def test_branch_with_its_own_open_pr_is_retained():
-    """A branch whose own PR is still open is never touched."""
-
-    decision = hygiene.decide_remote_branch(
-        "vps-loop/item-8",
-        "a" * 40,
-        (cleanup.PullRequest(80, "OPEN", "a" * 40),),
-        (),
-    )
-
-    assert decision.action == "keep"
-    assert "#80" in decision.reason
-
-
-def test_branch_with_no_pr_history_is_retained():
-    """A stray manually-pushed branch with no PR trail at all is a human's call."""
-
-    decision = hygiene.decide_remote_branch("vps-loop/item-9", "a" * 40, (), ())
-
-    assert decision.action == "keep"
-    assert "no merged PR evidence" in decision.reason
-
-
-def test_branch_with_only_closed_pr_is_retained():
-    """An unmerged closed PR is not proof of recoverability."""
-
-    decision = hygiene.decide_remote_branch(
-        "vps-loop/item-10",
-        "a" * 40,
-        (cleanup.PullRequest(90, "CLOSED", "a" * 40),),
-        (),
-    )
-
-    assert decision.action == "keep"
-
-
-# ---------------------------------------------------------------------------
-# Backup-branch retention decision table
-# ---------------------------------------------------------------------------
-
-
-def test_backup_branch_younger_than_retention_is_retained():
-    """A superseded-backup branch inside the retention window is kept."""
-
-    now = 1_000_000
-    creation_epoch = now - (29 * 86400)  # 29 days old, under a 30-day window
-
-    decision = hygiene.decide_backup_branch(
-        "vps-loop/item-5-superseded-abc1234", creation_epoch, now_epoch=now, retention_days=30
-    )
-
-    assert decision.action == "keep"
-
-
-def test_backup_branch_exactly_at_retention_boundary_is_retained():
-    """Exactly at the retention window is not yet 'older than' it."""
-
-    now = 1_000_000
-    creation_epoch = now - (30 * 86400)
-
-    decision = hygiene.decide_backup_branch(
-        "vps-loop/item-5-superseded-abc1234", creation_epoch, now_epoch=now, retention_days=30
-    )
-
-    assert decision.action == "keep"
-
-
-def test_backup_branch_older_than_retention_is_deletable():
-    """A superseded-backup branch past the retention window is deletable."""
-
-    now = 1_000_000
-    creation_epoch = now - (31 * 86400)
-
-    decision = hygiene.decide_backup_branch(
-        "vps-loop/item-5-superseded-abc1234", creation_epoch, now_epoch=now, retention_days=30
-    )
-
-    assert decision.action == "delete"
-    assert "31.0d old" in decision.reason
-
-
-def test_backup_branch_ages_from_its_own_creation_not_an_old_backing_commit():
-    """The whole point of the fix: a backup branch created *today* for an already-old,
-    long-stale branch must not look instantly past retention just because its backing
-    commit is old."""
-
-    now = 1_000_000
-    old_backing_commit_epoch = now - (365 * 86400)  # a year-old commit
-    creation_epoch = now  # the backup branch itself was just created
-
-    decision = hygiene.decide_backup_branch(
-        "vps-loop/item-5-superseded-abc1234", creation_epoch, now_epoch=now, retention_days=30
-    )
-
-    assert decision.action == "keep"
-    assert old_backing_commit_epoch < creation_epoch  # sanity: the two clocks really do differ
-
-
-def test_backup_branch_with_unknown_creation_time_is_retained():
-    """No reflog entry to measure age from -- always kept, never guessed at either extreme."""
-
-    decision = hygiene.decide_backup_branch(
-        "vps-loop/item-5-superseded-abc1234", None, now_epoch=1_000_000, retention_days=30
-    )
-
-    assert decision.action == "keep"
-    assert "unknown" in decision.reason
-
-
-# ---------------------------------------------------------------------------
-# Branch name matching
-# ---------------------------------------------------------------------------
-
-
-def test_superseded_pattern_matches_only_the_backup_shape():
-    """The backup-branch regex must not also match a plain item branch or unrelated name."""
-
-    assert hygiene.SUPERSEDED_BRANCH_RE.match("vps-loop/item-12-superseded-abc123f")
-    assert not hygiene.SUPERSEDED_BRANCH_RE.match("vps-loop/item-12")
-    assert not hygiene.SUPERSEDED_BRANCH_RE.match("vps-loop/item-12-superseded")
-    assert not hygiene.VPS_LOOP_ITEM_BRANCH_RE.match("vps-loop/item-12-superseded-abc123f")
-    assert hygiene.VPS_LOOP_ITEM_BRANCH_RE.match("vps-loop/item-12")
-
-
-# ---------------------------------------------------------------------------
 # Lock file concurrency guard
 # ---------------------------------------------------------------------------
 
@@ -333,7 +127,7 @@ def test_superseded_pattern_matches_only_the_backup_shape():
 def test_lock_round_trip_when_uncontended(tmp_path: Path):
     """Acquiring and releasing an uncontended lock works and frees it for reuse."""
 
-    lock_path = tmp_path / "claude-loop.lock"
+    lock_path = tmp_path / "hygiene.lock"
 
     handle = hygiene.try_acquire_lock(lock_path)
     assert handle is not None
@@ -346,9 +140,9 @@ def test_lock_round_trip_when_uncontended(tmp_path: Path):
 
 
 def test_lock_skip_when_already_held(tmp_path: Path):
-    """A concurrently held lock (simulating a live /vps-loop-run tick) is not acquired."""
+    """A concurrently held lock (simulating another run) is not acquired."""
 
-    lock_path = tmp_path / "claude-loop.lock"
+    lock_path = tmp_path / "hygiene.lock"
     holder = lock_path.open("a+")
     fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
@@ -359,20 +153,19 @@ def test_lock_skip_when_already_held(tmp_path: Path):
 
 
 def test_main_skips_all_cleanup_when_lock_is_held(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """main() must not touch any git state at all while the loop's lock is held."""
+    """main() must not touch any git state at all while another run holds the lock."""
 
-    lock_path = tmp_path / "claude-loop.lock"
+    lock_path = tmp_path / "hygiene.lock"
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
     holder = lock_path.open("a+")
     fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     def _boom(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("cleanup stage must not run while the loop lock is held")
+        raise AssertionError("cleanup stage must not run while the lock is held")
 
     monkeypatch.setattr(hygiene, "run_local_cleanup", _boom)
-    monkeypatch.setattr(hygiene, "run_remote_branch_cleanup", _boom)
-    monkeypatch.setattr(hygiene, "run_backup_branch_pruning", _boom)
+    monkeypatch.setattr(hygiene, "run_orphaned_venv_pruning", _boom)
 
     try:
         exit_code = hygiene.main(
@@ -475,7 +268,7 @@ def test_main_skips_before_touching_the_lock_when_already_succeeded_today(
 ):
     """An hourly re-trigger on a day this job already completed must not even try the lock."""
 
-    lock_path = tmp_path / "claude-loop.lock"
+    lock_path = tmp_path / "hygiene.lock"
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
     hygiene.mark_succeeded_today(state_path, log_path)
@@ -507,14 +300,14 @@ def test_main_marks_today_succeeded_only_after_a_fully_clean_apply_run(
 ):
     """A stage error must not mark today done -- it should retry on the next hourly trigger."""
 
-    lock_path = tmp_path / "claude-loop.lock"
+    lock_path = tmp_path / "hygiene.lock"
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
 
     def _boom(*_args: object, **_kwargs: object) -> bool:
         raise hygiene.HygieneError("simulated stage failure")
 
-    monkeypatch.setattr(hygiene, "run_remote_branch_cleanup", _boom)
+    monkeypatch.setattr(hygiene, "run_orphaned_venv_pruning", _boom)
 
     exit_code = hygiene.main(
         [
@@ -546,7 +339,6 @@ def test_main_does_not_mark_today_succeeded_on_a_dry_run(
     """
 
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
-    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
 
     # The venv-pruning stage's own self-check requires the main checkout's own
     # venv to be a real, enumerable candidate under --venv-root, so this test
@@ -560,7 +352,7 @@ def test_main_does_not_mark_today_succeeded_on_a_dry_run(
     main_venv = _make_fake_venv(venv_root, "transit-delay-app-main-py3.12", age_hours=1)
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: main_venv.resolve())
 
-    lock_path = tmp_path / "claude-loop.lock"
+    lock_path = tmp_path / "hygiene.lock"
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
 
@@ -589,13 +381,12 @@ def test_main_marks_today_succeeded_after_a_fully_clean_apply_run_with_nothing_t
     """A real --apply run that finds nothing to delete is still a fully-clean day."""
 
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
-    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
 
     venv_root = tmp_path / "virtualenvs"
     main_venv = _make_fake_venv(venv_root, "transit-delay-app-main-py3.12", age_hours=1)
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: main_venv.resolve())
 
-    lock_path = tmp_path / "claude-loop.lock"
+    lock_path = tmp_path / "hygiene.lock"
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
 
@@ -632,7 +423,6 @@ def test_main_actually_prunes_an_orphaned_venv_end_to_end(
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
-    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
     main_venv = _make_fake_venv(venv_root, "transit-delay-app-main-py3.12", age_hours=100)
     monkeypatch.setattr(
         hygiene,
@@ -642,7 +432,7 @@ def test_main_actually_prunes_an_orphaned_venv_end_to_end(
 
     orphan = _make_fake_venv(venv_root, "transit-delay-app-orphan-py3.12", age_hours=100)
 
-    lock_path = tmp_path / "claude-loop.lock"
+    lock_path = tmp_path / "hygiene.lock"
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
 
@@ -674,11 +464,11 @@ def test_main_does_not_mark_today_succeeded_when_a_stage_has_a_per_item_failure(
 ):
     """A stage that returns False (a swallowed per-item error) must not mark today done either."""
 
-    lock_path = tmp_path / "claude-loop.lock"
+    lock_path = tmp_path / "hygiene.lock"
     log_path = tmp_path / "git-hygiene.log"
     state_path = tmp_path / "last-success"
 
-    monkeypatch.setattr(hygiene, "run_remote_branch_cleanup", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(hygiene, "run_orphaned_venv_pruning", lambda *_args, **_kwargs: False)
 
     exit_code = hygiene.main(
         [
@@ -699,339 +489,7 @@ def test_main_does_not_mark_today_succeeded_when_a_stage_has_a_per_item_failure(
 
 
 # ---------------------------------------------------------------------------
-# End-to-end: backup-branch pruning against a real repository
-# ---------------------------------------------------------------------------
-
-
-def test_load_local_superseded_branches_reads_creation_time_from_reflog_in_bulk(repository: Path):
-    """One bulk reflog read returns each backup branch's own creation epoch -- not its
-    backing commit's committer time -- and excludes a plain (non-superseded)
-    `vps-loop/item-<N>` branch.
-    """
-
-    when = "2000-01-01T00:00:00+0000"
-    create_backup_branch_at(repository, "vps-loop/item-1-superseded-deadbee", "main", when)
-    git(repository, "branch", "vps-loop/item-2", "main")  # not a backup branch; must be excluded
-
-    branches = hygiene.load_local_superseded_branches(repository)
-
-    assert branches == {"vps-loop/item-1-superseded-deadbee": 946_684_800}
-
-
-def test_load_local_superseded_branches_uses_branch_creation_time_not_backing_commit_time(
-    repository: Path,
-):
-    """The whole point of the fix: an old backing commit must not make a brand-new backup
-    branch look already old. The branch here is created with a plain, un-backdated
-    `git branch` -- its reflog timestamp is real "now", even though it points at a
-    40-day-old commit.
-    """
-
-    old_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(time.time() - 40 * 86400))
-    git(repository, "checkout", "-b", "old-work")
-    commit_at(repository, "old work", old_when)
-    old_tip = git(repository, "rev-parse", "HEAD")
-    git(repository, "checkout", "main")
-
-    git(repository, "branch", "vps-loop/item-4-superseded-a1d1234", old_tip)
-
-    branches = hygiene.load_local_superseded_branches(repository)
-
-    creation_epoch = branches["vps-loop/item-4-superseded-a1d1234"]
-    assert creation_epoch is not None
-    assert abs(creation_epoch - time.time()) < 60  # created just now, not 40 days ago
-
-
-def test_load_local_superseded_branches_reports_none_for_a_branch_with_no_reflog(
-    repository: Path,
-):
-    """A real branch that happens to have no reflog (disabled, or expired) must be reported
-    with an unknown (`None`) creation time -- not silently omitted from the result."""
-
-    git(repository, "config", "core.logAllRefUpdates", "false")
-    git(repository, "branch", "vps-loop/item-7-superseded-0decafe", "main")
-
-    branches = hygiene.load_local_superseded_branches(repository)
-
-    assert branches == {"vps-loop/item-7-superseded-0decafe": None}
-
-
-def test_run_backup_branch_pruning_deletes_only_stale_branches(tmp_path: Path, repository: Path):
-    """Apply removes only the superseded-backup branch older than the retention window --
-    based on when each backup BRANCH was created, not its (here, identical and fresh)
-    backing commit.
-    """
-
-    now = time.time()
-    old_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(now - 40 * 86400))
-    new_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(now - 5 * 86400))
-
-    create_backup_branch_at(repository, "vps-loop/item-1-superseded-deadbee", "main", old_when)
-    create_backup_branch_at(repository, "vps-loop/item-2-superseded-cafef00d", "main", new_when)
-
-    log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_backup_branch_pruning(repository, retention_days=30, apply=True, log_file=log_path)
-
-    assert git(repository, "branch", "--list", "vps-loop/item-1-superseded-deadbee") == ""
-    assert git(repository, "branch", "--list", "vps-loop/item-2-superseded-cafef00d")
-    log_contents = log_path.read_text(encoding="utf-8")
-    assert "vps-loop/item-1-superseded-deadbee" in log_contents
-    assert "vps-loop/item-2-superseded-cafef00d" not in log_contents
-
-
-def test_run_backup_branch_pruning_dry_run_deletes_nothing(tmp_path: Path, repository: Path):
-    """Without --apply, planning must not remove anything nor write the log."""
-
-    old_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(time.time() - 40 * 86400))
-    create_backup_branch_at(repository, "vps-loop/item-3-superseded-1234567", "main", old_when)
-
-    log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_backup_branch_pruning(repository, retention_days=30, apply=False, log_file=log_path)
-
-    assert git(repository, "branch", "--list", "vps-loop/item-3-superseded-1234567")
-    assert not log_path.exists()
-
-
-# ---------------------------------------------------------------------------
-# End-to-end: remote branch cleanup against a real (local, bare) "origin"
-# ---------------------------------------------------------------------------
-
-
-def test_run_remote_branch_cleanup_deletes_only_merged_non_stacked_branches(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """Apply deletes a merged, non-stacked branch but keeps one with a live dependent PR."""
-
-    tip = git(repository, "rev-parse", "HEAD")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-11")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-12")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-13")
-
-    pull_requests = {
-        "vps-loop/item-11": (cleanup.PullRequest(111, "MERGED", tip),),
-        "vps-loop/item-12": (cleanup.PullRequest(112, "MERGED", tip),),
-        # item-13 has no PR at all -- must never be touched.
-    }
-    dependents = {
-        "vps-loop/item-12": (120,),
-    }
-    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: pull_requests)
-    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: dependents)
-
-    log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
-
-    remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
-    assert "vps-loop/item-11" not in remaining
-    assert "vps-loop/item-12" in remaining
-    assert "vps-loop/item-13" in remaining
-    log_contents = log_path.read_text(encoding="utf-8")
-    assert "vps-loop/item-11" in log_contents
-    assert "vps-loop/item-12" not in log_contents
-
-
-def test_run_remote_branch_cleanup_retains_branch_with_mismatched_tip(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A merged PR whose head_oid no longer matches the branch's real remote tip is retained."""
-
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-14")
-
-    pull_requests = {"vps-loop/item-14": (cleanup.PullRequest(114, "MERGED", "f" * 40),)}
-    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: pull_requests)
-    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
-
-    log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
-
-    remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
-    assert "vps-loop/item-14" in remaining
-    assert not log_path.exists()
-
-
-def test_run_remote_branch_cleanup_skips_branch_whose_tip_changed_since_planning(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A commit landing on the branch between planning and delete must not be discarded.
-
-    Simulates the TOCTOU window entirely within one `run_remote_branch_cleanup` call:
-    `list_remote_vps_loop_branches` is patched to return the tip as it was at planning
-    time, while the branch is genuinely advanced on `origin` before the apply loop's own
-    real, unpatched `remote_branch_head` recheck runs.
-    """
-
-    planned_tip = git(repository, "rev-parse", "HEAD")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-17")
-
-    monkeypatch.setattr(
-        hygiene, "list_remote_vps_loop_branches", lambda _repo, _remote: {"vps-loop/item-17": planned_tip}
-    )
-    pull_requests = {"vps-loop/item-17": (cleanup.PullRequest(117, "MERGED", planned_tip),)}
-    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: pull_requests)
-    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
-
-    # A real new commit lands on the branch on `origin` after planning would have run.
-    (repository / "tracked.txt").write_text("advanced on the branch\n", encoding="utf-8")
-    git(repository, "commit", "-am", "advance the branch after planning")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-17")
-    advanced_tip = git(repository, "rev-parse", "HEAD")
-    assert advanced_tip != planned_tip
-
-    log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
-
-    remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-17")
-    assert advanced_tip in remaining  # branch survives with its newer, unshipped commit intact
-    log_contents = log_path.read_text(encoding="utf-8")
-    assert "tip changed since planning" in log_contents
-
-
-def test_run_remote_branch_cleanup_dry_run_deletes_nothing(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """Without --apply, planning must not delete any remote branch nor write the log."""
-
-    tip = git(repository, "rev-parse", "HEAD")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-20")
-    pull_requests = {"vps-loop/item-20": (cleanup.PullRequest(200, "MERGED", tip),)}
-    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: pull_requests)
-    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
-
-    log_path = tmp_path / "git-hygiene.log"
-    hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=False, log_file=log_path)
-
-    remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
-    assert "vps-loop/item-20" in remaining
-    assert not log_path.exists()
-
-
-def test_load_dependent_open_prs_groups_by_exact_base_ref(monkeypatch: pytest.MonkeyPatch):
-    """Grouping trusts only `baseRefName` equality, not gh's own `--base` filter semantics."""
-
-    payload = (
-        '[{"number": 5, "baseRefName": "vps-loop/item-1"}, '
-        '{"number": 6, "baseRefName": "vps-loop/item-1"}, '
-        '{"number": 7, "baseRefName": "vps-loop/item-2"}]'
-    )
-    fake_result = subprocess.CompletedProcess(args=(), returncode=0, stdout=payload, stderr="")
-    monkeypatch.setattr(cleanup, "run_command", lambda *_args, **_kwargs: fake_result)
-
-    grouped = hygiene.load_dependent_open_prs(Path("/unused"))
-
-    assert grouped == {"vps-loop/item-1": (5, 6), "vps-loop/item-2": (7,)}
-
-
-# ---------------------------------------------------------------------------
-# Per-branch delete resilience (one failure must not abort the whole stage)
-# ---------------------------------------------------------------------------
-
-
-def test_run_remote_branch_cleanup_continues_after_one_delete_error(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A transient delete failure on one branch must not stop the rest of the stage."""
-
-    tip = git(repository, "rev-parse", "HEAD")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-15")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-16")
-
-    pull_requests = {
-        "vps-loop/item-15": (cleanup.PullRequest(115, "MERGED", tip),),
-        "vps-loop/item-16": (cleanup.PullRequest(116, "MERGED", tip),),
-    }
-    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: pull_requests)
-    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
-
-    def _flaky_delete(repo: Path, remote: str, branch: str) -> None:
-        if branch == "vps-loop/item-15":
-            raise cleanup.CleanupError("simulated transient network error")
-        cleanup.run_git(repo, "push", remote, "--delete", "--", branch)
-
-    monkeypatch.setattr(hygiene, "delete_remote_branch", _flaky_delete)
-
-    log_path = tmp_path / "git-hygiene.log"
-    all_clean = hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
-
-    assert all_clean is False  # the swallowed per-branch error must still surface to the caller
-    remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
-    assert "vps-loop/item-15" in remaining  # the failed delete leaves it in place
-    assert "vps-loop/item-16" not in remaining  # the other branch still gets swept
-    log_contents = log_path.read_text(encoding="utf-8")
-    assert "ERROR deleting origin/vps-loop/item-15" in log_contents
-    assert "DELETED origin/vps-loop/item-16" in log_contents
-
-
-def test_run_remote_branch_cleanup_continues_after_one_tip_check_error(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A transient failure checking one branch's tip must not stop the rest of the stage.
-
-    Distinct from the delete-failure test above: this injects the failure at the
-    immediately-before-delete `remote_branch_head` recheck itself, not at
-    `delete_remote_branch`.
-    """
-
-    tip = git(repository, "rev-parse", "HEAD")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-18")
-    git(repository, "push", "origin", "HEAD:refs/heads/vps-loop/item-19")
-
-    pull_requests = {
-        "vps-loop/item-18": (cleanup.PullRequest(118, "MERGED", tip),),
-        "vps-loop/item-19": (cleanup.PullRequest(119, "MERGED", tip),),
-    }
-    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: pull_requests)
-    monkeypatch.setattr(hygiene, "load_dependent_open_prs", lambda _repo: {})
-
-    real_remote_branch_head = hygiene.remote_branch_head
-
-    def _flaky_head_check(repo: Path, remote: str, branch: str) -> str | None:
-        if branch == "vps-loop/item-18":
-            raise cleanup.CleanupError("simulated transient network error")
-        return real_remote_branch_head(repo, remote, branch)
-
-    monkeypatch.setattr(hygiene, "remote_branch_head", _flaky_head_check)
-
-    log_path = tmp_path / "git-hygiene.log"
-    all_clean = hygiene.run_remote_branch_cleanup(repository, remote="origin", apply=True, log_file=log_path)
-
-    assert all_clean is False  # the swallowed per-branch error must still surface to the caller
-    remaining = git(repository, "ls-remote", "--heads", "origin", "vps-loop/item-*")
-    assert "vps-loop/item-18" in remaining  # the failed tip check leaves it in place
-    assert "vps-loop/item-19" not in remaining  # the other branch still gets checked and swept
-    log_contents = log_path.read_text(encoding="utf-8")
-    assert "ERROR checking origin/vps-loop/item-18 tip" in log_contents
-    assert "DELETED origin/vps-loop/item-19" in log_contents
-
-
-def test_run_backup_branch_pruning_continues_after_one_delete_error(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A delete failure on one stale backup branch must not stop the rest of the stage."""
-
-    old_when = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(time.time() - 40 * 86400))
-    for branch in ("vps-loop/item-6-superseded-1111111", "vps-loop/item-6-superseded-2222222"):
-        create_backup_branch_at(repository, branch, "main", old_when)
-
-    def _flaky_delete(repo: Path, branch: str) -> None:
-        if branch == "vps-loop/item-6-superseded-1111111":
-            raise cleanup.CleanupError("simulated transient error")
-        cleanup.run_git(repo, "branch", "-D", "--", branch)
-
-    monkeypatch.setattr(hygiene, "delete_local_branch", _flaky_delete)
-
-    log_path = tmp_path / "git-hygiene.log"
-    all_clean = hygiene.run_backup_branch_pruning(repository, retention_days=30, apply=True, log_file=log_path)
-
-    assert all_clean is False  # the swallowed per-branch error must still surface to the caller
-    assert git(repository, "branch", "--list", "vps-loop/item-6-superseded-1111111")
-    assert git(repository, "branch", "--list", "vps-loop/item-6-superseded-2222222") == ""
-    log_contents = log_path.read_text(encoding="utf-8")
-    assert "ERROR deleting vps-loop/item-6-superseded-1111111" in log_contents
-    assert "DELETED vps-loop/item-6-superseded-2222222" in log_contents
-
-
-# ---------------------------------------------------------------------------
-# 4. Orphaned poetry venv pruning
+# Orphaned poetry venv pruning
 # ---------------------------------------------------------------------------
 
 
@@ -1059,7 +517,7 @@ def test_poetry_env_path_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch
 
 def test_poetry_env_path_returns_none_on_timeout(monkeypatch: pytest.MonkeyPatch):
     """A hanging `poetry env info` must not hang this job -- treated the same as unresolvable,
-    never left to hold /tmp/claude-loop.lock indefinitely."""
+    never left to hold the hygiene lock indefinitely."""
 
     def _hangs(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(cmd="poetry", timeout=hygiene.POETRY_ENV_INFO_TIMEOUT_SECONDS)
@@ -1092,7 +550,7 @@ def test_compute_in_use_poetry_venvs_raises_when_an_old_worktree_venv_unresolvab
     failed to resolve."""
 
     worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "vps-loop/item-99", str(worktree_path), "main")
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
 
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)  # the worktree's venv fails to resolve
 
@@ -1112,7 +570,7 @@ def test_compute_in_use_poetry_venvs_skips_a_young_worktree_with_no_resolvable_v
     such perfectly ordinary worktree exists."""
 
     worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "vps-loop/item-99", str(worktree_path), "main")
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
 
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)  # the worktree's venv fails to resolve
 
@@ -1134,7 +592,7 @@ def test_compute_in_use_poetry_venvs_ages_a_worktree_by_its_git_file_not_its_dir
     `git worktree add`, never touched again) must be what's aged instead."""
 
     worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "vps-loop/item-99", str(worktree_path), "main")
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
 
     old_stamp = time.time() - 100 * 3600  # 100h ago -- well past any grace period
     os.utime(worktree_path / ".git", (old_stamp, old_stamp))
@@ -1162,7 +620,7 @@ def test_compute_in_use_poetry_venvs_skips_a_prunable_worktree_entry(
     on it, and without needing the age grace period."""
 
     worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "vps-loop/item-99", str(worktree_path), "main")
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
     shutil.rmtree(worktree_path)  # remove the directory directly, bypassing `git worktree remove`
     assert "prunable" in git(repository, "worktree", "list", "--porcelain")
 
@@ -1185,7 +643,7 @@ def test_compute_in_use_poetry_venvs_skips_a_prunable_worktree_entry(
     ("path", "expected"),
     [
         (Path("/repo/.worktrees/review-main"), True),
-        (Path("/repo/.worktrees/review-vps-loop/item-85"), True),
+        (Path("/repo/.worktrees/review-fix/item-85"), True),
         (Path("/anywhere/.worktrees/review-main"), True),  # structural, not anchored to a particular checkout
         (Path("/repo/.worktrees/other"), False),
         (Path("/repo/.claude/worktrees/agent-a85e93fb4ec1fbec1"), False),
@@ -1195,7 +653,7 @@ def test_compute_in_use_poetry_venvs_skips_a_prunable_worktree_entry(
         (Path("/repo/.worktrees"), False),  # `.worktrees` with nothing after it to match `review-*`
         (Path("/repo/.worktrees/review-main/.claude/worktrees/agent-abc"), False),  # nested worktree, not this shape
         # An extra segment with no worktree marker in it is indistinguishable from more of
-        # a slash-containing head ref (same shape as the `review-vps-loop/item-85` case
+        # a slash-containing head ref (same shape as the `review-fix/item-85` case
         # above) -- matching it is what makes the slash-containing case work at all.
         (Path("/repo/.worktrees/review-main/subdir"), True),
     ],
@@ -1304,14 +762,14 @@ def test_compute_in_use_poetry_venvs_still_raises_for_a_non_review_shaped_worktr
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """The exemption's scope is enforced at the call site, not just in `is_review_worktree`
-    alone: an in-repo worktree that is NOT `.worktrees/review-*` -- e.g. a `/vps-loop-run`
-    worker's `.claude/worktrees/agent-*` shape -- must still hit the fail-closed raise past
+    alone: an in-repo worktree that is NOT `.worktrees/review-*` -- e.g. an agent
+    worktree's `.claude/worktrees/agent-*` shape -- must still hit the fail-closed raise past
     the grace period, proving the gate itself (not only the pure predicate) rejects a
     broader match than the stated policy."""
 
     worktree_path = repository / ".claude" / "worktrees" / "agent-a85e93fb4ec1fbec1"
     worktree_path.parent.mkdir(parents=True)
-    git(repository, "worktree", "add", "-b", "vps-loop/item-88", str(worktree_path), "main")
+    git(repository, "worktree", "add", "-b", "fix/item-88", str(worktree_path), "main")
 
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)
 
@@ -1352,7 +810,7 @@ def test_compute_in_use_poetry_venvs_raises_for_a_locked_worktree_whose_director
     unambiguously "nothing runs out of here"."""
 
     worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "vps-loop/item-99", str(worktree_path), "main")
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
     git(repository, "worktree", "lock", str(worktree_path))
     shutil.rmtree(worktree_path)  # remove the directory directly while still locked
     listing = git(repository, "worktree", "list", "--porcelain")
@@ -1372,7 +830,7 @@ def test_compute_in_use_poetry_venvs_includes_main_and_every_worktree(
     by whatever `poetry_env_path` reports for that location."""
 
     worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "vps-loop/item-99", str(worktree_path), "main")
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
 
     main_venv = tmp_path / "venv-main"
     worktree_venv = tmp_path / "venv-item-99"
@@ -1687,7 +1145,7 @@ def test_run_orphaned_venv_pruning_rechecks_before_apply(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """A venv that became in-use between planning and apply must not be deleted --
-    mirrors run_remote_branch_cleanup's fresh_dependents re-check."""
+    the plan is re-checked immediately before deleting."""
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: venv_root / "transit-delay-app-main-py3.12")

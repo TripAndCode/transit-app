@@ -32,8 +32,14 @@
    tabs doesn't tear down and recreate the MapLibre WebGL context each time. */
 .focus-tab-panel--hidden { display: none; }
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
-.focus-aside strong { font-size: 30px; color: var(--color-danger); }
+.focus-aside strong { font-size: 30px; color: var(--delay-severe); }
 .focus-chart { width: 100%; height: 300px; min-height: 230px; }
+/* `components/tableStyles.ts` is where table and cell styling belongs, and
+   the tables on these pages read from it. `.focus-table` stays for the one
+   consumer that has not moved -- the Marey diagram's narrow-viewport data
+   table, which is markup rather than styled cells -- because a class kept
+   in the tree while something still names it is cheaper than the silent
+   unstyled table deleting it would leave behind. */
 .focus-table-wrap { overflow-x: auto; }
 .focus-table { border-collapse: collapse; width: 100%; font-size: 14px; }
 .focus-table th, .focus-table td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border-soft); }

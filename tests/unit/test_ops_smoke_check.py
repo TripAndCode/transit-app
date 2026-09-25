@@ -1,5 +1,5 @@
 """Tests for scripts/ops_smoke_check.py: the post-install/post-rollback check that
-all four operations-status collectors (vps_loop, github, oracle_crawler, r2) are
+all three operations-status collectors (github, oracle_crawler, r2) are
 wired up correctly, distinct from whether the underlying systems they observe are
 currently healthy.
 """
@@ -30,18 +30,18 @@ def make_component(component: str, *, state_kwargs: dict | None = None) -> dict:
     return to_json_dict(build_status(**kwargs))
 
 
-ALL_FOUR = [make_component(name) for name in ("vps_loop", "github", "oracle_crawler", "r2")]
+ALL_COMPONENTS = [make_component(name) for name in ("github", "oracle_crawler", "r2")]
 
 
 # ── check_documents ─────────────────────────────────────────────────────────
 
 
-def test_check_documents_passes_with_all_four_valid_components():
-    assert ops_smoke_check.check_documents(ALL_FOUR) == []
+def test_check_documents_passes_with_all_valid_components():
+    assert ops_smoke_check.check_documents(ALL_COMPONENTS) == []
 
 
 def test_check_documents_reports_a_missing_component():
-    documents = [doc for doc in ALL_FOUR if doc["component"] != "r2"]
+    documents = [doc for doc in ALL_COMPONENTS if doc["component"] != "r2"]
     problems = ops_smoke_check.check_documents(documents)
     assert len(problems) == 1
     assert "r2" in problems[0]
@@ -51,16 +51,16 @@ def test_check_documents_reports_a_missing_component():
 def test_check_documents_reports_an_unexpected_component():
     # build_status itself rejects an unknown component name, so a malformed
     # collector output is simulated by mutating a valid document's field instead.
-    bogus = dict(ALL_FOUR[0])
+    bogus = dict(ALL_COMPONENTS[0])
     bogus["component"] = "bogus"
-    problems = ops_smoke_check.check_documents([*ALL_FOUR, bogus])
+    problems = ops_smoke_check.check_documents([*ALL_COMPONENTS, bogus])
     assert any("unexpected" in problem and "bogus" in problem for problem in problems)
 
 
 def test_check_documents_reports_a_schema_violation():
-    broken = dict(ALL_FOUR[0])
+    broken = dict(ALL_COMPONENTS[0])
     broken["state"] = "not_a_real_state"
-    problems = ops_smoke_check.check_documents([broken, *ALL_FOUR[1:]])
+    problems = ops_smoke_check.check_documents([broken, *ALL_COMPONENTS[1:]])
     assert any("failed contract validation" in problem for problem in problems)
 
 
@@ -68,12 +68,12 @@ def test_check_documents_reports_a_schema_violation():
 
 
 def test_check_collector_warnings_empty_when_no_collector_errors():
-    assert ops_smoke_check.check_collector_warnings(ALL_FOUR) == []
+    assert ops_smoke_check.check_collector_warnings(ALL_COMPONENTS) == []
 
 
 def test_check_collector_warnings_surfaces_a_collector_error_without_failing():
     with_error = make_component("github", state_kwargs={"details": {"collector_error": "gh: command not found"}})
-    documents = [doc if doc["component"] != "github" else with_error for doc in ALL_FOUR]
+    documents = [doc if doc["component"] != "github" else with_error for doc in ALL_COMPONENTS]
 
     warnings = ops_smoke_check.check_collector_warnings(documents)
     problems = ops_smoke_check.check_documents(documents)
@@ -89,8 +89,8 @@ def test_check_collector_warnings_surfaces_a_collector_error_without_failing():
 # ── main (CLI wiring) ────────────────────────────────────────────────────────
 
 
-def test_main_exits_zero_when_all_four_collect_and_validate(monkeypatch, tmp_path: Path, capsys):
-    monkeypatch.setattr(ops_smoke_check, "collect_all", lambda **kw: ALL_FOUR)
+def test_main_exits_zero_when_all_collect_and_validate(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setattr(ops_smoke_check, "collect_all", lambda **kw: ALL_COMPONENTS)
 
     exit_code = ops_smoke_check.main(["--repo", str(tmp_path)])
 
@@ -100,7 +100,7 @@ def test_main_exits_zero_when_all_four_collect_and_validate(monkeypatch, tmp_pat
 
 
 def test_main_exits_nonzero_when_a_component_is_missing(monkeypatch, tmp_path: Path, capsys):
-    documents = [doc for doc in ALL_FOUR if doc["component"] != "oracle_crawler"]
+    documents = [doc for doc in ALL_COMPONENTS if doc["component"] != "oracle_crawler"]
     monkeypatch.setattr(ops_smoke_check, "collect_all", lambda **kw: documents)
 
     exit_code = ops_smoke_check.main(["--repo", str(tmp_path)])
@@ -113,7 +113,7 @@ def test_main_exits_nonzero_when_a_component_is_missing(monkeypatch, tmp_path: P
 
 def test_main_prints_warnings_but_still_exits_zero(monkeypatch, tmp_path: Path, capsys):
     with_error = make_component("r2", state_kwargs={"details": {"collector_error": "aws: no credentials"}})
-    documents = [doc if doc["component"] != "r2" else with_error for doc in ALL_FOUR]
+    documents = [doc if doc["component"] != "r2" else with_error for doc in ALL_COMPONENTS]
     monkeypatch.setattr(ops_smoke_check, "collect_all", lambda **kw: documents)
 
     exit_code = ops_smoke_check.main(["--repo", str(tmp_path)])

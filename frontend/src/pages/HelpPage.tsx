@@ -7,7 +7,6 @@ import rehypeSlug from "rehype-slug";
 import { ApiError } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { SidebarNavList } from "../components/SidebarNavList";
-import { Tooltip } from "../components/Tooltip";
 import { PageHeader } from "../components/ui/PageHeader";
 
 const MANUAL_BASE = "/user-manual";
@@ -171,6 +170,7 @@ export function HelpPage() {
   const [initialHash] = useState(() =>
     typeof window === "undefined" ? "" : decodeURIComponent(window.location.hash.replace(/^#/, "")),
   );
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Keeps in-content anchor links (e.g. the manual's own "Table of contents"
   // section links to `#5-analysis-tab...`) working even though the target
@@ -198,6 +198,30 @@ export function HelpPage() {
   const safeIndex = sections.length === 0 ? 0 : Math.min(derivedIndex, sections.length - 1);
   const contentRef = useRef<HTMLDivElement>(null);
 
+  // Client-side filter over the loaded manual's own sections -- title and
+  // body text, in whichever locale is currently fetched (see `fetchManual`
+  // above; only one locale's markdown is ever in memory at a time). Derived
+  // fresh on every render rather than cached, matching this file's existing
+  // "plain function calls, not useMemo" convention.
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const isSearching = normalizedQuery !== "";
+  const matchedIndices = isSearching
+    ? sections
+        .map((section, i) => ({ section, i }))
+        .filter(
+          ({ section }) =>
+            section.title.toLowerCase().includes(normalizedQuery) ||
+            section.markdown.toLowerCase().includes(normalizedQuery),
+        )
+        .map(({ i }) => i)
+    : sections.map((_, i) => i);
+  const hasMatches = matchedIndices.length > 0;
+  // The user's own selection (`safeIndex`) survives a search that happens to
+  // filter it out -- falls back to the first match only for what's on
+  // screen, so clearing the search box returns to the same section instead
+  // of whatever the search temporarily landed on.
+  const displayIndex = matchedIndices.includes(safeIndex) ? safeIndex : matchedIndices[0];
+
   // Keeps the address bar in sync with whichever section is actually on
   // screen, using the section's real rendered heading id (rehype-slug's own
   // output) rather than a second slug computation -- this covers both
@@ -215,15 +239,15 @@ export function HelpPage() {
     contentRef.current?.scrollIntoView?.({ block: "start" });
     const heading = contentRef.current?.querySelector("h2[id]");
     if (heading?.id) window.history.replaceState(null, "", `#${heading.id}`);
-    // sections.length also gates this: safeIndex can stay unchanged (e.g. 0
-    // before content loads and 0 is also the eventual default) across the
+    // sections.length also gates this: displayIndex can stay unchanged (e.g.
+    // 0 before content loads and 0 is also the eventual default) across the
     // loading -> loaded transition, so without it this effect would skip
     // re-running once the real heading exists in the DOM. content is needed
     // too: switching the UI language re-fetches a differently-worded manual
     // whose heading ids differ (rehype-slug slugs the translated text), even
-    // when safeIndex/sections.length stay the same -- without it the address
-    // bar would keep pointing at the previous locale's slug.
-  }, [safeIndex, sections.length, content]);
+    // when displayIndex/sections.length stay the same -- without it the
+    // address bar would keep pointing at the previous locale's slug.
+  }, [displayIndex, sections.length, content]);
 
   // Up to 3 real sections (never the "Table of contents" entry itself, index
   // 0 when tocAnchors.length > 0) as quick-jump category shortcuts -- picks
@@ -237,28 +261,32 @@ export function HelpPage() {
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 0 64px" }}>
       <PageHeader title={t("help.title")} />
-      {/* `aria-disabled` + `readOnly` rather than `disabled`: a natively
-          disabled field takes no focus and fires no pointer events, so the
-          tooltip saying why it does nothing yet would be unreachable. */}
-      <Tooltip label={t("help.search_disabled_reason")}>
-        <input
-          type="search"
-          placeholder={t("help.search_placeholder")}
-          aria-label={t("help.search_placeholder")}
-          aria-disabled="true"
-          readOnly
-          style={{
-            width: "100%",
-            padding: "11px 14px",
-            fontSize: 13,
-            border: "1px solid var(--card-border)",
-            borderRadius: "var(--card-radius)",
-            background: "var(--bg-soft)",
-            color: "var(--text-secondary)",
-            marginBottom: 18,
-          }}
-        />
-      </Tooltip>
+      <input
+        type="search"
+        placeholder={t("help.search_placeholder")}
+        aria-label={t("help.search_placeholder")}
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        style={{
+          width: "100%",
+          padding: "11px 14px",
+          fontSize: 13,
+          border: "1px solid var(--card-border)",
+          borderRadius: "var(--card-radius)",
+          background: "var(--bg-soft)",
+          color: "var(--text-primary)",
+          marginBottom: isSearching ? 6 : 18,
+        }}
+      />
+      {/* Visible feedback doubles as the aria-live announcement -- a single
+          role="status" region rather than a separate visually-hidden one,
+          since the count is useful to a sighted user too. Only shown while
+          actively searching, so the calm default view stays uncluttered. */}
+      {isSearching && (
+        <div role="status" aria-live="polite" style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 18 }}>
+          {t("help.search_result_count", { count: matchedIndices.length })}
+        </div>
+      )}
       {content != null && categorySections.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 24 }}>
           {categorySections.map(({ section, i }) => (
@@ -302,10 +330,14 @@ export function HelpPage() {
             ariaLabel={t("help.sections_nav")}
             width={240}
             navStyle={{ position: "sticky", top: 16 }}
-            items={sections.map((section, i) => ({ key: i, label: section.title }))}
-            activeKey={safeIndex}
+            items={matchedIndices.map((i) => ({ key: i, label: sections[i].title }))}
+            activeKey={hasMatches ? displayIndex : null}
             onSelect={setExplicitIndex}
           />
+          {!hasMatches && (
+            <div style={{ flex: 1, minWidth: 0, color: "var(--text-tertiary)" }}>{t("common.no_match")}</div>
+          )}
+          {hasMatches && (
           <div className="user-manual-content" style={{ flex: 1, minWidth: 0 }} ref={contentRef}>
             <ReactMarkdown
               // GFM adds the table syntax the manual uses (plain CommonMark,
@@ -332,9 +364,10 @@ export function HelpPage() {
                 ),
               }}
             >
-              {sections[safeIndex].markdown}
+              {sections[displayIndex].markdown}
             </ReactMarkdown>
           </div>
+          )}
         </div>
       )}
     </div>

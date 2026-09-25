@@ -10,8 +10,7 @@ Two tools:
 
 Both produce :class:`ToolResult` objects so the chat renderer is
 unchanged. Localized summaries follow the existing ``_chat_str`` pattern;
-all DB queries are scoped to the request's ``agency_id`` except
-``kind="agencies"``.
+all DB queries are scoped to the request's ``agency_id``.
 """
 
 from __future__ import annotations
@@ -270,21 +269,14 @@ async def describe_data(
         )
 
     if kind == "agencies":
-        # Multi-tenant data-isolation default: unless the caller explicitly
-        # opts in to cross-agency mode, only return the caller's own agency.
-        # The LLM might be tempted to list every tenant in response to
-        # "どんなエージェンシーがある?" — that's a leak waiting to happen.
-        cross_agency = bool(args.get("cross_agency", False))
-        if cross_agency:
-            rows = await conn.fetch(
-                "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
-            )
-        else:
-            rows = await conn.fetch(
-                "SELECT agency_id, agency_name FROM agencies WHERE agency_id = $1 AND deleted_at IS NULL "
-                "ORDER BY agency_id",
-                agency_id,
-            )
+        # Tenant isolation: the caller only ever sees its own agency. The
+        # Ask surface has no trusted cross-tenant caller, and anything in
+        # ``args`` is model-chosen, so no argument may widen this scope.
+        rows = await conn.fetch(
+            "SELECT agency_id, agency_name FROM agencies WHERE agency_id = $1 AND deleted_at IS NULL "
+            "ORDER BY agency_id",
+            agency_id,
+        )
         return ToolResult(
             kind="table",
             summary=_summary("mt_agencies_summary", locale, n=len(rows)),
@@ -563,15 +555,6 @@ META_TOOLS: list[dict] = [
                         "minimum": 0,
                         "description": (
                             "Row offset for pagination; for a 'next page' follow-up, re-call with offset += limit."
-                        ),
-                    },
-                    "cross_agency": {
-                        "type": "boolean",
-                        "description": (
-                            "Only honored when kind='agencies'. Default false → return "
-                            "ONLY the caller's own agency. Set true to list every "
-                            "agency in the system; do this only when the user has "
-                            "explicit cross-tenant authority (very rare)."
                         ),
                     },
                 },

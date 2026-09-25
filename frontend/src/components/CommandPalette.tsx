@@ -16,6 +16,7 @@ import { buildTimeBandOptions } from "./timeBandOptions";
 import { REPORT_TYPE_IDS, buildReportTypeLabels } from "../tabs/reportTypes";
 import { useTheme } from "../styles/useTheme";
 import { filterItems, type Searchable } from "./commandPaletteMatch";
+import { isTypingTarget } from "../utils/isTypingTarget";
 import { onActivateKey } from "../utils/a11y";
 import { modifierKeyLabel } from "../utils/platform";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
@@ -60,12 +61,6 @@ function pushRecentId(id: string): string[] {
   const next = [id, ...readRecentIds().filter((existing) => existing !== id)].slice(0, MAX_RECENTS);
   writeRecentIds(next);
   return next;
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
 }
 
 function buildAgencyItems(
@@ -427,7 +422,7 @@ export function CommandPalette() {
               <kbd className="cmdp-kbd">↵</kbd> {t("palette.footer.select")}
             </span>
             <span>
-              <kbd className="cmdp-kbd">esc</kbd> {t("palette.footer.close")}
+              <kbd className="cmdp-kbd">esc</kbd> {t("common.close")}
             </span>
           </div>
       </OverlayBase>

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The operations-status contract: one versioned, read-only status document shape
-shared by every ops component (the VPS loop, GitHub, the Oracle crawler, and R2).
+shared by every ops component (GitHub, the Oracle crawler, and R2).
 
-An Oracle heartbeat publisher, a VPS/loop collector, a GitHub collector, a
+An Oracle heartbeat publisher, a GitHub collector, a
 storage-metrics (R2) collector, and a status page that assembles them each
 publish or collect one component's health. Without a shared contract, each
 would invent its own state names, freshness math, and bounds -- and the page
@@ -13,7 +13,7 @@ incompatible change can be detected by a consumer instead of silently misread.
 
 Every component status is a `ComponentStatus`, carrying exactly:
 
-- `component`: one of `COMPONENTS` (`vps_loop`, `github`, `oracle_crawler`, `r2`).
+- `component`: one of `COMPONENTS` (`github`, `oracle_crawler`, `r2`).
 - `state`: one of `STATES`:
     - `healthy`  -- observed recently, age within the component's own
                     healthy threshold.
@@ -62,14 +62,14 @@ class OpsStatusError(ValueError):
 
 SCHEMA_VERSION = 1
 
-COMPONENTS: frozenset[str] = frozenset({"vps_loop", "github", "oracle_crawler", "r2"})
+COMPONENTS: frozenset[str] = frozenset({"github", "oracle_crawler", "r2"})
 
 STATES: frozenset[str] = frozenset({"healthy", "degraded", "stale", "failed", "unknown"})
 
 # How far a document's own `observed_at` may sit ahead of the validating
 # process's wall clock before it is treated as untrustworthy rather than
 # genuinely fresh. Bounds ordinary NTP drift between machines (Oracle, the
-# VPS, GitHub-reported timestamps) while still catching a badly-skewed clock
+# status host, GitHub-reported timestamps) while still catching a badly-skewed clock
 # reporting a future timestamp.
 DEFAULT_MAX_CLOCK_SKEW_SECONDS = 300.0
 
@@ -224,7 +224,7 @@ def classify_state(
     """Derive `(state, age_seconds)` from raw facts, per the module docstring's state semantics.
 
     `healthy_max_age_seconds` and `stale_max_age_seconds` are supplied by the
-    caller (each component has its own cadence -- an hourly VPS loop tick and
+    caller (each component has its own cadence -- an hourly heartbeat and
     a per-minute R2 sync do not share one threshold), not fixed here.
 
     Clock skew is handled two ways, both resolving to `unknown` rather than a

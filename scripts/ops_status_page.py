@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Assemble the four operations-status collectors into one combined,
+"""Assemble the three operations-status collectors into one combined,
 read-only operations-status document, and render it three ways: a compact text view
 for SSH, an HTML page, and a JSON document for automation.
 
-Each collector (`scripts/collect_vps_status.py`, `collect_github_status.py`,
+Each collector (`scripts/collect_github_status.py`,
 `collect_oracle_status.py`, `collect_r2_status.py`) already returns one
 `scripts/ops_status.py`-contract `ComponentStatus` for its own component, gathered
 independently with its own failure/fallback handling. Nothing before this module
 combines them -- that is this module's whole job:
 
-- `collect_all` calls all four, in a fixed order, isolating each behind its own
-  `try`/`except`: one collector raising must never take the other three down with
+- `collect_all` calls all three, in a fixed order, isolating each behind its own
+  `try`/`except`: one collector raising must never take the other two down with
   it, and must never surface as anything other than a synthesized `unknown`
   component document (`_unknown_status`), carrying a short, already-bounded
   `collector_error` detail -- never the raw exception traceback, matching the
@@ -21,8 +21,8 @@ combines them -- that is this module's whole job:
   the *expected* outcome between Oracle's periodic heartbeats (e.g. most calls to
   this page between two 30-minute Oracle publishes), so degrading it to `unknown`
   here would make the page flicker to unknown on every ordinary poll.
-- `build_document` wraps the four resulting documents with a combined
-  `overall_state` (the worst of the four, by the same severity order
+- `build_document` wraps the three resulting documents with a combined
+  `overall_state` (the worst of the three, by the same severity order
   `oracle_cloud/v3/bin/status-snapshot.sh` already uses:
   failed > stale > degraded > unknown > healthy) and a `reasons` map giving a
   short, human-facing explanation for every non-healthy component, mined from
@@ -50,14 +50,13 @@ from scripts.collect_oracle_status import DEFAULT_REPO as ORACLE_DEFAULT_GITHUB_
 from scripts.collect_oracle_status import OracleStatusReplayed, collect_oracle_status
 from scripts.collect_r2_status import DEFAULT_CACHE_PATH as R2_DEFAULT_CACHE_PATH
 from scripts.collect_r2_status import R2StatusReplayed, collect_r2_status
-from scripts.collect_vps_status import collect_vps_loop_status
 
 DEFAULT_LOCAL_REPO = Path("/root/transit-app")
 DEFAULT_GITHUB_REPO_SLUG = ORACLE_DEFAULT_GITHUB_REPO_SLUG
 
 DOCUMENT_SCHEMA_VERSION = 1
 
-COMPONENT_ORDER: tuple[str, ...] = ("vps_loop", "github", "oracle_crawler", "r2")
+COMPONENT_ORDER: tuple[str, ...] = ("github", "oracle_crawler", "r2")
 
 # failed > stale > degraded > unknown > healthy -- matches
 # oracle_cloud/v3/bin/status-snapshot.sh's own `severity_rank`.
@@ -106,11 +105,6 @@ def _unknown_status(component: str, *, now: datetime, reason: str) -> dict:
     return ops_status.to_json_dict(status)
 
 
-def _collect_vps_loop(*, local_repo: Path, now: datetime) -> dict:
-    status = collect_vps_loop_status(repo=local_repo, now=now)
-    return ops_status.to_json_dict(status)
-
-
 def _collect_github(*, local_repo: Path, cache_path: Path, now: datetime) -> dict:
     status = collect_github_status(repo=local_repo, cache_path=cache_path, now=now)
     return ops_status.to_json_dict(status)
@@ -141,21 +135,20 @@ def collect_all(
     r2_cache_path: Path = R2_DEFAULT_CACHE_PATH,
     now: datetime | None = None,
 ) -> list[dict]:
-    """Collect all four components' status documents, in `COMPONENT_ORDER`.
+    """Collect all three components' status documents, in `COMPONENT_ORDER`.
 
     Every collector call is individually isolated: a raised exception (any type --
     a collector's own module may raise an exception class loaded under a different
-    identity than this module's own imports, see `scripts/collect_vps_status.py`'s
-    sibling-loading rationale, so this deliberately does not rely on `isinstance`)
+    identity than this module's own imports, see `scripts/collect_github_status.py`'s
+    `_load_sibling`, so this deliberately does not rely on `isinstance`)
     degrades only that one component to `unknown` via `_unknown_status`, never the
-    other three.
+    other two.
     """
 
     now = now or datetime.now(timezone.utc)
     github_cache_path = github_cache_path or (local_repo / GITHUB_DEFAULT_CACHE_BASENAME)
 
     jobs: list[tuple[str, Callable[[], dict]]] = [
-        ("vps_loop", lambda: _collect_vps_loop(local_repo=local_repo, now=now)),
         ("github", lambda: _collect_github(local_repo=local_repo, cache_path=github_cache_path, now=now)),
         (
             "oracle_crawler",
@@ -228,18 +221,6 @@ def _generic_reason(state: str, age_seconds: int | None, last_success_at: str | 
     return f"state is {state}"
 
 
-def _vps_loop_reason(details: Mapping[str, object]) -> str | None:
-    activity = details.get("loop_activity")
-    blocker = details.get("blocker_class")
-    if activity == "restarting":
-        return f"repeatedly blocked on {blocker or 'the same issue'} without making progress"
-    if activity == "paused":
-        return f"circuit-breaker paused (blocked on {blocker or 'an unspecified issue'})"
-    if details.get("systemd_active_state") == "failed":
-        return "claude-loop.service reported a failed run"
-    return None
-
-
 def _github_reason(details: Mapping[str, object]) -> str | None:
     parts: list[str] = []
     if details.get("last_error_kind"):
@@ -272,7 +253,6 @@ def _r2_reason(details: Mapping[str, object]) -> str | None:
 
 
 _SPECIFIC_REASON_BUILDERS: Mapping[str, Callable[[Mapping[str, object]], str | None]] = {
-    "vps_loop": _vps_loop_reason,
     "github": _github_reason,
     "oracle_crawler": _oracle_crawler_reason,
     "r2": _r2_reason,
@@ -300,12 +280,6 @@ def reason_for(document: dict) -> str | None:
         return _truncate(specific)
 
     return _truncate(_generic_reason(state, document.get("age_seconds"), document.get("last_success_at")))
-
-
-def _vps_loop_highlight(details: Mapping[str, object]) -> str:
-    current_item = details.get("current_item")
-    activity = details.get("loop_activity")
-    return f"current_item={current_item if current_item is not None else 'none'} activity={activity or 'unknown'}"
 
 
 def _github_highlight(details: Mapping[str, object]) -> str:
@@ -345,7 +319,6 @@ def _r2_highlight(details: Mapping[str, object]) -> str:
 
 
 _HIGHLIGHT_BUILDERS: Mapping[str, Callable[[Mapping[str, object]], str]] = {
-    "vps_loop": _vps_loop_highlight,
     "github": _github_highlight,
     "oracle_crawler": _oracle_crawler_highlight,
     "r2": _r2_highlight,
@@ -354,7 +327,7 @@ _HIGHLIGHT_BUILDERS: Mapping[str, Callable[[Mapping[str, object]], str]] = {
 
 def highlight_for(document: dict) -> str:
     """A short, always-present (healthy or not) summary of the operationally relevant
-    facts for this component: current task, CI/PR summary, crawler freshness, disk/R2
+    facts for this component: CI/PR summary, crawler freshness, disk/R2
     usage."""
 
     builder = _HIGHLIGHT_BUILDERS.get(document.get("component", ""))
@@ -451,7 +424,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--repo", type=Path, default=Path.cwd(), help="Local checkout for vps_loop/github facts")
+    parser.add_argument("--repo", type=Path, default=Path.cwd(), help="Local checkout for github facts")
     parser.add_argument(
         "--github-repo",
         default=DEFAULT_GITHUB_REPO_SLUG,

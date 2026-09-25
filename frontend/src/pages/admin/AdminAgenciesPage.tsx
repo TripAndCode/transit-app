@@ -12,7 +12,7 @@ import {
   type AgencyHealthRow,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
-import { formatDateTime } from "../../utils/format";
+import { formatDateTime, EM_DASH } from "../../utils/format";
 import { AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { Modal } from "../../components/Modal";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -22,8 +22,6 @@ import { AgencyDiagnosticsDrawer } from "./AgencyDiagnosticsDrawer";
 import { ClampSparkline } from "./ClampSparkline";
 
 const STRATEGIES = ["aomori_regex", "direct_url", "aomori_index_scrape", "static_join"] as const;
-
-const EM_DASH = "—";
 
 /** URL search param backing the saved-view chips, so a view survives a reload
  *  and can be linked to. */
@@ -119,7 +117,7 @@ function AgencyFormModal({
             style={{ width: "100%" }}
           />
           {form.feed_url && !form.feed_url.startsWith("http://") && !form.feed_url.startsWith("https://") && (
-            <div style={{ color: "var(--color-warning)", fontSize: 12, marginTop: 2 }}>
+            <div style={{ color: "var(--color-warning-text)", fontSize: 12, marginTop: 2 }}>
               {t("admin.agencies.form_error_feed_url")}
             </div>
           )}
@@ -155,7 +153,7 @@ function AgencyFormModal({
           />
         </Field>
         {!!error && (
-          <div style={{ color: "var(--color-warning)", fontSize: 13 }}>
+          <div style={{ color: "var(--color-warning-text)", fontSize: 13 }}>
             {formatApiError(error)}
           </div>
         )}

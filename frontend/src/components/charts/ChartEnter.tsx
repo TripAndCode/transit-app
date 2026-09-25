@@ -1,8 +1,5 @@
 import { useLayoutEffect, type CSSProperties, type RefObject } from "react";
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
+import { prefersReducedMotion } from "../../utils/motion";
 
 /**
  * Draws an SVG line (`<path>` or `<polyline>`) on over `var(--dur-4)`: reads
@@ -37,9 +34,10 @@ export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>
     el.classList.add("chart-draw-on");
     const raf = requestAnimationFrame(() => el.classList.add("chart-draw-on--active"));
     return () => cancelAnimationFrame(raf);
-    // Runs once at mount -- see the docstring above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Runs once at mount -- see the docstring above. `ref` (from `useRef`) is
+    // stable across renders, so listing it here satisfies exhaustive-deps
+    // without changing when the effect re-runs.
+  }, [ref]);
 }
 
 type StaggerOptions = {
