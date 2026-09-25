@@ -47,16 +47,12 @@ describe("useRevealOnScroll", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reveals on the next frame when IntersectionObserver is unavailable", async () => {
+  it("reveals immediately when IntersectionObserver is unavailable", () => {
     // The global test setup installs an inert IntersectionObserver default,
     // so this environment has to be forced rather than relied on -- it must
     // still fall open rather than hiding the section forever.
     vi.stubGlobal("IntersectionObserver", undefined);
     const { result } = renderHook(() => useRevealOnScroll<HTMLDivElement>());
-    expect(result.current[1]).toBe(false);
-    await act(async () => {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    });
     expect(result.current[1]).toBe(true);
   });
 

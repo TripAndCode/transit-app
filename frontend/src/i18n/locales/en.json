@@ -185,7 +185,8 @@
       "feed_status_label": "Feed status",
       "feed_status_ok": "Running normally",
       "feed_status_stale": "Data delayed",
-      "feed_status_updated": "Last updated {{when}}"
+      "feed_status_updated": "Last updated {{when}}",
+      "sparkline_baseline": "Period avg {{value}} min"
     },
     "story": {
       "behind_one": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",

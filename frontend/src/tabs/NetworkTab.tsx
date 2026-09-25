@@ -63,7 +63,7 @@ function ScheduleVersionTooltip({
  *  refetches. */
 function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
   const { t } = useTranslation();
-  const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1 });
+  const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1, entrance: false });
   if (avgDelayMin == null) return <>—</>;
   return (
     <span style={{ color: delayTextColor(avgDelayMin) }}>
