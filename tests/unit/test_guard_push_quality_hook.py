@@ -182,3 +182,18 @@ def test_frontend_gate_runs_every_check_ci_runs():
     block = _frontend_gate_block()
     for script in ("npm run deadcode", "npm run test:check-css-tokens", "npm run check:css-tokens"):
         assert script in block, f"{script} missing from the RUN_FRONTEND gate block"
+
+
+def test_a_missing_oxc_native_binding_warns_instead_of_blocking_every_push():
+    """knip's parser needs a platform-specific native binary that npm's
+    optional-dependency resolution drops often enough to expect. That is a
+    broken install rather than dead code, and this gate runs against the
+    main checkout for every push in the repository, so treating it as a
+    failure would block all of them at once. Nothing else about a knip
+    failure may be downgraded."""
+    block = _frontend_gate_block()
+    deadcode = block[block.index("npm run deadcode") : block.index("npm run test:check-entry-chunk")]
+    assert "Cannot find native binding" in deadcode
+    guarded, _, unguarded = deadcode.partition("Cannot find native binding")
+    assert "FAIL=1" not in guarded, "the deadcode check must not fail before the native-binding case is excluded"
+    assert "FAIL=1" in unguarded, "every other deadcode failure must still block the push"

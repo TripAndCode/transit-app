@@ -150,23 +150,32 @@ jobs:
           EVAL_API_BASE: http://localhost:8000
         run: poetry run pytest tests/ask_eval/test_baseline.py::test_golden_set_aggregate_score -v
 
-      # test_followup_pagination_two_turns lives in the same file as the
-      # golden-set test above and is a separate, narrower pagination-
-      # continuation check; it failed in early runs of this workflow
-      # (turn-2 tool_call came back empty even with 2400+ real stops in the
-      # Hiroden fixture, so it wasn't a too-small-dataset artifact) and
-      # needs its own router investigation this workflow isn't the place to
-      # do. `continue-on-error: true` runs it for visibility (a step
-      # summary/notification on every change) without gating the job on a
-      # router bug this workflow doesn't own fixing. Same worktree, server,
-      # and seeded data as the step above, so it must run before the
-      # numeric-ground-truth step below wipes both — never after.
+      # A narrower pagination-continuation check than the golden-set test it
+      # shares a file with. Turn-2 tool-call resolution in the follow-up path
+      # returns empty regardless of fixture size, so this is non-blocking
+      # until the router is fixed. Same worktree, server, and seeded data as
+      # the step above, so it must run before the numeric-ground-truth step
+      # below wipes both — never after.
       - name: Run the follow-up pagination eval (non-blocking; known router gap)
+        id: followup_eval
         continue-on-error: true
         env:
           RUN_LLM_EVAL: "1"
           EVAL_API_BASE: http://localhost:8000
         run: poetry run pytest tests/ask_eval/test_baseline.py::test_followup_pagination_two_turns -v
+
+      # `continue-on-error` leaves the job green, and a green job sends no
+      # notification, so the outcome is written where someone reading the run
+      # will see it. The day this reports a pass, the step above stops needing
+      # to be non-blocking.
+      - name: Record the follow-up pagination outcome
+        if: always() && steps.followup_eval.outcome != 'skipped'
+        run: |
+          if [ "${{ steps.followup_eval.outcome }}" = "success" ]; then
+            echo "✅ Follow-up pagination eval passed — the router gap is closed, so this step no longer needs \`continue-on-error\`." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ Follow-up pagination eval still failing (known router gap; not gating this run)." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # Verifies the Ask tab's numeric answers, not just its tool choice,
       # against synthetic ground truth. Must run after the golden-set eval
