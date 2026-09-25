@@ -254,6 +254,26 @@ describe("AdminBoardPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("asks inside a modal dialog Escape can close, handing focus back to the trigger", async () => {
+    // Re-aggregating is irreversible from here; the confirm has to behave
+    // like every other dialog in the app (trapped, labelled, Escape-able)
+    // rather than as a block of page content the operator can tab past.
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    wrap(<AdminBoardPage />);
+    const trigger = screen.getByRole("button", { name: i18n.t("admin.board.reanalyze") });
+    await user.click(trigger);
+
+    const dialog = screen.getByRole("dialog", { name: i18n.t("admin.board.reanalyze_confirm_title") });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(within(dialog).getByRole("button", { name: i18n.t("admin.board.reanalyze_confirm") })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockTrigger.mutate).not.toHaveBeenCalled();
+    expect(trigger).toHaveFocus();
+  });
+
   it("reports a rejected trigger instead of leaving the operator guessing", () => {
     mockTrigger = { mutate: vi.fn(), isPending: false, isSuccess: false, error: new Error("nope") };
     wrap(<AdminBoardPage />);

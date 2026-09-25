@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Search } from "lucide-react";
 import { useAgencies, useRoutes } from "../api/hooks";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { useRouteNames } from "../api/useRouteNames";
 import { ctxToQueryString, useRangeContext, type TimeBand } from "../api/rangeContext";
 import { buildTimeBandOptions } from "./timeBandOptions";
@@ -19,7 +20,6 @@ import { REPORT_TYPE_IDS, buildReportTypeLabels } from "../tabs/reportTypes";
 import { useTheme } from "../styles/useTheme";
 import { filterItems, type Searchable } from "./commandPaletteMatch";
 import { onActivateKey } from "../utils/a11y";
-import { focusableIn } from "../utils/focusable";
 import { modifierKeyLabel } from "../utils/platform";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
 import { GO_TO_TARGETS } from "./paletteNavTargets";
@@ -70,11 +70,11 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * Escape-to-close, a Tab-cycling focus trap, and restoring focus to
- * whatever was focused before opening — the three behaviors a native
- * `<dialog>` gives for free and a plain overlay `<div>` does not. Shared by
- * the palette and the shortcut sheet rather than duplicated, since neither
- * dialog in this app is available from another (still-unmerged) branch.
+ * The palette's own overlay chrome (a top-anchored card, not `Modal`'s
+ * centered one) over the shared dialog semantics: Escape closes the topmost
+ * surface only, Tab cycles inside the card, and focus returns to whatever
+ * was focused before it opened. Rendered only while open, so the trap is
+ * unconditionally active for as long as this component is mounted.
  */
 function Dialog({
   onClose,
@@ -90,51 +90,7 @@ function Dialog({
   children: ReactNode;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const toFocus = initialFocusRef?.current ?? (containerRef.current ? focusableIn(containerRef.current)[0] : undefined) ?? null;
-    toFocus?.focus();
-
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const container = containerRef.current;
-      if (!container) return;
-      const focusables = focusableIn(container);
-      if (focusables.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey) {
-        if (active === first || !container.contains(active)) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (active === last || !container.contains(active)) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prevOverflow;
-      previouslyFocused?.focus();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose/initialFocusRef intentionally read once per mount; this effect owns one dialog's lifetime, not a value that should reopen it
-  }, []);
+  useFocusTrap(true, containerRef, onClose, initialFocusRef);
 
   return (
     <div
