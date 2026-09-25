@@ -9,10 +9,12 @@ import {
   type ServiceFilter,
   type TimeBand,
 } from "../api/rangeContext";
+import { Glossary } from "./Glossary";
 import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
+import { dowValueLabel, serviceValueLabel, type LabelT } from "../utils/filterValueLabels";
 import { pill, groupLabel } from "./pillStyles";
 import { Z_INDEX } from "../styles/zIndex";
 
@@ -41,15 +43,15 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
 
   const dowOptions: { value: DowFilter; label: string }[] = [
     { value: "all", label: t("filters.dow.all") },
-    { value: "weekday", label: t("filters.dow.weekday") },
-    { value: "weekend", label: t("filters.dow.weekend") },
+    { value: "weekday", label: dowValueLabel("weekday", t) },
+    { value: "weekend", label: dowValueLabel("weekend", t) },
   ];
 
   const serviceOptions: { value: ServiceFilter; label: string }[] = [
     { value: "all", label: t("filters.service.all") },
     // value stays as the raw JP string (URL query value); only the label is translated
-    { value: "平日", label: t("filters.service.weekday") }, // i18n-ignore: query contract
-    { value: "土日祝", label: t("filters.service.weekend") }, // i18n-ignore: query contract
+    { value: "平日", label: serviceValueLabel("平日", t) }, // i18n-ignore: query contract
+    { value: "土日祝", label: serviceValueLabel("土日祝", t) }, // i18n-ignore: query contract
   ];
 
   const timeBandOptions = buildTimeBandOptions(t);
@@ -330,7 +332,9 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <span style={groupLabel}>{t("filters.service.label_gtfs")}</span>
+            <span style={groupLabel}>
+              {t("filters.service.label")} (<Glossary term="GTFS" explanation={t("glossary.gtfs")} />)
+            </span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {serviceOptions.map((o) => (
                 <button
@@ -410,10 +414,8 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   );
 }
 
-function dowLabel(d: DowFilter, t: (key: string) => string): string {
-  if (d === "weekday") return t("filters.dow.weekday");
-  if (d === "weekend") return t("filters.dow.weekend");
-  return t("filters.dow.all");
+function dowLabel(d: DowFilter, t: LabelT): string {
+  return d === "all" ? t("filters.dow.all") : dowValueLabel(d, t);
 }
 
 function Chip({ label, onClear }: { label: string; onClear: () => void }) {
@@ -425,7 +427,7 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
         alignItems: "center",
         gap: 6,
         background: "var(--accent-soft)",
-        color: "var(--accent)",
+        color: "var(--accent-strong)",
         border: "1px solid var(--accent)",
         borderRadius: 999,
         padding: "3px 10px 3px 12px",

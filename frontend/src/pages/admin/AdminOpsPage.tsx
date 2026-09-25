@@ -79,7 +79,7 @@ export function AdminOpsPage() {
           role="alert"
           style={{
             marginBottom: 16, padding: "10px 14px", borderRadius: "var(--radius-lg)",
-            background: "var(--surface-1)", color: "var(--color-warning, #C99A2E)", fontSize: 14,
+            background: "var(--surface-1)", color: "var(--color-warning-text, #89691F)", fontSize: 14,
           }}
         >
           {t("admin.ops.load_error")}
