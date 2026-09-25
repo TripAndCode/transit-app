@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
@@ -37,6 +37,11 @@ describe("ScrollNarrative", () => {
   });
 
   it("gives every section the reveal wrapper, already revealed without IntersectionObserver support", () => {
+    // Forced, not inherited: the shared setup installs an inert observer so
+    // an unguarded component still mounts, which means absence is no longer
+    // jsdom's ambient default. An inert observer would leave these sections
+    // pre-reveal forever, which is the case this guards against.
+    vi.stubGlobal("IntersectionObserver", undefined);
     expect(typeof IntersectionObserver).toBe("undefined");
     const { container } = renderNarrative();
     const sections = container.querySelectorAll(".landing-narrative-section");
