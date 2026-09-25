@@ -96,7 +96,10 @@ describe("AnalysisMap", () => {
   });
 
   it("mounts where ResizeObserver is unavailable", () => {
-    // jsdom does not implement ResizeObserver, the same gap MapTab guards.
+    // The gap MapTab guards. Forced rather than inherited: the shared setup
+    // installs an inert ResizeObserver so components that observe without
+    // checking still mount, so absence is no longer the ambient default.
+    vi.stubGlobal("ResizeObserver", undefined);
     expect(globalThis.ResizeObserver).toBeUndefined();
     expect(() => renderWithProviders(<AnalysisMap data={shape()} selected={undefined} />)).not.toThrow();
   });

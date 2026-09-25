@@ -18,15 +18,22 @@ export default defineConfig({
     // jsdom's CSS-color dependency ships ESM that the default `forks` pool
     // can't `require()` under Node; the worker-thread pool loads it cleanly.
     pool: "threads",
-    // Requires the `@vitest/coverage-v8` package (matching this repo's
-    // vitest ^4.1.8), which is not installed in this worktree — left
-    // commented rather than enabled so `npm run test:coverage` fails with
-    // vitest's own "install @vitest/coverage-v8" message instead of a
-    // config-shape error once the dependency lands.
-    // coverage: {
-    //   provider: "v8",
-    //   reporter: ["text-summary"],
-    //   thresholds: { lines: 70, statements: 70 },
-    // },
+    // The default (5s) leaves no margin under machine load for the handful
+    // of tests that drive several real userEvent interactions against a
+    // provider-wrapped tree in one case; a slow CI runner or a busy dev
+    // machine pushed those past 5s even though nothing was actually hung.
+    testTimeout: 15000,
+    // A `vi.stubGlobal` is undone after the test that made it. Several tests
+    // replace `IntersectionObserver`/`ResizeObserver` with a driveable stub,
+    // or force one absent; without this those replacements outlive the test
+    // and the next one silently inherits them.
+    unstubGlobals: true,
+    // Provided by the `@vitest/coverage-v8` dev dependency (see
+    // package.json), matching this repo's vitest ^4.1.8.
+    coverage: {
+      provider: "v8",
+      reporter: ["text-summary"],
+      thresholds: { lines: 70, statements: 70 },
+    },
   },
 });
