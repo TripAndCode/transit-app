@@ -110,7 +110,11 @@ export function MareyDiagram({
   date?: string | null;
 }) {
   const { t } = useTranslation("design");
+  // Pointer and keyboard are tracked apart so neither clears the other's
+  // selection: blurring a trip must not silently drop a highlight the pointer
+  // is still resting on, and no `mouseenter` would fire to restore it.
   const [hovered, setHovered] = useState<string | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
   const [chartRevealed, setChartRevealed] = useState(false);
   const narrow = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   // useId's own value contains colons, which are not usable inside url(#...).
@@ -120,7 +124,8 @@ export function MareyDiagram({
   const drawn = tripsInWindow(trips, viewWindow);
   const ghosts = tripsInWindow(previousTrips, viewWindow);
   const peak = peakWindow(drawn, viewWindow);
-  const hoveredTrip = drawn.find((trip) => trip.trip_id === hovered) ?? null;
+  const active = focused ?? hovered;
+  const activeTrip = drawn.find((trip) => trip.trip_id === active) ?? null;
   const labelStep = Math.max(1, Math.ceil(axis.length / MAX_STOP_LABELS));
   const ribbonWindow = peak ?? viewWindow;
   const ribbonLabel = t("ribbonLabel", {
@@ -255,9 +260,9 @@ export function MareyDiagram({
                           last: row.lastStop,
                           delay: row.delayMin,
                         })}
-                        opacity={hovered !== null && hovered !== trip.trip_id ? MUTED_OPACITY : 1}
-                        onFocus={() => setHovered(trip.trip_id)}
-                        onBlur={() => setHovered(null)}
+                        opacity={active !== null && active !== trip.trip_id ? MUTED_OPACITY : 1}
+                        onFocus={() => setFocused(trip.trip_id)}
+                        onBlur={() => setFocused((current) => (current === trip.trip_id ? null : current))}
                       >
                         {points.slice(1).map((point, i) => (
                           <line
@@ -278,7 +283,7 @@ export function MareyDiagram({
                           stroke="transparent"
                           strokeWidth={12}
                           onMouseEnter={() => setHovered(trip.trip_id)}
-                          onMouseLeave={() => setHovered(null)}
+                          onMouseLeave={() => setHovered((current) => (current === trip.trip_id ? null : current))}
                         >
                           <title>{tripSummary(trip, t)}</title>
                         </polyline>
@@ -291,7 +296,7 @@ export function MareyDiagram({
           )}
           {chartShown && (
             <p className="focus-muted marey__readout" data-testid="marey-readout" aria-live="polite">
-              {hoveredTrip ? tripSummary(hoveredTrip, t) : t("mareyHover")}
+              {activeTrip ? tripSummary(activeTrip, t) : t("mareyHover")}
             </p>
           )}
           <table

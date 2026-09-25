@@ -162,6 +162,19 @@ describe("MareyDiagram keyboard and screen-reader access", () => {
     expect(groups.every((g) => g.getAttribute("opacity") === "1")).toBe(true);
   });
 
+  it("leaves a still-hovered trip highlighted after a different trip is blurred", () => {
+    const { container } = show();
+    const groups = [...container.querySelectorAll("[data-trip-id]")];
+
+    fireEvent.mouseEnter(groups[1].querySelector(".marey-trip__hit")!);
+    fireEvent.focus(groups[2]);
+    // Tabbing away raises no `mouseleave`, so the pointer is still on group 1.
+    fireEvent.blur(groups[2]);
+
+    expect(groups[1].getAttribute("opacity")).toBe("1");
+    expect(groups[0].getAttribute("opacity")).toBe(String(MUTED_OPACITY));
+  });
+
   it("announces the readout politely so a change on focus is spoken", () => {
     show();
     expect(screen.getByTestId("marey-readout")).toHaveAttribute("aria-live", "polite");

@@ -21,6 +21,24 @@ const a11yAsError = Object.fromEntries(
   }),
 )
 
+// Every AST position that introduces a binding, as an esquery selector list.
+// `no-restricted-syntax` takes one selector string per entry, and a
+// comma-separated list is one selector, so this stays a single rule entry with
+// a single message.
+const shadowBindingSelector = [
+  'VariableDeclarator > Identifier.id',
+  'ObjectPattern > Property > Identifier.value',
+  'ArrayPattern > Identifier',
+  'RestElement > Identifier',
+  'AssignmentPattern > Identifier.left',
+  'CatchClause > Identifier.param',
+  ':matches(FunctionDeclaration, FunctionExpression, ArrowFunctionExpression) > Identifier.params',
+  ':matches(FunctionDeclaration, FunctionExpression, ClassDeclaration, ClassExpression) > Identifier.id',
+  ':matches(ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier) > Identifier.local',
+]
+  .map((position) => `${position}[name=/^(window|document)$/]`)
+  .join(', ')
+
 export default tseslint.config(
   { ignores: ['dist', 'coverage', 'node_modules'] },
   {
@@ -97,21 +115,18 @@ export default tseslint.config(
           // global (a `window.matchMedia` call, a `document.querySelector`),
           // at which point it fails at runtime far from its cause. Name the
           // local for what it holds instead.
-          selector: 'VariableDeclarator[id.name=/^(window|document)$/]',
+          //
+          // The hazard is "a new binding in scope", not any one syntax, so the
+          // selector enumerates binding positions rather than statement kinds:
+          // a destructured `const { window } = x` shadows exactly as hard as a
+          // plain `const window = x`, and a selector that only reaches the
+          // plain form passes the case a reviewer is likelier to miss.
+          // Type-only positions (`TSFunctionType`, `TSMethodSignature`) are
+          // deliberately absent: they declare no body, so there is no scope in
+          // which a bare `window` could resolve to the parameter.
+          selector: shadowBindingSelector,
           message:
             'Do not name a local binding `window` or `document` — it shadows the DOM global for the rest of the scope. Use a descriptive name (e.g. `viewWindow`).',
-        },
-        {
-          // The same hazard introduced through a parameter, which the
-          // VariableDeclarator selector above cannot see. A destructured or
-          // rest parameter is not an `Identifier` in `params` and so is out of
-          // reach of this selector, but it also cannot bind the bare names
-          // `window`/`document` without a property alias that reads as the
-          // shadow it is.
-          selector:
-            ':matches(FunctionDeclaration, FunctionExpression, ArrowFunctionExpression, TSDeclareFunction, TSFunctionType, TSMethodSignature) > Identifier.params[name=/^(window|document)$/]',
-          message:
-            'Do not name a parameter `window` or `document` — it shadows the DOM global for the whole function body. Use a descriptive name (e.g. `viewWindow`).',
         },
         {
           // `Number.prototype.toLocaleString`/`Date.prototype.toLocaleDateString`/
