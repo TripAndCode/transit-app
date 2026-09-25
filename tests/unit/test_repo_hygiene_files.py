@@ -43,10 +43,14 @@ def test_dependabot_config_is_valid_and_covers_npm_pip_and_actions():
 
     assert config["version"] == 2
     updates = config["updates"]
-    by_ecosystem = {entry["package-ecosystem"]: entry for entry in updates}
-    assert set(by_ecosystem) == {"npm", "pip", "github-actions"}
+    # "docker" appears once per directory that holds a Dockerfile/compose
+    # file (three, below), so ecosystems are grouped by name here rather
+    # than assumed unique per entry.
+    ecosystems = {entry["package-ecosystem"] for entry in updates}
+    assert ecosystems == {"npm", "pip", "github-actions", "docker"}
 
-    for ecosystem, entry in by_ecosystem.items():
+    for entry in updates:
+        ecosystem = entry["package-ecosystem"]
         assert entry["directory"].startswith("/"), ecosystem
         assert entry["schedule"]["interval"] == "weekly", ecosystem
         # Every group must actually select something; an empty group is
@@ -54,7 +58,14 @@ def test_dependabot_config_is_valid_and_covers_npm_pip_and_actions():
         for name, group in entry.get("groups", {}).items():
             assert group.get("update-types"), f"{ecosystem}: group {name} selects no updates"
 
-    assert by_ecosystem["npm"]["directory"] == "/frontend", "npm manifests live in frontend/"
+    npm_entries = [entry for entry in updates if entry["package-ecosystem"] == "npm"]
+    assert len(npm_entries) == 1
+    assert npm_entries[0]["directory"] == "/frontend", "npm manifests live in frontend/"
+
+    docker_dirs = {entry["directory"] for entry in updates if entry["package-ecosystem"] == "docker"}
+    assert docker_dirs == {"/", "/db", "/tools/geosql"}, (
+        "docker ecosystem should cover every directory with a Dockerfile/compose file"
+    )
 
 
 def test_dependabot_cannot_swamp_the_single_ci_runner():

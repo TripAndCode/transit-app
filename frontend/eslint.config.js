@@ -21,6 +21,24 @@ const a11yAsError = Object.fromEntries(
   }),
 )
 
+// Every AST position that introduces a binding, as an esquery selector list.
+// `no-restricted-syntax` takes one selector string per entry, and a
+// comma-separated list is one selector, so this stays a single rule entry with
+// a single message.
+const shadowBindingSelector = [
+  'VariableDeclarator > Identifier.id',
+  'ObjectPattern > Property > Identifier.value',
+  'ArrayPattern > Identifier',
+  'RestElement > Identifier',
+  'AssignmentPattern > Identifier.left',
+  'CatchClause > Identifier.param',
+  ':matches(FunctionDeclaration, FunctionExpression, ArrowFunctionExpression) > Identifier.params',
+  ':matches(FunctionDeclaration, FunctionExpression, ClassDeclaration, ClassExpression) > Identifier.id',
+  ':matches(ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier) > Identifier.local',
+]
+  .map((position) => `${position}[name=/^(window|document)$/]`)
+  .join(', ')
+
 export default tseslint.config(
   { ignores: ['dist', 'coverage', 'node_modules'] },
   {
@@ -88,6 +106,27 @@ export default tseslint.config(
           // selector, as is a derived expression like `Z_INDEX.foo - 1`.
           selector: 'Property[key.name="zIndex"][value.type="Literal"]',
           message: "Do not hardcode zIndex — use a rung from Z_INDEX (src/styles/zIndex.ts) instead.",
+        },
+        {
+          // A local binding named `window` or `document` shadows the DOM
+          // global of the same name for the whole of its scope, so every
+          // later reference there resolves to the local value instead. The
+          // mistake is invisible until something in that scope wants the real
+          // global (a `window.matchMedia` call, a `document.querySelector`),
+          // at which point it fails at runtime far from its cause. Name the
+          // local for what it holds instead.
+          //
+          // The hazard is "a new binding in scope", not any one syntax, so the
+          // selector enumerates binding positions rather than statement kinds:
+          // a destructured `const { window } = x` shadows exactly as hard as a
+          // plain `const window = x`, and a selector that only reaches the
+          // plain form passes the case a reviewer is likelier to miss.
+          // Type-only positions (`TSFunctionType`, `TSMethodSignature`) are
+          // deliberately absent: they declare no body, so there is no scope in
+          // which a bare `window` could resolve to the parameter.
+          selector: shadowBindingSelector,
+          message:
+            'Do not name a local binding `window` or `document` — it shadows the DOM global for the rest of the scope. Use a descriptive name (e.g. `viewWindow`).',
         },
         {
           // `Number.prototype.toLocaleString`/`Date.prototype.toLocaleDateString`/

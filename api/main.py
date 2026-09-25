@@ -56,6 +56,7 @@ from api.routers.static import router as static_router
 from api.security import cookie_secure
 from pipeline.flags import flag
 from pipeline.query.llm_client import ProviderConfig
+from pipeline.runs import reap_abandoned_runs_best_effort
 
 _log = logging.getLogger(__name__)
 
@@ -250,6 +251,15 @@ async def lifespan(app: FastAPI):
                 exc_info=True,
             )
             app.state.ch_client = None
+
+        # Close any run row left `running` by a process that died mid-job:
+        # this process is the first thing up after such a death, and a bar
+        # with no end is indistinguishable from work still in flight. Runs
+        # off the event loop and never raises -- a tidy-up must not be able
+        # to stop the API from booting.
+        reaped = await asyncio.to_thread(reap_abandoned_runs_best_effort, DATABASE_URL)
+        if reaped:
+            _log.warning("Closed %d pipeline run(s) abandoned by a previous process", reaped)
 
         # Break-glass local-admin account (independent of the OAuth env block
         # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD

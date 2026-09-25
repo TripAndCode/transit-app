@@ -1,3 +1,6 @@
+-- DESTRUCTIVE: deletes every session and API key row created since the up
+-- migration was applied, since none of them has a raw `sid` / `key` to restore.
+--
 -- Restores the raw-credential primary keys.
 --
 -- Rows minted while the up migration was in effect carry no raw `sid` / `key`

@@ -4,8 +4,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-  type RefObject,
 } from "react";
 import { useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -20,26 +18,16 @@ import { useTheme } from "../styles/useTheme";
 import { filterItems, type Searchable } from "./commandPaletteMatch";
 import { isTypingTarget } from "../utils/isTypingTarget";
 import { onActivateKey } from "../utils/a11y";
+import { modifierKeyLabel } from "../utils/platform";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
+import { GO_TO_TARGETS } from "./paletteNavTargets";
+import { OverlayBase } from "./ui/OverlayBase";
+import { Z_INDEX } from "../styles/zIndex";
 import "./commandPalette.css";
 
 const RECENTS_KEY = "transit.commandPaletteRecents";
 const MAX_RECENTS = 8;
 const GO_CHORD_TIMEOUT_MS = 900;
-
-/** The four keyboard-reachable destinations, doubling as the palette's
- *  "移動" group and the `g` + letter chords. A separate table from
- *  Sidebar.tsx's SIDEBAR_NAV_ITEMS rather than reusing it directly: three of
- *  the four (all but "ask", which the sidebar renders as a distinct CTA, not
- *  a nav item) would still need a second, palette-only table for the chord
- *  key and search sublabel, so a from-scratch table of all four together is
- *  the simpler single source for this list specifically. */
-const GO_TO_TARGETS = [
-  { to: "operations", chordKey: "o", labelKey: "design:overview", sublabelKey: "design:live" },
-  { to: "route-analysis", chordKey: "a", labelKey: "design:analysis", sublabelKey: "design:investigate" },
-  { to: "reports", chordKey: "r", labelKey: "design:reports", sublabelKey: "design:summary" },
-  { to: "ask", chordKey: "q", labelKey: "nav.ask", sublabelKey: "palette.nav_ask_sublabel" },
-] as const;
 
 type PaletteGroup = "recent" | "nav" | "agency" | "route" | "report" | "timeband" | "action";
 
@@ -73,91 +61,6 @@ function pushRecentId(id: string): string[] {
   const next = [id, ...readRecentIds().filter((existing) => existing !== id)].slice(0, MAX_RECENTS);
   writeRecentIds(next);
   return next;
-}
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-/**
- * Escape-to-close, a Tab-cycling focus trap, and restoring focus to
- * whatever was focused before opening — the three behaviors a native
- * `<dialog>` gives for free and a plain overlay `<div>` does not. Shared by
- * the palette and the shortcut sheet rather than duplicated, since neither
- * dialog in this app is available from another (still-unmerged) branch.
- */
-function Dialog({
-  onClose,
-  ariaLabel,
-  className,
-  initialFocusRef,
-  children,
-}: {
-  onClose: () => void;
-  ariaLabel: string;
-  className: string;
-  initialFocusRef?: RefObject<HTMLElement | null>;
-  children: ReactNode;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const toFocus = initialFocusRef?.current ?? containerRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? null;
-    toFocus?.focus();
-
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const container = containerRef.current;
-      if (!container) return;
-      const focusables = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-      if (focusables.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey) {
-        if (active === first || !container.contains(active)) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (active === last || !container.contains(active)) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prevOverflow;
-      previouslyFocused?.focus();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose/initialFocusRef intentionally read once per mount; this effect owns one dialog's lifetime, not a value that should reopen it
-  }, []);
-
-  return (
-    <div
-      className="cmdp-overlay"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div ref={containerRef} className={className} role="dialog" aria-modal="true" aria-label={ariaLabel}>
-        {children}
-      </div>
-    </div>
-  );
 }
 
 function buildAgencyItems(
@@ -203,6 +106,27 @@ function buildReportItems(t: TFunction, agencyId: number | null, goToReport: (id
     sublabel: `analysis/${id}`,
     run: () => goToReport(id),
   }));
+}
+
+type PaletteRun = { group: PaletteGroup; entries: { item: PaletteItem; index: number }[] };
+
+/** Chunk `items` into consecutive same-group runs, keeping each entry's
+ *  original index into `items` — that index is the option's id suffix and
+ *  the value arrow-key navigation and `aria-activedescendant` track, so it
+ *  must survive the regrouping. A search query can interleave groups (items
+ *  are ranked by match score, not by group), so runs are not one per group
+ *  overall — the same group can recur in more than one run. */
+function groupIntoRuns(items: PaletteItem[]): PaletteRun[] {
+  const runs: PaletteRun[] = [];
+  items.forEach((item, index) => {
+    const last = runs[runs.length - 1];
+    if (last && last.group === item.group) {
+      last.entries.push({ item, index });
+    } else {
+      runs.push({ group: item.group, entries: [{ item, index }] });
+    }
+  });
+  return runs;
 }
 
 function buildTimeBandItems(t: TFunction, agencyId: number | null, goToTimeBand: (band: TimeBand) => void): PaletteItem[] {
@@ -263,7 +187,7 @@ export function CommandPalette() {
   }
 
   function goToAgency(id: number) {
-    navigate(`/agencies/${id}/${tabParam ?? "overview"}`);
+    navigate(`/agencies/${id}/${tabParam ?? "operations"}${ctxSuffix}`);
   }
 
   function goToRoute(code: string) {
@@ -290,7 +214,7 @@ export function CommandPalette() {
     id: `nav:${target.to}`,
     group: "nav",
     label: t(target.labelKey),
-    sublabel: t(target.sublabelKey),
+    sublabel: target.sublabelKey ? t(target.sublabelKey) : undefined,
     keys: ["g", target.chordKey],
     run: () => goToNav(target.to),
   }));
@@ -416,12 +340,17 @@ export function CommandPalette() {
     }
   }
 
-  let lastGroup: PaletteGroup | null = null;
-
   return (
     <>
-      {open && (
-        <Dialog onClose={closePalette} ariaLabel={t("palette.aria_label")} className="cmdp-palette" initialFocusRef={inputRef}>
+      <OverlayBase
+        open={open}
+        onClose={closePalette}
+        ariaLabel={t("palette.aria_label")}
+        className="cmdp-palette"
+        scrimClassName="cmdp-overlay"
+        scrimZIndex={Z_INDEX.commandPalette}
+        initialFocusRef={inputRef}
+      >
           <div className="cmdp-input-row">
             <Search size={16} strokeWidth={1.75} aria-hidden="true" className="cmdp-input-icon" />
             <input
@@ -433,7 +362,9 @@ export function CommandPalette() {
               autoComplete="off"
               role="combobox"
               aria-expanded="true"
+              aria-autocomplete="list"
               aria-controls="cmdp-listbox"
+              aria-activedescendant={visibleItems.length > 0 ? `cmdp-option-${activeIndex}` : undefined}
               onChange={(e) => {
                 setQuery(e.target.value);
                 setActiveIndex(0);
@@ -441,19 +372,21 @@ export function CommandPalette() {
               onKeyDown={onInputKeyDown}
             />
           </div>
-          <ul id="cmdp-listbox" className="cmdp-list" role="listbox">
-            {visibleItems.length === 0 && <li className="cmdp-empty">{t("palette.no_results")}</li>}
-            {visibleItems.map((item, index) => {
-              const showHeader = lastGroup !== item.group;
-              lastGroup = item.group;
-              return (
-                <li key={item.id}>
-                  {showHeader && <div className="cmdp-group-label">{t(`palette.group.${item.group}`)}</div>}
+          <div id="cmdp-listbox" className="cmdp-list" role="listbox">
+            {visibleItems.length === 0 && <div className="cmdp-empty">{t("palette.no_results")}</div>}
+            {groupIntoRuns(visibleItems).map((run) => (
+              <div key={`${run.group}-${run.entries[0].index}`} role="group" aria-label={t(`palette.group.${run.group}`)}>
+                <div className="cmdp-group-label" aria-hidden="true">
+                  {t(`palette.group.${run.group}`)}
+                </div>
+                {run.entries.map(({ item, index }) => (
                   <div
+                    key={item.id}
+                    id={`cmdp-option-${index}`}
                     role="option"
                     aria-selected={index === activeIndex}
                     className="cmdp-item"
-                    // Not in the Tab sequence (tabIndex={-1} + the Dialog's
+                    // Not in the Tab sequence (tabIndex={-1} + the overlay's
                     // focus trap excludes it): the input owns keyboard focus
                     // and arrow-key selection, matching the ARIA combobox
                     // pattern. This is still a real activation target for a
@@ -477,10 +410,10 @@ export function CommandPalette() {
                       </span>
                     )}
                   </div>
-                </li>
-              );
-            })}
-          </ul>
+                ))}
+              </div>
+            ))}
+          </div>
           <div className="cmdp-footer">
             <span>
               <kbd className="cmdp-kbd">↑↓</kbd> {t("palette.footer.navigate")}
@@ -492,10 +425,15 @@ export function CommandPalette() {
               <kbd className="cmdp-kbd">esc</kbd> {t("palette.footer.close")}
             </span>
           </div>
-        </Dialog>
-      )}
-      {sheetOpen && (
-        <Dialog onClose={() => setSheetOpen(false)} ariaLabel={t("palette.shortcuts.title")} className="cmdp-sheet">
+      </OverlayBase>
+      <OverlayBase
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        ariaLabel={t("palette.shortcuts.title")}
+        className="cmdp-sheet"
+        scrimClassName="cmdp-overlay"
+        scrimZIndex={Z_INDEX.commandPalette}
+      >
           <div className="cmdp-sheet-header">
             <h2 className="cmdp-sheet-title">{t("palette.shortcuts.title")}</h2>
             <button type="button" className="cmdp-sheet-close" onClick={() => setSheetOpen(false)} aria-label={t("common.close")}>
@@ -506,7 +444,7 @@ export function CommandPalette() {
             <li>
               <span>{t("palette.shortcuts.open_palette")}</span>
               <span className="cmdp-item-keys">
-                <kbd className="cmdp-kbd">⌘</kbd>
+                <kbd className="cmdp-kbd">{modifierKeyLabel()}</kbd>
                 <kbd className="cmdp-kbd">K</kbd>
               </span>
             </li>
@@ -533,8 +471,7 @@ export function CommandPalette() {
               </span>
             </li>
           </ul>
-        </Dialog>
-      )}
+      </OverlayBase>
     </>
   );
 }

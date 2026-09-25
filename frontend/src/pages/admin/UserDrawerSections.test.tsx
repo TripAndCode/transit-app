@@ -35,7 +35,7 @@ beforeEach(() => {
 
 describe("ApiKeysSection", () => {
   it("shows the raw key exactly once, in a copy box, right after issuing", async () => {
-    apiGetMock.mockResolvedValue([]);
+    apiGetMock.mockResolvedValue({ keys: [], truncated: false });
     apiPostMock.mockResolvedValue({
       id: 1,
       owner_user_id: 7,
@@ -54,18 +54,24 @@ describe("ApiKeysSection", () => {
   });
 
   it("never renders a raw key from the list endpoint (only from the issue response)", async () => {
-    apiGetMock.mockResolvedValue([
-      { id: 1, owner_user_id: 7, tier: "pro", label: "svc", created_at: "2026-01-01T00:00:00Z", expires_at: null, revoked_at: null },
-    ]);
+    apiGetMock.mockResolvedValue({
+      keys: [
+        { id: 1, owner_user_id: 7, tier: "pro", label: "svc", created_at: "2026-01-01T00:00:00Z", expires_at: null, revoked_at: null },
+      ],
+      truncated: false,
+    });
     renderWithProviders(<ApiKeysSection uid={7} />);
     await screen.findByText("svc");
     expect(screen.queryByDisplayValue(/sk_/)).toBeNull();
   });
 
   it("revokes a key via the revoke button", async () => {
-    apiGetMock.mockResolvedValue([
-      { id: 9, owner_user_id: 7, tier: "pro", label: "svc", created_at: "2026-01-01T00:00:00Z", expires_at: null, revoked_at: null },
-    ]);
+    apiGetMock.mockResolvedValue({
+      keys: [
+        { id: 9, owner_user_id: 7, tier: "pro", label: "svc", created_at: "2026-01-01T00:00:00Z", expires_at: null, revoked_at: null },
+      ],
+      truncated: false,
+    });
     const user = userEvent.setup();
     renderWithProviders(<ApiKeysSection uid={7} />);
     await user.click(await screen.findByRole("button", { name: /revoke/i }));

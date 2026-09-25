@@ -53,6 +53,10 @@ export function OverviewTab() {
     peakHourSel?.dow ?? null,
   );
 
+  // Nothing here is answerable without an agency, and every query above is
+  // already disabled for a null id.
+  if (agencyId == null) return null;
+
   // movers is intentionally excluded here: since the retired MoversList/
   // HeroSentence removal, movers no longer drives any main-view content
   // (it's only consumed inside ConcentrationBar). Checking it would let an
@@ -109,7 +113,7 @@ export function OverviewTab() {
             <OverviewHeroRow
               headline={data.headline}
               delayedCount={data.top_delayed.delayed_count}
-              agencyId={agencyId!}
+              agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               peakHour={data.peak_hour}
               concentration={data.concentration}
