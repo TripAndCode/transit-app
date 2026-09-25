@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from api.deps import get_conn
 from api.routers import admin_agencies
 from api.security import User, require_admin
+from pipeline.url_guard import FeedURLError
 
 _ADMIN = User(
     user_id=1,
@@ -29,8 +30,31 @@ _ADMIN = User(
 )
 
 
+_RUN_ROW = {
+    "run_id": 77,
+    "kind": "ingest",
+    "agency_id": 1,
+    "agency_name": "Hokuriku",
+    "started_at": datetime(2026, 9, 21, 4, 30, tzinfo=timezone.utc),
+    "finished_at": None,
+    "status": "running",
+    "rows": None,
+    "lock_wait_ms": None,
+    "error": None,
+    "requested_by": 1,
+}
+
+
+class _Txn:
+    async def __aenter__(self) -> "_Txn":
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
 class _Conn:
-    def __init__(self, deleted_at: datetime | None):
+    def __init__(self, deleted_at: datetime | None, *, insert_unrecordable: bool = False):
         self._row = {
             "agency_id": 1,
             "agency_name": "Hokuriku",
@@ -38,9 +62,20 @@ class _Conn:
             "ingest_strategy": "direct_url",
             "deleted_at": deleted_at,
         }
+        self.insert_unrecordable = insert_unrecordable
+        self.inserted: list[tuple[Any, ...]] = []
         self.audit: list[tuple[Any, ...]] = []
 
-    async def fetchrow(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+    def transaction(self) -> "_Txn":
+        """`record_admin_action` wraps its insert in a savepoint so a failure
+        cannot abort the caller's transaction; without this the fake raises
+        `AttributeError` there, which the audit write no longer swallows."""
+        return _Txn()
+
+    async def fetchrow(self, sql: str = "", *args: Any, **_kwargs: Any) -> dict[str, Any] | None:
+        if "INSERT INTO pipeline_runs" in sql:
+            self.inserted.append(args)
+            return None if self.insert_unrecordable else dict(_RUN_ROW)
         return self._row
 
     async def execute(self, sql: str, *args: Any) -> str:
@@ -70,10 +105,10 @@ def queued(monkeypatch) -> list[int]:
     the real one opens `DATABASE_URL` and ingests -- which, with a developer's
     shell pointed at the dev database, is a write against real data from a
     unit test."""
-    calls: list[int] = []
+    calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
         "api.routers.internal._run_ingest_and_analyze",
-        lambda **kwargs: calls.extend(kwargs["agency_ids"]),
+        lambda **kwargs: calls.append(kwargs),
         raising=False,
     )
     return calls
@@ -94,5 +129,93 @@ def test_reanalyzing_a_live_agency_is_accepted(queued):
     response = _client(conn).post("/api/admin/agencies/1/reanalyze")
     assert response.status_code == 202
     assert response.json() == {"status": "started"}
-    assert queued == [1]
+    assert [call["agency_ids"] for call in queued] == [[1]]
     assert [call[1] for call in conn.audit] == ["agency.reanalyze_requested"]
+
+
+def test_reanalyzing_opens_one_umbrella_run_and_hands_the_runner_its_id(queued):
+    """Without a row opened here the drawer's action draws no bar at all, and
+    the per-agency rows the sweep writes have no run to belong to."""
+    conn = _Conn(deleted_at=None)
+    _client(conn).post("/api/admin/agencies/1/reanalyze")
+
+    assert conn.inserted == [("ingest", 1, _ADMIN.user_id)]
+    assert queued[0]["run_id"] == 77
+
+
+def test_a_reanalyze_that_cannot_be_recorded_is_refused_rather_than_run_blind(queued):
+    conn = _Conn(deleted_at=None, insert_unrecordable=True)
+    response = _client(conn).post("/api/admin/agencies/1/reanalyze")
+
+    assert response.status_code == 503
+    assert queued == []
+
+
+# ── POST /{agency_id}/probe ─────────────────────────────────────────────
+
+
+def test_probe_rejects_a_disallowed_feed_url(monkeypatch):
+    """`safe_urlopen` guards SSRF by raising `FeedURLError`; the endpoint
+    must surface that as a 422 naming the problem, not a 502 or 500."""
+    conn = _Conn(deleted_at=None)
+
+    def _boom(feed_url: str) -> dict[str, Any]:
+        raise FeedURLError("feed_url resolves to a private address")
+
+    monkeypatch.setattr(admin_agencies, "_fetch_and_measure", _boom)
+    response = _client(conn).post("/api/admin/agencies/1/probe")
+
+    assert response.status_code == 422
+    assert "private address" in response.json()["detail"]
+    assert conn.audit == []
+
+
+def test_probe_reports_502_on_a_generic_fetch_failure(monkeypatch):
+    """Any other fetch failure (timeout, DNS, 5xx from the feed) is reported
+    generically rather than leaking the underlying exception text."""
+    conn = _Conn(deleted_at=None)
+
+    def _boom(feed_url: str) -> dict[str, Any]:
+        raise TimeoutError("feed took too long")
+
+    monkeypatch.setattr(admin_agencies, "_fetch_and_measure", _boom)
+    response = _client(conn).post("/api/admin/agencies/1/probe")
+
+    assert response.status_code == 502
+    assert conn.audit == []
+
+
+def test_probe_rejects_an_empty_poll_as_409(monkeypatch):
+    """`record_field_coverage_probe` raises `ValueError` for a capture with
+    no stop_time_updates; that must not be recorded as a durable verdict."""
+    conn = _Conn(deleted_at=None)
+    cov = {"stop_time_updates": 0}
+
+    async def _empty(conn_arg, agency_id, cov_arg, feed_url):
+        raise ValueError("capture has no stop_time_updates")
+
+    monkeypatch.setattr(admin_agencies, "_fetch_and_measure", lambda feed_url: cov)
+    monkeypatch.setattr("pipeline.strategies.static_join.record_field_coverage_probe", _empty)
+    response = _client(conn).post("/api/admin/agencies/1/probe")
+
+    assert response.status_code == 409
+    assert conn.audit == []
+
+
+def test_probe_success_records_verdicts_and_audits_the_action(monkeypatch):
+    conn = _Conn(deleted_at=None)
+    cov = {"stop_time_updates": 42}
+    verdicts = {"stop_id": True, "arr_delay": False}
+
+    async def _recorded(conn_arg, agency_id, cov_arg, feed_url):
+        assert agency_id == 1
+        assert feed_url == "https://example.test/feed.pb"
+        return verdicts
+
+    monkeypatch.setattr(admin_agencies, "_fetch_and_measure", lambda feed_url: cov)
+    monkeypatch.setattr("pipeline.strategies.static_join.record_field_coverage_probe", _recorded)
+    response = _client(conn).post("/api/admin/agencies/1/probe")
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "recorded", "sample_size": 42, "fields": verdicts}
+    assert [call[1] for call in conn.audit] == ["agency.probed"]

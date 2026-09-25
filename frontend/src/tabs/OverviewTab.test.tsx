@@ -133,3 +133,11 @@ describe("OverviewTab", () => {
     expect(screen.queryByRole("button", { name: "Reset service type to all" })).not.toBeInTheDocument();
   });
 });
+
+describe("OverviewTab without a usable agency id", () => {
+  it("renders nothing when the route segment is not an agency id", () => {
+    renderOverview(summary(), "/agencies/not-an-id/overview?from=2030-01-01&to=2030-01-07");
+    expect(screen.queryByRole("region")).toBeNull();
+    expect(document.querySelector(".ov-page")).toBeNull();
+  });
+});

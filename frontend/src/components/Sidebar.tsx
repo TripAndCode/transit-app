@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   HelpCircle,
@@ -19,7 +19,7 @@ import { SettingsDrawer } from "./SettingsDrawer";
 import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { Tooltip } from "./Tooltip";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
-import { useFocusTrap } from "../hooks/useFocusTrap";
+import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
 import { openCommandPalette } from "./commandPaletteEvents";
@@ -82,12 +82,12 @@ function RailTooltip({
 
 /** The mobile "…" destination: a bottom sheet holding the agency picker and
  *  the account/settings controls that don't fit as one of the four tab bar
- *  slots. Traps focus and closes on Escape or a backdrop click.
+ *  slots.
  *
  *  Not the shared `Modal`: its two variants are a centred card and a
  *  full-height side drawer, and this is anchored to the bottom edge above
- *  the tab bar. It shares the dialog semantics through `useFocusTrap`
- *  rather than re-implementing them. */
+ *  the tab bar. It takes the scrim, the trap and the Escape/backdrop close
+ *  straight from `OverlayBase` and contributes only the anchoring. */
 function MoreSheet({
   title,
   onClose,
@@ -97,43 +97,31 @@ function MoreSheet({
   onClose: () => void;
   children: ReactNode;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(true, panelRef, onClose);
-
   return (
-    <>
-      <div
-        onClick={onClose}
-        role="presentation"
-        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: Z_INDEX.drawerBackdrop }}
-      />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-        className="more-sheet ov-modal"
-        style={{
-          position: "fixed",
-          right: 0,
-          bottom: MOBILE_TABBAR_HEIGHT_PX,
-          left: 0,
-          zIndex: Z_INDEX.drawer,
-          maxHeight: "70vh",
-          background: "var(--bg-surface)",
-          borderRadius: "var(--radius-xl) var(--radius-xl) 0 0",
-          boxShadow: "var(--el-3)",
-          display: "flex",
-          flexDirection: "column",
-          overflowY: "auto",
-          padding: "16px 0",
-          outline: "none",
-        }}
-      >
-        {children}
-      </div>
-    </>
+    <OverlayBase
+      open
+      onClose={onClose}
+      ariaLabel={title}
+      zIndex={Z_INDEX.drawer}
+      scrimZIndex={Z_INDEX.drawerBackdrop}
+      className="more-sheet ov-modal"
+      style={{
+        position: "fixed",
+        right: 0,
+        bottom: MOBILE_TABBAR_HEIGHT_PX,
+        left: 0,
+        maxHeight: "70vh",
+        background: "var(--bg-surface)",
+        borderRadius: "var(--radius-xl) var(--radius-xl) 0 0",
+        boxShadow: "var(--el-3)",
+        display: "flex",
+        flexDirection: "column",
+        overflowY: "auto",
+        padding: "16px 0",
+      }}
+    >
+      {children}
+    </OverlayBase>
   );
 }
 
@@ -253,10 +241,10 @@ export function Sidebar() {
                   justifyContent: collapsedFlag ? "center" : "flex-start",
                   gap: 9,
                   color: isActive ? "var(--accent)" : "var(--text-secondary)",
-                  fontSize: 13,
+                  fontSize: "var(--text-sm)",
                   border: `1px dashed ${isActive ? "var(--accent)" : "var(--border-soft)"}`,
                   textDecoration: "none",
-                  transition: "all var(--transition)",
+                  transition: "color var(--transition), border-color var(--transition)",
                 })}
               >
                 <HelpCircle size={16} strokeWidth={1.5} aria-hidden="true" />
@@ -418,12 +406,12 @@ export function Sidebar() {
           flexShrink: 0,
           borderRadius: 8,
           background: "var(--accent)",
-          color: "#fff",
+          color: "var(--on-accent)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           fontWeight: 700,
-          fontSize: 15,
+          fontSize: "var(--text-base)",
         }}
       >
         {t("header.app_title").slice(0, 1)}
@@ -434,7 +422,7 @@ export function Sidebar() {
             style={{
               fontFamily: "var(--font-display)",
               fontWeight: 600,
-              fontSize: 15,
+              fontSize: "var(--text-base)",
               letterSpacing: "0.01em",
             }}
           >

@@ -1,5 +1,5 @@
 .stop-evidence h3 { font-size: 17px; margin: 16px 0 8px; }
-.ask-pattern-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 13px; }
+.ask-pattern-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: var(--text-sm); }
 .ask-pattern-picker select { max-width: 100%; padding: 6px; }
 .stop-evidence-missing { position: absolute; left: 0; right: 0; bottom: 12px; color: var(--text-secondary); font-size: 12px; }
 .stop-navigator { margin: 16px 0; }
@@ -33,11 +33,11 @@
 .stop-evidence-bar { position: absolute; left: 25%; width: 50%; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius) var(--radius) 0 0; min-height: 1px; }
 .stop-evidence-column[aria-pressed="true"] .stop-evidence-bar { background: var(--accent); }
 .stop-evidence-zero { position: absolute; left: 0; right: 0; border-bottom: 1px solid var(--border-soft); }
-.stop-evidence-value { position: absolute; left: 0; right: 0; padding-bottom: 8px; font-variant-numeric: tabular-nums; font-size: 13px; }
-.stop-evidence-name { font-size: 13px; overflow-wrap: anywhere; }
-.stop-evidence-detail { position: absolute; top: -24px; width: 250px; box-sizing: border-box; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); padding: 12px 16px; background: var(--bg-surface); box-shadow: 0 6px 20px #0002; z-index: var(--z-popover); }
+.stop-evidence-value { position: absolute; left: 0; right: 0; padding-bottom: 8px; font-variant-numeric: tabular-nums; font-size: var(--text-sm); }
+.stop-evidence-name { font-size: var(--text-sm); overflow-wrap: anywhere; }
+.stop-evidence-detail { position: absolute; top: -24px; width: 250px; box-sizing: border-box; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); padding: 12px 16px; background: var(--bg-surface); box-shadow: var(--el-2); z-index: var(--z-popover); }
 .stop-evidence-detail h3 { margin: 4px 0; }
-.stop-evidence-detail p { margin: 4px 0; font-size: 13px; }
+.stop-evidence-detail p { margin: 4px 0; font-size: var(--text-sm); }
 .stop-evidence-detail strong { font-size: 26px; color: var(--accent); font-variant-numeric: tabular-nums; }
 .stop-evidence-detail summary, .stop-evidence-definition { font-size: 12px; color: var(--text-secondary); }
 .stop-evidence-detail summary, .stop-evidence-definition summary { cursor: pointer; }

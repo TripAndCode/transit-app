@@ -18,6 +18,7 @@ import { BandGrid, Legend } from "../components/charts/DowBandGrid";
 import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
 import { accentRampColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
+import { WEEK } from "../utils/week";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
@@ -28,7 +29,7 @@ import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
-import { th, td } from "../components/tableStyles";
+import { SHARED_TABLE, th, td } from "../components/tableStyles";
 import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
@@ -207,7 +208,7 @@ export function AnalysisTab() {
                       padding: 12,
                       marginTop: 8,
                       whiteSpace: "pre-wrap",
-                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                      fontFamily: "var(--font-mono)",
                       fontSize: 12,
                       lineHeight: 1.6,
                       maxWidth: 920,
@@ -230,8 +231,6 @@ export function AnalysisTab() {
     </div>
   );
 }
-
-const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 
 function TrendBlock({
   data,
@@ -299,7 +298,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <table style={SHARED_TABLE}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
             <th style={th({ width: 40 })}>#</th>

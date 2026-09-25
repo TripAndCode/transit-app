@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
-import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import "../../i18n";
 import { MareyDiagram } from "./MareyDiagram";
 import { MUTED_OPACITY, formatClock, type MareyStop } from "./mareyLayout";
@@ -39,6 +39,25 @@ function show(props: Partial<ComponentProps<typeof MareyDiagram>> = {}) {
   return render(<MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" {...props} />);
 }
 
+/** Force the phone/desktop branch `useMediaQuery` reads, so the narrow layout
+ *  can be asserted in jsdom (which reports no viewport width of its own). */
+function mockViewport(narrow: boolean) {
+  vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+    matches: narrow,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }) as unknown as MediaQueryList);
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("MareyDiagram", () => {
   it("draws one polyline per trip", () => {
     const { container } = show();
@@ -58,8 +77,11 @@ describe("MareyDiagram", () => {
   });
 
   it("labels every stop on the y axis", () => {
-    show();
-    for (const stop of AXIS) expect(screen.getByText(stop.stop_name)).toBeInTheDocument();
+    // Scoped to the drawing: the same stop names also appear in the tabular
+    // reading of the chart that follows it.
+    const { container } = show();
+    const labels = [...container.querySelectorAll("svg.marey__chart text")].map((node) => node.textContent);
+    for (const stop of AXIS) expect(labels).toContain(stop.stop_name);
   });
 
   it("fades the other trips while one is hovered", () => {
@@ -113,5 +135,88 @@ describe("MareyDiagram", () => {
   it("stays silent about capping when nothing was dropped", () => {
     show();
     expect(screen.queryByTestId("marey-truncated")).toBeNull();
+  });
+});
+
+describe("MareyDiagram keyboard and screen-reader access", () => {
+  it("puts every trip in the tab order with a label naming its route of travel and times", () => {
+    const { container } = show();
+    const groups = [...container.querySelectorAll("[data-trip-id]")];
+    expect(groups.every((g) => g.getAttribute("tabindex") === "0")).toBe(true);
+    const label = groups[2].getAttribute("aria-label") ?? "";
+    expect(label).toContain("08:00");
+    expect(label).toContain("Station");
+    expect(label).toContain("Terminus");
+    expect(label).toContain("15.0");
+  });
+
+  it("reads out the focused trip and mirrors the hover fade", () => {
+    const { container } = show();
+    const groups = [...container.querySelectorAll("[data-trip-id]")];
+
+    fireEvent.focus(groups[2]);
+    expect(screen.getByTestId("marey-readout")).toHaveTextContent("08:00");
+    expect(groups[0].getAttribute("opacity")).toBe(String(MUTED_OPACITY));
+
+    fireEvent.blur(groups[2]);
+    expect(groups.every((g) => g.getAttribute("opacity") === "1")).toBe(true);
+  });
+
+  it("leaves a still-hovered trip highlighted after a different trip is blurred", () => {
+    const { container } = show();
+    const groups = [...container.querySelectorAll("[data-trip-id]")];
+
+    fireEvent.mouseEnter(groups[1].querySelector(".marey-trip__hit")!);
+    fireEvent.focus(groups[2]);
+    // Tabbing away raises no `mouseleave`, so the pointer is still on group 1.
+    fireEvent.blur(groups[2]);
+
+    expect(groups[1].getAttribute("opacity")).toBe("1");
+    expect(groups[0].getAttribute("opacity")).toBe(String(MUTED_OPACITY));
+  });
+
+  it("announces the readout politely so a change on focus is spoken", () => {
+    show();
+    expect(screen.getByTestId("marey-readout")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("gives the chart an image role and a summary label", () => {
+    const { container } = show();
+    const svg = container.querySelector("svg.marey__chart")!;
+    expect(svg.getAttribute("role")).toBe("img");
+    expect(svg.getAttribute("aria-label")).toContain("3");
+  });
+
+  it("follows the chart with one table row per drawn trip", () => {
+    show();
+    const table = screen.getByTestId("marey-table");
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(3);
+    expect(within(rows[2]).getByText("08:00")).toBeInTheDocument();
+    expect(within(rows[2]).getByText("15.0")).toBeInTheDocument();
+  });
+});
+
+describe("MareyDiagram on a narrow viewport", () => {
+  it("shows the table instead of the chart, behind a toggle", async () => {
+    mockViewport(true);
+    const { container } = show();
+    expect(container.querySelector("svg.marey__chart")).toBeNull();
+    expect(screen.getByTestId("marey-table")).toBeVisible();
+
+    const toggle = screen.getByRole("button", { name: "Show diagram" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+
+    expect(container.querySelector("svg.marey__chart")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Hide diagram" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps the chart and the hidden table on a wide viewport", () => {
+    mockViewport(false);
+    const { container } = show();
+    expect(container.querySelector("svg.marey__chart")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Show diagram" })).toBeNull();
+    expect(screen.getByTestId("marey-table").className).toContain("marey__table--hidden");
   });
 });

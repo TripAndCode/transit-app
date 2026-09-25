@@ -15,9 +15,19 @@ on:
   repository_dispatch:
     types: [vps-heartbeat]
 
+# This job only echoes the dispatch payload into its own log; it never
+# checks out the repo or calls the GitHub API, so it needs no token scope
+# at all. (vps-heartbeat-watchdog.yml is the one that later reads this run's
+# log back out via `gh run view --log`, and it needs its own `actions: read`
+# for that -- unrelated to this job's own token.)
+permissions: {}
+
 jobs:
   record:
     runs-on: ubuntu-latest
+    # A log-append step should finish in seconds; bounds a hung runner
+    # instead of relying on GitHub's 6-hour default.
+    timeout-minutes: 5
     steps:
       - name: Record heartbeat and reported loop health
         # Values come from our own trusted VPS dispatch, not third-party

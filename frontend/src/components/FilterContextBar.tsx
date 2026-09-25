@@ -282,7 +282,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
           disabled={pending}
           style={{
             background: pending ? "var(--bg-soft)" : "var(--accent)",
-            color: pending ? "var(--text-tertiary)" : "#fff",
+            color: pending ? "var(--text-tertiary)" : "var(--on-accent)",
             border: "none",
             borderRadius: 4,
             padding: "6px 18px",

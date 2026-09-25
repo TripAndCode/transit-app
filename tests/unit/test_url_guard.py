@@ -6,7 +6,7 @@ without a real DNS query — the suite stays hermetic and network-free.
 
 import pytest
 
-from pipeline.url_guard import FeedURLError, _ip_blocked, _redact_url, validate_feed_url
+from pipeline.url_guard import FeedURLError, _ip_blocked, _redact_url, redact_urls_in_text, validate_feed_url
 
 
 def test_rejects_file_scheme():
@@ -119,3 +119,25 @@ def test_ip_blocked_allows_6to4_encoded_public_address():
     """A 6to4 address embedding a genuinely public IPv4 must still pass -
     the unwrap must not become a blanket reject of the whole 2002::/16 range."""
     assert _ip_blocked("2002:0808:0808::") is False  # embeds 8.8.8.8
+
+
+def test_redact_urls_in_text_strips_credentials_from_a_url_inside_a_message():
+    assert (
+        redact_urls_in_text("HTTPError: could not fetch https://u:p@feeds.test/rt.pb?key=SECRET")
+        == "HTTPError: could not fetch https://feeds.test/rt.pb"
+    )
+
+
+def test_redact_urls_in_text_leaves_a_message_without_a_url_exactly_as_it_was():
+    assert redact_urls_in_text("ZeroDivisionError: division by zero") == "ZeroDivisionError: division by zero"
+
+
+def test_redact_urls_in_text_leaves_sentence_punctuation_outside_the_url():
+    assert redact_urls_in_text("blocked https://feeds.test/rt.pb?k=1.") == "blocked https://feeds.test/rt.pb."
+
+
+def test_redact_urls_in_text_handles_several_urls_in_one_message():
+    assert (
+        redact_urls_in_text("redirect https://a.test/x?k=1 -> http://b.test/y?k=2")
+        == "redirect https://a.test/x -> http://b.test/y"
+    )

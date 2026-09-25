@@ -62,6 +62,13 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("dialog", { name: "Command palette" })).toBeInTheDocument();
   });
 
+  it("renders through the shared overlay base", () => {
+    renderPalette();
+    openWithCtrlK();
+    expect(screen.getByRole("dialog")).toHaveClass("ui-overlay-panel", "cmdp-palette");
+    expect(screen.getByRole("presentation")).toHaveClass("ui-overlay-scrim", "cmdp-overlay");
+  });
+
   it("ignores Ctrl+K while focus is in a text input elsewhere on the page", () => {
     renderPalette("/agencies/1/overview", <input data-testid="outside-input" />);
     const outside = screen.getByTestId("outside-input");
@@ -110,8 +117,8 @@ describe("CommandPalette", () => {
       renderPalette();
       fireEvent.keyDown(document, { key: "g" });
       fireEvent.keyDown(document, { key: "o" });
-      // `operations` is where Overview lives; `/overview` is only a legacy
-      // alias that redirects there, so the chord must not route through it.
+      // `/overview` is only a legacy alias that redirects to `operations`,
+      // so the chord must not route through it.
       expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/operations");
     });
 
@@ -120,6 +127,20 @@ describe("CommandPalette", () => {
       fireEvent.keyDown(document, { key: "g" });
       fireEvent.keyDown(document, { key: "a" });
       expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/route-analysis");
+    });
+
+    it("navigates to period-overview on g then p", () => {
+      renderPalette();
+      fireEvent.keyDown(document, { key: "g" });
+      fireEvent.keyDown(document, { key: "p" });
+      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/period-overview");
+    });
+
+    it("navigates to network on g then n", () => {
+      renderPalette();
+      fireEvent.keyDown(document, { key: "g" });
+      fireEvent.keyDown(document, { key: "n" });
+      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/network");
     });
 
     it("ignores the chord while focus is in a text input", () => {
@@ -138,11 +159,16 @@ describe("CommandPalette", () => {
     });
   });
 
-  it("opens the shortcut sheet on '?' and lists the go-to chords", () => {
+  it("opens the shortcut sheet on '?' and lists the go-to chords for every sidebar destination plus Ask", () => {
     renderPalette();
     fireEvent.keyDown(document, { key: "?" });
     const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
-    expect(within(dialog).getByText("Go to Overview")).toBeInTheDocument();
+    expect(within(dialog).getByText("Go to Operations")).toBeInTheDocument();
+    expect(within(dialog).getByText("Go to Period overview")).toBeInTheDocument();
+    expect(within(dialog).getByText("Go to Segment analysis")).toBeInTheDocument();
+    expect(within(dialog).getByText("Go to Compare agencies")).toBeInTheDocument();
+    expect(within(dialog).getByText("Go to Reports")).toBeInTheDocument();
+    expect(within(dialog).getByText("Go to Ask")).toBeInTheDocument();
     expect(within(dialog).getByText("Show this shortcut list")).toBeInTheDocument();
   });
 
@@ -174,13 +200,24 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("search").textContent).toContain("time_band=morning");
   });
 
-  it("switching agencies keeps the current tab", async () => {
+  it("switching agencies keeps the current tab and the active range context", async () => {
     const user = userEvent.setup();
-    renderPalette("/agencies/1/route-analysis");
+    renderPalette("/agencies/1/route-analysis?from=2026-06-01&to=2026-06-07");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
     await user.click(screen.getByText("Kaga Bay Bus"));
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/route-analysis");
+    expect(screen.getByTestId("search").textContent).toBe("?from=2026-06-01&to=2026-06-07");
+  });
+
+  it("switching agencies falls back to operations, with the active range context, when there is no current tab", async () => {
+    const user = userEvent.setup();
+    renderPalette("/agencies/1?from=2026-06-01&to=2026-06-07");
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
+    await user.click(screen.getByText("Kaga Bay Bus"));
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/operations");
+    expect(screen.getByTestId("search").textContent).toBe("?from=2026-06-01&to=2026-06-07");
   });
 
   it("records a run item in localStorage and shows it under Recent next time", async () => {
@@ -223,6 +260,35 @@ describe("CommandPalette", () => {
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "Reports");
     await expect(user.click(screen.getByText("Reports"))).resolves.not.toThrow();
+  });
+
+  it("exposes each option's id via aria-activedescendant on the input, tracking arrow-key navigation", () => {
+    renderPalette();
+    openWithCtrlK();
+    const input = screen.getByRole("combobox");
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(1);
+    expect(options[0]).toHaveAttribute("id");
+    expect(input).toHaveAttribute("aria-activedescendant", options[0].id);
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", options[1].id);
+  });
+
+  it("marks the input as a list-autocomplete combobox", () => {
+    renderPalette();
+    openWithCtrlK();
+    expect(screen.getByRole("combobox")).toHaveAttribute("aria-autocomplete", "list");
+  });
+
+  it("groups options under labelled ARIA groups instead of a plain heading", () => {
+    renderPalette();
+    openWithCtrlK();
+    const groups = screen.getAllByRole("group");
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of groups) {
+      expect(group).toHaveAttribute("aria-label");
+    }
   });
 
   it("toggles the theme via the action group without navigating", async () => {

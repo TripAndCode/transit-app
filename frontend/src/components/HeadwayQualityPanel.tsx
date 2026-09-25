@@ -14,8 +14,8 @@ import { useRouteNames } from "../api/useRouteNames";
 import type { RangeCtx } from "../api/rangeContext";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
-import { th, td } from "./tableStyles";
-import { formatNumber } from "../utils/format";
+import { SHARED_TABLE, th, td } from "./tableStyles";
+import { formatNumber, fmtRatioPct } from "../utils/format";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
   if (sec == null) return "—";
@@ -26,10 +26,6 @@ function fmtSignedMin(sec: number | null, t: TFunction): string {
 
 function fmtCov(v: number | null): string {
   return v == null ? "—" : v.toFixed(2);
-}
-
-function fmtPct(v: number | null): string {
-  return v == null ? "—" : `${(v * 100).toFixed(1)}%`;
 }
 
 export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) {
@@ -48,7 +44,7 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }
       )}
       {data && data.rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={SHARED_TABLE}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
                 <th style={th({ align: "left" })}>{t("common.route")}</th>
@@ -64,7 +60,7 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }
                   <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
                   <td style={{ ...td(), textAlign: "right" }}>{fmtSignedMin(r.ewt_sec, t)}</td>
                   <td style={{ ...td(), textAlign: "right" }}>{fmtCov(r.cov)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtPct(r.long_gap_rate)}</td>
+                  <td style={{ ...td(), textAlign: "right" }}>{fmtRatioPct(r.long_gap_rate)}</td>
                   <td style={{ ...td(), textAlign: "right" }}>{formatNumber(r.samples)}</td>
                 </tr>
               ))}

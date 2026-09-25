@@ -31,6 +31,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   const agencyIdNum = useAgencyId();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [draft, setDraft] = useState<Draft>({
     dow: ctx.dow,
     time_band: ctx.time_band,
@@ -79,6 +80,23 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
+
+  // The popover has no close control of its own, so without this the only
+  // way out for a keyboard user is a click elsewhere on the page. It is not
+  // a focus trap -- Tab still leaves it -- so it acts only on a keypress
+  // that belongs to it: anything with focus of its own (a dialog opened over
+  // the page) owns its own Escape.
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (!ref.current?.contains(document.activeElement)) return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
 
   const dirty =
     draft.dow !== ctx.dow ||
@@ -195,10 +213,11 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
       )}
       <button
         type="button"
+        ref={triggerRef}
         onClick={() => setOpen((v) => !v)}
         style={{
           background: activeCount > 0 ? "var(--accent)" : "var(--bg-surface)",
-          color: activeCount > 0 ? "#fff" : "var(--text-primary)",
+          color: activeCount > 0 ? "var(--on-accent)" : "var(--text-primary)",
           border: `1px solid ${activeCount > 0 ? "var(--accent)" : "var(--border-subtle)"}`,
           borderRadius: 8,
           padding: "8px 16px",
@@ -218,7 +237,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
           <span
             style={{
               background: "rgba(255,255,255,0.25)",
-              color: "#fff",
+              color: "var(--on-accent)",
               fontSize: 12,
               borderRadius: 999,
               padding: "1px 8px",
@@ -375,7 +394,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
               disabled={!dirty}
               style={{
                 background: dirty ? "var(--accent)" : "var(--bg-soft)",
-                color: dirty ? "#fff" : "var(--text-tertiary)",
+                color: dirty ? "var(--on-accent)" : "var(--text-tertiary)",
                 border: "none",
                 borderRadius: 4,
                 padding: "6px 18px",

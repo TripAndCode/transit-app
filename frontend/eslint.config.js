@@ -21,6 +21,24 @@ const a11yAsError = Object.fromEntries(
   }),
 )
 
+// Every AST position that introduces a binding, as an esquery selector list.
+// `no-restricted-syntax` takes one selector string per entry, and a
+// comma-separated list is one selector, so this stays a single rule entry with
+// a single message.
+const shadowBindingSelector = [
+  'VariableDeclarator > Identifier.id',
+  'ObjectPattern > Property > Identifier.value',
+  'ArrayPattern > Identifier',
+  'RestElement > Identifier',
+  'AssignmentPattern > Identifier.left',
+  'CatchClause > Identifier.param',
+  ':matches(FunctionDeclaration, FunctionExpression, ArrowFunctionExpression) > Identifier.params',
+  ':matches(FunctionDeclaration, FunctionExpression, ClassDeclaration, ClassExpression) > Identifier.id',
+  ':matches(ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier) > Identifier.local',
+]
+  .map((position) => `${position}[name=/^(window|document)$/]`)
+  .join(', ')
+
 export default tseslint.config(
   { ignores: ['dist', 'coverage', 'node_modules'] },
   {
@@ -90,12 +108,55 @@ export default tseslint.config(
           message: "Do not hardcode zIndex — use a rung from Z_INDEX (src/styles/zIndex.ts) instead.",
         },
         {
+          // A local binding named `window` or `document` shadows the DOM
+          // global of the same name for the whole of its scope, so every
+          // later reference there resolves to the local value instead. The
+          // mistake is invisible until something in that scope wants the real
+          // global (a `window.matchMedia` call, a `document.querySelector`),
+          // at which point it fails at runtime far from its cause. Name the
+          // local for what it holds instead.
+          //
+          // The hazard is "a new binding in scope", not any one syntax, so the
+          // selector enumerates binding positions rather than statement kinds:
+          // a destructured `const { window } = x` shadows exactly as hard as a
+          // plain `const window = x`, and a selector that only reaches the
+          // plain form passes the case a reviewer is likelier to miss.
+          // Type-only positions (`TSFunctionType`, `TSMethodSignature`) are
+          // deliberately absent: they declare no body, so there is no scope in
+          // which a bare `window` could resolve to the parameter.
+          selector: shadowBindingSelector,
+          message:
+            'Do not name a local binding `window` or `document` — it shadows the DOM global for the rest of the scope. Use a descriptive name (e.g. `viewWindow`).',
+        },
+        {
           // `Number.prototype.toLocaleString`/`Date.prototype.toLocaleDateString`/
           // `toLocaleTimeString`/`toLocaleString` silently default to the
           // runtime's locale rather than the active UI language, so ja/en
           // users can see numbers or dates formatted in the wrong locale.
           selector: 'CallExpression[callee.property.name=/^toLocale(String|DateString|TimeString)$/]',
           message: 'Do not call toLocale*() directly — use formatNumber()/formatDateTime() from src/utils/format.ts, which read the active UI language.',
+        },
+        {
+          // An import declaration that isn't hoisted above the module's other
+          // top-level statements reads as if it were conditionally loaded or
+          // ordering-sensitive, when in fact every import is hoisted to the
+          // top by the module system regardless of where it's written — a
+          // `const`/function declaration between two imports is just visual
+          // noise that makes the module's dependency list harder to scan.
+          // `eslint-plugin-import`'s `import/first` isn't installed; this
+          // selector is the dependency-free equivalent: it flags an
+          // ImportDeclaration that has an earlier non-import sibling in the
+          // same module body.
+          //
+          // Two kinds of sibling do not count. A directive prologue
+          // (`"use client"`) *must* come first, so flagging the import after
+          // it would demand a move with nowhere to move to. A re-export with
+          // a source (`export { x } from "./x"`) is part of the same
+          // dependency list an import belongs to, which is how `import/first`
+          // treats it too.
+          selector:
+            'Program > :not(ImportDeclaration, ExportNamedDeclaration[source], ExportAllDeclaration, ExpressionStatement[expression.type="Literal"][expression.value=/^use /]) ~ ImportDeclaration',
+          message: 'Move this import above the module\'s other top-level statements — imports are hoisted regardless of where they appear, so keep them together at the top.',
         },
       ],
       // Closes the aliased-import hole the syntax selectors above can't see
