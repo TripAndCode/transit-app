@@ -570,8 +570,30 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n" || FAIL=1
     echo "== npm run lint:i18n-strings =="
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n-strings" || FAIL=1
+    echo "== npm run deadcode (knip; matches CI's dead-code gate) =="
+    # knip parses through oxc-parser's platform-specific native binary, which
+    # npm's optional-dependency resolution drops often enough to expect it
+    # (npm/cli#4828). A missing binary is a broken install, not dead code:
+    # treating it as a gate failure would block every push from this checkout
+    # until someone reinstalled node_modules, behind a stack trace that names
+    # neither the cause nor the cure. CI installs cleanly and still enforces
+    # the gate, so degrading to a warning here loses local coverage only.
+    deadcode_out="$(mktemp)"
+    if ! run_with_timeout 60 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run deadcode" >"$deadcode_out" 2>&1; then
+      if grep -q "Cannot find native binding" "$deadcode_out"; then
+        echo "WARNING: npm run deadcode could not run — oxc-parser's native binding is missing from $CLAUDE_PROJECT_DIR/frontend/node_modules, so the local dead-code gate is skipped for this push. Reinstall it to restore the check; CI enforces it either way." >&2
+      else
+        FAIL=1
+      fi
+    fi
+    cat "$deadcode_out"
+    rm -f "$deadcode_out"
     echo "== npm run test:check-entry-chunk (fixture-based positive/negative controls for the checker itself) =="
     run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test:check-entry-chunk" || FAIL=1
+    echo "== npm run test:check-css-tokens (fixture-based positive/negative controls for the checker itself) =="
+    run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test:check-css-tokens" || FAIL=1
+    echo "== npm run check:css-tokens (static scan: var(--x) refs resolve, z-index uses the shared ladder) =="
+    run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run check:css-tokens" || FAIL=1
     if [ "${PUSH_GATE_SKIP_BUILD:-0}" = "1" ]; then
       echo "WARNING: PUSH_GATE_SKIP_BUILD=1 set — skipping npm run build:bundle + check:entry-chunk for this push (deliberate opt-out; MapLibre-in-entry regressions won't be caught locally)." >&2
     else

@@ -48,7 +48,8 @@ the task needs them.
   inherit the default `:5433` URL; point it at `:5544`. `make fmt` rewrites files
   rather than reporting, so it does not verify formatting.
 - Frontend: `npm run typecheck`, `npm run test`, `npm run lint`, `npm run lint:i18n`,
-  `npm run lint:i18n-strings`, `npm run test:check-entry-chunk`, then
+  `npm run lint:i18n-strings`, `npm run deadcode`, `npm run test:check-entry-chunk`,
+  `npm run test:check-css-tokens`, `npm run check:css-tokens`, then
   `npm run build:bundle && npm run check:entry-chunk`.
 - Run the smallest relevant check during iteration and the required complete check
   once before completion. Capture verbose output to a file and surface only the
