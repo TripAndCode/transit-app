@@ -14,7 +14,7 @@ function run(over: Partial<PipelineRun> & { run_id: number }): PipelineRun {
     finished_at: "2026-09-20T19:30:00Z",
     status: "ok",
     rows: null,
-    lock_wait_ms: null,
+    lock_probe_ms: null,
     error: null,
     requested_by: null,
     ...over,
@@ -66,11 +66,20 @@ describe("runsToBars", () => {
 
   it("dashes a run that never did any work, so a displaced sweep reads differently from a fast one", () => {
     const [lane] = runsToBars(
-      [run({ run_id: 1, status: "skipped", finished_at: null, lock_wait_ms: 4 })],
+      [run({ run_id: 1, status: "skipped", finished_at: null, lock_probe_ms: 4 })],
       DAY_START,
       DAY_START,
     );
     expect(lane.bars[0].dashed).toBe(true);
+  });
+
+  it("carries the lock probe cost through under the name the API gives it", () => {
+    const [lane] = runsToBars(
+      [run({ run_id: 1, status: "skipped", finished_at: null, lock_probe_ms: 4 })],
+      DAY_START,
+      DAY_START,
+    );
+    expect(lane.bars[0].lockProbeMs).toBe(4);
   });
 
   it("leaves an ordinary completed run solid", () => {

@@ -54,7 +54,7 @@ function barTooltip(t: TFunction, lane: string, bar: RunBar): string {
     }),
   ];
   if (bar.rows != null) parts.push(t("admin.board.run_tooltip_rows", { count: bar.rows }));
-  if (bar.lockWaitMs != null) parts.push(t("admin.board.run_tooltip_lock"));
+  if (bar.lockProbeMs != null) parts.push(t("admin.board.run_tooltip_lock"));
   if (bar.error) parts.push(bar.error);
   return parts.join(" · ");
 }

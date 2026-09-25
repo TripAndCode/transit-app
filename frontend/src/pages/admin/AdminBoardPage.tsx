@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
@@ -10,6 +10,7 @@ import {
   type BoardCollector,
   type BoardFreshnessDay,
 } from "../../api/admin";
+import { Modal } from "../../components/Modal";
 import { RunTimeline } from "./RunTimeline";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
@@ -36,16 +37,6 @@ const STATUS_COLORS: Record<BoardCollector["status"], string> = {
  *  The timeline's axis is a JST civil day because the pipeline buckets on one
  *  and the server returns one; deriving it from the viewer's own timezone
  *  would slide every bar for an operator abroad. */
-/** Move focus to the element when it appears, and only then.
- *
- *  Declared at module scope so its identity is stable: React re-invokes a ref
- *  callback whenever the callback itself changes, so an inline arrow would
- *  re-focus on every render — and the board re-renders on every poll, which
- *  would drag focus back from wherever the operator had moved it. */
-function focusOnMount(el: HTMLButtonElement | null): void {
-  el?.focus();
-}
-
 function jstDayStart(now: Date): Date {
   const jstNow = new Date(now.getTime() + JST_OFFSET_MS);
   return new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate()) - JST_OFFSET_MS);
@@ -133,6 +124,7 @@ export function AdminBoardPage() {
   const { data, error, isPending } = useAdminBoard();
   const trigger = useTriggerRun();
   const [confirming, setConfirming] = useState(false);
+  const confirmRef = useRef<HTMLButtonElement>(null);
 
   // Read once per render rather than held in state: the board re-renders on
   // every poll, so the marker and any open run's bar advance on their own
@@ -176,63 +168,64 @@ export function AdminBoardPage() {
         </button>
       </header>
 
-      {confirming && (
-        <div
-          role="dialog"
-          aria-label={t("admin.board.reanalyze_confirm_title")}
-          style={{
-            display: "grid",
-            gap: 8,
-            padding: "12px 14px",
-            borderRadius: "var(--radius-lg)",
-            border: "1px solid var(--border-subtle)",
-            background: "var(--surface-1)",
-          }}
-        >
-          <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>{t("admin.board.reanalyze_confirm_title")}</h2>
-          <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-            {t("admin.board.reanalyze_confirm_body")}
-          </p>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              ref={focusOnMount}
-              onClick={() => {
-                setConfirming(false);
-                trigger.mutate({ kind: "ingest" });
-              }}
-              style={{
-                fontSize: "var(--text-xs)",
-                fontFamily: "inherit",
-                padding: "5px 12px",
-                borderRadius: 6,
-                border: "1px solid var(--accent)",
-                background: "var(--accent)",
-                color: "var(--on-accent, #fff)",
-                cursor: "pointer",
-              }}
-            >
-              {t("admin.board.reanalyze_confirm")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirming(false)}
-              style={{
-                fontSize: "var(--text-xs)",
-                fontFamily: "inherit",
-                padding: "5px 12px",
-                borderRadius: 6,
-                border: "1px solid var(--border-subtle)",
-                background: "transparent",
-                color: "var(--text-primary)",
-                cursor: "pointer",
-              }}
-            >
-              {t("admin.board.reanalyze_cancel")}
-            </button>
-          </div>
+      <Modal
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        labelledBy="board-reanalyze-confirm-title"
+        initialFocusRef={confirmRef}
+        style={{
+          display: "grid",
+          gap: 8,
+          width: "min(420px, calc(100vw - 32px))",
+          padding: "14px 16px",
+          borderRadius: "var(--radius-lg)",
+          border: "1px solid var(--border-subtle)",
+          boxShadow: "var(--el-3)",
+        }}
+      >
+        <h2 id="board-reanalyze-confirm-title" style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>
+          {t("admin.board.reanalyze_confirm_title")}
+        </h2>
+        <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{t("admin.board.reanalyze_confirm_body")}</p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            ref={confirmRef}
+            onClick={() => {
+              setConfirming(false);
+              trigger.mutate({ kind: "ingest" });
+            }}
+            style={{
+              fontSize: "var(--text-xs)",
+              fontFamily: "inherit",
+              padding: "5px 12px",
+              borderRadius: 6,
+              border: "1px solid var(--accent)",
+              background: "var(--accent)",
+              color: "var(--on-accent, #fff)",
+              cursor: "pointer",
+            }}
+          >
+            {t("admin.board.reanalyze_confirm")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            style={{
+              fontSize: "var(--text-xs)",
+              fontFamily: "inherit",
+              padding: "5px 12px",
+              borderRadius: 6,
+              border: "1px solid var(--border-subtle)",
+              background: "transparent",
+              color: "var(--text-primary)",
+              cursor: "pointer",
+            }}
+          >
+            {t("admin.board.reanalyze_cancel")}
+          </button>
         </div>
-      )}
+      </Modal>
 
       {trigger.error != null && (
         <p role="alert" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-warning, #C99A2E)" }}>

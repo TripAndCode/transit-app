@@ -2,7 +2,12 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "../../components/Modal";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
-import { useFeatureFlags, usePatchFeatureFlag, type FeatureFlag } from "../../api/admin";
+import {
+  useClearFeatureFlag,
+  useFeatureFlags,
+  usePatchFeatureFlag,
+  type FeatureFlag,
+} from "../../api/admin";
 import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
 
@@ -124,6 +129,7 @@ export function AdminFlagsPage() {
   const { t } = useTranslation();
   const { data, error } = useFeatureFlags();
   const patch = usePatchFeatureFlag();
+  const clear = useClearFeatureFlag();
   const [pending, setPending] = useState<PendingChange | null>(null);
 
   const columns: DataTableColumn<FeatureFlag>[] = [
@@ -141,9 +147,20 @@ export function AdminFlagsPage() {
       key: "source",
       header: t("admin.flags.col_source"),
       render: (f) => (
-        <StatusChip tone={f.source === "override" ? "good" : "neutral"}>
-          {t(f.source === "override" ? "admin.flags.source_override" : "admin.flags.source_env")}
-        </StatusChip>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <StatusChip tone={f.source === "override" ? "good" : "neutral"}>
+            {t(f.source === "override" ? "admin.flags.source_override" : "admin.flags.source_env")}
+          </StatusChip>
+          {f.source === "override" && (
+            <AdminButton
+              variant="secondary"
+              disabled={clear.isPending}
+              onClick={() => clear.mutate({ key: f.key })}
+            >
+              {t("admin.flags.clear_override")}
+            </AdminButton>
+          )}
+        </span>
       ),
     },
     {
@@ -163,6 +180,22 @@ export function AdminFlagsPage() {
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
       <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.flags.title")}</h1>
+
+      {clear.error !== null && (
+        <p
+          role="alert"
+          style={{
+            marginBottom: 16,
+            padding: "10px 14px",
+            borderRadius: "var(--radius-lg)",
+            background: "var(--surface-1)",
+            color: "var(--color-warning, #C99A2E)",
+            fontSize: 14,
+          }}
+        >
+          {t("admin.flags.clear_error")}
+        </p>
+      )}
 
       {error && (
         <p

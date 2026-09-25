@@ -31,13 +31,14 @@ raw_archives_static/
 !.claude/settings.json
 .claude/settings.local.json
 .claude/**/*.local.md
-# Finder drops these anywhere, and until now only .claude/ was covered — the
-# blanket docs/* rule was silently doing the rest of the job.
+# Finder drops these anywhere in the tree, not just under .claude/ (the only
+# directory a blanket ignore above covers), so it needs its own top-level
+# pattern.
 .DS_Store
 # docs/ is tracked by default; only these local-only planning trees (never
-# meant for the team) stay ignored. This list is the whole protection now
-# that the blanket `docs/*` is gone — anything under docs/ not named here is
-# stageable, so a new local-only tree must be added the moment it appears.
+# meant for the team) stay ignored. This explicit list is the whole
+# protection — anything under docs/ not named here is stageable, so a new
+# local-only tree must be added the moment it appears.
 # tests/unit/test_repo_hygiene_files.py asserts each one against git itself.
 docs/superpowers/
 docs/specs/
