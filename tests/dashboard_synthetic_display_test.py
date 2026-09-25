@@ -76,26 +76,13 @@ Chromium — the same tier as `tests/i18n_coverage_test.py`, whose
       CLICKHOUSE_USER=transit CLICKHOUSE_PASSWORD=transit CLICKHOUSE_DATABASE=transit_test \\
       poetry run pytest tests/dashboard_synthetic_display_test.py -v
 
-Verify item 22's own "not a vacuous pass" requirement by temporarily
+Confirm this is not a vacuous pass by temporarily
 swapping/corrupting one delay value in one of
 `tests.fixtures.synthetic_gtfs`'s pattern builders (or monkeypatching one
 `expected["agg_route_stats"]["avg_min"]` in a scratch copy) and confirming
 this test goes red, then reverting and confirming it's green again — see
 `tests/unit/test_dashboard_value_check.py` for a fast, offline, always-run
 version of the same corruption check against the pure comparison helper.
-
-Provisioning history, kept for context: the implementing session could not
-launch this test at all (no `poetry install`/`npm install` in its Bash
-allowlist, and `frontend/node_modules` was missing the `mermaid` package),
-so every selector/query-param/column-index/rounding rule above was traced by
-hand against source instead. A later, fully-provisioned interactive session
-closed that gap for real: built the SPA, installed Playwright's Chromium,
-and ran the command block above against the live throwaway Postgres/
-ClickHouse stack — both tests passed, and the corruption check above was
-performed for real (temporarily forced `uniform_delays`'s `avg_min` from 0.5
-to 99.9 in `tests/fixtures/synthetic_gtfs.py`, confirmed both tests failed
-with a clear mismatch message, then reverted and reconfirmed green). See
-`docs/refactor-log.md` for the full command line and output summary.
 """
 
 from __future__ import annotations

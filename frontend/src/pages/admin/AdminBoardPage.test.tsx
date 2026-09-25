@@ -34,7 +34,6 @@ const BOARD: AdminBoard = {
       detail: "disk usage is degraded",
       history: [...Array(20).fill(1), 0, 0, 0, 0],
     },
-    { key: "vps_loop", label: "VPS loop", status: "down", last_success_at: null, detail: null, history: Array(24).fill(0) },
     { key: "github", label: "CI (GitHub)", status: "unknown", last_success_at: null, detail: null, history: Array(24).fill(0) },
   ],
   freshness: [
@@ -131,7 +130,7 @@ describe("AdminBoardPage", () => {
   it("renders one tile per collector with its status and last success", () => {
     wrap(<AdminBoardPage />);
     const tiles = screen.getAllByTestId("collector-tile");
-    expect(tiles).toHaveLength(4);
+    expect(tiles).toHaveLength(3);
     expect(within(tiles[0]).getByText(i18n.t("admin.board.collector.oracle_crawler"))).toBeInTheDocument();
     expect(within(tiles[0]).getByText(i18n.t("admin.board.status.ok"))).toBeInTheDocument();
     expect(within(tiles[2]).getByText(i18n.t("admin.board.never"))).toBeInTheDocument();

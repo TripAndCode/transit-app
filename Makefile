@@ -344,8 +344,7 @@ verify-secrets-all-branches:
 # `make bootstrap`, which depends on it — if any step can't complete; a
 # workstation or VPS clone with no local hook has no secret-scanning gate
 # until the next push reaches CI. `git worktree`s share one .git/hooks
-# directory, so one run against a VPS's persistent checkout covers every
-# /vps-loop-run worker worktree cut from it too.
+# directory, so one run against a clone covers every worktree cut from it.
 hooks:
 	@bash scripts/setup_git_hooks.sh
 

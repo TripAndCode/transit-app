@@ -159,7 +159,7 @@ def test_tracked_docs_and_env_example_are_not_ignored():
     for path in (
         "docs/deploy-railway.md",
         "docs/features/ask-tab.md",
-        "docs/refactor-log.md",
+        "docs/ops-monitoring-deploy.md",
         ".env.example",
     ):
         assert not _is_ignored(path), f"{path} is ignored but must stay tracked"
