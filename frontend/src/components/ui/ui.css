@@ -9,6 +9,13 @@
 }
 .ui-card--padded { padding: 16px 18px; }
 
+/* Hover/focus affordance for a card that is itself a click target (a
+   clickable summary tile). Pair with role="button" + tabIndex + onKeyDown,
+   never onClick alone, so mouse and keyboard behave the same way. */
+.ui-card--clickable { cursor: pointer; transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out); }
+.ui-card--clickable:hover { transform: translateY(-1px); box-shadow: var(--el-2); }
+.ui-card--clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .ui-page-header {
   display: flex;
   align-items: flex-start;

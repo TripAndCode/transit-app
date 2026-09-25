@@ -35,6 +35,15 @@ type Props = {
  * object handed to `cloneElement` reads as a render-time ref access to the
  * compiler).
  */
+/** Whether a focus event belongs to this tooltip rather than to one nested
+ *  inside it. React's focus events bubble, so an outer tooltip sees focus
+ *  land on an inner tooltip's trigger and would open alongside it, putting
+ *  two bubbles on screen and two `aria-describedby` targets on one path.
+ *  The innermost anchor owns the event; every ancestor ignores it. */
+function isOwnTrigger(anchor: HTMLElement | null, target: EventTarget | null): boolean {
+  return anchor !== null && target instanceof Element && target.closest(".tooltip-anchor") === anchor;
+}
+
 export function Tooltip({ label, placement = "top", children }: Props) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLSpanElement>(null);
@@ -118,11 +127,13 @@ export function Tooltip({ label, placement = "top", children }: Props) {
           setOpen(false);
         }}
         // Focus is already a deliberate act, so it skips the dwell delay.
-        onFocus={() => {
+        onFocus={(e) => {
+          if (!isOwnTrigger(anchorRef.current, e.target)) return;
           cancelPending();
           setOpen(true);
         }}
-        onBlur={() => {
+        onBlur={(e) => {
+          if (!isOwnTrigger(anchorRef.current, e.target)) return;
           cancelPending();
           setOpen(false);
         }}
