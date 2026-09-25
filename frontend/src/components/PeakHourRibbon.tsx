@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { serviceValueLabel } from "../utils/filterValueLabels";
+import { dowValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewPeakHour } from "../api/types";
 
@@ -15,9 +15,6 @@ type Props = {
   /** Called when the user clicks on a specific hour bar in the chart. */
   onHourClick?: (hour: number) => void;
 };
-
-const WEEKDAY_KEY = "平日"; // i18n-ignore: GTFS service-type key
-const WEEKEND_KEY = "土日祝"; // i18n-ignore: GTFS service-type key
 
 const W = 660;
 const H = 140;
@@ -320,7 +317,7 @@ export function PeakHourRibbon({
         <div className="ov-peak-dow-stack">
           <div>
             <p className="ov-peak-dow-panel-title">
-              {serviceValueLabel(WEEKDAY_KEY, t)}
+              {dowValueLabel("weekday", t)}
             </p>
             {peak_hour_weekday ? (
               <PeakHourChart peak_hour={peak_hour_weekday} />
@@ -332,7 +329,7 @@ export function PeakHourRibbon({
           </div>
           <div>
             <p className="ov-peak-dow-panel-title">
-              {serviceValueLabel(WEEKEND_KEY, t)}
+              {dowValueLabel("weekend", t)}
             </p>
             {peak_hour_weekend ? (
               <PeakHourChart peak_hour={peak_hour_weekend} />
