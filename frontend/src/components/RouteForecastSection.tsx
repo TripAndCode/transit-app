@@ -325,7 +325,7 @@ function HeatmapGrid({
                             fontSize: "var(--text-xs)",
                             fontWeight: 800,
                             lineHeight: 1,
-                            color: "var(--color-warning-text)",
+                            color: "var(--color-warning)",
                             pointerEvents: "none",
                           }}
                         >
