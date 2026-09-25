@@ -101,6 +101,47 @@ describe("Toast", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
+  it("keeps holding when the pointer leaves while the action still has focus", () => {
+    // The sequence that a single shared pause flag gets wrong: the reader
+    // tabs onto Undo with the pointer still resting on the toast, then moves
+    // the pointer away. The countdown must not resume under them.
+    vi.useFakeTimers();
+    renderHarness(vi.fn());
+    const toast = screen.getByRole("status");
+    const action = screen.getByRole("button", { name: "Undo" });
+
+    fireEvent.mouseOver(toast);
+    act(() => {
+      action.focus();
+    });
+    fireEvent.mouseOut(toast);
+    advance(PAST_AUTO_DISMISS_MS);
+    expect(screen.getByRole("status")).toBeInTheDocument();
+
+    act(() => {
+      action.blur();
+    });
+    advance(PAST_AUTO_DISMISS_MS);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("keeps holding when focus leaves while the pointer is still over it", () => {
+    vi.useFakeTimers();
+    renderHarness(vi.fn());
+    const toast = screen.getByRole("status");
+    const action = screen.getByRole("button", { name: "Undo" });
+
+    act(() => {
+      action.focus();
+    });
+    fireEvent.mouseOver(toast);
+    act(() => {
+      action.blur();
+    });
+    advance(PAST_AUTO_DISMISS_MS);
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
   it("runs the action and clears the toast with it", () => {
     const onUndo = vi.fn();
     renderHarness(onUndo);

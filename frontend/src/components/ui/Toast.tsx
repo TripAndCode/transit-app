@@ -60,7 +60,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastItem({ toast, onDismiss }: { toast: ToastRecord; onDismiss: (id: number) => void }) {
-  const [paused, setPaused] = useState(false);
+  // Pointer and focus hold the pause independently. One flag toggled by both
+  // would let whichever ends last speak for the other: a pointer leaving
+  // while the action button still has focus would restart the countdown under
+  // the reader who is about to press it.
+  const [pointerOver, setPointerOver] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
+  const paused = pointerOver || focusWithin;
   // What is left of the window, carried across pauses: restarting the full
   // duration on every pointer-out would let a toast the reader keeps brushing
   // past outlive the message it carries.
@@ -81,10 +87,10 @@ function ToastItem({ toast, onDismiss }: { toast: ToastRecord; onDismiss: (id: n
     <div
       className="ui-toast"
       role="status"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocus={() => setPaused(true)}
-      onBlur={() => setPaused(false)}
+      onMouseEnter={() => setPointerOver(true)}
+      onMouseLeave={() => setPointerOver(false)}
+      onFocus={() => setFocusWithin(true)}
+      onBlur={() => setFocusWithin(false)}
     >
       <span className="ui-toast__message">{toast.message}</span>
       {toast.action && (
