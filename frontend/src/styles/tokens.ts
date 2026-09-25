@@ -144,10 +144,10 @@ const MODERATE_TEXT_VAR = "var(--delay-text-moderate)";
  *  fills work as backgrounds and marks but fall short of WCAG AA (4.5:1) as
  *  text on --bg-surface (measured 2.6-3.8:1 in light mode); this ramp swaps
  *  in per-theme CSS custom properties instead, following the same literal-
- *  var()-for-DOM-consumers pattern as DELAY_RAMP.severe. The dark values
- *  reuse the plain ramp's own fills -- they already clear AA on the dark
- *  surface (5.9-6.9:1) -- so only the light theme needed darkening; both are
- *  defined in global.css and held to the invariant by tokens.test.ts. Use
+ *  var()-for-DOM-consumers pattern as DELAY_RAMP.severe. Both themes' values
+ *  are tuned per tier to clear AA on the page, --accent-soft and current-row
+ *  surfaces; in dark mode only mild coincides with its fill. They are defined
+ *  in global.css and held to AA by tokens.test.ts. Use
  *  `delayTextColor()`/`DELAY_RAMP_TEXT` (not `delayColor()`/`DELAY_RAMP`) for
  *  any `color` (text); the plain ramp stays correct for fills and marks. */
 export const DELAY_RAMP_TEXT = {

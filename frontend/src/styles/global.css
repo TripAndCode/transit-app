@@ -124,8 +124,8 @@
      (tokens.ts's DELAY_RAMP), which are 2.6-3.8:1 as text against
      --bg-surface -- under WCAG AA. Darkened along each fill's own hue rather
      than desaturating to grey. The severe tier needs no text variant: it is
-     already per-theme and AA-passing (--delay-severe above). Dark-theme
-     values reuse the fills themselves -- see the dark declaration. */
+     already per-theme and AA-passing (--delay-severe above). Each theme's
+     values are tuned per tier to clear AA on every surface they land on. */
   --delay-text-ok: #217857;
   --delay-text-mild: #85661E;
   --delay-text-moderate: #AC4F22;
@@ -261,9 +261,8 @@
      it clears 4.5:1 on this theme's --bg-surface — see the invariant on the
      light declaration. */
   --delay-severe: #F0837A;
-  /* The plain delay-ramp fills already clear 4.5:1 on this theme's
-     --bg-surface, so the dark text variants are the fills themselves — see
-     the light declaration for why light needs its own darkened set. */
+  /* Tuned per tier to clear 4.5:1 on this theme's page, --accent-soft and
+     current-row surfaces; only mild coincides with its ramp fill. */
   --delay-text-ok: #31B483;
   --delay-text-mild: #C99A2E;
   --delay-text-moderate: #E08A61;

@@ -525,9 +525,15 @@ describe("--color-danger is retired outside destructive-action buttons", () => {
     // --delay-severe (calm, per-theme, AA-passing as text); --color-danger
     // stays reserved for buttons that actually delete/remove something.
     const srcDir = resolve(process.cwd(), "src");
-    const allowedFiles = new Set(
-      ["pages/admin/adminControls.tsx", "components/ThreadSidebar.tsx"].map((p) => resolve(srcDir, p)),
-    );
+    // Each entry strips exactly the sanctioned text, so any other mention in
+    // the same file still counts as an offender.
+    const allowed = new Map<string, RegExp[]>([
+      [
+        resolve(srcDir, "styles/global.css"),
+        [/^\s*--color-danger:[^;]*;/gm, /\.context-menu__item--danger\s*\{\s*color:\s*var\(--color-danger\);\s*\}/g],
+      ],
+      [resolve(srcDir, "pages/admin/adminControls.tsx"), [/\.admin-btn\.danger[^{]*\{[^}]*\}/g]],
+    ]);
 
     function walk(dir: string): string[] {
       return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -539,10 +545,9 @@ describe("--color-danger is retired outside destructive-action buttons", () => {
     }
 
     const offenders = walk(srcDir).filter((file) => {
-      if (allowedFiles.has(file)) return false;
       if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) return false;
-      if (file === resolve(srcDir, "styles/global.css")) return false; // token definition, not a use
-      return readFileSync(file, "utf8").includes("--color-danger");
+      const text = (allowed.get(file) ?? []).reduce((acc, re) => acc.replace(re, ""), readFileSync(file, "utf8"));
+      return text.includes("--color-danger");
     });
 
     expect(offenders).toEqual([]);

@@ -38,7 +38,7 @@
 .ops-freshness > span { width: 8px; height: 8px; border-radius: 50%; background: var(--color-warning); box-shadow: 0 0 0 4px rgba(201,154,46,.12); }
 .ops-freshness--normal > span { background: var(--delay-ok); box-shadow: 0 0 0 4px rgba(46,168,122,.12); }
 .ops-freshness--delayed > span { background: var(--color-warning); box-shadow: 0 0 0 4px rgba(201,154,46,.12); }
-.ops-freshness--stale > span { background: var(--delay-severe); box-shadow: 0 0 0 4px color-mix(in srgb, var(--delay-severe) 12%, transparent); }
+.ops-freshness--stale > span { background: var(--delay-severe); box-shadow: 0 0 0 4px rgba(168,57,31,.12); box-shadow: 0 0 0 4px color-mix(in srgb, var(--delay-severe) 12%, transparent); }
 /* Neutral, not amber: "unknown" means there is no reading to judge -- no
    timestamp at all, labelled "no update" -- which is a different fact from a
    feed that is lagging. Sharing the warning colour with `delayed` presented
