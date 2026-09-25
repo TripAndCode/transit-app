@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -170,7 +170,9 @@ it("keeps the route map mounted across tab switches instead of recreating its We
   show("route-analysis");
   const user = setupUser();
   await user.click(screen.getByRole("tab", { name: "Map" }));
-  expect(mapMounts).toHaveBeenCalledTimes(1);
+  // The map is a lazy chunk behind a Suspense boundary, so its first mount
+  // lands a tick after the click that reveals it.
+  await waitFor(() => expect(mapMounts).toHaveBeenCalledTimes(1));
   expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
 
   await user.click(screen.getByRole("tab", { name: "Delay trend" }));
@@ -184,5 +186,5 @@ it("keeps the route map mounted across tab switches instead of recreating its We
 it("gives the route map a real height rather than leaving it at the collapsed default", async () => {
   show("route-analysis");
   await setupUser().click(screen.getByRole("tab", { name: "Map" }));
-  expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ height: 420 }));
+  await waitFor(() => expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ height: 420 })));
 });

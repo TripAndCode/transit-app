@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Modal } from "./Modal";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { Z_INDEX } from "../styles/zIndex";
 
 function Harness({ initialOpen = true }: { initialOpen?: boolean }) {
@@ -122,6 +123,16 @@ describe("Modal", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("renders through the shared overlay base", () => {
+    render(
+      <Modal open onClose={() => {}} ariaLabel="Example">
+        content
+      </Modal>,
+    );
+    expect(screen.getByRole("dialog")).toHaveClass("ui-overlay-panel");
+    expect(screen.getByRole("presentation")).toHaveClass("ui-overlay-scrim");
+  });
+
   it("locks body scroll while open and restores it on close", async () => {
     const { rerender } = render(
       <Modal open onClose={() => {}} ariaLabel="Example">
@@ -135,6 +146,40 @@ describe("Modal", () => {
       </Modal>,
     );
     expect(document.body.style.overflow).not.toBe("hidden");
+  });
+});
+
+describe("stacked over another trapped surface", () => {
+  function Stacked({ onSheetEscape, onModalClose }: { onSheetEscape: () => void; onModalClose: () => void }) {
+    const sheetRef = useRef<HTMLDivElement>(null);
+    const [modalOpen, setModalOpen] = useState(false);
+    useFocusTrap(true, sheetRef, onSheetEscape);
+    return (
+      <div ref={sheetRef} tabIndex={-1}>
+        <button type="button" onClick={() => setModalOpen(true)}>
+          open modal
+        </button>
+        <Modal open={modalOpen} onClose={onModalClose} ariaLabel="On top">
+          <button type="button">inside modal</button>
+        </Modal>
+      </div>
+    );
+  }
+
+  it("lets one Escape close only the surface on top", async () => {
+    // Both listen on `document`, where stopPropagation does not reach a
+    // sibling listener on the same target -- so a modal that does not join
+    // the activation stack takes the sheet underneath down with it.
+    const onSheetEscape = vi.fn();
+    const onModalClose = vi.fn();
+    const user = userEvent.setup();
+    render(<Stacked onSheetEscape={onSheetEscape} onModalClose={onModalClose} />);
+    await user.click(screen.getByRole("button", { name: "open modal" }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onModalClose).toHaveBeenCalledTimes(1);
+    expect(onSheetEscape).not.toHaveBeenCalled();
   });
 });
 

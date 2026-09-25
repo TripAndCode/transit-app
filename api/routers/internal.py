@@ -24,6 +24,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
+from pipeline.url_guard import redact_urls_in_text
 
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
 collector_router = APIRouter(prefix="/internal/collector", tags=["internal"], include_in_schema=False)
@@ -31,6 +32,12 @@ collector_router = APIRouter(prefix="/internal/collector", tags=["internal"], in
 _log = logging.getLogger(__name__)
 _SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
 _MAX_COLLECTOR_PAYLOAD = 10 * 1024 * 1024
+
+# How long a push waits for another push or analyze() run to release this
+# agency's lock before giving up and answering 409, same as an instant miss
+# used to. Well under the collector's own re-poll interval (300s), so a push
+# that still times out and gets retried costs at most one extra poll cycle.
+COLLECTOR_LOCK_WAIT_SECONDS = 20
 
 
 def _check_secret(request: Request) -> None:
@@ -57,7 +64,7 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
 
     from pipeline.clickhouse import get_client
     from pipeline.ingest import ingest_live_payload
-    from pipeline.locks import try_lock_agency_ingest
+    from pipeline.locks import lock_agency_ingest_or_timeout
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -75,16 +82,26 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
             )
             if cur.fetchone() is None:
                 raise ValueError(f"Unknown or deleted agency_id={agency_id}")
-        if not try_lock_agency_ingest(conn, agency_id):
-            raise HTTPException(status_code=409, detail="A data ingest is already in progress for this agency")
+        # Off before the lock attempt: lock_agency_ingest_or_timeout's `SET
+        # LOCAL lock_timeout` needs an explicit transaction to bound anything
+        # -- under autocommit, each statement is its own implicit
+        # transaction and the setting would expire before the next one runs.
         conn.autocommit = False
+        if not lock_agency_ingest_or_timeout(conn, agency_id, COLLECTOR_LOCK_WAIT_SECONDS):
+            raise HTTPException(status_code=409, detail="A data ingest is already in progress for this agency")
         ch_client = get_client()
         return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
     finally:
-        if conn is not None:
-            conn.close()
-        if ch_client is not None:
-            ch_client.close()
+        # Nested try/finally: if conn.close() raises, ch_client.close() must
+        # still run -- an unguarded `conn.close(); ch_client.close()` would
+        # skip the ClickHouse close on a Postgres close error, leaking the
+        # client + its HTTP pool inside this long-lived API process.
+        try:
+            if conn is not None:
+                conn.close()
+        finally:
+            if ch_client is not None:
+                ch_client.close()
 
 
 @collector_router.post("/updates/{agency_id}")
@@ -168,6 +185,7 @@ def _run_ingest_and_analyze(
     kind: str = "ingest",
     agency_ids: list[int] | None = None,
     requested_by: int | None = None,
+    run_weather: bool = True,
     run_id: int | None = None,
 ) -> None:
     """Run the sweep and close the operator's umbrella run row after it.
@@ -186,10 +204,20 @@ def _run_ingest_and_analyze(
         _log.error("cron: DATABASE_URL not set; skipping ingest")
         return
     try:
-        status = _ingest_and_analyze_sweep(db_url, kind=kind, agency_ids=agency_ids, requested_by=requested_by)
+        status = _ingest_and_analyze_sweep(
+            db_url,
+            kind=kind,
+            agency_ids=agency_ids,
+            requested_by=requested_by,
+            run_weather=run_weather,
+            run_id=run_id,
+        )
     except Exception as exc:
         _log.exception("cron: ingest+analyze run failed")
-        _finish_manual_run(db_url, run_id, "error", error=f"{type(exc).__name__}: {exc}")
+        # Redacted: a feed fetch's failure quotes the URL it was given, and
+        # that URL routinely carries an API key. This row is read by every
+        # operator with the board open.
+        _finish_manual_run(db_url, run_id, "error", error=redact_urls_in_text(f"{type(exc).__name__}: {exc}"))
         return
     _finish_manual_run(db_url, run_id, status)
 
@@ -200,6 +228,8 @@ def _ingest_and_analyze_sweep(
     kind: str = "ingest",
     agency_ids: list[int] | None = None,
     requested_by: int | None = None,
+    run_weather: bool = True,
+    run_id: int | None = None,
 ) -> str:
     """Pull live GTFS-RT for every agency, then refresh aggregations.
 
@@ -221,6 +251,15 @@ def _ingest_and_analyze_sweep(
     re-analyze has no reason to re-drive a third-party fetch for the whole
     fleet. Scoped or not, the roster is filtered through `deleted_at IS
     NULL`: a disabled agency is not work this is allowed to do.
+
+    ``run_weather=False`` is the operator-triggered path saying the fleet-wide
+    weather fetch is not part of what was asked for; the scheduled poke leaves
+    it at ``True``.
+
+    ``run_id`` is the caller's own umbrella row, already open and closed by
+    the caller. It is passed in only so this function knows not to open a
+    second row for the same action when the advisory lock turns the sweep
+    away.
     """
     import psycopg2  # local import: keeps the import-graph cheap on cold starts
 
@@ -265,9 +304,15 @@ def _ingest_and_analyze_sweep(
         conn.autocommit = False
         if not got_lock:
             _log.warning("cron: another ingest+analyze run is already in flight; skipping this poke")
-            # The displaced sweep's only trace. Without it a deployment whose
-            # pokes always collide looks identical to a healthy one.
-            pipeline_runs.start_run(conn, kind, status="skipped", lock_wait_ms=lock_wait_ms, requested_by=requested_by)
+            if run_id is None:
+                # The displaced sweep's only trace. Without it a deployment
+                # whose pokes always collide looks identical to a healthy
+                # one. Skipped when the caller already owns a row: that one
+                # is closed as `skipped` by the caller, and a second would
+                # draw two bars for one action.
+                pipeline_runs.start_run(
+                    conn, kind, status="skipped", lock_wait_ms=lock_wait_ms, requested_by=requested_by
+                )
             return "skipped"
         with conn.cursor() as cur:
             if requested_agency_ids is None:
@@ -349,7 +394,9 @@ def _ingest_and_analyze_sweep(
     # re-aggregated, and the weather pass is a fetch from a third party with
     # nothing to do with aggregation. Skipped for a scoped run for the same
     # reason in reverse: observed weather is per station, not per agency.
-    if kind == "ingest" and requested_agency_ids is None:
+    # Skipped whenever the caller said so: a fleet-wide third-party fetch is
+    # not what an operator asked for by pressing one button.
+    if run_weather and kind == "ingest" and requested_agency_ids is None:
         _run_weather_ingest(db_url)
     return "ok"
 

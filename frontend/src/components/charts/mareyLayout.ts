@@ -55,10 +55,10 @@ export function timeWindowForBand(band: TimeBand): TimeWindow {
 /** Horizontal position of a time. Deliberately unclamped: a time outside the
  *  window lands outside the plot and is clipped there, because folding it onto
  *  an edge would draw a vertical line no bus ran. */
-export function timeToX(sec: number, window: TimeWindow, plot: Plot): number {
-  const span = window.endSec - window.startSec;
+export function timeToX(sec: number, viewWindow: TimeWindow, plot: Plot): number {
+  const span = viewWindow.endSec - viewWindow.startSec;
   if (span <= 0) return plot.left;
-  return plot.left + ((sec - window.startSec) / span) * plot.width;
+  return plot.left + ((sec - viewWindow.startSec) / span) * plot.width;
 }
 
 /** Vertical position of a stop, or null when the route's axis has no such
@@ -88,18 +88,18 @@ export function tripTerminalDelay(trip: RouteTrip): number | null {
   return trip.stops.length ? trip.stops[trip.stops.length - 1].delay_sec : null;
 }
 
-export function tripsInWindow(trips: RouteTrip[], window: TimeWindow): RouteTrip[] {
+export function tripsInWindow(trips: RouteTrip[], viewWindow: TimeWindow): RouteTrip[] {
   return trips.filter((trip) => {
     const departure = tripDeparture(trip);
-    return departure != null && departure >= window.startSec && departure < window.endSec;
+    return departure != null && departure >= viewWindow.startSec && departure < viewWindow.endSec;
   });
 }
 
-/** The hour inside `window` whose trips lost the most time on average, or null
+/** The hour inside `viewWindow` whose trips lost the most time on average, or null
  *  when no hour carries enough observations to make that claim. */
-export function peakWindow(trips: RouteTrip[], window: TimeWindow): TimeWindow | null {
+export function peakWindow(trips: RouteTrip[], viewWindow: TimeWindow): TimeWindow | null {
   const byHour = new Map<number, { total: number; count: number }>();
-  for (const trip of tripsInWindow(trips, window)) {
+  for (const trip of tripsInWindow(trips, viewWindow)) {
     const hour = Math.floor(tripDeparture(trip)! / HOUR_SEC);
     const bucket = byHour.get(hour) ?? { total: 0, count: 0 };
     for (const stop of trip.stops) {
@@ -117,15 +117,15 @@ export function peakWindow(trips: RouteTrip[], window: TimeWindow): TimeWindow |
   return best === null ? null : { startSec: best.hour * HOUR_SEC, endSec: (best.hour + 1) * HOUR_SEC };
 }
 
-/** Mean delay per stop across the trips departing inside `window`.
+/** Mean delay per stop across the trips departing inside `viewWindow`.
  *
  *  Every stop on the axis gets a segment, observed or not: the ribbon is the
  *  route's geography, so a stop with no data must read as a gap rather than
  *  shorten the line and misplace every stop after it.
  */
-export function ribbonSegments(trips: RouteTrip[], axis: MareyStop[], window: TimeWindow): StopRibbonSegment[] {
+export function ribbonSegments(trips: RouteTrip[], axis: MareyStop[], viewWindow: TimeWindow): StopRibbonSegment[] {
   const totals = new Map<number, { total: number; count: number }>();
-  for (const trip of tripsInWindow(trips, window)) {
+  for (const trip of tripsInWindow(trips, viewWindow)) {
     for (const stop of trip.stops) {
       const bucket = totals.get(stop.stop_sequence) ?? { total: 0, count: 0 };
       bucket.total += stop.delay_sec;
@@ -153,10 +153,10 @@ export function formatClock(sec: number): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
-/** Whole-hour gridline positions covering `window`. */
-export function hourTicks(window: TimeWindow): number[] {
+/** Whole-hour gridline positions covering `viewWindow`. */
+export function hourTicks(viewWindow: TimeWindow): number[] {
   const ticks: number[] = [];
-  for (let sec = Math.ceil(window.startSec / HOUR_SEC) * HOUR_SEC; sec <= window.endSec; sec += HOUR_SEC) {
+  for (let sec = Math.ceil(viewWindow.startSec / HOUR_SEC) * HOUR_SEC; sec <= viewWindow.endSec; sec += HOUR_SEC) {
     ticks.push(sec);
   }
   return ticks;

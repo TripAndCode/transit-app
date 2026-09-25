@@ -106,8 +106,10 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make check-aggs` | Detect stale aggregate tables |
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
-| `make build-rag-index` | Build the Ask RAG index for all agencies |
+| `make build-rag-index` | Build the Ask RAG index for all agencies (also the re-index after an embedder change) |
 | `make ask-eval` | CI gate: verify Ask builder coverage against the gold question set |
+| `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
+| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (matches the deploy's data-retention horizon) |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
 | `make verify-secrets` | On-demand gitleaks scan of the full git history |
@@ -185,11 +187,20 @@ The main endpoints are:
 | `POST /api/{agency_id}/conversations/{cid}/messages` | Deterministic Ask tools |
 | `POST /api/{agency_id}/ask` | Natural-language Ask fallback |
 | `GET /api/auth/{provider}/login` | Start Google or GitHub OAuth |
-| `GET /api/admin/users` | Admin user management |
+| `/api/admin/board`, `/api/admin/runs` | Admin control room: fleet health board + run timeline |
+| `/api/admin/agencies*` | Admin agency list, per-agency health, and diagnostics drawer |
+| `/api/admin/users*` | Admin user management, sessions, API keys |
+| `/api/admin/audit` | Merged admin-action + login audit log |
+| `/api/admin/ops` | Read-only ops health snapshot (migrations, aggregate freshness) |
+| `/api/admin/flags` | Feature-flag registry: resolved values + DB overrides |
+| `/api/admin/ask/*` | Ask query log, funnel, intent-cache promotion, eval result |
+| `/api/admin/architecture/*` | Serves `docs/features/*.md` to the in-product architecture page |
+| `/api/admin/api-keys`, `/api/admin/invites` | Issue/revoke API keys, invite new users |
 
 Most data endpoints accept `from`, `to`, `dow`, `time_band`, `service`, and
-`routes` filters. API documentation is available from FastAPI at
-`/docs` while the server is running.
+`routes` filters. API documentation is available from FastAPI at `/docs`
+while the server is running and `OPENAPI_DOCS_ENABLED` is on (see
+Configuration below).
 
 Example:
 
@@ -206,15 +217,47 @@ Copy `.env.example` and set only what your environment needs. Important groups:
 
 - `DATABASE_URL`, `CLICKHOUSE_*`: database connections.
 - `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
-- `ASK_FOLLOWUP_ENABLED`, `COPILOT_INSIGHT_ENABLED`, `WEATHER_INGEST_ENABLED`:
-  feature kill switches.
-- `OPENAPI_DOCS_ENABLED`: gates `/docs`, `/redoc`, and `/openapi.json`. Off
-  unless set, so a deployment publishes no schema by default. `.env.example`
-  turns it on for local dev.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
 - `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
   `PUBLIC_BASE_URL`, `ADMIN_EMAILS`: optional authentication and admin setup.
+- `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD`: break-glass local-admin
+  account, seeded (and re-seeded on every boot) only when both are set.
+  Rotating it is editing `.env` and restarting — the same mental model as
+  rotating an OAuth client secret. Never set `DEFAULT_ADMIN_USERNAME` to a
+  live SSO user's email: seeding refuses to promote an email that already
+  belongs to a real OAuth-linked account, so a collision just logs an error
+  and leaves that account untouched.
+- `OPS_STATUS_REPO`: the git checkout the admin board's `vps_loop`/`github`
+  collectors read, when it differs from their built-in default path. Unset
+  on a host where that path doesn't exist and every collector tile on the
+  board reads `unknown` rather than a real status.
 - `OBJECT_STORE_*`, `AGENCY_IDS`, `RETENTION_DAYS`: scheduled archive ingest.
+
+### Feature kill switches
+
+Every entry in `pipeline/flags.py`'s registry resolves as: a `feature_flags`
+DB override (set via `PATCH /api/admin/flags/{key}`, see the admin control
+room's flags page) wins when present, otherwise the flag falls back to its
+env var, otherwise to its hardcoded default. An override, once written,
+takes effect everywhere within 30 seconds (the in-process cache's TTL) —
+immediately for the process that wrote it.
+
+| Key | Env var | Default |
+| --- | --- | --- |
+| `ask_router_enabled` | `ASK_ROUTER_ENABLED` | on |
+| `ask_followup_enabled` | `ASK_FOLLOWUP_ENABLED` | off |
+| `copilot_insight_enabled` | `COPILOT_INSIGHT_ENABLED` | off |
+| `ask_history_enabled` | `ASK_HISTORY_ENABLED` | on |
+| `ask_intent_cache_enabled` | `ASK_INTENT_CACHE_ENABLED` | off |
+| `ask_query_log_enabled` | `ASK_QUERY_LOG_ENABLED` | on |
+| `weather_ingest_enabled` | `WEATHER_INGEST_ENABLED` | off |
+| `openapi_docs_enabled` | `OPENAPI_DOCS_ENABLED` | off |
+| `perf_debug_enabled` | `PERF_DEBUG_ENABLED` | off |
+
+`openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json` and is
+registered like every other key above — it takes a DB override the same as
+the rest, not env-only. Off unless set, so a deployment that configures
+nothing publishes no schema; `.env.example` turns it on for local dev.
 
 Leaving all OAuth variables unset runs the app in anonymous-only mode. Do not
 commit `.env`, API keys, OAuth secrets, database passwords, or private keys.

@@ -23,6 +23,11 @@ export default defineConfig({
     // provider-wrapped tree in one case; a slow CI runner or a busy dev
     // machine pushed those past 5s even though nothing was actually hung.
     testTimeout: 15000,
+    // A `vi.stubGlobal` is undone after the test that made it. Several tests
+    // replace `IntersectionObserver`/`ResizeObserver` with a driveable stub,
+    // or force one absent; without this those replacements outlive the test
+    // and the next one silently inherits them.
+    unstubGlobals: true,
     // Provided by the `@vitest/coverage-v8` dev dependency (see
     // package.json), matching this repo's vitest ^4.1.8.
     coverage: {

@@ -143,6 +143,32 @@ describe("Tooltip and its trigger", () => {
   });
 });
 
+describe("Tooltip nested inside another", () => {
+  it("opens only the innermost bubble when focus lands on the inner trigger", () => {
+    // React implements onFocus on the bubbling focusin event, so without a
+    // guard the outer tooltip reopens alongside the inner one and the reader
+    // gets two bubbles and two aria-describedby targets at once.
+    render(
+      <Tooltip label="outer text">
+        <div role="gridcell" tabIndex={0} data-testid="outer">
+          <Tooltip label="inner text">
+            <button type="button" data-testid="inner">
+              !
+            </button>
+          </Tooltip>
+        </div>
+      </Tooltip>,
+    );
+
+    fireEvent.focusIn(screen.getByTestId("inner"));
+    expect(screen.getAllByRole("tooltip").map((el) => el.textContent)).toEqual(["inner text"]);
+
+    fireEvent.focusOut(screen.getByTestId("inner"));
+    fireEvent.focusIn(screen.getByTestId("outer"));
+    expect(screen.getAllByRole("tooltip").map((el) => el.textContent)).toEqual(["outer text"]);
+  });
+});
+
 describe("computeTooltipPosition", () => {
   const viewport = { width: 1000, height: 800 };
   const tip = { width: 120, height: 40 };

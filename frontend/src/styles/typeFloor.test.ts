@@ -51,3 +51,51 @@ describe("CJK type floor", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// The literal font sizes barred from the files below: 12.5px, which is off
+// the scale entirely, and bare 13px/15px, which are on it but name no token
+// (they equal --text-sm/--text-base). Deliberately not the whole scale --
+// 17px/26px literals also sit in these files and are not barred, so a rule
+// covering every on-scale value would flag those too.
+const BYPASSED_LITERALS_PX = [12.5, 13, 15];
+
+// The files held to that rule. It is a per-file rule rather than a tree-wide
+// one because on-scale literals are still widespread elsewhere; the tree-wide
+// invariant is the CJK type floor above (no size below 12px), which every
+// file must satisfy. Adding a file here is a commitment to keep it free of
+// the literals above, so add one only after converting it.
+const TOKEN_BYPASS_AUDITED_FILES = [
+  "pages/admin/AdminBoardPage.tsx",
+  "pages/LoginPage.css",
+  "components/paramPills/RoutePickerPill.css",
+  "components/SettingsDrawer.tsx",
+  "pages/admin/AdminUsersPage.tsx",
+  "tabs/ask/investigation.css",
+  "tabs/ask/stopEvidence.css",
+  "tabs/map/operationsMap.css",
+  "pages/admin/AdminFlagsPage.tsx",
+  "components/Sidebar.tsx",
+];
+
+describe("type scale — audited files reference tokens, not scale-matching literals", () => {
+  it("declares no literal 12.5/13/15px font size in any audited file", () => {
+    const offenders: string[] = [];
+    for (const relPath of TOKEN_BYPASS_AUDITED_FILES) {
+      const file = path.join(root, relPath);
+      const text = readFileSync(file, "utf8");
+      const lines = text.split("\n");
+      lines.forEach((line, i) => {
+        for (const re of PATTERNS) {
+          re.lastIndex = 0;
+          for (const m of line.matchAll(re)) {
+            const px = parseFloat(m[1]);
+            if (BYPASSED_LITERALS_PX.includes(px)) {
+              offenders.push(`${relPath}:${i + 1}: ${m[0].trim()}`);
+            }
+          }
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+});

@@ -68,6 +68,26 @@ describe("Drawer", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("stays non-modal on the shared overlay base: no scrim, no aria-modal, page still scrolls", async () => {
+    const user = userEvent.setup();
+    wrap(<Harness />);
+    await user.click(screen.getByRole("button", { name: "open" }));
+    const panel = screen.getByRole("dialog", { name: "Agency detail" });
+    expect(panel).toHaveClass("ui-overlay-panel");
+    expect(panel).not.toHaveAttribute("aria-modal");
+    expect(screen.queryByRole("presentation")).not.toBeInTheDocument();
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
+
+  it("announces its heading, since a non-modal panel never takes the page over", async () => {
+    const user = userEvent.setup();
+    wrap(<Harness />);
+    await user.click(screen.getByRole("button", { name: "open" }));
+    const region = screen.getByRole("heading", { name: "Agency detail" }).closest("[aria-live]");
+    expect(region).not.toBeNull();
+    expect(region).toHaveAttribute("aria-live", "polite");
+  });
+
   it("offers an explicit close control", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
