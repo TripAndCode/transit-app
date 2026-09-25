@@ -67,13 +67,9 @@ export function OverviewHeroRow({
     }
   }
 
-  // The sparkline's y-scale spans only this window's own min..max, so its
-  // shape alone cannot say whether a climb is half a minute or ten. The
-  // reference is the period mean rather than a fixed 0 baseline: the absolute
-  // figure is already set in the largest type on the page right beside it,
-  // and pinning the axis at 0 would flatten a typical few-minutes series into
-  // a band at the top of the box, costing the day-to-day read that is the
-  // only thing this sparkline adds.
+  // The sparkline scales to its own min..max, so it is anchored on the period
+  // mean rather than 0: the absolute figure is already shown beside it, and a
+  // 0 axis would flatten the day-to-day variation the sparkline exists to show.
   const sparklineMean = periodMean(sparklinePoints);
 
   const avgMinColor = headline.avg_min != null ? delayColor(headline.avg_min) : undefined;

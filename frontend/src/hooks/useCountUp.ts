@@ -48,13 +48,9 @@ export function useCountUp(value: number, { duration = 600, decimals = 1 }: UseC
   const [display, setDisplay] = useState(() => (immediate ? value : 0));
   const fromRef = useRef(immediate ? value : 0);
 
-  // The standard adjust-state-when-a-prop-changes pattern: re-sync during
-  // render, with no effect involved. "Immediate" is precisely the mode in
-  // which `display` must equal `value`, so `display` itself is the thing to
-  // compare -- including when motion is switched off mid-tween, which would
-  // otherwise strand the figure on whatever frame it had reached. Under
-  // motion `display` drifts away from `value` on purpose, and the guard
-  // keeps this branch out of that case entirely.
+  // Re-sync during render: in immediate mode `display` must equal `value`, so
+  // comparing the two also catches motion being switched off mid-tween, which
+  // would otherwise strand the figure on its last frame.
   if (immediate && display !== value) {
     setDisplay(value);
   }
