@@ -1,6 +1,6 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { useFocusTrap, useTopmostEscape } from "../../hooks/useFocusTrap";
 import { focusableIn } from "../../utils/focusable";
 import "./ui.css";
 
@@ -76,7 +76,12 @@ export function OverlayBase({
 }: OverlayBaseProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
-  useFocusTrap(open && modal, panelRef, onClose);
+  // The trap owns focus placement for the modal path, so it is told where to
+  // put it rather than corrected afterwards: two effects both calling
+  // `.focus()` agree only for as long as they keep running in declaration
+  // order. `initialFocus="panel"` resolves to the panel, which carries
+  // `tabIndex={-1}` for exactly this.
+  useFocusTrap(open && modal, panelRef, onClose, initialFocusRef ?? (initialFocus === "panel" ? panelRef : undefined));
 
   // The non-modal path's own focus restore. Declared before the placement
   // effect below so it reads `document.activeElement` while it is still the
@@ -89,25 +94,17 @@ export function OverlayBase({
     };
   }, [open, modal]);
 
-  // Listened for on the document rather than the panel: a non-modal overlay
-  // traps nothing, so focus may legitimately sit outside it while it is open.
+  // Shares the trap stack even though it traps nothing: a modal overlay
+  // opened over this one must be the only surface an Escape reaches.
+  useTopmostEscape(open && !modal, onClose);
+
+  // The non-modal path's own focus placement, since no trap runs to do it.
   useEffect(() => {
     if (!open || modal) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, modal, onClose]);
-
-  // Placement is decided here for both paths, so the trap's own "first
-  // focusable" default never overrides a caller that asked for something else.
-  useEffect(() => {
-    if (!open) return;
     const panel = panelRef.current;
     const fallback = panel && initialFocus === "first" ? (focusableIn(panel)[0] ?? panel) : panel;
     (initialFocusRef?.current ?? fallback)?.focus();
-  }, [open, initialFocus, initialFocusRef]);
+  }, [open, modal, initialFocus, initialFocusRef]);
 
   if (!open) return null;
 

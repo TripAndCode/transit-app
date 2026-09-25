@@ -142,6 +142,30 @@ describe("OverlayBase", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves a non-modal overlay open when Escape dismisses a modal one stacked over it", async () => {
+    // The admin pages do exactly this: a detail drawer stays open while the
+    // operator edits a row in a modal. Both listen on `document`, where
+    // `stopPropagation` never reaches a sibling listener, so the
+    // non-modal surface has to check the stack too.
+    const user = userEvent.setup();
+    const closeNonModal = vi.fn();
+    const closeModal = vi.fn();
+    render(
+      <>
+        <OverlayBase open onClose={closeNonModal} ariaLabel="Drawer" modal={false} scrim={false} portal={false}>
+          <button type="button">in drawer</button>
+        </OverlayBase>
+        <OverlayBase open onClose={closeModal} ariaLabel="Modal">
+          <button type="button">in modal</button>
+        </OverlayBase>
+      </>,
+    );
+
+    await user.keyboard("{Escape}");
+    expect(closeModal).toHaveBeenCalledTimes(1);
+    expect(closeNonModal).not.toHaveBeenCalled();
+  });
+
   it("closes on a scrim click but not on a click inside the panel", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

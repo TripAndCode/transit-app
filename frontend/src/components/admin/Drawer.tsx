@@ -25,11 +25,13 @@ type DrawerProps = {
  * would cover the list this panel exists to sit beside, and `document.body`
  * is not the containing block it is positioned against.
  *
- * Because nothing else on the page changes when it opens, the heading is a
- * polite live region: a screen-reader user still working the list would
- * otherwise get no signal that a detail panel had appeared next to it. The
- * region is the heading alone, not the header row, so the announcement is
- * the panel's name rather than its name plus a close button.
+ * Opening moves focus to the panel, which is what actually tells a screen
+ * reader a detail panel appeared. The heading is additionally a polite live
+ * region, covering the case where focus has since moved back out to the list
+ * and the panel is swapped to another row: that changes the heading's text
+ * in place, which is the shape `aria-live` reliably announces. The region is
+ * the heading alone, not the header row, so what is announced is the panel's
+ * name rather than its name plus a close button.
  */
 export function Drawer({ open, onClose, label, children }: DrawerProps) {
   const { t } = useTranslation();
