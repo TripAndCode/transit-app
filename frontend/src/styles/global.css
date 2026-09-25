@@ -512,6 +512,21 @@ summary:focus-visible,
   box-shadow: var(--el-2);
   pointer-events: none;
 }
+/* `Glossary` (components/Glossary.tsx). Inline trigger for a technical term
+   kept visible on an operator-facing page; the tooltip carries the plain-
+   language explanation. Reset to plain text rather than button chrome, with
+   a dotted underline as the only affordance that it's interactive. */
+.glossary-term {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+  border-bottom: 1px dotted var(--text-secondary);
+}
+
 /* `ThreadSidebar`'s conversation context menu (components/ThreadSidebar.tsx).
    The highlight is a CSS state so the keyboard-focused item and the hovered
    item look alike -- a JS hover handler can only ever light up the mouse's
