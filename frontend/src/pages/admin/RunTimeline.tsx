@@ -22,7 +22,7 @@ const STATUS_FILL: Record<RunBar["status"], string> = {
   running: "var(--accent)",
   ok: "var(--accent)",
   skipped: "var(--color-warning, #C99A2E)",
-  error: "var(--color-danger, #c0392b)",
+  error: "var(--delay-severe)",
 };
 
 function hourX(hour: number): number {

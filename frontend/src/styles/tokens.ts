@@ -136,6 +136,33 @@ export function delayColor(minutes: number): string {
   return DELAY_RAMP[delayBand(minutes)];
 }
 
+const OK_TEXT_VAR = "var(--delay-text-ok)";
+const MILD_TEXT_VAR = "var(--delay-text-mild)";
+const MODERATE_TEXT_VAR = "var(--delay-text-moderate)";
+
+/** Text-safe counterpart to DELAY_RAMP. The plain ramp's ok/mild/moderate
+ *  fills work as backgrounds and marks but fall short of WCAG AA (4.5:1) as
+ *  text on --bg-surface (measured 2.6-3.8:1 in light mode); this ramp swaps
+ *  in per-theme CSS custom properties instead, following the same literal-
+ *  var()-for-DOM-consumers pattern as DELAY_RAMP.severe. Both themes' values
+ *  are tuned per tier to clear AA on the page, --accent-soft and current-row
+ *  surfaces; in dark mode only mild coincides with its fill. They are defined
+ *  in global.css and held to AA by tokens.test.ts. Use
+ *  `delayTextColor()`/`DELAY_RAMP_TEXT` (not `delayColor()`/`DELAY_RAMP`) for
+ *  any `color` (text); the plain ramp stays correct for fills and marks. */
+export const DELAY_RAMP_TEXT = {
+  ok: OK_TEXT_VAR,
+  mild: MILD_TEXT_VAR,
+  moderate: MODERATE_TEXT_VAR,
+  // Already per-theme and AA-passing as text -- see DELAY_RAMP.severe.
+  severe: SEVERE_VAR,
+} as const;
+
+/** Same threshold mapping as `delayColor()`, but text-safe -- see `DELAY_RAMP_TEXT`. */
+export function delayTextColor(minutes: number): string {
+  return DELAY_RAMP_TEXT[delayBand(minutes)];
+}
+
 // A dense grid of cells encodes one quantity, so it gets one hue that runs
 // light to dark: switching hue at each severity cutoff turns a continuous
 // magnitude into four unordered categories and makes a 2.9-minute cell look

@@ -8,7 +8,7 @@ import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { PageHeader } from "../components/ui/PageHeader";
-import { delayColor } from "../styles/tokens";
+import { delayColor, delayTextColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { formatNumber } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
@@ -66,7 +66,7 @@ function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
   const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1 });
   if (avgDelayMin == null) return <>—</>;
   return (
-    <span style={{ color: delayColor(avgDelayMin) }}>
+    <span style={{ color: delayTextColor(avgDelayMin) }}>
       {avgDelayMin >= 0 ? "+" : ""}
       {displayed.toFixed(1)}
       <span className="network-row__unit">{t("network.delay_unit")}</span>
