@@ -74,6 +74,12 @@
      in both themes, so it needs no separate dark-block entry. */
   --delay-flag-soft: var(--bg-soft);
   --delay-flag-soft: color-mix(in srgb, var(--delay-flag) 10%, transparent);
+  /* Low tier of the delay ramp (DELAY_RAMP.ok / delayColor(<1.5)), mirrored
+     from tokens.ts's BASE_RAMP.ok by hand -- the same relationship
+     --delay-severe below has with SEVERE_FALLBACK. Unlike --delay-severe this
+     tier never carries text on top of it, so it needs no per-theme AA split:
+     same value in both themes. */
+  --delay-ok: #2EA87A;
   --card-border: #E4E7EC;
   --card-radius: var(--radius-lg);
   /* Tooltip is intentionally theme-invariant (always a dark chip with white
@@ -153,6 +159,13 @@
   --el-1: 0 1px 3px rgba(17, 24, 39, 0.05), 0 0 0 1px rgba(17, 24, 39, 0.04);
   --el-2: 0 4px 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
   --el-3: 0 24px 60px rgba(17, 24, 39, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  /* Leftward counterpart of --el-2, for a panel anchored to the right edge
+     (a drawer) whose shadow has to cast onto the page it covers rather than
+     downward -- the scale above is downward-only, so an edge-anchored panel
+     can't reuse it without losing the direction that separates it from the
+     content it covers. Same weight and opacity as --el-2, offset to the left
+     instead of down. */
+  --el-left: -4px 0 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
   /* Type scale. --text-xs (12px) is the floor for any DOM text: below it CJK
      glyphs lose stroke separation and Japanese labels stop being readable.
      SVG chart tick labels are the one exception and set their size as an
@@ -252,6 +265,11 @@
           0 8px 24px rgba(0, 0, 0, 0.40);
   --el-3: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
           0 24px 60px rgba(0, 0, 0, 0.60);
+  /* Same hairline ring and top inset highlight as el-2 above -- depth on a
+     near-black page still has to come from the edge, not the shadow -- with
+     the drop cast to the left instead of down. */
+  --el-left: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
+             -8px 0 24px rgba(0, 0, 0, 0.40);
   /* More translucent than the light value: a near-black --bg-surface mixed
      at the same 82% reads as a near-opaque card rather than glass, which
      defeats the point over a bright basemap (aerial photo, GSI std). The
