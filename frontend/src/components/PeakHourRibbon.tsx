@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { serviceValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewPeakHour } from "../api/types";
 
@@ -319,7 +320,7 @@ export function PeakHourRibbon({
         <div className="ov-peak-dow-stack">
           <div>
             <p className="ov-peak-dow-panel-title">
-              {t(`common.service_value.${WEEKDAY_KEY}`)}
+              {serviceValueLabel(WEEKDAY_KEY, t)}
             </p>
             {peak_hour_weekday ? (
               <PeakHourChart peak_hour={peak_hour_weekday} />
@@ -331,7 +332,7 @@ export function PeakHourRibbon({
           </div>
           <div>
             <p className="ov-peak-dow-panel-title">
-              {t(`common.service_value.${WEEKEND_KEY}`)}
+              {serviceValueLabel(WEEKEND_KEY, t)}
             </p>
             {peak_hour_weekend ? (
               <PeakHourChart peak_hour={peak_hour_weekend} />

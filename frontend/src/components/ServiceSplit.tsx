@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { serviceValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewServiceSplitDay } from "../api/types";
 
@@ -117,7 +118,7 @@ export function ServiceSplit({
             <div className="ov-svc-row" key={k}>
               <div className="ov-svc-head">
                 <span className="ov-svc-label">
-                  {t(`common.service_value.${k}`, { defaultValue: k })}
+                  {serviceValueLabel(k, t)}
                 </span>
                 <span className="ov-svc-num ov-anim-fade">
                   {v.toFixed(1)}
@@ -262,14 +263,14 @@ function ServiceSplitDailyChart({
             className="ov-svc-daily-legend-swatch"
             style={{ background: "var(--trend-neutral)" }}
           />
-          {t(`common.service_value.${WEEKDAY_KEY}`)}
+          {serviceValueLabel(WEEKDAY_KEY, t)}
         </span>
         <span>
           <span
             className="ov-svc-daily-legend-swatch"
             style={{ background: "var(--text-tertiary)" }}
           />
-          {t(`common.service_value.${WEEKEND_KEY}`)}
+          {serviceValueLabel(WEEKEND_KEY, t)}
         </span>
       </div>
       <svg
@@ -360,10 +361,10 @@ function ServiceSplitDailyChart({
         >
           {hover.label} —{" "}
           {hover.weekday != null
-            ? `${t(`common.service_value.${WEEKDAY_KEY}`)} ${hover.weekday.toFixed(1)}${t("overview.hero_unit_min")}`
+            ? `${serviceValueLabel(WEEKDAY_KEY, t)} ${hover.weekday.toFixed(1)}${t("overview.hero_unit_min")}`
             : "—"}
           {hover.weekend != null
-            ? `, ${t(`common.service_value.${WEEKEND_KEY}`)} ${hover.weekend.toFixed(1)}${t("overview.hero_unit_min")}`
+            ? `, ${serviceValueLabel(WEEKEND_KEY, t)} ${hover.weekend.toFixed(1)}${t("overview.hero_unit_min")}`
             : ""}
         </div>
       )}
