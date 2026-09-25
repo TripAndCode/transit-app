@@ -19,9 +19,17 @@ on:
   repository_dispatch:
     types: [r2-storage-heartbeat]
 
+# This job only echoes the dispatch payload into its own log; it never
+# checks out the repo or calls the GitHub API, so it needs no token scope
+# at all.
+permissions: {}
+
 jobs:
   record:
     runs-on: ubuntu-latest
+    # A log-append step should finish in seconds; bounds a hung runner
+    # instead of relying on GitHub's 6-hour default.
+    timeout-minutes: 5
     steps:
       - name: Record the R2 storage metrics status document
         # The payload comes from our own trusted Oracle dispatch, not
