@@ -236,7 +236,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
           style={{
             width: "100%",
             background: "var(--accent)",
-            color: "#fff",
+            color: "var(--on-accent)",
             border: "none",
             borderRadius: "var(--radius)",
             padding: "9px var(--space-3)",

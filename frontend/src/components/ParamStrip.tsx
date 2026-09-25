@@ -81,7 +81,7 @@ export function ParamStrip({
           // readable; only fade to bg-soft when blocked by missing params.
           background:
             busy || canRun ? "var(--accent)" : "var(--bg-soft)",
-          color: busy || canRun ? "white" : "var(--text-tertiary, #999)",
+          color: busy || canRun ? "var(--on-accent)" : "var(--text-tertiary, #999)",
           border: "none",
           borderRadius: 999,
           padding: "5px 16px",

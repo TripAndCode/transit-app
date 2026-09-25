@@ -18,7 +18,7 @@ const ADMIN_CSS = `
   .admin-btn.secondary:hover:not(:disabled) { background: var(--hover-tint); }
   .admin-btn.danger { border-color: var(--border-subtle); color: var(--color-danger, #c0392b); }
   .admin-btn.danger:hover:not(:disabled) { background: var(--bg-soft); border-color: var(--color-danger, #c0392b); }
-  .admin-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .admin-btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
   .admin-btn.primary:hover:not(:disabled) { opacity: 0.9; }
 
   table.admin-table { width: 100%; border-collapse: collapse; font-size: 14px; }

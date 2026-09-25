@@ -7,17 +7,17 @@ domain. No box to harden, no Caddy, no SSH.
 
 **Point every Railway service at the `production` branch, not `main`.**
 This repo runs an autonomous VPS loop (see CLAUDE.md "Autonomous VPS loop")
-that continuously opens PRs against `main`, and — since 2026-08-28 — both the
-loop and interactive sessions may squash-merge a PR themselves once the
-required `/review-branch` pass is clean and it's mergeable/clean, with no
-separate human go-ahead required. If Railway watched `main` directly, every
-one of those merges — reviewed but not yet soak-tested in a real deploy —
-would auto-deploy and run `preDeployCommand` migrations immediately, with no
+that continuously opens PRs against `main`, and both the loop and interactive
+sessions may squash-merge a PR themselves once the required
+`/review-branch` pass is clean and it's mergeable/clean, with no separate
+human go-ahead required. If Railway watched `main` directly, every one of
+those merges — reviewed but not yet soak-tested in a real deploy — would
+auto-deploy and run `preDeployCommand` migrations immediately, with no
 remaining checkpoint before production traffic sees it. Instead, `main` is
 just the integration branch; `production` only ever moves when a human
 deliberately promotes a reviewed, merged commit to it (see step 6) — that
-promotion is now the *only* human checkpoint left before a deploy, and that
-is what actually triggers a Railway deploy. The `production` branch already
+promotion is the only human checkpoint left before a deploy, and that is
+what actually triggers a Railway deploy. The `production` branch already
 exists in this repo for exactly this purpose.
 
 Cost: ~$10–18/mo usage-based, in exchange for zero server ops and git-push
@@ -167,13 +167,24 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
      is rejected at startup). Add the
      `https://<domain>/api/auth/{google,github}/callback` redirect URIs at
      the provider. See README ▸ Authentication.
+   - `DEFAULT_ADMIN_USERNAME`/`DEFAULT_ADMIN_PASSWORD` are an optional
+     break-glass local-admin login, independent of SSO — see README ▸
+     Configuration. Never set `DEFAULT_ADMIN_USERNAME` to a real SSO user's
+     email; rotate the password by editing the Railway variable and
+     redeploying.
+   - `OPS_STATUS_REPO` (see README ▸ Configuration) is not needed here
+     unless this service's own checkout path differs from the collectors'
+     default — leaving it unset just means the admin board's `vps_loop`/
+     `github` collector tiles read "unknown".
 5. `app` → **Settings → Networking → Generate Domain**. Railway issues
    `https://<something>.up.railway.app` with TLS. Copy it — that's
    `APP_BASE_URL` for the cron and `PUBLIC_BASE_URL` for SSO.
 6. First deploy: promote `main` to `production` now (see the "Updates"
    section below) to actually trigger it. The pre-deploy `migrate up` runs
-   first; watch **Deploy Logs** for `applied migration 0001 … 0016`, then
-   the uvicorn boot line.
+   first; watch **Deploy Logs** for its `Applied N migration(s).` line (see
+   `db/migrations/README.md` for how migrations are numbered — the count
+   grows over time, so no specific range is quoted here), then the uvicorn
+   boot line.
 
 Smoke test:
 

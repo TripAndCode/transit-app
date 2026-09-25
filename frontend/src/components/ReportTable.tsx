@@ -5,9 +5,9 @@ import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
+import { formatNumber, fmtPct } from "../utils/format";
 
 const ROWS_CAP = 200;
-import { formatNumber } from "../utils/format";
 
 type Schema = {
   /** Column index in the row tuple */
@@ -122,13 +122,6 @@ function fmtMin(v: unknown, t: TFunction): string {
   const n = Number(v);
   if (!isFinite(n)) return "—";
   return `${n.toFixed(1)}${t("common.unit_min")}`;
-}
-
-function fmtPct(v: unknown, _t: TFunction): string {
-  if (v == null) return "—";
-  const n = Number(v);
-  if (!isFinite(n)) return "—";
-  return `${n.toFixed(1)}%`;
 }
 
 function fmtNum(v: unknown, _t: TFunction): string {

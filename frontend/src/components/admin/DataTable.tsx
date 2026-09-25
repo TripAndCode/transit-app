@@ -415,7 +415,7 @@ function ShortcutHintChip({ shortcuts }: { shortcuts: readonly ShortcutHint[] })
                 <dt style={{ margin: 0 }}>
                   <kbd
                     style={{
-                      fontFamily: "var(--font-mono, monospace)",
+                      fontFamily: "var(--font-mono)",
                       fontSize: "var(--text-xs)",
                       padding: "1px 6px",
                       borderRadius: 4,

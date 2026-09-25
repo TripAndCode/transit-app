@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, lazy, useRef, useState, type KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
@@ -11,7 +11,6 @@ import type { RouteShapeStop } from "../api/types";
 import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
-import { AnalysisMap } from "../components/analysis/AnalysisMap";
 import { MareyDiagram } from "../components/charts/MareyDiagram";
 import { SkeletonChart } from "../components/Skeleton";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
@@ -22,6 +21,28 @@ import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
+
+// Dynamic, not a static import: MapLibre would otherwise ride into this tab's
+// chunk, which the sidebar warms on hover, downloading a map nobody has asked
+// to see yet.
+const AnalysisMap = lazy(() =>
+  import("../components/analysis/AnalysisMap").then((m) => ({ default: m.AnalysisMap })),
+);
+
+/** Sub-tabs in the order they are rendered — also the order the arrow keys
+ *  walk, and the closed set `sub_tab` may hold. */
+const SUB_TABS = ["trend", "marey", "map", "byStop"] as const;
+type SubTab = (typeof SUB_TABS)[number];
+
+const SUB_TAB_LABEL_KEYS: Record<SubTab, string> = {
+  trend: "tabTrend",
+  marey: "tabMarey",
+  map: "tabMap",
+  byStop: "tabByStop",
+};
+
+const tabId = (sub: SubTab) => `route-analysis-tab-${sub}`;
+const panelId = (sub: SubTab) => `route-analysis-panel-${sub}`;
 
 export function RouteAnalysisTab() {
   const id = useAgencyId();
@@ -48,8 +69,28 @@ export function RouteAnalysisTab() {
     patchUrl({ stop_route: next.route, stop_seq: String(next.sequence) });
   }
   const [notice, setNotice] = useState("");
-  const [activeTab, setActiveTab] = useUrlState<"map" | "trend" | "marey" | "byStop">("sub_tab", "trend");
-  const [mapVisited, setMapVisited] = useState(false);
+  const [activeTab, setActiveTab] = useUrlState<SubTab>("sub_tab", "trend", SUB_TABS);
+  // Seeded from the URL so `?sub_tab=map` restores the map, and sticky
+  // afterwards so leaving the sub-tab doesn't tear down the WebGL context.
+  const [mapVisited, setMapVisited] = useState(activeTab === "map");
+  const tabRefs = useRef<Partial<Record<SubTab, HTMLButtonElement | null>>>({});
+  function selectTab(next: SubTab) {
+    setActiveTab(next);
+    if (next === "map") setMapVisited(true);
+  }
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, sub: SubTab) {
+    const index = SUB_TABS.indexOf(sub);
+    const next =
+      event.key === "ArrowRight" ? SUB_TABS[(index + 1) % SUB_TABS.length]
+      : event.key === "ArrowLeft" ? SUB_TABS[(index - 1 + SUB_TABS.length) % SUB_TABS.length]
+      : event.key === "Home" ? SUB_TABS[0]
+      : event.key === "End" ? SUB_TABS[SUB_TABS.length - 1]
+      : null;
+    if (!next) return;
+    event.preventDefault();
+    selectTab(next);
+    tabRefs.current[next]?.focus();
+  }
   // No `date`: the server answers for the route's own latest observed day.
   // The range filter's end date is routinely a day this route did not run, and
   // a diagram of nothing teaches nothing.
@@ -61,6 +102,9 @@ export function RouteAnalysisTab() {
     date: ghostDate,
     timeBand: ctx.time_band,
   });
+  // Nothing on this page is answerable without an agency, and every query
+  // above is already disabled for a null id.
+  if (id == null) return null;
   const stops = query.data ? orderedStops(query.data) : [];
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? stops.find((s) => s.avg_min != null) ?? stops[0];
@@ -79,7 +123,7 @@ export function RouteAnalysisTab() {
         ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
-      <button disabled={!id || !query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id!, `${names.format(route)} · ${ctx.from} – ${ctx.to}`, ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
+      <button disabled={!query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id, `${names.format(route)} · ${ctx.from} – ${ctx.to}`, ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
     </div></header>
     {notice && <span role="status">{notice}</span>}
     <AnalysisFilters agencyId={id} />
@@ -101,27 +145,40 @@ export function RouteAnalysisTab() {
         {compare && previous.isPending && <p className="focus-muted" role="status">{t("previous")} …</p>}
         {compare && !previous.isPending && !previous.error && !prevStops.length && <p>{t("compareUnavailable")}</p>}
         <div className="focus-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={activeTab === "trend"} onClick={() => setActiveTab("trend")}>{t("tabTrend")}</button>
-          <button type="button" role="tab" aria-selected={activeTab === "marey"} onClick={() => setActiveTab("marey")}>{t("tabMarey")}</button>
-          <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => { setActiveTab("map"); setMapVisited(true); }}>{t("tabMap")}</button>
-          <button type="button" role="tab" aria-selected={activeTab === "byStop"} onClick={() => setActiveTab("byStop")}>{t("tabByStop")}</button>
+          {/* Roving tabindex: only the selected tab is in the tab order, and
+              the arrow keys move between them -- so Tab leaves the tablist
+              for the panel rather than stepping through every sub-tab. */}
+          {SUB_TABS.map((sub) => <button
+            key={sub}
+            type="button"
+            role="tab"
+            id={tabId(sub)}
+            aria-controls={panelId(sub)}
+            aria-selected={activeTab === sub}
+            tabIndex={activeTab === sub ? 0 : -1}
+            ref={(el) => { tabRefs.current[sub] = el; }}
+            onKeyDown={(e) => onTabKeyDown(e, sub)}
+            onClick={() => selectTab(sub)}
+          >{t(SUB_TAB_LABEL_KEYS[sub])}</button>)}
         </div>
         <div className="focus-split">
           <div>
-            {activeTab === "trend" && <div className="focus-tab-panel">
+            {activeTab === "trend" && <div className="focus-tab-panel" role="tabpanel" id={panelId("trend")} aria-labelledby={tabId("trend")}>
               <div className="focus-actions focus-muted"><span style={{ color: "var(--accent)" }}>● {t("selected")}</span>{compare && <span>┄ {t("previous")}</span>}<span>○ {t("missing")}</span></div>
               <StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
               <p className="focus-muted">{t("selected")} {ctx.from} – {ctx.to}{compare && ` · ${t("previous")} ${prevCtx.from} – ${prevCtx.to}`}</p>
             </div>}
-            {activeTab === "marey" && <div className="focus-tab-panel">
+            {activeTab === "marey" && <div className="focus-tab-panel" role="tabpanel" id={panelId("marey")} aria-labelledby={tabId("marey")}>
               <AsyncSection loading={trips.isPending} error={trips.error} onRetry={() => void trips.refetch()} data={trips.data} hasContent={(d) => d.trips.length > 0} empty={<EmptyState title={t("empty")} />} skeleton={<SkeletonChart height={320} />}>
                 {(d) => <MareyDiagram trips={d.trips} previousTrips={previousTrips.data?.trips ?? []} axis={stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }))} band={ctx.time_band} truncated={d.truncated} date={d.date} />}
               </AsyncSection>
             </div>}
-            {mapVisited && <div className={`focus-tab-panel${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`}>
-              <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} />
+            {mapVisited && <div className={`focus-tab-panel${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`} role="tabpanel" id={panelId("map")} aria-labelledby={tabId("map")}>
+              <Suspense fallback={<SkeletonChart height={420} />}>
+                <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} />
+              </Suspense>
             </div>}
-            {activeTab === "byStop" && <div className="focus-tab-panel">
+            {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>
               <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("stop")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th></tr></thead><tbody>
                 {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min ?? t("missing")}</td><td style={td()}>{s.samples}</td></tr>)}
               </tbody></table></div>
