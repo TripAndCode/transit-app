@@ -1,6 +1,6 @@
 """CI hardening invariants for `.github/workflows/ci.yml`.
 
-Three docs (README, docs/features, docs/refactor-log) call `npm run lint:i18n`
+The docs (README, docs/features) call `npm run lint:i18n`
 and `npm run lint:i18n-strings` mandatory gates, but nothing actually ran them
 in CI, so a key-parity or exact-string regression could merge unnoticed. The
 workflow also lacked the baseline hardening (concurrency de-dup, least-

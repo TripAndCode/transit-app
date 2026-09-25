@@ -11,8 +11,7 @@
 # `git worktree`s share one .git/hooks directory (it lives in the common git
 # dir, not per-worktree), so a single run of this script against any
 # worktree of a clone installs the hook for every worktree of that same
-# clone -- one run on the VPS's persistent checkout covers every
-# /vps-loop-run worker worktree cut from it.
+# clone.
 #
 # Usage: scripts/setup_git_hooks.sh
 #        scripts/setup_git_hooks.sh --check   # verify only, install nothing
@@ -21,8 +20,8 @@
 # bit + pre-commit marker + no core.hooksPath override + unqualified
 # `gitleaks` on PATH still resolving to the pinned GITLEAKS_VERSION) and
 # exits 0/1 with no side effects -- the single source of truth for `make
-# doctor` and deploy/vps/claude-loop.sh's per-tick check, so they can't
-# drift out of sync with what install_hook itself considers "installed".
+# doctor`, so it can't drift out of sync with what install_hook itself
+# considers "installed".
 set -euo pipefail
 case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
@@ -164,9 +163,8 @@ hook_file_path() {
 # install, not just at install time. Echoes an empty string when the hook
 # is fully installed, otherwise echoes an actionable reason it isn't. Used
 # both by install_hook (which turns a non-empty reason into a hard `fail`)
-# and by `--check` mode (Makefile's `doctor` target,
-# deploy/vps/claude-loop.sh), so all three call sites can never drift out
-# of sync on what "installed" means.
+# and by `--check` mode (Makefile's `doctor` target), so both call sites
+# can never drift out of sync on what "installed" means.
 hook_verify_reason() {
   local hook_file
   hook_file="$(hook_file_path)"

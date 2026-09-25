@@ -1372,7 +1372,6 @@
       "collector": {
         "oracle_crawler": "Oracle クローラ",
         "r2": "R2 同期",
-        "vps_loop": "VPS ループ",
         "github": "CI (GitHub)"
       },
       "status": {

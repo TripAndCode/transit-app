@@ -191,29 +191,13 @@ async def test_describe_data_agencies(conn_with_observations):
 
 
 @pytest.mark.asyncio
-async def test_describe_data_agencies_cross(conn_with_observations):
-    """When cross_agency=True, every agency is returned (admin path)."""
+async def test_describe_data_agencies_ignores_cross_agency_arg(conn_with_observations):
+    """A model-supplied ``cross_agency`` must not widen the tenant scope."""
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO agencies (agency_name, feed_url) VALUES ('OTHER', 'http://other')")
         result = await describe_data({"kind": "agencies", "cross_agency": True}, _ctx(), conn, agency_id, locale="ja")
-    assert result.kind == "table"
-    names = {row[1] for row in result.rows}
-    assert "OTHER" in names
-    assert len(result.rows) >= 2
-
-
-@pytest.mark.asyncio
-async def test_describe_data_agencies_cross_excludes_deleted(conn_with_observations):
-    """cross_agency=True must still hide soft-deleted agencies."""
-    pool, agency_id = conn_with_observations
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO agencies (agency_name, feed_url, deleted_at) VALUES ('GONE', 'http://gone', now())"
-        )
-        result = await describe_data({"kind": "agencies", "cross_agency": True}, _ctx(), conn, agency_id, locale="ja")
-    names = {row[1] for row in result.rows}
-    assert "GONE" not in names
+    assert [row[0] for row in result.rows] == [agency_id]
 
 
 @pytest.mark.asyncio
