@@ -11,6 +11,7 @@ import {
   severityStepColors,
   surfaceColorResolved,
 } from "./tokens";
+import { ruleBody, decl } from "../test/cssRules";
 
 // Two distinct severe-color surfaces:
 //  - `DELAY_RAMP.severe` / `delayColor(>10)` return the LITERAL string
@@ -120,29 +121,6 @@ describe("severityStepColors() (MapLibre step-expression stops)", () => {
 // the sentence instead of the declaration.
 const globalCss = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "");
-
-/** Body of the first rule whose selector text starts at `selector`, with
- *  braces balanced so nested at-rules/rules are included. */
-function ruleBody(css: string, selector: string): string {
-  const at = css.indexOf(selector);
-  if (at === -1) throw new Error(`selector not found: ${selector}`);
-  const open = css.indexOf("{", at + selector.length - 1);
-  let depth = 0;
-  for (let i = open; i < css.length; i++) {
-    if (css[i] === "{") depth++;
-    else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
-  }
-  throw new Error(`unbalanced braces after: ${selector}`);
-}
-
-/** Last declared value of `prop` in `body` (later declaration wins, matching
- *  the cascade), with runs of whitespace collapsed. */
-function decl(body: string, prop: string): string | null {
-  const re = new RegExp(`(?:^|[;{\\s])${prop}\\s*:\\s*([^;]+);`, "g");
-  let last: string | null = null;
-  for (const m of body.matchAll(re)) last = m[1].replace(/\s+/g, " ").trim();
-  return last;
-}
 
 const rootBlock = ruleBody(globalCss, ":root {");
 const darkBlock = ruleBody(globalCss, ':root[data-theme="dark"] {');

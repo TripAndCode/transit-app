@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { ScrollNarrative } from "./ScrollNarrative";
+import { ruleBody, decl } from "../../test/cssRules";
 
 void i18n.changeLanguage("en");
 
@@ -62,34 +63,16 @@ describe("landing reveal CSS", () => {
   );
 
   /** Body of the first rule whose selector text starts at `selector`. */
-  function ruleBody(selector: string): string {
-    const at = css.indexOf(selector);
-    if (at === -1) throw new Error(`selector not found: ${selector}`);
-    const open = css.indexOf("{", at + selector.length - 1);
-    let depth = 0;
-    for (let i = open; i < css.length; i++) {
-      if (css[i] === "{") depth++;
-      else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
-    }
-    throw new Error(`unbalanced braces after: ${selector}`);
-  }
-
-  function decl(body: string, prop: string): string | null {
-    const re = new RegExp(`(?:^|[;{\\s])${prop}\\s*:\\s*([^;]+);`, "g");
-    let last: string | null = null;
-    for (const m of body.matchAll(re)) last = m[1].replace(/\s+/g, " ").trim();
-    return last;
-  }
 
   it("never parks a narrative section at opacity: 0 -- the offset is the whole animation", () => {
-    const pending = ruleBody(".landing-reveal.landing-reveal--pending {");
+    const pending = ruleBody(css, ".landing-reveal.landing-reveal--pending {");
     expect(decl(pending, "opacity")).toBeNull();
     expect(decl(pending, "transform")).toBe("translateY(28px)");
   });
 
   it("transitions the transform only, inside a motion-allowed block", () => {
     expect(css.match(/@media \(prefers-reduced-motion: no-preference\)/g)).toHaveLength(1);
-    const visible = ruleBody(".landing-reveal.landing-reveal--pending.landing-reveal--visible {");
+    const visible = ruleBody(css, ".landing-reveal.landing-reveal--pending.landing-reveal--visible {");
     expect(decl(visible, "opacity")).toBeNull();
     expect(decl(visible, "transform")).toBe("translateY(0)");
     expect(decl(visible, "transition")).toBe("transform var(--dur-3) var(--ease-out)");

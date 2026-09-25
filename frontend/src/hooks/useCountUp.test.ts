@@ -100,6 +100,30 @@ describe("useCountUp", () => {
     expect(result.current).toBe(10);
   });
 
+  it("continues from where it was when the value changes mid-tween, never falling back", () => {
+    // A refetch or an agency switch can land inside the entrance window that
+    // now runs on every first paint. The next tween has to start from the
+    // figure on screen; starting from the interrupted tween's own origin
+    // would walk the number backwards, usually to 0.
+    const raf = mockRaf();
+    const { result, rerender } = renderHook(({ value }) => useCountUp(value, { duration: 600, decimals: 1 }), {
+      initialProps: { value: 10 },
+    });
+
+    raf.flush(0);
+    raf.flush(300);
+    const midTween = result.current;
+    expect(midTween).toBeGreaterThan(0);
+    expect(midTween).toBeLessThan(10);
+
+    rerender({ value: 20 });
+    raf.flush(1000); // first frame of the new tween: elapsed 0, so it shows its start
+    expect(result.current).toBe(midTween);
+
+    raf.flush(1600);
+    expect(result.current).toBe(20);
+  });
+
   it("jumps straight to the target under prefers-reduced-motion: reduce", () => {
     setReducedMotion(true);
     const raf = vi.spyOn(window, "requestAnimationFrame");

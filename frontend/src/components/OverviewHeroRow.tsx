@@ -79,8 +79,7 @@ export function OverviewHeroRow({
   const avgMinColor = headline.avg_min != null ? delayColor(headline.avg_min) : undefined;
   // Called unconditionally (hooks can't branch on headline.avg_min's
   // nullability) -- the "—" fallback below still renders in place of it when
-  // there is nothing to display. Never animates on first mount, only when
-  // avg_min changes afterward (an agency switch, a live refresh).
+  // there is nothing to display.
   const avgMinDisplay = useCountUp(headline.avg_min ?? 0, { decimals: 1 });
   const delayedCountDisplay = useCountUp(delayedCount, { decimals: 0 });
 

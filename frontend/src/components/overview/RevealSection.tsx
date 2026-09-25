@@ -3,8 +3,9 @@ import { useInView } from "../../hooks/useInView";
 
 /** Highest `--stagger` index a section can be given. A tab is one entrance
  *  group, not a queue: past this many steps the remaining sections share the
- *  last delay, so the whole tab still settles within
- *  `MAX_STAGGER * --dur-1` however many sections it grows. */
+ *  last delay, so the last one still starts within `MAX_STAGGER * --dur-1`
+ *  and finishes a further `--dur-3` later, however many sections the tab
+ *  grows. */
 const MAX_STAGGER = 4;
 
 type Props = {

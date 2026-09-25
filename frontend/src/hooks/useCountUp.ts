@@ -77,12 +77,15 @@ export function useCountUp(value: number, { duration = 600, decimals = 1 }: UseC
       if (startTime === null) startTime = now;
       const elapsed = now - startTime;
       const t = Math.min(1, elapsed / duration);
-      setDisplay(round(from + delta * easeOutCubic(t), decimals));
-      if (t < 1) {
-        frameId = requestAnimationFrame(tick);
-      } else {
-        fromRef.current = value;
-      }
+      // Written every frame, not only on arrival: a `value` that changes
+      // mid-tween cancels this loop, and the next one starts from wherever
+      // the figure actually is. Recording it only at `t === 1` would leave
+      // the interrupted tween's starting point behind -- since first paint
+      // now always starts at 0, the figure would visibly fall back to 0
+      // before climbing to the new target.
+      fromRef.current = round(from + delta * easeOutCubic(t), decimals);
+      setDisplay(fromRef.current);
+      if (t < 1) frameId = requestAnimationFrame(tick);
     }
 
     frameId = requestAnimationFrame(tick);
