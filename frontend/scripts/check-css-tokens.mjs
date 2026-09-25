@@ -11,7 +11,7 @@
 //    (`var(--x, var(--y))`) is exempt regardless, since it composes two
 //    named tokens. A reference with a *literal* fallback (`var(--x,
 //    <value>)`) is exempt only when `--x` is listed in
-//    DYNAMIC_PER_INSTANCE_PROPERTIES below (genuinely set per-instance at
+//    DYNAMIC_PER_INSTANCE_PROPERTIES (genuinely set per-instance at
 //    runtime, e.g. inline `style={{ "--ops-queue-width": ... }}`) — anything
 //    else with an unresolved name and a literal fallback is presumed to be a
 //    design token whose name was typo'd or renamed and must still resolve.
@@ -27,6 +27,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DYNAMIC_PER_INSTANCE_PROPERTIES } from "./dynamicCssProperties.mjs";
 
 function srcDirFromArgv() {
   const flagIndex = process.argv.indexOf("--src-dir");
@@ -57,19 +58,6 @@ function walk(dir, out = []) {
   return out;
 }
 
-// Custom properties that are genuinely set per-instance at runtime (an
-// inline `style.setProperty`/style-object write), never declared in
-// global.css by design — DailyChart/ChartEnter's measured stroke length,
-// HourlyHeatmap/DowBandGrid's per-cell data-driven opacity, and MapTab's
-// resizable queue-column width. A literal fallback on one of these means
-// "the instance hasn't set it yet", not "this design token is missing", so
-// these are exempt from the check below even though nothing in global.css
-// defines them. Anything else with an unresolved name and a literal
-// fallback is presumed to be a typo'd or renamed design token (e.g.
-// `var(--radius-md, 10px)` when only `--radius-lg` was ever defined) and
-// must still resolve — add a name here only for a genuinely dynamic,
-// per-instance property, never to silence this check for a real token.
-const DYNAMIC_PER_INSTANCE_PROPERTIES = new Set(["--len", "--cell-opacity", "--ops-queue-width"]);
 
 // A hand-rolled scan (not a single regex) because a fallback value can
 // itself contain parens (e.g. `var(--accent-soft, rgba(91, 108, 173,
@@ -168,7 +156,7 @@ for (const file of files) {
     console.error(
       `check-css-tokens: FAIL — "${relPath}" references var(${name}, ${fallback}), but ${name} is not defined ` +
         "anywhere in styles/global.css and its fallback is a literal value, not another token. Define " +
-        `${name} in global.css, or add it to DYNAMIC_PER_INSTANCE_PROPERTIES in this script if it is ` +
+        `${name} in global.css, or add it to DYNAMIC_PER_INSTANCE_PROPERTIES in scripts/dynamicCssProperties.mjs if it is ` +
         "genuinely set per-instance at runtime rather than being a design token.",
     );
     failed = true;

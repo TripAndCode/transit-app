@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { after, test } from "node:test";
+import { DYNAMIC_PER_INSTANCE_PROPERTIES } from "../../frontend/scripts/dynamicCssProperties.mjs";
 
 const SCRIPT_PATH = fileURLToPath(new URL("../../frontend/scripts/check-css-tokens.mjs", import.meta.url));
 
@@ -135,4 +136,11 @@ test("missing global.css -> exit 1 with an actionable message", () => {
   const result = run(dir);
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /could not read/);
+});
+
+test("the dynamic-property allowlist is exactly the three runtime-set properties", () => {
+  // This set is the one way a `var(--x, <literal>)` naming an undefined
+  // token can pass, so widening it has to be a deliberate edit here rather
+  // than a line nobody notices in a diff.
+  assert.deepEqual([...DYNAMIC_PER_INSTANCE_PROPERTIES].sort(), ["--cell-opacity", "--len", "--ops-queue-width"]);
 });

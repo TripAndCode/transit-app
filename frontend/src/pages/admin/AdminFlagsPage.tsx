@@ -103,6 +103,9 @@ function FlagToggle({ flag, onRequestChange }: { flag: FeatureFlag; onRequestCha
         flexShrink: 0,
       }}
     >
+      {/* The knob tracks the state rather than staying one colour: it has to
+          read against `--accent` when on and `--surface-2` when off, and no
+          single token contrasts with both in both themes. */}
       <span
         aria-hidden="true"
         style={{

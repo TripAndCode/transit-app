@@ -52,24 +52,18 @@ describe("CJK type floor", () => {
   });
 });
 
-// The literal pixel values this fix removed from the files below: 12.5px (an
-// off-scale value -- no --text-* step is 12.5) and bare 13px/15px (on-scale,
-// but naming no token -- they happen to equal --text-sm/--text-base). Not the
-// whole --text-* scale: this fix did not touch every on-scale literal (e.g. a
-// pre-existing 17px/26px in these same files, which equal --text-md/--text-xl
-// but were out of its scope), so checking the full scale here would flag
-// those too.
+// The literal font sizes barred from the files below: 12.5px, which is off
+// the scale entirely, and bare 13px/15px, which are on it but name no token
+// (they equal --text-sm/--text-base). Deliberately not the whole scale --
+// 17px/26px literals also sit in these files and are not barred, so a rule
+// covering every on-scale value would flag those too.
 const BYPASSED_LITERALS_PX = [12.5, 13, 15];
 
-// Files a design-token-bypass audit converted from hardcoded scale-matching
-// literals (12.5px, an off-scale value that rounded a --text-xs/13px caption
-// down; bare 13px/15px, which happen to equal --text-sm/--text-base but named
-// no token) to `var(--text-*)`. Scoped to these files, not the whole tree:
-// dozens of other components still hardcode on-scale sizes like 13px/15px
-// coincidentally, and converting every one of those is a separate, much
-// larger effort than this fix, whose bug was specifically the 12.5/13/15
-// literals inside these files -- see the CJK type floor test above for the
-// tree-wide invariant (no size below the 12px floor) that check does cover.
+// The files held to that rule. It is a per-file rule rather than a tree-wide
+// one because on-scale literals are still widespread elsewhere; the tree-wide
+// invariant is the CJK type floor above (no size below 12px), which every
+// file must satisfy. Adding a file here is a commitment to keep it free of
+// the literals above, so add one only after converting it.
 const TOKEN_BYPASS_AUDITED_FILES = [
   "pages/admin/AdminBoardPage.tsx",
   "pages/LoginPage.css",
@@ -84,7 +78,7 @@ const TOKEN_BYPASS_AUDITED_FILES = [
 ];
 
 describe("type scale — audited files reference tokens, not scale-matching literals", () => {
-  it("declares no literal 12.5/13/15px font size in the files this fix converted", () => {
+  it("declares no literal 12.5/13/15px font size in any audited file", () => {
     const offenders: string[] = [];
     for (const relPath of TOKEN_BYPASS_AUDITED_FILES) {
       const file = path.join(root, relPath);

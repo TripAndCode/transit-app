@@ -192,7 +192,7 @@ describe("elevation tokens", () => {
 
   it("--el-left casts to the left (negative x-offset), not downward like --el-2/--el-3", () => {
     // A right-anchored drawer's shadow has to fall onto the page it covers,
-    // not below itself -- see the SettingsDrawer.tsx boxShadow comment.
+    // not below itself, so the offset is on the x axis and negative.
     for (const block of [rootBlock, darkBlock]) {
       expect(decl(block, "--el-left")).toMatch(/-\d+px 0/);
     }
