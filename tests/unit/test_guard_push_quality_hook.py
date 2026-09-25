@@ -8,10 +8,11 @@ the wrong half. These tests pin the parser's behavior for the shapes
 those bugs came from so a regression fails a test run instead of waiting
 for the next review pass.
 
-Only the embedded Python parser is exercised here (extracted verbatim
-from the hook file, so this can't silently drift out of sync with what
-actually ships), not the full bash script end to end -- the rest of the
-script's behavior depends on a real git worktree and a provisioned
+What runs here is extracted verbatim from the hook -- the embedded Python
+parser, and the bash that decides whether a failing dead-code check is a
+real finding or a toolchain that could not start -- so these tests cannot
+silently drift out of sync with what ships. The script is never run end to
+end: the rest of it depends on a real git worktree and a provisioned
 poetry/npm environment, which is integration-test territory this file
 deliberately stays out of.
 """
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -184,17 +186,56 @@ def test_frontend_gate_runs_every_check_ci_runs():
         assert script in block, f"{script} missing from the RUN_FRONTEND gate block"
 
 
-def test_a_toolchain_that_cannot_run_knip_warns_instead_of_blocking_every_push():
-    """A knip that cannot start (Node too old for its `engines`, oxc-parser's
-    native binary missing) exits non-zero exactly like one that found dead
-    code. This gate runs against the main checkout for every push in the
-    repository, so failing on a broken toolchain would block all of them.
-    The two are separated by whether a report came out, which is why the
-    JSON reporter is what the gate runs -- so only a real finding blocks."""
+def _deadcode_classifier() -> str:
+    """The hook's `rc`-dispatch for the deadcode check, extracted verbatim so
+    these tests exercise what ships rather than a restatement of it."""
     block = _frontend_gate_block()
-    deadcode = block[block.index("npm run deadcode") : block.index("npm run test:check-entry-chunk")]
-    assert "--reporter json" in deadcode, "the classifier needs a machine-readable report to key on"
-    assert "JSON.parse" in deadcode
-    parsed, _, unparsed = deadcode.partition("JSON.parse")
-    assert "FAIL=1" not in parsed, "the deadcode check must not fail before it knows knip actually ran"
-    assert "FAIL=1" in unparsed, "a knip run that produced a report must still block the push"
+    start = block.index('    if [ "$rc" -eq 124 ]; then')
+    end = block.index("\n    fi\n", start) + len("\n    fi\n")
+    return block[start:end]
+
+
+def _deadcode_verdict(rc: int, stdout: str) -> int:
+    """Run that dispatch with a given knip exit status and stdout, and report
+    the FAIL it leaves behind. `run_with_timeout` is stubbed out: the plain
+    re-run it performs exists only to put a reason in the log."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "deadcode_out"
+        out.write_text(stdout)
+        script = (
+            "FAIL=0\n"
+            f"rc={rc}\n"
+            f'deadcode_out="{out}"\n'
+            "run_with_timeout() { return 0; }\n"
+            f"{_deadcode_classifier()}"
+            'echo "FAIL=$FAIL"\n'
+        )
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        return int(result.stdout.strip().rsplit("FAIL=", 1)[1])
+
+
+def test_a_knip_run_that_reported_findings_blocks_the_push():
+    assert _deadcode_verdict(1, '{"issues":[{"file":"src/dead.ts"}]}') == 1
+
+
+def test_a_toolchain_that_cannot_run_knip_warns_instead_of_blocking_every_push():
+    """A knip that cannot start (Node outside its `engines` range,
+    oxc-parser's native binary missing, the npm script renamed) exits
+    non-zero exactly like one that found dead code, and this gate runs
+    against the main checkout for every push in the repository -- so failing
+    on a broken toolchain would block all of them at once. Only a run that
+    produced a report may block."""
+    assert _deadcode_verdict(1, "") == 0
+    assert _deadcode_verdict(1, "Error [ERR_REQUIRE_ESM]: require() of ES Module ...\n") == 0
+
+
+def test_a_deadcode_check_that_never_finished_still_blocks():
+    """The warn path is a narrow exception for a classified failure. A
+    watchdog kill classifies nothing, so the file header's fail-closed
+    contract applies unchanged."""
+    assert _deadcode_verdict(124, "") == 1
+
+
+def test_a_clean_knip_run_blocks_nothing():
+    assert _deadcode_verdict(0, '{"issues":[]}') == 0
