@@ -43,29 +43,46 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 
-@functools.lru_cache(maxsize=1)
+@functools.lru_cache(maxsize=4)
+def _versions_in(directory: pathlib.Path) -> tuple[str, ...]:
+    """Migration versions in *directory*, in order.
+
+    Keyed on the directory rather than cached globally. A single shared entry
+    would outlive a change to `_MIGRATIONS_DIR` -- which is how a test that
+    points it at a `tmp_path` leaves a later real run reading the temporary
+    directory's versions. That does not fail loudly: `migrate_up` computes an
+    empty pending set, returns without committing, and the connection sits
+    idle in a transaction until the next fixture's DDL blocks behind it and
+    the job burns its timeout. Keying on the path makes that impossible
+    rather than asking every test to remember a reset.
+
+    A tuple, not a list, because an lru_cache handing out a mutable value
+    lets one caller's edit reach every later one.
+    """
+    return tuple(f.name.split("_")[0] for f in sorted(directory.glob("*.up.sql")))
+
+
 def _versions_on_disk() -> list[str]:
     """On-disk migration versions, in order.
 
-    Cached: the migration directory is fixed for the life of the process
-    (nothing in it changes without a deploy), but this is read on every
-    board/ops poll (pipeline.health.migration_status) as well as every
-    `migrate up`/`pending_migrations` call, so an uncached glob turns an
-    O(1) health check into an O(migration count) directory scan on a hot
+    Cached via :func:`_versions_in`: the directory's contents are fixed for
+    the life of the process (nothing in it changes without a deploy), but this
+    is read on every board/ops poll (pipeline.health.migration_status) as well
+    as every `migrate up`/`pending_migrations` call, so an uncached glob turns
+    an O(1) health check into an O(migration count) directory scan on a hot
     path.
     """
-    files = sorted(_MIGRATIONS_DIR.glob("*.up.sql"))
-    return [f.name.split("_")[0] for f in files]
+    return list(_versions_in(_MIGRATIONS_DIR))
 
 
 def reset_for_tests() -> None:
-    """Drop the cached on-disk migration list.
+    """Drop the cached migration lists.
 
-    A test that points `_MIGRATIONS_DIR` at a temporary directory needs this
-    to see its own files instead of whatever the first call in the process
-    already cached.
+    Pointing `_MIGRATIONS_DIR` at another directory no longer needs this --
+    that is keyed. This is for the remaining case: files appearing in a
+    directory already read once, which only a test does.
     """
-    _versions_on_disk.cache_clear()
+    _versions_in.cache_clear()
 
 
 def _applied_versions(conn) -> set[str]:
