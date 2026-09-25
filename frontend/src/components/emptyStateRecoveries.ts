@@ -1,5 +1,11 @@
 import type { TFunction } from "i18next";
 import type { Recovery } from "./EmptyState";
+import {
+  dowValueLabel,
+  serviceValueLabel,
+  timeBandValueLabel,
+  translationT as tt,
+} from "../utils/filterValueLabels";
 
 /** The subset of RangeCtx that explains an empty result — kept structural
  *  (not `import type { RangeCtx }`) so this module works for any caller that
@@ -10,38 +16,6 @@ type ReasonCtx = {
   service?: string;
   routes?: string[];
 };
-
-// Every key this module reads lives in the main `translation` resource
-// (ja.json/en.json), never in a feature namespace like "design" -- callers
-// bound to a different default namespace (e.g. AnalysisTab/ReportsHomeTab's
-// `useTranslation("design")`) must still resolve the real copy, not the
-// bare key string. `{ ns: "translation" }` on every lookup makes that
-// explicit regardless of the caller's own default.
-function tt(t: TFunction, key: string, options?: Record<string, unknown>): string {
-  return t(key, { ns: "translation", ...options });
-}
-
-/** Renders a RangeCtx `service` value ("平日" / "土日祝" / "all") for display.
- *  Exported for reuse anywhere else a stored ctx needs the same rendering
- *  (e.g. the Ask evidence card's provenance disclosure) -- one canonical
- *  mapping from the query-contract value to display text. */
-export function serviceValueLabel(service: string, t: TFunction): string {
-  if (service === "平日") return tt(t, "filters.service.weekday"); // i18n-ignore: query contract
-  if (service === "土日祝") return tt(t, "filters.service.weekend"); // i18n-ignore: query contract
-  return service;
-}
-
-export function dowValueLabel(dow: string, t: TFunction): string {
-  if (dow === "weekday") return tt(t, "filters.dow.weekday");
-  if (dow === "weekend") return tt(t, "filters.dow.weekend");
-  return dow;
-}
-
-export function timeBandValueLabel(timeBand: string, t: TFunction): string {
-  const key = `filters.time_band.${timeBand}`;
-  const label = tt(t, key);
-  return label === key ? timeBand : label;
-}
 
 /** Short statements of which non-default filter dimensions are currently
  *  active, in the order they'd narrow a query: days, time, service, routes.
