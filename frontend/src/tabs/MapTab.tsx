@@ -48,6 +48,8 @@ import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
 import { useCappedList } from "../hooks/useCappedList";
+import { fitAll, focusRoute as frameRoute, inspectTrip } from "./map/cameraChoreography";
+import { InspectCard } from "./map/InspectCard";
 
 const DELAYED_TRIPS_CAP = 200;
 
@@ -55,8 +57,6 @@ const DELAYED_TRIPS_CAP = 200;
 // sooner (e.g. an idle map with no live rows, or a system clock jump) --
 // scheduling only ever exact boundaries would otherwise never re-check.
 const STALENESS_SAFETY_TICK_MS = 60_000;
-import { fitAll, focusRoute as frameRoute, inspectTrip } from "./map/cameraChoreography";
-import { InspectCard } from "./map/InspectCard";
 
 /** Clusters stop expanding here: past it MapLibre's own clusterMaxZoom has
  *  already broken them into individual vehicles, so a further step would move

@@ -18,6 +18,7 @@ import { BandGrid, Legend } from "../components/charts/DowBandGrid";
 import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
 import { accentRampColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
+import { WEEK } from "../utils/week";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
@@ -230,8 +231,6 @@ export function AnalysisTab() {
     </div>
   );
 }
-
-const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 
 function TrendBlock({
   data,

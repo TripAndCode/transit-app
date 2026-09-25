@@ -24,4 +24,21 @@ describe("useEnteredOnMount", () => {
     act(() => cb(0));
     expect(result.current).toBe(true);
   });
+
+  it("is true immediately under prefers-reduced-motion, without waiting on a frame", () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }));
+    const { result } = renderHook(() => useEnteredOnMount());
+    expect(result.current).toBe(true);
+    expect(raf).not.toHaveBeenCalled();
+  });
 });
