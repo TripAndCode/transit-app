@@ -56,6 +56,7 @@ from api.admin_runs import (
     today_jst,
 )
 from api.deps import get_ch, get_conn
+from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin, token_hash
 from api.sqlutil import escape_like
@@ -383,6 +384,7 @@ async def bulk_patch_users(
                 }
                 for r in out_rows
             ],
+            ip=request.client.host if request.client else None,
         )
     return [UserRow(**dict(r)) for r in out_rows]
 
@@ -495,6 +497,7 @@ async def patch_user(
                 target_id=str(uid),
                 before={k: before_fields[k] for k in changed},
                 after={k: after_fields[k] for k in changed},
+                ip=request.client.host if request.client else None,
             )
 
         out = await conn.fetchrow(
@@ -554,6 +557,7 @@ async def delete_user(
                 "llm_approved": row["llm_approved"],
             },
             after={"email": f"deleted-{uid}@local"},
+            ip=request.client.host if request.client else None,
         )
     return Response(status_code=204)
 
@@ -631,6 +635,7 @@ async def revoke_user_session(
             action="user.session_revoked",
             target_type="user",
             target_id=str(uid),
+            ip=request.client.host if request.client else None,
         )
     return Response(status_code=204)
 
@@ -664,19 +669,31 @@ class ApiKeyCreate(BaseModel):
     expires_at: Any = None
 
 
-@router.get("/api-keys", response_model=list[ApiKeyOut])
+class ApiKeyListOut(BaseModel):
+    """The bounded API-key listing plus whether the cap actually cut rows.
+
+    Without ``truncated``, a caller at exactly ``MAX_API_KEYS_LISTED`` rows
+    is indistinguishable from one with thousands more never shown.
+    """
+
+    keys: list[ApiKeyOut]
+    truncated: bool
+
+
+@router.get("/api-keys", response_model=ApiKeyListOut)
 async def list_api_keys(
     owner_user_id: int | None = None,
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-) -> list[ApiKeyOut]:
+) -> ApiKeyListOut:
     """List admin-issued API keys (rows with an ``owner_user_id``) -- excludes
     legacy operator-inserted rows that predate this table's ownership/label
     columns. ``key_hash`` no longer distinguishes the two: it is backfilled
     for every row, admin-issued or legacy.
 
-    Bounded: unscoped, this returns every admin-issued key in the system, and
-    that set only grows."""
+    Bounded: unscoped, this returns at most ``MAX_API_KEYS_LISTED`` of every
+    admin-issued key in the system, and that set only grows; ``truncated``
+    tells the caller whether the cap actually cut anything."""
     rows = await conn.fetch(
         """
         SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at
@@ -686,9 +703,11 @@ async def list_api_keys(
         LIMIT $2
         """,
         owner_user_id,
-        MAX_API_KEYS_LISTED,
+        MAX_API_KEYS_LISTED + 1,
     )
-    return [ApiKeyOut(**dict(r)) for r in rows]
+    truncated = len(rows) > MAX_API_KEYS_LISTED
+    page = rows[:MAX_API_KEYS_LISTED]
+    return ApiKeyListOut(keys=[ApiKeyOut(**dict(r)) for r in page], truncated=truncated)
 
 
 @router.post("/api-keys", response_model=ApiKeyIssued, status_code=201)
@@ -731,6 +750,7 @@ async def issue_api_key(
             target_type="user",
             target_id=str(body.owner_user_id),
             after={"label": body.label, "tier": body.tier},
+            ip=request.client.host if request.client else None,
         )
     return ApiKeyIssued(**dict(row), key=raw_key)
 
@@ -759,6 +779,7 @@ async def revoke_api_key(
             action="api_key.revoked",
             target_type="api_key",
             target_id=str(key_id),
+            ip=request.client.host if request.client else None,
         )
     return Response(status_code=204)
 
@@ -820,6 +841,7 @@ async def create_invite(
             target_type="invite",
             target_id=str(row["invite_id"]),
             after={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
+            ip=request.client.host if request.client else None,
         )
     return InviteOut(**dict(row))
 
@@ -1362,6 +1384,7 @@ async def _runs_for_day(conn: asyncpg.Connection, day: date) -> list[dict[str, A
     try:
         rows = await conn.fetch(RUNS_FOR_DAY_SQL, start, end)
     except Exception:
+        _log.warning("admin runs: pipeline_runs query failed for day %s", day, exc_info=True)
         return []
     return [shape_run(row) for row in rows]
 
@@ -1399,6 +1422,7 @@ class RunRequest(BaseModel):
 
 
 @router.post("/runs", response_model=AdminRuns, status_code=202)
+@limiter.limit(ADMIN_ACTION_LIMIT)
 async def trigger_run(
     body: RunRequest,
     request: Request,
@@ -1421,19 +1445,21 @@ async def trigger_run(
     if body.agency_id is not None and await conn.fetchval(LIVE_AGENCY_SQL, body.agency_id) is None:
         raise HTTPException(404, "agency not found")
 
-    row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, body.kind, body.agency_id, admin.user_id)
-    if row is None:
-        raise HTTPException(503, "pipeline runs are not recordable in this environment")
-    run = shape_run(row)
+    async with conn.transaction():
+        row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, body.kind, body.agency_id, admin.user_id)
+        if row is None:
+            raise HTTPException(503, "pipeline runs are not recordable in this environment")
+        run = shape_run(row)
 
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
-        action="pipeline.run",
-        target_type="agency" if body.agency_id is not None else "system",
-        target_id=str(body.agency_id) if body.agency_id is not None else None,
-        after={"kind": body.kind, "run_id": run["run_id"]},
-    )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="pipeline.run",
+            target_type="agency" if body.agency_id is not None else "system",
+            target_id=str(body.agency_id) if body.agency_id is not None else None,
+            after={"kind": body.kind, "run_id": run["run_id"]},
+            ip=request.client.host if request.client else None,
+        )
     _start_manual_run(
         background_tasks=background_tasks,
         kind=body.kind,

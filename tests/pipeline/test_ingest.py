@@ -213,6 +213,40 @@ def test_ingest_dedup_skips_seen_files(pg_conn, ch_client, agency_id, tmp_path):
     assert second == 0
 
 
+def test_ingest_dedup_skips_a_member_stamped_before_its_tarballs_own_date(pg_conn, ch_client, agency_id, tmp_path):
+    """The already-ingested skip-list is bounded by the dates the folder's
+    NAMES carry, but a tarball member's own YYYYMMDD directory overrides its
+    tarball's stem — so a member can be stamped before that bound. Left
+    unwidened, the bounded list cannot see such a member's earlier rows and
+    the second run re-inserts every one of them (`updates` has no unique
+    constraint to absorb that).
+    """
+    fake_row = (
+        "20260401/TripUpdate_113700.pb",
+        "2026-04-01T11:37:00",
+        "平日_11時37分_系統44372",
+        "平日",
+        "11:37",
+        "44372",
+        1,
+        120,
+    )
+    with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_row]):
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo(name="20260401/TripUpdate_113700.pb")
+            info.size = 1
+            tf.addfile(info, io.BytesIO(b"\x00"))
+        # Named nine days after the day its one member is stamped with.
+        (tmp_path / "20260410.tar.gz").write_bytes(buf.getvalue())
+
+        first = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+        second = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert first == 1
+    assert second == 0
+
+
 def test_ingest_agency_isolated(pg_conn, ch_client, tmp_path):
     """Two agencies ingesting same file_name don't interfere."""
     with pg_conn.cursor() as cur:

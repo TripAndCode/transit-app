@@ -503,7 +503,7 @@ export function useRevokeSession(uid: number) {
 
 // ── User drawer: API keys ─────────────────────────────────────────────────
 
-export type AdminApiKey = {
+type AdminApiKey = {
   id: number;
   owner_user_id: number | null;
   tier: string;
@@ -515,12 +515,16 @@ export type AdminApiKey = {
 
 export type AdminApiKeyIssued = AdminApiKey & { key: string };
 
+/** `truncated` is true when more admin-issued keys exist than the backend's
+ * per-request cap returned -- see MAX_API_KEYS_LISTED in api/routers/admin.py. */
+export type AdminApiKeyList = { keys: AdminApiKey[]; truncated: boolean };
+
 /** API keys issued (via the admin drawer) for one user. */
 export function useApiKeys(ownerUserId: number) {
   return useQuery({
     queryKey: ["adminApiKeys", ownerUserId],
     queryFn: ({ signal }) =>
-      apiGet<AdminApiKey[]>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
+      apiGet<AdminApiKeyList>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
   });
 }
 
@@ -658,6 +662,19 @@ export function usePatchFeatureFlag() {
   return useMutation({
     mutationFn: ({ key, value, reason }: { key: string; value: boolean; reason: string }) =>
       apiPatch<FeatureFlag>(`/api/admin/flags/${key}`, { value, reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminFlags"] });
+    },
+  });
+}
+
+/** Mutation: DELETE one flag's override, returning it to its env value.
+ *  Takes no reason — there is nothing to justify beyond "stop overriding",
+ *  and the server records the clear in the admin audit trail regardless. */
+export function useClearFeatureFlag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key }: { key: string }) => apiDelete<FeatureFlag>(`/api/admin/flags/${key}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminFlags"] });
     },

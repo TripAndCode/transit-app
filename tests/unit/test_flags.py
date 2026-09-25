@@ -7,6 +7,8 @@ env fallback is what's actually exercised, never a real Postgres.
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 
 import pytest
@@ -21,11 +23,17 @@ def _reset_flags_cache(monkeypatch):
     `DATABASE_URL` points at a port nothing listens on, so `flags._load_all`
     fails fast (connection refused) and falls back to env defaults --
     exactly the "DB unreachable" contract this module promises.
+
+    `reset_cache()` rather than `invalidate()`: an invalidated cache keeps
+    its entries so a live override survives a failed re-read, and a
+    synchronous reader is served those entries rather than blocking on the
+    database. That is the production contract, and it would leak one test's
+    resolved value into the next.
     """
     monkeypatch.setenv("DATABASE_URL", "postgresql://nobody@127.0.0.1:1/nonexistent")
-    flags.invalidate()
+    flags.reset_cache()
     yield
-    flags.invalidate()
+    flags.reset_cache()
 
 
 def test_flag_returns_env_default_when_db_unreachable(monkeypatch):
@@ -100,13 +108,86 @@ def test_an_expired_cache_refreshes_behind_the_reader(monkeypatch):
     assert flags.flag("ask_intent_cache_enabled", False) is False
 
 
-def test_invalidate_forces_immediate_reread(monkeypatch):
+def test_invalidate_is_honoured_by_the_next_async_read(monkeypatch):
+    """`invalidate()` promises the next read sees the new value. The async
+    read is what keeps that promise now, because it can do the blocking
+    database read in a worker thread instead of on the event loop."""
     monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
     assert flags.flag("weather_ingest_enabled", False) is True
 
     monkeypatch.setenv("WEATHER_INGEST_ENABLED", "false")
     flags.invalidate()
-    assert flags.flag("weather_ingest_enabled", False) is False
+    assert asyncio.run(flags.aflag("weather_ingest_enabled")) is False
+
+
+def test_a_sync_read_after_invalidate_serves_the_cached_value_without_a_db_read(monkeypatch):
+    """The synchronous path never blocks the caller on Postgres when it has
+    something to serve -- the documented trade-off being that a sync caller
+    may keep seeing the pre-invalidate value."""
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+    assert flags.flag("weather_ingest_enabled", False) is True
+
+    def _must_not_be_called():
+        raise AssertionError("the synchronous path read the database")
+
+    monkeypatch.setattr(flags, "_load_overrides", _must_not_be_called)
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "false")
+    flags.invalidate()
+    assert flags.flag("weather_ingest_enabled", False) is True
+    assert flags.get_flag_state("weather_ingest_enabled").value is True
+
+
+def test_a_forced_refresh_runs_in_a_worker_thread_not_on_the_event_loop(monkeypatch):
+    """The whole point of the async variants: the psycopg2 round trip must
+    happen off the loop thread, or every other request stalls behind it."""
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {})
+    flags.warm()
+
+    real_refresh = flags._refresh
+    refresh_threads: list[int] = []
+
+    def _recording_refresh() -> None:
+        refresh_threads.append(threading.get_ident())
+        real_refresh()
+
+    monkeypatch.setattr(flags, "_refresh", _recording_refresh)
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
+    flags.invalidate()
+
+    async def _read() -> tuple[flags.FlagState, int]:
+        return await flags.aget_flag_state("weather_ingest_enabled"), threading.get_ident()
+
+    state, loop_thread = asyncio.run(_read())
+    assert state.value is True
+    assert refresh_threads, "the forced refresh never ran"
+    assert loop_thread not in refresh_threads, "the refresh ran on the event loop thread"
+
+
+def test_an_async_read_of_a_fresh_cache_does_not_refresh_at_all(monkeypatch):
+    monkeypatch.setenv("ASK_QUERY_LOG_ENABLED", "true")
+    assert asyncio.run(flags.aflag("ask_query_log_enabled")) is True
+
+    def _must_not_be_called():
+        raise AssertionError("a fresh cache was re-read")
+
+    monkeypatch.setattr(flags, "_load_overrides", _must_not_be_called)
+    assert asyncio.run(flags.aflag("ask_query_log_enabled")) is True
+
+
+def test_aget_flag_state_rejects_an_unknown_key():
+    with pytest.raises(KeyError):
+        asyncio.run(flags.aget_flag_state("not_a_real_flag"))
+
+
+def test_reset_cache_forgets_even_an_override(monkeypatch):
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {"weather_ingest_enabled": (True, "pilot", 1, None)})
+    flags.warm()
+    assert flags.get_flag_state("weather_ingest_enabled").source == "override"
+
+    monkeypatch.setattr(flags, "_load_overrides", lambda: None)
+    flags.reset_cache()
+    monkeypatch.setenv("WEATHER_INGEST_ENABLED", "false")
+    assert flags.get_flag_state("weather_ingest_enabled").source == "env"
 
 
 def test_registry_covers_every_known_gated_env_var():
@@ -170,6 +251,7 @@ def test_an_override_survives_a_database_read_failure(monkeypatch):
 
     monkeypatch.setattr(flags, "_load_overrides", lambda: None)
     flags.invalidate()
+    flags.warm()
     state = flags.get_flag_state("ask_intent_cache_enabled")
     assert state.value is False, "the override was lost when the read failed"
     assert state.source == "override"
@@ -185,6 +267,7 @@ def test_an_env_change_still_lands_while_the_database_is_unreadable(monkeypatch)
 
     monkeypatch.setenv("WEATHER_INGEST_ENABLED", "false")
     flags.invalidate()
+    flags.warm()
     assert flags.flag("weather_ingest_enabled", False) is False
 
 
@@ -207,10 +290,12 @@ def test_an_unrecognised_env_value_keeps_the_flags_own_default(monkeypatch):
 
     monkeypatch.setenv("ASK_QUERY_LOG_ENABLED", "false")
     flags.invalidate()
+    flags.warm()
     assert flags.flag("ask_query_log_enabled", True) is False
 
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "nonsense")
     flags.invalidate()
+    flags.warm()
     assert flags.flag("ask_intent_cache_enabled", False) is False
 
 
@@ -276,7 +361,7 @@ def test_a_refresh_that_began_before_a_write_cannot_overwrite_it(monkeypatch):
     time.sleep(0.05)
 
     flags.invalidate()  # the PATCH
-    assert flags.get_flag_state(key).reason == "after-the-write"
+    assert asyncio.run(flags.aget_flag_state(key)).reason == "after-the-write"
 
     if flags._refresh_thread is not None:
         flags._refresh_thread.join(timeout=5)

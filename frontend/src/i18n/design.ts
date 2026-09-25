@@ -1,6 +1,6 @@
 export const design = {
   ja: {
-    overview: "概況", period_overview: "期間概況", analysis: "区間分析", reports: "レポート", live: "現在の運行",
+    overview: "概況", operations: "運行状況", period_overview: "期間概況", analysis: "区間分析", reports: "レポート", live: "現在の運行",
     aggregateDate: "最新集計日", excluded: "除外した異常値", lastObserved: "最新の観測日時",
     mapUnavailable: "この環境では地図を表示できません。観測データは引き続き確認できます。",
     investigate: "遅れが増えた区間を調べる", reportTitle: "運行の傾向を、一枚にまとめる",
@@ -39,7 +39,7 @@ export const design = {
     copyLinkFallback: "このリンクを選択してコピーしてください", pngFailed: "画像を作成できませんでした",
   },
   en: {
-    overview: "Overview", period_overview: "Period overview", analysis: "Segment analysis", reports: "Reports", live: "Current observations",
+    overview: "Overview", operations: "Operations", period_overview: "Period overview", analysis: "Segment analysis", reports: "Reports", live: "Current observations",
     aggregateDate: "Latest aggregate date", excluded: "Excluded implausible observations", lastObserved: "Latest observation timestamp",
     mapUnavailable: "The map is unavailable in this environment. Observation data remains available.",
     investigate: "Where does delay build up?", reportTitle: "Summarize service performance in one page",
