@@ -463,25 +463,35 @@ describe("--delay-severe clears AA on its own theme's surface", () => {
   });
 });
 
-describe("--delay-text-ok/mild/moderate clear AA on --bg-surface in both themes", () => {
-  it.each(["--delay-text-ok", "--delay-text-mild", "--delay-text-moderate"])(
-    "%s clears 4.5:1 against the light surface",
-    (prop) => {
-      expect(contrastRatio(decl(rootBlock, prop)!, decl(rootBlock, "--bg-surface")!)).toBeGreaterThanOrEqual(4.5);
+/** Every surface a `delayTextColor()` figure actually renders on. Checking
+ *  only `--bg-surface` is what let these tokens ship tuned to clear AA on a
+ *  card while failing on the page, the soft fill and the current-row tint --
+ *  the KPI hero sits on the page, the report bar cell on the page, and the
+ *  network row on `--bg-soft` or `--accent-soft` when it is the active one. */
+const DELAY_TEXT_SURFACES = ["--bg-surface", "--bg-page", "--bg-soft", "--accent-soft"];
+const DELAY_TEXT_TOKENS = ["--delay-text-ok", "--delay-text-mild", "--delay-text-moderate"];
+
+describe("--delay-text-ok/mild/moderate clear AA on every surface they render on", () => {
+  it.each(DELAY_TEXT_TOKENS.flatMap((prop) => DELAY_TEXT_SURFACES.map((surface) => [prop, surface])))(
+    "%s clears 4.5:1 on light %s",
+    (prop, surface) => {
+      expect(contrastRatio(decl(rootBlock, prop)!, decl(rootBlock, surface)!)).toBeGreaterThanOrEqual(4.5);
     },
   );
 
-  it.each(["--delay-text-ok", "--delay-text-mild", "--delay-text-moderate"])(
-    "%s clears 4.5:1 against the dark surface",
-    (prop) => {
-      expect(contrastRatio(decl(darkBlock, prop)!, decl(darkBlock, "--bg-surface")!)).toBeGreaterThanOrEqual(4.5);
+  it.each(DELAY_TEXT_TOKENS.flatMap((prop) => DELAY_TEXT_SURFACES.map((surface) => [prop, surface])))(
+    "%s clears 4.5:1 on dark %s",
+    (prop, surface) => {
+      const onDark = decl(darkBlock, surface) ?? decl(rootBlock, surface)!;
+      expect(contrastRatio(decl(darkBlock, prop)!, onDark)).toBeGreaterThanOrEqual(4.5);
     },
   );
 
-  it("the dark values are identical to the plain ramp's own fills (already AA-passing there)", () => {
-    expect(decl(darkBlock, "--delay-text-ok")).toBe(DELAY_RAMP.ok);
-    expect(decl(darkBlock, "--delay-text-mild")).toBe(DELAY_RAMP.mild);
-    expect(decl(darkBlock, "--delay-text-moderate")).toBe(DELAY_RAMP.moderate);
+  it("is a distinct set from the plain ramp, which is for fills and fails as text", () => {
+    // The dark ramp reads as AA-passing against a card and is not against the
+    // page tints, so text needs its own values in both themes, not just light.
+    expect(decl(darkBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
+    expect(decl(rootBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
   });
 });
 

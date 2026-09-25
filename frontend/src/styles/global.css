@@ -126,9 +126,9 @@
      than desaturating to grey. The severe tier needs no text variant: it is
      already per-theme and AA-passing (--delay-severe above). Dark-theme
      values reuse the fills themselves -- see the dark declaration. */
-  --delay-text-ok: #248460;
-  --delay-text-mild: #916F21;
-  --delay-text-moderate: #BD5725;
+  --delay-text-ok: #217857;
+  --delay-text-mild: #85661E;
+  --delay-text-moderate: #AC4F22;
   /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
      ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
@@ -264,9 +264,9 @@
   /* The plain delay-ramp fills already clear 4.5:1 on this theme's
      --bg-surface, so the dark text variants are the fills themselves — see
      the light declaration for why light needs its own darkened set. */
-  --delay-text-ok: #2EA87A;
+  --delay-text-ok: #31B483;
   --delay-text-mild: #C99A2E;
-  --delay-text-moderate: #D4622A;
+  --delay-text-moderate: #E08A61;
   /* --color-warning itself already clears 4.5:1 on this theme's surfaces —
      see the light declaration for why light needs a separate darkened value. */
   --color-warning-text: #C99A2E;
