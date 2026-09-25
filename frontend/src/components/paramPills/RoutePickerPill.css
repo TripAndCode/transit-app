@@ -15,7 +15,7 @@
   min-width: 180px;
   max-width: 260px;
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   background: var(--bg-surface, #fff);
   border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.14));
@@ -34,7 +34,7 @@
 .rp-trigger.is-open {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft, rgba(91, 108, 173, 0.15));
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .rp-trigger:disabled {
   cursor: not-allowed;
@@ -72,7 +72,7 @@
   background: var(--bg-surface, #fff);
   border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.12));
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--el-2);
   z-index: var(--z-dropdown);
 }
 
@@ -99,7 +99,7 @@
 .rp-search {
   width: 100%;
   padding: 7px 9px 7px 30px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   background: var(--bg-soft);
   border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.1));
@@ -108,7 +108,7 @@
 .rp-search:focus-visible {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft, rgba(91, 108, 173, 0.15));
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .rp-list {
@@ -142,10 +142,10 @@
   background: var(--bg-soft);
 }
 .rp-opt[aria-selected="true"] {
-  background: var(--accent-soft, rgba(91, 108, 173, 0.14));
+  background: var(--accent-soft);
 }
 .rp-opt-name {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -156,7 +156,7 @@
   font-weight: 600;
 }
 .rp-opt-code {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-tertiary, #999);
 }

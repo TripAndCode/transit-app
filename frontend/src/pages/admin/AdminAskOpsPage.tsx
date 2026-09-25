@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
+import { ErrorBanner } from "../../components/ErrorBanner";
 import {
   useAdminAskEval,
   useAdminAskFunnel,
@@ -10,7 +11,6 @@ import {
   type AskQueryLogRow,
   type AskRoute,
 } from "../../api/admin";
-import { formatApiError } from "../../api/client";
 import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
 
@@ -163,7 +163,7 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
 
   return (
     <>
-      {error && <div style={{ color: "var(--text-tertiary)" }}>{formatApiError(error)}</div>}
+      {error != null && <ErrorBanner error={error} />}
       {isLoading && <div>{t("common.loading")}</div>}
       {promoteMessage && (
         <div role="status" style={{ marginBottom: 12, fontSize: 13, color: "var(--text-secondary)" }}>
@@ -273,10 +273,9 @@ export function AdminAskOpsPage() {
         <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 8 }}>
           {t("admin.ask_ops.funnel.total", { count: funnel?.total ?? 0 })}
         </div>
-        <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-tertiary)" }}>
-          <strong>{t("admin.ask_ops.funnel.providers_title")}:</strong>{" "}
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-tertiary)" }}>
           {t("admin.ask_ops.funnel.providers_not_tracked")}
-        </div>
+        </p>
       </section>
 
       <section

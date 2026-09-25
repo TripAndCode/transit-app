@@ -309,6 +309,7 @@
     "title": "利用マニュアル",
     "sections_nav": "マニュアルの目次",
     "search_placeholder": "マニュアル内を検索（近日公開）",
+    "search_disabled_reason": "マニュアル内検索は準備中です。左の目次から選んでください。",
     "category_shortcut_label": "{{title}}へ移動",
     "hint_text": "はじめての方へ：利用マニュアルで使い方を確認できます。",
     "hint_cta": "ヘルプを見る",
@@ -1069,7 +1070,13 @@
           "suspended": "{{count}} 件を停止しました",
           "promoted": "{{count}} 件を管理者にしました",
           "demoted": "{{count}} 件を一般ユーザーにしました"
-        }
+        },
+        "delete_title": "選択したユーザーを削除しますか？",
+        "delete_body": "{{count}} 件のユーザーを匿名化します。元に戻せません。"
+      },
+      "shortcut": {
+        "approve": "AI利用を承認",
+        "search": "検索へ移動"
       }
     },
     "user_detail": {
@@ -1299,7 +1306,6 @@
       "reason_placeholder": "この変更の理由を入力してください",
       "confirm": "保存",
       "cancel": "キャンセル",
-      "load_error": "機能フラグを読み込めませんでした。",
       "clear_override": "上書きを解除",
       "clear_error": "上書きを解除できませんでした。",
       "labels": {
@@ -1318,12 +1324,19 @@
       "saved_views": "保存された表示",
       "empty": "該当する行がありません。",
       "select_all": "すべて選択",
-      "select_row": "{{label}} を選択"
+      "select_row": "{{label}} を選択",
+      "shortcuts": {
+        "trigger": "ショートカット",
+        "title": "キーボードショートカット",
+        "next": "次の行へ",
+        "prev": "前の行へ",
+        "select": "選択を切り替え",
+        "open": "行を開く"
+      }
     },
     "board": {
       "title": "管制盤",
       "poll_note": "10 秒ごとに更新",
-      "load_error": "管制盤の取得に失敗しました。取得できた分のみ表示しています。",
       "reanalyze": "いま再集計",
       "reanalyze_confirm_title": "いま再集計しますか？",
       "reanalyze_confirm_body": "取り込みと集計を実行します。数分かかることがあり、実行中の結果はタイムラインに表示されます。",
@@ -1331,6 +1344,8 @@
       "reanalyze_cancel": "やめる",
       "reanalyze_started": "再集計を開始しました。タイムラインに表示されます。",
       "reanalyze_error": "再集計を開始できませんでした。",
+      "reanalyze_busy_reason": "再集計の実行中です。完了までお待ちください。",
+      "reanalyze_unavailable_reason": "管制盤の読み込みが終わるまで再集計は実行できません。",
       "runs_title": "実行タイムライン · 今日",
       "runs_legend": "スキップした実行は破線",
       "runs_empty": "今日はまだ実行記録がありません。",
@@ -1357,7 +1372,6 @@
       "collector": {
         "oracle_crawler": "Oracle クローラ",
         "r2": "R2 同期",
-        "vps_loop": "VPS ループ",
         "github": "CI (GitHub)"
       },
       "status": {
@@ -1438,7 +1452,6 @@
         "title": "ルート別ファネル",
         "total": "合計: {{count}}",
         "success_of": "{{success}} / {{count}} 件成功",
-        "providers_title": "プロバイダー",
         "providers_not_tracked": "プロバイダーは質問単位では記録されていません—記録されるのはルート段階のみです。"
       },
       "kill_switch": {

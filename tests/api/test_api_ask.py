@@ -315,7 +315,7 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
     assert resp.status_code == 200
     assert captured["history"] and captured["history"][0]["question"] == "停留所はいくつ？"
     assert resp.json().get("router_stage") == "llm"
-    # Regression pin (item 8 / NEXT_TASK.md): a recognized pagination
+    # Regression pin: a recognized pagination
     # follow-up must force a tool call rather than leave tool_choice="auto",
     # which live-observed a bare "次の50件" coming back with tool_call: None.
     assert captured["force_tool_call"] is True

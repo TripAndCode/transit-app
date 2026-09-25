@@ -97,7 +97,39 @@ export function useFocusTrap(
   }, [active, containerRef, initialFocusRef]);
 }
 
-/** Activation order, so the last entry is whichever trap is on top. Overlays
- *  stack in the order they open, so nothing has to know about anything else
- *  to find out whether it is the one a keypress belongs to. */
+/**
+ * Escape for a surface that owns dismissal but deliberately traps nothing --
+ * a non-modal overlay that leaves the page behind usable. It shares the stack
+ * above rather than keeping its own: a surface listening on `document`
+ * outside the stack answers an Escape meant for whatever opened over it, and
+ * `stopPropagation` from the topmost trap does not reach a sibling listener
+ * on the same target.
+ */
+export function useTopmostEscape(active: boolean, onEscape: () => void): void {
+  const escape = useEffectEvent(() => onEscape());
+
+  useEffect(() => {
+    if (!active) return;
+    const token = Symbol("escape-layer");
+    ACTIVE_TRAPS.push(token);
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (ACTIVE_TRAPS[ACTIVE_TRAPS.length - 1] !== token) return;
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      escape();
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      const at = ACTIVE_TRAPS.indexOf(token);
+      if (at !== -1) ACTIVE_TRAPS.splice(at, 1);
+    };
+  }, [active]);
+}
+
+/** Activation order, so the last entry is whichever surface is on top.
+ *  Overlays stack in the order they open, so nothing has to know about
+ *  anything else to find out whether it is the one a keypress belongs to. */
 const ACTIVE_TRAPS: symbol[] = [];

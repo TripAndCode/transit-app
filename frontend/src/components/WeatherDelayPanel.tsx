@@ -15,7 +15,7 @@ import type { WeatherDelayBucket } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { delayColor } from "../styles/tokens";
-import { th, td } from "./tableStyles";
+import { SHARED_TABLE, th, td } from "./tableStyles";
 import { formatNumber } from "../utils/format";
 
 function fmtDelaySec(v: number | null, t: TFunction): string {
@@ -71,7 +71,7 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) 
             <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>{data.station.note}</p>
           )}
           <div style={{ width: "100%", overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table style={SHARED_TABLE}>
               <thead>
                 <tr style={{ background: "var(--bg-soft)" }}>
                   <th style={th({ align: "left" })}>{t("reports.weather_delay.col.condition")}</th>

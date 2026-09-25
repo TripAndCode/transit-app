@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Post-install/post-rollback smoke check for the operations-monitoring hub.
 
-`scripts/ops_status_page.collect_all` already isolates each of the four
-collectors (`vps_loop`, `github`, `oracle_crawler`, `r2`) behind its own
+`scripts/ops_status_page.collect_all` already isolates each of the three
+collectors (`github`, `oracle_crawler`, `r2`) behind its own
 `try`/`except`, so a single broken collector never crashes the combined page
 or `ops_alerts.py`'s poll -- it just degrades that one component to
 `unknown` with a `collector_error` detail. That isolation is exactly why a
@@ -25,7 +25,7 @@ usually just means a credential or cache path still needs to be configured
 on this particular box -- but it is always printed, never swallowed, so an
 operator running this right after install sees it immediately.
 
-Exit code: 0 when all four expected components were returned and every one
+Exit code: 0 when all three expected components were returned and every one
 validates against the shared contract; 1 otherwise.
 """
 
@@ -81,9 +81,7 @@ def check_collector_warnings(documents: Sequence[dict]) -> list[str]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument(
-        "--repo", type=Path, default=DEFAULT_LOCAL_REPO, help="Local checkout for vps_loop/github facts"
-    )
+    parser.add_argument("--repo", type=Path, default=DEFAULT_LOCAL_REPO, help="Local checkout for github facts")
     parser.add_argument(
         "--github-repo",
         default=DEFAULT_GITHUB_REPO_SLUG,
@@ -107,7 +105,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"FAIL: {problem}", file=sys.stderr)
         return 1
 
-    print("OK: all four components collected and validate against the operations-status contract")
+    print("OK: all three components collected and validate against the operations-status contract")
     return 0
 
 

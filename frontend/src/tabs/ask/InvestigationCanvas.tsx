@@ -8,6 +8,7 @@ import { ResultExports } from "./ResultExports";
 import { stopEvidence, type StopFocus } from "./stopEvidence";
 import { StopEvidenceChart } from "./StopEvidenceChart";
 import { StopPatternResult } from "./StopPatternResult";
+import { Tooltip } from "../../components/Tooltip";
 import "./investigation.css";
 
 export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepChange, onChip, children }: {
@@ -47,21 +48,28 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
   return (
     <section className="investigation" aria-label={t("ask.workspace.title")}>
       <header className="investigation-heading">
-        <h2 title={selected.question}>{selected.question.split("\n")[0] || t("ask.workspace.retained_result")}</h2>
+        <Tooltip label={selected.question || t("ask.workspace.retained_result")}>
+          <h2
+            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- heading, not a control; keyboard-focusable only so the tooltip revealing the untruncated question is reachable
+            tabIndex={0}
+          >
+            {selected.question.split("\n")[0] || t("ask.workspace.retained_result")}
+          </h2>
+        </Tooltip>
       </header>
       <details className="investigation-history">
         <summary>{t("ask.workspace.steps")} · {t("ask.workspace.step_count", { count: steps.length })}</summary>
       <nav className="investigation-steps" aria-label={t("ask.workspace.steps")}>
         {steps.map((step, index) => (
-          <button
-            key={step.id}
-            type="button"
-            aria-current={step.id === selected.id ? "step" : undefined}
-            onClick={() => selectStep({ id: step.id, latestId: latest.id })}
-            title={step.question || t("ask.workspace.retained_result")}
-          >
-            {index + 1}. {step.question.split("\n")[0] || t("ask.workspace.retained_result")}
-          </button>
+          <Tooltip key={step.id} label={step.question || t("ask.workspace.retained_result")}>
+            <button
+              type="button"
+              aria-current={step.id === selected.id ? "step" : undefined}
+              onClick={() => selectStep({ id: step.id, latestId: latest.id })}
+            >
+              {index + 1}. {step.question.split("\n")[0] || t("ask.workspace.retained_result")}
+            </button>
+          </Tooltip>
         ))}
       </nav>
       </details>

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { Link, Outlet, useNavigate, useSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -12,11 +12,14 @@ import {
 import { useSession } from "../../api/auth";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { useToast } from "../../components/ui/toastContext";
 import { Z_INDEX } from "../../styles/zIndex";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
+import { Modal } from "../../components/Modal";
 import { InviteDialog } from "./InviteDialog";
 import { pageItems } from "./pageItems";
+import { isTypingTarget } from "../../utils/isTypingTarget";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -45,14 +48,6 @@ const BULK_TOAST_KEY: Record<BulkAction, string> = {
   promote: "promoted",
   demote: "demoted",
 };
-
-/** True for an element that consumes plain-letter keystrokes as text input,
- * so the j/k/x/a// shortcuts below don't fire while the admin is typing. */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || target.isContentEditable;
-}
 
 /** The search box's own local-edit + debounce-commit state, extracted so the
  *  displayed value can track `q` for any reason it changes -- including a
@@ -111,11 +106,12 @@ function AdminUserSearchBox({
 }
 
 /** Admin: searchable, filterable, paginated user list with bulk selection (checkbox
- *  column, floating bulk-action bar, 8s undo), saved views, keyboard navigation
+ *  column, floating bulk-action bar, undo toast), saved views, keyboard navigation
  *  (j/k move focus, x toggles selection, a approves, / focuses search, Enter opens),
  *  and inline role / suspend / delete controls. */
 export function AdminUsersPage() {
   const { t } = useTranslation();
+  const toast = useToast();
   const [inviteOpen, setInviteOpen] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -184,13 +180,8 @@ export function AdminUsersPage() {
     setSelected(new Set());
   }
 
-  const [undo, setUndo] = useState<{ message: string; ids: number[]; inverse: UserPatchBody } | null>(null);
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    };
-  }, []);
+  const [bulkDeleteIds, setBulkDeleteIds] = useState<number[] | null>(null);
+  const bulkDeleteTitleId = useId();
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -227,9 +218,10 @@ export function AdminUsersPage() {
   const bulkBusy = bulkPatch.isPending || del.isPending;
 
   function showUndo(message: string, ids: number[], inverse: UserPatchBody) {
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    setUndo({ message, ids, inverse });
-    undoTimerRef.current = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    toast.show(message, {
+      durationMs: UNDO_WINDOW_MS,
+      action: { label: t("admin.users.bulk.undo"), onClick: () => bulkPatch.mutate({ ids, patch: inverse }) },
+    });
   }
 
   function runBulkAction(action: BulkAction, ids: number[]) {
@@ -250,19 +242,20 @@ export function AdminUsersPage() {
     );
   }
 
-  function handleUndo() {
-    if (!undo) return;
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    bulkPatch.mutate({ ids: undo.ids, patch: undo.inverse });
-    setUndo(null);
+  // One dialog for the whole batch, naming every row it will anonymize. The
+  // per-row `confirm()` this replaces asked once per id, so deleting ten
+  // users meant answering ten identical prompts -- which trains an operator
+  // to dismiss the eleventh without reading it.
+  function requestBulkDelete(ids: number[]) {
+    const targets = ids.filter(isSelectable);
+    if (targets.length > 0) setBulkDeleteIds(targets);
   }
 
-  async function handleBulkDelete(ids: number[]) {
-    for (const uid of ids.filter(isSelectable)) {
-      const row = rows.find((u) => u.user_id === uid);
-      if (!row) continue;
-      if (!confirm(t("admin.users.confirm_delete", { email: row.email }))) continue;
-      patch.reset();
+  async function confirmBulkDelete() {
+    const ids = bulkDeleteIds ?? [];
+    setBulkDeleteIds(null);
+    patch.reset();
+    for (const uid of ids) {
       await del.mutateAsync(uid);
     }
     setSelected(new Set());
@@ -501,6 +494,10 @@ export function AdminUsersPage() {
         onSelectionChange={(next) => setSelected(new Set([...next].map(Number)))}
         onOpen={(u) => navigate(`/admin/users/${u.user_id}`, { state: { listSearch: searchParams.toString() } })}
         onRowKeyDown={onRowKeyDown}
+        extraShortcuts={[
+          { keys: "a", description: t("admin.users.shortcut.approve") },
+          { keys: "/", description: t("admin.users.shortcut.search") },
+        ]}
         savedViews={savedViewChips}
         activeView={activeView}
         onSelectView={(id) => selectView(id as SavedView)}
@@ -546,12 +543,12 @@ export function AdminUsersPage() {
             background: "var(--surface-1)",
             border: "1px solid var(--border-subtle)",
             borderRadius: 999,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+            boxShadow: "var(--el-2)",
             padding: "8px 8px 8px 16px",
             display: "flex",
             gap: 8,
             alignItems: "center",
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
             zIndex: Z_INDEX.sticky,
           }}
         >
@@ -587,7 +584,7 @@ export function AdminUsersPage() {
             <option value="admin">{t("account.role.admin")}</option>
             <option value="user">{t("account.role.user")}</option>
           </select>
-          <AdminButton variant="danger" disabled={bulkBusy} onClick={() => handleBulkDelete([...selected])}>
+          <AdminButton variant="danger" disabled={bulkBusy} onClick={() => requestBulkDelete([...selected])}>
             {t("admin.users.action.delete")}
           </AdminButton>
           <AdminButton variant="secondary" onClick={() => setSelected(new Set())}>
@@ -595,37 +592,38 @@ export function AdminUsersPage() {
           </AdminButton>
         </div>
       )}
-      {undo && (
-        <div
-          role="status"
-          style={{
-            position: "fixed",
-            left: 24,
-            bottom: 24,
-            background: "var(--text-primary)",
-            color: "var(--surface-1)",
-            borderRadius: 6,
-            padding: "8px 14px",
-            display: "flex",
-            gap: 12,
-            alignItems: "center",
-            fontSize: 13,
-            // Above the selection bar it shares a corner with: undoing is
-            // the one action still worth taking while both are on screen.
-            zIndex: Z_INDEX.toast,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.16)",
-          }}
-        >
-          <span>{undo.message}</span>
-          <button
-            type="button"
-            onClick={handleUndo}
-            style={{ color: "var(--accent)", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}
-          >
-            {t("admin.users.bulk.undo")}
-          </button>
+      <Modal
+        open={bulkDeleteIds !== null}
+        onClose={() => setBulkDeleteIds(null)}
+        labelledBy={bulkDeleteTitleId}
+        style={{
+          width: "min(460px, calc(100vw - 32px))",
+          padding: 20,
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius)",
+          boxShadow: "var(--el-2)",
+        }}
+      >
+        <h2 id={bulkDeleteTitleId} style={{ margin: "0 0 8px", fontSize: 16 }}>
+          {t("admin.users.bulk.delete_title")}
+        </h2>
+        <p style={{ margin: "0 0 12px", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+          {t("admin.users.bulk.delete_body", { count: bulkDeleteIds?.length ?? 0 })}
+        </p>
+        <ul style={{ margin: "0 0 16px", paddingLeft: 18, fontSize: "var(--text-sm)", maxHeight: 200, overflowY: "auto" }}>
+          {(bulkDeleteIds ?? []).map((uid) => (
+            <li key={uid}>{rows.find((u) => u.user_id === uid)?.email ?? uid}</li>
+          ))}
+        </ul>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <AdminButton variant="secondary" onClick={() => setBulkDeleteIds(null)}>
+            {t("common.cancel")}
+          </AdminButton>
+          <AdminButton variant="danger" onClick={() => void confirmBulkDelete()}>
+            {t("admin.users.action.delete")}
+          </AdminButton>
         </div>
-      )}
+      </Modal>
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
       <Outlet />
     </div>

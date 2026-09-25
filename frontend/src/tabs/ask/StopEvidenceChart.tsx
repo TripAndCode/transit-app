@@ -4,6 +4,7 @@ import type { ConvMessage } from "../../api/types";
 import { conditionsLabel, provenancePath, toolLabel } from "./provenance";
 import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
+import { Tooltip } from "../../components/Tooltip";
 import { formatNumber } from "../../utils/format";
 import "./stopEvidence.css";
 
@@ -121,25 +122,26 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
             style={{ bottom: `${(tick - low) / span * 100}%` }}><i>{Number(tick.toPrecision(8))}</i></span>)}</div>
           <div className={`stop-evidence-bars${size > 16 ? " stop-evidence-overview" : ""}`} role="group" aria-label={t("ask.evidence.select")}>
             {visiblePoints.map((point) => (
-              <button key={point.sequence} className="stop-evidence-column" type="button"
-                aria-pressed={selected?.sequence === point.sequence}
-                aria-controls={selected?.sequence === point.sequence ? detailId : undefined}
-                title={`${point.name} · #${point.sequence}`}
-                aria-label={t(point.minutes === null ? "ask.evidence.missing_label" : "ask.evidence.bar_label", { name: point.name, sequence: point.sequence, minutes: point.minutes, count: point.samples })}
-                onClick={(event) => { selectedButtonRef.current = event.currentTarget; select(point); }}>
-                <span className="stop-evidence-plot">
-                  <span className="stop-evidence-zero" style={{ bottom: `${-low / span * 100}%` }} />
-                  {point.minutes === null ? <span className="stop-evidence-missing">—<br />{t("ask.evidence.missing")}</span> : <>
-                  <span className="stop-evidence-bar" style={{
-                    bottom: `${(Math.min(0, point.minutes) - low) / span * 100}%`,
-                    height: `${Math.abs(point.minutes) / span * 100}%`,
-                  }} />
-                  <span className="stop-evidence-value" style={{ bottom: `${(Math.max(0, point.minutes) - low) / span * 100}%` }}>{formatNumber(point.minutes)}</span>
-                  </>}
-                </span>
-                <span className="stop-evidence-name">{point.name}</span>
-                <span className="investigation-caption">#{point.sequence}</span>
-              </button>
+              <Tooltip key={point.sequence} label={`${point.name} · #${point.sequence}`}>
+                <button className="stop-evidence-column" type="button"
+                  aria-pressed={selected?.sequence === point.sequence}
+                  aria-controls={selected?.sequence === point.sequence ? detailId : undefined}
+                  aria-label={t(point.minutes === null ? "ask.evidence.missing_label" : "ask.evidence.bar_label", { name: point.name, sequence: point.sequence, minutes: point.minutes, count: point.samples })}
+                  onClick={(event) => { selectedButtonRef.current = event.currentTarget; select(point); }}>
+                  <span className="stop-evidence-plot">
+                    <span className="stop-evidence-zero" style={{ bottom: `${-low / span * 100}%` }} />
+                    {point.minutes === null ? <span className="stop-evidence-missing">—<br />{t("ask.evidence.missing")}</span> : <>
+                    <span className="stop-evidence-bar" style={{
+                      bottom: `${(Math.min(0, point.minutes) - low) / span * 100}%`,
+                      height: `${Math.abs(point.minutes) / span * 100}%`,
+                    }} />
+                    <span className="stop-evidence-value" style={{ bottom: `${(Math.max(0, point.minutes) - low) / span * 100}%` }}>{formatNumber(point.minutes)}</span>
+                    </>}
+                  </span>
+                  <span className="stop-evidence-name">{point.name}</span>
+                  <span className="investigation-caption">#{point.sequence}</span>
+                </button>
+              </Tooltip>
             ))}
           </div>
           <p className="investigation-caption">{t("ask.evidence.unit")}</p>

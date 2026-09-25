@@ -3,11 +3,11 @@ import type { TFunction } from "i18next";
 import { delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
-import { th, td } from "./tableStyles";
+import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
+import { formatNumber, fmtPct } from "../utils/format";
 
 const ROWS_CAP = 200;
-import { formatNumber } from "../utils/format";
 
 type Schema = {
   /** Column index in the row tuple */
@@ -124,13 +124,6 @@ function fmtMin(v: unknown, t: TFunction): string {
   return `${n.toFixed(1)}${t("common.unit_min")}`;
 }
 
-function fmtPct(v: unknown, _t: TFunction): string {
-  if (v == null) return "—";
-  const n = Number(v);
-  if (!isFinite(n)) return "—";
-  return `${n.toFixed(1)}%`;
-}
-
 function fmtNum(v: unknown, _t: TFunction): string {
   if (v == null) return "—";
   const n = Number(v);
@@ -181,7 +174,7 @@ export function ReportTable({ reportType, rows }: Props) {
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <table style={SHARED_TABLE}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
             <th style={th({ width: 40 })}>#</th>

@@ -4,25 +4,25 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-  type RefObject,
 } from "react";
 import { useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Search } from "lucide-react";
 import { useAgencies, useRoutes } from "../api/hooks";
-import { useFocusTrap } from "../hooks/useFocusTrap";
 import { useRouteNames } from "../api/useRouteNames";
 import { ctxToQueryString, useRangeContext, type TimeBand } from "../api/rangeContext";
 import { buildTimeBandOptions } from "./timeBandOptions";
 import { REPORT_TYPE_IDS, buildReportTypeLabels } from "../tabs/reportTypes";
 import { useTheme } from "../styles/useTheme";
 import { filterItems, type Searchable } from "./commandPaletteMatch";
+import { isTypingTarget } from "../utils/isTypingTarget";
 import { onActivateKey } from "../utils/a11y";
 import { modifierKeyLabel } from "../utils/platform";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
 import { GO_TO_TARGETS } from "./paletteNavTargets";
+import { OverlayBase } from "./ui/OverlayBase";
+import { Z_INDEX } from "../styles/zIndex";
 import "./commandPalette.css";
 
 const RECENTS_KEY = "transit.commandPaletteRecents";
@@ -61,50 +61,6 @@ function pushRecentId(id: string): string[] {
   const next = [id, ...readRecentIds().filter((existing) => existing !== id)].slice(0, MAX_RECENTS);
   writeRecentIds(next);
   return next;
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
-}
-
-/**
- * The palette's own overlay chrome (a top-anchored card, not `Modal`'s
- * centered one) over the shared dialog semantics: Escape closes the topmost
- * surface only, Tab cycles inside the card, and focus returns to whatever
- * was focused before it opened. Rendered only while open, so the trap is
- * unconditionally active for as long as this component is mounted.
- */
-function Dialog({
-  onClose,
-  ariaLabel,
-  className,
-  initialFocusRef,
-  children,
-}: {
-  onClose: () => void;
-  ariaLabel: string;
-  className: string;
-  initialFocusRef?: RefObject<HTMLElement | null>;
-  children: ReactNode;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  useFocusTrap(true, containerRef, onClose, initialFocusRef);
-
-  return (
-    <div
-      className="cmdp-overlay"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div ref={containerRef} className={className} role="dialog" aria-modal="true" aria-label={ariaLabel}>
-        {children}
-      </div>
-    </div>
-  );
 }
 
 function buildAgencyItems(
@@ -386,8 +342,15 @@ export function CommandPalette() {
 
   return (
     <>
-      {open && (
-        <Dialog onClose={closePalette} ariaLabel={t("palette.aria_label")} className="cmdp-palette" initialFocusRef={inputRef}>
+      <OverlayBase
+        open={open}
+        onClose={closePalette}
+        ariaLabel={t("palette.aria_label")}
+        className="cmdp-palette"
+        scrimClassName="cmdp-overlay"
+        scrimZIndex={Z_INDEX.commandPalette}
+        initialFocusRef={inputRef}
+      >
           <div className="cmdp-input-row">
             <Search size={16} strokeWidth={1.75} aria-hidden="true" className="cmdp-input-icon" />
             <input
@@ -423,7 +386,7 @@ export function CommandPalette() {
                     role="option"
                     aria-selected={index === activeIndex}
                     className="cmdp-item"
-                    // Not in the Tab sequence (tabIndex={-1} + the Dialog's
+                    // Not in the Tab sequence (tabIndex={-1} + the overlay's
                     // focus trap excludes it): the input owns keyboard focus
                     // and arrow-key selection, matching the ARIA combobox
                     // pattern. This is still a real activation target for a
@@ -462,10 +425,15 @@ export function CommandPalette() {
               <kbd className="cmdp-kbd">esc</kbd> {t("palette.footer.close")}
             </span>
           </div>
-        </Dialog>
-      )}
-      {sheetOpen && (
-        <Dialog onClose={() => setSheetOpen(false)} ariaLabel={t("palette.shortcuts.title")} className="cmdp-sheet">
+      </OverlayBase>
+      <OverlayBase
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        ariaLabel={t("palette.shortcuts.title")}
+        className="cmdp-sheet"
+        scrimClassName="cmdp-overlay"
+        scrimZIndex={Z_INDEX.commandPalette}
+      >
           <div className="cmdp-sheet-header">
             <h2 className="cmdp-sheet-title">{t("palette.shortcuts.title")}</h2>
             <button type="button" className="cmdp-sheet-close" onClick={() => setSheetOpen(false)} aria-label={t("common.close")}>
@@ -503,8 +471,7 @@ export function CommandPalette() {
               </span>
             </li>
           </ul>
-        </Dialog>
-      )}
+      </OverlayBase>
     </>
   );
 }
