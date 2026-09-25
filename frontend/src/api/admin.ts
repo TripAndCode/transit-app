@@ -505,7 +505,7 @@ export function useRevokeSession(uid: number) {
 
 // ── User drawer: API keys ─────────────────────────────────────────────────
 
-export type AdminApiKey = {
+type AdminApiKey = {
   id: number;
   owner_user_id: number | null;
   tier: string;
@@ -517,12 +517,16 @@ export type AdminApiKey = {
 
 export type AdminApiKeyIssued = AdminApiKey & { key: string };
 
+/** `truncated` is true when more admin-issued keys exist than the backend's
+ * per-request cap returned -- see MAX_API_KEYS_LISTED in api/routers/admin.py. */
+export type AdminApiKeyList = { keys: AdminApiKey[]; truncated: boolean };
+
 /** API keys issued (via the admin drawer) for one user. */
 export function useApiKeys(ownerUserId: number) {
   return useQuery({
     queryKey: ["adminApiKeys", ownerUserId],
     queryFn: ({ signal }) =>
-      apiGet<AdminApiKey[]>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
+      apiGet<AdminApiKeyList>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
   });
 }
 

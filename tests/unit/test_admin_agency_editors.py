@@ -62,37 +62,49 @@ class _EditorConn:
         raise AssertionError(f"unexpected fetch: {sql}")
 
     async def execute(self, sql: str, *args: Any) -> str:
+        # The editors bind one array per column and expand them with
+        # `unnest(...)`, so every row of a request arrives in one call. The
+        # fake mirrors that rather than the per-row loop it replaced -- a fake
+        # modelling the old shape would be exercising a call the router no
+        # longer makes.
         if "INSERT INTO route_performance_standards" in sql:
-            _agency_id, route_code, metric_type, threshold_value, bonus_malus_rate = args
-            self.standards = [
-                r for r in self.standards if not (r["route_code"] == route_code and r["metric_type"] == metric_type)
-            ]
-            self.standards.append(
-                {
-                    "route_code": route_code,
-                    "metric_type": metric_type,
-                    "threshold_value": threshold_value,
-                    "bonus_malus_rate": bonus_malus_rate,
-                }
-            )
+            _agency_id, route_codes, metric_types, thresholds, rates = args
+            for route_code, metric_type, threshold_value, bonus_malus_rate in zip(
+                route_codes, metric_types, thresholds, rates, strict=True
+            ):
+                self.standards = [
+                    r for r in self.standards if not (r["route_code"] == route_code and r["metric_type"] == metric_type)
+                ]
+                self.standards.append(
+                    {
+                        "route_code": route_code,
+                        "metric_type": metric_type,
+                        "threshold_value": threshold_value,
+                        "bonus_malus_rate": bonus_malus_rate,
+                    }
+                )
             return "INSERT 1"
         if "DELETE FROM route_performance_standards" in sql:
-            _, route_code, metric_type = args
-            self.standards = [
-                r for r in self.standards if not (r["route_code"] == route_code and r["metric_type"] == metric_type)
-            ]
+            _agency_id, route_codes, metric_types = args
+            doomed = set(zip(route_codes, metric_types, strict=True))
+            self.standards = [r for r in self.standards if (r["route_code"], r["metric_type"]) not in doomed]
             return "DELETE 1"
         if "INSERT INTO ridership_weights" in sql:
-            # The default-weight upsert addresses no route_code column ($1, NULL, $2)
-            # so it takes one fewer bind parameter than the per-route upsert.
-            route_code = None if len(args) == 2 else args[1]
-            weight = args[-1]
-            self.weights = [r for r in self.weights if r["route_code"] != route_code]
-            self.weights.append({"route_code": route_code, "weight": weight})
+            # Two shapes: the route batch binds arrays, while the default row
+            # keeps its own statement because ridership_weights' default-row
+            # arbiter is a different partial index.
+            if len(args) == 2:
+                pairs = [(None, args[1])]
+            else:
+                pairs = list(zip(args[1], args[2], strict=True))
+            for route_code, weight in pairs:
+                self.weights = [r for r in self.weights if r["route_code"] != route_code]
+                self.weights.append({"route_code": route_code, "weight": weight})
             return "INSERT 1"
         if "DELETE FROM ridership_weights" in sql:
-            route_code = None if len(args) == 1 else args[1]
-            self.weights = [r for r in self.weights if r["route_code"] != route_code]
+            _agency_id, route_codes = args
+            doomed = set(route_codes)
+            self.weights = [r for r in self.weights if r["route_code"] not in doomed]
             return "DELETE 1"
         if "INSERT INTO admin_audit" in sql:
             self.audit.append(args)
