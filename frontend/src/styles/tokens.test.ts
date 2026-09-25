@@ -199,6 +199,35 @@ describe("elevation tokens", () => {
   });
 });
 
+// One wash behind every overlay. A scrim is a theme decision, not a
+// per-overlay one: two overlays that pick their own literal drift apart the
+// moment either theme is retuned, and the dark theme needs a deeper wash
+// than the light one to separate the panel from the page at all.
+describe("scrim token", () => {
+  it("is defined on the bare :root", () => {
+    expect(decl(rootBlock, "--scrim")).toBe("rgba(15, 17, 25, 0.32)");
+  });
+
+  it("deepens under the dark theme, where the light wash would not separate the panel", () => {
+    expect(decl(darkBlock, "--scrim")).toBe("rgba(0, 0, 0, 0.55)");
+  });
+
+  it("is what the shared overlay paints, so no overlay carries its own literal", () => {
+    const overlayBase = readFileSync(resolve(process.cwd(), "src/components/ui/OverlayBase.tsx"), "utf8");
+    expect(overlayBase).toContain("var(--scrim)");
+    for (const file of ["src/components/Modal.tsx", "src/components/Sidebar.tsx", "src/components/commandPalette.css"]) {
+      expect(
+        readFileSync(resolve(process.cwd(), file), "utf8"),
+        `${file} still hardcodes a scrim colour`,
+      ).not.toMatch(/background:\s*rgba\(/);
+    }
+  });
+
+  it("leaves no dead backdrop rule behind in overview.css", () => {
+    expect(overviewCss).not.toContain("ov-modal-backdrop");
+  });
+});
+
 describe("type scale tokens", () => {
   it.each([
     ["--text-xs", "12px"],

@@ -1,5 +1,5 @@
-import { useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { useFocusTrap } from "../hooks/useFocusTrap";
+import { type CSSProperties, type ReactNode, type RefObject } from "react";
+import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
 
 type LabelProps = { labelledBy: string; ariaLabel?: undefined } | { ariaLabel: string; labelledBy?: undefined };
@@ -24,26 +24,33 @@ const BASE_PANEL_STYLE: Record<"modal" | "drawer", CSSProperties> = {
     left: "50%",
     transform: "translate(-50%, -50%)",
     background: "var(--bg-surface)",
-    zIndex: Z_INDEX.modal,
   },
   drawer: {
     position: "fixed",
     top: 0,
     bottom: 0,
     background: "var(--bg-surface)",
-    zIndex: Z_INDEX.drawer,
   },
 };
 
+// Each variant sits on its own rung. The ladder separates drawer (300/301)
+// from modal (400/401) so a modal opened over a drawer layers above it;
+// pinning both to the modal rungs would leave DOM order to decide, which is
+// what the ladder exists to stop.
+const RUNGS: Record<"modal" | "drawer", { panel: number; scrim: number }> = {
+  modal: { panel: Z_INDEX.modal, scrim: Z_INDEX.modalBackdrop },
+  drawer: { panel: Z_INDEX.drawer, scrim: Z_INDEX.drawerBackdrop },
+};
+
 /**
- * Shared accessible overlay: backdrop click closes, and `useFocusTrap`
- * supplies the dialog semantics -- Escape closes (the topmost surface only),
- * Tab is trapped inside the panel, focus moves into it on open (to
- * `initialFocusRef` when given) and back to whatever was focused beforehand
- * on close, and body scroll is locked while open. Callers own the panel's
- * visual size/position via `className`/`style` layered on top of the
- * `variant` base (centered card, or a full-height side sheet for
- * drawer-style overlays like the mobile nav and settings panel).
+ * The centered-card and side-sheet overlays, over the shared `OverlayBase`.
+ * Callers own the panel's visual size/position via `className`/`style`
+ * layered on top of the `variant` base; everything else -- scrim, Escape and
+ * backdrop close, focus trap and restore, scroll lock -- belongs to the base.
+ *
+ * Focus lands on the panel itself rather than its first control (unless a
+ * caller names one with `initialFocusRef`), so a screen reader reads the
+ * dialog from its top instead of starting part-way through it.
  */
 export function Modal({
   open,
@@ -56,44 +63,24 @@ export function Modal({
   labelledBy,
   ariaLabel,
 }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // The panel itself is the default landing spot rather than its first
-  // control: a dialog that announces its own label before its contents is
-  // what a screen reader user needs to know what just opened.
-  useFocusTrap(open, panelRef, onClose, initialFocusRef ?? panelRef);
-
-  if (!open) return null;
-
+  const rungs = RUNGS[variant];
+  // Re-narrowed rather than spread: the base takes the same either/or label
+  // contract, and spreading both keys would hand it `ariaLabel: undefined`
+  // alongside `labelledBy`, which the union does not admit.
+  const label: LabelProps = labelledBy != null ? { labelledBy } : { ariaLabel: ariaLabel! };
   return (
-    <div
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.3)",
-        // Each variant sits on its own rung. The ladder separates drawer
-        // (300/301) from modal (400/401) so a modal opened over a drawer
-        // layers above it; pinning both to the modal rungs would leave DOM
-        // order to decide, which is what the ladder exists to stop.
-        zIndex: variant === "drawer" ? Z_INDEX.drawerBackdrop : Z_INDEX.modalBackdrop,
-      }}
+    <OverlayBase
+      open={open}
+      onClose={onClose}
+      zIndex={rungs.panel}
+      scrimZIndex={rungs.scrim}
+      initialFocus="panel"
+      initialFocusRef={initialFocusRef}
+      className={className}
+      style={{ ...BASE_PANEL_STYLE[variant], ...style }}
+      {...label}
     >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={labelledBy}
-        aria-label={ariaLabel}
-        tabIndex={-1}
-        className={className}
-        style={{ ...BASE_PANEL_STYLE[variant], outline: "none", ...style }}
-      >
-        {children}
-      </div>
-    </div>
+      {children}
+    </OverlayBase>
   );
 }

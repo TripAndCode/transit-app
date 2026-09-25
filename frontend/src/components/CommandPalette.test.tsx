@@ -62,6 +62,13 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("dialog", { name: "Command palette" })).toBeInTheDocument();
   });
 
+  it("renders through the shared overlay base", () => {
+    renderPalette();
+    openWithCtrlK();
+    expect(screen.getByRole("dialog")).toHaveClass("ui-overlay-panel", "cmdp-palette");
+    expect(screen.getByRole("presentation")).toHaveClass("ui-overlay-scrim", "cmdp-overlay");
+  });
+
   it("ignores Ctrl+K while focus is in a text input elsewhere on the page", () => {
     renderPalette("/agencies/1/overview", <input data-testid="outside-input" />);
     const outside = screen.getByTestId("outside-input");
