@@ -161,7 +161,7 @@ describe("RouteForecastSection", () => {
     expect(visible.length).toBeGreaterThan(0);
   });
 
-  it("keyboard focus on a heatmap cell shows an anchored tooltip and updates the aria-live readout", () => {
+  it("names a heatmap cell once, through the tooltip that opens on focus", () => {
     renderSection(overview(), "100");
     fireEvent.click(screen.getByText(/Show day . hour detail/i));
     const cell = screen.getAllByTestId("hm-cell")[0];
@@ -176,21 +176,69 @@ describe("RouteForecastSection", () => {
     fireEvent.focusIn(cell);
     const tooltip = screen.getByRole("tooltip");
     expect(tooltip).toHaveTextContent(cell.getAttribute("aria-label") ?? "");
-    expect(screen.getByTestId("hm-readout")).toHaveTextContent(cell.getAttribute("aria-label") ?? "");
+    // One channel, not three: the cell's name is the tooltip's text, and no
+    // live region repeats it behind them.
+    expect(screen.queryByTestId("hm-readout")).toBeNull();
+    expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(0);
 
     fireEvent.focusOut(cell);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    expect(screen.getByTestId("hm-readout")).toHaveTextContent("");
   });
 
-  it("keyboard focus on a margin bar updates its own aria-live readout", () => {
+  it("folds the low-sample warning into the cell's own name instead of a nested tooltip", () => {
     renderSection(overview(), "100");
-    const bar = screen.getAllByTestId("dow-bar")[0];
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const badge = screen.queryAllByTestId("hm-cell-lowconf")[0];
+    if (!badge) return;
 
-    expect(bar).not.toHaveAttribute("title");
-    fireEvent.focusIn(bar);
-    expect(screen.getByTestId("dow-bar-readout")).toHaveTextContent(bar.getAttribute("aria-label") ?? "");
-    fireEvent.focusOut(bar);
-    expect(screen.getByTestId("dow-bar-readout")).toHaveTextContent("");
+    // A tooltip nested inside the cell's own would open alongside it, because
+    // focus events bubble; the glyph is decoration and its text lives in the
+    // cell's label.
+    expect(badge).toHaveAttribute("aria-hidden", "true");
+    expect(badge).not.toHaveAttribute("tabindex");
+    const cell = badge.closest('[role="gridcell"]');
+    expect(cell?.getAttribute("aria-label")).toMatch(/·.*·/);
   });
+
+  it("is one tab stop per grid, with the arrow keys moving inside it", () => {
+    renderSection(overview(), "100");
+    fireEvent.click(screen.getByText(/Show day . hour detail/i));
+    const grid = screen.getAllByRole("grid").find((g) => g.querySelectorAll('[role="gridcell"]').length > 24)!;
+    const cells = [...grid.querySelectorAll('[role="gridcell"]')];
+
+    // 7x24 cells, exactly one of them reachable by Tab.
+    expect(cells).toHaveLength(168);
+    expect(cells.filter((c) => c.getAttribute("tabindex") === "0")).toHaveLength(1);
+    expect(cells[0]).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(grid, { key: "ArrowRight" });
+    expect(cells[1]).toHaveAttribute("tabindex", "0");
+    expect(cells[0]).toHaveAttribute("tabindex", "-1");
+
+    fireEvent.keyDown(grid, { key: "ArrowDown" });
+    expect(cells[25]).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(grid, { key: "Home" });
+    expect(cells[24]).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(grid, { key: "End" });
+    expect(cells[47]).toHaveAttribute("tabindex", "0");
+
+    // The row edges hold rather than wrapping onto a neighbouring day.
+    fireEvent.keyDown(grid, { key: "ArrowRight" });
+    expect(cells[47]).toHaveAttribute("tabindex", "0");
+  });
+
+  it("gives the margin bars one tab stop too", () => {
+    renderSection(overview(), "100");
+    const bars = screen.getAllByTestId("dow-bar");
+
+    expect(bars.filter((b) => b.getAttribute("tabindex") === "0")).toHaveLength(1);
+    expect(bars[0]).not.toHaveAttribute("title");
+
+    fireEvent.focusIn(bars[0]);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(bars[0].getAttribute("aria-label") ?? "");
+    expect(screen.queryByTestId("dow-bar-readout")).toBeNull();
+  });
+
 });

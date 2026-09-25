@@ -14,7 +14,7 @@
  * route chip in the shared Filters bar is the way back, matching how every
  * other tab's focused-route mode already works.
  */
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
 import { useRangeContext } from "../api/rangeContext";
@@ -45,18 +45,6 @@ const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 type Tip = { x: number; y: number; text: string } | null;
 type View = "dow" | "hr" | null;
 
-/** Screen-reader-only: content that a sighted reader gets some other way
- *  (here, the same text a hovered/focused cell already shows visibly). */
-const srOnly: CSSProperties = {
-  position: "absolute",
-  width: 1,
-  height: 1,
-  margin: -1,
-  padding: 0,
-  overflow: "hidden",
-  clipPath: "inset(50%)",
-  whiteSpace: "nowrap",
-};
 
 /** Clickable-card props matching the Overview card pattern (role=button + keyboard). */
 function clickable(onClick: () => void) {
@@ -148,6 +136,75 @@ function RankedRoutes({
   );
 }
 
+/**
+ * Roving focus over a grid of read-only value cells: the widget is one tab
+ * stop and the arrow keys move inside it.
+ *
+ * A tab stop per cell is the obvious way to make a heatmap keyboard-reachable
+ * and the wrong one -- a day x hour grid then sits 168 Tab presses deep in
+ * front of everything after it on the page, which is its own barrier. This is
+ * the composite-widget pattern ARIA has for that.
+ *
+ * `slots` is row-major and may hold `null` where a position renders nothing
+ * focusable; navigation skips those rather than landing on them.
+ */
+function useRovingCells(slots: (string | null)[], columns: number) {
+  const firstFilled = slots.findIndex((slot) => slot !== null);
+  const [requested, setRequested] = useState(firstFilled);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Derived, not synchronised: the data can shrink under a held index, and an
+  // effect correcting it afterwards would render one frame with no tab stop.
+  const active = slots[requested] != null ? requested : firstFilled;
+
+  function step(from: number, delta: number): number | null {
+    if (Math.abs(delta) === 1) {
+      const row = Math.floor(from / columns);
+      for (let i = from + delta; i >= 0 && i < slots.length && Math.floor(i / columns) === row; i += delta) {
+        if (slots[i] !== null) return i;
+      }
+      return null;
+    }
+    const target = from + delta;
+    if (target < 0 || target >= slots.length || slots[target] === null) return null;
+    return target;
+  }
+
+  function edgeOfRow(from: number, side: "first" | "last"): number | null {
+    const row = Math.floor(from / columns);
+    const indices = [];
+    for (let i = row * columns; i < Math.min((row + 1) * columns, slots.length); i++) {
+      if (slots[i] !== null) indices.push(i);
+    }
+    return (side === "first" ? indices[0] : indices.at(-1)) ?? null;
+  }
+
+  function onKeyDown(event: ReactKeyboardEvent) {
+    const next =
+      event.key === "ArrowRight"
+        ? step(active, 1)
+        : event.key === "ArrowLeft"
+          ? step(active, -1)
+          : event.key === "ArrowDown"
+            ? step(active, columns)
+            : event.key === "ArrowUp"
+              ? step(active, -columns)
+              : event.key === "Home"
+                ? edgeOfRow(active, "first")
+                : event.key === "End"
+                  ? edgeOfRow(active, "last")
+                  : null;
+    if (next === null) return;
+    event.preventDefault();
+    setRequested(next);
+    // Focused straight from the handler rather than from an effect on
+    // `active`: an effect would also fire on first render and pull focus into
+    // the grid before anyone asked for it.
+    containerRef.current?.querySelector<HTMLElement>(`[data-cell="${next}"]`)?.focus();
+  }
+
+  return { containerRef, activeSlot: slots[active], onKeyDown, onCellFocus: setRequested };
+}
+
 function HeatmapGrid({
   cells,
   big,
@@ -163,86 +220,105 @@ function HeatmapGrid({
 }) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<string | null>(null);
-  const [readout, setReadout] = useState("");
   const byKey = new Map(cells.map((c) => [`${c.dow}-${c.hour}`, c]));
   const labelW = big ? 30 : 22;
   const cellH = big ? 26 : 13;
   const gap = big ? 3 : 2;
   const cols = `${labelW}px repeat(24, 1fr)`;
 
-  function focusCell(key: string, text: string) {
-    setHover(key);
-    setReadout(text);
-  }
-  function clearCell() {
-    setHover(null);
-    setReadout("");
+  const HOURS = 24;
+  const slots = Array.from({ length: 7 * HOURS }, (_, i) => `${Math.floor(i / HOURS) + 1}-${i % HOURS}`);
+  const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells(slots, HOURS);
+
+  /** Everything a cell says, in one string. It is the cell's accessible name
+   *  and the text of its tooltip; a screen reader reads a name once, where a
+   *  second live region carrying the same words reads it twice. */
+  function cellText(dow: number, hour: number): string {
+    const cell = byKey.get(`${dow}-${hour}`);
+    const value = cell?.expected_avg_min;
+    const head = `${dayLabel(dow)} ${hour}:00 · ${value == null ? "—" : `${value.toFixed(1)}${axisMin}`}`;
+    return cell?.low_confidence ? `${head} · ${t("forecast.lowSamples", { count: cell.samples })}` : head;
   }
 
   return (
-    <div role="group" aria-label={ariaLabel} onMouseLeave={clearCell}>
+    <div
+      ref={containerRef}
+      role="grid"
+      aria-label={ariaLabel}
+      // The roving cell owns the tab stop; the container is focusable only
+      // programmatically, which is what the composite pattern asks for.
+      tabIndex={-1}
+      aria-rowcount={7}
+      aria-colcount={HOURS}
+      onKeyDown={onKeyDown}
+      onMouseLeave={() => setHover(null)}
+    >
       <div style={{ display: "grid", gridTemplateColumns: cols, gap, alignItems: "center" }}>
         {Array.from({ length: 7 }, (_, di) => {
           const dow = di + 1;
-          return [
-            <div key={`l${dow}`} style={{ fontSize: big ? 11 : 10, color: "var(--text-secondary)", textAlign: "right", paddingRight: 5 }}>
-              {dayLabel(dow)}
-            </div>,
-            ...Array.from({ length: 24 }, (_, h) => {
-              const c = byKey.get(`${dow}-${h}`);
-              const v = c?.expected_avg_min ?? null;
-              const key = `${dow}-${h}`;
-              if (v == null || !c) {
-                const text = `${dayLabel(dow)} ${h}:00 · —`;
+          return (
+            // `display: contents` so the rows carry the grid semantics while
+            // the cells stay direct children of the CSS grid that lays them out.
+            <div key={`r${dow}`} role="row" style={{ display: "contents" }}>
+              <div
+                role="rowheader"
+                style={{ fontSize: big ? 11 : 10, color: "var(--text-secondary)", textAlign: "right", paddingRight: 5 }}
+              >
+                {dayLabel(dow)}
+              </div>
+              {Array.from({ length: HOURS }, (_, h) => {
+                const key = `${dow}-${h}`;
+                const index = di * HOURS + h;
+                const cell = byKey.get(key);
+                const value = cell?.expected_avg_min ?? null;
+                const text = cellText(dow, h);
+                const highlighted = hover === key;
+                const empty = value == null || !cell;
                 return (
                   <Tooltip key={key} label={text}>
                     <div
-                      role="img"
+                      data-testid={empty ? undefined : "hm-cell"}
+                      data-cell={index}
+                      data-lowconf={cell?.low_confidence ? "" : undefined}
+                      role="gridcell"
                       aria-label={text}
-                      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- read-only heatmap cell: keyboard-focusable so its value reaches the tooltip and the aria-live readout below, not a control
-                      tabIndex={0}
-                      onMouseEnter={() => focusCell(key, text)}
-                      onFocus={() => focusCell(key, text)}
-                      onMouseLeave={clearCell}
-                      onBlur={clearCell}
-                      style={{ height: cellH, borderRadius: 2, background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)" }}
-                    />
-                  </Tooltip>
-                );
-              }
-              const active = hover === key;
-              const text = `${dayLabel(dow)} ${h}:00 · ${v.toFixed(1)}${axisMin}`;
-              const lowConfText = c.low_confidence ? t("forecast.lowSamples", { count: c.samples }) : null;
-              return (
-                <Tooltip key={key} label={text}>
-                  <div
-                    data-testid="hm-cell"
-                    role="img"
-                    aria-label={text}
-                    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- read-only heatmap cell: keyboard-focusable so its value reaches the tooltip and the aria-live readout below, not a control
-                    tabIndex={0}
-                    onMouseEnter={() => focusCell(key, text)}
-                    onFocus={() => focusCell(key, text)}
-                    onMouseLeave={clearCell}
-                    onBlur={clearCell}
-                    style={{
-                      position: "relative",
-                      height: cellH,
-                      borderRadius: 2,
-                      background: delayColor(v),
-                      opacity: c.low_confidence ? 0.5 : 1,
-                      outline: active ? "2px solid var(--accent)" : "none",
-                      outlineOffset: 1,
-                      boxShadow: active ? "0 0 0 3px var(--accent-soft)" : "none",
-                    }}
-                  >
-                    {lowConfText && (
-                      <Tooltip label={lowConfText}>
+                      tabIndex={activeSlot === key ? 0 : -1}
+                      onMouseEnter={() => setHover(key)}
+                      onFocus={() => {
+                        setHover(key);
+                        onCellFocus(index);
+                      }}
+                      onMouseLeave={() => setHover(null)}
+                      onBlur={() => setHover(null)}
+                      style={
+                        empty
+                          ? {
+                              height: cellH,
+                              borderRadius: 2,
+                              background:
+                                "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)",
+                              outline: highlighted ? "2px solid var(--accent)" : "none",
+                              outlineOffset: 1,
+                            }
+                          : {
+                              position: "relative",
+                              height: cellH,
+                              borderRadius: 2,
+                              background: delayColor(value),
+                              opacity: cell.low_confidence ? 0.5 : 1,
+                              outline: highlighted ? "2px solid var(--accent)" : "none",
+                              outlineOffset: 1,
+                              boxShadow: highlighted ? "0 0 0 3px var(--accent-soft)" : "none",
+                            }
+                      }
+                    >
+                      {cell?.low_confidence && (
+                        // Decoration: the warning is already part of the
+                        // cell's own name, and a nested tooltip here would
+                        // open alongside the cell's on the way to it.
                         <span
                           data-testid="hm-cell-lowconf"
-                          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- glyph with real content (the low-sample warning); pointer-events stay off so hovering it still reads as hovering the cell, keyboard focus reaches it independently
-                          tabIndex={0}
-                          aria-label={lowConfText}
+                          aria-hidden="true"
                           style={{
                             position: "absolute",
                             top: 1,
@@ -256,26 +332,25 @@ function HeatmapGrid({
                         >
                           !
                         </span>
-                      </Tooltip>
-                    )}
-                  </div>
-                </Tooltip>
-              );
-            }),
-          ];
+                      )}
+                    </div>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          );
         })}
       </div>
       {big && (
-        <div style={{ display: "grid", gridTemplateColumns: cols, gap, marginTop: 5 }}>
+        <div style={{ display: "grid", gridTemplateColumns: cols, gap, marginTop: 5 }} aria-hidden="true">
           <span />
-          {Array.from({ length: 24 }, (_, h) => (
+          {Array.from({ length: HOURS }, (_, h) => (
             <span key={h} style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center" }}>
               {h % 6 === 0 ? h : ""}
             </span>
           ))}
         </div>
       )}
-      <span data-testid="hm-readout" aria-live="polite" style={srOnly}>{readout}</span>
     </div>
   );
 }
@@ -287,6 +362,7 @@ function MarginBars({
   big,
   sparse,
   axisMin,
+  ariaLabel,
 }: {
   values: (number | null)[];
   labels: string[];
@@ -294,12 +370,18 @@ function MarginBars({
   big: boolean;
   sparse: boolean;
   axisMin: string;
+  ariaLabel: string;
 }) {
-  const [readout, setReadout] = useState("");
   const max = Math.max(...values.filter((v): v is number => v != null), 1);
+  const slots = values.map((v, i) => (v == null ? null : String(i)));
+  const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells(slots, values.length);
+
   return (
-    <div onMouseLeave={() => setReadout("")}>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: big ? 150 : 64, borderBottom: "1px solid var(--border-soft)" }}>
+    <div ref={containerRef} role="grid" aria-label={ariaLabel} tabIndex={-1} aria-rowcount={1} onKeyDown={onKeyDown}>
+      <div
+        role="row"
+        style={{ display: "flex", alignItems: "flex-end", gap: 4, height: big ? 150 : 64, borderBottom: "1px solid var(--border-soft)" }}
+      >
         {values.map((v, i) => {
           if (v == null) return <span key={i} style={{ flex: 1 }} />;
           const text = `${labels[i]} · ${v.toFixed(1)}${axisMin}`;
@@ -307,28 +389,24 @@ function MarginBars({
             <Tooltip key={i} label={text}>
               <i
                 data-testid={testid}
-                role="img"
+                data-cell={i}
+                role="gridcell"
                 aria-label={text}
-                // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- read-only bar: keyboard-focusable so its value reaches the tooltip and the aria-live readout below, not a control
-                tabIndex={0}
-                onMouseEnter={() => setReadout(text)}
-                onFocus={() => setReadout(text)}
-                onMouseLeave={() => setReadout("")}
-                onBlur={() => setReadout("")}
+                tabIndex={activeSlot === String(i) ? 0 : -1}
+                onFocus={() => onCellFocus(i)}
                 style={{ flex: 1, display: "block", height: `${Math.max((v / max) * 100, 1)}%`, background: delayColor(v), borderRadius: "3px 3px 0 0" }}
               />
             </Tooltip>
           );
         })}
       </div>
-      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+      <div style={{ display: "flex", gap: 4, marginTop: 4 }} aria-hidden="true">
         {labels.map((l, i) => (
           <span key={i} style={{ flex: 1, textAlign: "center", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
             {sparse ? (i % 6 === 0 ? i : "") : l}
           </span>
         ))}
       </div>
-      <span data-testid={`${testid}-readout`} aria-live="polite" style={srOnly}>{readout}</span>
     </div>
   );
 }
@@ -649,10 +727,10 @@ function RouteDetail({
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
         <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
-          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} axisMin={axisMin} />
+          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} axisMin={axisMin} ariaLabel={t("forecast.dow_summary")} />
         </SectionCard>
         <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
-          <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse axisMin={axisMin} />
+          <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse axisMin={axisMin} ariaLabel={t("forecast.hour_summary")} />
         </SectionCard>
       </div>
 
@@ -691,7 +769,7 @@ function RouteDetail({
                     { label: t("forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}
                 />
-                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={axisMin} />
+                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={axisMin} ariaLabel={t(view === "dow" ? "forecast.dow_summary" : "forecast.hour_summary")} />
               </>
             );
           })()}
