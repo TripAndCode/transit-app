@@ -101,7 +101,7 @@ def app_server():
     # (a missing provider key, an unreachable DB) is otherwise indistinguishable
     # from one that is merely slow, and both surface as the timeout below. A
     # file, not a PIPE, so a chatty startup cannot fill the buffer and wedge;
-    # unnamed and closed in the `finally` because the runner this job uses is
+    # unnamed and closed on the way out because the runner this job uses is
     # persistent, so a leaked temp file per run accumulates there forever.
     with tempfile.TemporaryFile("w+") as log:
         proc = subprocess.Popen(
