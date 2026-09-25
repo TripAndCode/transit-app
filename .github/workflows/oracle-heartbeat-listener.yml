@@ -13,9 +13,7 @@ name: Oracle Heartbeat Listener
 # operations-status document status-snapshot.sh built (see
 # scripts/ops_status.py for the contract it follows).
 #
-# Mirrors vps-heartbeat-listener.yml's own pattern in the opposite direction:
-# that one records the VPS loop's heartbeat for GitHub-side watching; this one
-# records the Oracle collector's, for the VPS's own already-authenticated
+# Records the Oracle collector's heartbeat for the VPS's own already-authenticated
 # `gh` to read back out via `gh run view --log` -- the only place a
 # `repository_dispatch` payload survives after the triggering run completes.
 on:
@@ -45,9 +43,6 @@ jobs:
           echo "Oracle heartbeat received at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           # toJson() always pretty-prints (multi-line, indented); re-compact
           # with jq so the whole document survives as the single grep-able
-          # line the VPS-side reader expects -- mirroring vps-heartbeat-
-          # listener.yml's own idea of a single log line as the payload's
-          # durable home, though that workflow spreads its facts across one
-          # "HEALTH key=value" line per field rather than one line per
-          # document.
+          # line the VPS-side reader expects; the run log is the payload's
+          # only durable home.
           echo "ORACLE_STATUS $(echo "$ORACLE_STATUS_JSON" | jq -c '.')"

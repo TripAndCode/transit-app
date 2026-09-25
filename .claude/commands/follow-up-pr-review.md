@@ -119,9 +119,8 @@ and say so rather than quietly fanning out.
    least one later comment carries a **different** `user.login`. A reply count alone
    does not prove anyone answered you: a follow-up remark you added to your own thread
    while waiting would satisfy `comment_count > 1` and be misread as a reply.
-   When the PR's `author.login` is your own login — a `/vps-loop-run` PR is the usual
-   case — no thread can satisfy this, which is correct rather than a bug: there
-   is no human on the other side to have answered. Say so, and let Phase 1's delta
+   When the PR's `author.login` is your own login, no thread can satisfy this, which
+   is correct rather than a bug: there is no human on the other side to have answered. Say so, and let Phase 1's delta
    scan carry the run.
 3. Resolution state does not exist on the REST comments endpoint. Fetch it from
    GraphQL and drop resolved threads:

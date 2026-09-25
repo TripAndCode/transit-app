@@ -2,11 +2,8 @@
 # Publish status-snapshot.sh's last document to the VPS operations status
 # picture, over HTTPS to GitHub's `repository_dispatch` API -- never SSH, so
 # this never needs the Oracle collector's own SSH private key (or any copy of
-# it) to exist on the VPS at all. Mirrors the direction this repo already
-# uses for the VPS loop's own heartbeat (`deploy/vps/claude-loop.sh` ->
-# `gh api repos/:owner/:repo/dispatches` -> `vps-heartbeat-listener.yml`),
-# just the other way around: the VPS already has its own separate `gh`
-# authentication (used for its PR work) to read `oracle-heartbeat-
+# it) to exist on the VPS at all. The VPS already has its own separate `gh`
+# authentication (used by its status collectors) to read `oracle-heartbeat-
 # listener.yml`'s run log back out, so nothing new needs to be granted on the
 # VPS side either -- only this script's own GitHub token (unrelated to any
 # SSH key) is new, and it lives only on Oracle.

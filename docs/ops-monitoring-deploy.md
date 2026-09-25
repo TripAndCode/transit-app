@@ -17,8 +17,7 @@ every unit file's own header comment.
 Both run as `User=root` under `WorkingDirectory=/root/transit-app`, matching
 every other VPS-side automation this repo already runs that way (see
 `.claude/README.md`'s "VPS operations" section — the persistent clone itself
-is provisioned and owned as `root`, and `claude-loop.service` already runs
-as `root` against the same checkout). Splitting these two units onto a
+is provisioned and owned as `root`). Splitting these two units onto a
 separate, narrower system user would need re-provisioning the checkout's own
 ownership without affecting every other root-run VPS unit that reads/writes
 the same tree — out of scope here; least-privilege for this feature instead
@@ -36,8 +35,8 @@ never commit it.
 Nothing else on the VPS side needed a new or broadened credential:
 
 - **GitHub** (`scripts/collect_github_status.py`): shells out to the `gh`
-  CLI, reusing whatever `gh auth` session already exists for
-  `/vps-loop-run` — no separate token, and no new scope requested.
+  CLI, reusing whatever `gh auth` session already exists on the
+  VPS — no separate token, and no new scope requested.
 - **Oracle** (`scripts/collect_oracle_status.py`): reads a heartbeat
   relayed through GitHub Actions run logs. The VPS never holds an Oracle
   credential of any kind, and specifically never the Oracle SSH private key
@@ -116,8 +115,8 @@ under test.
 
 ## 6. Smoke check
 
-`scripts/ops_smoke_check.py` verifies the four collectors (`vps_loop`,
-`github`, `oracle_crawler`, `r2`) are wired correctly — not that the
+`scripts/ops_smoke_check.py` verifies the three collectors (`github`,
+`oracle_crawler`, `r2`) are wired correctly — not that the
 underlying systems they observe are currently healthy. Run it right after
 install, and again after any rollback, before trusting the deployed state:
 

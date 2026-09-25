@@ -227,8 +227,8 @@ Copy `.env.example` and set only what your environment needs. Important groups:
   live SSO user's email: seeding refuses to promote an email that already
   belongs to a real OAuth-linked account, so a collision just logs an error
   and leaves that account untouched.
-- `OPS_STATUS_REPO`: the git checkout the admin board's `vps_loop`/`github`
-  collectors read, when it differs from their built-in default path. Unset
+- `OPS_STATUS_REPO`: the git checkout the admin board's `github` collector
+  reads, when it differs from their built-in default path. Unset
   on a host where that path doesn't exist and every collector tile on the
   board reads `unknown` rather than a real status.
 - `OBJECT_STORE_*`, `AGENCY_IDS`, `RETENTION_DAYS`: scheduled archive ingest.
@@ -291,14 +291,14 @@ the Oracle-to-R2 archive path.
 api/                    FastAPI app, auth, routers, middleware
 pipeline/               ingest, static loading, aggregation, reports, Ask
 db/                     Postgres/PostGIS and ClickHouse schemas
-deploy/                 systemd units and VPS scripts for the loop and ops-monitoring services
+deploy/                 systemd units and log rotation for ops monitoring and drift checks
 frontend/               React SPA and translations
 oracle_cloud/           Oracle VM collector agent (v3): archive fetch, R2 sync, health checks, alerting
 scripts/                operational tools and review helpers
 tests/                  pytest suites (api, pipeline, query, db, frontend, unit) and fixtures
 tools/                  optional local dev tools (GeoSQL/Dekart)
 docs/features/          feature-specific behavior guides
-.claude/                review and autonomous-loop workflows
+.claude/                review and PR workflows
 ```
 
 Useful entry points:

@@ -1142,8 +1142,7 @@ def _iter_feature_docs() -> Iterator[tuple[Path, str]]:
     """Yield ``(path, content)`` for every `docs/features/*.md` file with real
     content, sorted by filename for a stable, deterministic sidebar order.
     Never cached at import time -- a doc file added while the server is
-    already running (this directory grows over time; see docs/refactor-log.md
-    item 26) shows up on the next request with no restart needed. Reads each
+    already running shows up on the next request with no restart needed. Reads each
     file's content exactly once, so callers should consume this instead of
     re-reading a path returned by ``_list_feature_docs``."""
     if not _FEATURE_DOCS_DIR.is_dir():

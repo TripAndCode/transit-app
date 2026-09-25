@@ -11,8 +11,8 @@
 # literally, and this repo also keeps a long-lived pair of containers by
 # those exact names running for everyday local use. Two verification runs
 # against that same fixed pair -- e.g. an interactive session's own
-# verification and a concurrent `/vps-loop-run` worker's, in two different
-# worktrees on the same VPS -- don't just risk a `docker run` name
+# verification and a concurrent agent's, in two different worktrees on the
+# same host -- don't just risk a `docker run` name
 # collision: `tests/conftest.py`'s per-test Postgres reset and its
 # ClickHouse `DROP TABLE`/`CREATE TABLE` both race across the two
 # runs, producing spurious failures with no connection to either diff. This
