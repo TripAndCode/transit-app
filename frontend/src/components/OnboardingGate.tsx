@@ -186,7 +186,7 @@ export function OnboardingGate() {
                       justifyContent: "center",
                     }}
                   >
-                    <Check size={12} strokeWidth={3} color="#fff" />
+                    <Check size={12} strokeWidth={3} color="var(--on-accent)" />
                   </span>
                 )}
                 <div style={{ fontSize: 15, fontWeight: 600 }}>{a.agency_name}</div>

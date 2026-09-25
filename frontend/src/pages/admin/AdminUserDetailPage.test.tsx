@@ -37,7 +37,8 @@ const mockSession = vi.hoisted(() => ({
 // scoped to the detail fetch.
 const apiGetMock = vi.hoisted(() =>
   vi.fn((url: string) => {
-    if (url.includes("/sessions") || url.includes("/api-keys")) return Promise.resolve([]);
+    if (url.includes("/sessions")) return Promise.resolve([]);
+    if (url.includes("/api-keys")) return Promise.resolve({ keys: [], truncated: false });
     return Promise.resolve(mockDetail);
   })
 );

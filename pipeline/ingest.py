@@ -10,7 +10,7 @@ import pathlib
 import re
 import tarfile
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
 
 from clickhouse_connect.driver.exceptions import DataError
@@ -44,6 +44,43 @@ _DATE_DIR_RE = re.compile(r"\d{8}")
 def _date_dir(name: str) -> str:
     """Return *name* if it is a YYYYMMDD token, otherwise ``""``."""
     return name if _DATE_DIR_RE.fullmatch(name) else ""
+
+
+def _archive_since(tarballs: list[pathlib.Path], pb_loose: list[pathlib.Path]) -> date | None:
+    """The earliest JST calendar day *any* file in this folder can be stamped
+    with, or ``None`` when that cannot be established for every one of them.
+
+    Bounds the already-ingested skip-list (`distinct_file_names`) to the span
+    the folder actually covers, instead of reading the agency's whole history
+    to answer a question about a few days. A file whose rows fall before the
+    bound would read as new and be ingested twice, so anything that cannot be
+    placed from the names alone collapses the answer to ``None``: a tarball
+    with no date in its stem (its members fall back to their own inner
+    directories, unreadable without opening the archive), a loose ``.pb``
+    with no date directory (its captured_at falls back to ``now()``), or a
+    token that is eight digits but not a date.
+
+    A tarball member's own YYYYMMDD directory still overrides its tarball's
+    stem, so a member can be stamped earlier than this bound — :func:`ingest`
+    watches for that and drops the bound rather than trusting it.
+    """
+    tokens = []
+    for tgz in tarballs:
+        m = _DATE_DIR_RE.search(tgz.stem)
+        if m is None:
+            return None
+        tokens.append(m.group(0))
+    for path in pb_loose:
+        token = _date_dir(path.parent.name)
+        if not token:
+            return None
+        tokens.append(token)
+    if not tokens:
+        return None
+    try:
+        return min(datetime.strptime(t, "%Y%m%d").date() for t in tokens)
+    except ValueError:
+        return None
 
 
 @contextmanager
@@ -186,7 +223,15 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     n_errors = 0
     n_inserted = 0
 
-    done = distinct_file_names(ch_client, agency_id)
+    tarballs = sorted(root.glob("*.tar.gz")) + sorted(root.glob("*.tgz"))
+    pb_loose = sorted(root.rglob("*.pb"))
+
+    # The skip-list only has to cover the span this folder can be stamped
+    # with; unbounded it reads the agency's whole history to do it. See
+    # _archive_since for when a bound may be claimed at all, and
+    # _widen_skip_list for the one case that revokes it after the fact.
+    since = _archive_since(tarballs, pb_loose)
+    done = distinct_file_names(ch_client, agency_id, since=since)
 
     # `done` is only updated by _flush() (every _BATCH_ROWS rows, Task 8.9),
     # so a file buffered but not yet flushed is invisible to any dedup check
@@ -207,6 +252,27 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     # the file(s) that actually failed on retry, not every file that shared
     # the batch with them.
     seen = set(done)
+
+    def _widen_skip_list() -> None:
+        """Re-read the skip-list unbounded, because a file turned up that the
+        bound cannot place.
+
+        `_archive_since` reads tarball stems, but a member's own YYYYMMDD
+        directory wins over its tarball's stem, so a member can be stamped
+        before the bound — and for that member a bounded skip-list proves
+        nothing, while treating it as new would duplicate its rows. One
+        unbounded re-read restores the full list; both sets only ever gain
+        names that really are already ingested, so widening can never cause a
+        file to be skipped that should have been read.
+        """
+        nonlocal since
+        if since is None:
+            return
+        since = None
+        logger.info("  archive member predates the folder's date range; re-reading the full skip-list")
+        full = distinct_file_names(ch_client, agency_id)
+        done.update(full)
+        seen.update(full)
 
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
@@ -321,8 +387,6 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
             pending_files.clear()
             pending_counts.clear()
 
-    tarballs = sorted(root.glob("*.tar.gz")) + sorted(root.glob("*.tgz"))
-    pb_loose = sorted(root.rglob("*.pb"))
     logger.info(f"Found {len(tarballs)} tar.gz, {len(pb_loose)} loose .pb (strategy={strategy_name})")
 
     with conn.cursor() as cur:
@@ -340,6 +404,11 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                         inner_dir = pathlib.Path(m.name).parent.name
                         d = _date_dir(inner_dir) or date_dir
                         members.append((m, pb_name, d))
+                    # Checked before `seen` is consulted, not after: a member
+                    # stamped before the bound is exactly the one a bounded
+                    # skip-list cannot speak for.
+                    if since is not None and any(d < since.strftime("%Y%m%d") for _, _, d in members):
+                        _widen_skip_list()
                     new = [(m, pb, d) for m, pb, d in members if f"{d}/{pb}" not in seen]
                     logger.info(f"  {len(members)} pb files, {len(new)} new")
                     for j, (member, pb_name, d) in enumerate(new):

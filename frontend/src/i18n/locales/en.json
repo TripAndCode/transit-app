@@ -1300,6 +1300,8 @@
       "reason_placeholder": "Why are you changing this flag?",
       "confirm": "Save",
       "cancel": "Cancel",
+      "clear_override": "Clear override",
+      "clear_error": "Couldn't clear the override.",
       "labels": {
         "askRouterEnabled": "Ask: rules router",
         "askFollowupEnabled": "Ask: LLM follow-up",

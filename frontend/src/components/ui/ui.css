@@ -116,3 +116,24 @@
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
+
+/* OverlayBase's two elements. The scrim's colour is set inline from the
+   --scrim token (one wash for every overlay, per theme); everything the
+   cascade can own lives here.
+
+   The panel takes focus on open, so it needs a tabIndex -- and with it a
+   focus ring that would otherwise draw a box around a whole dialog the user
+   never navigated to. */
+.ui-overlay-panel { outline: none; }
+
+/* The entrance is a fade on the scrim alone. Panels that want their own
+   entrance declare it on their own class (.ov-modal), which would otherwise
+   be competing with a second `animation` shorthand at equal specificity,
+   resolved by stylesheet order rather than intent. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ui-overlay-scrim-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .ui-overlay-scrim { animation: ui-overlay-scrim-in var(--dur-1) var(--ease-out); }
+}

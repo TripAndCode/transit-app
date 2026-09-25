@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { computeTooltipPosition, type TooltipPlacement } from "./tooltipPosition";
 import { readTourSeen, writeTourSeen } from "../api/tourSeen";
 import "./FirstRunTour.css";
@@ -41,8 +42,29 @@ export function FirstRunTour() {
   const [dismissed, setDismissed] = useState(() => readTourSeen() !== "unseen");
   const [stepIndex, setStepIndex] = useState(0);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const previouslyFocused = useRef<HTMLElement | null>(null);
   const step = STEPS[stepIndex];
+
+  function finish() {
+    writeTourSeen();
+    setDismissed(true);
+  }
+  function later() {
+    setDismissed(true);
+  }
+  function next() {
+    if (stepIndex === STEPS.length - 1) {
+      finish();
+      return;
+    }
+    setStepIndex((i) => i + 1);
+  }
+
+  // Escape is the keyboard form of the x control, so it persists the
+  // dismissal the same way; treating it as "later" instead would bring the
+  // tour back on the next mount for keyboard users only. The trap also owns
+  // moving focus into the card and handing it back on dismissal, which is
+  // why `place` below no longer captures or moves focus itself.
+  useFocusTrap(!dismissed, panelRef, finish);
 
   useLayoutEffect(() => {
     if (dismissed) return;
@@ -53,12 +75,13 @@ export function FirstRunTour() {
     // re-asserting the attribute on an unrelated re-render would hide a
     // panel that is already placed, until the next tick moved it back.
     panel.hidden = true;
-    // Focus moves on the transition into view, not at mount: an anchor the
-    // dashboard has not finished fetching yet is the case the retry poll
-    // exists for, and a panel that appears three ticks later still has to
-    // announce itself. Once per step -- a reposition is not a new arrival.
+    // A panel placed before the trap activates is focused by the trap. One
+    // that only finds its anchor several ticks later (the case the retry
+    // poll exists for) was unfocusable back then, so it announces itself
+    // here, on the tick it becomes visible -- once, since a reposition is
+    // not a new arrival.
     let announced = false;
-    function place() {
+    function place({ mayAnnounce = true } = {}) {
       // A poll that forces layout on a tab nobody is looking at buys
       // nothing; the anchor cannot have moved under the visitor.
       if (document.hidden) return;
@@ -79,46 +102,22 @@ export function FirstRunTour() {
       panel.hidden = false;
       if (!announced) {
         announced = true;
-        // Captured before the panel takes focus, so dismissing returns the
-        // visitor to what they were on rather than the tour's own button.
-        previouslyFocused.current ??= document.activeElement as HTMLElement | null;
-        panel.querySelector<HTMLElement>("button")?.focus();
+        if (mayAnnounce) panel.querySelector<HTMLElement>("button")?.focus();
       }
     }
-    place();
-    const intervalId = window.setInterval(place, FIND_RETRY_MS);
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
+    place({ mayAnnounce: false });
+    const reposition = () => place();
+    const intervalId = window.setInterval(reposition, FIND_RETRY_MS);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
     return () => {
       window.clearInterval(intervalId);
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
     };
   }, [dismissed, step.selector, step.placement]);
 
   if (dismissed) return null;
-
-  /** Hand focus back to wherever it was before the tour took it. */
-  function restoreFocus() {
-    previouslyFocused.current?.focus();
-    previouslyFocused.current = null;
-  }
-  function finish() {
-    writeTourSeen();
-    setDismissed(true);
-    restoreFocus();
-  }
-  function later() {
-    setDismissed(true);
-    restoreFocus();
-  }
-  function next() {
-    if (stepIndex === STEPS.length - 1) {
-      finish();
-      return;
-    }
-    setStepIndex((i) => i + 1);
-  }
 
   const isLast = stepIndex === STEPS.length - 1;
 

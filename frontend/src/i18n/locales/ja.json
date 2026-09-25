@@ -1300,6 +1300,8 @@
       "reason_placeholder": "この変更の理由を入力してください",
       "confirm": "保存",
       "cancel": "キャンセル",
+      "clear_override": "上書きを解除",
+      "clear_error": "上書きを解除できませんでした。",
       "labels": {
         "askRouterEnabled": "Ask: ルールルーター",
         "askFollowupEnabled": "Ask: LLM フォローアップ",
@@ -1351,7 +1353,7 @@
       },
       "run_tooltip": "{{lane}} · {{from}}–{{to}} · {{status}}",
       "run_tooltip_rows": "{{count}} 行",
-      "run_tooltip_lock": "ロック待ちのためスキップ",
+      "run_tooltip_lock": "取り込み/集計ロックが保持されていたためスキップ",
       "collectors_title": "収集器",
       "collector": {
         "oracle_crawler": "Oracle クローラ",

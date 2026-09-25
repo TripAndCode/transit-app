@@ -534,12 +534,12 @@ export function AdminUsersPage() {
             background: "var(--surface-1)",
             border: "1px solid var(--border-subtle)",
             borderRadius: 999,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+            boxShadow: "var(--el-2)",
             padding: "8px 8px 8px 16px",
             display: "flex",
             gap: 8,
             alignItems: "center",
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
             zIndex: Z_INDEX.sticky,
           }}
         >
