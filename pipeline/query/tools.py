@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 
 import clickhouse_connect
 
-from api.range import MAX_RANGE_DAYS, RangeCtx, ServiceType, jst_today
+from api.range import RangeCtx, ServiceType, clamp_range_ctx, jst_today
 from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
@@ -339,6 +339,15 @@ _DATE_OVERRIDE_PROPS = {
     "to": {"type": "string", "format": "date", "description": "ISO YYYY-MM-DD end (override)."},
 }
 
+_ROUTE_PROP = {
+    "type": "string",
+    "description": (
+        "route_code (4-5 digits, e.g. '16071'), or the alias / Japanese route name "
+        "the user wrote ('路線5', '中央大橋線'); dispatch resolves aliases to a route_code "
+        "and answers with candidates when the name is ambiguous."
+    ),
+}
+
 
 TOOLS: list[dict] = [
     {
@@ -348,13 +357,13 @@ TOOLS: list[dict] = [
             "description": (
                 "Aggregate delay statistics for ONE specific route over the request "
                 "window. Use when the user asks about how a particular bus route is "
-                "doing (e.g. '路線5の遅延', '44372はどう?'). Always returns "
-                "per-service-type rows."
+                "doing (e.g. '路線5の遅延', '44372はどう?'). Returns one row per "
+                "service type and day of week (average delay minutes + sample count)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string", "description": "route_code, digits only e.g. '16071'"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -382,8 +391,10 @@ TOOLS: list[dict] = [
                     "best_first": {
                         "type": "boolean",
                         "description": (
-                            "When true, sort ascending (best first). Defaults to false "
-                            "for avg_delay/worst_5min, true for on_time_rate."
+                            "When true, list the best routes first. Honored for avg_delay "
+                            "(default false: longest delay first) and on_time_rate (default "
+                            "true: highest on-time % first); ignored for worst_5min, which "
+                            "always lists the most >5min incidents first."
                         ),
                     },
                     **_DATE_OVERRIDE_PROPS,
@@ -397,13 +408,16 @@ TOOLS: list[dict] = [
         "function": {
             "name": "compare_segments",
             "description": (
-                "Side-by-side delay comparison for one route, splitting on weekday "
-                "vs weekend (dimension=dow) or service_type. Use for '平日と土日祝の比較'."
+                "Weekday vs weekend/holiday delay comparison (dimension=dow) or a "
+                "per-service_type split (dimension=service_type). With dimension=dow, "
+                "omit route to rank every route by the weekday/weekend gap, or set it "
+                "to compare one route. dimension=service_type requires route. "
+                "Use for '平日と土日祝の比較'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     "dimension": {"type": "string", "enum": ["dow", "service_type"]},
                     **_DATE_OVERRIDE_PROPS,
                 },
@@ -422,7 +436,10 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string", "description": "Optional — if set, filter to this route_code."},
+                    "route": {
+                        **_ROUTE_PROP,
+                        "description": "Optional; narrows the series to one route. " + _ROUTE_PROP["description"],
+                    },
                     **_DATE_OVERRIDE_PROPS,
                 },
             },
@@ -433,8 +450,10 @@ TOOLS: list[dict] = [
         "function": {
             "name": "on_time_rate",
             "description": (
-                "On-time percentage per route. Default threshold is 60 seconds; "
-                "set threshold_min=5 to compute '5分以内定時率' instead."
+                "On-time percentage per route and service type, highest first "
+                "(n rows, default 20). Default threshold is 60 seconds; set "
+                "threshold_min=5 to compute '5分以内定時率' instead. For the lowest "
+                "on-time routes use top_n(metric='on_time_rate', best_first=false)."
             ),
             "parameters": {
                 "type": "object",
@@ -457,7 +476,7 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                 },
                 "required": ["route"],
             },
@@ -475,7 +494,7 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -494,7 +513,7 @@ TOOLS: list[dict] = [
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"route": {"type": "string"}},
+                "properties": {"route": _ROUTE_PROP},
                 "required": ["route"],
             },
         },
@@ -512,7 +531,7 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -531,7 +550,7 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -552,7 +571,7 @@ TOOLS.extend(META_TOOLS)
 
 
 SYSTEM_PROMPT = """\
-あなたは青森市バスの遅延分析アシスタントです。利用可能なツールを使って質問に答えます。
+あなたは公共交通の遅延分析アシスタントです。利用可能なツールを使って質問に答えます。
 
 == 重要なルール ==
 1. ツールが質問に合うなら必ずツールを呼び出す。前置きや説明文は不要。
@@ -591,10 +610,11 @@ SYSTEM_PROMPT = """\
 - schedule_realism(route, days_back?, from?, to?): 時刻表の妥当性
   (区間・時間帯ごとに時刻表上の所要時間と実績を比較し余裕時間の有無を判定。対応エージェンシーでは終点早着率・調整停車も表示)
 - trend_shift(route, days_back?, from?, to?): 慢性的な遅延か、期間内で最近悪化したか(トレンドの変化)の判定
-- describe_data(kind, limit?, filter_substring?): データセットそのものの問い合わせ
+- describe_data(kind, limit?, offset?, filter_substring?, order?): データセットそのものの問い合わせ
   (kind ∈ routes/stops/date_range/agencies/sample_counts/overview/metrics)
   例:「どんな路線がある?」→ kind=routes /「いつからのデータ?」→ kind=date_range /
-     「サンプル数の多い路線」→ kind=sample_counts /「全体感」→ kind=overview
+     「サンプル数の多い路線」→ kind=sample_counts /「少ない路線」→ kind=sample_counts, order=asc /
+     「全体感」→ kind=overview
 - capabilities(category?): 答えられる質問例(カテゴリ別)を返す。
   ユーザーの質問が漠然としていたり範囲外の時に使う。
   例:「やばい路線」「いつものやつ」「何ができる?」
@@ -652,12 +672,6 @@ or omitted.
 """
 
 
-# Human-readable name of each locale, for the "Reply in ..." system addendum
-# (see :mod:`pipeline.query.chat`). Kept here so the LLM-related strings live
-# alongside their translation table.
-LOCALE_LANGUAGE_NAME = {"ja": "日本語", "en": "English"}
-
-
 # ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
@@ -701,11 +715,20 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
         new_to = today
         new_from = today - timedelta(days=n - 1)
 
-    if new_from > new_to:
-        new_from, new_to = new_to, new_from
-    if (new_to - new_from).days >= MAX_RANGE_DAYS:
-        new_from = new_to - timedelta(days=MAX_RANGE_DAYS - 1)
-    return replace(ctx, from_date=new_from, to_date=new_to)
+    # Hand back to the shared clamp rather than re-deriving its rules here.
+    # Parsing stays local and lenient on purpose -- an unparseable date from a
+    # model should fall back to the default window, not 422 the request -- but
+    # once the dates exist, the future-date bound, the reversed-range swap and
+    # the width cap are clamp_range_ctx's to enforce, as they are for every
+    # other entry point. Passing date objects skips its stricter parse.
+    return clamp_range_ctx(
+        from_=new_from,
+        to=new_to,
+        dow=ctx.dow,
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+    )
 
 
 async def _is_route_registered(route: str | None, conn, agency_id: int, ch=None) -> bool:
@@ -1198,6 +1221,8 @@ _HANDLERS = {
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
+    # Guided-card only (``__build__``); deliberately absent from TOOLS so the
+    # LLM never selects it on its own.
     "route_stop_patterns": _tool_route_stop_patterns,
     "time_pattern": _tool_time_pattern,
     "schedule_realism": _tool_schedule_realism,

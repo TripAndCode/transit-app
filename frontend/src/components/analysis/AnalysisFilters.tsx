@@ -4,6 +4,7 @@ import { useRoutes } from "../../api/hooks";
 import { useRangeContext, type TimeBand, type DowFilter } from "../../api/rangeContext";
 import { ErrorBanner } from "../ErrorBanner";
 import { routeGroups, selectedGroup } from "./routeGroups";
+import { sameCodes } from "../../utils/sameCodes";
 
 export function PatternFilters({ agencyId, codes, onChange }: {
   agencyId: number | null; codes: string[]; onChange: (codes: string[]) => void;
@@ -13,10 +14,10 @@ export function PatternFilters({ agencyId, codes, onChange }: {
   const routes = query.data ?? [];
   const groups = routeGroups(routes);
   const group = selectedGroup(routes, codes);
-  const options = group ? groups.find(([name]) => name === group)![1] : routes;
+  const options = group ? (groups.find(([name]) => name === group)?.[1] ?? routes) : routes;
   return <>
     <label>{t("line")}<select value={group} disabled={query.isPending} onChange={(e) => {
-      onChange(e.target.value ? [...new Set(groups.find(([name]) => name === e.target.value)![1].flatMap((r) => r.route_code ? [r.route_code] : []))] : []);
+      onChange(e.target.value ? [...new Set((groups.find(([name]) => name === e.target.value)?.[1] ?? routes).flatMap((r) => r.route_code ? [r.route_code] : []))] : []);
     }}><option value="">{t("allLines")}</option>{groups.map(([name]) => <option key={name} value={name}>{name}</option>)}</select></label>
     <label>{t("pattern")}<select value={codes.length === 1 ? codes[0] : ""} disabled={query.isPending} onChange={(e) => {
       onChange(e.target.value ? [e.target.value] : group ? options.flatMap((r) => r.route_code ? [r.route_code] : []) : []);
@@ -104,10 +105,4 @@ export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
       )}
     </form>
   );
-}
-
-function sameCodes(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const seen = new Set(b);
-  return a.every((code) => seen.has(code));
 }

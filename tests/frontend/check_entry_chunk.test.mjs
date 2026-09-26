@@ -9,6 +9,7 @@ import { after, test } from "node:test";
 const SCRIPT_PATH = fileURLToPath(new URL("../../frontend/scripts/check-entry-chunk.mjs", import.meta.url));
 const JS_MARKER = "getRTLTextPluginStatus";
 const CSS_MARKER = "maplibregl-canvas";
+const MERMAID_JS_MARKER = "mermaidAPI";
 
 const tmpDirs = [];
 after(() => {
@@ -99,6 +100,37 @@ test("MapLibre only in a dynamic (lazy) chunk -> exit 0 (lazy loading is allowed
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
+test("mermaid statically imported (JS marker in a static chunk) -> exit 1", () => {
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": { file: "assets/index.js", isEntry: true, imports: ["src/vendor.ts"], dynamicImports: ["src/MapTab.tsx"] },
+      "src/vendor.ts": { file: "assets/vendor.js", imports: [] },
+      "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
+    }),
+    "assets/index.js": "console.log('hello');",
+    "assets/vendor.js": `${MERMAID_JS_MARKER}.render();`,
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains mermaid/);
+});
+
+test("mermaid only in a dynamic (lazy) chunk -> exit 0 (lazy loading is allowed)", () => {
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": { file: "assets/index.js", isEntry: true, imports: [], dynamicImports: ["src/MapTab.tsx", "src/AdminArchitecturePage.tsx"] },
+      "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
+      "src/AdminArchitecturePage.tsx": { file: "assets/AdminArchitecturePage.js", imports: [] },
+    }),
+    "assets/index.js": "console.log('hello');",
+    "assets/AdminArchitecturePage.js": `${MERMAID_JS_MARKER}.render();`,
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
 test("MapLibre CSS statically reachable via entry.css -> exit 1", () => {
   const dist = makeDist({
     ".vite/manifest.json": JSON.stringify({
@@ -143,7 +175,7 @@ test("app-authored MapLibre class overrides in entry CSS do not false-positive (
 });
 
 test("vendor split defeats a naive entry-only budget, but the summed static closure still fails", () => {
-  // Generously over the script's STATIC_CLOSURE_BUDGET_BYTES (600 KiB as of
+  // Generously over the script's STATIC_CLOSURE_BUDGET_BYTES (640 KiB as of
   // writing) -- not derived from it (the script has no exports), so if that
   // constant is ever raised well past 4 MiB this fixture needs bumping too.
   const bigChunk = "x".repeat(4 * 1024 * 1024);
@@ -223,6 +255,29 @@ test("hand-authored <script src> in index.html bypasses the manifest but is stil
   <body>
     <script type="module" src="/assets/index.js"></script>
     <script src="/vendor-maplibre.js"></script>
+  </body>
+</html>`,
+    },
+  );
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /not part of the Vite manifest's static import graph/);
+});
+
+test("hand-authored <script src> embedding mermaid in index.html bypasses the manifest but is still caught", () => {
+  const dist = makeDist(
+    {
+      ".vite/manifest.json": JSON.stringify(CLEAN_MANIFEST),
+      "assets/index.js": "console.log('hello');",
+      "vendor-mermaid.js": `${MERMAID_JS_MARKER}.render();`,
+      ...MAPTAB_FILES,
+    },
+    {
+      indexHtml: `<!doctype html>
+<html>
+  <body>
+    <script type="module" src="/assets/index.js"></script>
+    <script src="/vendor-mermaid.js"></script>
   </body>
 </html>`,
     },

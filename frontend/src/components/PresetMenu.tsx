@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { apiGet, apiPost, formatApiError } from "../api/client";
 import type { RangeCtx } from "../api/rangeContext";
+import { Tooltip } from "./Tooltip";
+import { Z_INDEX } from "../styles/zIndex";
 
 type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: RangeCtx };
 
@@ -41,9 +43,15 @@ export function PresetMenu({
 
   if (!session) {
     return (
-      <span title={t("presets.login_to_save_tooltip")} style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
-        {t("presets.label")}
-      </span>
+      <Tooltip label={t("presets.login_to_save_tooltip")}>
+        <span
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain label, not a control; keyboard-focusable only so the tooltip explaining why saving is disabled is reachable
+          tabIndex={0}
+          style={{ color: "var(--text-tertiary)", fontSize: 12 }}
+        >
+          {t("presets.label")}
+        </span>
+      </Tooltip>
     );
   }
 
@@ -79,7 +87,7 @@ export function PresetMenu({
       {open && (
         <div style={{ position: "absolute", top: "100%", left: 0, padding: 12,
                        background: "var(--surface-1)", border: "1px solid var(--surface-2)",
-                       borderRadius: 4, zIndex: 10 }}>
+                       borderRadius: 4, zIndex: Z_INDEX.dropdown }}>
           <input
             // eslint-disable-next-line jsx-a11y/no-autofocus -- name field of a just-opened "save preset" popover; focusing it is the expected UX
             autoFocus
@@ -93,14 +101,14 @@ export function PresetMenu({
             onClick={() => create.mutate(name.trim())}
             style={{
               background: saveDisabled ? "var(--bg-soft)" : "var(--accent)",
-              color: saveDisabled ? "var(--text-tertiary)" : "#fff",
+              color: saveDisabled ? "var(--text-tertiary)" : "var(--on-accent)",
               border: "none",
               borderRadius: 4,
               fontSize: 13,
               fontWeight: 500,
               padding: "6px 18px",
               cursor: saveDisabled ? "not-allowed" : "pointer",
-              boxShadow: saveDisabled ? "none" : "0 1px 2px rgba(91,108,173,0.25)",
+              boxShadow: saveDisabled ? "none" : "var(--el-1)",
             }}
           >
             {t("common.save")}

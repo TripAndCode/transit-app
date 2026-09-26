@@ -1,47 +1,97 @@
 // Severity ramp for delays (minutes -> color). Calm at the low end so the
-// usual data isn't visually loud; severe (>5 min) is a true red so the
-// genuinely problematic stops pop without ambiguity.
+// usual data isn't visually loud; the severe tier (>=5 min) is the deep end of
+// the warm ramp -- loud enough that a genuinely problematic stop is
+// unambiguous, deliberately short of an alarm red.
 
-// The severe tier (>5 min) is theme-aware: at #d92121 (the light-mode red)
-// contrast against the new dark backgrounds is ~3.6:1 — fails WCAG AA's 4.5:1
-// for normal text; the dark value is now the artifact mockup's literal
-// #A83A1A, which only reaches ~2.95:1 on dark — a deliberately accepted
-// tradeoff for design-parity (see global.css's comment on --delay-severe),
-// not an oversight. Both live in the `--delay-severe` CSS custom property
-// (light #d92121 / dark #A83A1A, defined in global.css) so the cascade is
-// the single source of truth.
+// The severe tier is theme-aware, and the split is load-bearing rather than
+// cosmetic: the invariant is that each theme's value clears WCAG AA (4.5:1) as
+// text on that theme's own --bg-surface, and no single hex satisfies both --
+// dark enough to read on white is too dark to read on a near-black page, and
+// the reverse. Both values live in the `--delay-severe` CSS custom property
+// (defined per theme in global.css) so the cascade is the single source of
+// truth; tokens.test.ts asserts both directions of the invariant, including
+// that the cross-theme pairs still fail.
 //
-// TWO surfaces, deliberately split — pick by how the caller renders the color:
+// TWO surfaces, deliberately split -- pick by how the caller renders the color:
 //  - DOM/React (renders into an inline `style` prop): use `DELAY_RAMP.severe` /
 //    `delayColor()`, which return the LITERAL string "var(--delay-severe)". The
 //    browser cascade resolves it to the active theme's color automatically, so
-//    these consumers recolor on a theme toggle for free — no re-render, no JS.
+//    these consumers recolor on a theme toggle for free -- no re-render, no JS.
 //  - MapLibre (builds plain-JS paint expressions that CANNOT consume var()):
 //    call `severeColorResolved()`, which returns a real parseable hex. These
 //    call sites already subscribe to `useThemeSignal` and rebuild their
 //    expressions on toggle (see useOperationsMapLayers).
 const SEVERE_VAR = "var(--delay-severe)";
 
-// Light-mode severe red — the fallback when the CSS custom property can't be
+// Light-mode values -- the fallback when the CSS custom property can't be
 // resolved (e.g. under jsdom, which doesn't apply global.css's cascade; tests
-// see this unless they set `--delay-severe` inline).
-// NOTE: must stay in sync with global.css's base `:root { --delay-severe: … }`
-// light value — there's no build-time link between the two, so a change to one
-// must be mirrored in the other by hand.
-const SEVERE_FALLBACK = "#d92121";
+// see these unless they set the property inline).
+// NOTE: each must stay in sync with global.css's base `:root` declaration --
+// there's no build-time link between the two, so a change to one must be
+// mirrored in the other by hand. tokens.test.ts holds them to it.
+const SEVERE_FALLBACK = "#A8391F";
+const SURFACE_FALLBACK = "#ffffff";
+const ACCENT_FALLBACK = "#187b80";
 
-/** Resolve `--delay-severe` to a concrete hex for callers that need a real,
- *  parseable color string — MapLibre paint expressions, which can't consume
- *  `var()`. Reads the live CSS cascade so it tracks the active theme; falls
- *  back to the light-mode red when unresolved (SSR / jsdom). DOM consumers
- *  should NOT call this — use `DELAY_RAMP.severe` (the literal var) instead so
- *  the cascade recolors them on toggle without a re-render. */
+/** Resolve a CSS custom property to a concrete color for callers that need a
+ *  real, parseable string -- MapLibre paint expressions, which can't consume
+ *  `var()`. Reads the live cascade so it tracks the active theme; falls back
+ *  to the light-mode value when unresolved (SSR / jsdom). */
+function cssColor(prop: string, fallback: string): string {
+  if (typeof document === "undefined") return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(prop).trim();
+  return v || fallback;
+}
+
+/** The active theme's `--delay-severe` as a concrete hex. DOM consumers should
+ *  NOT call this -- use `DELAY_RAMP.severe` (the literal var) instead so the
+ *  cascade recolors them on toggle without a re-render. */
 export function severeColorResolved(): string {
-  if (typeof document === "undefined") return SEVERE_FALLBACK;
-  const v = getComputedStyle(document.documentElement)
-    .getPropertyValue("--delay-severe")
-    .trim();
-  return v || SEVERE_FALLBACK;
+  return cssColor("--delay-severe", SEVERE_FALLBACK);
+}
+
+/** The active theme's `--bg-surface` as a concrete hex. Map marks ring
+ *  themselves in it so they separate from the basemap in either theme without
+ *  a heavy dark casing. */
+export function surfaceColorResolved(): string {
+  return cssColor("--bg-surface", SURFACE_FALLBACK);
+}
+
+/** The active theme's `--accent` as a concrete hex, for map layers that carry
+ *  the product accent (the selected trip's reported trail). */
+export function accentColorResolved(): string {
+  return cssColor("--accent", ACCENT_FALLBACK);
+}
+
+/** Relative luminance per WCAG 2.x, for a `#rrggbb` string. */
+function luminance(hex: string): number {
+  const n = parseInt(hex.slice(1), 16);
+  const channels = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+/** WCAG contrast ratio between two `#rrggbb` colors, 1:1 to 21:1. Symmetric.
+ *  Lives here rather than in a test helper because `readableInkOn` needs it at
+ *  runtime, and a second copy would be free to drift from this one. */
+export function contrastRatio(a: string, b: string): number {
+  const [la, lb] = [luminance(a), luminance(b)];
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+// The two inks a mark's own label can use. Neither is pure black/near-white by
+// accident: they are the darkest and lightest surfaces the product already
+// paints, so a label sitting on a colored mark still belongs to the palette.
+const INK_DARK = "#0F1119";
+const INK_LIGHT = "#ffffff";
+
+/** The ink that reads best on `bg` -- for text painted directly onto a
+ *  data-colored mark, where the background is a ramp color rather than a
+ *  theme surface and so cannot be assumed light or dark. */
+export function readableInkOn(bg: string): string {
+  return contrastRatio(INK_DARK, bg) >= contrastRatio(INK_LIGHT, bg) ? INK_DARK : INK_LIGHT;
 }
 
 const BASE_RAMP = {
@@ -54,7 +104,7 @@ export const DELAY_RAMP = {
   ...BASE_RAMP,
   // Literal CSS var string for DOM/React consumers — see the block comment
   // above. MapLibre call sites use severeColorResolved() instead.
-  severe: SEVERE_VAR, // > 5 min red, per-theme via --delay-severe
+  severe: SEVERE_VAR, // >= 5 min, per-theme via --delay-severe
 } as const;
 
 type DelayBand = "ok" | "mild" | "moderate" | "severe";
@@ -84,6 +134,63 @@ export function delayBand(minutes: number): DelayBand {
 
 export function delayColor(minutes: number): string {
   return DELAY_RAMP[delayBand(minutes)];
+}
+
+const OK_TEXT_VAR = "var(--delay-text-ok)";
+const MILD_TEXT_VAR = "var(--delay-text-mild)";
+const MODERATE_TEXT_VAR = "var(--delay-text-moderate)";
+
+/** Text-safe counterpart to DELAY_RAMP. The plain ramp's ok/mild/moderate
+ *  fills work as backgrounds and marks but fall short of WCAG AA (4.5:1) as
+ *  text on --bg-surface (measured 2.6-3.8:1 in light mode); this ramp swaps
+ *  in per-theme CSS custom properties instead, following the same literal-
+ *  var()-for-DOM-consumers pattern as DELAY_RAMP.severe. Both themes' values
+ *  are tuned per tier to clear AA on the page, --accent-soft and current-row
+ *  surfaces; in dark mode only mild coincides with its fill. They are defined
+ *  in global.css and held to AA by tokens.test.ts. Use
+ *  `delayTextColor()`/`DELAY_RAMP_TEXT` (not `delayColor()`/`DELAY_RAMP`) for
+ *  any `color` (text); the plain ramp stays correct for fills and marks. */
+export const DELAY_RAMP_TEXT = {
+  ok: OK_TEXT_VAR,
+  mild: MILD_TEXT_VAR,
+  moderate: MODERATE_TEXT_VAR,
+  // Already per-theme and AA-passing as text -- see DELAY_RAMP.severe.
+  severe: SEVERE_VAR,
+} as const;
+
+/** Same threshold mapping as `delayColor()`, but text-safe -- see `DELAY_RAMP_TEXT`. */
+export function delayTextColor(minutes: number): string {
+  return DELAY_RAMP_TEXT[delayBand(minutes)];
+}
+
+// A dense grid of cells encodes one quantity, so it gets one hue that runs
+// light to dark: switching hue at each severity cutoff turns a continuous
+// magnitude into four unordered categories and makes a 2.9-minute cell look
+// unrelated to a 3.1-minute one. The cutoffs still matter, but they are drawn
+// as an outline annotation on top of the ramp, not as its colour. The domain
+// runs slightly past `DELAY_THRESHOLDS.severe` so a severe cell reads as
+// "near the top of the scale" instead of every value from 5 minutes upwards
+// saturating to the same ink. The floor is non-zero so a cell holding data is
+// always distinguishable from one holding none.
+export const HEAT_RAMP = {
+  maxMin: 5.5,
+  minOpacity: 0.08,
+  maxOpacity: 1,
+} as const;
+
+/** Where `minutes` sits on the single-hue heat ramp, as an opacity. Rounded
+ *  so the value written into the DOM is stable and comparable. */
+export function heatOpacity(minutes: number): number {
+  const t = Math.min(1, Math.max(0, minutes / HEAT_RAMP.maxMin));
+  const opacity = HEAT_RAMP.minOpacity + t * (HEAT_RAMP.maxOpacity - HEAT_RAMP.minOpacity);
+  return Math.round(opacity * 1000) / 1000;
+}
+
+/** The same ramp as a CSS colour, for grids that paint a `background`
+ *  instead of setting an SVG opacity. `var(--accent)` is kept intact so the
+ *  cascade recolors the whole ramp on a theme toggle. */
+export function accentRampColor(minutes: number): string {
+  return `color-mix(in srgb, var(--accent) ${Math.round(heatOpacity(minutes) * 100)}%, transparent)`;
 }
 
 /** Same ramp as `delayColor()`, but MapLibre-safe: the severe tier resolves

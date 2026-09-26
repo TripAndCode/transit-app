@@ -5,9 +5,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { AdminOpsPage } from "./AdminOpsPage";
+import type { AgencyFreshnessItem } from "../../api/admin";
+
+type OpsHealthData = {
+  migrations: { applied: string | null; latest: string | null; behind: number } | null;
+  agencies: AgencyFreshnessItem[];
+  agencies_ok: boolean;
+};
+type OpsHealthResult = { data: OpsHealthData | undefined; isLoading: boolean; error: Error | null };
 
 // Mock state to control what useAdminOps returns
-let mockReturnValue: any = {
+let mockReturnValue: OpsHealthResult = {
   data: {
     migrations: { applied: "0026", latest: "0026", behind: 0 },
     agencies: [

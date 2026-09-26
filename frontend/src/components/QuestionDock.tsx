@@ -86,7 +86,7 @@ export function QuestionDock({
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
           borderRadius: 12,
           padding: "10px 12px",
-          boxShadow: composing ? "0 2px 10px rgba(0,0,0,0.04)" : "none",
+          boxShadow: composing ? "var(--el-1)" : "none",
           transition: "box-shadow 120ms ease",
         }}
       >
@@ -119,11 +119,11 @@ export function QuestionDock({
                   aria-disabled={busy && !active}
                   aria-pressed={active}
                   style={{
-                    background: active ? "var(--accent, #5b6cad)" : "var(--bg-soft, rgba(0,0,0,0.04))",
-                    color: active ? "var(--on-accent)" : "var(--text-primary, #1a1a1a)",
+                    background: active ? "var(--accent)" : "var(--bg-soft)",
+                    color: active ? "var(--on-accent)" : "var(--text-primary)",
                     border: "1px solid",
                     borderColor: active
-                      ? "var(--accent, #5b6cad)"
+                      ? "var(--accent)"
                       : "var(--border-soft, rgba(0,0,0,0.08))",
                     borderRadius: 999,
                     padding: "5px 14px",
@@ -141,7 +141,7 @@ export function QuestionDock({
             {!composing && (
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--text-tertiary, #999)",
                   marginLeft: 6,
                 }}

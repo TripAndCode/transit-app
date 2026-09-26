@@ -9,7 +9,7 @@ aggregates, and application data live in Postgres/PostGIS.
 
 ### Requirements
 
-- Python 3.11+
+- Python 3.11+ (CI and the production image run the same minor version; see `Dockerfile`)
 - [Poetry](https://python-poetry.org/)
 - Docker Desktop
 - A Gemini API key for the optional Ask LLM fallback
@@ -104,14 +104,33 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make analyze-all` | Rebuild aggregates for all agencies |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline |
 | `make check-aggs` | Detect stale aggregate tables |
+| `make digest` | Generate the daily delay digest (Markdown, ja/en) |
+| `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
+| `make build-rag-index` | Build the Ask RAG index for all agencies (also the re-index after an embedder change) |
+| `make ask-eval` | CI gate: verify Ask builder coverage against the gold question set |
+| `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
+| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (matches the deploy's data-retention horizon) |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
 | `make verify-secrets` | On-demand gitleaks scan of the full git history |
+| `make verify-secrets-all-branches` | Gitleaks scan across every branch and tag, not just HEAD |
+| `make geosql-up` | Start the optional local GeoSQL/Dekart spatial-SQL tool |
+| `make geosql-down` | Stop GeoSQL/Dekart |
+| `make oracle-tests` | Run the Oracle collector's shell test suite |
 | `make git-cleanup` | Preview stale local Git cleanup |
 | `make git-cleanup-apply` | Apply safe local Git cleanup |
 
 To remove local database data completely, use `docker compose down -v`. This is
 destructive and is not part of the normal reset flow.
+
+### GeoSQL / Dekart (optional)
+
+`make geosql-up` starts a local [Dekart](https://dekart.xyz/) instance for
+exploratory spatial SQL, local-only and never wired into `check`/`test`/
+`serve`. `tools/geosql/bootstrap.sh` prints the connection string to add; it
+points at the dev Postgres/PostGIS database, so the same read-only rule as
+any other dev-database access applies — see `CLAUDE.md`. `make geosql-down`
+stops it.
 
 ## Development
 
@@ -122,9 +141,12 @@ make test
 make check
 ```
 
-Tests must use the throwaway Postgres instance on `:5544`, never the real dev
-database on `:5433`. ClickHouse integration tests require the test instance on
-`:8124` and `RUN_CH_INTEGRATION=1`.
+`make test` always runs against the throwaway Postgres/ClickHouse instances on
+`:5544`/`:8124` via `scripts/run_integration_tests.sh`, never the real dev
+database, regardless of whatever `DATABASE_URL` the caller has configured.
+That runner also exports `RUN_CH_INTEGRATION=1`, so the ClickHouse-gated tests
+actually run rather than silently skipping. `make check` runs `fmt-check`
+(verifies formatting, doesn't rewrite files), `lint`, `typecheck`, then `test`.
 
 Example targeted test:
 
@@ -134,28 +156,18 @@ DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test \
   poetry run pytest tests/query/test_tool_queries.py -v
 ```
 
-That fixed `:5544`/`:8124` pair is shared — fine for one run at a time, but
-two runs against it at once (e.g. two worktrees on the same host) can
-interfere with each other's schema mid-test. `scripts/run_full_ci.sh` runs
-the same lint/type/test gate as CI against its own uniquely-named,
-uniquely-ported Postgres + ClickHouse pair instead, torn down again on
-exit, so any number of invocations can run concurrently without
-coordinating:
+That fixed `:5544`/`:8124` pair is shared, and a concurrent run against it can
+interfere with another's schema mid-test. When a run might overlap with
+another one on the same host, use `scripts/run_full_ci.sh` instead — its
+header explains why and describes the isolated Postgres/ClickHouse pair it
+uses instead:
 
 ```bash
 scripts/run_full_ci.sh
 ```
 
-Frontend checks:
-
-```bash
-npm run typecheck
-npm run test
-npm run lint
-npm run lint:i18n
-npm run lint:i18n-strings
-npm run build:bundle
-```
+Frontend checks: see `CLAUDE.md`'s Verification commands section for the
+full required list to run before opening a PR.
 
 The React Compiler is enabled. Do not add `useMemo`, `useCallback`, or
 `React.memo` as performance fixes. User-visible strings require matching `ja`
@@ -175,11 +187,20 @@ The main endpoints are:
 | `POST /api/{agency_id}/conversations/{cid}/messages` | Deterministic Ask tools |
 | `POST /api/{agency_id}/ask` | Natural-language Ask fallback |
 | `GET /api/auth/{provider}/login` | Start Google or GitHub OAuth |
-| `GET /api/admin/users` | Admin user management |
+| `/api/admin/board`, `/api/admin/runs` | Admin control room: fleet health board + run timeline |
+| `/api/admin/agencies*` | Admin agency list, per-agency health, and diagnostics drawer |
+| `/api/admin/users*` | Admin user management, sessions, API keys |
+| `/api/admin/audit` | Merged admin-action + login audit log |
+| `/api/admin/ops` | Read-only ops health snapshot (migrations, aggregate freshness) |
+| `/api/admin/flags` | Feature-flag registry: resolved values + DB overrides |
+| `/api/admin/ask/*` | Ask query log, funnel, intent-cache promotion, eval result |
+| `/api/admin/architecture/*` | Serves `docs/features/*.md` to the in-product architecture page |
+| `/api/admin/api-keys`, `/api/admin/invites` | Issue/revoke API keys, invite new users |
 
 Most data endpoints accept `from`, `to`, `dow`, `time_band`, `service`, and
-`routes` filters. API documentation is available from FastAPI at
-`/docs` while the server is running.
+`routes` filters. API documentation is available from FastAPI at `/docs`
+while the server is running and `OPENAPI_DOCS_ENABLED` is on (see
+Configuration below).
 
 Example:
 
@@ -196,12 +217,47 @@ Copy `.env.example` and set only what your environment needs. Important groups:
 
 - `DATABASE_URL`, `CLICKHOUSE_*`: database connections.
 - `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
-- `ASK_FOLLOWUP_ENABLED`, `COPILOT_INSIGHT_ENABLED`, `WEATHER_INGEST_ENABLED`:
-  feature kill switches.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
 - `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
   `PUBLIC_BASE_URL`, `ADMIN_EMAILS`: optional authentication and admin setup.
+- `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD`: break-glass local-admin
+  account, seeded (and re-seeded on every boot) only when both are set.
+  Rotating it is editing `.env` and restarting — the same mental model as
+  rotating an OAuth client secret. Never set `DEFAULT_ADMIN_USERNAME` to a
+  live SSO user's email: seeding refuses to promote an email that already
+  belongs to a real OAuth-linked account, so a collision just logs an error
+  and leaves that account untouched.
+- `OPS_STATUS_REPO`: the git checkout the admin board's `github` collector
+  reads, when it differs from their built-in default path. Unset
+  on a host where that path doesn't exist and every collector tile on the
+  board reads `unknown` rather than a real status.
 - `OBJECT_STORE_*`, `AGENCY_IDS`, `RETENTION_DAYS`: scheduled archive ingest.
+
+### Feature kill switches
+
+Every entry in `pipeline/flags.py`'s registry resolves as: a `feature_flags`
+DB override (set via `PATCH /api/admin/flags/{key}`, see the admin control
+room's flags page) wins when present, otherwise the flag falls back to its
+env var, otherwise to its hardcoded default. An override, once written,
+takes effect everywhere within 30 seconds (the in-process cache's TTL) —
+immediately for the process that wrote it.
+
+| Key | Env var | Default |
+| --- | --- | --- |
+| `ask_router_enabled` | `ASK_ROUTER_ENABLED` | on |
+| `ask_followup_enabled` | `ASK_FOLLOWUP_ENABLED` | off |
+| `copilot_insight_enabled` | `COPILOT_INSIGHT_ENABLED` | off |
+| `ask_history_enabled` | `ASK_HISTORY_ENABLED` | on |
+| `ask_intent_cache_enabled` | `ASK_INTENT_CACHE_ENABLED` | off |
+| `ask_query_log_enabled` | `ASK_QUERY_LOG_ENABLED` | on |
+| `weather_ingest_enabled` | `WEATHER_INGEST_ENABLED` | off |
+| `openapi_docs_enabled` | `OPENAPI_DOCS_ENABLED` | off |
+| `perf_debug_enabled` | `PERF_DEBUG_ENABLED` | off |
+
+`openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json` and is
+registered like every other key above — it takes a DB override the same as
+the rest, not env-only. Off unless set, so a deployment that configures
+nothing publishes no schema; `.env.example` turns it on for local dev.
 
 Leaving all OAuth variables unset runs the app in anonymous-only mode. Do not
 commit `.env`, API keys, OAuth secrets, database passwords, or private keys.
@@ -235,10 +291,14 @@ the Oracle-to-R2 archive path.
 api/                    FastAPI app, auth, routers, middleware
 pipeline/               ingest, static loading, aggregation, reports, Ask
 db/                     Postgres/PostGIS and ClickHouse schemas
+deploy/                 systemd units and log rotation for ops monitoring and drift checks
 frontend/               React SPA and translations
+oracle_cloud/           Oracle VM collector agent (v3): archive fetch, R2 sync, health checks, alerting
 scripts/                operational tools and review helpers
+tests/                  pytest suites (api, pipeline, query, db, frontend, unit) and fixtures
+tools/                  optional local dev tools (GeoSQL/Dekart)
 docs/features/          feature-specific behavior guides
-.claude/                review and autonomous-loop workflows
+.claude/                review and PR workflows
 ```
 
 Useful entry points:
@@ -252,11 +312,12 @@ Useful entry points:
 
 ## Safety Rules
 
-- Treat the dev databases as read-only; use throwaway test databases for writes.
+- Dev databases are read-only; see `CLAUDE.md`. Use the throwaway `:5544`/
+  `:8124` pair described above for writes.
 - Never push directly to `main`; use reviewed squash-merged PRs.
-- Commit messages carry `[skip ci]`, except the last push before a PR is
-  readied: its tip must omit the trailer so CI runs and can be green, which
-  the merge gate requires. See `CLAUDE.md` for the rule and
-  `transit-app-gotchas` for how the trailer behaves.
+- Branch commits carry no `[skip ci]`, so every push to a PR runs CI and the
+  merge gate has a result to read. Only the squash-merge commit carries the
+  trailer, keeping `main` from re-running what the branch proved. See
+  `CLAUDE.md` for the rule and `transit-app-gotchas` for how it behaves.
 - Run the relevant checks before opening a PR, then run `make check` when the
   change affects backend behavior.

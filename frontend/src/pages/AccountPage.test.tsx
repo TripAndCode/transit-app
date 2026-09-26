@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
+import { formatDateTime } from "../utils/format";
 import { AccountPage } from "./AccountPage";
 
 const mockMutate = vi.fn();
@@ -70,11 +71,10 @@ describe("AccountPage logout", () => {
     mockApiGet.mockResolvedValue([
       { sid_prefix: "abc123", user_agent: "Chrome", ip: "1.2.3.4", created_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-01-02T03:04:00Z" },
     ]);
-    const localeSpy = vi.spyOn(Date.prototype, "toLocaleString");
     await i18n.changeLanguage("en");
     renderAccount();
     await screen.findByText("Chrome");
-    expect(localeSpy).toHaveBeenCalledWith("en");
-    localeSpy.mockRestore();
+    const expected = formatDateTime("2026-01-02T03:04:00Z");
+    expect(document.body.textContent).toContain(expected);
   });
 });

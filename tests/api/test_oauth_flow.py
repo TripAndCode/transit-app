@@ -2,7 +2,7 @@
 patched out. We never hit a real provider; the userinfo path is monkeypatched
 to return canned dicts.
 
-Each test builds a valid signed ``oauth_tx`` cookie via ``auth_mod._signer.dumps``
+Each test builds a valid signed ``oauth_tx`` cookie via ``auth_mod._get_signer().dumps``
 so the callback's state check accepts it, then asserts redirect target +
 database side effects (users, oauth_identities, sessions, login_events).
 """
@@ -14,6 +14,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.security import token_hash
 from tests.conftest import _test_pool
 
 
@@ -83,7 +84,7 @@ async def test_callback_unverified_email_redirects(auth_client, aconn, monkeypat
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
 
     # build a valid tx cookie ourselves
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
 
     # mock authorize_access_token to skip real provider call
     fake_token = {"access_token": "tok"}
@@ -113,7 +114,7 @@ async def test_callback_creates_user_and_session(auth_client, aconn, monkeypatch
         }
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
     fake_token = {"access_token": "tok"}
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value=fake_token)
@@ -130,8 +131,95 @@ async def test_callback_creates_user_and_session(auth_client, aconn, monkeypatch
     row = await aconn.fetchrow("SELECT user_id, email, role FROM users WHERE email='yo@x'")
     assert row is not None
     assert row["role"] == "user"
-    s = await aconn.fetchrow("SELECT sid FROM sessions WHERE user_id=$1", row["user_id"])
+    s = await aconn.fetchrow("SELECT sid_hash FROM sessions WHERE user_id=$1", row["user_id"])
     assert s is not None
+
+
+@pytest.mark.asyncio
+async def test_pending_invite_preapproves_role_and_llm_on_first_login(auth_client, aconn, monkeypatch):
+    """An admin-created ``user_invites`` row for this email is honored on the
+    invitee's first OAuth login: role and llm_approved come from the invite,
+    and the invite is marked consumed so it can't be reused."""
+    from api.routers import auth as auth_mod
+
+    admin_uid = (await aconn.fetchrow("INSERT INTO users (email, role) VALUES ('admin@x', 'admin') RETURNING user_id"))[
+        "user_id"
+    ]
+    invite_id = (
+        await aconn.fetchrow(
+            "INSERT INTO user_invites (email, role, llm_approved, invited_by) "
+            "VALUES ('invitee@x', 'admin', true, $1) RETURNING invite_id",
+            admin_uid,
+        )
+    )["invite_id"]
+
+    async def fake_userinfo(client, token, provider):
+        return {
+            "sub": "google-sub-invitee",
+            "email": "invitee@x",
+            "email_verified": True,
+            "name": "Invitee",
+            "avatar_url": None,
+        }
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "tok"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+
+    row = await aconn.fetchrow("SELECT role, llm_approved FROM users WHERE email='invitee@x'")
+    assert row is not None
+    assert row["role"] == "admin"
+    assert row["llm_approved"] is True
+
+    invite_row = await aconn.fetchrow(
+        "SELECT consumed_at, consumed_user_id FROM user_invites WHERE invite_id=$1", invite_id
+    )
+    assert invite_row["consumed_at"] is not None
+    assert invite_row["consumed_user_id"] is not None
+
+
+@pytest.mark.asyncio
+async def test_expired_invite_is_not_honored(auth_client, aconn, monkeypatch):
+    from api.routers import auth as auth_mod
+
+    await aconn.execute(
+        "INSERT INTO user_invites (email, role, llm_approved, expires_at) "
+        "VALUES ('stale@x', 'admin', true, now() - interval '1 day')"
+    )
+
+    async def fake_userinfo(client, token, provider):
+        return {
+            "sub": "google-sub-stale",
+            "email": "stale@x",
+            "email_verified": True,
+            "name": "Stale",
+            "avatar_url": None,
+        }
+
+    monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "tok"})
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+
+    row = await aconn.fetchrow("SELECT role, llm_approved FROM users WHERE email='stale@x'")
+    assert row is not None
+    assert row["role"] == "user"
+    assert row["llm_approved"] is False
 
 
 @pytest.mark.asyncio
@@ -144,7 +232,7 @@ async def test_admin_email_promotes(auth_client, aconn, monkeypatch):
         return {"sub": "g2", "email": "boss@x", "email_verified": True, "name": "Boss", "avatar_url": None}
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
     with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
@@ -175,7 +263,7 @@ async def test_account_linking_by_verified_email(auth_client, aconn, monkeypatch
         return {"sub": "gh-sub", "email": "shared@x", "email_verified": True, "name": "A", "avatar_url": None}
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "github"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "github"})
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
     with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
@@ -213,7 +301,7 @@ async def test_oauth_login_refuses_to_take_over_a_local_password_account(auth_cl
         return {"sub": "g-sub", "email": "root@local", "email_verified": True, "name": "Someone", "avatar_url": None}
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
     with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
@@ -240,7 +328,7 @@ async def test_first_login_emits_account_created(auth_client, aconn, monkeypatch
         return {"sub": "new-sub", "email": "new@x", "email_verified": True, "name": "N", "avatar_url": None}
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
     with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
@@ -266,7 +354,7 @@ async def test_login_event_and_session_fields_on_successful_callback(auth_client
         return {"sub": "field-sub", "email": "field@x", "email_verified": True, "name": "F", "avatar_url": None}
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
     with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
@@ -289,9 +377,12 @@ async def test_login_event_and_session_fields_on_successful_callback(auth_client
     assert row["provider"] == "google"
     assert row["user_agent"] == "test-ua"
     assert row["meta"] is None
-    sid = await aconn.fetchval("SELECT sid FROM sessions WHERE user_id=$1", uid)
-    assert sid is not None
-    assert f"sid={sid}" in resp.headers.get("set-cookie", "")
+    stored = await aconn.fetchrow("SELECT sid, sid_hash FROM sessions WHERE user_id=$1", uid)
+    assert stored is not None
+    # The raw session id lives only in the cookie; the row keeps its digest.
+    assert stored["sid"] is None
+    cookie_sid = resp.headers["set-cookie"].split("sid=", 1)[1].split(";", 1)[0]
+    assert stored["sid_hash"] == token_hash(cookie_sid)
 
 
 @pytest.mark.asyncio
@@ -310,7 +401,7 @@ async def test_repeat_login_skips_account_created(auth_client, aconn, monkeypatc
         return {"sub": "r-sub", "email": "repeat@x", "email_verified": True, "name": None, "avatar_url": None}
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
     with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
@@ -352,7 +443,7 @@ async def test_unverified_email_records_login_failed(auth_client, aconn, monkeyp
         return {"sub": "u", "email": "u@x", "email_verified": False, "name": None, "avatar_url": None}
 
     monkeypatch.setattr(auth_mod, "_fetch_userinfo", fake_userinfo)
-    payload = auth_mod._signer.dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "google"})
     client_mock = AsyncMock()
     client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
     with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
@@ -384,8 +475,8 @@ async def test_logout_deletes_session(auth_client, aconn):
     uid = (await aconn.fetchrow("INSERT INTO users (email) VALUES ('x@x') RETURNING user_id"))["user_id"]
     sid = "test-sid"
     await aconn.execute(
-        "INSERT INTO sessions (sid, user_id, expires_at) VALUES ($1, $2, $3)",
-        sid,
+        "INSERT INTO sessions (sid_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+        token_hash(sid),
         uid,
         datetime.now(tz.utc) + timedelta(days=30),
     )
@@ -395,7 +486,7 @@ async def test_logout_deletes_session(auth_client, aconn):
         headers={"Origin": "http://test"},
     )
     assert resp.status_code == 204
-    n = await aconn.fetchval("SELECT count(*) FROM sessions WHERE sid=$1", sid)
+    n = await aconn.fetchval("SELECT count(*) FROM sessions WHERE sid_hash=$1", token_hash(sid))
     assert n == 0
 
 
@@ -421,7 +512,7 @@ async def test_real_login_then_callback_does_not_raise_duplicate_code_verifier(a
     assert login_resp.status_code == 302
     tx_cookie = login_resp.cookies.get("oauth_tx")
     assert tx_cookie
-    tx = auth_mod._signer.loads(tx_cookie)
+    tx = auth_mod._get_signer().loads(tx_cookie)
 
     async def fake_userinfo(client, token, provider):
         return {"sub": "real-sub", "email": "real@x", "email_verified": True, "name": "Real", "avatar_url": None}

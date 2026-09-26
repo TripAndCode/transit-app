@@ -11,8 +11,8 @@
 # literally, and this repo also keeps a long-lived pair of containers by
 # those exact names running for everyday local use. Two verification runs
 # against that same fixed pair -- e.g. an interactive session's own
-# verification and a concurrent `/vps-loop-run` worker's, in two different
-# worktrees on the same VPS -- don't just risk a `docker run` name
+# verification and a concurrent agent's, in two different worktrees on the
+# same host -- don't just risk a `docker run` name
 # collision: `tests/conftest.py`'s per-test Postgres reset and its
 # ClickHouse `DROP TABLE`/`CREATE TABLE` both race across the two
 # runs, producing spurious failures with no connection to either diff. This
@@ -36,6 +36,7 @@
 # Requires: docker, poetry (with `poetry install` already run in this
 # worktree's own virtualenv -- this script does not install dependencies).
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -92,7 +93,7 @@ start_containers() {
         -p "127.0.0.1:${pg_port}:5432" "$pg_image" >/dev/null 2>&1 \
       && docker run -d --name "$ch_name" \
         -e CLICKHOUSE_USER=transit -e CLICKHOUSE_PASSWORD=transit -e CLICKHOUSE_DB=transit_test \
-        -p "127.0.0.1:${ch_port}:8123" clickhouse/clickhouse-server:26.3 >/dev/null 2>&1
+        -p "127.0.0.1:${ch_port}:8123" clickhouse/clickhouse-server:26.8 >/dev/null 2>&1
     then
       return 0
     fi

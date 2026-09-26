@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
+import { Z_INDEX } from "../styles/zIndex";
 import { useAgencies } from "../api/hooks";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 import { readWelcomeSeen, writeWelcomeSeen } from "../api/welcomeSeen";
@@ -52,7 +53,7 @@ export function OnboardingGate() {
   // instead of leaving it to call navigate() on a gone component.
   useEffect(() => {
     if (selectedId == null) return;
-    const id = setTimeout(() => navigate(`/agencies/${selectedId}/map`, { replace: true }), SELECT_TRANSITION_MS);
+    const id = setTimeout(() => navigate(`/agencies/${selectedId}/operations`, { replace: true }), SELECT_TRANSITION_MS);
     return () => clearTimeout(id);
   }, [selectedId, navigate]);
 
@@ -95,11 +96,11 @@ export function OnboardingGate() {
   }
 
   if (agencies.length === 1) {
-    return <Navigate to={`/agencies/${agencies[0].agency_id}/map`} replace />;
+    return <Navigate to={`/agencies/${agencies[0].agency_id}/operations`} replace />;
   }
 
   if (remembered != null && agencies.some((a) => a.agency_id === remembered)) {
-    return <Navigate to={`/agencies/${remembered}/map`} replace />;
+    return <Navigate to={`/agencies/${remembered}/operations`} replace />;
   }
 
   function select(agency: Agency) {
@@ -117,7 +118,7 @@ export function OnboardingGate() {
         alignItems: "center",
         justifyContent: "center",
         padding: 40,
-        zIndex: 100,
+        zIndex: Z_INDEX.modal,
       }}
     >
       <div style={{ width: "100%", maxWidth: 640, textAlign: "center" }}>
@@ -185,7 +186,7 @@ export function OnboardingGate() {
                       justifyContent: "center",
                     }}
                   >
-                    <Check size={12} strokeWidth={3} color="#fff" />
+                    <Check size={12} strokeWidth={3} color="var(--on-accent)" />
                   </span>
                 )}
                 <div style={{ fontSize: 15, fontWeight: 600 }}>{a.agency_name}</div>

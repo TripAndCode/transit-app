@@ -8,12 +8,20 @@ chroma_db/
 gtfs.db
 raw_archives/
 raw_archives_static/
-.env
+.env*
+!.env.example
 .cloudflare_api.txt
+# macOS Finder duplicate-file naming ("file copy.txt", "file copy 2.txt").
+* copy*
+* copy.*
 # Ops-status collectors' local cache files (e.g. scripts/collect_github_status.py's
 # --cache-file default), keyed by component name -- a resilience aid for a single
 # checkout, never repo content.
 .cache/ops-status-*.json
+# Local ask-eval artifact(s), read by GET /api/admin/ask/eval when present
+# (see pipeline/query/ask_ops.py find_latest_eval_result) -- not produced by
+# any committed script yet, and never repo content when it is.
+.cache/ask-eval-*.json
 # Claude Code — commit shared tools, ignore personal/runtime/docs
 .claude/*
 !.claude/commands/
@@ -23,12 +31,18 @@ raw_archives_static/
 !.claude/settings.json
 .claude/settings.local.json
 .claude/**/*.local.md
-.claude/**/.DS_Store
-docs/*
-!docs/deploy-railway.md
-!docs/ops-monitoring-deploy.md
-!docs/refactor-log.md
-!docs/features/
+# Finder drops these anywhere in the tree, not just under .claude/ (the only
+# directory a blanket ignore above covers), so it needs its own top-level
+# pattern.
+.DS_Store
+# docs/ is tracked by default; only these local-only planning trees (never
+# meant for the team) stay ignored. This explicit list is the whole
+# protection — anything under docs/ not named here is stageable, so a new
+# local-only tree must be added the moment it appears.
+# tests/unit/test_repo_hygiene_files.py asserts each one against git itself.
+docs/superpowers/
+docs/specs/
+docs/references/
 specs/
 .worktrees/
 .superpowers/

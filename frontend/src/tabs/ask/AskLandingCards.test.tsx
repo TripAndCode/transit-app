@@ -101,6 +101,13 @@ describe("AskLandingCards", () => {
     expect(document.querySelector("svg")).toBeInTheDocument();
   });
 
+  it("describes the feature in user language, not internal pipeline terms", () => {
+    setup();
+    const copy = `${i18n.t("ask.landing.header_title")} ${i18n.t("ask.landing.header_subtitle")}`;
+    expect(copy).not.toMatch(/rule|embedding|RAG|pipeline|stage/i);
+    expect(copy).not.toMatch(/ルール|埋め込み|段階/);
+  });
+
   it("shows an example-answer line under instant cards that have one, none for pills", () => {
     setup();
     expect(screen.getByText(i18n.t("ask.card.top_delay.example_answer"))).toBeInTheDocument();

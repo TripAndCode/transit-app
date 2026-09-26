@@ -67,11 +67,26 @@ const JS_MARKER = "getRTLTextPluginStatus";
 // rules, which would false-positive a prefix-only match every time.
 const CSS_MARKER = "maplibregl-canvas";
 
+// mermaidAPI is a public property mermaid exposes on its default export
+// (mermaid.mermaidAPI.render/.parse/...) -- a public API surface, so it
+// survives minification the same way getRTLTextPluginStatus does for
+// MapLibre. mermaid has no equivalent dedicated stylesheet to guard, so
+// unlike MapLibre this check has only a JS marker, and (unlike JS_MARKER)
+// no "seen anywhere in dist/" liveness requirement: mermaid is loaded only
+// from an admin-only page (MarkdownMermaid.tsx), so plenty of legitimate
+// builds/fixtures never reference it at all.
+const MERMAID_JS_MARKER = "mermaidAPI";
+
 // Budget covers the whole static closure (JS + CSS), not a fixed
 // "current measured size" — it's headroom, not a baseline to keep in
-// sync by hand. MapLibre alone adds ~800 KiB, so 600 KiB catches a
-// MapLibre-scale regression well before it would fit.
-const STATIC_CLOSURE_BUDGET_BYTES = 600 * 1024;
+// sync by hand. MapLibre alone adds ~800 KiB, so this still catches a
+// MapLibre-scale regression with room to spare.
+//
+// The largest single occupant is not a library: both locale bundles are
+// imported eagerly by i18n's init, so every translated string in the app
+// ships in the entry. Moving them to a per-language fetch would free well
+// over a tenth of this budget and is the real reduction available here.
+const STATIC_CLOSURE_BUDGET_BYTES = 640 * 1024;
 
 // Matches <script ... src="...">, <link ... href="...">, single- or
 // double-quoted, tag attributes in any order/case. Also matches HTML5's
@@ -267,6 +282,13 @@ for (const [entryKey] of entries) {
           );
           failed = true;
         }
+        if (!node.file.endsWith(".css") && content.includes(MERMAID_JS_MARKER)) {
+          console.error(
+            `check-entry-chunk: FAIL — "${node.file}" (statically reachable from entry "${entryKey}") contains mermaid. ` +
+              "mermaid must only be reached via a dynamic import (React.lazy), never a static one.",
+          );
+          failed = true;
+        }
         const size = sizeOrNull(filePath);
         if (size === null) {
           console.error(`check-entry-chunk: FAIL — could not stat chunk "${node.file}".`);
@@ -351,6 +373,15 @@ for (const [entryKey] of entries) {
             "MapLibre and is not part of the Vite manifest's static import graph (likely a hand-authored tag " +
             "pointing at a file copied verbatim into dist/, e.g. from public/). This bypasses the manifest " +
             "walk above; remove the tag and load MapLibre only via a dynamic import (React.lazy), like MapTab.",
+        );
+        failed = true;
+      }
+      if (content.includes(MERMAID_JS_MARKER)) {
+        console.error(
+          `check-entry-chunk: FAIL — index.html's <script>/<link> tag references "${url}", which contains ` +
+            "mermaid and is not part of the Vite manifest's static import graph (likely a hand-authored tag " +
+            "pointing at a file copied verbatim into dist/, e.g. from public/). This bypasses the manifest " +
+            "walk above; remove the tag and load mermaid only via a dynamic import (React.lazy), like MarkdownMermaid.tsx.",
         );
         failed = true;
       }

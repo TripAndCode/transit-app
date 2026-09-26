@@ -160,5 +160,8 @@ async def test_movers_returns_rows(dash_app):
     assert r.status_code == 200
     body = r.json()
     assert "rows" in body
+    # Both compared windows (2026-05-25..31 and 2026-05-18..24) fall inside the
+    # seeded 20 days, so an empty list would mean the windows landed off the data.
+    assert body["rows"]
     expected_keys = {"route_code", "label", "current_avg", "previous_avg", "delta", "delta_pct", "samples"}
     assert all(expected_keys.issubset(r.keys()) for r in body["rows"])

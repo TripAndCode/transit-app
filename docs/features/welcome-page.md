@@ -74,27 +74,29 @@ for a visitor who hasn't decided yet, whereas a single dominant default
 matches how most product landing pages present an optional lower-commitment
 path.
 
-## The dashboard preview is a mock, not a live demo
+## The scroll narrative is real charts on fixture data, not a live demo
 
-Below the hero, `frontend/src/pages/landing/DashboardPreview.tsx` renders a
-shell structurally matching the real `Sidebar.tsx` + `App.tsx` (collapsible
-sidebar, the real nav set, full-bleed Map tab, functional controls) and
-auto-advances through the real tabs (Overview → Map → Analysis → Network →
-Live, `AUTO_ADVANCE_ORDER` in `DashboardPreview.tsx`) on its own, cycling
-indefinitely so a visitor who never touches it still sees the whole
-sequence. "Ask" is deliberately excluded from the auto-advance cycle — it is
-presented as a CTA a visitor opts into, not a peer tab in the cycle, mirroring
-how `PreviewSidebar` itself treats it.
+Below the hero, `frontend/src/pages/landing/ScrollNarrative.tsx` renders three
+sections — each a heading/body pair beside a real, working chart component:
+the route-delay `StopChart` (the same component Route analysis uses), the
+day-over-day `DailyChart` (the same component Analysis's trend report uses),
+and Ask's `StopEvidenceChart` (the same evidence view a real Ask answer
+renders). Each section fades and rises into place as it scrolls into view
+(`useRevealOnScroll`), gated behind `prefers-reduced-motion: no-preference`
+in `ScrollNarrative.css` so a reduced-motion visitor sees every section fully
+visible immediately instead of animating in.
 
-Every panel in the preview (`PreviewOverviewPanel`, `PreviewMapPanel`,
-`PreviewAnalysisPanel`, `PreviewNetworkPanel`, `PreviewLivePanel`,
-`PreviewAskPanel`) reads from static, hardcoded fixture data
-(`frontend/src/pages/landing/previewData.ts`), never a live API call. This
-is what stands in for a produced demo video — it shows the product moving
-without needing a maintained recording — and it keeps the preview itself
-free of any cost or data-exposure question entirely independently of the
-guest-access policy described above: the preview would render identically
-even if guest access to the real app were removed tomorrow.
+None of the three components ever fetches — every figure is illustrative,
+static example data from `frontend/src/pages/landing/previewData.ts` (an
+invented route whose delay compounds stop after stop against a calmer
+week-earlier comparison, a couple of rough days against a calmer trailing
+average, and one Ask evidence point deliberately missing so the fixture
+exercises the same no-data path real data hits). This is what stands in for a
+produced demo video — it shows the product's real chart components moving
+without needing a maintained recording — and it keeps the narrative free of
+any cost or data-exposure question entirely independently of the guest-access
+policy described above: it would render identically even if guest access to
+the real app were removed tomorrow.
 
 ## A guest reaches no LLM at all; the rest of the dashboard is fully open
 
@@ -144,9 +146,10 @@ duplicating that flow here.
 |---|---|
 | `frontend/src/pages/LandingPage.tsx` | Hero: headline, sign-in CTA, secondary guest link |
 | `frontend/src/pages/LandingPage.css` | Hero/hero-CTA/guest-link styling |
-| `frontend/src/pages/landing/CityMapHero.tsx` | Animated background scene behind the hero text |
-| `frontend/src/pages/landing/DashboardPreview.tsx` | Auto-advancing mock dashboard shell below the hero |
-| `frontend/src/pages/landing/previewData.ts` | Static fixture data consumed by every preview panel |
+| `frontend/src/pages/landing/LiveMapHero.tsx` | Animated backdrop behind the hero text: the operations map with trip dots, the app's right-hand panel, and morphs that carry a trip's reported stops and the day-playback hours into that panel. Only real app screens, sample figures on a fictional city. Scene data in `heroMapScene.ts`, script in `heroMapTimeline.ts`, map layers in `heroMapDraw.ts`, panel in `heroPanelDraw.ts`, driven by `useHeroMapAnimation.ts` |
+| `frontend/src/pages/landing/ScrollNarrative.tsx` | Post-hero scroll narrative: three real charts on fixture data |
+| `frontend/src/pages/landing/useRevealOnScroll.ts` | Fade/rise-in-view hook backing the narrative's scroll reveal |
+| `frontend/src/pages/landing/previewData.ts` | Static fixture data consumed by the scroll narrative's charts |
 | `frontend/src/components/OnboardingGate.tsx` | What `/` actually renders — the real, guest-accessible dashboard entry; redirects a genuinely first-time anonymous visitor to `/welcome` |
 | `frontend/src/api/welcomeSeen.ts` | localStorage-backed "has this browser passed the welcome step" flag consulted by `OnboardingGate` |
 | `frontend/src/components/GuestPrompt.tsx` | Persistent, dismissible guest-login nudge shown inside the real app shell |
@@ -157,9 +160,14 @@ duplicating that flow here.
 ## i18n
 
 Hero strings live under `landing.hero.*`
-(`frontend/src/i18n/locales/{ja,en}.json`): `title`, `subtitle`,
-`guest_cta`. The primary sign-in CTA reuses the shared `common.login` key
-rather than a `landing`-scoped one.
+(`frontend/src/i18n/locales/{ja,en}.json`): `title_now` and `title_where`
+(the headline's two lines, rendered as separate spans so it never breaks
+mid-phrase), `subtitle`, `guest_cta`. The primary sign-in CTA reuses the
+shared `common.login` key rather than a `landing`-scoped one. Text drawn on
+the hero canvas (screen tags, captions, panel labels, sample route and stop
+names, legend) lives under `landing.hero_map.*`. The scroll narrative's three
+heading/body pairs live under `landing.narrative.{route,trend,ask}.{title,body}`
+in the same locale files.
 
 ## How to verify manually
 
@@ -174,7 +182,10 @@ rather than a `landing`-scoped one.
    login prompt blocking access, and the guest-login nudge (`GuestPrompt`)
    visible as a dismissible banner rather than a hard gate.
 5. Automated coverage: `frontend/src/pages/LandingPage.test.tsx` asserts
-   both links and their `href`s independently.
+   both links and their `href`s independently;
+   `frontend/src/pages/landing/ScrollNarrative.test.tsx` and
+   `useRevealOnScroll.test.ts` cover the post-hero narrative and its scroll
+   reveal.
 6. First-time redirect: clear the browser's localStorage (or open a private
    window), log out if signed in, then navigate straight to `/` — expect an
    immediate redirect to `/welcome`. Click "Continue as a guest" and confirm

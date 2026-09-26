@@ -21,6 +21,24 @@ const a11yAsError = Object.fromEntries(
   }),
 )
 
+// Every AST position that introduces a binding, as an esquery selector list.
+// `no-restricted-syntax` takes one selector string per entry, and a
+// comma-separated list is one selector, so this stays a single rule entry with
+// a single message.
+const shadowBindingSelector = [
+  'VariableDeclarator > Identifier.id',
+  'ObjectPattern > Property > Identifier.value',
+  'ArrayPattern > Identifier',
+  'RestElement > Identifier',
+  'AssignmentPattern > Identifier.left',
+  'CatchClause > Identifier.param',
+  ':matches(FunctionDeclaration, FunctionExpression, ArrowFunctionExpression) > Identifier.params',
+  ':matches(FunctionDeclaration, FunctionExpression, ClassDeclaration, ClassExpression) > Identifier.id',
+  ':matches(ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier) > Identifier.local',
+]
+  .map((position) => `${position}[name=/^(window|document)$/]`)
+  .join(', ')
+
 export default tseslint.config(
   { ignores: ['dist', 'coverage', 'node_modules'] },
   {
@@ -40,17 +58,12 @@ export default tseslint.config(
       // with eslint-plugin-react-hooks v7 (flags code the compiler can't
       // optimize), on top of the classic rules-of-hooks set. Its actual
       // bailout signals (`unsupported-syntax`, `incompatible-library`) ship
-      // at 'warn', and `npm run lint` is bare `eslint .` with no
-      // `--max-warnings` — so a warn-level bailout doesn't fail the build
-      // today. `react-hooks/todo` ("unimplemented compiler features", Hint
-      // severity, off by default upstream) was previously promoted to
-      // 'error' here as an attempted bailout signal — removed: it isn't
-      // actually a bailout diagnostic, and promoting an unverified
-      // off-by-default rule risks failing lint on unrelated files with no
-      // lint run available in this sandbox to confirm it's clean. Needs a
-      // human to either add `--max-warnings 0` to `frontend/package.json`'s
-      // `lint` script, or promote `unsupported-syntax`/`incompatible-library`
-      // to `error` after a verified clean `npm run lint` run.
+      // at 'warn'; `npm run lint` runs with `--max-warnings 0`, so a
+      // bailout now fails the build instead of passing silently.
+      // `react-hooks/todo` ("unimplemented compiler features", Hint
+      // severity, off by default upstream) is deliberately left at its
+      // default: it isn't a bailout diagnostic, and promoting an
+      // off-by-default rule needs its own verified-clean lint run first.
       ...reactHooks.configs['recommended-latest'].rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       ...a11yAsError,
@@ -63,9 +76,9 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_',
         },
       ],
-      // `any` is a code smell, not a correctness bug — surface it as a warning
-      // during adoption rather than blocking on the existing uses.
-      '@typescript-eslint/no-explicit-any': 'warn',
+      // `any` defeats the type checker; every existing use has been
+      // replaced with a real type, so this now blocks on new ones.
+      '@typescript-eslint/no-explicit-any': 'error',
       // React Compiler (enabled repo-wide, see CLAUDE.md) auto-memoizes —
       // manual useMemo/useCallback/React.memo are redundant at best and can
       // mask compiler bailouts at worst. Banned as a hard error; use
@@ -83,6 +96,67 @@ export default tseslint.config(
           selector: "CallExpression[callee.name=/^(useMemo|useCallback|memo)$/]",
           message:
             'Do not use useMemo/useCallback/React.memo — the React Compiler handles memoization automatically. Inline the computation or use a plain function.',
+        },
+        {
+          // A raw number (or any other literal) assigned to a `zIndex`
+          // object property bypasses the shared stacking-order ladder in
+          // src/styles/zIndex.ts — nothing else then tells you where it
+          // sits relative to every other overlay. `zIndex: Z_INDEX.foo` (a
+          // MemberExpression, not a Literal) is unaffected by this
+          // selector, as is a derived expression like `Z_INDEX.foo - 1`.
+          selector: 'Property[key.name="zIndex"][value.type="Literal"]',
+          message: "Do not hardcode zIndex — use a rung from Z_INDEX (src/styles/zIndex.ts) instead.",
+        },
+        {
+          // A local binding named `window` or `document` shadows the DOM
+          // global of the same name for the whole of its scope, so every
+          // later reference there resolves to the local value instead. The
+          // mistake is invisible until something in that scope wants the real
+          // global (a `window.matchMedia` call, a `document.querySelector`),
+          // at which point it fails at runtime far from its cause. Name the
+          // local for what it holds instead.
+          //
+          // The hazard is "a new binding in scope", not any one syntax, so the
+          // selector enumerates binding positions rather than statement kinds:
+          // a destructured `const { window } = x` shadows exactly as hard as a
+          // plain `const window = x`, and a selector that only reaches the
+          // plain form passes the case a reviewer is likelier to miss.
+          // Type-only positions (`TSFunctionType`, `TSMethodSignature`) are
+          // deliberately absent: they declare no body, so there is no scope in
+          // which a bare `window` could resolve to the parameter.
+          selector: shadowBindingSelector,
+          message:
+            'Do not name a local binding `window` or `document` — it shadows the DOM global for the rest of the scope. Use a descriptive name (e.g. `viewWindow`).',
+        },
+        {
+          // `Number.prototype.toLocaleString`/`Date.prototype.toLocaleDateString`/
+          // `toLocaleTimeString`/`toLocaleString` silently default to the
+          // runtime's locale rather than the active UI language, so ja/en
+          // users can see numbers or dates formatted in the wrong locale.
+          selector: 'CallExpression[callee.property.name=/^toLocale(String|DateString|TimeString)$/]',
+          message: 'Do not call toLocale*() directly — use formatNumber()/formatDateTime() from src/utils/format.ts, which read the active UI language.',
+        },
+        {
+          // An import declaration that isn't hoisted above the module's other
+          // top-level statements reads as if it were conditionally loaded or
+          // ordering-sensitive, when in fact every import is hoisted to the
+          // top by the module system regardless of where it's written — a
+          // `const`/function declaration between two imports is just visual
+          // noise that makes the module's dependency list harder to scan.
+          // `eslint-plugin-import`'s `import/first` isn't installed; this
+          // selector is the dependency-free equivalent: it flags an
+          // ImportDeclaration that has an earlier non-import sibling in the
+          // same module body.
+          //
+          // Two kinds of sibling do not count. A directive prologue
+          // (`"use client"`) *must* come first, so flagging the import after
+          // it would demand a move with nowhere to move to. A re-export with
+          // a source (`export { x } from "./x"`) is part of the same
+          // dependency list an import belongs to, which is how `import/first`
+          // treats it too.
+          selector:
+            'Program > :not(ImportDeclaration, ExportNamedDeclaration[source], ExportAllDeclaration, ExpressionStatement[expression.type="Literal"][expression.value=/^use /]) ~ ImportDeclaration',
+          message: 'Move this import above the module\'s other top-level statements — imports are hoisted regardless of where they appear, so keep them together at the top.',
         },
       ],
       // Closes the aliased-import hole the syntax selectors above can't see
@@ -145,5 +219,13 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    // The entry module bootstraps the app through createRoot and exports
+    // nothing on purpose, so Fast Refresh never applies to it. The rule's
+    // advice there ("move your components to a separate file") is about a
+    // capability this file cannot have.
+    files: ['src/main.tsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
   },
 )

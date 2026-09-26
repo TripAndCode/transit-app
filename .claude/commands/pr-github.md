@@ -9,11 +9,8 @@ Post selected review findings as inline comments on the GitHub PR for the curren
 Nothing gets posted as a review comment without an explicit pick from the user in
 step 2. Listing the findings is not approval — post only the findings the user
 actually selected, never "post everything" by default.
-This gates Step 3 (posting the comments). It does NOT gate *editing the body text*
-of a PR that `/vps-loop-run` Step 6 already created as a draft — that runs unattended
-with no user present to pick. It is never licence to create a PR outside that flow: in
-an interactive session Step 1's "stop and offer" still applies, and every PR this repo
-opens starts as `--draft` per CLAUDE.md.
+This gates Step 3 (posting the comments). Creating a PR is gated separately by Step 1's
+"stop and offer", and every PR this repo opens starts as `--draft` per CLAUDE.md.
 
 ## Auth
 - Use the `gh` CLI — already authenticated via keyring. Do NOT ask for, paste, or
@@ -47,12 +44,7 @@ Write PR descriptions to be **scanned, not read**. Default to structure over pro
 - **Cut prose to the load-bearing clause.** Move rationale into the table cell /
   bullet it belongs to; don't write a paragraph to set it up.
 - **State the origin**, right after the one-line summary: `**Origin:**
-  Interactive session` if the work came from a human-driven session, or
-  `**Origin:** Autonomous VPS loop (item N)` if `/vps-loop-run` produced it
-  (per CLAUDE.md's "Autonomous VPS loop"). Lets a reviewer tell at a glance
-  which review posture applies (a VPS-loop PR squash-merges on its own once
-  the `/review-branch` pass is clean and GitHub reports it mergeable/
-  clean — no separate human go-ahead required; see CLAUDE.md).
+  Interactive session` (per CLAUDE.md's "Git and pull requests").
 - Keep sections short and titled: What · Affected · Behaviour · Fixes · Tests ·
   Verification (include only those that apply). End with the Claude Code trailer.
 

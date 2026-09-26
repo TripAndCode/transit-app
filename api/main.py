@@ -7,14 +7,16 @@ at ``/`` with an explicit JSON 404 for unknown ``/api/*`` paths so frontend
 fetches keep getting structured errors instead of HTML index pages.
 """
 
+import asyncio
 import logging
 import os
 import os.path
 from contextlib import asynccontextmanager
 
 import asyncpg
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -32,6 +34,9 @@ from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
 from api.routers.admin import router as admin_router
+from api.routers.admin_agencies import router as admin_agencies_router
+from api.routers.admin_ask import router as admin_ask_router
+from api.routers.admin_flags import router as admin_flags_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
 from api.routers.ask_dashboard import router as ask_dashboard_router
@@ -49,7 +54,9 @@ from api.routers.overview import router as overview_router
 from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
 from api.security import cookie_secure
+from pipeline.flags import flag
 from pipeline.query.llm_client import ProviderConfig
+from pipeline.runs import reap_abandoned_runs_best_effort
 
 _log = logging.getLogger(__name__)
 
@@ -123,6 +130,37 @@ def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> Non
         )
 
 
+def _openapi_docs_enabled() -> bool:
+    """Whether ``/docs``, ``/redoc`` and ``/openapi.json`` should be exposed.
+
+    Off unless ``OPENAPI_DOCS_ENABLED`` says otherwise, matching
+    ``PERF_DEBUG_ENABLED``: a deployment that configures nothing publishes no
+    schema. The HTTPS signal behind ``cookie_secure()`` cannot stand in for
+    "is this production" here, because ``PUBLIC_BASE_URL`` is only set when
+    SSO is configured — a live HTTPS deployment without SSO leaves it at its
+    localhost default, which would read as local dev and expose the schema.
+
+    Local dev gets the docs from ``.env.example``, which turns them on and is
+    only ever copied into a developer's own ``.env``.
+    """
+    return os.environ.get("OPENAPI_DOCS_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
+def _require_docs_enabled() -> None:
+    """404 the docs surface when disabled, matching ``debug._require_enabled``'s
+    disabled-looks-nonexistent convention (never a 403 that would confirm the
+    route exists).
+
+    Checked as a per-route dependency rather than at app construction: unlike
+    ``docs_url``/``redoc_url``/``openapi_url`` (fixed for the process's whole
+    lifetime once passed to ``FastAPI(...)``), this runs on every request, so
+    a ``feature_flags`` override on ``openapi_docs_enabled`` -- or an env
+    change -- takes effect without a restart.
+    """
+    if not flag("openapi_docs_enabled", _openapi_docs_enabled()):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
     """Refuse to boot with zero usable LLM providers configured.
 
@@ -138,6 +176,24 @@ def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
         )
 
 
+async def _close_startup_resources(app: FastAPI) -> None:
+    """Close the ClickHouse client and the connection pool, tolerating either
+    being absent or already failed. Shared by the startup-failure path and
+    the normal shutdown so the two cannot drift."""
+    client = getattr(app.state, "ch_client", None)
+    if client is not None:
+        try:
+            await client.close()
+        except Exception:
+            _log.warning("ClickHouse client failed to close cleanly", exc_info=True)
+    pool = getattr(app.state, "pool", None)
+    if pool is not None:
+        try:
+            await pool.close()
+        except Exception:
+            _log.warning("Connection pool failed to close cleanly", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
@@ -147,6 +203,7 @@ async def lifespan(app: FastAPI):
     partial set is rejected as a misconfiguration since a half-wired OAuth
     flow would leak state cookies without ever completing.
     """
+    from pipeline.flags import warm as warm_flags
     from pipeline.query.llm_client import _load_providers
 
     _validate_llm_providers(_load_providers())
@@ -162,52 +219,87 @@ async def lifespan(app: FastAPI):
     # fan-out one slot short and serialized a stage on every cold request.
     app.state.pool = await asyncpg.create_pool(DATABASE_URL, init=_init_connection, min_size=10, max_size=20)
 
-    # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
-    # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
-    # heatmap, any time_band="all" report path reading agg_* tables) have
-    # nothing to do with ClickHouse and must keep working even if it's down
-    # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
-    # client that raises a clean 503 lazily, only if something actually
-    # tries to use it.
+    # Everything below reuses app.state.pool, so any failure here must close
+    # it before re-raising — this generator's own cleanup after `yield` never
+    # runs unless `yield` is actually reached, otherwise the pool leaks.
     try:
-        app.state.ch_client = await get_ch_client()
-    except KeyError as exc:
-        _log.warning(
-            "ClickHouse client not started — missing required env var %s. "
-            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
-            exc,
-        )
-        app.state.ch_client = None
+        # Resolve the flags once here, off the request path. Every later
+        # refresh happens on a background thread, so this is the one read
+        # that would otherwise land on the event loop -- inside whichever
+        # request happened to touch a flag first.
+        await asyncio.to_thread(warm_flags)
+        # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
+        # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
+        # heatmap, any time_band="all" report path reading agg_* tables) have
+        # nothing to do with ClickHouse and must keep working even if it's down
+        # or misconfigured. api.deps.get_ch hands routes a stand-in for a None
+        # client that raises a clean 503 lazily, only if something actually
+        # tries to use it.
+        try:
+            app.state.ch_client = await get_ch_client()
+        except KeyError as exc:
+            _log.warning(
+                "ClickHouse client not started — missing required env var %s. "
+                "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+                exc,
+            )
+            app.state.ch_client = None
+        except Exception:
+            _log.warning(
+                "ClickHouse client not started — connection failed. "
+                "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
+                exc_info=True,
+            )
+            app.state.ch_client = None
+
+        # Close any run row left `running` by a process that died mid-job:
+        # this process is the first thing up after such a death, and a bar
+        # with no end is indistinguishable from work still in flight. Runs
+        # off the event loop and never raises -- a tidy-up must not be able
+        # to stop the API from booting.
+        reaped = await asyncio.to_thread(reap_abandoned_runs_best_effort, DATABASE_URL)
+        if reaped:
+            _log.warning("Closed %d pipeline run(s) abandoned by a previous process", reaped)
+
+        # Break-glass local-admin account (independent of the OAuth env block
+        # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
+        # are both set. See api.routers.auth.seed_local_admin.
+        await seed_local_admin(app.state.pool)
+
+        from pipeline.query.embeddings import get_embedder
+
+        embedder = get_embedder()
+        if not embedder.available:
+            _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
     except Exception:
-        _log.warning(
-            "ClickHouse client not started — connection failed. "
-            "ClickHouse-dependent routes will return 503; Postgres-only routes are unaffected.",
-            exc_info=True,
-        )
-        app.state.ch_client = None
-
-    # Break-glass local-admin account (independent of the OAuth env block
-    # above) — no-ops unless DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD
-    # are both set. See api.routers.auth.seed_local_admin.
-    await seed_local_admin(app.state.pool)
-
-    from pipeline.query.embeddings import get_embedder
-
-    embedder = get_embedder()
-    if not embedder.available:
-        _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
+        # Close what startup already opened, in the same order the shutdown
+        # path below uses. The ClickHouse client is opened inside this same
+        # try, so a failure after it leaks its HTTP session otherwise.
+        # Cleanup failures are logged, never raised: the startup error is the
+        # one worth reporting, and letting a close() failure replace it would
+        # hide the actual cause.
+        await _close_startup_resources(app)
+        raise
 
     yield
-    if app.state.ch_client is not None:
-        await app.state.ch_client.close()
-    await app.state.pool.close()
+    await _close_startup_resources(app)
 
 
 _CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 
 configure_logging()
 
-app = FastAPI(title="Transit Delay API", lifespan=lifespan)
+# FastAPI's own docs_url/redoc_url/openapi_url are fixed at construction --
+# no per-request hook to gate them dynamically. Disable the built-ins and
+# register equivalent routes below (after the routers), each behind
+# Depends(_require_docs_enabled), so the flag/env check happens per request.
+app = FastAPI(
+    title="Transit Delay API",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.state.limiter = limiter
 # slowapi's handler is typed against its own exception class, not Starlette's
 # broader (Request, Exception) signature — runtime contract is fine.
@@ -261,6 +353,9 @@ app.add_middleware(
 app.add_middleware(RequestLogMiddleware)
 
 app.include_router(admin_router)
+app.include_router(admin_agencies_router)
+app.include_router(admin_ask_router)
+app.include_router(admin_flags_router)
 app.include_router(agencies_router)
 app.include_router(ask_router)
 app.include_router(ask_dashboard_router)
@@ -276,6 +371,21 @@ app.include_router(reports_router)
 app.include_router(static_router)
 app.include_router(internal_router)
 app.include_router(collector_router)
+
+
+@app.get("/openapi.json", include_in_schema=False, dependencies=[Depends(_require_docs_enabled)])
+async def _openapi_schema() -> JSONResponse:
+    return JSONResponse(app.openapi())
+
+
+@app.get("/docs", include_in_schema=False, dependencies=[Depends(_require_docs_enabled)])
+async def _swagger_ui():
+    return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{app.title} - Swagger UI")
+
+
+@app.get("/redoc", include_in_schema=False, dependencies=[Depends(_require_docs_enabled)])
+async def _redoc_ui():
+    return get_redoc_html(openapi_url="/openapi.json", title=f"{app.title} - ReDoc")
 
 
 class HealthStatus(BaseModel):

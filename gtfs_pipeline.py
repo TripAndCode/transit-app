@@ -9,7 +9,8 @@ from urllib.parse import urlsplit
 
 import psycopg2
 
-from pipeline.locks import try_lock_ingest_analyze
+from pipeline import runs as pipeline_runs
+from pipeline.locks import try_lock_ingest_analyze_timed
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,19 @@ def _get_conn(require_schema: bool = True):
     return conn
 
 
-def _lock_or_skip_agency(conn, cmd: str) -> None:
+def _record_displaced(conn, kind: str, agency_id: int | None, lock_wait_ms: int) -> None:
+    """Leave a `skipped` pipeline_runs row for a job the lock turned away.
+
+    The whole reason this table exists: a displaced job produces no data and
+    therefore no other trace, so without this row a fleet losing every other
+    scheduled run looks exactly like a healthy one on the control board.
+    Best-effort like every other write in pipeline/runs.py -- it never changes
+    the exit code the caller is about to take.
+    """
+    pipeline_runs.start_run(conn, kind, agency_id=agency_id, status="skipped", lock_wait_ms=lock_wait_ms)
+
+
+def _lock_or_skip_agency(conn, cmd: str, kind: str, agency_id: int | None = None) -> None:
     """Exit(EX_TEMPFAIL) if another ingest/analyze process holds the lock.
 
     For `ingest` and `analyze` -- the single-agency commands
@@ -148,14 +161,16 @@ def _lock_or_skip_agency(conn, cmd: str) -> None:
     failure and skip just this agency this run, instead of the whole
     remaining loop aborting under `set -euo pipefail`.
     """
-    if try_lock_ingest_analyze(conn):
+    got, lock_wait_ms = try_lock_ingest_analyze_timed(conn)
+    if got:
         return
     logger.warning("%s: another ingest/analyze process is already running; skipping this agency this run.", cmd)
+    _record_displaced(conn, kind, agency_id, lock_wait_ms)
     conn.close()
     sys.exit(EX_TEMPFAIL)
 
 
-def _lock_or_exit(conn, cmd: str) -> None:
+def _lock_or_exit(conn, cmd: str, kind: str) -> None:
     """Exit(1) if another ingest/analyze process holds the lock.
 
     For `analyze_all` and `ingest_live` -- the whole-fleet commands that no
@@ -165,11 +180,24 @@ def _lock_or_exit(conn, cmd: str) -> None:
     are documented as fail-loud ("partial run can't pass silently" --
     CLAUDE.md); a silent no-op would violate that contract for no benefit.
     """
-    if try_lock_ingest_analyze(conn):
+    got, lock_wait_ms = try_lock_ingest_analyze_timed(conn)
+    if got:
         return
     logger.error("%s: another ingest/analyze process is already running; refusing to start.", cmd)
+    _record_displaced(conn, kind, None, lock_wait_ms)
     conn.close()
     sys.exit(1)
+
+
+def _args_agency_id(args) -> int | None:
+    """The agency the command was asked for, before the DB is consulted.
+
+    The lock is taken (and a displaced run recorded) before `_require_agency`
+    can infer a sole agency from the database, so a skipped run knows only
+    what the caller named. `None` means "not named", not "every agency".
+    """
+    raw = getattr(args, "agency_id", None)
+    return int(raw) if raw else None
 
 
 def _require_agency(args, conn) -> int:
@@ -302,10 +330,11 @@ def cmd_ingest(args):
     from pipeline.ingest import ingest
 
     conn = _get_conn()
-    _lock_or_skip_agency(conn, "ingest")
+    _lock_or_skip_agency(conn, "ingest", "ingest", _args_agency_id(args))
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
-    ingest(args.folder, agency_id, conn, ch_client)
+    with pipeline_runs.record_run(conn, "ingest", agency_id=agency_id) as run:
+        run.rows = ingest(args.folder, agency_id, conn, ch_client)
     conn.close()
 
 
@@ -315,7 +344,8 @@ def cmd_load_static(args):
 
     conn = _get_conn()
     agency_id = _require_agency(args, conn)
-    load_static(args.path, agency_id, conn)
+    with pipeline_runs.record_run(conn, "static", agency_id=agency_id):
+        load_static(args.path, agency_id, conn)
     conn.close()
 
 
@@ -348,10 +378,11 @@ def cmd_analyze(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
-    _lock_or_skip_agency(conn, "analyze")
+    _lock_or_skip_agency(conn, "analyze", "analyze", _args_agency_id(args))
     agency_id = _require_agency(args, conn)
     ch_client = get_client()
-    analyze(agency_id, conn, ch_client)
+    with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id):
+        analyze(agency_id, conn, ch_client)
     conn.close()
 
 
@@ -366,7 +397,7 @@ def cmd_analyze_all(args):
     from pipeline.clickhouse import get_client
 
     conn = _get_conn()
-    _lock_or_exit(conn, "analyze-all")
+    _lock_or_exit(conn, "analyze-all", "analyze")
     ch_client = get_client()
     with conn.cursor() as cur:
         cur.execute(ACTIVE_AGENCY_IDS_SQL)
@@ -379,7 +410,8 @@ def cmd_analyze_all(args):
     for aid in agency_ids:
         try:
             logger.info(f"--- analyze agency_id={aid} ---")
-            analyze(aid, conn, ch_client)
+            with pipeline_runs.record_run(conn, "analyze", agency_id=aid):
+                analyze(aid, conn, ch_client)
         except Exception:
             logger.exception(f"analyze failed for agency {aid}")
             failed.append(aid)
@@ -466,10 +498,11 @@ def cmd_ingest_live(args):
     from pipeline.ingest import ingest_live
 
     conn = _get_conn()
-    _lock_or_exit(conn, "ingest-live")
+    _lock_or_exit(conn, "ingest-live", "ingest")
     ch_client = get_client()
     if args.agency_id is not None:
-        ingest_live(int(args.agency_id), conn, ch_client)
+        with pipeline_runs.record_run(conn, "ingest", agency_id=int(args.agency_id)) as run:
+            run.rows = ingest_live(int(args.agency_id), conn, ch_client)
         conn.close()
         return
 
@@ -484,7 +517,8 @@ def cmd_ingest_live(args):
     for aid in agency_ids:
         try:
             logger.info(f"--- Ingesting agency_id={aid} ---")
-            ingest_live(aid, conn, ch_client)
+            with pipeline_runs.record_run(conn, "ingest", agency_id=aid) as run:
+                run.rows = ingest_live(aid, conn, ch_client)
         except Exception:
             logger.exception(f"ingest-live failed for agency {aid}")
             conn.rollback()
@@ -506,7 +540,7 @@ def cmd_migrate(args):
     if args.direction == "up":
         migrate_up(conn)
     else:
-        migrate_down(args.target, conn)
+        migrate_down(args.target, conn, force_destructive=args.force_destructive)
     conn.close()
 
 
@@ -580,6 +614,78 @@ def cmd_prune_query_log(args):
     asyncio.run(run())
 
 
+#: The control board reads pipeline_runs one JST day at a time (see
+#: api/admin_runs.py); a run this far back has no viewer left to show it to.
+PIPELINE_RUNS_RETENTION_DAYS = 90
+
+#: Matches the deploy's own 400-day data-retention horizon (RETENTION_DAYS in
+#: docs/deploy-railway.md), so the audit trail never outlives the operational
+#: data it explains changes to.
+ADMIN_AUDIT_RETENTION_DAYS = 400
+
+
+def prune_pipeline_runs_sql(days: int) -> str:
+    """DELETE text for the `pipeline_runs` retention prune.
+
+    The interval is embedded as text rather than bound as a parameter,
+    matching `cmd_prune_query_log`: asyncpg has no placeholder for an
+    INTERVAL literal. `int()` here rather than trusting the annotation --
+    argparse coerces the CLI path, but this builder is importable and the
+    coercion is what makes the interpolation safe, so it belongs where the
+    string is built rather than one call site away.
+    """
+    return f"DELETE FROM pipeline_runs WHERE started_at < now() - INTERVAL '{int(days)} days'"
+
+
+def prune_admin_audit_sql(days: int) -> str:
+    """DELETE text for the `admin_audit` retention prune. See `prune_pipeline_runs_sql`."""
+    return f"DELETE FROM admin_audit WHERE at < now() - INTERVAL '{int(days)} days'"
+
+
+def cmd_prune_pipeline_runs(args):
+    """Delete pipeline_runs rows older than the retention window (default 90 days)."""
+    import asyncio
+
+    import asyncpg
+
+    days = int(args.days)
+
+    async def run():
+        """Async body executed via asyncio.run()."""
+        _log_target()
+        conn = await asyncpg.connect(DATABASE_URL)
+        try:
+            await guard_async_conn(conn)
+            result = await conn.execute(prune_pipeline_runs_sql(days))
+            logger.info(f"prune_pipeline_runs: {result}")
+        finally:
+            await conn.close()
+
+    asyncio.run(run())
+
+
+def cmd_prune_admin_audit(args):
+    """Delete admin_audit rows older than the retention window (default 400 days)."""
+    import asyncio
+
+    import asyncpg
+
+    days = int(args.days)
+
+    async def run():
+        """Async body executed via asyncio.run()."""
+        _log_target()
+        conn = await asyncpg.connect(DATABASE_URL)
+        try:
+            await guard_async_conn(conn)
+            result = await conn.execute(prune_admin_audit_sql(days))
+            logger.info(f"prune_admin_audit: {result}")
+        finally:
+            await conn.close()
+
+    asyncio.run(run())
+
+
 def cmd_ingest_weather(args):
     """Fetch observed daily weather for every configured representative station."""
     from pipeline.weather import PUBLICATION_WINDOW_DAYS, ingest_weather
@@ -587,7 +693,11 @@ def cmd_ingest_weather(args):
     days = PUBLICATION_WINDOW_DAYS if args.days is None else int(args.days)
     conn = _get_conn()
     try:
-        written, considered, failed = ingest_weather(conn, days=days)
+        # Fleet-wide, not per-agency: the pass covers every configured
+        # station, and several agencies may share one.
+        with pipeline_runs.record_run(conn, "weather") as run:
+            written, considered, failed = ingest_weather(conn, days=days)
+            run.rows = written
     finally:
         conn.close()
     if failed:
@@ -646,6 +756,11 @@ def main():
         default=None,
         help="Roll back to (not including) this version, e.g. --target 0002",
     )
+    p_migrate.add_argument(
+        "--force-destructive",
+        action="store_true",
+        help="Allow rolling back a down migration marked `-- DESTRUCTIVE` (see db/migrations/README.md)",
+    )
 
     p_rag = sub.add_parser("build_rag_index", help="Embed golden_set.jsonl into rag_chunks")
     p_rag.add_argument("--agency-id", type=int, default=None)
@@ -653,6 +768,12 @@ def main():
 
     p_prune = sub.add_parser("prune_query_log", help="Delete ask_query_log rows older than N days")
     p_prune.add_argument("--days", type=int, default=90)
+
+    p_prune_runs = sub.add_parser("prune-pipeline-runs", help="Delete pipeline_runs rows older than N days")
+    p_prune_runs.add_argument("--days", type=int, default=PIPELINE_RUNS_RETENTION_DAYS)
+
+    p_prune_audit = sub.add_parser("prune-admin-audit", help="Delete admin_audit rows older than N days")
+    p_prune_audit.add_argument("--days", type=int, default=ADMIN_AUDIT_RETENTION_DAYS)
 
     p_weather = sub.add_parser(
         "ingest_weather",
@@ -698,6 +819,10 @@ def main():
         cmd_build_rag_index(args)
     elif args.command == "prune_query_log":
         cmd_prune_query_log(args)
+    elif args.command == "prune-pipeline-runs":
+        cmd_prune_pipeline_runs(args)
+    elif args.command == "prune-admin-audit":
+        cmd_prune_admin_audit(args)
     elif args.command == "ingest_weather":
         cmd_ingest_weather(args)
     else:

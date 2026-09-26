@@ -251,6 +251,37 @@ async def test_append_message_tool_args_path(conv_app):
 
 
 @pytest.mark.asyncio
+async def test_append_message_persists_dispatch_conditions(conv_app):
+    """The assistant message records the dow/time_band/service the dispatch
+    actually ran under (from the conversation's filter_ctx at send time) --
+    the historical provenance record the Ask evidence card's disclosure
+    reads, distinct from `args` and from the conversation's current,
+    editable filter_ctx."""
+    app, agency, uid, pool = conv_app
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, 'R1', 'R1')",
+            agency,
+        )
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(
+            f"/api/{agency}/conversations",
+            json={"title": "T", "filter_ctx": {"dow": "weekend", "time_band": "morning", "service": "all"}},
+            headers=_CSRF,
+        )
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["user"]["conditions"] is None
+        assert body["assistant"]["conditions"] == {"dow": "weekend", "time_band": "morning", "service": "all"}
+
+
+@pytest.mark.asyncio
 async def test_append_message_default_window_uses_jst_today(conv_app, monkeypatch):
     """When a conversation's filter_ctx has no explicit dates, the default
     30-day window built for tool dispatch must anchor on the JST civil

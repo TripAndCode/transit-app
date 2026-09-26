@@ -6,7 +6,7 @@ description: Digest and triage unresolved GitHub review-comment threads on your 
 Address the review comment threads on the GitHub PR for the current branch — both
 comments with no reply yet, and threads that already have a reply or fix but are
 still unresolved. The goal is to **think before acting**: judge each thread against
-the real code, propose a reply and an action, and WAIT for the user's per-thread
+the real code, propose a reply and an action, and wait for the user's per-thread
 approval before posting anything or changing any code.
 
 `$ARGUMENTS` (optional) is a PR url or number. If omitted, resolve the PR from the
@@ -30,7 +30,7 @@ Boundaries.
   touches the area they cover.
 
 ## Auth
-- Use the `gh` CLI — already authenticated via keyring. Do NOT ask for, paste, or
+- Use the `gh` CLI — already authenticated via keyring. Never ask for, paste, or
   store any API token. If a call fails, check `gh auth status`.
 
 ## Phase 0 — Fetch & filter threads (you, directly)
@@ -41,7 +41,7 @@ Boundaries.
    `gh api repos/{owner}/{repo}/pulls/<number>/comments --paginate`.
    Group into threads via `in_reply_to_id` (root comment has none; replies point at
    the root's `id`). Compute `round = comment_count_in_thread - 1`.
-3. Filter to KEEP threads where at least one comment is NOT authored by you.
+3. Keep only threads where at least one comment is not authored by you.
 
    **Known API quirk — the REST comments endpoint has no "resolved" field at all.**
    Thread-resolution state lives only on the GraphQL `reviewThread` object, not on
@@ -59,7 +59,7 @@ Boundaries.
      }' -f owner=<owner> -f repo=<repo> -F pr=<number>
    ```
    Match each REST comment's `id` against a thread's `comments.nodes[].databaseId`
-   to find its `isResolved` flag. DROP threads where `isResolved` is true — do not
+   to find its `isResolved` flag. Drop threads where `isResolved` is true — do not
    trust anything off the plain REST list for resolution state.
    **Limit:** this query is unpaginated (`first:100` threads, `first:50` comments
    per thread) — on a PR with more threads/comments than that, a match can be
@@ -68,8 +68,8 @@ Boundaries.
    miss.
 4. If nothing is left after filtering, say so and stop.
 
-## Phase 1 — Digest & analyze (NO replies written, NO code touched)
-**Scale how you do this to the thread count.** **Group threads by file/topic FIRST**,
+## Phase 1 — Digest & analyze (no replies written, no code touched)
+**Scale how you do this to the thread count.** **Group threads by file/topic first**,
 then batch those groups (bounded so each subagent handles a set that fits comfortably
 in one context, ~10 threads) so threads making the same point stay in one batch.
 Dispatch with `subagent_type: Explore` — it has no Edit/Write tools, so the read-only rail below is tool-enforced rather than prompt-only — and only when that grouping yields **2 or more** batches — a single
@@ -80,7 +80,7 @@ than splitting a group across batches.
 Each batch prompt must carry, verbatim: "You are read-only: do not edit any file, do
 not run any `gh` write call, do not post or reply to any comment, never call the
 resolve mutation, do not commit or push. Any SQL is read-only SELECT/EXPLAIN against
-dev Postgres :5433 or the dev ClickHouse (`transit-ch`) — never write to either. Read
+dev Postgres (the instance `DATABASE_URL` names) or the dev ClickHouse (`docker compose exec clickhouse`) — never write to either. Read
 only within the worktree path given; never read another worktree. Report only." — a
 dispatched subagent doesn't see this command file, so the per-thread approval gate
 above binds it only if you say so.
@@ -90,7 +90,7 @@ one row per thread. After all batches return, run one cross-batch pass yourself 
 merge rows whose underlying point is the same before emitting the table (skip this when
 there was only one batch — nothing to merge).
 
-For EACH thread, read the actual code at the referenced file:line before judging —
+For each thread, read the actual code at the referenced file:line before judging —
 targeted read first (`grep -n` for the symbol, then `sed -n '<start>,<end>p'` for a
 window around it), whole-file read only when that isn't enough — and read the full
 exchange if `round >= 1` (original comment + all replies/fixes so far). If two or
@@ -119,7 +119,7 @@ Produce a numbered table, one row per thread:
   Consider recommending a synchronous discussion instead of another async reply,
   and say so in the draft.
 
-This is the digest stage. STOP here and show the table, split into a **Settled (no
+This is the digest stage. Stop here and show the table, split into a **Settled (no
 action)** list and a **Needs action** list. Do not draft replies or touch code until
 the user has seen it.
 
@@ -134,7 +134,7 @@ the user decide per thread:
 - reclassify as `settled` if the user disagrees and considers it closed,
 - or skip it.
 
-WAIT for an explicit decision on EVERY thread individually. Nothing is posted and no
+Wait for an explicit decision on **every** thread individually. Nothing is posted and no
 code is changed in this phase, and nothing carries over from a decision on a
 different thread.
 
@@ -143,7 +143,7 @@ different thread.
    together). DB SAFETY: if a fix touches DB code, tests point at the throwaway
    Postgres (`DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`)
    and the throwaway ClickHouse on :8124 — never the dev Postgres or dev ClickHouse
-   (`transit-ch`). See CLAUDE.md / transit-app-gotchas.
+   (`docker compose exec clickhouse`). See CLAUDE.md / transit-app-gotchas.
 2. **Run `/review-branch`** on the result using its proportional routing and
    fix-triggered retry policy. This is mandatory whenever code changed. "Green"
    means: no findings ranked Major or higher remain, and any Minor findings are
@@ -163,8 +163,8 @@ different thread.
    is the reviewer's call, not yours — report posted replies and settled threads,
    and leave resolving to them (GitHub UI: "Resolve conversation").
 
-## Reply-style rule (hard constraint)
-Replies MUST be plain English:
+## Reply style
+Write replies in plain English — the reviewer reads them without this session's context:
 - Short and concrete; address the reviewer directly ("you", "I").
 - State what you did and why — or, if you disagree, why — in one or two sentences.
 - No unexplained jargon, acronyms, or cryptic shorthand. If a term is unavoidable,
@@ -178,7 +178,7 @@ Replies MUST be plain English:
   approval prompt. Reporting them is the only output.
 - Read-only until the user approves each item in Phase 2. No code edits, no posted
   comments before that.
-- Do NOT commit or push without an explicit go from the user (per CLAUDE.md).
+- Do not commit or push without an explicit go from the user (per CLAUDE.md).
 - If work is in a git worktree, run git via `git -C <worktree-abs-path>` and confirm
   commits land on the feature branch, not `main`.
 - **Never call the resolve mutation, on any thread.** Resolving your own PR's

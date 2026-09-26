@@ -6,8 +6,7 @@ mutate anything (there is no write path in this app at all).
 
 This is a small, standalone, VPS-local tool, not a router added to `api/`: `api/`
 deploys to Railway (see `railway.json`), and nothing in this repo runs an HTTP server
-on the VPS today (the VPS only runs `claude-loop.service`/`.timer` and cron jobs --
-see `.claude/README.md`). Reusing `api/`'s session-cookie `require_admin` would need a
+on the VPS besides this tool. Reusing `api/`'s session-cookie `require_admin` would need a
 browser login against the production Postgres `users` table for a tool that has to work
 from a bare `curl`/SSH context and has no DB dependency of its own; reusing
 `api/routers/internal.py`'s shared-secret pattern instead (`OPS_STATUS_TOKEN`, fail

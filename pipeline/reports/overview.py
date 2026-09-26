@@ -352,15 +352,16 @@ async def _headline_stats(
         where, params, _ = _agg_filter(ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
         sql = (
-            # sum_delay_sec is nullable (unlike samples); FILTER both sides of
-            # avg_min's division to the same row population — see
-            # _route_weekly_history's identical rationale. The returned
-            # `samples` column below stays the TRUE total (unfiltered) count.
+            # The count sits beside a sum_delay_sec-derived average, so it
+            # counts the rows that average covers and FILTERs with it. The
+            # ClickHouse path below returns an exact count of its own average's
+            # rows, so only the filtered figure is the same statistic whichever
+            # path answered.
             "SELECT CASE WHEN SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0\n"
             "            THEN ROUND((SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
             "                / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0), 2)\n"
             "            ELSE NULL END AS avg_min,\n"
-            "       COALESCE(SUM(samples), 0)::int AS samples\n"
+            "       COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}"
         )
@@ -393,19 +394,21 @@ async def _per_route_avg(
         where_clause = f" AND ({where})" if where else ""
         sql = (
             "SELECT route_code,\n"
-            # See _route_weekly_history's identical FILTER rationale: match
-            # avg_min's numerator/denominator to the same sum_delay_sec
-            # IS NOT NULL row population. The returned `samples` column below
-            # stays the TRUE total (unfiltered) sample count — a distinct,
-            # legitimate "how much data backs this route" figure independent
-            # of whether sum_delay_sec has been backfilled yet.
+            # The count sits beside a sum_delay_sec-derived average, so it
+            # counts that average's rows and FILTERs with it. Two reasons it
+            # cannot be the unfiltered total here: the slow path below sums a
+            # ClickHouse row count where every row carries a dep_delay, so an
+            # unfiltered fast path would answer differently for the same
+            # route; and _movers gates MIN_SAMPLES on this number, which would
+            # otherwise admit a route whose average rests on far fewer rows
+            # than the floor implies.
             "       (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
             "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,\n"
-            "       SUM(samples)::int AS samples\n"
+            "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"
             "FROM agg_daily_trend\n"
             f"WHERE agency_id=$1{where_clause}\n"
             "GROUP BY route_code\n"
-            "HAVING SUM(samples) > 0 AND SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0"
+            "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 0"
         )
         rows = await conn.fetch(sql, agency_id, *params)
         return {r["route_code"]: (float(r["avg_min"]), int(r["samples"])) for r in rows}
@@ -1152,9 +1155,9 @@ async def _service_split(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
 async def _daily_sparkline(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> list[float]:
     """Daily avg_min points (oldest first) over ``ctx``.
 
-    Returns the FULL daily series. The frontend hero card slices the
-    trailing 7 days for the inline sparkline; the modal variant uses the
-    full series (typically 30+ points for a 30-day default range).
+    Returns the FULL daily series (typically 30+ points for a 30-day
+    default range) and leaves any windowing to the caller, so a consumer
+    that wants a shorter tail can take one without a second query.
 
     Fast path (``ctx.time_band == 'all'``) reads ``agg_daily_trend`` with
     a sample-weighted average per date. Slow path reads the shared grain

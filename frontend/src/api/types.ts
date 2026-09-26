@@ -1,3 +1,5 @@
+import type { TimeBand } from "./rangeContext";
+
 export type Agency = {
   agency_id: number;
   agency_name: string;
@@ -6,7 +8,7 @@ export type Agency = {
   latest_data_date: string | null;
 };
 
-export type RouteBucket = "anomaly" | "watch" | "normal" | "no_baseline";
+type RouteBucket = "anomaly" | "watch" | "normal" | "no_baseline";
 
 export type RouteSummary = {
   route_code: string;
@@ -27,44 +29,6 @@ export type RouteSummary = {
   low_confidence: boolean;
   has_baseline: boolean;
   late5_pct?: number | null;
-};
-
-export type RouteTrip = {
-  trip_id: string;
-  scheduled_time: string | null;
-  headsign: string | null;
-  avg_delay_sec: number;
-  samples: number;
-};
-
-export type RouteTripsResponse = {
-  date: string | null;
-  trips: RouteTrip[];
-};
-
-export type RouteStopProfileRow = {
-  stop_sequence: number;
-  stop_id?: string | null;
-  stop_name: string | null;
-  avg_delay_sec: number;
-  samples: number;
-  cohort_avg_delay_sec?: number | null;
-  cohort_route_count?: number;
-  /** Total observation count backing `cohort_avg_delay_sec` (pooled across
-   *  every route in the cohort) — distinct from `cohort_route_count`, which
-   *  only counts how many DISTINCT routes contributed. */
-  cohort_samples?: number;
-  /** True when `cohort_samples` is too thin to trust `cohort_avg_delay_sec`
-   *  (a lower floor than the route-level LOW_CONFIDENCE_SAMPLES — see
-   *  api.triage.COHORT_LOW_CONFIDENCE_SAMPLES). Independent of `is_outlier`,
-   *  which only gates on `cohort_route_count >= 2`. */
-  cohort_low_confidence?: boolean;
-  is_outlier?: boolean;
-};
-
-export type RouteStopProfileResponse = {
-  date: string | null;
-  stops: RouteStopProfileRow[];
 };
 
 export type RouteSummaryResponse = {
@@ -93,7 +57,7 @@ export type LiveTrip = {
   direction_id?: number | null;
 };
 
-export type LiveTripProgressStop = {
+type LiveTripProgressStop = {
   stop_sequence: number;
   stop_id: string | null;
   stop_name: string | null;
@@ -111,6 +75,33 @@ export type LiveTripProgressResponse = {
   direction_id: number | null;
   latest_captured_at: string | null;
   stops: LiveTripProgressStop[];
+};
+
+/** One stop's pooled delay inside one day-playback frame. `samples` counts
+ *  observed trip visits to this stop in the bucket, not feed polls. */
+type TimelinePoint = {
+  stop_id: string;
+  stop_name: string | null;
+  lon: number;
+  lat: number;
+  avg_delay_min: number;
+  samples: number;
+};
+
+/** One time bucket of the service day. Frames are dense over 05:00–24:00, so
+ *  an empty `points` is a statement about that hour, not a gap in the list;
+ *  `mean_delay_min` is null exactly then. */
+export type TimelineFrame = {
+  t: string;
+  points: TimelinePoint[];
+  mean_delay_min: number | null;
+  samples: number;
+};
+
+export type DelayTimelineResponse = {
+  date: string;
+  step_minutes: number;
+  frames: TimelineFrame[];
 };
 
 export type LiveTripsResponse = {
@@ -134,7 +125,7 @@ export type RouteShapeStop = {
 
 /** Stop on the chosen shape with no observations in the current window —
  *  rendered as a hollow marker so the route topology stays visible. */
-export type UnobservedStop = {
+type UnobservedStop = {
   stop_sequence: number;
   stop_name: string;
   stop_id?: string | null;
@@ -160,33 +151,7 @@ export type RouteShapeResponse = {
   unobserved_stops?: UnobservedStop[];
 };
 
-export type HeatmapProps = {
-  stop_id: string;
-  stop_name: string;
-  /** Optional GTFS stop_code (e.g. "②のりば"). Populated when the agency's // i18n-ignore: GTFS format example
-   *  static feed includes it; clustered stops yield a "/-joined" set. */
-  stop_code?: string;
-  /** Optional GTFS platform_code (pole number, e.g. "2"). */
-  platform_code?: string;
-  avg_delay_min: number;
-  p90_delay_min?: number | null;
-  samples: number;
-  /** Comma-joined list of route_codes contributing to this stop's avg.
-   *  Optional because clients with cached responses from before the
-   *  field was added will still parse correctly. */
-  route_codes?: string;
-  /** True when `samples` is too thin to trust `avg_delay_min`/`p90_delay_min`
-   *  at full visual weight (same LOW_CONFIDENCE_SAMPLES floor as the route
-   *  baselines elsewhere). Optional for the same cached-response reason as
-   *  `route_codes`. */
-  low_confidence?: boolean;
-};
-
-export type HeatmapCollection = GeoJSON.FeatureCollection<GeoJSON.Point, HeatmapProps> & {
-  ctx?: ResponseCtx;
-};
-
-export type PeakHourBreakdownRoute = {
+type PeakHourBreakdownRoute = {
   route_code: string;
   service_type: string;
   avg_min: number;
@@ -199,15 +164,91 @@ export type PeakHourBreakdown = {
   routes: PeakHourBreakdownRoute[];
 };
 
-export type ResponseCtx = {
+type ResponseCtx = {
   from: string;
   to: string;
   dow: string;
   time_band: string;
 };
 
+/** Every report `GET /api/{agency_id}/reports/{report_type}` serves --
+ *  api/routers/reports.py's `_REPORT_TYPES` is the single source of truth,
+ *  and the endpoint 404s on anything outside it. The Analysis tab lists
+ *  `route_forecast` alongside these, but that one is served by /forecast and
+ *  is deliberately not a member here. */
+export type ReportType =
+  | "ranking"
+  | "ranking_best"
+  | "on_time"
+  | "worst_5min"
+  | "trend"
+  | "compare_ranking"
+  | "dow_weekend"
+  | "dow_weekday"
+  | "dwell_run"
+  | "council_summary"
+  | "delay_certificate";
+
+/** One observed stop of one trip, as a point on a time-distance diagram. */
+type RouteTripStop = {
+  stop_id: string | null;
+  stop_sequence: number;
+  /** Seconds since the service day's 00:00, not a clock string: a GTFS
+   *  post-midnight continuation (25:30) has no same-day "HH:MM" form, and a
+   *  time axis needs a number anyway. Null when the row carries no usable
+   *  scheduled time. */
+  scheduled_sec: number | null;
+  /** `scheduled_sec + delay_sec`; null whenever `scheduled_sec` is. */
+  observed_sec: number | null;
+  delay_sec: number;
+};
+
+export type RouteTrip = {
+  trip_id: string;
+  scheduled_time: string | null;
+  headsign: string | null;
+  avg_delay_sec: number;
+  samples: number;
+  /** Ordered by stop_sequence — this is the drawing order of the trip's
+   *  polyline in the Marey diagram. */
+  stops: RouteTripStop[];
+};
+
+export type RouteTripsResponse = {
+  date: string | null;
+  time_band: TimeBand;
+  /** True when the route ran more trips than the endpoint will return, or its
+   *  kept trips together carry more stops than its per-response stop budget,
+   *  and the least-delayed tail was dropped either way. */
+  truncated: boolean;
+  trips: RouteTrip[];
+};
+export type RouteStopProfileRow = {
+  stop_sequence: number;
+  stop_id?: string | null;
+  stop_name: string | null;
+  avg_delay_sec: number;
+  samples: number;
+  cohort_avg_delay_sec?: number | null;
+  cohort_route_count?: number;
+  /** Total observation count backing `cohort_avg_delay_sec` (pooled across
+   *  every route in the cohort) — distinct from `cohort_route_count`, which
+   *  only counts how many DISTINCT routes contributed. */
+  cohort_samples?: number;
+  /** True when `cohort_samples` is too thin to trust `cohort_avg_delay_sec`
+   *  (a lower floor than the route-level LOW_CONFIDENCE_SAMPLES — see
+   *  api.triage.COHORT_LOW_CONFIDENCE_SAMPLES). Independent of `is_outlier`,
+   *  which only gates on `cohort_route_count >= 2`. */
+  cohort_low_confidence?: boolean;
+  is_outlier?: boolean;
+};
+export type RouteStopProfileResponse = {
+  date: string | null;
+  stops: RouteStopProfileRow[];
+};
+
 export type ReportMeta = {
-  report_type: string;
+  report_type: ReportType;
   rendered_at: string;
 };
 
@@ -226,18 +267,152 @@ export type DefinitionMeta = {
   dedup_rule: string;
 };
 
-export type ReportResponse = ReportMeta & {
+/** A report cell the backend computes as a Python `Decimal` (chosen so its
+ *  rounding matches Postgres `ROUND`'s half-up behaviour). `ReportResponse.
+ *  rows` is an untyped `list` on the Python side, so a bare `Decimal` is
+ *  serialised as a JSON *string* while the plain `int` columns beside it stay
+ *  JSON numbers. Coerce with `Number()` before arithmetic or formatting. */
+type DecimalCell = number | string;
+
+/** `ranking` and `ranking_best` -- same columns, opposite sort order.
+ *  `p50_min`/`p90_min` are null when the merged histogram can't resolve a
+ *  percentile; `avg_min` always resolves (the >20-sample gate). */
+export type RankingRow = [
+  route_code: string,
+  service_type: string | null,
+  avg_min: DecimalCell,
+  p50_min: DecimalCell | null,
+  p90_min: DecimalCell | null,
+  samples: number,
+];
+
+/** `on_time`. The trailing `low_confidence` flag is appended by
+ *  pipeline/stats.py's annotate_on_time_pct_confidence as a display-layer
+ *  caveat (95% Wilson interval too wide to trust `on_time_pct`). */
+type OnTimeRow = [
+  route_code: string,
+  service_type: string | null,
+  on_time_pct: DecimalCell,
+  avg_min: DecimalCell,
+  samples: number,
+  low_confidence: boolean,
+];
+
+/** `worst_5min` -- routes ranked by count of severely-late observations. */
+type Worst5MinRow = [
+  route_code: string,
+  service_type: string | null,
+  late5_count: number,
+  avg_min: DecimalCell,
+  samples: number,
+];
+
+/** `compare_ranking` -- per-route weekday-vs-weekend delay, sorted by the
+ *  absolute difference. Carries no service_type: the comparison drops the
+ *  service filter on purpose (a weekday-schedule service never runs on a
+ *  weekend, so the pairing would always be empty). */
+type CompareRankingRow = [
+  route_code: string,
+  weekday_avg_min: DecimalCell,
+  weekend_avg_min: DecimalCell,
+  abs_delta_min: DecimalCell,
+  signed_delta_min: DecimalCell,
+];
+
+/** `dow_weekday` and `dow_weekend`. `dow_label` is the backend's own
+ *  Japanese group label for the half the rows were restricted to. */
+type DowRankingRow = [
+  route_code: string,
+  service_type: string | null,
+  dow_label: string,
+  avg_min: DecimalCell,
+  samples: number,
+];
+
+/** `council_summary` -- exactly one agency-wide row.
+ *  `on_time_pct`/`avg_delay_min` are null together when nothing matched the
+ *  range; `executed_trips`/`service_delivered_pct` are null together when the
+ *  delivered ratio isn't computable, which is never the same as zero. */
+export type CouncilSummaryRow = [
+  on_time_pct: number | null,
+  avg_delay_min: number | null,
+  samples: number,
+  planned_trips: number,
+  executed_trips: number | null,
+  service_delivered_pct: number | null,
+];
+
+/** `delay_certificate` -- one row per physical trip-run exceeding the
+ *  threshold. `actual_time` is `scheduled_time` shifted by `dep_delay_sec`,
+ *  and may carry a day-boundary suffix rather than being a bare clock time. */
+export type DelayCertificateRow = [
+  agency_name: string,
+  route_code: string,
+  service_type: string | null,
+  date: string,
+  scheduled_time: string,
+  actual_time: string,
+  dep_delay_sec: number,
+];
+
+/** One hour-of-day × date cell of the trend heatmap. `sum_delay_sec` is the
+ *  cell's exact raw-seconds total, null until the aggregate row has been
+ *  rebuilt since the column was introduced -- only a caller pooling several
+ *  cells needs it. */
+type TrendHourlyCell = {
+  date: string;
+  hour: number;
+  avg_min: number | null;
+  samples: number;
+  sum_delay_sec?: number | null;
+};
+
+/** The dow × band grid the trend report reuses from the forecast summariser,
+ *  minus the forecast-specific route ranking and disclaimer. */
+type TrendDowBand = {
+  grid: ForecastOverviewGridCell[];
+  worst: ForecastOverviewWorst | null;
+};
+
+/** The `trend` report's single structured row -- unlike every other report,
+ *  `rows` here is one object, not a list of tuples. */
+export type TrendPayload = {
+  days: TrendDay[];
+  hourly: TrendHourlyCell[];
+  dow_band: TrendDowBand;
+  /** Optional for back-compat with responses cached before the field existed;
+   *  the endpoint always sends it (empty when the agency has no coverage). */
+  revision_boundaries?: RevisionBoundaries;
+};
+
+type ReportEnvelope<T extends ReportType, Row> = {
+  report_type: T;
+  rendered_at: string;
   text: string;
-  rows: unknown[];
+  rows: Row[];
   ctx?: ResponseCtx;
   definition: DefinitionMeta;
 };
+
+/** Discriminated on `report_type`: each report's `rows` element type is
+ *  derived from what api/routers/reports.py actually returns for it, so a
+ *  consumer narrows on `report_type` instead of casting `rows` blind. */
+export type ReportResponse =
+  | ReportEnvelope<"ranking" | "ranking_best", RankingRow>
+  | ReportEnvelope<"on_time", OnTimeRow>
+  | ReportEnvelope<"worst_5min", Worst5MinRow>
+  | ReportEnvelope<"compare_ranking", CompareRankingRow>
+  | ReportEnvelope<"dow_weekday" | "dow_weekend", DowRankingRow>
+  | ReportEnvelope<"trend", TrendPayload>
+  | ReportEnvelope<"dwell_run", DwellRunPayload>
+  | ReportEnvelope<"council_summary", CouncilSummaryRow>
+  | ReportEnvelope<"delay_certificate", DelayCertificateRow>;
 
 /** One high-frequency route's pooled Excess Waiting Time / coefficient of
  *  variation / long-gap rate over the request's range (item 94) -- see
  *  pipeline/reports/headway_quality.py's compute_headway_quality. A
  *  non-high-frequency route never appears in this list at all. */
-export type HeadwayQualityRow = {
+type HeadwayQualityRow = {
   route_code: string;
   ewt_sec: number | null;
   cov: number | null;
@@ -285,7 +460,7 @@ export type PerformanceStandardsResponse = {
  *  pipeline/reports/weather.py for why this is one station rather than an
  *  area average. `note` is the operator's own record of why this station
  *  represents the service area. */
-export type WeatherStation = {
+type WeatherStation = {
   station_id: string;
   station_name: string;
   note: string | null;
@@ -295,7 +470,7 @@ export type WeatherStation = {
  *  pooled over every delay measurement on that side's days and is `null`
  *  exactly when the side has no days/samples; `avg_precip_mm` counts each
  *  matched day once, however many routes ran on it. */
-export type WeatherDelayGroup = {
+type WeatherDelayGroup = {
   days: number;
   samples: number;
   avg_delay_sec: number | null;
@@ -354,6 +529,13 @@ export type Suggestion = {
   to_date: string;
 };
 
+/** GET /:agency/reports/suggest. `suggestion` is null when no rule produced a
+ *  pick — an object body rather than a bare `null`, so the endpoint has
+ *  somewhere to say more about the empty case later. */
+export type SuggestionEnvelope = {
+  suggestion: Suggestion | null;
+};
+
 export type TrendDay = {
   date: string;
   avg_min: number;
@@ -374,7 +556,7 @@ export type TrendDay = {
  *  service-quality change. */
 export type RevisionBoundaries = string[];
 
-export type DwellRunRoute = {
+type DwellRunRoute = {
   route_code: string;
   service_type: string | null;
   dwell_samples: number;
@@ -425,7 +607,7 @@ export type AskResponse = {
 
 // Canonical intent + guided UX
 
-export type CacheOutcome = "hit" | "miss" | "bypass";
+type CacheOutcome = "hit" | "miss" | "bypass";
 
 export type FilterCtx = {
   dow?: "all" | "weekday" | "weekend";
@@ -465,6 +647,12 @@ export type ConvMessage = {
     pairs: unknown | null;
   } | null;
   rendered_summary: string | null;
+  /** The dow/time_band/service the message's dispatch actually ran under —
+   *  distinct from `args` (the tool's own arguments) and from the live,
+   *  editable conversation `filter_ctx`, which can change after this
+   *  message was sent. `null` for user messages and for a dispatch-free
+   *  assistant reply (e.g. an LLM-grounded follow-up). */
+  conditions?: { dow: string; time_band: string; service: string } | null;
   created_at: string;
 };
 
@@ -488,6 +676,12 @@ export type Route = {
   route_long_name: string | null;
   route_code: string | null;
   trip_headsigns: string[];
+};
+
+/** GET /:agency/routes. Collection endpoints answer with an object, not a bare
+ *  array, so the server can add paging or a total without breaking clients. */
+export type RoutesResponse = {
+  rows: Route[];
 };
 
 export interface ForecastHeatmapCell {
@@ -578,7 +772,7 @@ export type OverviewHeadline = {
   window_to: string;
 };
 
-export type OverviewMover = {
+type OverviewMover = {
   route_code: string;
   route_short_name: string | null;
   delta_min: number;
@@ -598,7 +792,7 @@ export type OverviewMovers = {
   better: OverviewMover[];
 };
 
-export type OverviewConcentrationTopRoute = {
+type OverviewConcentrationTopRoute = {
   route_code: string;
   route_short_name: string | null;
   share_pct: number;
@@ -616,7 +810,7 @@ export type OverviewTopDelayedRoute = {
   avg_min: number;
 };
 
-export type OverviewTopDelayed = {
+type OverviewTopDelayed = {
   routes: OverviewTopDelayedRoute[];
   delayed_count: number;
 };

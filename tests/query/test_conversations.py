@@ -10,6 +10,7 @@ from pipeline.query.conversations import (
     create_conversation,
     delete_conversation,
     get_conversation,
+    get_message,
     list_conversations,
     list_messages,
     migrate_anon_threads,
@@ -88,6 +89,39 @@ async def test_list_conversations_ordered_by_updated(pool_with_users):
 
 
 @pytest.mark.asyncio
+async def test_list_conversations_anonymous_sees_only_anonymous_threads(pool_with_users):
+    """The anonymous branch is a separate predicate from the signed-in one, so
+    it needs its own coverage: a `user_id IS NULL` list must return the
+    anonymous threads and none of a signed-in user's."""
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        await create_conversation(c, user_id=u1, agency_id=agency, title="owned", filter_ctx={})
+        await create_conversation(c, user_id=None, agency_id=agency, title="anon-1", filter_ctx={})
+        await create_conversation(c, user_id=None, agency_id=agency, title="anon-2", filter_ctx={})
+
+        anon = await list_conversations(c, user_id=None, agency_id=agency, limit=10)
+        owned = await list_conversations(c, user_id=u1, agency_id=agency, limit=10)
+
+    assert [r["title"] for r in anon] == ["anon-2", "anon-1"]
+    assert [r["title"] for r in owned] == ["owned"]
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_anonymous_respects_agency_and_limit(pool_with_users):
+    """The anonymous branch renumbers its placeholders, so agency scoping and
+    the limit have to be checked on that path too, not just the signed-in one."""
+    pool, agency, _, _ = pool_with_users
+    async with pool.acquire() as c:
+        for i in range(3):
+            await create_conversation(c, user_id=None, agency_id=agency, title=f"t{i}", filter_ctx={})
+        limited = await list_conversations(c, user_id=None, agency_id=agency, limit=2)
+        other_agency = await list_conversations(c, user_id=None, agency_id=agency + 9999, limit=10)
+
+    assert len(limited) == 2
+    assert other_agency == []
+
+
+@pytest.mark.asyncio
 async def test_update_conversation_owner_only(pool_with_users):
     pool, agency, u1, u2 = pool_with_users
     async with pool.acquire() as c:
@@ -157,6 +191,109 @@ async def test_append_and_list_messages(pool_with_users):
     assert [m["role"] for m in msgs] == ["user", "assistant"]
     assert msgs[1]["tool"] == "top_n"
     assert msgs[1]["args"] == {"metric": "avg_delay", "n": 10}
+
+
+@pytest.mark.asyncio
+async def test_get_message_returns_the_requested_message(pool_with_users):
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        await append_message(
+            c,
+            conv["conversation_id"],
+            role="user",
+            chip_id="rank-delay-top",
+            tool=None,
+            args=None,
+            signature_hash=None,
+            result=None,
+            rendered_summary=None,
+        )
+        assistant = await append_message(
+            c,
+            conv["conversation_id"],
+            role="assistant",
+            chip_id="rank-delay-top",
+            tool="top_n",
+            args={"metric": "avg_delay", "n": 10},
+            signature_hash="abcdef0123456789",
+            result={"kind": "table"},
+            rendered_summary="遅延ランキングTOP10: ...",
+        )
+        msg = await get_message(c, conv["conversation_id"], assistant["message_id"], user_id=u1, agency_id=agency)
+    assert msg["role"] == "assistant"
+    assert msg["tool"] == "top_n"
+    assert msg["args"] == {"metric": "avg_delay", "n": 10}
+
+
+@pytest.mark.asyncio
+async def test_get_message_raises_lookup_error_for_missing_message(pool_with_users):
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        with pytest.raises(LookupError):
+            await get_message(c, conv["conversation_id"], 999999, user_id=u1, agency_id=agency)
+
+
+@pytest.mark.asyncio
+async def test_get_message_raises_permission_denied_for_wrong_owner(pool_with_users):
+    pool, agency, u1, u2 = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        msg = await append_message(
+            c,
+            conv["conversation_id"],
+            role="user",
+            chip_id="rank-delay-top",
+            tool=None,
+            args=None,
+            signature_hash=None,
+            result=None,
+            rendered_summary=None,
+        )
+        with pytest.raises(PermissionDenied):
+            await get_message(c, conv["conversation_id"], msg["message_id"], user_id=u2, agency_id=agency)
+
+
+@pytest.mark.asyncio
+async def test_append_message_persists_and_returns_conditions(pool_with_users):
+    """`conditions` -- the dow/time_band/service a dispatch actually ran under --
+    round-trips through both append_message's own return value and a later
+    list_messages read, and is None when the caller doesn't pass one (e.g. a
+    user message, or a dispatch-free LLM follow-up)."""
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        user_msg = await append_message(
+            c,
+            conv["conversation_id"],
+            role="user",
+            chip_id=None,
+            tool=None,
+            args=None,
+            signature_hash=None,
+            result=None,
+            rendered_summary="質問",
+        )
+        assistant_msg = await append_message(
+            c,
+            conv["conversation_id"],
+            role="assistant",
+            chip_id=None,
+            tool="top_n",
+            args={"metric": "avg_delay", "n": 10},
+            signature_hash="abcdef0123456789",
+            result={"kind": "table"},
+            rendered_summary="遅延ランキングTOP10: ...",
+            conditions={"dow": "weekend", "time_band": "morning", "service": "all"},
+        )
+    assert user_msg["conditions"] is None
+    assert assistant_msg["conditions"] == {"dow": "weekend", "time_band": "morning", "service": "all"}
+
+    async with pool.acquire() as c:
+        msgs = await list_messages(c, conv["conversation_id"], user_id=u1, agency_id=agency)
+    assert msgs[0]["conditions"] is None
+    assert msgs[1]["conditions"] == {"dow": "weekend", "time_band": "morning", "service": "all"}
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,13 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { delayColor } from "../styles/tokens";
+import { delayColor, delayTextColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
-import { useParams } from "react-router-dom";
+import { useAgencyId } from "../api/useAgencyId";
+import { SHARED_TABLE, th, td } from "./tableStyles";
+import { useCappedList } from "../hooks/useCappedList";
+import { formatNumber, fmtPct } from "../utils/format";
+
+const ROWS_CAP = 200;
 
 type Schema = {
   /** Column index in the row tuple */
@@ -25,7 +30,7 @@ type Schema = {
 // Sentinel reference for the route column. The render path uses reference
 // equality (`c === ROUTE_COL`) to swap in route-name formatting, so every
 // schema below must reuse this exact instance.
-const ROUTE_COL: Schema = { index: 0, labelKey: "reports.col.route", align: "left" };
+const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left" };
 
 // ranking + ranking_best share columns; only the API sort order differs.
 const RANKING_COLS: Schema[] = [
@@ -69,8 +74,8 @@ const SCHEMAS: Record<string, Schema[]> = {
   ],
   compare_ranking: [
     ROUTE_COL,
-    { index: 1, labelKey: "reports.col.weekday", align: "right", format: (v, t) => fmtMin(v, t) },
-    { index: 2, labelKey: "reports.col.weekend", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 1, labelKey: "common.service_value.平日", align: "right", format: (v, t) => fmtMin(v, t) }, // i18n-ignore: query contract
+    { index: 2, labelKey: "common.service_value.土日祝", align: "right", format: (v, t) => fmtMin(v, t) }, // i18n-ignore: query contract
     { index: 3, labelKey: "reports.col.diff", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
     {
       index: 4,
@@ -103,7 +108,7 @@ const SCHEMAS: Record<string, Schema[]> = {
   // useRouteNames formatting is keyed to index 0 by reference equality).
   delay_certificate: [
     { index: 0, labelKey: "reports.col.agency_name", align: "left" },
-    { index: 1, labelKey: "reports.col.route", align: "left" },
+    { index: 1, labelKey: "common.route", align: "left" },
     { index: 2, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
     { index: 3, labelKey: "reports.col.date", align: "left" },
     { index: 4, labelKey: "reports.col.scheduled_time", align: "left" },
@@ -119,18 +124,11 @@ function fmtMin(v: unknown, t: TFunction): string {
   return `${n.toFixed(1)}${t("common.unit_min")}`;
 }
 
-function fmtPct(v: unknown, _t: TFunction): string {
-  if (v == null) return "—";
-  const n = Number(v);
-  if (!isFinite(n)) return "—";
-  return `${n.toFixed(1)}%`;
-}
-
 function fmtNum(v: unknown, _t: TFunction): string {
   if (v == null) return "—";
   const n = Number(v);
   if (!isFinite(n)) return "—";
-  return n.toLocaleString();
+  return formatNumber(n);
 }
 
 function fmtConfidence(v: unknown, t: TFunction): string {
@@ -162,12 +160,12 @@ type Props = {
 
 export function ReportTable({ reportType, rows }: Props) {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const { format: formatRoute } = useRouteNames(id);
   const schema = SCHEMAS[reportType];
 
   const maxes = computeColumnMaxes(schema, rows);
+  const cappedRows = useCappedList(rows, ROWS_CAP, reportType);
 
   if (!schema) {
     // Unknown type — fall back to raw key/value table
@@ -176,10 +174,10 @@ export function ReportTable({ reportType, rows }: Props) {
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <table style={SHARED_TABLE}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
-            <th style={th(40)}>#</th>
+            <th style={th({ width: 40 })}>#</th>
             {schema.map((c) => (
               <th key={c.labelKey} style={{ ...th(), textAlign: c.align ?? "left" }}>
                 {t(c.labelKey)}
@@ -188,7 +186,7 @@ export function ReportTable({ reportType, rows }: Props) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
+          {cappedRows.visible.map((row, i) => (
             <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td(), color: "var(--text-tertiary)", textAlign: "right" }}>{i + 1}</td>
               {schema.map((c) => {
@@ -214,10 +212,14 @@ export function ReportTable({ reportType, rows }: Props) {
                   const max = maxes.get(c.index) ?? 1;
                   const v = Number(raw);
                   const ratio = isFinite(v) ? Math.min(1, Math.abs(v) / max) : 0;
+                  // The bar fill can stay the plain ramp colour (it's a mark, not
+                  // text); the label sitting on top needs the text-safe variant,
+                  // since delayColor()'s ok/mild/moderate fall short of AA as text.
                   const color = c.bar === "delay" ? delayColor(v) : "var(--accent)";
+                  const textColor = c.bar === "delay" ? delayTextColor(v) : "var(--accent)";
                   return (
                     <td key={c.labelKey} style={{ ...td(), textAlign: c.align ?? "right", minWidth: 110 }}>
-                      <BarCell text={text} ratio={ratio} color={color} />
+                      <BarCell text={text} ratio={ratio} color={color} textColor={textColor} />
                     </td>
                   );
                 }
@@ -231,11 +233,26 @@ export function ReportTable({ reportType, rows }: Props) {
           ))}
         </tbody>
       </table>
+      {cappedRows.remaining > 0 && (
+        <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
+          {t("common.show_more", { count: cappedRows.remaining })}
+        </button>
+      )}
     </div>
   );
 }
 
-function BarCell({ text, ratio, color }: { text: string; ratio: number; color: string }) {
+function BarCell({
+  text,
+  ratio,
+  color,
+  textColor,
+}: {
+  text: string;
+  ratio: number;
+  color: string;
+  textColor: string;
+}) {
   return (
     <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
       <div
@@ -252,20 +269,7 @@ function BarCell({ text, ratio, color }: { text: string; ratio: number; color: s
           pointerEvents: "none",
         }}
       />
-      <span style={{ position: "relative", color }}>{text}</span>
+      <span style={{ position: "relative", color: textColor }}>{text}</span>
     </div>
   );
 }
-
-const th = (w?: number): React.CSSProperties => ({
-  padding: "8px 10px",
-  textAlign: "left",
-  fontWeight: 500,
-  color: "var(--text-secondary)",
-  fontSize: 12,
-  width: w,
-});
-const td = (): React.CSSProperties => ({
-  padding: "6px 10px",
-  fontSize: 13,
-});

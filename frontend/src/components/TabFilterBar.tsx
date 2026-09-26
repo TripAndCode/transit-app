@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import { routeDisplayName } from "../api/routeDisplayName";
 import {
   useRangeContext,
@@ -9,31 +9,15 @@ import {
   type ServiceFilter,
   type TimeBand,
 } from "../api/rangeContext";
+import { Glossary } from "./Glossary";
 import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
+import { dowValueLabel, serviceValueLabel, type LabelT } from "../utils/filterValueLabels";
+import { pill, groupLabel } from "./pillStyles";
+import { Z_INDEX } from "../styles/zIndex";
 
-const pill = (active: boolean): CSSProperties => ({
-  background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-  color: active ? "var(--accent)" : "var(--text-secondary)",
-  border: `1px solid ${active ? "var(--accent)" : "var(--border-soft)"}`,
-  borderRadius: 999,
-  padding: "5px 12px",
-  fontSize: 12,
-  fontWeight: active ? 600 : 400,
-  cursor: "pointer",
-  transition: "all var(--transition)",
-});
-
-const groupLabel: CSSProperties = {
-  fontSize: 11,
-  color: "var(--text-tertiary)",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  marginBottom: 6,
-  display: "block",
-};
 
 type Draft = {
   dow: DowFilter;
@@ -48,6 +32,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   const agencyIdNum = useAgencyId();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [draft, setDraft] = useState<Draft>({
     dow: ctx.dow,
     time_band: ctx.time_band,
@@ -58,15 +43,15 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
 
   const dowOptions: { value: DowFilter; label: string }[] = [
     { value: "all", label: t("filters.dow.all") },
-    { value: "weekday", label: t("filters.dow.weekday") },
-    { value: "weekend", label: t("filters.dow.weekend") },
+    { value: "weekday", label: dowValueLabel("weekday", t) },
+    { value: "weekend", label: dowValueLabel("weekend", t) },
   ];
 
   const serviceOptions: { value: ServiceFilter; label: string }[] = [
     { value: "all", label: t("filters.service.all") },
     // value stays as the raw JP string (URL query value); only the label is translated
-    { value: "平日", label: t("filters.service.weekday") }, // i18n-ignore: query contract
-    { value: "土日祝", label: t("filters.service.weekend") }, // i18n-ignore: query contract
+    { value: "平日", label: serviceValueLabel("平日", t) }, // i18n-ignore: query contract
+    { value: "土日祝", label: serviceValueLabel("土日祝", t) }, // i18n-ignore: query contract
   ];
 
   const timeBandOptions = buildTimeBandOptions(t);
@@ -96,6 +81,23 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
+
+  // The popover has no close control of its own, so without this the only
+  // way out for a keyboard user is a click elsewhere on the page. It is not
+  // a focus trap -- Tab still leaves it -- so it acts only on a keypress
+  // that belongs to it: anything with focus of its own (a dialog opened over
+  // the page) owns its own Escape.
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (!ref.current?.contains(document.activeElement)) return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
 
   const dirty =
     draft.dow !== ctx.dow ||
@@ -194,17 +196,14 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   }
 
   return (
-    <div
-      ref={ref}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        flexWrap: "wrap",
-        marginBottom: 16,
-        position: "relative",
-      }}
-    >
+    <div ref={ref} style={{ marginBottom: 16, position: "relative" }}>
+      {/* The scrolling behavior lives on this inner row, not the outer
+          relative-positioned wrapper: the wrapper also anchors the filter
+          popover below via `position: absolute`, and giving the wrapper
+          itself `overflow-x: auto` would clip that popover's vertical
+          overflow too (an auto axis forces the other axis to auto as well,
+          per the CSS overflow spec). */}
+      <div className="tab-filter-bar-row" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <RangeBadge />
       {agencyIdNum !== null && (
         <PresetMenu
@@ -215,10 +214,11 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
       )}
       <button
         type="button"
+        ref={triggerRef}
         onClick={() => setOpen((v) => !v)}
         style={{
           background: activeCount > 0 ? "var(--accent)" : "var(--bg-surface)",
-          color: activeCount > 0 ? "#fff" : "var(--text-primary)",
+          color: activeCount > 0 ? "var(--on-accent)" : "var(--text-primary)",
           border: `1px solid ${activeCount > 0 ? "var(--accent)" : "var(--border-subtle)"}`,
           borderRadius: 8,
           padding: "8px 16px",
@@ -228,7 +228,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
           alignItems: "center",
           gap: 8,
           cursor: "pointer",
-          boxShadow: activeCount > 0 ? "0 1px 3px rgba(91,108,173,0.30)" : "none",
+          boxShadow: activeCount > 0 ? "var(--el-1)" : "none",
           transition: "all var(--transition)",
         }}
       >
@@ -238,7 +238,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
           <span
             style={{
               background: "rgba(255,255,255,0.25)",
-              color: "#fff",
+              color: "var(--on-accent)",
               fontSize: 12,
               borderRadius: 999,
               padding: "1px 8px",
@@ -297,6 +297,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
       )}
 
       {after && <div style={{ marginLeft: "auto" }}>{after}</div>}
+      </div>
 
       {open && (
         <div
@@ -304,13 +305,13 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
             position: "absolute",
             top: "calc(100% + 6px)",
             left: 0,
-            zIndex: 50,
+            zIndex: Z_INDEX.popover,
             width: 480,
             maxWidth: "calc(100vw - 48px)",
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius-lg)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.10)",
+            boxShadow: "var(--el-2)",
             padding: 18,
           }}
         >
@@ -331,7 +332,9 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
           </div>
 
           <div style={{ marginBottom: 14 }}>
-            <span style={groupLabel}>{t("filters.service.label_gtfs")}</span>
+            <span style={groupLabel}>
+              {t("filters.service.label")} (<Glossary term="GTFS" explanation={t("glossary.gtfs")} />)
+            </span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {serviceOptions.map((o) => (
                 <button
@@ -392,14 +395,14 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
               disabled={!dirty}
               style={{
                 background: dirty ? "var(--accent)" : "var(--bg-soft)",
-                color: dirty ? "#fff" : "var(--text-tertiary)",
+                color: dirty ? "var(--on-accent)" : "var(--text-tertiary)",
                 border: "none",
                 borderRadius: 4,
                 padding: "6px 18px",
                 fontSize: 13,
                 fontWeight: 500,
                 cursor: dirty ? "pointer" : "not-allowed",
-                boxShadow: dirty ? "0 1px 2px rgba(91,108,173,0.25)" : "none",
+                boxShadow: dirty ? "var(--el-1)" : "none",
               }}
             >
               {`✓ ${t("common.apply")}`}
@@ -411,15 +414,8 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   );
 }
 
-function useAgencyId(): number | null {
-  const { agencyId } = useParams();
-  return agencyId ? Number(agencyId) : null;
-}
-
-function dowLabel(d: DowFilter, t: (key: string) => string): string {
-  if (d === "weekday") return t("filters.dow.weekday");
-  if (d === "weekend") return t("filters.dow.weekend");
-  return t("filters.dow.all");
+function dowLabel(d: DowFilter, t: LabelT): string {
+  return d === "all" ? t("filters.dow.all") : dowValueLabel(d, t);
 }
 
 function Chip({ label, onClear }: { label: string; onClear: () => void }) {
@@ -431,7 +427,7 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
         alignItems: "center",
         gap: 6,
         background: "var(--accent-soft)",
-        color: "var(--accent)",
+        color: "var(--accent-strong)",
         border: "1px solid var(--accent)",
         borderRadius: 999,
         padding: "3px 10px 3px 12px",

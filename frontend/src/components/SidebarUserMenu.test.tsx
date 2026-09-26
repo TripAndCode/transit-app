@@ -63,14 +63,26 @@ describe("SidebarUserMenu", () => {
     await waitFor(() => expect(i18n.resolvedLanguage).toBe("ja"));
   });
 
-  it("toggles data-theme when the theme menu item is clicked", async () => {
+  it("offers system, light and dark as a checked radio set, with system checked by default", async () => {
     const user = userEvent.setup();
     renderMenu();
     const trigger = await screen.findByRole("button", { name: "Account menu" });
     await user.click(trigger);
-    const themeItem = screen.getByRole("menuitem", { name: /switch to (light|dark) mode/i });
-    await user.click(themeItem);
-    await waitFor(() => expect(document.documentElement.dataset.theme).toBeTruthy());
+    const options = screen.getAllByRole("menuitemradio");
+    expect(options.map((o) => o.textContent)).toEqual(["System", "Light", "Dark"]);
+    expect(options.map((o) => o.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+  });
+
+  it("applies and persists the theme chosen from the radio set", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const trigger = await screen.findByRole("button", { name: "Account menu" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("menuitemradio", { name: "Dark" }));
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    expect(localStorage.getItem("transit.theme")).toBe("dark");
+    expect(screen.getByRole("menuitemradio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("menuitemradio", { name: "System" }).getAttribute("aria-checked")).toBe("false");
   });
 
   it("calls onOpenSettings and closes the popover when the settings menu item is clicked", async () => {

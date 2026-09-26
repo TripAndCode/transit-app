@@ -13,12 +13,25 @@ the task needs them.
   ClickHouse.
 - Ask routing is rules → embedding nearest-neighbour → RAG LLM. Only the third stage
   calls an LLM.
+- Admin control room: `api/routers/admin*.py` (board, agencies, users, audit, flags,
+  ask ops) behind `RequireAdmin`/`require_admin`. See `docs/features/admin-control-
+  room.md` for routes, endpoints, and tables per section.
+- `pipeline/flags.py` is the one read path for feature kill switches: a DB
+  `feature_flags` override wins over the env default, cached process-wide for 30s,
+  invalidated immediately on a PATCH. Never read a flag's env var directly.
+- `pipeline/runs.py` records pipeline jobs into `pipeline_runs`; `api/admin_audit.py`
+  records every admin mutation into `admin_audit`. Both feed the admin board/audit log
+  and never let bookkeeping failure break the underlying job or request.
 
 ## Database safety
 
-- Dev Postgres `localhost:5433/transit` and dev ClickHouse `transit-ch` contain real
+- Dev Postgres and dev ClickHouse (`docker compose exec clickhouse`) contain real
   data and are read-only for agents. SELECT/EXPLAIN is allowed; never run writes,
-  DDL, resets, down migrations, or destructive Make targets against them.
+  DDL, resets, down migrations, or destructive Make targets against them. Dev
+  Postgres is whichever port the live container publishes — `compose.yml` declares
+  `:5433`, but the instance holding the data can be published elsewhere, so read
+  `DATABASE_URL` rather than assuming. `.claude/hooks/guard_dev_db.py`'s
+  `DEV_PORTS` is the enforced list and must name every such port.
 - Tests use throwaway Postgres `:5544/transit_test` and ClickHouse `:8124`. Before a
   DB test, load `transit-app-gotchas` for the complete environment block and image
   requirements.
@@ -35,7 +48,8 @@ the task needs them.
   inherit the default `:5433` URL; point it at `:5544`. `make fmt` rewrites files
   rather than reporting, so it does not verify formatting.
 - Frontend: `npm run typecheck`, `npm run test`, `npm run lint`, `npm run lint:i18n`,
-  `npm run lint:i18n-strings`, `npm run test:check-entry-chunk`, then
+  `npm run lint:i18n-strings`, `npm run deadcode`, `npm run test:check-entry-chunk`,
+  `npm run test:check-css-tokens`, `npm run check:css-tokens`, then
   `npm run build:bundle && npm run check:entry-chunk`.
 - Run the smallest relevant check during iteration and the required complete check
   once before completion. Capture verbose output to a file and surface only the
@@ -60,8 +74,9 @@ the task needs them.
 
 ## LLM features
 
-- Prefer deterministic SQL tools. New LLM-grounded behavior needs an environment
-  kill switch, graceful disabled path, and objective stopping criterion.
+- Prefer deterministic SQL tools. New LLM-grounded behavior needs a kill switch
+  registered in `pipeline/flags.py`, a graceful disabled path, and an objective
+  stopping criterion.
 
 ## Git and pull requests
 
@@ -74,21 +89,21 @@ the task needs them.
 - Open PRs as drafts. Mark ready only after the required `/review-branch` pass
   is clean. Once ready and GitHub reports the PR mergeable/clean (no conflicts)
   AND CI is green on the PR's head AND `main` has not advanced since that pass
-  ran, it may be squash-merged
-  — by an interactive session or by `/vps-loop-run` itself — then run
-  `/cleanup-merged` to remove the now-stale branch/worktree. GitHub's
-  `mergeable`/`mergeStateStatus` alone does NOT catch a `main` that moved on
-  without a textual conflict (this repo has no branch-protection "must be
-  up to date" rule to surface that as `BEHIND`) — check the actual SHA. Either a
+  ran, it may be squash-merged — then run `/cleanup-merged` to remove the
+  now-stale branch/worktree. GitHub's `mergeable`/`mergeStateStatus` alone does
+  NOT catch a `main` that moved on without a textual conflict (this repo has no
+  branch-protection "must be up to date" rule to surface that as `BEHIND`) —
+  check the actual SHA. Either a
   `CONFLICTING`/`DIRTY` state or `main` having advanced at all requires the same
   fix: merge latest `main`, resolve any conflicts, and re-run the review pass
   on the result before readying or merging. Every PR body states `**Origin:**
-  Interactive session` or `**Origin:** Autonomous VPS loop (item N)`.
-- CI runs on a self-hosted runner and must be green on the PR's head before it
-  merges. Commit messages still carry `[skip ci]`, so a branch needs one push
-  whose tip omits it to produce the run the gate reads; `transit-app-gotchas`
-  owns that mechanism and its traps. The squash-merge commit keeps the trailer,
-  so `main` does not re-run what the branch already proved.
+  Interactive session`.
+- CI must be green on the PR's head before it merges. Branch commits carry no
+  `[skip ci]`: every push to a PR runs CI, which is what the gate reads. Only
+  the squash-merge commit keeps the trailer, so `main` does not re-run what the
+  branch already proved. `transit-app-gotchas` owns the mechanism and its traps
+  — chiefly that a tip which does carry the trailer produces no run at all, and
+  the gate then has nothing to read rather than something to fail.
 - Local verification stays mandatory regardless: CI sees only the tip that
   triggered it, and the pre-push hook's file-scoped checks cover only the pushed
   worktree's changed Python — its own header states what it leaves uncovered.
@@ -96,8 +111,9 @@ the task needs them.
   GitHub otherwise closes them.
 - After a PR merge, run `/cleanup-merged` in persistent local/VPS clones. Its
   `scripts/cleanup_git_state.py` dry run is the deletion authority: only clean local
-  worktrees and branches proven recoverable from `main` or an exact merged-PR head
-  may be removed. Remote branches, `production`, and unique post-merge commits stay.
+  worktrees (with or without a branch) proven recoverable from `main` or a merged PR's
+  permanent head ref (the tip is that head or an ancestor of it) may be removed.
+  Remote branches, `production`, and unique post-merge commits stay.
 
 ## Process rules
 
@@ -132,41 +148,4 @@ the task needs them.
   of rows") is fine when it adds real intuition, a specific decaying number is not.
 - Do not commit a markdown file that is a log of a past dev/refactor session (dated
   entries, "found X, fixed Y", slice-by-slice narrative) as permanent repo content —
-  that belongs in the PR body or commit message, not a tracked file. `docs/refactor-
-  log.md` is the one deliberate exception: it is `/vps-loop-run`'s own required
-  operational trail (see `.claude/commands/vps-loop-run.md`), not free-standing dev
-  narration, and stays out of this rule.
-
-## Autonomous VPS loop
-
-- `/vps-loop-run` is the canonical state machine. `NEXT_TASK.md` is its untracked
-  input and status log; one run advances at most one item.
-- The loop may create worktrees, commit, push feature branches, open draft PRs,
-  mark its own PR ready, and squash-merge it once the required `/review-branch`
-  pass is clean, GitHub reports the PR mergeable/clean, AND `main` hasn't
-  advanced since that pass ran (Step 5 gates this unconditionally before Step
-  6 runs; Step 6 re-checks the `main` SHA immediately before merging, since a
-  non-conflicting advance is invisible to `mergeable`/`mergeStateStatus` alone)
-  — then run `/cleanup-merged` to remove the now-stale branch/worktree. It never
-  pushes directly to `main` (only via a reviewed, merged PR), never force-pushes,
-  and never bypasses the review gate, a `CONFLICTING` merge state, or a
-  `main` that moved on to force a merge through.
-- Shared hooks apply on the VPS. VPS-only permissions live in ignored
-  `.claude/settings.local.json` and must never be committed.
-- Operational setup, non-interactive-shell environment rules, and current timeout
-  limitations are documented in `.claude/README.md`, not repeated in every session.
-- For a `NEXT_TASK.md`-tracked backlog item, the VPS loop is the default place
-  that work happens, not an interactive session (this doesn't apply to ordinary
-  interactive feature work outside the backlog, e.g. work requested directly in
-  a session — see `## Git and pull requests` above). Prefer reporting status and
-  letting the next tick continue over fixing/finishing a stuck or blocked item
-  yourself; only take over in-progress worker state when explicitly asked to. A
-  specific ask to intervene ("if it stops, resolve it" / "fix the root cause")
-  authorizes that one intervention — not a chain into full interactive
-  development of everything downstream. After finishing the thing that was
-  actually asked for, check whether the loop's next tick can plausibly continue
-  from here; if so, stop and let it, rather than proactively continuing the
-  chain of related fixes yourself. (This is a session-discipline rule, not a
-  code-enforceable one, so it skips the usual skill-first promotion ladder in
-  `## Process rules` — there's no existing skill for session behavior to have
-  captured it in.)
+  that belongs in the PR body or commit message, not a tracked file.

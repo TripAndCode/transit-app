@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { fireEvent, screen } from "@testing-library/react";
+import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewTab } from "./OverviewTab";
 import * as hooks from "../api/hooks";
@@ -19,13 +19,23 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
   };
 }
 
-function renderOverview(data: OverviewSummary) {
+function SearchProbe() {
+  const [params] = useSearchParams();
+  return <span data-testid="search">{params.toString()}</span>;
+}
+
+function renderOverview(data: OverviewSummary, path = "/agencies/8/overview?from=2030-01-01&to=2030-01-07") {
   vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data, isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
+  // The jump-to-latest-data recovery reads the agency's latest_data_date.
+  vi.spyOn(hooks, "useAgencies").mockReturnValue({
+    data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
+    isPending: false,
+  } as never);
   renderWithProviders(
-    <MemoryRouter initialEntries={["/agencies/8/overview?from=2030-01-01&to=2030-01-07"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/agencies/:agencyId/overview" element={<OverviewTab />} />
+        <Route path="/agencies/:agencyId/overview" element={<><OverviewTab /><SearchProbe /></>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -65,5 +75,69 @@ describe("OverviewTab", () => {
     // MapLibre helper and carry this class whatever the wrapper is called.
     expect(document.querySelector(".maplibregl-map")).not.toBeInTheDocument();
     expect(document.querySelector("canvas")).not.toBeInTheDocument();
+  });
+
+  // Selecting an hour writes two query keys. Written as two per-key setters
+  // they would not compose -- the second navigation starts from the same
+  // params snapshot as the first and drops it -- so the hour would never
+  // reach the URL and the breakdown would never open.
+  it("writes the peak hour to the URL when an hour is picked", () => {
+    renderOverview(
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        peak_hour: { by_hour: Array.from({ length: 24 }, (_, i) => i / 10), peak_hour: 8, peak_avg_min: 2.3 },
+      }),
+    );
+    // jsdom reports a zero-size rect, and the ribbon maps a click to an hour
+    // through its own width, so the geometry has to be supplied here.
+    const ribbon = screen.getByRole("img", { name: "Worst hour of day" });
+    ribbon.getBoundingClientRect = () =>
+      ({ width: 660, height: 90, left: 0, top: 0, right: 660, bottom: 90, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.click(ribbon, { clientX: 8 * (660 / 24) + 1 });
+    const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(search.has("peak_hour")).toBe(true);
+    // The range the tab was opened with must survive the selection write.
+    expect(search.get("from")).toBe("2030-01-01");
+  });
+
+  it("renders peak-hour, concentration, and service-split content inline, with nothing to disclose", () => {
+    renderOverview(
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
+        peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
+        service_split: { "平日": 3.1, "土日祝": 2.0 },
+      }),
+    );
+    expect(screen.getByText("Delay concentration")).toBeInTheDocument();
+    expect(screen.getByText("Worst hour of day")).toBeInTheDocument();
+    expect(screen.getByText("By service day")).toBeInTheDocument();
+    // Progressively revealed, not gated behind a disclosure widget.
+    expect(document.querySelector("details")).not.toBeInTheDocument();
+    expect(document.querySelector("summary")).not.toBeInTheDocument();
+  });
+
+  it("offers a clear-routes recovery when the empty result is scoped to specific routes", () => {
+    renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07&routes=A05");
+    expect(screen.getByRole("button", { name: "Clear the route filter" })).toBeInTheDocument();
+  });
+
+  it("offers a jump-to-latest-data recovery when the agency has data outside this window", () => {
+    renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07");
+    expect(screen.getByRole("button", { name: "Jump to the latest data" })).toBeInTheDocument();
+  });
+
+  it("offers no recoveries beyond the jump when nothing is filtered", () => {
+    renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07");
+    expect(screen.queryByRole("button", { name: "Clear the route filter" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reset service type to all" })).not.toBeInTheDocument();
+  });
+});
+
+describe("OverviewTab without a usable agency id", () => {
+  it("renders nothing when the route segment is not an agency id", () => {
+    renderOverview(summary(), "/agencies/not-an-id/overview?from=2030-01-01&to=2030-01-07");
+    expect(screen.queryByRole("region")).toBeNull();
+    expect(document.querySelector(".ov-page")).toBeNull();
   });
 });

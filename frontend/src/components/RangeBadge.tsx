@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { isoDaysAgo, jstYearMonth, todayISO, toJstISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { Z_INDEX } from "../styles/zIndex";
 
 type Preset = { key: string; label: string; from: () => string; to: () => string };
 
@@ -75,7 +76,7 @@ export function RangeBadge() {
         onClick={() => setOpen((v) => !v)}
         style={{
           background: active ? "var(--accent)" : "var(--bg-surface)",
-          color: active ? "#fff" : "var(--text-primary)",
+          color: active ? "var(--on-accent)" : "var(--text-primary)",
           border: `1px solid ${active ? "var(--accent)" : "var(--border-subtle)"}`,
           borderRadius: 8,
           padding: "8px 16px",
@@ -85,7 +86,7 @@ export function RangeBadge() {
           alignItems: "center",
           gap: 8,
           cursor: "pointer",
-          boxShadow: active ? "0 1px 3px rgba(91,108,173,0.30)" : "none",
+          boxShadow: active ? "var(--el-1)" : "none",
           transition: "all var(--transition)",
         }}
       >
@@ -99,12 +100,12 @@ export function RangeBadge() {
             position: "absolute",
             top: "calc(100% + 6px)",
             left: 0,
-            zIndex: 50,
+            zIndex: Z_INDEX.popover,
             minWidth: 280,
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius-lg)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.10)",
+            boxShadow: "var(--el-2)",
             padding: 8,
             color: "var(--text-primary)",
           }}
@@ -129,7 +130,7 @@ export function RangeBadge() {
                   borderRadius: 4,
                   fontSize: 13,
                   background: selected ? "var(--accent-soft)" : "transparent",
-                  color: selected ? "var(--accent)" : "var(--text-primary)",
+                  color: selected ? "var(--accent-strong)" : "var(--text-primary)",
                   fontWeight: selected ? 500 : 400,
                 }}
               >

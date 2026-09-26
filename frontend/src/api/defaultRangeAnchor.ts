@@ -43,6 +43,49 @@ export function computeAnchorRange(
 }
 
 /**
+ * The agency's most recent `DEFAULT_RANGE_DAYS`-day window, ending at its
+ * real latest data date — regardless of whether today's naive window would
+ * already cover it. Unlike {@link computeAnchorRange}, this is not a "does
+ * this rewrite need to happen" decision for a fresh visit; it is the target
+ * for a manual "take me to real data" recovery a user taps from an
+ * EmptyState after a route/service filter (not the date range itself) left
+ * the view empty, so it always returns the window when the agency has any
+ * data at all.
+ */
+export function latestDataWindow(
+  agencyId: number | null,
+  agencies: Agency[] | undefined,
+): { from: string; to: string } | null {
+  if (agencyId == null || !agencies) return null;
+  const latestDataDate = agencies.find((a) => a.agency_id === agencyId)?.latest_data_date;
+  if (!latestDataDate) return null;
+  return { from: isoDaysBefore(latestDataDate, DEFAULT_RANGE_DAYS - 1), to: latestDataDate };
+}
+
+/**
+ * A recovery callback that overwrites the URL's from/to with the agency's
+ * latest-data window, leaving every other query param untouched. Returns
+ * `null` (render no control) when the agency has no data to jump to.
+ */
+export function useJumpToLatestDataRange(agencyId: number | null): (() => void) | null {
+  const { data: agencies } = useAgencies();
+  const [, setParams] = useSearchParams();
+  const range = latestDataWindow(agencyId, agencies);
+  if (!range) return null;
+  return () => {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("from", range.from);
+        next.set("to", range.to);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+}
+
+/**
  * On a fresh visit (no explicit from/to in the URL), rewrites the URL to
  * anchor the default 30-day window at the agency's real latest data date
  * instead of today, when today's default window would otherwise be

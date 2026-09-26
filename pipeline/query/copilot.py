@@ -10,8 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 
+from pipeline.flags import aflag, flag
 from pipeline.query.chat import _completion_with_key
 from pipeline.query.copilot_templates import (
     NO_SIGNAL_TEMPLATE_ID,
@@ -19,7 +19,7 @@ from pipeline.query.copilot_templates import (
     render_template,
     templates_for_tab,
 )
-from pipeline.query.llm_client import get_client
+from pipeline.query.llm_client import describe_provider_failure, get_client
 from pipeline.query.user_llm_keys import UserLLMKey
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,19 @@ def is_enabled() -> bool:
     app — the panel fires it on the default tab for every visitor — so it has
     to be opted into per deployment rather than shipped hot.
     """
-    return os.environ.get("COPILOT_INSIGHT_ENABLED", "false").lower() in ("1", "true", "yes")
+    return flag("copilot_insight_enabled", False)
+
+
+async def ais_enabled() -> bool:
+    """:func:`is_enabled` for a caller on the event loop.
+
+    The synchronous read never blocks on Postgres once anything is cached,
+    but it also declines to perform a refresh that `invalidate()` has marked
+    owed -- it leaves that to an async reader. A handler that only ever calls
+    the sync form is therefore the reader that never arrives, and an operator
+    who just cleared or set this switch keeps being served the old value.
+    """
+    return await aflag("copilot_insight_enabled")
 
 
 def _get_client():
@@ -64,7 +76,10 @@ def _pick_template_tool(tab: str) -> dict:
         "type": "function",
         "function": {
             "name": "pick_template",
-            "description": "Choose which pre-verified insight template best matches the current data.",
+            "description": (
+                "Choose the pre-verified insight template that fits the current data. "
+                + " ".join(f"{t.id}: {t.use_when}" for t in all_candidates)
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -126,8 +141,11 @@ async def generate_proactive_insight(
                 tool_choice="required",
                 temperature=0.0,
             )
-        except Exception:
-            logger.warning("copilot: BYOK completion failed; falling back to no_signal")
+        except Exception as exc:
+            logger.warning(
+                "copilot: BYOK completion failed; falling back to no_signal (%s)",
+                describe_provider_failure(exc),
+            )
             message = None
     else:
         client = _get_client()

@@ -41,7 +41,8 @@ API token. If a call fails, check `gh auth status`.
 
 1. `gh pr view <arg> --json number,url,title,body,headRefName,headRefOid,author`, and
    resolve your own login once with `gh api user --jq .login`. Open the report with the
-   PR's `url` and `number`, as `/review-pr` does.
+   PR's `url` and `number`, as `/review-pr` does. If `author.login` equals your own
+   login, stop and point at `/address-my-pr-comments`, which owns threads on your own PR.
 2. **Before touching the worktree**, capture its current head as `old_head`:
    `git -C .worktrees/review-<headRefName> rev-parse HEAD`. An error or empty result
    means no baseline — record that case for Phase 1.
@@ -119,10 +120,6 @@ and say so rather than quietly fanning out.
    least one later comment carries a **different** `user.login`. A reply count alone
    does not prove anyone answered you: a follow-up remark you added to your own thread
    while waiting would satisfy `comment_count > 1` and be misread as a reply.
-   When the PR's `author.login` is your own login — a `/vps-loop-run` PR is the usual
-   case — no thread can satisfy this, which is correct rather than a bug: there
-   is no human on the other side to have answered. Say so, and let Phase 1's delta
-   scan carry the run.
 3. Resolution state does not exist on the REST comments endpoint. Fetch it from
    GraphQL and drop resolved threads:
    ```bash
@@ -152,7 +149,7 @@ and say so rather than quietly fanning out.
    prompt must carry, verbatim: "You are read-only: do not edit any file, do not run
    any `gh` write call, do not post or reply to any comment, never call the resolve
    mutation, do not commit or push. Any SQL is read-only SELECT/EXPLAIN against dev
-   Postgres :5433 or the dev ClickHouse (`transit-ch`) — never write to either. Read
+   Postgres (the instance `DATABASE_URL` names) or the dev ClickHouse (`docker compose exec clickhouse`) — never write to either. Read
    only within the worktree path given; never read another worktree. Report only."
 
 Produce a numbered table, one row per thread:

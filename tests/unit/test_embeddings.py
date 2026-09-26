@@ -1,6 +1,7 @@
 """Embedder unit tests. The success-path tests are gated under RUN_SLOW
 because they download / load a ~120MB model."""
 
+import logging
 import os
 
 import pytest
@@ -29,6 +30,19 @@ def test_embedder_unavailable_when_model_id_invalid(monkeypatch):
     assert e.available is False
     with pytest.raises(RuntimeError):
         e.embed("hello", mode="query")
+
+
+def test_unavailable_load_logs_with_traceback(caplog):
+    """The load failure is only ever logged, never re-raised (Embedder.available
+    just goes False) -- so the traceback has to be captured in the log record
+    itself (exc_info=True) or it is lost, leaving only the exception's class
+    name to debug a real model-loading failure in production with."""
+    with caplog.at_level(logging.ERROR, logger="pipeline.query.embeddings"):
+        Embedder(model_id="nonexistent/this-model-does-not-exist")
+
+    records = [r for r in caplog.records if r.name == "pipeline.query.embeddings"]
+    assert records, "expected an error log record from the failed load"
+    assert records[0].exc_info is not None
 
 
 def test_get_embedder_returns_singleton(monkeypatch):

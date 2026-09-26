@@ -1,0 +1,111 @@
+/* Inspect card — the operations map's top-right dock.
+
+   Its own stylesheet rather than another block in operationsMap.css: the card
+   is a self-contained surface with no selector shared with the map's other
+   chrome, and keeping it separate means the component can be read (and moved)
+   without reading the map's whole style sheet.
+
+   The right inset clears MapLibre's NavigationControl, which this map puts in
+   the same corner (see MapTab.tsx) — the same clearance .ops-map-ref and
+   .ops-dock already reserve on narrow screens. z-index is explicit because
+   .ops-map__empty and .ops-map__loading cover this corner too. */
+.ops-inspect {
+  position: absolute;
+  top: 12px;
+  right: 52px;
+  z-index: var(--z-map-overlay);
+  width: min(250px, calc(100% - 76px));
+  padding: 12px 14px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: var(--el-2);
+  color: var(--text-primary);
+  transition: box-shadow var(--transition);
+}
+
+/* Engines without backdrop-filter get the same geometry on an opaque fill: a
+   translucent panel with no blur behind it leaves map detail showing through
+   the route name and the delay figure. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ops-inspect { background: var(--bg-surface); }
+}
+
+/* A preview follows the pointer and is gone the moment it moves on. It sits
+   one tier shallower than a pinned card so the two never read as the same
+   commitment, and the card visibly settles when the operator pins it. */
+.ops-inspect--preview { box-shadow: var(--el-1); }
+
+/* The fade rides the contents, not the card: the dock itself stays put while
+   the operator sweeps the pointer across vehicles, and each trip's figures
+   cross-fade in over the last one's. Opacity only -- a card that also jumps
+   4px every time the pointer crosses a marker is motion the operator did not
+   ask for. */
+@media (prefers-reduced-motion: no-preference) {
+  .ops-inspect__body { animation: ops-inspect-in var(--dur-2) var(--ease-out); }
+  @keyframes ops-inspect-in {
+    from { opacity: 0; }
+  }
+}
+
+.ops-inspect__head { display: flex; align-items: flex-start; gap: 8px; }
+
+/* --brand, not --accent: a route badge identifies a line. It is a label, not
+   an interactive accent, and reading as one would make every vehicle on the
+   map look clickable in the same way the filter controls are. */
+.ops-inspect__badge {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: var(--radius);
+  color: var(--on-brand);
+  background: var(--brand);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.ops-inspect__name { min-width: 0; font-size: var(--text-sm); line-height: 1.35; }
+.ops-inspect__name b { display: block; font-weight: 600; }
+.ops-inspect__name small { display: block; color: var(--text-secondary); font-size: var(--text-xs); }
+
+.ops-inspect__pin {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--text-tertiary);
+  background: none;
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition);
+}
+.ops-inspect__pin:hover { color: var(--text-primary); background: var(--bg-soft); }
+.ops-inspect__pin[aria-pressed="true"] { color: var(--accent-strong); }
+
+.ops-inspect__delay { display: flex; align-items: baseline; gap: 6px; margin: 8px 0 0; }
+.ops-inspect__delay b { font-size: var(--text-xl); font-weight: 700; line-height: 1; }
+.ops-inspect__delay span { color: var(--text-secondary); font-size: var(--text-xs); }
+
+.ops-inspect__spark { margin-top: 6px; }
+.ops-inspect__spark small { display: block; color: var(--text-tertiary); font-size: var(--text-xs); }
+
+.ops-inspect__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.ops-inspect__row b { color: var(--text-primary); font-weight: 500; text-align: right; }
+
+/* BP.sm */
+@media (max-width: 640px) {
+  .ops-inspect { left: 8px; right: 52px; width: auto; }
+}

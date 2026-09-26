@@ -75,11 +75,70 @@ async def test_heatmap_returns_p90_delay_min(hmap_client):
 @pytest.mark.asyncio
 async def test_heatmap_p90_null_when_no_data(hmap_client):
     client, aid = hmap_client
-    # Request a future date range with no data
-    r = await client.get(f"/api/{aid}/delays/heatmap?from=2099-01-01&to=2099-01-07")
+    # A historical range with no data. Not a FUTURE range: both range
+    # boundaries are clamped to jst_today() (api.range.clamp_range_ctx), so a
+    # far-future window collapses onto today — which this fixture does seed.
+    r = await client.get(f"/api/{aid}/delays/heatmap?from=2020-01-01&to=2020-01-07")
     assert r.status_code == 200
     # No features expected (no data in that range)
     assert r.json()["features"] == []
+
+
+@pytest.fixture
+async def zero_sample_hmap_client(apply_schema):
+    """One clustered stop whose only aggregate row records zero samples.
+
+    `agg_stop_daily.samples` is NOT NULL but unconstrained above zero, so a
+    cluster can legitimately sum to zero observations. The heatmap must report
+    "no average" for it rather than dividing by zero.
+    """
+    from api.main import app
+
+    pool = await _test_pool()
+    app.state.pool = pool
+    row = await pool.fetchrow(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
+        "HmapZeroAgency",
+        "http://hmap-zero-test.example.com",
+    )
+    aid = row["agency_id"]
+    await pool.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+        "VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($5,$4),4326))",
+        aid,
+        "S0",
+        "無観測停留所",
+        40.8,
+        140.8,
+    )
+    await pool.execute(
+        "INSERT INTO agg_stop_daily "
+        "(agency_id, stop_id, date, service_type, time_band, delay_sum, samples) "
+        "VALUES ($1,$2,$3,$4,$5,0,0)",
+        aid,
+        "S0",
+        date.today(),
+        "平日",
+        "朝",
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c, aid
+    async with pool.acquire() as conn:
+        await conn.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_heatmap_zero_sample_cluster_reports_no_average(zero_sample_hmap_client):
+    client, aid = zero_sample_hmap_client
+    r = await client.get(f"/api/{aid}/delays/heatmap")
+    assert r.status_code == 200
+    features = r.json()["features"]
+    assert len(features) == 1
+    props = features[0]["properties"]
+    assert props["avg_delay_min"] is None
+    assert props["p90_delay_min"] is None
+    assert props["samples"] == 0
 
 
 @pytest.fixture
@@ -341,8 +400,8 @@ async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
 async def test_stop_profile_cohort_avg_is_samples_weighted(weighted_cohort_client):
     """cohort_avg_delay_sec must weight each cohort row by its own `samples`,
     matching every other averaging site in map.py (today_route_summary's
-    `rb` CTE at map.py:635-636, delay_heatmap's `avg_delay_min` at
-    map.py:1062) rather than a plain AVG over each row's own
+    `rb` CTE, delay_heatmap's `avg_delay_min`) rather than a plain AVG over
+    each row's own
     delay_sum/samples ratio, where a 2-sample row would otherwise count the
     same as a 500-sample row."""
     client, aid = weighted_cohort_client

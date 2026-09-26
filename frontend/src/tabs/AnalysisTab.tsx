@@ -1,83 +1,63 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
-import { ctxToQueryString, isoDaysAgo, todayISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
-import type { DwellRunPayload, RevisionBoundaries, TrendDay } from "../api/types";
+import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
+import { ctxToQueryString, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import type { DwellRunPayload, TrendPayload } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
+import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
 import { InsightPanel } from "../components/InsightPanel";
-import { Skeleton } from "../components/Skeleton";
+import { SkeletonChart, SkeletonTable } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
-import { HourlyHeatmap, type HourlyCell } from "../components/charts/HourlyHeatmap";
+import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
 import { BandGrid, Legend } from "../components/charts/DowBandGrid";
-import { delayColor } from "../styles/tokens";
+import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
+import { accentRampColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
+import { WEEK } from "../utils/week";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
+import { formatNumber } from "../utils/format";
+import { serviceValueLabel } from "../utils/filterValueLabels";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
-import { MOBILE_BREAKPOINT_PX } from "../hooks/useMediaQuery";
+import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
-
-/** "This week" = the 7 days ending today, in the ctx's from/to string
- *  format. Used by the "no data" EmptyState's recovery action to jump to a
- *  window likely to have real data, rather than leaving the user stuck on
- *  whatever empty range they'd filtered to. */
-function thisWeekRange(): { from: string; to: string } {
-  return { from: isoDaysAgo(6), to: todayISO() };
-}
+import { useAgencyId } from "../api/useAgencyId";
+import { SHARED_TABLE, th, td } from "../components/tableStyles";
+import { ReportList } from "../components/analysis/ReportList";
+import { reportLabel } from "../components/analysis/reportGroups";
+import "./analysisTab.css";
 
 export function AnalysisTab() {
   const { t } = useTranslation();
-  const { agencyId, reportType } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const { reportType } = useParams();
+  const id = useAgencyId();
   const navigate = useNavigate();
   const [ctx, update] = useRangeContext();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
   // Build the filter querystring from ctx so navigating between reports
   // carries only the filter dimensions — not unrelated keys like ?admin=1.
   const filterQS = ctxToQueryString(ctx);
   const filterSuffix = filterQS ? `?${filterQS}` : "";
   const list = useReports(id);
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
+  const [rawRowsOpen, setRawRowsOpen] = useState(false);
 
-  const reportLabels: Record<string, string> = {
-    ranking: t("reports.type.ranking"),
-    ranking_best: t("reports.type.ranking_best"),
-    on_time: t("reports.type.on_time"),
-    worst_5min: t("reports.type.worst_5min"),
-    trend: t("reports.type.trend"),
-    compare_ranking: t("reports.type.compare_ranking"),
-    dow_weekday: t("reports.type.dow_weekday"),
-    dow_weekend: t("reports.type.dow_weekend"),
-    dwell_run: t("reports.type.dwell_run"),
-    route_forecast: t("reports.type.route_forecast"),
-    council_summary: t("reports.type.council_summary"),
-    delay_certificate: t("reports.type.delay_certificate"),
-  };
+  // `route_forecast` is served by its own endpoint, so the reports list never
+  // returns it -- it is appended here as list data rather than re-rendered as
+  // a second, hand-copied button underneath the list.
+  const listedTypes = [...(list.data ?? []).map((r) => r.report_type), "route_forecast"];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <TabFilterBar />
-      {/* Below ~640px this row's 280px report list + flex:1 report body +
-          260px InsightPanel force a combined min-width the phone viewport
-          can't satisfy, pushing the whole page into horizontal scroll (the
-          tables inside are already self-contained via ReportTable's own
-          overflow-x:auto, so it's only this outer row that needs help).
-          This tab's dense multi-column reports stay desktop-oriented by
-          design -- the fix here is just to stack the three sections
-          vertically instead of side-by-side, not to redesign them for
-          touch. */}
-      <style>{`
-        @media (max-width: ${MOBILE_BREAKPOINT_PX}px) {
-          .analysis-body { flex-direction: column; }
-          .analysis-report-list { width: 100% !important; }
-          .analysis-insights { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border-subtle); }
-        }
-      `}</style>
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -100,63 +80,20 @@ export function AnalysisTab() {
           />
         </h3>
         {list.error && <ErrorBanner error={list.error} onRetry={() => list.refetch()} />}
-        {list.isLoading && [...Array(6)].map((_, i) => (
-          <Skeleton key={i} height={48} style={{ marginBottom: 6 }} />
-        ))}
+        {list.isLoading && <SkeletonTable rows={6} rowHeight={48} />}
         {list.data && list.data.length === 0 && (
           <EmptyState
             title={t("reports.empty.title")}
             hint={t("reports.empty.hint")}
           />
         )}
-        {list.data?.map((r) => {
-          const active = r.report_type === reportType;
-          return (
-            <button
-              key={r.report_type}
-              type="button"
-              onClick={() => navigate(`/agencies/${id}/analysis/${r.report_type}${filterSuffix}`)}
-              aria-pressed={active}
-              style={{
-                appearance: "none",
-                font: "inherit",
-                textAlign: "left",
-                color: "inherit",
-                display: "block",
-                width: "100%",
-                padding: "10px 12px",
-                marginBottom: 4,
-                background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-                border: "1px solid var(--border-soft)",
-                borderRadius: "var(--radius)",
-                cursor: "pointer",
-              }}
-            >
-              <div style={{ fontWeight: 500 }}>{reportLabels[r.report_type] ?? r.report_type}</div>
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => navigate(`/agencies/${id}/analysis/route_forecast${filterSuffix}`)}
-          aria-pressed={reportType === "route_forecast"}
-          style={{
-            appearance: "none",
-            font: "inherit",
-            textAlign: "left",
-            color: "inherit",
-            display: "block",
-            width: "100%",
-            padding: "10px 12px",
-            marginBottom: 4,
-            background: reportType === "route_forecast" ? "var(--accent-soft)" : "var(--bg-surface)",
-            border: "1px solid var(--border-soft)",
-            borderRadius: "var(--radius)",
-            cursor: "pointer",
-          }}
-        >
-          <div style={{ fontWeight: 500 }}>{reportLabels.route_forecast}</div>
-        </button>
+        {list.data && (
+          <ReportList
+            types={listedTypes}
+            active={reportType ?? null}
+            onSelect={(type) => navigate(`/agencies/${id}/analysis/${type}${filterSuffix}`)}
+          />
+        )}
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -165,18 +102,18 @@ export function AnalysisTab() {
         )}
         {reportType === "route_forecast" && id != null && (
           <div>
-            <h2 style={{ margin: "0 0 16px" }}>{reportLabels.route_forecast}</h2>
+            <h2 style={{ margin: "0 0 16px" }}>{reportLabel(t, "route_forecast")}</h2>
             <RouteForecastSection aid={id} />
           </div>
         )}
         {reportType && reportType !== "route_forecast" && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
         )}
-        {reportType && reportType !== "route_forecast" && detail.isFetching && <Skeleton height={400} />}
+        {reportType && reportType !== "route_forecast" && detail.isFetching && <SkeletonChart height={360} />}
         {reportType !== "route_forecast" && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-              <h2 style={{ margin: 0 }}>{reportLabels[detail.data.report_type] ?? detail.data.report_type}</h2>
+              <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
               {detail.data.report_type !== "trend" && (
                 <a
                   href={`/api/${id}/reports/${detail.data.report_type}?${new URLSearchParams({
@@ -210,29 +147,26 @@ export function AnalysisTab() {
             )}
             {detail.data.definition && <DefinitionMetaBlock definition={detail.data.definition} />}
             {detail.data.report_type === "trend" ? (
-              <TrendBlock
-                data={
-                  detail.data.rows as unknown as {
-                    days: TrendDay[];
-                    hourly: HourlyCell[];
-                    dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null };
-                    revision_boundaries?: RevisionBoundaries;
-                  }[]
-                }
-                ctx={ctx}
-              />
+              <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
-              <DwellRunBlock payload={(detail.data.rows as unknown as DwellRunPayload[])[0]} />
+              <DwellRunBlock payload={detail.data.rows[0]} />
             ) : detail.data.rows.length > 0 ? (
               <ReportTable
                 reportType={detail.data.report_type}
-                rows={detail.data.rows as unknown[][]}
+                rows={detail.data.rows}
               />
             ) : (
               <EmptyState
                 title={t("reports.no_data.title")}
                 hint={t("reports.no_data.hint")}
-                action={{ label: t("reports.no_data.reset_action"), onClick: () => update(thisWeekRange()) }}
+                reasons={buildFilterCtxReasons(ctx, t)}
+                recoveries={buildFilterCtxRecoveries({
+                  ctx,
+                  onClearRoutes: () => update({ routes: null }),
+                  onResetService: () => update({ service: "all" }),
+                  jumpToLatestData,
+                  t,
+                })}
               />
             )}
             {/* Second, narrower metric panel (item 94) -- high-frequency
@@ -259,26 +193,31 @@ export function AnalysisTab() {
               <WeatherDelayPanel aid={id} ctx={ctx} />
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
-              <details style={{ marginTop: 16, color: "var(--text-tertiary)" }}>
+              <details
+                style={{ marginTop: 16, color: "var(--text-tertiary)" }}
+                onToggle={(e) => setRawRowsOpen(e.currentTarget.open)}
+              >
                 <summary style={{ cursor: "pointer", fontSize: 12 }}>
                   {t("reports.raw_rows", { count: detail.data.rows.length })}
                 </summary>
-                <pre
-                  style={{
-                    background: "var(--bg-surface)",
-                    border: "1px solid var(--border-soft)",
-                    borderRadius: "var(--radius)",
-                    padding: 12,
-                    marginTop: 8,
-                    whiteSpace: "pre-wrap",
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                    fontSize: 12,
-                    lineHeight: 1.6,
-                    maxWidth: 920,
-                  }}
-                >
-                  {detail.data.text}
-                </pre>
+                {rawRowsOpen && (
+                  <pre
+                    style={{
+                      background: "var(--bg-surface)",
+                      border: "1px solid var(--border-soft)",
+                      borderRadius: "var(--radius)",
+                      padding: 12,
+                      marginTop: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12,
+                      lineHeight: 1.6,
+                      maxWidth: 920,
+                    }}
+                  >
+                    {detail.data.text}
+                  </pre>
+                )}
               </details>
             )}
           </div>
@@ -294,39 +233,43 @@ export function AnalysisTab() {
   );
 }
 
-const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
-
 function TrendBlock({
   data,
   ctx,
 }: {
-  data: {
-    days: TrendDay[];
-    hourly: HourlyCell[];
-    dow_band: { grid: ForecastOverviewGridCell[]; worst: ForecastOverviewWorst | null };
-    revision_boundaries?: RevisionBoundaries;
-  }[];
+  data: TrendPayload[];
   ctx: RangeCtx;
 }) {
-  const payload = data[0] ?? { days: [], hourly: [], dow_band: { grid: [], worst: null }, revision_boundaries: [] };
+  const payload: TrendPayload = data[0] ?? {
+    days: [],
+    hourly: [],
+    dow_band: { grid: [], worst: null },
+    revision_boundaries: [],
+  };
   const rangeDays = Math.max(
     1,
     Math.round((new Date(ctx.to).getTime() - new Date(ctx.from).getTime()) / 86400000) + 1,
   );
+  // One provider over all three charts: hovering a mark in any of them dims
+  // the marks in the others that don't share its day, weekday or hour.
   return (
-    <div>
-      <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
-      <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
-      <HourlyHeatmap cells={payload.hourly} />
-    </div>
+    <TrendFocusProvider>
+      <div>
+        <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
+        <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
+        <HourlyHeatmap cells={payload.hourly} />
+      </div>
+    </TrendFocusProvider>
   );
 }
 
 function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const { format: formatRoute } = useRouteNames(id);
+  const cappedRoutes = useCappedList(payload?.routes ?? [], 200, payload);
+  const [ctx, update] = useRangeContext();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
 
   if (!payload || !payload.available) {
     return <EmptyState title={t("reports.dwell_run.not_available")} />;
@@ -339,20 +282,28 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
       <EmptyState
         title={t("reports.no_data.title")}
         hint={t("reports.no_data.hint")}
+        reasons={buildFilterCtxReasons(ctx, t)}
+        recoveries={buildFilterCtxRecoveries({
+          ctx,
+          onClearRoutes: () => update({ routes: null }),
+          onResetService: () => update({ service: "all" }),
+          jumpToLatestData,
+          t,
+        })}
       />
     );
   }
 
   const fmtSec = (v: number | null): string => (v == null ? "—" : `${v.toFixed(0)}${t("common.unit_sec")}`);
-  const fmtSamples = (v: number): string => v.toLocaleString();
+  const fmtSamples = (v: number): string => formatNumber(v);
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <table style={SHARED_TABLE}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
-            <th style={th(40)}>#</th>
-            <th style={th()}>{t("reports.col.route")}</th>
+            <th style={th({ width: 40 })}>#</th>
+            <th style={th()}>{t("common.route")}</th>
             <th style={th()}>{t("reports.col.service")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_avg")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p50")}</th>
@@ -365,11 +316,11 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           </tr>
         </thead>
         <tbody>
-          {payload.routes.map((r, i) => (
+          {cappedRoutes.visible.map((r, i) => (
             <tr key={`${r.route_code}-${r.service_type ?? ""}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td(), color: "var(--text-tertiary)", textAlign: "right" }}>{i + 1}</td>
               <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
-              <td style={td()}>{r.service_type ? t(`common.service_value.${r.service_type}`, { defaultValue: r.service_type }) : "—"}</td>
+              <td style={td()}>{r.service_type ? serviceValueLabel(r.service_type, t) : "—"}</td>
               <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_avg_sec)}</td>
               <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_p50_sec)}</td>
               <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_p90_sec)}</td>
@@ -382,6 +333,11 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           ))}
         </tbody>
       </table>
+      {cappedRoutes.remaining > 0 && (
+        <button type="button" className="btn-ghost" onClick={cappedRoutes.showMore}>
+          {t("common.show_more", { count: cappedRoutes.remaining })}
+        </button>
+      )}
     </div>
   );
 }
@@ -425,30 +381,14 @@ function DowBandHeatmapCard({
             bandLabel={bandLabel}
             dayLabel={dayLabel}
             axisMin={axisMin}
-            colorFor={delayColor}
+            colorFor={accentRampColor}
             onTip={() => {}}
             onLeave={() => {}}
           />
-          <Legend min={min} max={max} unit={axisMin} colorFor={delayColor} />
+          <Legend min={min} max={max} unit={axisMin} colorFor={accentRampColor} />
         </>
       )}
     </div>
   );
 }
 
-// Local table-cell helpers for DwellRunBlock above -- same shape as
-// ReportTable.tsx's own (unexported) th/td, duplicated here rather than
-// exported cross-module since DwellRunBlock's table doesn't share
-// ReportTable's tuple-row/SCHEMAS shape.
-const th = (w?: number): React.CSSProperties => ({
-  padding: "8px 10px",
-  textAlign: "left",
-  fontWeight: 500,
-  color: "var(--text-secondary)",
-  fontSize: 12,
-  width: w,
-});
-const td = (): React.CSSProperties => ({
-  padding: "6px 10px",
-  fontSize: 13,
-});

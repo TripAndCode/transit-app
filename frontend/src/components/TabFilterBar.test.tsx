@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { TabFilterBar } from "./TabFilterBar";
@@ -57,5 +58,41 @@ describe("TabFilterBar route chip labels", () => {
       { route_id: "国道・古川線(1021)", route_short_name: "", route_long_name: "国道・古川線", route_code: "1021", trip_headsigns: [] },
     ]);
     expect(screen.getByText("国道・古川線 (1021)")).toBeInTheDocument();
+  });
+});
+
+describe("TabFilterBar day and service labels", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("labels active chips and popover options from the wire values", async () => {
+    const user = userEvent.setup();
+    renderFilterBar(`/agencies/1/overview?dow=weekend&service=${encodeURIComponent("平日")}`); // i18n-ignore: query contract
+    expect(screen.getByText("Day: Weekend/Holiday")).toBeInTheDocument();
+    expect(screen.getByText("Service: Weekday")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Filters/ }));
+    expect(screen.getAllByRole("button", { name: "Weekday" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Weekend/Holiday" })).toHaveLength(2);
+  });
+});
+
+describe("TabFilterBar popover dismissal", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("closes on Escape and puts focus back on the filter button", async () => {
+    // The popover is opened from the keyboard as often as from the mouse,
+    // and it has no close control of its own: without Escape the only way
+    // out is a click somewhere else on the page.
+    const user = userEvent.setup();
+    renderFilterBar("/agencies/1/overview");
+    const trigger = screen.getByRole("button", { name: /Filters/ });
+
+    await user.click(trigger);
+    screen.getByRole("button", { name: "All days" }).focus();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("button", { name: "All days" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });

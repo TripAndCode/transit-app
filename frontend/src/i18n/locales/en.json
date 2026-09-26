@@ -3,13 +3,19 @@
     "ask": "Ask",
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
-    "open_menu": "Open menu",
     "account_menu": "Account menu",
     "help": "Help",
     "prototype_section_label": "PROTOTYPE",
     "prototype_onboarding": "First-time login screen",
     "prototype_stale_feed": "Feed-stale state",
-    "prototype_no_data": "No-data state"
+    "prototype_no_data": "No-data state",
+    "mobile_tabbar_label": "Primary navigation",
+    "more": "More",
+    "more_menu_label": "More options",
+    "close_menu": "Close menu"
+  },
+  "sheet": {
+    "handle": "Sheet handle"
   },
   "onboarding": {
     "subtitle": "Select your transit agency",
@@ -17,42 +23,100 @@
   },
   "landing": {
     "hero": {
-      "title": "What's happening right now — and where it's happening.",
+      "title_now": "What's happening right now —",
+      "title_where": "and where it's happening.",
       "subtitle": "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track.",
       "guest_cta": "Continue as a guest"
     },
-    "preview": {
-      "heading": "See what's inside",
-      "route_label": "Route {{code}}",
-      "agency": {
-        "riverside": "Riverside Transit",
-        "harborline": "Harborline",
-        "hillcrest": "Hillcrest Connect"
+    "hero_map": {
+      "screens": {
+        "live": "Current observations",
+        "period": "Period overview"
       },
-      "overview": {
-        "filter_all": "All routes",
-        "filter_on_time": "On-time",
-        "filter_delayed": "Delayed"
+      "captions": {
+        "live": "Current observations",
+        "trip": "Open a Route 12 trip",
+        "playback": "Play the day",
+        "overview": "Period overview"
+      },
+      "routes": {
+        "rapid": "Rapid",
+        "local": "Local",
+        "tram3": "Tram 3",
+        "bus12": "Route 12",
+        "bus7": "Route 7",
+        "bus3": "Route 3"
+      },
+      "stops": {
+        "konan": "Konan",
+        "shiyakusho": "City Hall",
+        "central": "Central Sta.",
+        "honmachi": "Honmachi",
+        "higashidai": "Higashidai",
+        "minatomachi": "Minatomachi"
+      },
+      "queue_title": "Trips to check",
+      "kpi": {
+        "observed": "Observed",
+        "delayed": "Delayed 5+ min",
+        "on_time": "On-time rate"
+      },
+      "legend": {
+        "under": "< {{minutes}} min",
+        "over": "{{minutes}}+ min",
+        "disclosure": "Last reported stop, not GPS"
+      },
+      "trip_heading": "Route 12 · to Kitamachi",
+      "trip_chart_title": "Delay progression by stop",
+      "trip_note": "Grew from Central Sta. to Honmachi",
+      "refresh": "Updated  08:12:30",
+      "playback": "Play the day",
+      "playback_speed": "1×",
+      "hourly_title": "Worst hour of day",
+      "peak": "peak",
+      "overview_average": "Network avg delay",
+      "overview_change": "▼ {{minutes}}  vs previous period",
+      "overview_delayed_routes": "Routes delayed",
+      "routes_to_check": "Routes to check now",
+      "sample_notice": "Sample data · fictional city",
+      "delay_short": "+{{minutes}} min",
+      "minutes": "{{minutes}} min",
+      "hour_of_day": "{{hour}}:00",
+      "clock": "{{hour}}:00",
+      "minute_unit": "min"
+    },
+    "narrative": {
+      "route": {
+        "title": "Delay builds along a route",
+        "body": "The same stop-by-stop chart from Analysis, with example data — watch how a route's delay compounds stop after stop against a calmer week-earlier comparison."
+      },
+      "trend": {
+        "title": "Every day, compared",
+        "body": "The same daily trend chart from Reports, with example days — a rough day still shows clearly against the trailing average around it."
       },
       "ask": {
-        "q1": "Which route is running late right now?",
-        "a1": "Route H9 is currently averaging a 4.4 min delay, the most of any route today.",
-        "q2": "How does this agency compare to others?",
-        "a2": "This agency's on-time rate is 92%, ahead of the network average.",
-        "q3": "When does this route usually run late?",
-        "a3": "Delays tend to peak in the evening commute, around 18:00.",
-        "generic_reply": "Here's a quick look based on your question — sign in to ask about your own agency's real data.",
-        "empty_hint": "Try a suggestion below, or ask your own question.",
-        "input_label": "Ask a question",
-        "input_placeholder": "Ask about delays, routes, or on-time performance…",
-        "send": "Send"
-      },
-      "map": {
-        "style_standard": "Standard",
-        "style_muted": "Muted",
-        "legend_on_time": "On-time route",
-        "legend_delayed": "Delayed route"
+        "title": "Ask, get evidence",
+        "body": "The same evidence view Ask shows for a real answer — not a screenshot. Select a stop below to see it."
       }
+    }
+  },
+  "tour": {
+    "step_of": "Step {{step}} of {{total}}",
+    "next": "Next",
+    "done": "Got it",
+    "later": "Later",
+    "dismiss": "Dismiss this tour",
+    "filters": {
+      "title": "Narrow what you're looking at",
+      "body": "Filter by route, day of week, or time of day — everything below updates to match."
+    },
+    "map": {
+      "title": "Inspect what's running now",
+      "body": "Every observed trip is listed here — open one to see its live progress."
+    },
+    "ask": {
+      "title": "Ask a question",
+      "body": "Ask about delays, routes, or on-time performance in plain language, and get an evidenced answer."
     }
   },
   "forecast": {
@@ -127,7 +191,10 @@
     "col_vehicle_km_delivered": "Vehicle-km delivered %",
     "help_vehicle_km_delivered": "Share of the current schedule's planned vehicle-kilometers actually run — shows \"—\" when this agency has no shapes.txt loaded or doesn't report cancellations (see Service delivered).",
     "planned_trip_count_fallback": "{{count}} planned trips (vehicle-km not available)",
-    "schedule_version_title": "Static schedule version: {{version}}"
+    "schedule_version_title": "Static schedule version: {{version}}",
+    "col_agency": "Agency",
+    "axis_caption": "Shared axis · 0–{{max}} min",
+    "definition_disclosure": "How these are calculated"
   },
   "definitionMeta": {
     "tolerance_line": "On-time definition: {{preset}} (early ≤ {{early}}, late ≤ {{late}})",
@@ -166,28 +233,34 @@
     "section_peak_hour": "Worst hour of day",
     "peak_hour_callout": "Peak: {{hour}}-{{next_hour}} ({{avg}} min avg).",
     "section_service_split": "By service day",
-    "service_split_label": {
-      "平日": "Weekday",
-      "土日祝": "Weekend/Holiday"
-    },
     "hero_row": {
       "avg_delay_label": "Network avg delay",
       "baseline_hint_title": "About the vs. last week comparison",
       "baseline_hint_body": "Compares the average delay for the selected date range against the same-length period immediately before it.",
-      "avg_delay_compared": "{{sign}}{{min}} min vs. last week",
       "avg_delay_no_baseline": "No comparison data",
       "delayed_count_label": "Routes delayed",
       "delayed_count_value": "{{count}} / {{total}} routes",
       "feed_status_label": "Feed status",
       "feed_status_ok": "Running normally",
       "feed_status_stale": "Data delayed",
-      "feed_status_updated": "Last updated {{when}}"
+      "feed_status_updated": "Last updated {{when}}",
+      "sparkline_baseline": "Period avg {{value}} min"
+    },
+    "story": {
+      "behind_one": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
+      "behind_other": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
+      "behind_short": "Running {{delta}} min behind last week.",
+      "ahead_one": "Running {{delta}} min ahead of last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
+      "ahead_other": "Running {{delta}} min ahead of last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
+      "ahead_short": "Running {{delta}} min ahead of last week.",
+      "flat_one": "Delay is about the same as last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
+      "flat_other": "Delay is about the same as last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
+      "flat_short": "Delay is about the same as last week."
     },
     "routes_to_check": {
       "title": "Routes to check now",
       "empty": "No routes need attention"
     },
-    "details_toggle": "Show details",
     "concentration": {
       "single_route": "{{name}} accounts for 100% — only 1 route observed.",
       "lorenz_label": "Lorenz curve — cumulative share of delay",
@@ -198,15 +271,11 @@
       "story_weekday_higher": "Weekdays are {{ratio}}× the weekend delay.",
       "story_weekend_higher": "Weekends are {{ratio}}× the weekday delay.",
       "story_same": "Weekday and weekend nearly identical.",
-      "weekday_label": "Weekday",
-      "weekend_label": "Weekend/Holiday",
       "daily_label": "Daily weekday vs weekend trend"
     },
     "peak_hour": {
       "max_label": "Max {{avg}} min",
       "avg_label": "Avg",
-      "weekday_label": "Weekday",
-      "weekend_label": "Weekend/Holiday",
       "weekday_empty": "No weekday data.",
       "weekend_empty": "No weekend data."
     },
@@ -219,6 +288,9 @@
     "concentration_explainer": "Each route's share of total delay in the selected range. The Lorenz curve below shows the skew: the dotted diagonal would be a perfectly even spread, and the further the curve bows away from it, the more the delay sits with a few routes.",
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split weekday vs weekend/holiday — compare commute peaks against weekend patterns.",
     "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
+  },
+  "markdownMermaid": {
+    "diagram_fallback_label": "Diagram"
   },
   "peakHourModal": {
     "title_dow": "{{dow}} {{hour}}:00 — delayed routes",
@@ -258,6 +330,7 @@
     "route_code_fallback": "Route {{code}}",
     "save": "Save",
     "search_placeholder": "Search...",
+    "show_more": "Show {{count}} more",
     "yes": "Yes",
     "no": "No",
     "unit_min": "min",
@@ -270,21 +343,30 @@
     "rel_seconds_ago": "{{count}}s ago",
     "range_separator": "–",
     "language_aria": "Language",
+    "theme_aria": "Appearance",
+    "theme_dark": "Dark",
+    "theme_light": "Light",
+    "theme_system": "System",
     "theme_toggle_to_dark": "Switch to dark mode",
     "theme_toggle_to_light": "Switch to light mode",
+    "decrement_aria": "Decrement",
+    "increment_aria": "Increment",
     "service_value": {
       "平日": "Weekday",
       "土日祝": "Weekend/Holiday"
-    }
+    },
+    "route": "Route"
   },
   "help": {
     "title": "User Manual",
     "sections_nav": "Manual sections",
-    "search_placeholder": "Search the manual (coming soon)",
+    "search_placeholder": "Search the manual",
     "category_shortcut_label": "Jump to: {{title}}",
     "hint_text": "New here? Check out the User Manual for a walkthrough.",
     "hint_cta": "View Help",
-    "hint_dismiss_aria": "Dismiss help hint"
+    "hint_dismiss_aria": "Dismiss help hint",
+    "search_result_count_one": "{{count}} section found",
+    "search_result_count_other": "{{count}} sections found"
   },
   "account": {
     "admin_link": "Admin",
@@ -301,7 +383,6 @@
       "status_shared": "Using the shared free tier",
       "status_own": "Using your own {{provider}} key · ****{{suffix}}",
       "input_label": "API key",
-      "save": "Save",
       "remove": "Remove",
       "rejected": "Key rejected — check it and try again.",
       "remove_error": "Couldn't remove the key. Please check your connection and try again."
@@ -323,6 +404,8 @@
       },
       "sso_disabled_title": "SSO not configured",
       "sso_disabled_body": "SSO is disabled in this build. You can browse anonymously.",
+      "config_error_title": "Couldn't load sign-in options",
+      "config_error_body": "Something went wrong reaching the server. Please try again.",
       "back_to_top": "Back to home",
       "welcome_back": "Welcome back",
       "choose_provider": "Choose an account to sign in",
@@ -362,16 +445,11 @@
     },
     "dow": {
       "all": "All days",
-      "weekday": "Weekday",
-      "weekend": "Weekend/Holiday",
       "label": "Day"
     },
     "service": {
       "all": "All services",
-      "weekday": "Weekday",
-      "weekend": "Weekend/Holiday",
-      "label": "Service",
-      "label_gtfs": "Service (GTFS)"
+      "label": "Service"
     },
     "time_band": {
       "all": "All hours",
@@ -408,9 +486,6 @@
     "loading": "Loading the latest operations...",
     "map": {
       "aria_label": "Map of latest reported stops and delays",
-      "delay": "Delay {{delay}}",
-      "reported_stop": "Reported stop: {{stop}}",
-      "updated": "Updated {{when}}",
       "disclosure": "{{located}} of {{total}} trips · last reported stop, not GPS",
       "legend_label": "Map legend",
       "legend_current": "Latest report",
@@ -421,6 +496,17 @@
       "reference_show": "Show legend and note",
       "reference_hide": "Hide legend and note",
       "fit_all_hint": "Moves the map to frame every trip in the current filter. Which trips are shown does not change."
+    },
+    "inspect": {
+      "label": "Selected trip detail",
+      "pin": "Pin this trip",
+      "unpin": "Unpin this trip",
+      "delay_unit": "min · delay now",
+      "hourly_trend": "Mean delay by hour",
+      "worst_segment": "Worst segment",
+      "segment": "{{from}} → {{to}}",
+      "vehicles_label": "Vehicles running",
+      "vehicles": "{{vehicles}}"
     },
     "trip_panel": {
       "aria_label": "Operations by direction and trip",
@@ -450,6 +536,21 @@
     "empty": {
       "title": "No current trips to display",
       "hint": "Waiting for the latest TripUpdate. New reports appear automatically."
+    },
+    "playback": {
+      "aria_label": "Day playback",
+      "play": "Play",
+      "pause": "Pause",
+      "step_back": "Previous time bucket",
+      "step_forward": "Next time bucket",
+      "scrubber": "Choose a time bucket",
+      "speed": "Playback speed {{speed}}x",
+      "speed_label": "{{speed}}×",
+      "exit": "Leave playback and return to current observations",
+      "loading": "Loading the day",
+      "empty": "No observations for this day",
+      "toggle_on": "Play the day",
+      "toggle_off": "Back to current observations"
     }
   },
   "map": {
@@ -464,7 +565,8 @@
       "pale": "Light",
       "std": "Standard",
       "photo": "Satellite",
-      "layers": "Layers"
+      "layers": "Layers",
+      "dim_label": "Basemap dim"
     },
     "heatmapMode": {
       "avg": "Avg delay",
@@ -513,7 +615,34 @@
       "samples": "{{count}} observations",
       "unit": "Minutes · bars below zero indicate early departures",
       "caveat": "Grouped by stop sequence; names are representative. These aggregates do not establish the cause of delay.",
-      "recorded": "View returned data and recorded arguments"
+      "recorded": "View returned data and recorded arguments",
+      "tool_label": {
+        "route_stop_patterns": "Stop-by-stop pattern",
+        "segment_hotspots": "Stop delay hotspots",
+        "on_time_rate": "On-time rate ranking"
+      },
+      "window_range": "{{from}} – {{to}}",
+      "conditions_all": "No conditions (all)",
+      "chip": {
+        "morning_peak": "View morning peak only",
+        "view_map": "View on the map",
+        "compare_previous": "Compare with two weeks ago",
+        "export_png": "Save as PNG"
+      },
+      "badge": {
+        "sql": "SQL only",
+        "llm": "LLM"
+      },
+      "disclosure_title": "Where this answer comes from",
+      "disclosure_route": "Route",
+      "disclosure_conditions": "Conditions",
+      "disclosure_aggregation": "Aggregation",
+      "disclosure_confidence": "Confidence",
+      "confidence": {
+        "sql": "Exact (computed directly from the aggregate)",
+        "llm": "LLM-generated summary (grounded only in the already-fetched result)"
+      },
+      "sample_count": "{{count}} observations"
     },
     "workspace": {
       "investigations": "Your investigations",
@@ -637,12 +766,12 @@
       "unpin": "Unpin",
       "delete": "Delete",
       "delete_confirm": "Delete this conversation?",
-      "empty": "No conversations yet"
+      "empty": "No conversations yet",
+      "more_options_aria": "More options"
     },
     "filter_bar": {
       "edit": "Edit",
       "apply": "Apply",
-      "cancel": "Cancel",
       "label_date_range": "Date range",
       "label_dow": "DOW",
       "label_time_band": "Time band",
@@ -708,8 +837,8 @@
       }
     },
     "landing": {
-      "header_title": "Route Intelligence",
-      "header_subtitle": "Answers via a 3-stage pipeline: rules → embedding search → RAG",
+      "header_title": "Ask about a delay",
+      "header_subtitle": "Pick a route or stop and get an answer right away",
       "cards_title": "You can ask things like",
       "pills_title": "More questions"
     }
@@ -735,7 +864,6 @@
       "delay_certificate": "Delay certificate"
     },
     "col": {
-      "route": "Route",
       "service": "Service",
       "avg": "Avg",
       "median": "Median",
@@ -744,8 +872,6 @@
       "dow": "Day",
       "on_time_pct": "On-time %",
       "over_5min_count": "≥5 min late",
-      "weekday": "Weekday",
-      "weekend": "Weekend/Holiday",
       "diff": "Diff",
       "direction": "Direction",
       "confidence": "Confidence",
@@ -781,8 +907,7 @@
     },
     "no_data": {
       "title": "No matching data",
-      "hint": "Try a different range or filters",
-      "reset_action": "View this week"
+      "hint": "Try a different range or filters"
     },
     "heatmap": {
       "empty": "No time-band data.",
@@ -790,13 +915,12 @@
       "subtitle": "Y: hour (0–23) · X: date · click to filter",
       "legend_aria": "Show legend",
       "delay_label": "Delay:",
-      "band_lt": "< {{min}} min",
-      "band_range": "{{min}}–{{max}} min",
-      "band_gt": "> {{min}} min",
-      "legend_explainer": "· opacity = samples · rows → time band · columns → date",
+      "legend_explainer": "· rows → time band · columns → date",
       "svg_aria": "Time-band delay heatmap",
       "tooltip_hour": "{{hour}}:00 · avg",
-      "tooltip_metrics": "{{min}} min · {{count}} obs."
+      "tooltip_metrics": "{{min}} min · {{count}} obs.",
+      "ramp_max": "{{min}} min and over",
+      "severe_outline": "outlined = {{min}} min and over"
     },
     "dow_band": {
       "title": "Usual delay pattern",
@@ -812,7 +936,13 @@
       "worst_label": "Worst:",
       "offender": "Route {{code}} ({{min}} min)",
       "revision_boundary_label": "Schedule change",
-      "revision_boundary_aria": "Static schedule revision took effect on {{date}}"
+      "revision_boundary_aria": "Static schedule revision took effect on {{date}}",
+      "brush_hint": "Drag across the chart to narrow the period",
+      "brush_reset": "Reset period",
+      "brush_aria": "Daily chart period brush. Arrow keys move the cursor, Shift+arrows extend the selection, Enter applies it.",
+      "brush_range": "{{from}} to {{to}}",
+      "severe_band_label": "Severe ({{min}} min and over)",
+      "worst_day_label": "Worst day"
     },
     "dwell_run": {
       "not_available": "This agency's feed doesn't report arrival delay, so dwell/running time decomposition isn't available.",
@@ -833,7 +963,6 @@
       "subtitle": "Excess Waiting Time, spacing consistency, and long-gap rate for this agency's high-frequency routes (scheduled headway of 12 minutes or better).",
       "empty": "No high-frequency route has enough data in this range yet.",
       "col": {
-        "route": "Route",
         "ewt": "Excess wait",
         "cov": "Spacing CoV",
         "long_gap_rate": "Long-gap rate",
@@ -845,7 +974,6 @@
       "simulation_badge": "Internal simulation — not an invoice",
       "subtitle": "Estimated achievement rate and bonus/deduction against each route's configured minimum performance standard.",
       "col": {
-        "route": "Route",
         "metric": "Metric",
         "threshold": "Threshold",
         "actual": "Actual",
@@ -882,6 +1010,27 @@
         "sample_count": "{{count}} samples",
         "bar_aria": "{{label}}: {{value}}, {{count}} samples"
       }
+    },
+    "group": {
+      "ranking": "Rankings",
+      "punctuality": "Punctuality",
+      "pattern": "Patterns over time",
+      "forecast": "Forecasts and evidence",
+      "other": "Other"
+    },
+    "desc": {
+      "ranking": "Which routes run latest, worst first.",
+      "ranking_best": "Which routes keep to the timetable best.",
+      "on_time": "Share of departures inside the on-time threshold, by route.",
+      "worst_5min": "Routes with the most departures five minutes or more late.",
+      "trend": "How delay moved day by day, by hour and by weekday.",
+      "compare_ranking": "The same ranking against the previous period.",
+      "dow_weekday": "How a typical weekday runs, band by band.",
+      "dow_weekend": "How a typical weekend or holiday runs, band by band.",
+      "dwell_run": "Where time goes: waiting at stops against running between them.",
+      "route_forecast": "Expected delay for a route on an upcoming day.",
+      "council_summary": "A period summary written for a council or board.",
+      "delay_certificate": "Proof of a specific late departure, for a passenger."
     }
   },
   "insight_panel": {
@@ -899,6 +1048,7 @@
     "aggregate_not_ready": "Data for this view isn't ready in this environment yet. It will appear once the data has been prepared.",
     "generic_status": "Failed to load ({{status}})",
     "network": "Connection dropped for a moment. Please retry.",
+    "timeout": "The request timed out. Please try again.",
     "generic": "Failed to load.",
     "followup_too_long": "That question is too long. Please shorten it and try again.",
     "followup_rate_limit": "High traffic right now. Please wait a moment and retry.",
@@ -908,6 +1058,7 @@
   },
   "admin": {
     "users": {
+      "table_label": "Users",
       "title": "User management",
       "search_placeholder": "Search by email / name",
       "col": {
@@ -943,25 +1094,86 @@
       "pagination": {
         "prev": "Previous",
         "next": "Next"
+      },
+      "view": {
+        "all": "All",
+        "pending": "Pending approval",
+        "admin": "Admins",
+        "suspended": "Suspended"
+      },
+      "bulk": {
+        "selected_count": "{{count}} selected",
+        "clear": "Clear selection",
+        "undo": "Undo",
+        "role_label": "Change role",
+        "toast": {
+          "approved": "Approved AI access for {{count}}",
+          "suspended": "Suspended {{count}}",
+          "promoted": "Made {{count}} admin",
+          "demoted": "Changed {{count}} to standard user"
+        },
+        "delete_title": "Delete the selected users?",
+        "delete_body": "{{count}} users will be anonymized. This cannot be undone."
+      },
+      "shortcut": {
+        "approve": "Approve AI access",
+        "search": "Jump to search"
       }
     },
     "user_detail": {
+      "panel_label": "User detail",
       "error": "Error: {{msg}}",
       "name_label": "Name",
       "status_label": "Status",
       "created_label": "Created",
       "email_at_link": "Email at link time: {{email}}",
-      "recent_events": "Recent events",
+      "recent_events": "Login history",
       "back_to_users": "Back to users",
       "actions_title": "Actions",
-      "self_hint": "You can't modify your own account here."
+      "self_hint": "You can't modify your own account here.",
+      "byok_label": "BYOK",
+      "byok_configured": "{{provider}} key configured",
+      "byok_not_configured": "Not configured",
+      "sessions_title": "Sessions",
+      "sessions_empty": "No active sessions.",
+      "session_revoke": "Revoke",
+      "session_last_seen": "Last seen {{time}}",
+      "api_keys_title": "API keys",
+      "api_keys_empty": "No API keys issued.",
+      "api_key_issue": "Issue",
+      "api_key_revoke": "Revoke",
+      "api_key_revoked_label": "revoked",
+      "api_key_issued_notice": "Copy this key now — it won't be shown again.",
+      "api_key_copy": "Copy",
+      "api_key_copied": "Copied",
+      "danger_zone_title": "Danger zone"
+    },
+    "invite": {
+      "trigger": "+ Invite",
+      "dialog_title": "Invite a user",
+      "email_label": "Email",
+      "role_label": "Role",
+      "llm_approved_label": "Pre-approve AI access",
+      "submit": "Send invite",
+      "success": "Invite created for {{email}}.",
+      "error": "Error: {{msg}}"
     },
     "nav": {
       "label": "Admin navigation",
       "agencies": "Agencies",
       "users": "Users",
       "ops": "Ops",
-      "architecture": "Architecture"
+      "architecture": "Architecture",
+      "audit": "Audit log",
+      "flags": "Flags",
+      "board": "Control board",
+      "group": {
+        "operations": "Operations",
+        "people": "People",
+        "governance": "Governance",
+        "reference": "Reference"
+      },
+      "ask_ops": "Ask ops"
     },
     "ops": {
       "title": "Ops",
@@ -992,15 +1204,8 @@
       "search_placeholder": "Search by name",
       "empty": "No agencies found.",
       "col_name": "Name",
-      "col_feed_url": "Feed URL",
-      "col_strategy": "Strategy",
-      "col_status": "Status",
-      "status_active": "Active",
       "status_deleted": "Deleted",
       "action_edit": "Edit",
-      "action_delete": "Delete",
-      "action_restore": "Restore",
-      "confirm_delete": "Delete \"{{name}}\"? It will be excluded from ingest and analysis.",
       "form_title_add": "Add agency",
       "form_title_edit": "Edit agency",
       "form_name": "Agency name",
@@ -1012,7 +1217,78 @@
       "form_submit_add": "Add",
       "form_submit_edit": "Update",
       "form_submitting": "Saving...",
-      "form_error_feed_url": "Invalid feed URL"
+      "form_error_feed_url": "Invalid feed URL",
+      "col_freshness": "Freshness",
+      "col_last_capture": "Last capture",
+      "col_rt_coverage": "RT coverage",
+      "col_clamp": "Clamp rate · 14d",
+      "col_static_version": "Static version",
+      "table_label": "Agencies",
+      "freshness_fresh": "Fresh",
+      "freshness_stale": "Behind",
+      "freshness_unknown": "Unknown",
+      "view_all": "All",
+      "view_stale": "Behind schedule",
+      "view_rt_incomplete": "RT coverage gaps",
+      "rt_summary": "{{present}}/{{total}} fields",
+      "rt_unprobed": "Not probed",
+      "health_error": "Health data could not be loaded; showing the basic columns only."
+    },
+    "agency_diag": {
+      "drawer_label": "Agency details",
+      "feed": "Feed",
+      "strategy": "Ingest strategy",
+      "last_capture": "Last capture",
+      "aggregation": "Aggregation",
+      "clamp": "Clamp rate · 14d",
+      "rt_section": "RT field diagnostics (latest probe)",
+      "rt_scope_note": "Measured on TripUpdate stop_time_update fields. VehiclePosition and Alerts are not ingested.",
+      "rt_present": "Present",
+      "rt_absent": "Absent",
+      "rt_unprobed": "Not probed",
+      "rt_expired": "Expired",
+      "rt_detail": "coverage {{pct}}% · {{samples}} samples",
+      "static_section": "Static data",
+      "static_current": "Current",
+      "static_detail": "routes {{routes}} · trips {{trips}}",
+      "static_calendar": "calendar to {{date}}",
+      "static_empty": "No static version has been recorded yet.",
+      "policy_section": "Standards and weights",
+      "standards": "Performance standards",
+      "standards_summary": "Set on {{count}} route(s)",
+      "weights": "Ridership weights",
+      "weights_summary": "{{withWeights}}/{{total}} route(s)",
+      "station": "Weather station",
+      "station_value": "{{name}} ({{id}})",
+      "station_none": "Not set",
+      "edit": "Edit",
+      "edit_standards": "Edit performance standards",
+      "edit_weights": "Edit ridership weights",
+      "actions_section": "Actions",
+      "action_probe": "Check the feed now",
+      "action_reload_static": "Reload static data",
+      "action_reload_static_hint": "The static reload endpoint is not available yet.",
+      "action_reanalyze": "Re-aggregate this agency only",
+      "action_reanalyze_disabled_hint": "A disabled agency is skipped by the aggregation run.",
+      "probe_done": "Probe recorded ({{samples}} samples).",
+      "reanalyze_started": "Re-aggregation started; it runs in the background.",
+      "danger_section": "Danger zone",
+      "danger_hint": "Disabling stops ingest and removes the agency from the public views. It can be restored.",
+      "confirm_label": "Type the agency name to confirm",
+      "disable": "Disable",
+      "restore": "Restore",
+      "disabled_note": "This agency is disabled.",
+      "purge_unavailable": "Permanent deletion is not offered; disabling is reversible.",
+      "editor_route": "Route code",
+      "editor_metric": "Metric",
+      "editor_threshold": "Threshold",
+      "editor_rate": "Bonus/malus rate",
+      "editor_weight": "Weight",
+      "editor_default_route": "Default (all routes)",
+      "editor_add": "Add row",
+      "editor_remove": "Remove row",
+      "editor_save": "Save",
+      "editor_empty": "Nothing configured yet."
     },
     "architecture": {
       "title": "Architecture",
@@ -1020,6 +1296,214 @@
       "docs_title": "Feature docs",
       "docs_nav_label": "Feature doc list",
       "docs_empty": "No feature docs found."
+    },
+    "audit": {
+      "table_label": "Audit timeline",
+      "title": "Audit log",
+      "filter": {
+        "actor_placeholder": "Actor ID",
+        "target_placeholder": "Target type or ID",
+        "action_placeholder": "Action",
+        "from": "From",
+        "to": "To"
+      },
+      "col": {
+        "at": "Time",
+        "actor": "Actor",
+        "action": "Action",
+        "target": "Target",
+        "diff": "Change",
+        "reason": "Reason",
+        "ip": "IP"
+      },
+      "empty": "No audit events found.",
+      "pagination": {
+        "prev": "Previous",
+        "next": "Next"
+      },
+      "export": {
+        "csv": "Export CSV",
+        "loading": "Exporting…"
+      }
+    },
+    "flags": {
+      "table_label": "Feature flags",
+      "empty": "No flags registered.",
+      "title": "Feature flags",
+      "col_flag": "Flag",
+      "col_value": "Value",
+      "col_source": "Source",
+      "col_updated": "Last changed",
+      "source_env": "Env default",
+      "source_override": "Override",
+      "updated_by": "Changed by user #{{id}}",
+      "no_reason": "No reason recorded",
+      "dialog_title_enable": "Enable \"{{label}}\"?",
+      "dialog_title_disable": "Disable \"{{label}}\"?",
+      "reason_label": "Reason",
+      "reason_placeholder": "Why are you changing this flag?",
+      "confirm": "Save",
+      "clear_override": "Clear override",
+      "clear_error": "Couldn't clear the override.",
+      "labels": {
+        "askRouterEnabled": "Ask: rules router",
+        "askFollowupEnabled": "Ask: LLM follow-up",
+        "copilotInsightEnabled": "Copilot: proactive insight",
+        "askHistoryEnabled": "Ask: conversation history",
+        "askIntentCacheEnabled": "Ask: intent cache",
+        "askQueryLogEnabled": "Ask: query log",
+        "weatherIngestEnabled": "Weather: observed-data ingest",
+        "openapiDocsEnabled": "API: OpenAPI docs",
+        "perfDebugEnabled": "API: perf debug surface"
+      }
+    },
+    "table": {
+      "saved_views": "Saved views",
+      "empty": "Nothing to show.",
+      "select_all": "Select all",
+      "select_row": "Select {{label}}",
+      "shortcuts": {
+        "trigger": "Shortcuts",
+        "title": "Keyboard shortcuts",
+        "next": "Next row",
+        "prev": "Previous row",
+        "select": "Toggle selection",
+        "open": "Open row"
+      }
+    },
+    "board": {
+      "title": "Control board",
+      "poll_note": "Refreshed every 10 seconds",
+      "reanalyze": "Re-aggregate now",
+      "reanalyze_confirm_title": "Re-aggregate now?",
+      "reanalyze_confirm_body": "This runs ingest and analyze. It can take several minutes; progress appears on the timeline.",
+      "reanalyze_confirm": "Run it",
+      "reanalyze_cancel": "Cancel",
+      "reanalyze_started": "Re-aggregation started. It will appear on the timeline.",
+      "reanalyze_error": "Could not start the re-aggregation.",
+      "reanalyze_busy_reason": "A re-aggregation is already running — wait for it to finish.",
+      "reanalyze_unavailable_reason": "Re-aggregating needs the board's run history, which hasn't loaded yet.",
+      "runs_title": "Run timeline · today",
+      "runs_legend": "Skipped runs are dashed",
+      "runs_empty": "Nothing has run yet today.",
+      "runs_chart_label": "Today's run timeline ({{count}} runs)",
+      "runs_now": "now",
+      "run_lane": "{{kind}} · {{agency}}",
+      "run_lane_all": "{{kind}} · all agencies",
+      "run_kind": {
+        "ingest": "Ingest",
+        "analyze": "Analyze",
+        "weather": "Weather",
+        "static": "Static"
+      },
+      "run_status": {
+        "running": "Running",
+        "ok": "Done",
+        "skipped": "Skipped",
+        "error": "Failed"
+      },
+      "run_tooltip": "{{lane}} · {{from}}–{{to}} · {{status}}",
+      "run_tooltip_rows": "{{count}} rows",
+      "run_tooltip_lock": "Skipped: the ingest/analyze lock was held",
+      "collectors_title": "Collectors",
+      "collector": {
+        "oracle_crawler": "Oracle crawler",
+        "r2": "R2 sync",
+        "github": "CI (GitHub)"
+      },
+      "status": {
+        "ok": "Healthy",
+        "warn": "Behind",
+        "down": "Failing",
+        "unknown": "Unknown"
+      },
+      "last_success": "Last success {{when}}",
+      "never": "No success on record",
+      "sparkline_label": "Confirmed running for {{ok}} of the last 24 hours",
+      "freshness_title": "Aggregate freshness — agency x last 14 days",
+      "freshness_empty": "No agencies registered.",
+      "agency_column": "Agency",
+      "legend_fresh": "Aggregated",
+      "legend_stale": "Behind",
+      "legend_missing": "No data",
+      "state": {
+        "fresh": "Aggregated",
+        "stale": "Behind",
+        "missing": "No data"
+      },
+      "cell_tooltip": "{{agency}} · {{date}} · {{state}}",
+      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · clamp {{pct}}%",
+      "alerts_title": "Alerts",
+      "alerts_none": "Nothing needs attention.",
+      "alert_open": "Open",
+      "alert": {
+        "agency_stale": "{{agency}}: aggregates {{days}} day(s) behind",
+        "clamp_high": "{{agency}}: {{pct}}% of samples clamped on {{date}}",
+        "migrations_behind": "Schema behind by {{count}} migration(s)",
+        "llm_approvals_pending": "{{count}} user(s) awaiting AI access approval"
+      }
+    },
+    "ask_ops": {
+      "title": "Ask ops",
+      "filter": {
+        "route_all": "All routes",
+        "status_all": "All statuses",
+        "from_label": "From",
+        "to_label": "To"
+      },
+      "route": {
+        "rules": "Rules",
+        "nn": "Embedding (NN)",
+        "rag": "RAG (LLM)",
+        "no_history": "No history"
+      },
+      "status": {
+        "ok": "OK",
+        "error": "Error"
+      },
+      "col": {
+        "agency": "Agency",
+        "question": "Question",
+        "route": "Route",
+        "status": "Status",
+        "tool": "Tool",
+        "cache": "Cache",
+        "created": "Created"
+      },
+      "cache_outcome": {
+        "hit": "Cache hit",
+        "miss": "Cache miss",
+        "bypass": "Bypassed"
+      },
+      "promote_action": "Promote",
+      "promote_success": "Promoted.",
+      "promote_already": "Already promoted.",
+      "promote_not_eligible": "Not eligible for promotion.",
+      "promote_error": "Couldn't promote — try again.",
+      "empty": "No queries found for this filter.",
+      "pagination": {
+        "prev": "Previous",
+        "next": "Next"
+      },
+      "funnel": {
+        "title": "Route funnel",
+        "total": "Total: {{count}}",
+        "success_of": "{{success}} / {{count}} ok",
+        "providers_not_tracked": "Provider isn't recorded per query yet — only the route stage is logged."
+      },
+      "kill_switch": {
+        "title": "Kill switches",
+        "router_note": "ASK_ROUTER_ENABLED / ASK_QUERY_LOG_ENABLED gate the router and the query log.",
+        "flags_link": "Manage in Feature flags"
+      },
+      "eval": {
+        "title": "Weekly eval",
+        "not_run": "Not run yet",
+        "score_label": "Score",
+        "generated_at_label": "As of"
+      },
+      "table_label": "Ask query log",
+      "numeric_guard": "Numeric guard"
     }
   },
   "copilot": {
@@ -1030,5 +1514,49 @@
     "ask_step_back": "You're already in the full conversation here.",
     "followup_placeholder": "Ask a follow-up…",
     "followup_submit": "Ask"
+  },
+  "palette": {
+    "placeholder": "Search agencies, routes, reports, time bands, actions…",
+    "aria_label": "Command palette",
+    "no_results": "No matching items",
+    "nav_ask_sublabel": "Ask about routes, stops, and time bands",
+    "hint": "Command",
+    "hint_aria": "Open the command palette (⌘K)",
+    "group": {
+      "recent": "Recent",
+      "nav": "Go to",
+      "agency": "Agencies",
+      "route": "Routes",
+      "report": "Reports",
+      "timeband": "Time bands",
+      "action": "Actions"
+    },
+    "action": {
+      "toggle_theme": "Toggle theme",
+      "toggle_theme_sublabel": "System / light / dark",
+      "shortcuts": "Keyboard shortcuts"
+    },
+    "footer": {
+      "navigate": "Navigate",
+      "select": "Select"
+    },
+    "shortcuts": {
+      "title": "Keyboard shortcuts",
+      "open_palette": "Open the command palette",
+      "go_to": "Go to {{target}}",
+      "open_shortcuts": "Show this shortcut list",
+      "extend_brush": "Extend the daily chart's selected range"
+    }
+  },
+  "empty_state": {
+    "reason_format": "{{label}}: {{value}}",
+    "recovery": {
+      "clear_routes": "Clear the route filter",
+      "reset_service": "Reset service type to all",
+      "jump_latest_data": "Jump to the latest data"
+    }
+  },
+  "glossary": {
+    "gtfs": "GTFS: the standard transit-data format for schedules and real-time positions."
   }
 }

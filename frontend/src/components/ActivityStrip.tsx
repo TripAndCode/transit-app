@@ -1,7 +1,7 @@
 /**
  * ActivityStrip — in-context loading signal rendered beneath the header.
  *
- * Shows a soft lavender band with three pulsing dots and a translated
+ * Shows a soft accent-tinted band with three pulsing dots and a translated
  * "Loading…" label whenever any mutation is in flight. Replaces the
  * 3 px TopProgressBar that lived at the top of the viewport; the
  * in-content context is where the user's attention already is.
@@ -21,66 +21,22 @@
 import { useEffect, useState } from "react";
 import { useIsMutating } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-
-/** Guards against duplicate <style> injection across Strict Mode double-invoke and HMR remounts. */
-let _stripStylesInjected = false;
-
-/** CSS injected once into the document head; scoped to [data-activity-strip]. */
-const STRIP_CSS = `
-  [data-activity-strip] .as-dot {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent, #5b6cad);
-    animation: as-pulse 1s ease-in-out infinite;
-    opacity: 0.25;
-  }
-  [data-activity-strip] .as-dot:nth-child(2) { animation-delay: 0.15s; }
-  [data-activity-strip] .as-dot:nth-child(3) { animation-delay: 0.30s; }
-  @keyframes as-pulse {
-    0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
-    40%           { opacity: 1;    transform: scale(1.1); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    [data-activity-strip] .as-dot {
-      animation: none;
-      opacity: 0.7;
-      transform: none;
-    }
-  }
-`;
-
-/**
- * Injects `STRIP_CSS` into the document `<head>` exactly once per module
- * lifetime. The module-level `_stripStylesInjected` flag survives React
- * Strict Mode's double-invocation of effects and Vite HMR remounts, both of
- * which would reset a `useRef`.
- */
-function useStripStyles(): void {
-  useEffect(() => {
-    if (_stripStylesInjected) return;
-    const el = document.createElement("style");
-    el.textContent = STRIP_CSS;
-    document.head.appendChild(el);
-    _stripStylesInjected = true;
-  }, []);
-}
+import "./ActivityStrip.css";
 
 /**
  * Horizontal activity strip that signals in-flight mutations to the user.
  *
  * Renders an always-present 24 px row in the App shell. The row is visually
- * transparent when idle and transitions to a soft lavender band with animated
- * dots when `useIsMutating()` reports one or more active mutations.
+ * transparent when idle and transitions to a soft --accent-soft band with
+ * animated dots when `useIsMutating()` reports one or more active mutations.
+ * Themed through --accent-soft with --accent-strong text (not a hardcoded
+ * colour) so the band follows the active theme and its label stays AA-readable.
  */
 export function ActivityStrip() {
   const mutating = useIsMutating();
   const { t } = useTranslation();
   const busy = mutating > 0;
   const [visible, setVisible] = useState(false);
-
-  useStripStyles();
 
   // Show is debounced 80ms so sub-frame mutations never flash the strip;
   // hide goes through a 0ms timeout too, keeping the effect free of
@@ -99,16 +55,16 @@ export function ActivityStrip() {
       style={{
         height: 24,
         flexShrink: 0,
-        background: visible ? "rgba(91, 108, 173, 0.06)" : "transparent",
+        background: visible ? "var(--accent-soft)" : "transparent",
         borderBottom: visible
-          ? "1px solid rgba(91, 108, 173, 0.25)"
+          ? "1px solid color-mix(in srgb, var(--accent) 25%, transparent)"
           : "1px solid transparent",
         display: visible ? "flex" : "none",
         alignItems: "center",
         gap: 10,
         padding: "0 16px",
         fontSize: 12,
-        color: "var(--accent, #5b6cad)",
+        color: "var(--accent-strong)",
         opacity: visible ? 1 : 0,
         transition:
           "opacity 200ms ease-out, background 200ms ease-out, border-color 200ms ease-out",

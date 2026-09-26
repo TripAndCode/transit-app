@@ -4,9 +4,18 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { useConfig } from "../api/config";
 import { useTheme } from "../styles/useTheme";
+import type { Theme } from "../styles/theme";
 import { SUPPORTED_LOCALES, type Locale } from "../i18n";
+import { Z_INDEX } from "../styles/zIndex";
 
 const LOCALE_LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
+
+const THEME_OPTIONS = ["system", "light", "dark"] as const satisfies readonly Theme[];
+const THEME_OPTION_LABEL_KEYS: Record<(typeof THEME_OPTIONS)[number], string> = {
+  system: "common.theme_system",
+  light: "common.theme_light",
+  dark: "common.theme_dark",
+};
 
 const popItemStyle: CSSProperties = {
   display: "flex",
@@ -23,6 +32,15 @@ const popItemStyle: CSSProperties = {
   cursor: "pointer",
   font: "inherit",
   textAlign: "left",
+};
+
+/** The chosen appearance reads as chosen, not just as aria-checked: a tinted
+ *  row is the only cue a sighted user gets that "system" is active when it
+ *  currently resolves to the same theme they could pick explicitly. */
+const selectedItemStyle: CSSProperties = {
+  ...popItemStyle,
+  color: "var(--accent-strong)",
+  background: "var(--accent-soft)",
 };
 
 /** Sidebar footer control: collapses what used to be five separate header
@@ -77,9 +95,9 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
             borderRadius: 8,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+            boxShadow: "var(--el-2)",
             padding: 6,
-            zIndex: 10,
+            zIndex: Z_INDEX.dropdown,
           }}
         >
           {config?.auth_enabled &&
@@ -102,7 +120,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           </Link>
           <button type="button" role="menuitem" onClick={() => void i18n.changeLanguage(other)} style={popItemStyle}>
             <span>{t("common.language_aria")}</span>
-            <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{LOCALE_LABELS[current]}</span>
+            <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>{LOCALE_LABELS[current]}</span>
           </button>
           <button
             type="button"
@@ -112,6 +130,24 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           >
             <span>{theme === "dark" ? t("common.theme_toggle_to_light") : t("common.theme_toggle_to_dark")}</span>
           </button>
+          {/* Three states, not a two-way toggle: "system" has to be reachable
+              and distinguishable from whichever theme it currently resolves
+              to. menuitemradio (not radio) because these live inside a menu,
+              where radio is not a permitted child role. */}
+          <div role="group" aria-label={t("common.theme_aria")}>
+            {THEME_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={theme === option}
+                onClick={() => setTheme(option)}
+                style={theme === option ? selectedItemStyle : popItemStyle}
+              >
+                <span>{t(THEME_OPTION_LABEL_KEYS[option])}</span>
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             role="menuitem"
@@ -154,11 +190,11 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             borderRadius: "50%",
             flexShrink: 0,
             background: "var(--accent-soft)",
-            color: "var(--accent)",
+            color: "var(--accent-strong)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             fontWeight: 700,
           }}
         >
@@ -168,13 +204,13 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {displayName}
           </div>
-          <div style={{ fontSize: 10, color: "var(--text-tertiary)" }}>{LOCALE_LABELS[current]}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{LOCALE_LABELS[current]}</div>
         </span>
         <span
           aria-hidden
           style={{
             color: "var(--text-tertiary)",
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             transform: open ? "rotate(180deg)" : "none",
             transition: "transform 160ms ease",
           }}

@@ -16,7 +16,7 @@
    this is the same fact for a screen reader. */
 .focus-filters__pending { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .focus-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.focus-actions button, .focus-actions a { padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 5px; background: var(--bg-surface); color: var(--text-primary); text-decoration: none; font-size: 13px; }
+.focus-actions button, .focus-actions a { padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-surface); color: var(--text-primary); text-decoration: none; font-size: 13px; }
 /* Higher specificity than the generic rule above (two classes vs. one class
    + one type) so .btn-ghost buttons inside .focus-actions (CSV/share
    actions on the report and route-analysis pages) actually get the shared
@@ -24,7 +24,7 @@
    rule above still wins padding/border-radius/font-size ties against a
    plain .btn-ghost (0,1,0 < 0,1,1), so every property .btn-ghost sets needs
    restating here, not just the two that looked visibly wrong. */
-.focus-actions .btn-ghost { padding: 7px 13px; border-radius: 8px; font-size: 12px; font-weight: 500; border-color: var(--card-border); color: var(--accent-strong); }
+.focus-actions .btn-ghost { padding: 7px 13px; border-radius: var(--radius); font-size: 12px; font-weight: 500; border-color: var(--card-border); color: var(--accent-strong); }
 .focus-actions .btn-ghost:disabled { color: var(--text-tertiary); border-color: var(--border-subtle); }
 .focus-split { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; }
 .focus-tab-panel { margin-bottom: 16px; }
@@ -32,8 +32,14 @@
    tabs doesn't tear down and recreate the MapLibre WebGL context each time. */
 .focus-tab-panel--hidden { display: none; }
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
-.focus-aside strong { font-size: 30px; color: var(--color-danger); }
+.focus-aside strong { font-size: 30px; color: var(--delay-severe); }
 .focus-chart { width: 100%; height: 300px; min-height: 230px; }
+/* `components/tableStyles.ts` is where table and cell styling belongs, and
+   the tables on these pages read from it. `.focus-table` stays for the one
+   consumer that has not moved -- the Marey diagram's narrow-viewport data
+   table, which is markup rather than styled cells -- because a class kept
+   in the tree while something still names it is cheaper than the silent
+   unstyled table deleting it would leave behind. */
 .focus-table-wrap { overflow-x: auto; }
 .focus-table { border-collapse: collapse; width: 100%; font-size: 14px; }
 .focus-table th, .focus-table td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border-soft); }
@@ -48,5 +54,31 @@
    next action (CSV / share link) instead of trailing off after the
    definitions accordion. */
 .focus-report-footer { margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; padding-bottom: 28px; }
+/* BP.md */
 @media (max-width: 900px) { .focus-split { grid-template-columns: 1fr; } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
-@media print { body { background: white; } .app-shell { display: block !important; height: auto !important; } .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack { display: none !important; } main { overflow: visible !important; } .focus-page { color: black; } .focus-page svg { break-inside: avoid; } }
+/* Print rules for `.focus-page` and the app shell live in the shared print
+   media block in styles/global.css, loaded on every page. */
+.marey__caption { margin: 0 0 6px; }
+.marey__chart { width: 100%; height: 340px; min-height: 260px; }
+/* The hit target is a fat invisible stroke over the visible legs, so a trip
+   can be picked up anywhere along its line rather than only on the 2px ink. */
+.marey-trip__hit { cursor: pointer; }
+.marey-trip { transition: opacity var(--dur-1) var(--ease-out); }
+/* Each trip group is in the tab order, so the keyboard ring has to survive
+   the SVG's own default of no visible focus style. */
+.marey-trip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.marey__readout { margin: 4px 0 14px; min-height: 1.4em; }
+.marey__toggle { margin-bottom: 10px; }
+/* Visually hidden above the phone breakpoint: the drawing is the sighted
+   reading and this table is the same trips in text, for assistive tech and
+   for the narrow layout, where it is shown instead. */
+.marey__table--hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.marey__table caption { text-align: left; padding: 0 0 8px; color: var(--text-secondary); font-size: 13px; }
+.stop-ribbon { width: 100%; height: 20px; display: block; margin-bottom: 8px; }
+/* BP.sm — a 780-unit viewBox squeezed into a phone-width column renders the
+   11px axis labels at roughly half size, so below this width the diagram
+   scrolls at a legible width instead of scaling down to fit. */
+@media (max-width: 640px) {
+  .marey__scroll { overflow-x: auto; }
+  .marey__chart { min-width: 560px; }
+}

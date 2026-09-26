@@ -10,9 +10,26 @@
      text. Retuned to clear 4.5:1 against every background this token is
      actually used on (--bg-surface and the slightly-lighter --bg-soft). */
   --text-tertiary: #6E6E6E;
-  --accent: #5b6cad;
-  --accent-soft: #e8ebf4;
+  /* One accent for the whole product, light and dark: the shell teal. It used
+     to be declared here as a blue-purple and then overridden inside
+     `.app-shell`, so signed-in and pre-auth surfaces carried two different
+     brands. Any scoped redefinition of --accent re-opens that split and is
+     asserted against in tokens.test.ts. */
+  --accent: #187b80;
+  --accent-soft: #e1f1f1;
   --on-accent: #ffffff;
+  /* The former accent, kept as a separate identity rather than a second one:
+     it marks a route (the operations route badge) and the pre-auth wordmark,
+     and nothing else. --on-brand is theme-split because the dark brand is
+     light enough that white text on it falls below AA. */
+  --brand: #5b6cad;
+  --on-brand: #ffffff;
+  /* Own token (aliasing --accent) rather than a hardcoded var(--accent)
+     reference in every :focus-visible rule, so a future focus-ring color
+     can diverge from the accent color in one place. Tracks --accent
+     automatically in both themes, including the .app-shell/dark overrides
+     below, with no separate dark-block entry needed. */
+  --focus-ring: var(--accent);
   --error-bg: #fdf6e3;
   --error-fg: #8a6f1c;
   /* Derived from --bg-surface (not a hand-copied literal per theme) so it
@@ -41,48 +58,77 @@
      contrast comfortably on dark, matches the pre-existing (marginal) look
      on light — not changing the light-mode value here, out of scope. */
   --color-warning: #C99A2E;
+  /* Text-safe counterpart to --color-warning: the plain value is 2.3-2.6:1 as
+     text against --bg-surface/--bg-soft, well under WCAG AA. Darkened along
+     the same amber hue rather than desaturating to grey. Dark theme reuses
+     --color-warning itself -- see the dark declaration. */
+  --color-warning-text: #89691F;
+  /* Reserved for destructive-action buttons only (delete/remove controls) --
+     an alarm red the calm-UI rule otherwise rules out. Any other severity
+     signal (a stale feed, an error message, a danger-zone heading) uses
+     --delay-severe instead, which is per-theme and AA-passing as text. */
   --color-danger: #c0392b;
   /* Deepened variant of --accent for primary buttons/active states -- more
-     confident at button weight than --accent reads on its own. */
-  --accent-strong: #3E5C9A;
+     confident at button weight than --accent reads on its own. Same hue
+     family as --accent by contract (tokens.test.ts): a different family here
+     would give the app two accents again, one per weight. Clears 4.5:1 as
+     text on both --bg-surface and --bg-soft. */
+  --accent-strong: #115E62;
   /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
-     distinct from --delay-severe/--color-danger, which stay the map's own
-     per-point severity ramp; this is specifically for aggregate counts. */
+     distinct from --delay-severe, which stays the map's own per-point
+     severity ramp; this is specifically for aggregate counts. */
   --delay-flag: #C4501F;
   /* Fallback first for engines without color-mix() support (same reasoning as
      --map-badge-bg above); the mix itself tracks --delay-flag automatically
      in both themes, so it needs no separate dark-block entry. */
   --delay-flag-soft: var(--bg-soft);
   --delay-flag-soft: color-mix(in srgb, var(--delay-flag) 10%, transparent);
+  /* Low tier of the delay ramp (DELAY_RAMP.ok / delayColor(<1.5)), mirrored
+     from tokens.ts's BASE_RAMP.ok by hand -- the same relationship
+     --delay-severe below has with SEVERE_FALLBACK. Unlike --delay-severe this
+     tier never carries text on top of it, so it needs no per-theme AA split:
+     same value in both themes. */
+  --delay-ok: #2EA87A;
   --card-border: #E4E7EC;
-  --card-radius: 10px;
+  --card-radius: var(--radius-lg);
   /* Tooltip is intentionally theme-invariant (always a dark chip with white
      text, in both light and dark mode) — NOT derived from --text-primary,
      which flips light-to-dark and would otherwise break tooltip contrast. */
   --tooltip-bg: #2a2a2a;
   --tooltip-fg: #ffffff;
-  /* Same theme-invariant reasoning as --tooltip-bg/--tooltip-fg above, for
-     map overlay chrome that hardcodes a white pill background (so it reads
-     over any basemap, including dark aerial imagery) instead of using
-     --bg-surface: MapStyleControl. Pairing that fixed
-     white with --text-primary/--text-secondary/--accent broke contrast in
-     dark mode (those tokens assume a dark surface) — e.g. dark --text-primary
-     (#DDD9F3) on white computed to 1.37:1. These values equal the light
-     theme's --text-primary/--text-secondary/--accent and are defined once,
-     not overridden in the dark block, so both themes render the same
-     dark-on-white chip regardless of app theme. */
-  --chip-text-primary: #2a2a2a;
-  --chip-text-secondary: #6a6a6a;
-  --chip-accent: #5b6cad;
-  /* Severe-delay red (DELAY_RAMP.severe / delayColor(>5)). Theme-dependent:
-     this light value (#d92121) passes WCAG AA on the light background but
-     fails on the dark surfaces — see the dark block below, whose #A83A1A
-     (the artifact mockup's literal severe-red) only reaches ~2.95:1 there,
-     a deliberately accepted tradeoff for design parity, not an oversight.
+  /* Floating map chrome (filter dock, legend, basemap switcher, fit-all
+     button): a translucent, blurred fill so the control reads as sitting on
+     the map rather than punched through it, on any basemap including dark
+     aerial imagery. Derived from --bg-surface/--card-border (not a fixed
+     white, which is what these replaced) so the chrome follows the app
+     theme instead of always rendering a light-mode pill in a dark app. */
+  --glass: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  --glass-line: var(--card-border);
+  /* Severe-delay tone (DELAY_RAMP.severe / delayColor(>=5)) — the deep end of
+     the warm ramp, not an alarm red: it is the loudest colour in the product
+     and still has to sit in a calm interface.
+
+     Invariant, enforced by tokens.test.ts: each theme's value clears WCAG AA
+     (4.5:1) as text on that theme's own --bg-surface. The token is split per
+     theme because no single hex can do both — dark enough to read on white is
+     too dark to read on a near-black page, and the reverse. The test also
+     asserts the cross-theme pairs FAIL, so the split can be retired the day
+     that stops being true rather than outliving its reason.
+
      tokens.ts reads this via getComputedStyle so both CSS (var(--delay-severe))
      and JS consumers (MapLibre style expressions) resolve the same source
-     of truth. */
-  --delay-severe: #d92121;
+     of truth; its SEVERE_FALLBACK mirrors this light value by hand and is
+     held to it by the same test. */
+  --delay-severe: #A8391F;
+  /* Text-safe counterpart to the ok/mild/moderate delay-ramp fills
+     (tokens.ts's DELAY_RAMP), which are 2.6-3.8:1 as text against
+     --bg-surface -- under WCAG AA. Darkened along each fill's own hue rather
+     than desaturating to grey. The severe tier needs no text variant: it is
+     already per-theme and AA-passing (--delay-severe above). Each theme's
+     values are tuned per tier to clear AA on every surface they land on. */
+  --delay-text-ok: #217857;
+  --delay-text-mild: #85661E;
+  --delay-text-moderate: #AC4F22;
   /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
      ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
@@ -98,21 +144,92 @@
   --trend-neutral: #475569;
   --track-bg: rgba(0, 0, 0, 0.03);
   --hover-tint: rgba(0, 0, 0, 0.04);
-  --bg-soft-hover: #e4e4e0;
   --skeleton-a: #ececec;
   --skeleton-b: #f5f5f5;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
   --radius: 6px;
   --radius-lg: 10px;
-  --transition: 150ms ease-out;
+  --radius-xl: 14px;
+  /* Motion scale. --dur-1 is UI feedback (hover, focus, colour), --dur-2 a
+     panel or menu opening, --dur-3 a chart or bar drawing itself in, --dur-4
+     an ambient loop (skeleton pulse). --ease-out decelerates hard for things
+     entering; --ease-in-out is symmetric, for things that move and settle.
+     Every duration collapses to 0ms under the reduced-motion block below, so
+     naming a token here is also how a rule opts into that. */
+  --dur-1: 150ms;
+  --dur-2: 240ms;
+  --dur-3: 600ms;
+  --dur-4: 1200ms;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --transition: var(--dur-1) var(--ease-out);
+  /* Elevation scale: el-1 a resting card, el-2 something floating over the
+     page (menu, popover, tooltip, hover lift), el-3 a modal or full overlay.
+     On light surfaces depth reads as a soft drop shadow; the dark theme
+     overrides these with a hairline ring plus a top inset highlight, because
+     a black shadow is invisible on a near-black page and separation has to
+     come from the edge instead. Every tier carries the hairline ring, in both
+     themes: a surface that swaps tiers on hover would otherwise lose its own
+     edge at the moment it gains depth. */
+  --el-1: 0 1px 3px rgba(17, 24, 39, 0.05), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  --el-2: 0 4px 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  --el-3: 0 24px 60px rgba(17, 24, 39, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  /* Leftward counterpart of --el-2, for a panel anchored to the right edge
+     (a drawer) whose shadow has to cast onto the page it covers rather than
+     downward -- the scale above is downward-only, so an edge-anchored panel
+     can't reuse it without losing the direction that separates it from the
+     content it covers. Same weight and opacity as --el-2, offset to the left
+     instead of down. */
+  --el-left: -4px 0 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  /* Type scale. --text-xs (12px) is the floor for any DOM text: below it CJK
+     glyphs lose stroke separation and Japanese labels stop being readable.
+     SVG chart tick labels are the one exception and set their size as an
+     attribute, not through this scale. */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 17px;
+  --text-lg: 20px;
+  --text-xl: 26px;
+  --text-2xl: 34px;
+  --text-3xl: 46px;
+  /* The one wash behind an overlay, in both themes. A scrim is a property of
+     the theme, not of whichever overlay happens to be open: two overlays
+     picking their own literal drift apart the moment either theme is
+     retuned, and they are routinely seen one over the other. */
+  --scrim: rgba(15, 17, 25, 0.32);
+  /* Stacking-order ladder -- mirrors src/styles/zIndex.ts's Z_INDEX exactly
+     (zIndex.test.ts enforces it) for CSS files that can't import the TS
+     constant. Keep both in sync: add/change a rung in Z_INDEX first, then
+     mirror the same value here. */
+  --z-base: 0;
+  --z-raised: 1;
+  --z-map-overlay: 5;
+  --z-dropdown: 20;
+  --z-popover: 30;
+  --z-sticky: 40;
+  --z-tooltip: 60;
+  --z-coach-mark: 70;
+  --z-drawer-backdrop: 300;
+  --z-drawer: 301;
+  --z-modal-backdrop: 400;
+  --z-modal: 401;
+  --z-context-menu: 500;
+  --z-command-palette: 550;
+  --z-toast: 600;
+  /* Identity moments only: the brand wordmark, the Welcome headline, and a
+     single-sentence "story" line. Everything else — body copy, tables,
+     data labels, section headings — uses --font-body. */
   --font-display: "Noto Serif JP", "Times New Roman", serif;
   --font-body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
                "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+  /* Identifiers that are read character by character — a user id, a route
+     code, a hash — where proportional digits and an ambiguous 1/l/I cost the
+     reader a second look. Not for anything with prose in it. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root[data-theme="dark"] {
@@ -129,35 +246,91 @@
      family as --text-primary/--text-secondary (blended toward --text-secondary
      rather than desaturating to neutral grey). */
   --text-tertiary: #C9CBDA;
-  /* Teal accent, matching the artifact mockup (docs/superpowers/specs/2026-07-11-artifact-design-parity-design.md).
-     Light theme keeps the original blue-purple accent — this is a dark-theme-only change. */
-  --accent: #27B596;
-  --accent-soft: rgba(39, 181, 150, 0.18);
+  /* Dark counterpart of the single teal accent. */
+  --accent: #43c5ba;
+  --accent-soft: #183b3d;
   --on-accent: #071a16;
+  --brand: #7E8CD0;
+  /* Dark ink, not white: the dark brand is light enough that white on it
+     lands around 3.2:1. */
+  --on-brand: #0F1119;
   --error-bg: #2A1F14;
   --error-fg: #E0B45C;
   --color-danger: #E0685B;
-  /* Mockup's literal severe red — fails WCAG AA contrast against --bg-page (2.95:1,
-     confirmed and deliberately accepted; see the design-parity spec). Do not
-     "fix" this by substituting a brighter red. */
-  --delay-severe: #A83A1A;
+  /* Dark-theme severe tone. Same warm family as the light value, lifted until
+     it clears 4.5:1 on this theme's --bg-surface — see the invariant on the
+     light declaration. */
+  --delay-severe: #F0837A;
+  /* Tuned per tier to clear 4.5:1 on this theme's page, --accent-soft and
+     current-row surfaces; only mild coincides with its ramp fill. */
+  --delay-text-ok: #31B483;
+  --delay-text-mild: #C99A2E;
+  --delay-text-moderate: #E08A61;
+  /* --color-warning itself already clears 4.5:1 on this theme's surfaces —
+     see the light declaration for why light needs a separate darkened value. */
+  --color-warning-text: #C99A2E;
   --trend-good: #4ade80;
   --trend-bad: #fbbf24;
   --trend-neutral: #94a3b8;
   --track-bg: rgba(255, 255, 255, 0.08);
   --hover-tint: rgba(255, 255, 255, 0.08);
-  --bg-soft-hover: #2a2f4a;
   --skeleton-a: #202642;
   --skeleton-b: #30385A;
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
-     --bg-soft -- re-check contrast if this color or those tokens change. */
-  --accent-strong: #7C96D9;
+     --bg-soft -- re-check contrast if this color or those tokens change.
+     Stays in --accent's hue family; see the light declaration. */
+  --accent-strong: #6FD8CC;
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
      --bg-soft -- re-check contrast if this color or those tokens change. */
   --delay-flag: #E08A54;
   /* Border, not text -- reuses the existing dark --border-subtle value
      rather than introducing a third near-identical border hue. */
   --card-border: var(--border-subtle);
+  /* Depth on a near-black page cannot come from a black shadow, so every
+     tier carries a hairline ring and a top inset highlight to draw its own
+     edge; only the floating tiers add a drop, and el-3 makes it deep enough
+     to darken the page visibly behind a modal. */
+  --el-1: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --el-2: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
+          0 8px 24px rgba(0, 0, 0, 0.40);
+  --el-3: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
+          0 24px 60px rgba(0, 0, 0, 0.60);
+  /* Same hairline ring and top inset highlight as el-2 above -- depth on a
+     near-black page still has to come from the edge, not the shadow -- with
+     the drop cast to the left instead of down. */
+  --el-left: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
+             -8px 0 24px rgba(0, 0, 0, 0.40);
+  /* More translucent than the light value: a near-black --bg-surface mixed
+     at the same 82% reads as a near-opaque card rather than glass, which
+     defeats the point over a bright basemap (aerial photo, GSI std). The
+     hairline needs its own lighter line for the same reason --card-border
+     (a light-grey literal) does not read on a dark surface. */
+  --glass: color-mix(in srgb, var(--bg-surface) 62%, transparent);
+  --glass-line: rgba(255, 255, 255, 0.16);
+  /* Deeper than the light wash: on a near-black page a 32% ink wash barely
+     separates the panel from what it covers. */
+  --scrim: rgba(0, 0, 0, 0.55);
+}
+
+/* One global reduced-motion regime, so a stylesheet does not have to remember
+   to opt in: the duration tokens collapse, and the blanket rule catches
+   animations and transitions declared with literal durations (including
+   third-party CSS the app does not own). The near-zero -- rather than 0 --
+   duration keeps `animationend`/`transitionend` listeners firing, so a
+   component that advances state on one does not hang. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-4: 0ms;
+    --transition: 0s;
+  }
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
 
 /* Keep native date controls legible on both themes. Without an explicit
@@ -168,10 +341,8 @@ input[type="date"] { color-scheme: light; }
 /* App.tsx's root wrapper and the sidebar's data-status disclosure are always
    mounted, regardless of route, so their styling lives here rather than in a
    route-lazy-loaded stylesheet. */
-.app-shell { --accent: #187b80; --accent-soft: #e1f1f1; }
-:root[data-theme="dark"] .app-shell { --accent: #43c5ba; --accent-soft: #183b3d; }
 .focus-data-status { position: relative; margin: 18px 14px; font-size: 12px; color: var(--text-secondary); }
-.focus-data-status > div { position: absolute; bottom: 30px; left: 0; padding: 16px; width: min(280px, 75vw); border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-surface); z-index: 410; }
+.focus-data-status > div { position: absolute; bottom: 30px; left: 0; padding: 16px; width: min(280px, 75vw); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-surface); z-index: var(--z-modal); }
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -200,7 +371,8 @@ input[type="date"] { color-scheme: light; }
   border-radius: 50%;
   background: var(--accent);
 }
-@media (max-width: 720px) {
+/* BP.sm */
+@media (max-width: 640px) {
   .definition-meta { grid-template-columns: 1fr; max-width: 100%; }
 }
 html, body, #root { height: 100%; margin: 0; }
@@ -234,11 +406,31 @@ html, body, #root { height: 100%; margin: 0; }
 .app-notice-stack > *:not([data-activity-strip]) {
   margin: 0 16px;
   border: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .app-notice-stack > *:not([data-activity-strip]):first-child {
   margin-top: 16px;
+}
+
+/* BP.sm: Sidebar's bottom tab bar becomes `position: fixed` at this
+   breakpoint (Sidebar.tsx's `MOBILE_TABBAR_HEIGHT_PX` -- keep this 56px in
+   sync with that constant) and no longer claims layout space as a flex
+   sibling, so the content column needs the same height reserved at its own
+   bottom edge or the tab bar sits on top of whatever the active tab last
+   renders instead of below it. */
+@media (max-width: 640px) {
+  /* border-box, not the default content-box: main's height is a flex
+     stretch value (its parent, .app-shell, is the 100dvh row), so an
+     content-box padding would grow main taller than that stretch target
+     instead of eating into it, pushing the whole shell past the viewport. */
+  .app-main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+  /* TabFilterBar's shared filter row (Overview/Analysis/Reports): wrapping
+     at this width pushes the preset menu and chips onto several lines
+     before the tab content even starts. A single scrollable row keeps every
+     control one thumb-swipe away instead. */
+  .tab-filter-bar-row { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab-filter-bar-row > * { flex-shrink: 0; }
 }
 
 body {
@@ -247,10 +439,51 @@ body {
   line-height: 1.6;
   color: var(--text-primary);
   background: var(--bg-page);
+  /* palt tightens default Japanese proportional spacing (notably around
+     punctuation) without the layout risk of full-width-to-half-width
+     substitution. line-break: strict avoids breaking before/after
+     characters that Japanese typographic convention keeps attached (small
+     kana, prolonged sound marks, closing punctuation); overflow-wrap:
+     anywhere is the safety net for the long unbroken tokens (route codes,
+     URLs) that strict breaking is intentionally forbidden from splitting. */
+  font-feature-settings: "palt" 1;
+  line-break: strict;
+  overflow-wrap: anywhere;
+  /* Progressive enhancement: unsupported engines fall back to normal
+     spacing around half-width punctuation, not breakage. */
+  text-spacing-trim: space-first;
+}
+
+/* The single place tabular figures are turned on. Apply to columns of
+   numbers that must align vertically — table cells, chart axes, counters
+   in a fixed-width slot — never to a large standalone number, which reads
+   better with proportional figures. */
+.num {
+  font-variant-numeric: tabular-nums;
 }
 
 button { font: inherit; cursor: pointer; }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* `outline` on an SVG shape (not the whole <svg>) renders inconsistently
+   across engines, so interactive SVG shapes (role="button" circles/rects
+   inside a chart) opt into this instead of the generic [tabindex] rule:
+   a thicker, high-contrast stroke plus a matching drop-shadow ring, both of
+   which SVG paints reliably. */
+.svg-focus-ring:focus-visible {
+  outline: none;
+  stroke: var(--focus-ring);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 2px var(--focus-ring));
+}
 /* Shared secondary-button style (CSV downloads, share actions, etc.) --
    an explicit visible border + accent text, so it never looks disabled
    when the action is actually available (default browser button chrome
@@ -259,7 +492,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   background: var(--bg-surface);
   color: var(--accent-strong);
   border: 1px solid var(--card-border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 7px 13px;
   font-size: 12px;
   font-weight: 500;
@@ -270,55 +503,146 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   cursor: not-allowed;
 }
 
-/* Hover/focus tooltip for controls whose label can't carry the whole
-   explanation -- icon-only buttons, or a short label with a caveat worth
-   stating. Opt in with `className="tip" data-tip={t("...")}`: no wrapper
-   component and no JS state, and it appears on keyboard focus as well as
-   hover.
+/* The wrapper `Tooltip` (components/Tooltip.tsx) puts around its trigger. It
+   generates no box of its own, so the trigger keeps whatever containing block
+   it already had -- wrapping an absolutely-positioned map control in a
+   Tooltip cannot move it. */
+.tooltip-anchor {
+  display: contents;
+}
 
-   The tooltip is visual reinforcement only. The control keeps its own
-   accessible name (its text, or an aria-label), so a screen reader never
-   depends on `content: attr()`, which assistive tech is not required to
-   announce.
+/* The bubble itself. Fixed-position and portalled to <body>, so it is never
+   clipped by, or positioned relative to, the overflow container its trigger
+   sits in -- the normal case here, since the controls that need a tooltip are
+   icon-only ones inside map overlays and the collapsed nav rail.
 
-   `:where()` gives the positioning zero specificity, so a host that is
-   already positioned -- an absolutely-placed map control, say -- keeps its
-   own `position` regardless of stylesheet order, while a statically-placed
-   host still gets the containing block this needs. */
-:where(.tip) { position: relative; }
-.tip::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60;
+   The component measures this element and writes `left`/`top` before paint;
+   the coordinates below are only the pre-measurement resting place. The
+   tooltip is visual reinforcement only -- the control keeps its own
+   accessible name, and this element is wired as its `aria-describedby`. */
+.tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
   max-width: 240px;
   padding: 5px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--tooltip-bg);
   color: var(--tooltip-fg);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
   line-height: 1.45;
   text-align: left;
   white-space: pre-line;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  opacity: 0;
-  visibility: hidden;
+  box-shadow: var(--el-2);
   pointer-events: none;
-  transition: opacity 120ms;
 }
-.tip:hover::after,
-.tip:focus-visible::after {
-  opacity: 1;
-  visibility: visible;
+/* `Glossary` (components/Glossary.tsx). Inline trigger for a technical term
+   kept visible on an operator-facing page; the tooltip carries the plain-
+   language explanation. Reset to plain text rather than button chrome, with
+   a dotted underline as the only affordance that it's interactive. */
+.glossary-term {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+  border-bottom: 1px dotted var(--text-secondary);
 }
-/* For a control near the top edge, where an upward tooltip would be clipped. */
-.tip--below::after {
-  top: calc(100% + 8px);
-  bottom: auto;
+
+/* `ThreadSidebar`'s conversation context menu (components/ThreadSidebar.tsx).
+   The highlight is a CSS state so the keyboard-focused item and the hovered
+   item look alike -- a JS hover handler can only ever light up the mouse's
+   item, leaving arrow-key navigation with no visible position. */
+.context-menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 7px var(--space-4);
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background var(--transition);
 }
+.context-menu__item--danger {
+  color: var(--color-danger);
+}
+.context-menu__item:hover,
+.context-menu__item:focus-visible {
+  background: var(--bg-soft);
+}
+
+/* `ExportMenu` (components/ExportMenu.tsx). A plain dropdown anchored to its
+   trigger -- there is exactly one open at a time per page, so it needs no
+   portal (unlike `Tooltip`, which can sit inside a clipping map overlay). */
+.export-menu {
+  position: relative;
+  display: inline-flex;
+}
+.export-menu__panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--z-dropdown);
+  margin-top: 6px;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--el-2);
+}
+.export-menu__panel button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.export-menu__panel button:hover {
+  background: var(--hover-tint);
+}
+.export-menu__status {
+  margin-left: 8px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.export-menu__fallback {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--z-dropdown);
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--el-2);
+}
+.export-menu__fallback label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.export-menu__fallback input {
+  min-width: 260px;
+}
+
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
@@ -332,31 +656,124 @@ input, select, textarea {
   transition: border-color var(--transition);
 }
 input:focus, select:focus, textarea:focus {
-  outline: none;
   border-color: var(--accent);
 }
 
 summary::-webkit-details-marker { display: none; }
 
+/* A still gradient fill is the whole placeholder; the pulse below is an
+   enhancement layered on top, so the skeleton still reads as "loading" when
+   motion is suppressed. A slow opacity breath replaces the sliding shimmer
+   that used to run here -- a band travelling across the screen draws the eye
+   away from whatever the user was reading, which a fade does not. */
 .skeleton {
   background: linear-gradient(90deg, var(--skeleton-a) 0%, var(--skeleton-b) 50%, var(--skeleton-a) 100%);
   background-size: 200% 100%;
-  animation: skeleton-shimmer 1.4s ease-in-out infinite;
   border-radius: var(--radius);
 }
-@keyframes skeleton-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.62; }
+  }
+  .skeleton { animation: skeleton-pulse calc(var(--dur-4) * 1.5) var(--ease-in-out) infinite; }
 }
 
-/* MapLibre's popup override rules (.maplibregl-popup-content etc.) live in
-   src/tabs/map/mapOverrides.css now, imported from MapTab.tsx right after
-   maplibre-gl's own CSS — same lazy chunk, so import order (and therefore
-   cascade order against MapLibre's hardcoded-white defaults) is reliable.
-   They used to live here because main.tsx imported maplibre-gl.css before
-   this file; once MapLibre's CSS moved to MapTab's lazy chunk (to keep it
-   out of the entry chunk), staying here would load AFTER MapLibre's own
-   stylesheet with equal specificity and silently lose the cascade. */
+/* The resting value of a cell whose opacity is data-driven (a low-confidence
+   forecast cell, a crossfiltered one). Declared before the motion block below
+   and at equal specificity, so a reduced-motion viewer -- who gets none of the
+   entrance classes -- still sees that opacity, while under motion
+   `.chart-cell-enter`'s `opacity: 0` is declared later and wins the start of
+   the fade. */
+.chart-cell-opacity {
+  opacity: var(--cell-opacity, 1);
+}
+
+/* ---------- Shared entrance animations ----------
+   These live here rather than in a tab stylesheet so every route can use
+   them; a lazily-loaded tab sheet would otherwise define the same keyframes
+   again, and only for itself. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ov-fade-in {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes ov-modal-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.99); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .ov-modal       { animation: ov-modal-in var(--dur-2) var(--ease-out); }
+  /* Every route change fades its content in over the outgoing tab, which
+     startTransition keeps painted until the next chunk resolves. */
+  .route-enter    { animation: ov-fade-in var(--dur-2) var(--ease-out); }
+
+  /* ChartEnter.tsx's useDrawOn(): the element's own JS-measured length
+     (getTotalLength()) is written to --len, and .chart-draw-on--active is
+     added a frame later so the transition below has an "undrawn" state to
+     animate away from. */
+  .chart-draw-on {
+    stroke-dasharray: var(--len, 9999);
+    stroke-dashoffset: var(--len, 9999);
+    transition: stroke-dashoffset var(--dur-4) var(--ease-out);
+  }
+  .chart-draw-on.chart-draw-on--active {
+    stroke-dashoffset: 0;
+  }
+
+  /* ChartEnter.tsx's staggerDelay(): a heatmap/grid cell fades in from
+     opacity 0 to its own target opacity (--cell-opacity, set inline by the
+     caller -- often itself data-driven, e.g. a sample-density encoding, so
+     this can't just animate to a flat 1), each with its own transitionDelay
+     also set inline. */
+  .chart-cell-enter {
+    opacity: 0;
+    transition: opacity var(--dur-3) var(--ease-out);
+  }
+  .chart-cell-enter.chart-cell-enter--in {
+    opacity: var(--cell-opacity, 1);
+  }
+
+  /* TrendFocusContext's crossfilter: a mark that disagrees with the hovered
+     day/weekday/hour recedes. On a grid cell the dim rides `fill-opacity`,
+     a channel the entrance fade above does not touch -- sharing `opacity`
+     would make the hover response inherit that cell's staggered entrance
+     delay. */
+  .chart-focus-dimmable {
+    transition:
+      opacity var(--dur-2) var(--ease-out),
+      fill-opacity var(--dur-2) var(--ease-out);
+  }
+  .chart-cell-enter.chart-focus-dimmable {
+    transition:
+      opacity var(--dur-3) var(--ease-out),
+      fill-opacity var(--dur-2) var(--ease-out);
+  }
+
+  /* RevealSection.tsx's useInView(): a section starts fully visible, only
+     offset downward -- transform only, never opacity: 0 -- so it stays
+     readable before the observer's first callback (or without JS at all).
+
+     --stagger is the section's place in its tab's one entrance group, set
+     inline by RevealSection and capped there, so a tab arrives as a single
+     orchestrated sweep instead of every section (and every child inside it)
+     animating on its own clock. */
+  .reveal {
+    transform: translateY(16px);
+    transition: transform var(--dur-3) var(--ease-out);
+    transition-delay: calc(var(--stagger, 0) * var(--dur-1));
+  }
+  .reveal.reveal--in {
+    transform: translateY(0);
+  }
+}
+
+/* The daily chart's plot is a keyboard-operable range control: arrows move
+   the read-out cursor, Shift+arrows extend the selection. */
+.chart-brush-surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
 
 /* HelpPage renders the user manual (a fetched .md asset) via react-markdown,
    which emits bare h1-h6/p/ul/table/blockquote/img with no styling of their
@@ -409,10 +826,24 @@ summary::-webkit-details-marker { display: none; }
 }
 .user-manual-content img {
   max-width: 100%;
-  border-radius: 8px;
+  border-radius: var(--radius);
   border: 1px solid var(--border-soft);
   margin: 12px 0;
 }
 .user-manual-content a {
   color: var(--accent);
+}
+
+/* Shared print stylesheet: strips the app chrome so `window.print()` (from
+   `ExportMenu`) prints just the tab's content, on any page -- not only the
+   `.focus-page` tabs this originally shipped with. Declared once, here,
+   because it targets the app shell and generic control classes that exist
+   app-wide, not anything page-specific. */
+@media print {
+  body { background: white; }
+  .app-shell { display: block !important; height: auto !important; }
+  .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack, .export-menu { display: none !important; }
+  main { overflow: visible !important; }
+  .focus-page { color: black; }
+  .focus-page svg { break-inside: avoid; }
 }

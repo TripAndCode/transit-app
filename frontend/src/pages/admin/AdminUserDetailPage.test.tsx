@@ -5,6 +5,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
+import { formatDateTime } from "../../utils/format";
 import { AdminUserDetailPage } from "./AdminUserDetailPage";
 
 const mockDetail = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const mockDetail = vi.hoisted(() => ({
   created_at: "2026-01-01T00:00:00Z",
   identities: [],
   recent_events: [],
+  byok_provider: null,
 }));
 
 // A signed-in admin viewing someone else's record (user_id 999 !== 1), so
@@ -30,7 +32,16 @@ const mockSession = vi.hoisted(() => ({
   identities: [],
 }));
 
-const apiGetMock = vi.hoisted(() => vi.fn().mockResolvedValue(mockDetail));
+// The drawer also mounts SessionsSection/ApiKeysSection, each firing their
+// own GET -- route those to an empty list so this file's assertions can stay
+// scoped to the detail fetch.
+const apiGetMock = vi.hoisted(() =>
+  vi.fn((url: string) => {
+    if (url.includes("/sessions")) return Promise.resolve([]);
+    if (url.includes("/api-keys")) return Promise.resolve({ keys: [], truncated: false });
+    return Promise.resolve(mockDetail);
+  })
+);
 const apiGetOrNullMock = vi.hoisted(() => vi.fn().mockResolvedValue(mockSession));
 const apiPatchMock = vi.hoisted(() => vi.fn().mockResolvedValue({ ...mockDetail, role: "admin" }));
 const apiDeleteMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -75,12 +86,19 @@ describe("AdminUserDetailPage", () => {
   });
 
   it("formats the created-at timestamp in the active UI language, not a hardcoded ja-JP", async () => {
-    const localeSpy = vi.spyOn(Date.prototype, "toLocaleString");
     await i18n.changeLanguage("en");
     renderPage();
     await screen.findByText("a@b.com");
-    expect(localeSpy).toHaveBeenCalledWith("en");
-    localeSpy.mockRestore();
+    const expected = formatDateTime(mockDetail.created_at);
+    expect(document.body.textContent).toContain(expected);
+  });
+
+  it("names the panel for what it is while the detail is still loading", async () => {
+    // The accessible name is read before the content arrives, so it must not
+    // be borrowed from a section that has not rendered yet.
+    apiGetMock.mockImplementationOnce(() => new Promise<never[]>(() => {}));
+    renderPage();
+    expect(await screen.findByRole("dialog", { name: "User detail" })).toBeTruthy();
   });
 
   it("has a back-to-users link", async () => {
@@ -96,7 +114,8 @@ describe("AdminUserDetailPage", () => {
     await screen.findByText("a@b.com");
     await user.selectOptions(screen.getByLabelText("Role"), "admin");
     expect(apiPatchMock).toHaveBeenCalledWith("/api/admin/users/1", { role: "admin" });
-    await vi.waitFor(() => expect(apiGetMock).toHaveBeenCalledTimes(2));
+    const detailCalls = () => apiGetMock.mock.calls.filter(([url]) => url === "/api/admin/users/1").length;
+    await vi.waitFor(() => expect(detailCalls()).toBe(2));
     confirmSpy.mockRestore();
   });
 

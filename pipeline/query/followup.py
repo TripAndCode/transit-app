@@ -15,6 +15,7 @@ import json
 import logging
 import os
 
+from pipeline.flags import aflag, flag
 from pipeline.query.llm_client import get_client
 
 _log = logging.getLogger(__name__)
@@ -42,7 +43,13 @@ _SYS_PROMPT_EN = (
 
 def is_enabled() -> bool:
     """True iff the follow-up feature is turned on."""
-    return os.environ.get("ASK_FOLLOWUP_ENABLED", "false").lower() in ("1", "true", "yes")
+    return flag("ask_followup_enabled", False)
+
+
+async def ais_enabled() -> bool:
+    """:func:`is_enabled` for a caller on the event loop -- see
+    `pipeline.query.copilot.ais_enabled` for why the distinction matters."""
+    return await aflag("ask_followup_enabled")
 
 
 def _allowed_providers() -> set[str]:

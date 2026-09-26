@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { usePerformanceStandards } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
 import type { RangeCtx } from "../api/rangeContext";
+import { SHARED_TABLE, th, td } from "./tableStyles";
 import type { PerformanceStandardRow } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -50,7 +51,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
         <h3 style={{ margin: 0, fontSize: 14 }}>{t("reports.performance_standard.title")}</h3>
         <span
           style={{
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             fontWeight: 500,
             color: "var(--text-secondary)",
             background: "var(--bg-soft)",
@@ -69,15 +70,15 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {data && data.rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={SHARED_TABLE}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
-                <th style={th("left")}>{t("reports.performance_standard.col.route")}</th>
-                <th style={th("left")}>{t("reports.performance_standard.col.metric")}</th>
-                <th style={th("right")}>{t("reports.performance_standard.col.threshold")}</th>
-                <th style={th("right")}>{t("reports.performance_standard.col.actual")}</th>
-                <th style={th("right")}>{t("reports.performance_standard.col.achievement_rate")}</th>
-                <th style={th("right")}>{t("reports.performance_standard.col.estimate")}</th>
+                <th style={th({ align: "left" })}>{t("common.route")}</th>
+                <th style={th({ align: "left" })}>{t("reports.performance_standard.col.metric")}</th>
+                <th style={th({ align: "right" })}>{t("reports.performance_standard.col.threshold")}</th>
+                <th style={th({ align: "right" })}>{t("reports.performance_standard.col.actual")}</th>
+                <th style={th({ align: "right" })}>{t("reports.performance_standard.col.achievement_rate")}</th>
+                <th style={th({ align: "right" })}>{t("reports.performance_standard.col.estimate")}</th>
               </tr>
             </thead>
             <tbody>
@@ -87,7 +88,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
                   <td style={td()}>
                     {t(`reports.performance_standard.metric_label.${r.metric_type}`)}
                     {r.metric_scope === "agency" && (
-                      <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)" }}>
+                      <span style={{ display: "block", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
                         {t("reports.performance_standard.scope_agency_note")}
                       </span>
                     )}
@@ -103,7 +104,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
         </div>
       )}
       {data && (
-        <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--text-tertiary)", fontStyle: "italic" }}>
+        <p style={{ margin: "12px 0 0", fontSize: "var(--text-xs)", color: "var(--text-tertiary)", fontStyle: "italic" }}>
           {data.disclaimer}
         </p>
       )}
@@ -111,14 +112,3 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
   );
 }
 
-const th = (align: "left" | "right"): React.CSSProperties => ({
-  padding: "8px 10px",
-  textAlign: align,
-  fontWeight: 500,
-  color: "var(--text-secondary)",
-  fontSize: 12,
-});
-const td = (): React.CSSProperties => ({
-  padding: "6px 10px",
-  fontSize: 13,
-});

@@ -20,16 +20,27 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
+  # GitHub-hosted, unlike the `test` job below. Nothing here needs the VPS:
+  # no Docker, no database, no ClickHouse — the one native dependency is the
+  # `python3` that lint:i18n-strings shells out to, which every hosted image
+  # carries. Running it here buys real parallelism with `test` instead of
+  # queueing behind it on the single self-hosted runner, and takes the larger
+  # of the two jobs off a box with 3.8 GiB of RAM, where two concurrent jobs
+  # would not have fit.
   frontend:
-    runs-on: [self-hosted, vps]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -47,6 +58,18 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Key-parity gate: every visible string's t() key must exist in both
+      # frontend/src/i18n/locales/ja.json and en.json.
+      - name: i18n key parity
+        run: npm run lint:i18n
+
+      # Exact-string gate for server-rendered strings the frontend can't see
+      # through t(): shells out to `python3 scripts/lint-i18n-strings.py`.
+      # The only native dependency in this job, and the reason it is worth
+      # naming — it is what decides whether this job can stay hosted.
+      - name: i18n exact-string check
+        run: npm run lint:i18n-strings
+
       # Knip dead-code check: exits non-zero on any unused file/export, which
       # now gates the build to keep the tree free of dead code.
       - name: Dead-code check
@@ -62,6 +85,16 @@ jobs:
       - name: Entry-chunk checker unit tests
         run: npm run test:check-entry-chunk
 
+      # Fixture-based positive/negative controls for check-css-tokens.mjs
+      # itself, mirroring the entry-chunk checker's own tests above.
+      - name: CSS tokens checker unit tests
+        run: npm run test:check-css-tokens
+
+      # Static scan (no build needed): every var(--x) reference resolves
+      # (or has a fallback) and every z-index uses the shared ladder.
+      - name: CSS tokens check
+        run: npm run check:css-tokens
+
       # Typecheck already ran above (tsc -b), so this build step skips it
       # (build:bundle = vite build only) and just enforces CLAUDE.md's
       # "keep MapLibre out of the entry chunk" rule against the real bundle.
@@ -72,10 +105,11 @@ jobs:
 
   test:
     runs-on: [self-hosted, vps]
+    timeout-minutes: 45
 
     services:
       clickhouse:
-        image: clickhouse/clickhouse-server:26.3
+        image: clickhouse/clickhouse-server:26.8
         env:
           CLICKHOUSE_USER: transit
           CLICKHOUSE_PASSWORD: transit
@@ -93,25 +127,16 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      # Only meaningful on GitHub-hosted VMs, whose shared root filesystem
-      # comes pre-loaded with tooling this job never uses (Android SDK,
-      # .NET, GHC, etc.) and has tipped into intermittent `DiskFull` mid-run.
-      # A persistent self-hosted runner doesn't carry that preinstalled
-      # bulk and the cleanup commands need sudo, which this runner's user
-      # intentionally does not have.
-      - name: Free disk space on the runner
-        if: runner.environment == 'github-hosted'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
-            /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
-          df -h /
-
-      - uses: actions/setup-python@v5
+      # setup-python first: this self-hosted runner has no system `pip`, so
+      # the Poetry install below depends on the interpreter this step puts on
+      # PATH. That rules out `cache: poetry`, which needs Poetry to already be
+      # installed when setup-python runs -- the two requirements are mutually
+      # exclusive here, and a working gate matters more than the cache.
+      - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install Poetry
         run: pip install poetry==1.8.5
@@ -120,6 +145,7 @@ jobs:
         run: poetry install
 
       - name: Start Postgres from db/Dockerfile
+        id: postgres
         uses: ./.github/actions/start-test-postgres
         with:
           container-name: transit-ci-db
@@ -127,7 +153,7 @@ jobs:
       - name: Apply schema
         run: poetry run python gtfs_pipeline.py migrate up
         env:
-          DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
+          DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
 
       # Equivalent of `make ch-bootstrap`. The service container above isn't
       # started via docker compose/the Makefile, so this creates the
@@ -179,7 +205,7 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: postgresql://transit:transit@localhost:5433/transit
+          DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
           GEMINI_API_KEY: test-key
           CLICKHOUSE_HOST: localhost
           # tests/conftest.py's ch_client/ch_async_client fixtures (and a
@@ -199,4 +225,13 @@ jobs:
           # the figure is worth having: it describes what landed.
           COV_ARGS: ${{ github.event_name == 'push' && '--cov=api --cov=pipeline --cov=db --cov-report=term' || '' }}
         run: poetry run pytest $COV_ARGS
+
+      # A persistent self-hosted runner keeps its Docker state between runs,
+      # so the container and its volume have to go even when this job fails
+      # or is cancelled. The name is resolved by the action, not the literal
+      # passed in above: it carries the run id so concurrent jobs do not
+      # collide, and removing the prefix would remove nothing.
+      - name: Stop and remove the Postgres container
+        if: always()
+        run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
 

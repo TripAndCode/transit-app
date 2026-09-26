@@ -4,9 +4,11 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from api.admin_audit import record_admin_action
 from api.deps import get_conn
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
+from pipeline.query import agencies as _agencies
 from pipeline.strategies.static_join import invalidate_field_coverage_probes
 from pipeline.url_guard import FeedURLError, validate_feed_url
 
@@ -40,10 +42,8 @@ class AgencyOut(BaseModel):
     # ISO date string (YYYY-MM-DD) of the latest date with real aggregated
     # data for this agency, or None if it has none yet. Powers the frontend's
     # smart-default-range redirect. Same table/freshness signal as
-    # pipeline/health.py's _AGG_MAX_SQL, but computed as a per-agency
-    # correlated subquery rather than a bare GROUP BY over agg_route_daily —
-    # this endpoint is public and frequently hit, so it needs the
-    # index-backed backward scan per agency rather than a full-table scan.
+    # pipeline/health.py's _AGG_MAX_SQL; the query lives in
+    # pipeline/query/agencies.py.
     latest_data_date: str | None = None
 
 
@@ -57,31 +57,13 @@ class AdminAgencyOut(BaseModel):
     deleted_at: Any  # datetime | None — Any avoids asyncpg datetime serialization issues
 
 
-def _agency_row_to_dict(row) -> dict:
-    """asyncpg returns a raw datetime.date for latest_data_date (or None) —
-    convert explicitly to an ISO string, matching this codebase's existing
-    convention (e.g. pipeline/reports/overview.py's window_from/window_to
-    both call .isoformat() explicitly rather than relying on Pydantic to
-    auto-coerce a date onto a str-typed field)."""
-    d = dict(row)
-    if d.get("latest_data_date") is not None:
-        d["latest_data_date"] = d["latest_data_date"].isoformat()
-    return d
-
-
 @router.get("", response_model=list[AgencyOut])
-async def list_agencies(conn=Depends(get_conn)):
-    rows = await conn.fetch(
-        "SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, "
-        "  (SELECT MAX(date) FROM agg_route_daily r WHERE r.agency_id = a.agency_id) AS latest_data_date "
-        "FROM agencies a "
-        "WHERE a.deleted_at IS NULL ORDER BY a.agency_id"
-    )
-    return [_agency_row_to_dict(r) for r in rows]
+async def list_agencies(conn: asyncpg.Connection = Depends(get_conn)) -> list[dict[str, Any]]:
+    return await _agencies.list_agencies(conn, include_deleted=False)
 
 
 @router.get("/{agency_id}", response_model=AgencyOut)
-async def get_agency(agency_id: int, conn=Depends(get_conn)):
+async def get_agency(agency_id: int, conn: asyncpg.Connection = Depends(get_conn)) -> dict[str, Any]:
     row = await conn.fetchrow(
         "SELECT a.agency_id, a.agency_name, a.feed_url, a.static_url, "
         "  (SELECT MAX(date) FROM agg_route_daily r WHERE r.agency_id = a.agency_id) AS latest_data_date "
@@ -91,7 +73,7 @@ async def get_agency(agency_id: int, conn=Depends(get_conn)):
     )
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-    return _agency_row_to_dict(row)
+    return _agencies.agency_row_to_dict(row)
 
 
 @router.post("", response_model=AgencyOut, status_code=201)
@@ -100,7 +82,7 @@ async def create_agency(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),
     admin: User = Depends(require_admin),
-):
+) -> dict[str, Any]:
     """Create an agency. Admin-only (feed_url is a server-side fetch sink). Validates feed_url."""
     csrf_guard(request)
     if body.ingest_strategy is not None and body.ingest_strategy not in VALID_INGEST_STRATEGIES:
@@ -130,6 +112,20 @@ async def create_agency(
             kind="agency_created",
             meta={"agency_id": aid},
         )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="agency.created",
+            target_type="agency",
+            target_id=str(aid),
+            after={
+                "agency_name": body.agency_name,
+                "feed_url": body.feed_url,
+                "static_url": body.static_url,
+                "ingest_strategy": body.ingest_strategy,
+                "trip_id_pattern": body.trip_id_pattern,
+            },
+        )
     return dict(row)
 
 
@@ -140,7 +136,7 @@ async def patch_agency(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),
     admin: User = Depends(require_admin),
-):
+) -> dict[str, Any]:
     """Partial update. Only provided fields change. Validates feed_url if present."""
     csrf_guard(request)
     if "agency_name" in body.model_fields_set and body.agency_name is None:
@@ -167,26 +163,36 @@ async def patch_agency(
     # new feed and must not cost the agency its verified coverage.
     repointed = "feed_url" in updates and updates["feed_url"] != row["feed_url"]
 
-    if updates:
-        set_clauses = [f"{col}=${i + 2}" for i, col in enumerate(updates)]
-        sql = f"UPDATE agencies SET {', '.join(set_clauses)} WHERE agency_id=$1"
-        async with conn.transaction():
-            await conn.execute(sql, agency_id, *updates.values())
-            if repointed:
-                await invalidate_field_coverage_probes(conn, agency_id)
-            await record_event(
-                conn,
-                user_id=None,
-                actor_id=admin.user_id,
-                kind="agency_updated",
-                meta={"agency_id": agency_id, "fields": list(updates.keys())},
-            )
+    if not updates:
+        return dict(row)
 
-    out = await conn.fetchrow(
-        "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
-        "FROM agencies WHERE agency_id=$1",
-        agency_id,
+    set_clauses = [f"{col}=${i + 2}" for i, col in enumerate(updates)]
+    sql = (
+        f"UPDATE agencies SET {', '.join(set_clauses)} WHERE agency_id=$1 "
+        "RETURNING agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at"
     )
+    async with conn.transaction():
+        out = await conn.fetchrow(sql, agency_id, *updates.values())
+        if not out:
+            raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
+        if repointed:
+            await invalidate_field_coverage_probes(conn, agency_id)
+        await record_event(
+            conn,
+            user_id=None,
+            actor_id=admin.user_id,
+            kind="agency_updated",
+            meta={"agency_id": agency_id, "fields": list(updates.keys())},
+        )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="agency.updated",
+            target_type="agency",
+            target_id=agency_id,
+            before={col: row[col] for col in updates},
+            after=updates,
+        )
     return dict(out)
 
 
@@ -196,7 +202,7 @@ async def delete_agency(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),
     admin: User = Depends(require_admin),
-):
+) -> Response:
     """Soft-delete: sets deleted_at. Idempotent — re-deleting a deleted agency is 204."""
     csrf_guard(request)
     row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1", agency_id)
@@ -215,6 +221,15 @@ async def delete_agency(
                 kind="agency_deleted",
                 meta={"agency_id": agency_id},
             )
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action="agency.deleted",
+                target_type="agency",
+                target_id=str(agency_id),
+                before={"deleted": False},
+                after={"deleted": True},
+            )
     return Response(status_code=204)
 
 
@@ -224,20 +239,23 @@ async def restore_agency(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),
     admin: User = Depends(require_admin),
-):
+) -> dict[str, Any]:
     """Clear deleted_at, making the agency active again. Idempotent — restoring
     an already-active agency is a no-op, mirroring delete_agency's guard so a
     double-click (or a re-restore) doesn't write a duplicate audit row."""
     csrf_guard(request)
-    row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1", agency_id)
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
+    _COLS = "agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at"
     async with conn.transaction():
-        tag = await conn.execute(
-            "UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 AND deleted_at IS NOT NULL",
+        # The `deleted_at IS NOT NULL` guard stays part of the write rather
+        # than a preceding read: exactly one concurrent caller can match a
+        # deleted row and get a RETURNING row back, so exactly one writes the
+        # audit event. Deciding that from a separate SELECT would let two
+        # simultaneous restores both observe "was deleted" and both record it.
+        out = await conn.fetchrow(
+            f"UPDATE agencies SET deleted_at = NULL WHERE agency_id=$1 AND deleted_at IS NOT NULL RETURNING {_COLS}",
             agency_id,
         )
-        if tag == "UPDATE 1":
+        if out is not None:
             await record_event(
                 conn,
                 user_id=None,
@@ -245,9 +263,18 @@ async def restore_agency(
                 kind="agency_restored",
                 meta={"agency_id": agency_id},
             )
-    out = await conn.fetchrow(
-        "SELECT agency_id, agency_name, feed_url, static_url, ingest_strategy, trip_id_pattern, deleted_at "
-        "FROM agencies WHERE agency_id=$1",
-        agency_id,
-    )
+            await record_admin_action(
+                conn,
+                actor_id=admin.user_id,
+                action="agency.restored",
+                target_type="agency",
+                target_id=agency_id,
+                before={"deleted": True},
+                after={"deleted": False},
+            )
+        else:
+            # Already active, or gone. Either way this call restored nothing.
+            out = await conn.fetchrow(f"SELECT {_COLS} FROM agencies WHERE agency_id=$1", agency_id)
+            if out is None:
+                raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
     return dict(out)

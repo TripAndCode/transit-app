@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useRangeContext, type TimeBand } from "../../api/rangeContext";
-import { DELAY_RAMP, DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
+import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
+import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
+import { staggerDelay } from "./ChartEnter";
+import { DIM_OPACITY, isFocusDimmed, isoDow, useTrendFocus } from "./trendFocus";
 
 export type HourlyCell = {
   date: string;
@@ -23,6 +26,15 @@ const HOUR_TO_BAND: { hours: [number, number]; band: TimeBand }[] = [
   { hours: [20, 23], band: "night" },
 ];
 
+// Evenly spaced sample points across the ramp domain, for the legend strip.
+// Derived from the ramp's own endpoint so retuning it moves the swatches and
+// the `ramp_max` caption beside them together.
+const RAMP_STOP_COUNT = 6;
+const RAMP_STOPS = Array.from(
+  { length: RAMP_STOP_COUNT },
+  (_, i) => (HEAT_RAMP.maxMin * i) / (RAMP_STOP_COUNT - 1),
+);
+
 function bandFor(hour: number): TimeBand | null {
   for (const b of HOUR_TO_BAND) {
     if (hour >= b.hours[0] && hour <= b.hours[1]) return b.band;
@@ -32,15 +44,22 @@ function bandFor(hour: number): TimeBand | null {
 
 /**
  * Date × hour-of-day heatmap. Rows = hours 0-23, columns = dates.
- * Color = delay severity (delayColor); empty cells dimmed. Hover = tooltip
- * with date/hour/avg/samples. Useful for spotting which times of day
- * delays cluster (rush hour, evening, etc.).
+ *
+ * Delay is one quantity, so it gets one hue (`--accent`) ramped light to dark
+ * by opacity; a cell past the severe threshold is outlined rather than
+ * recoloured, keeping the ordering of the ramp intact. Hover publishes the
+ * cell's hour and weekday to `TrendFocusContext`, which dims the
+ * non-matching marks in the sibling charts, and shows a tooltip with the
+ * exact date/hour/avg/samples — the ramp answers "where", the tooltip
+ * answers "how much".
  */
 export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<HourlyCell | null>(null);
   const [showLegend, setShowLegend] = useState(false);
   const [, setCtx] = useRangeContext();
+  const { focus, setFocus } = useTrendFocus();
+  const entered = useEnteredOnMount();
 
   const dates = Array.from(new Set(cells.map((c) => c.date))).sort();
 
@@ -67,7 +86,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
     <div style={{ position: "relative", width: "100%", marginTop: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 13 }}>{t("reports.heatmap.title")}</strong>
-        <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
           {t("reports.heatmap.subtitle")}
         </span>
         <button
@@ -80,7 +99,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             borderRadius: "50%",
             width: 18,
             height: 18,
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             color: "var(--text-secondary)",
             cursor: "pointer",
             padding: 0,
@@ -95,7 +114,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
               display: "inline-flex",
               alignItems: "center",
               gap: 8,
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               color: "var(--text-secondary)",
               padding: "4px 10px",
               background: "var(--bg-soft)",
@@ -103,28 +122,33 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             }}
           >
             <span>{t("reports.heatmap.delay_label")}</span>
-            <Swatch
-              color={DELAY_RAMP.ok}
-              label={t("reports.heatmap.band_lt", { min: DELAY_THRESHOLDS.mild })}
-            />
-            <Swatch
-              color={DELAY_RAMP.mild}
-              label={t("reports.heatmap.band_range", {
-                min: DELAY_THRESHOLDS.mild,
-                max: DELAY_THRESHOLDS.moderate,
-              })}
-            />
-            <Swatch
-              color={DELAY_RAMP.moderate}
-              label={t("reports.heatmap.band_range", {
-                min: DELAY_THRESHOLDS.moderate,
-                max: DELAY_THRESHOLDS.severe,
-              })}
-            />
-            <Swatch
-              color={DELAY_RAMP.severe}
-              label={t("reports.heatmap.band_gt", { min: DELAY_THRESHOLDS.severe })}
-            />
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>0</span>
+            <span style={{ display: "inline-flex", gap: 2 }} aria-hidden="true">
+              {RAMP_STOPS.map((min) => (
+                <span
+                  key={min}
+                  style={{
+                    width: 14,
+                    height: 10,
+                    borderRadius: 2,
+                    background: "var(--accent)",
+                    opacity: heatOpacity(min),
+                  }}
+                />
+              ))}
+            </span>
+            <span>{t("reports.heatmap.ramp_max", { min: HEAT_RAMP.maxMin })}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 2,
+                  border: "1px solid var(--delay-severe)",
+                }}
+              />
+              {t("reports.heatmap.severe_outline", { min: DELAY_THRESHOLDS.severe })}
+            </span>
             <span style={{ color: "var(--text-tertiary)", marginLeft: 4 }}>
               {t("reports.heatmap.legend_explainer")}
             </span>
@@ -173,30 +197,73 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             const c = map.get(`${d}|${h}`);
             const x = padL + i * cellW;
             const y = padT + h * cellH;
-            const fill = c && c.avg_min != null ? delayColor(c.avg_min) : "var(--bg-soft)";
-            const opacity = c && c.avg_min != null ? Math.min(1, 0.35 + (c.samples / 200) * 0.5) : 0.35;
+            const value = c?.avg_min ?? null;
+            const fill = value != null ? "var(--accent)" : "var(--bg-soft)";
+            const opacity = value != null ? heatOpacity(value) : 0.35;
+            const dimmed = isFocusDimmed(focus, { date: d, hour: h, dow: isoDow(d) }, "hourly");
             const handleCellClick = () => {
               if (!c) return;
               const b = bandFor(c.hour);
               setCtx({ from: c.date, to: c.date, time_band: b ?? "all" });
             };
-            return (
+            // Two independent channels, deliberately: `opacity` carries the
+            // magnitude ramp (and is what the staggered entrance fades to via
+            // --cell-opacity), `fill-opacity` carries the crossfilter dim.
+            // Sharing one channel would make a hover response inherit the
+            // entrance transition's per-cell delay, which on a grid this size
+            // is most of a second.
+            const cell = (
               <rect
                 key={`${d}|${h}`}
+                data-testid="heat-cell"
+                data-date={d}
+                data-hour={h}
                 x={x + 0.5}
                 y={y + 0.5}
                 width={Math.max(1, cellW - 1)}
                 height={Math.max(1, cellH - 1)}
                 opacity={opacity}
-                // `fill` goes in `style`, not the SVG presentation attribute:
-                // delayColor()'s severe tier is now the literal "var(--delay-severe)",
-                // and var() only resolves in a CSS property, not a presentation attr.
-                style={{ fill, cursor: c ? "pointer" : "default" }}
-                onMouseEnter={() => c && setHover(c)}
-                onMouseLeave={() => setHover((v) => (v === c ? null : v))}
+                fillOpacity={dimmed ? DIM_OPACITY : 1}
+                className={`chart-cell-enter${entered ? " chart-cell-enter--in" : ""} chart-focus-dimmable`}
+                style={
+                  {
+                    fill,
+                    cursor: c ? "pointer" : "default",
+                    "--cell-opacity": opacity,
+                    ...staggerDelay(i * 24 + h),
+                  } as CSSProperties
+                }
+                onMouseEnter={() => {
+                  if (!c) return;
+                  setHover(c);
+                  setFocus({ source: "hourly", hour: c.hour, dow: isoDow(c.date) });
+                }}
+                onMouseLeave={() => {
+                  setHover((v) => (v === c ? null : v));
+                  setFocus(null);
+                }}
                 onClick={handleCellClick}
               />
             );
+            if (value == null || value < DELAY_THRESHOLDS.severe) return [cell];
+            // The threshold is an annotation drawn over the ramp, at full
+            // opacity, so it survives however faint its cell happens to be.
+            return [
+              cell,
+              <rect
+                key={`severe-${d}|${h}`}
+                data-testid="heat-severe-outline"
+                pointerEvents="none"
+                x={x + 0.5}
+                y={y + 0.5}
+                width={Math.max(1, cellW - 1)}
+                height={Math.max(1, cellH - 1)}
+                fill="none"
+                stroke="var(--delay-severe)"
+                strokeWidth="1"
+                strokeOpacity={dimmed ? DIM_OPACITY : 0.9}
+              />,
+            ];
           }),
         )}
       </svg>
@@ -212,7 +279,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             borderRadius: 4,
             padding: "6px 10px",
             fontSize: 12,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+            boxShadow: "var(--el-2)",
             pointerEvents: "none",
           }}
         >
@@ -222,14 +289,5 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
         </div>
       )}
     </div>
-  );
-}
-
-function Swatch({ color, label }: { color: string; label: string }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-      <span style={{ width: 10, height: 10, background: color, borderRadius: 2 }} />
-      {label}
-    </span>
   );
 }

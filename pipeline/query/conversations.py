@@ -67,12 +67,23 @@ async def list_conversations(
     agency_id: int,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
+    # `user_id IS NOT DISTINCT FROM $1` reads naturally but is not sargable:
+    # asyncpg sends user_id as a bound parameter, so the planner cannot push it
+    # into an index condition even when the value is NULL at runtime, and the
+    # whole table is scanned and sorted. `= $1` and `IS NULL` both drive the
+    # (user_id, agency_id, pinned, updated_at) index. Only the predicate and
+    # its parameters differ — the projection, ordering and limit stay in one
+    # place so a later change to them cannot reach one branch and miss the
+    # other.
+    if user_id is None:
+        predicate, params = "user_id IS NULL AND agency_id = $1", [agency_id]
+    else:
+        predicate, params = "user_id = $1 AND agency_id = $2", [user_id, agency_id]
     rows = await conn.fetch(
         f"SELECT {_CONV_COLS} FROM ask_conversations "
-        f"WHERE user_id IS NOT DISTINCT FROM $1 AND agency_id = $2 "
-        f"ORDER BY pinned DESC, updated_at DESC LIMIT $3",
-        user_id,
-        agency_id,
+        f"WHERE {predicate} "
+        f"ORDER BY pinned DESC, updated_at DESC LIMIT ${len(params) + 1}",
+        *params,
         int(limit),
     )
     return [_row_to_conv(r) for r in rows]
@@ -130,20 +141,25 @@ async def append_message(
     conversation_id: Any,
     *,
     role: str,
-    chip_id: str | None,
     tool: str | None,
+    chip_id: str | None = None,
     args: dict[str, Any] | None,
     signature_hash: str | None,
     result: dict[str, Any] | None,
     rendered_summary: str | None,
+    conditions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """``conditions`` is the dow/time_band/service RangeCtx the dispatch (if
+    any) actually ran under -- the historical record for the Ask evidence
+    card's provenance disclosure. ``None`` for user messages and for
+    assistant messages with no dispatch (e.g. an LLM-grounded follow-up)."""
     row = await conn.fetchrow(
         """
         INSERT INTO ask_conversation_messages
-          (conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary)
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8)
+          (conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary, conditions)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb)
         RETURNING message_id, conversation_id, role, chip_id, tool, args, signature_hash,
-                  result, rendered_summary, created_at
+                  result, rendered_summary, conditions, created_at
         """,
         conversation_id,
         role,
@@ -153,6 +169,7 @@ async def append_message(
         signature_hash,
         json.dumps(result) if result is not None else None,
         rendered_summary,
+        json.dumps(conditions) if conditions is not None else None,
     )
     await conn.execute(
         "UPDATE ask_conversations SET updated_at = now() WHERE conversation_id = $1",
@@ -163,6 +180,8 @@ async def append_message(
         d["args"] = json.loads(d["args"])
     if isinstance(d.get("result"), str):
         d["result"] = json.loads(d["result"])
+    if isinstance(d.get("conditions"), str):
+        d["conditions"] = json.loads(d["conditions"])
     return d
 
 
@@ -179,7 +198,7 @@ async def list_messages(
     rows = await conn.fetch(
         """
         SELECT message_id, conversation_id, role, chip_id, tool, args, signature_hash,
-               result, rendered_summary, created_at
+               result, rendered_summary, conditions, created_at
         FROM ask_conversation_messages
         WHERE conversation_id = $1 ORDER BY message_id
         """,
@@ -192,8 +211,41 @@ async def list_messages(
             d["args"] = json.loads(d["args"])
         if isinstance(d.get("result"), str):
             d["result"] = json.loads(d["result"])
+        if isinstance(d.get("conditions"), str):
+            d["conditions"] = json.loads(d["conditions"])
         out.append(d)
     return out
+
+
+async def get_message(
+    conn: asyncpg.Connection, conversation_id: Any, message_id: Any, *, user_id: int | None, agency_id: int
+) -> dict[str, Any]:
+    """Fetch one message by id, without loading the rest of its thread."""
+    owner_row = await conn.fetchrow(
+        "SELECT user_id, agency_id FROM ask_conversations WHERE conversation_id = $1", conversation_id
+    )
+    if owner_row is None:
+        raise LookupError(f"conversation {conversation_id} not found")
+    if owner_row["user_id"] != user_id or owner_row["agency_id"] != agency_id:
+        raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id} in agency {agency_id}")
+    row = await conn.fetchrow(
+        """
+        SELECT message_id, conversation_id, role, chip_id, tool, args, signature_hash,
+               result, rendered_summary, created_at
+        FROM ask_conversation_messages
+        WHERE conversation_id = $1 AND message_id = $2
+        """,
+        conversation_id,
+        message_id,
+    )
+    if row is None:
+        raise LookupError(f"message {message_id} not found in conversation {conversation_id}")
+    d = dict(row)
+    if isinstance(d.get("args"), str):
+        d["args"] = json.loads(d["args"])
+    if isinstance(d.get("result"), str):
+        d["result"] = json.loads(d["result"])
+    return d
 
 
 async def migrate_anon_threads(

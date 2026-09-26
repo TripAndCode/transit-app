@@ -1,15 +1,21 @@
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { Outlet, useMatch, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useDefaultRangeAnchor } from "./api/defaultRangeAnchor";
+import { useAgencyId } from "./api/useAgencyId";
 import { ActivityStrip } from "./components/ActivityStrip";
 import { CopilotPanel } from "./components/CopilotPanel";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { GuestPrompt } from "./components/GuestPrompt";
 import { HelpHint } from "./components/HelpHint";
+import { FirstRunTour } from "./components/FirstRunTour";
+import { ChunkLoading } from "./components/RoutePlaceholders";
+import { RouteTransition } from "./components/RouteTransition";
 import { Sidebar } from "./components/Sidebar";
+import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
+import { CommandPalette } from "./components/CommandPalette";
 
 /**
  * Keep <title> in sync with the active locale. The static `<title>` in
@@ -31,15 +37,16 @@ export default function App() {
   // is now agency-scoped (agencies/:agencyId/network) and remounts like every
   // other tab.
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
-  const agencyIdNum = agencyId ? Number(agencyId) : null;
+  const agencyIdNum = useAgencyId();
   const { pathname } = useLocation();
-  const focused = /\/agencies\/[^/]+\/(overview|map|route-analysis|reports|ask)$/.test(pathname);
+  const focused = FOCUSED_TAB_PATTERN.test(pathname);
   useDefaultRangeAnchor(agencyIdNum);
   useAnonymousFilterPersistence(agencyIdNum);
   return (
     <div className="app-shell" style={{ display: "flex", height: "100dvh" }}>
+      <CommandPalette />
       <Sidebar />
-      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+      <main className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
         {/* Scoped to the content area, not the whole app shell — these are
             notices about the agency data being viewed, not app-wide chrome,
             so they shouldn't span above the sidebar (a full-height nav rail
@@ -60,11 +67,26 @@ export default function App() {
             a percentage here would overflow main's box; flex: 1 fills
             exactly what's left, same trick the outer app shell used before
             this block moved inside main. */}
-        <div style={{ display: "flex", flexDirection: "column", padding: 24, flex: 1, minHeight: 0, boxSizing: "border-box" }}>
-          <Outlet key={agencyId ?? "root"} />
-        </div>
+        {/* One Suspense boundary for every routed tab, kept above the Outlet
+            rather than wrapped around each route element. A per-route
+            boundary is newly mounted on arrival and therefore always shows
+            its fallback; this one already holds the outgoing tab, so the
+            router's startTransition (main.tsx) can leave that painted until
+            the incoming chunk resolves. RouteTransition then fades the new
+            content in without remounting this wrapper. */}
+        <RouteTransition style={{ display: "flex", flexDirection: "column", padding: "clamp(16px, 4vw, 24px)", flex: 1, minHeight: 0, boxSizing: "border-box" }}>
+          <Suspense fallback={<ChunkLoading />}>
+            <Outlet key={agencyId ?? "root"} />
+          </Suspense>
+        </RouteTransition>
       </main>
       {!focused && <CopilotPanel />}
+      {/* Persisted like welcomeSeen.ts (transit.tourSeen); a no-op render
+          once a visitor has finished or dismissed it. Mounted here rather
+          than per-tab so its "Ask" step (anchored on the always-rendered
+          Sidebar nav link) survives navigating away from the filter/map
+          steps' own tab. */}
+      <FirstRunTour />
     </div>
   );
 }

@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import "./InsightPanel.css";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { useSuggestion } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import { delayColor } from "../styles/tokens";
 
 // Map the backend's binary severity onto the existing delay warm ramp
@@ -87,13 +88,16 @@ function addSeen(agencyId: number, key: string): void {
 
 export function InsightPanel({ className }: { className?: string } = {}) {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [seen, setSeen] = useState<string[]>(() => (id != null ? readSeen(id) : []));
 
-  const enabled = readEnabled();
+  // Lazy initializer, not a plain call: reading readEnabled() during every
+  // render would make the panel appear/disappear mid-session if a devtools
+  // toggle changes localStorage while it's mounted, instead of only on the
+  // next real mount (e.g. AnalysisTab's `key={id}` agency switch).
+  const [enabled] = useState(readEnabled);
   // Also gated on !collapsed: a collapsed panel has nowhere to show a
   // suggestion, so polling it every refetchInterval would just be wasted
   // backend load for a rail the user has explicitly hidden.

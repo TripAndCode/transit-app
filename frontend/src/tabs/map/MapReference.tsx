@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Info, Radio, X } from "lucide-react";
 import type { TFunction } from "i18next";
 import { LegendChip } from "../../components/LegendChip";
+import { Tooltip } from "../../components/Tooltip";
 import { readMapReferencePref, writeMapReferencePref } from "./mapReferencePref";
 
 /** The operations map's reference panel: what the markers mean, and what they
@@ -28,15 +29,16 @@ export function MapReference({ located, total, t }: {
 
   if (!open) {
     return (
-      <button
-        type="button"
-        className="ops-map-ref__peek tip tip--below"
-        data-tip={t("operations.map.reference_show")}
-        aria-label={t("operations.map.reference_show")}
-        onClick={() => toggle(true)}
-      >
-        <Info size={15} aria-hidden="true" />
-      </button>
+      <Tooltip label={t("operations.map.reference_show")} placement="bottom">
+        <button
+          type="button"
+          className="ops-map-ref__peek"
+          aria-label={t("operations.map.reference_show")}
+          onClick={() => toggle(true)}
+        >
+          <Info size={15} aria-hidden="true" />
+        </button>
+      </Tooltip>
     );
   }
 
@@ -44,9 +46,9 @@ export function MapReference({ located, total, t }: {
     <div className="ops-map-ref" aria-label={t("operations.map.legend_label")}>
       <div className="ops-map-ref__legend">
         <LegendChip color="var(--accent-strong)" label={t("operations.map.legend_current")} />
-        <LegendChip color="#2bc5aa" label={t("operations.map.legend_trail")} />
+        <LegendChip color="var(--accent)" label={t("operations.map.legend_trail")} />
         <LegendChip color="var(--delay-flag)" label={t("operations.map.legend_delay")} />
-        <LegendChip color="#2bc5aa" label={t("operations.map.legend_cluster")} />
+        <LegendChip color="var(--accent)" label={t("operations.map.legend_cluster")} />
       </div>
       {/* States what the markers are, and nothing else: the reading's age is
           the header freshness dot's job, and repeating it here put the same
@@ -55,15 +57,16 @@ export function MapReference({ located, total, t }: {
         <Radio size={13} aria-hidden="true" />
         <span>{t("operations.map.disclosure", { located, total })}</span>
       </p>
-      <button
-        type="button"
-        className="ops-map-ref__hide tip tip--below"
-        data-tip={t("operations.map.reference_hide")}
-        aria-label={t("operations.map.reference_hide")}
-        onClick={() => toggle(false)}
-      >
-        <X size={13} aria-hidden="true" />
-      </button>
+      <Tooltip label={t("operations.map.reference_hide")} placement="bottom">
+        <button
+          type="button"
+          className="ops-map-ref__hide"
+          aria-label={t("operations.map.reference_hide")}
+          onClick={() => toggle(false)}
+        >
+          <X size={13} aria-hidden="true" />
+        </button>
+      </Tooltip>
     </div>
   );
 }

@@ -48,10 +48,10 @@ async def map_client(map_app):
 @pytest.fixture
 async def map_app_ch(map_app, ch_async_client):
     """`map_app` with `app.state.ch_client` wired to a real async ClickHouse
-    client (Task 8: /delays/live, /route-shape, /today/route-summary,
-    /today/route/*/trips and /today/route/*/stop-profile now read live
-    `updates` from ClickHouse instead of Postgres). Tests using this fixture
-    require `make ch-test` / RUN_CH_INTEGRATION=1 (via `ch_async_client`)."""
+    client. /delays/live, /route-shape, /today/route-summary,
+    /today/route/*/trips and /today/route/*/stop-profile read live `updates`
+    from ClickHouse rather than Postgres, so tests using this fixture require
+    `make ch-test` / RUN_CH_INTEGRATION=1 (via `ch_async_client`)."""
     app, agency_id = map_app
     app.state.ch_client = ch_async_client
     yield app, agency_id
@@ -297,7 +297,7 @@ async def test_routes_list_empty(map_client):
     client, agency_id = map_client
     resp = await client.get(f"/api/{agency_id}/routes")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    assert resp.json() == {"rows": []}
 
 
 @pytest.mark.asyncio
@@ -305,7 +305,7 @@ async def test_stops_list_empty(map_client):
     client, agency_id = map_client
     resp = await client.get(f"/api/{agency_id}/stops")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    assert resp.json() == {"rows": []}
 
 
 @pytest.mark.asyncio
@@ -328,16 +328,18 @@ async def test_routes_list_exposes_every_documented_field(map_app):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/routes")
     assert resp.status_code == 200
-    assert resp.json() == [
-        {
-            "route_id": "国道・古川線(1021)",
-            "route_short_name": "1021",
-            "route_long_name": "国道・古川線",
-            # Extracted from the parenthesised tail of route_id.
-            "route_code": "1021",
-            "trip_headsigns": ["古川行"],
-        }
-    ]
+    assert resp.json() == {
+        "rows": [
+            {
+                "route_id": "国道・古川線(1021)",
+                "route_short_name": "1021",
+                "route_long_name": "国道・古川線",
+                # Extracted from the parenthesised tail of route_id.
+                "route_code": "1021",
+                "trip_headsigns": ["古川行"],
+            }
+        ]
+    }
 
 
 @pytest.mark.asyncio
@@ -353,7 +355,7 @@ async def test_stops_list_exposes_every_documented_field(map_app):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/stops")
     assert resp.status_code == 200
-    assert resp.json() == [{"stop_id": "S1", "stop_name": "駅前", "stop_lat": 40.5, "stop_lon": 140.5}]
+    assert resp.json() == {"rows": [{"stop_id": "S1", "stop_name": "駅前", "stop_lat": 40.5, "stop_lon": 140.5}]}
 
 
 @pytest.mark.asyncio
@@ -367,7 +369,7 @@ async def test_stops_list_tolerates_a_stop_with_no_name_or_position(map_app):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/stops")
     assert resp.status_code == 200
-    assert resp.json() == [{"stop_id": "S2", "stop_name": None, "stop_lat": None, "stop_lon": None}]
+    assert resp.json() == {"rows": [{"stop_id": "S2", "stop_name": None, "stop_lat": None, "stop_lon": None}]}
 
 
 @pytest.mark.asyncio
@@ -1177,11 +1179,108 @@ async def test_route_trips_drilldown(map_app_ch, ch_client):
 
 
 @pytest.mark.asyncio
+async def test_route_trips_returns_each_trips_ordered_stops(map_app_ch, ch_client):
+    """The per-trip `stops` list is what a time-distance diagram draws as one
+    polyline, so it must arrive in stop_sequence order with a position on the
+    time axis for every stop that has a scheduled time."""
+    app, agency_id = map_app_ch
+    await _seed_route(
+        app.state.pool,
+        agency_id,
+        "R_MAREY",
+        "平日",
+        [("A", 1, 600, "08:40"), ("A", 2, 540, "08:50"), ("A", 3, 120, "09:00")],
+        ch_client=ch_client,
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_MAREY/trips")
+    body = resp.json()
+    assert body["truncated"] is False
+    assert body["time_band"] == "all"
+    stops = body["trips"][0]["stops"]
+    assert [s["stop_sequence"] for s in stops] == [1, 2, 3]
+    # scheduled_sec falls back to the clock string: this fixture mirrors only
+    # the columns Postgres `updates` has, so ClickHouse's scheduled_sec is NULL.
+    assert stops[0]["scheduled_sec"] == 8 * 3600 + 40 * 60
+    assert stops[0]["delay_sec"] == 600
+    assert stops[0]["observed_sec"] == stops[0]["scheduled_sec"] + 600
+
+
+@pytest.mark.asyncio
+async def test_route_trips_time_band_narrows_to_the_bands_clock_range(map_app_ch, ch_client):
+    """?time_band= filters on scheduled_time exactly like every ranged endpoint,
+    so the diagram's x window and the rows behind it cannot disagree."""
+    app, agency_id = map_app_ch
+    await _seed_route(
+        app.state.pool,
+        agency_id,
+        "R_BAND",
+        "平日",
+        [("EARLY", 1, 600, "08:40"), ("LATE", 1, 300, "13:10")],
+        ch_client=ch_client,
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_BAND/trips?time_band=morning")
+    body = resp.json()
+    assert body["time_band"] == "morning"
+    assert [t["trip_id"] for t in body["trips"]] == ["EARLY"]
+
+
+@pytest.mark.asyncio
+async def test_route_trips_reads_the_requested_jst_day(map_app_ch, ch_client):
+    """?date= names the JST calendar day. The fixture's only day answers; the
+    day before it is a real, in-window date with nothing observed on it."""
+    app, agency_id = map_app_ch
+    await _seed_route(
+        app.state.pool,
+        agency_id,
+        "R_DATE",
+        "平日",
+        [("A", 1, 600, "08:40")],
+        ch_client=ch_client,
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        same_day = await client.get(f"/api/{agency_id}/today/route/R_DATE/trips?date=2026-06-09")
+        day_before = await client.get(f"/api/{agency_id}/today/route/R_DATE/trips?date=2026-06-08")
+    assert same_day.json()["date"] == "2026-06-09"
+    assert [t["trip_id"] for t in same_day.json()["trips"]] == ["A"]
+    assert day_before.json()["date"] == "2026-06-08"
+    assert day_before.json()["trips"] == []
+
+
+@pytest.mark.asyncio
+async def test_route_trips_refuses_a_date_outside_the_scan_window(map_app_ch, ch_client):
+    """A date beyond the probe's own bound resolves to the empty response
+    rather than an unbounded historical scan of a very large table."""
+    app, agency_id = map_app_ch
+    await _seed_route(
+        app.state.pool,
+        agency_id,
+        "R_FAR",
+        "平日",
+        [("A", 1, 600, "08:40")],
+        ch_client=ch_client,
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route/R_FAR/trips?date=2025-01-01")
+    assert resp.status_code == 200
+    assert resp.json()["date"] is None
+    assert resp.json()["trips"] == []
+
+
+@pytest.mark.asyncio
+async def test_route_trips_rejects_a_malformed_date(map_client_ch):
+    client, agency_id = map_client_ch
+    resp = await client.get(f"/api/{agency_id}/today/route/R/trips?date=not-a-day")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_route_trips_empty_when_no_data(map_client_ch):
     client, agency_id = map_client_ch
     resp = await client.get(f"/api/{agency_id}/today/route/NOPE/trips")
     assert resp.status_code == 200
-    assert resp.json() == {"date": None, "trips": []}
+    assert resp.json() == {"date": None, "time_band": "all", "truncated": False, "trips": []}
 
 
 @pytest.mark.asyncio
@@ -1219,17 +1318,15 @@ async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_clie
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route/R_STALE/trips")
     assert resp.status_code == 200
-    assert resp.json() == {"date": None, "trips": []}
+    assert resp.json() == {"date": None, "time_band": "all", "truncated": False, "trips": []}
 
 
 @pytest.mark.asyncio
 async def test_route_stop_profile_empty_when_no_data(map_client_ch):
-    """Characterization test (slice 3 refactor baseline): a fabricated/never-
-    observed route_code resolves to the empty response, mirroring
-    test_route_trips_empty_when_no_data. Added because this branch of
-    route_stop_profile had no direct test before this slice, despite sharing
-    the exact existence-precheck + bounded-probe logic route_trips already
-    covers."""
+    """A fabricated/never-observed route_code resolves to the empty response.
+    route_stop_profile shares route_trips' existence-precheck + bounded-probe
+    logic, so this mirrors test_route_trips_empty_when_no_data to keep both
+    copies of that branch covered."""
     client, agency_id = map_client_ch
     resp = await client.get(f"/api/{agency_id}/today/route/NOPE/stop-profile")
     assert resp.status_code == 200
@@ -1238,12 +1335,10 @@ async def test_route_stop_profile_empty_when_no_data(map_client_ch):
 
 @pytest.mark.asyncio
 async def test_route_stop_profile_excludes_stale_route_beyond_bound(map_app_ch, ch_client):
-    """Characterization test (slice 3 refactor baseline): a route that exists
-    (has an agg_route_daily row) but whose only ClickHouse observations are
-    older than the 30-day bound anchored to the agency's own latest activity
-    must resolve to the empty response, mirroring
-    test_route_trips_excludes_stale_route_beyond_bound. Added because this
-    branch of route_stop_profile had no direct test before this slice."""
+    """A route that exists (has an agg_route_daily row) but whose only
+    ClickHouse observations are older than the 30-day bound anchored to the
+    agency's own latest activity must resolve to the empty response,
+    mirroring test_route_trips_excludes_stale_route_beyond_bound."""
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:

@@ -4,6 +4,11 @@ import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout, useSession } from "../api/auth";
 import { apiDelete, apiGet, apiPut } from "../api/client";
+import { formatDateTime } from "../utils/format";
+import { Card } from "../components/ui/Card";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Section } from "../components/ui/Section";
+import { Toolbar } from "../components/ui/Toolbar";
 
 type SessionRow = {
   sid_prefix: string;
@@ -29,7 +34,7 @@ function LlmKeySection() {
   const qc = useQueryClient();
   const { data: status } = useQuery({
     queryKey: ["myLlmKey"],
-    queryFn: () => apiGet<LlmKeyStatus>("/api/me/llm-key"),
+    queryFn: ({ signal }) => apiGet<LlmKeyStatus>("/api/me/llm-key", { signal }),
   });
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
   const provider = providerOverride ?? status?.provider ?? "gemini";
@@ -64,42 +69,45 @@ function LlmKeySection() {
   });
 
   return (
-    <section style={{ marginBottom: 24 }}>
-      <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("account.llm_key.title")}</h2>
-      <p>
-        {status?.configured
+    <Section
+      title={t("account.llm_key.title")}
+      description={
+        status?.configured
           ? t("account.llm_key.status_own", { provider: status.provider, suffix: status.key_suffix })
-          : t("account.llm_key.status_shared")}
-      </p>
-      <select value={provider} onChange={(e) => setProviderOverride(e.target.value)}>
-        <option value="gemini">Gemini</option>
-        <option value="openai">OpenAI</option>
-      </select>
-      <label>
-        {t("account.llm_key.input_label")}
-        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-      </label>
-      <button onClick={() => save.mutate()} disabled={!apiKey || save.isPending}>
-        {t("account.llm_key.save")}
-      </button>
-      {status?.configured && (
-        <button onClick={() => remove.mutate()} disabled={remove.isPending}>
-          {t("account.llm_key.remove")}
+          : t("account.llm_key.status_shared")
+      }
+    >
+      <Toolbar>
+        <select value={provider} onChange={(e) => setProviderOverride(e.target.value)}>
+          <option value="gemini">Gemini</option>
+          <option value="openai">OpenAI</option>
+        </select>
+        <label>
+          {t("account.llm_key.input_label")}
+          <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+        </label>
+        <button onClick={() => save.mutate()} disabled={!apiKey || save.isPending}>
+          {t("common.save")}
         </button>
-      )}
+        {status?.configured && (
+          <button onClick={() => remove.mutate()} disabled={remove.isPending}>
+            {t("account.llm_key.remove")}
+          </button>
+        )}
+      </Toolbar>
       {saveError && <p role="alert">{saveError}</p>}
       {removeError && <p role="alert">{removeError}</p>}
-    </section>
+    </Section>
   );
 }
 
 /** Self-service profile + active sessions + logout. */
 export function AccountPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { data: session, isLoading } = useSession();
   const { data: sessions } = useQuery({
     queryKey: ["mySessions"],
-    queryFn: () => apiGet<SessionRow[]>("/api/me/sessions"),
+    queryFn: ({ signal }) => apiGet<SessionRow[]>("/api/me/sessions", { signal }),
   });
   const logout = useLogout();
 
@@ -108,31 +116,27 @@ export function AccountPage() {
 
   return (
     <div style={{ maxWidth: 640, margin: "32px auto", padding: 24 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("account.title")}</h1>
-      <section style={{ marginBottom: 24 }}>
-        <div>{session.email}</div>
+      <PageHeader title={t("account.title")} subtitle={session.email} />
+      <Card style={{ marginBottom: 24 }}>
         <div style={{ color: "var(--text-tertiary)" }}>{session.name ?? ""}</div>
-        <div style={{ color: "var(--text-tertiary)", fontSize: 13, marginTop: 4 }}>
+        <div style={{ color: "var(--text-tertiary)", fontSize: "var(--text-sm)", marginTop: 4 }}>
           {t("account.role_label")}: {session.role === "admin" ? t("account.role.admin") : t("account.role.user")}
         </div>
-      </section>
-      <section style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("account.linked_providers")}</h2>
+      </Card>
+      <Section title={t("account.linked_providers")}>
         <ul>{session.identities.map((i) => <li key={i.provider}>{i.provider}</li>)}</ul>
-      </section>
+      </Section>
       <LlmKeySection />
-      <section style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("account.active_sessions")}</h2>
+      <Section title={t("account.active_sessions")}>
         {sessions?.map((s) => (
-          <div key={s.sid_prefix} style={{ padding: 8, background: "var(--surface-1)",
-                                            borderRadius: 4, marginBottom: 4, fontSize: 13 }}>
+          <Card key={s.sid_prefix} style={{ marginBottom: 6, fontSize: "var(--text-sm)" }}>
             <div>{s.user_agent ?? "(unknown UA)"}</div>
             <div style={{ color: "var(--text-tertiary)" }}>
-              {t("account.session_last_seen", { when: new Date(s.last_seen_at).toLocaleString(i18n.language) })}
+              {t("account.session_last_seen", { when: formatDateTime(s.last_seen_at) })}
             </div>
-          </div>
+          </Card>
         ))}
-      </section>
+      </Section>
       <button
         onClick={() => logout.mutate(undefined, { onSuccess: () => (window.location.href = "/") })}
         disabled={logout.isPending}
@@ -142,7 +146,7 @@ export function AccountPage() {
       </button>
       {logout.isError && (
         <div role="alert" style={{ marginTop: 8, padding: 8, background: "var(--surface-2)",
-                                    borderRadius: 4, fontSize: 13, color: "var(--color-danger, #c0392b)" }}>
+                                    borderRadius: 4, fontSize: 13, color: "var(--delay-severe)" }}>
           {t("account.logout_error")}
         </div>
       )}

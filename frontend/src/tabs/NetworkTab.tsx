@@ -1,50 +1,197 @@
-import { useState } from "react";
+import { useRef, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
 import { AsyncSection } from "../components/AsyncSection";
+import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
-import { delayColor } from "../styles/tokens";
+import { PageHeader } from "../components/ui/PageHeader";
+import { delayColor, delayTextColor } from "../styles/tokens";
+import { useCountUp } from "../hooks/useCountUp";
+import { formatNumber } from "../utils/format";
+import { useFlipRows } from "../hooks/useFlipRows";
+import { useCappedList } from "../hooks/useCappedList";
+import { useUrlState } from "../api/useUrlState";
 import type { NetworkAgencyRow } from "../api/types";
+import "./NetworkTab.css";
 
 const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
 
-const card: React.CSSProperties = {
-  padding: "14px 18px",
-  background: "var(--bg-surface)",
-  border: "1px solid var(--border-soft)",
-  borderRadius: 10,
-  marginBottom: 10,
-};
-const cardTop: React.CSSProperties = { display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 10, marginBottom: 8 };
-const rankStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--text-tertiary)", width: 24, flexShrink: 0 };
-const agencyNameStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, flex: "1 1 180px", minWidth: 0 };
-const delayValStyle: React.CSSProperties = { fontSize: 32, fontWeight: 800, letterSpacing: "-0.025em", fontVariantNumeric: "tabular-nums" };
-const delayUnitStyle: React.CSSProperties = { fontSize: 16, fontWeight: 500, color: "var(--text-tertiary)" };
-const onTimeStyle: React.CSSProperties = { fontSize: 12, color: "var(--text-secondary)" };
-const barRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 };
-const barBg: React.CSSProperties = { flex: 1, height: 6, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" };
-const barFill: React.CSSProperties = { height: "100%", borderRadius: 3 };
-const samplesStyle: React.CSSProperties = { fontSize: 11, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
-const secondaryRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--text-tertiary)", marginBottom: 4 };
-const coverageStyle: React.CSSProperties = { fontSize: 11.5, color: "var(--text-tertiary)" };
-const youBadgeStyle: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 600,
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-  padding: "2px 7px",
-  borderRadius: 4,
-  // Solid fill, not --accent-soft — the highlighted card itself uses
-  // --accent-soft as its background, so a soft-tint badge would be
-  // invisible against it.
-  background: "var(--accent)",
-  color: "#ffffff",
-  marginLeft: 8,
-  flexShrink: 0,
-};
+/** Every agency's bar is drawn against this fixed span, never against the
+ *  current maximum: a bar whose axis moves with the data says nothing about
+ *  how one agency compares to another, or to the same agency last week.
+ *  A delay past the top of the axis fills it and keeps its exact figure in
+ *  the value column beside it. */
+const AXIS_MAX_MIN = 6;
+/** The severity threshold the product treats as "late", marked on the axis so
+ *  a bar can be read against it without a legend. */
+const AXIS_MARK_MIN = 5;
+
+/** Worst first, then agencies with no data in range -- ordering by a metric
+ *  puts the rows that need attention where the eye lands first, and a null
+ *  delay is an absence of evidence, not a good result. */
+function byDelayDescending(a: NetworkAgencyRow, b: NetworkAgencyRow): number {
+  if (a.avg_delay_min == null) return b.avg_delay_min == null ? 0 : 1;
+  if (b.avg_delay_min == null) return -1;
+  return b.avg_delay_min - a.avg_delay_min;
+}
+
+/** The schedule version is only known for some agencies; with none there is
+ *  nothing to describe, so the value renders bare rather than behind an empty
+ *  bubble.
+ *
+ *  Pointer-only, like the `title` it replaces: the value is a metric, not a
+ *  control, and giving a non-interactive element a tab stop to reach a
+ *  tooltip trades one accessibility problem for another. */
+function ScheduleVersionTooltip({
+  label,
+  children,
+}: {
+  label: string | null;
+  children: ReactElement;
+}) {
+  if (label == null) return children;
+  return <Tooltip label={label}>{children}</Tooltip>;
+}
+
+/** A dedicated component (not inlined in the row, which is rendered from a
+ *  `.map()` callback) -- `useCountUp` is a hook, and a hook cannot be called
+ *  from inside a loop callback. Animates the per-agency figure toward a new
+ *  average whenever the range/filters change and the network summary
+ *  refetches. */
+function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
+  const { t } = useTranslation();
+  const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1, entrance: false });
+  if (avgDelayMin == null) return <>—</>;
+  return (
+    <span style={{ color: delayTextColor(avgDelayMin) }}>
+      {avgDelayMin >= 0 ? "+" : ""}
+      {displayed.toFixed(1)}
+      <span className="network-row__unit">{t("network.delay_unit")}</span>
+    </span>
+  );
+}
+
+function AgencyRow({
+  agency,
+  isCurrent,
+  weightedView,
+  linkSuffix,
+}: {
+  agency: NetworkAgencyRow;
+  isCurrent: boolean;
+  weightedView: boolean;
+  linkSuffix: string;
+}) {
+  const { t } = useTranslation();
+  const a = agency;
+  const displayedOnTimePct = weightedView ? a.weighted_on_time_pct : a.on_time_pct;
+  const axisPct =
+    a.avg_delay_min == null ? 0 : Math.min(Math.max(a.avg_delay_min, 0) / AXIS_MAX_MIN, 1) * 100;
+  const coverage =
+    a.data_to == null
+      ? t("network.no_data_in_range")
+      : `${a.data_from} ${t("common.range_separator")} ${a.data_to}`;
+
+  return (
+    <div
+      className={`network-row${isCurrent ? " network-row--current" : ""}`}
+      data-flip-key={String(a.agency_id)}
+      data-testid="network-row"
+    >
+      <span className="network-row__name">
+        <Tooltip label={t("network.view_agency", { name: a.agency_name })}>
+          <Link to={`/agencies/${a.agency_id}/operations${linkSuffix}`}>{a.agency_name}</Link>
+        </Tooltip>
+        {isCurrent && (
+          <span data-testid="you-badge" className="network-row__you">
+            {t("network.you_badge")}
+          </span>
+        )}
+        <span className="network-row__sub">{coverage}</span>
+      </span>
+
+      <span className="network-row__value num" aria-label={t("network.col_avg_delay")}>
+        <AgencyDelayFigure avgDelayMin={a.avg_delay_min} />
+      </span>
+
+      {/* Decorative: the figure it encodes is already text in the column to
+          its left, so a second announcement would only repeat it. */}
+      <div className="network-row__axis" aria-hidden="true">
+        <div
+          className="network-row__axis-fill"
+          data-testid="network-axis-fill"
+          style={{
+            width: `${axisPct}%`,
+            background: a.avg_delay_min == null ? "transparent" : delayColor(a.avg_delay_min),
+          }}
+        />
+        <span
+          className="network-row__axis-mark"
+          style={{ left: `${(AXIS_MARK_MIN / AXIS_MAX_MIN) * 100}%` }}
+        />
+      </div>
+
+      <span
+        className="network-row__secondary num"
+        aria-label={weightedView ? t("network.col_on_time_weighted") : t("network.col_on_time")}
+      >
+        {displayedOnTimePct == null
+          ? "—"
+          : `${displayedOnTimePct.toFixed(1)}%${weightedView ? t("network.on_time_weighted_suffix") : ""}`}
+      </span>
+
+      <div className="network-row__meta">
+        <span>
+          {t("network.col_delivered")}{" "}
+          {a.service_delivered_pct == null ? "—" : `${a.service_delivered_pct.toFixed(1)}%`}
+        </span>
+        <ScheduleVersionTooltip
+          label={
+            a.static_version_id
+              ? t("network.schedule_version_title", { version: a.static_version_id })
+              : null
+          }
+        >
+          <span>
+            {t("network.col_vehicle_km_delivered")}{" "}
+            {a.vehicle_km_delivered_pct != null
+              ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
+              : a.planned_trip_count != null
+                ? t("network.planned_trip_count_fallback", {
+                    count: formatNumber(a.planned_trip_count),
+                  })
+                : "—"}
+          </span>
+        </ScheduleVersionTooltip>
+        <span>
+          {t("network.col_samples")} {formatNumber(a.samples)}
+        </span>
+        {a.clamp_pct != null && a.clamp_pct > CLAMP_NOTABLE_PCT && (
+          <span>
+            <span data-testid="clamp-dot" aria-hidden className="network-row__clamp-dot">
+              ●
+            </span>
+            {a.clamp_pct.toFixed(2)}%
+          </span>
+        )}
+        {a.is_stale && (
+          <Tooltip label={t("network.help_freshness")}>
+            <span
+              className="network-row__stale"
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain badge, not a control; keyboard-focusable only so the tooltip explaining staleness is reachable
+              tabIndex={0}
+            >
+              {t("network.stale_badge")}
+            </span>
+          </Tooltip>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function NetworkTab() {
   const { t, i18n } = useTranslation();
@@ -52,7 +199,9 @@ export function NetworkTab() {
   const currentAgencyId = agencyId ? Number(agencyId) : null;
   const [ctx, update] = useRangeContext();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
-  const [showRidershipWeighted, setShowRidershipWeighted] = useState(false);
+  const [ridershipWeightedParam, setRidershipWeightedParam] = useUrlState<"1" | "0">("ridership_weighted", "0");
+  const showRidershipWeighted = ridershipWeightedParam === "1";
+  const rowsRef = useRef<HTMLDivElement | null>(null);
 
   // Absent (not just unchecked) whenever NO agency in the current list has a
   // manually-configured ridership weight -- a toggle that flips to a view
@@ -60,160 +209,27 @@ export function NetworkTab() {
   const ridershipWeightingAvailable = data?.agencies.some((a) => a.has_ridership_weights) ?? false;
 
   // Carry the full current range into each agency's Overview, matching how
-  // Sidebar/ReportsTab build agency links (proper encoding; "all" dims omitted).
+  // Sidebar/AnalysisTab build agency links (proper encoding; "all" dims omitted).
   const filterQS = ctxToQueryString(ctx);
   const suffix = filterQS ? `?${filterQS}` : "";
 
-  const maxDelay =
-    data && data.agencies.length > 0
-      ? Math.max(...data.agencies.map((a) => a.avg_delay_min ?? 0))
-      : 0;
-
-  function renderCard(a: NetworkAgencyRow, index: number) {
-    const showFeedFlag = a.clamp_pct != null && a.clamp_pct > CLAMP_NOTABLE_PCT;
-    const showFreshnessFlag = a.is_stale;
-    const isCurrent = currentAgencyId != null && a.agency_id === currentAgencyId;
-    // Falls back to this agency's own unweighted on_time_pct when the
-    // toggle is on but THIS agency has no configured weight -- never blocks
-    // rendering, just can't show a weighted figure that doesn't exist.
-    const isWeightedView = showRidershipWeighted && a.has_ridership_weights;
-    const displayedOnTimePct = isWeightedView ? a.weighted_on_time_pct : a.on_time_pct;
-    return (
-      <div
-        className="network-card"
-        key={a.agency_id}
-        style={
-          isCurrent
-            ? { ...card, borderColor: "var(--accent)", background: "var(--accent-soft)" }
-            : card
-        }
-      >
-          <div className="network-card-top" style={cardTop}>
-          <span style={rankStyle}>#{index + 1}</span>
-          <Link
-            to={`/agencies/${a.agency_id}/overview${suffix}`}
-            title={t("network.view_agency", { name: a.agency_name })}
-            style={{ ...agencyNameStyle, color: "var(--accent)", textDecoration: "none" }}
-          >
-            {a.agency_name}
-          </Link>
-          {isCurrent && <span data-testid="you-badge" style={youBadgeStyle}>{t("network.you_badge")}</span>}
-        </div>
-          <div className="network-card-metrics">
-            <div className="network-card-metric network-card-metric--delay">
-              <span className="network-card-metric-label">{t("network.col_avg_delay")}</span>
-              <div style={delayValStyle} aria-label={t("network.col_avg_delay")}>
-              {a.avg_delay_min == null ? (
-                "—"
-              ) : (
-                <span style={{ color: delayColor(a.avg_delay_min) }}>
-                  {a.avg_delay_min >= 0 ? "+" : ""}
-                  {a.avg_delay_min.toFixed(1)}
-                  <span style={delayUnitStyle}>{t("network.delay_unit")}</span>
-                </span>
-              )}
-              </div>
-            </div>
-            <div className="network-card-metric">
-              <span className="network-card-metric-label">{t("network.col_on_time")}</span>
-              <div
-              style={onTimeStyle}
-              aria-label={isWeightedView ? t("network.col_on_time_weighted") : t("network.col_on_time")}
-            >
-              {displayedOnTimePct == null
-                ? "—"
-                : `${displayedOnTimePct.toFixed(1)}%${isWeightedView ? t("network.on_time_weighted_suffix") : ""}`}
-              </div>
-            </div>
-            <div className="network-card-metric">
-              <span className="network-card-metric-label">{t("network.col_delivered")}</span>
-              <div style={onTimeStyle} aria-label={t("network.col_delivered")}>
-                {a.service_delivered_pct == null ? "—" : `${a.service_delivered_pct.toFixed(1)}%`}
-              </div>
-            </div>
-            <div className="network-card-metric">
-              <span className="network-card-metric-label">{t("network.col_vehicle_km_delivered")}</span>
-              <div
-              style={onTimeStyle}
-              aria-label={t("network.col_vehicle_km_delivered")}
-              title={a.static_version_id ? t("network.schedule_version_title", { version: a.static_version_id }) : undefined}
-            >
-              {a.vehicle_km_delivered_pct != null
-                ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
-                : a.planned_trip_count != null
-                  ? t("network.planned_trip_count_fallback", { count: a.planned_trip_count.toLocaleString() })
-                  : "—"}
-              </div>
-            </div>
-          </div>
-          <div className="network-card-bar" style={barRow}>
-          <div style={barBg}>
-            <div
-              style={{
-                ...barFill,
-                width: a.avg_delay_min != null && maxDelay > 0 ? `${(a.avg_delay_min / maxDelay) * 100}%` : "0%",
-                background: a.avg_delay_min == null ? "transparent" : delayColor(a.avg_delay_min),
-              }}
-            />
-          </div>
-          <span style={samplesStyle}>{a.samples.toLocaleString()}</span>
-        </div>
-        {(showFeedFlag || showFreshnessFlag) && (
-          <div style={secondaryRow}>
-            {showFeedFlag && (
-              <span>
-                <span data-testid="clamp-dot" aria-hidden style={{ color: "var(--error-fg)", marginRight: 4 }}>●</span>
-                {a.clamp_pct!.toFixed(2)}%
-              </span>
-            )}
-            {showFreshnessFlag && (
-              <span title={t("network.help_freshness")} style={{ background: "var(--error-bg)", color: "var(--error-fg)", padding: "2px 8px", borderRadius: 4 }}>
-                {t("network.stale_badge")}
-              </span>
-            )}
-          </div>
-        )}
-        <div style={coverageStyle}>
-          {a.data_to == null ? t("network.no_data_in_range") : `${a.data_from} ${t("common.range_separator")} ${a.data_to}`}
-        </div>
-      </div>
-    );
-  }
+  const ordered = data ? [...data.agencies].sort(byDelayDescending) : [];
+  // Whatever can change the order: the sorted identity itself. Cheap to build
+  // and exact, where a data revision counter would also fire on a refetch that
+  // changed nothing.
+  const orderSignal = ordered.map((a) => a.agency_id).join(",");
+  useFlipRows(rowsRef, orderSignal);
+  const cappedAgencies = useCappedList(ordered, 200, data?.agencies);
 
   return (
-    <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <style>{`
-        .network-card { transition: background var(--transition); }
-        .network-card:hover { background: var(--bg-soft); }
-        .network-card a:hover { text-decoration: underline; }
-        .network-card-top > div { min-width: 0; }
-        .network-card-bar { min-width: 0; }
-        .network-card-metrics { display: grid; grid-template-columns: 1.35fr repeat(3, 1fr); gap: 8px; min-width: 0; margin: 14px 0 16px; }
-        .network-card-metric { min-width: 0; padding: 10px 12px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); text-align: left; }
-        .network-card-metric--delay { background: var(--accent-soft); border-color: var(--accent); }
-        .network-card-metric-label { display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
-        .network-card-metric--delay > div { font-size: 28px !important; line-height: 1; }
-        .network-card-metric--delay .network-card-metric-label { color: var(--text-primary); }
-        @media (max-width: 720px) { .network-card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-        .network-help { max-width: 640px; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
-        .network-howto { max-width: 680px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-        .network-howto summary { display: inline-flex; padding: 4px 0; font-size: 13px; font-weight: 600; }
-        .network-howto-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
-        .network-howto-list li { min-width: 0; padding: 9px 10px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); }
-        .network-howto-list strong { display: block; margin-bottom: 2px; color: var(--text-primary); font-size: 12px; }
-        @media (max-width: 720px) { .network-howto-list { grid-template-columns: 1fr; } }
-      `}</style>
-      <div style={{ fontSize: 12, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
-        {t("network.eyebrow", { from: ctx.from, to: ctx.to })}
-      </div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 22, margin: "4px 0 8px" }}>
-        {t("network.title")}
-      </h1>
-      <p className="network-help" style={{ margin: "0 0 12px" }}>
-        {t("network.help")}
-      </p>
+    <div className="network-page">
+      <PageHeader
+        eyebrow={t("network.eyebrow", { from: ctx.from, to: ctx.to })}
+        title={t("network.title")}
+        subtitle={t("network.help")}
+      />
       <details className="network-howto" style={{ marginBottom: 16 }}>
-        <summary style={{ cursor: "pointer", color: "var(--accent)" }}>{t("network.howto_title")}</summary>
+        <summary>{t("network.howto_title")}</summary>
         <ul className="network-howto-list">
           <li><strong>{t("network.col_avg_delay")}</strong> — {t("network.help_avg_delay")}</li>
           <li><strong>{t("network.col_on_time")}</strong> — {t("network.help_on_time")}</li>
@@ -229,7 +245,7 @@ export function NetworkTab() {
         </ul>
       </details>
 
-      <div style={{ display: "flex", gap: 16, marginBottom: 20, fontSize: 13, color: "var(--text-secondary)" }}>
+      <div className="network-controls">
         <label>
           {t("network.from")}{" "}
           <input type="date" lang={i18n.language} value={ctx.from} max={ctx.to} onChange={(e) => update({ from: e.target.value })} />
@@ -239,19 +255,27 @@ export function NetworkTab() {
           <input type="date" lang={i18n.language} value={ctx.to} min={ctx.from} onChange={(e) => update({ to: e.target.value })} />
         </label>
         {ridershipWeightingAvailable && (
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <label>
             <input
               type="checkbox"
               data-testid="ridership-weighted-toggle"
               checked={showRidershipWeighted}
-              onChange={(e) => setShowRidershipWeighted(e.target.checked)}
+              onChange={(e) => setRidershipWeightedParam(e.target.checked ? "1" : "0")}
             />
             {t("network.ridership_weighted_toggle")}
           </label>
         )}
       </div>
 
-      {data && <DefinitionMetaBlock definition={data.definition} />}
+      {/* Behind a disclosure: the aggregation rules are what you check once a
+          comparison has raised a question, not what you read before making
+          one. */}
+      {data && (
+        <details className="network-definition" style={{ marginBottom: 12 }}>
+          <summary>{t("network.definition_disclosure")}</summary>
+          <DefinitionMetaBlock definition={data.definition} />
+        </details>
+      )}
 
       <AsyncSection
         loading={isPending}
@@ -262,9 +286,32 @@ export function NetworkTab() {
         empty={<p style={{ color: "var(--text-secondary)" }}>{t("network.empty")}</p>}
         skeleton={<Skeleton height={320} />}
       >
-        {(summary) => (
-          <div data-testid="network-card-list">
-            {summary.agencies.map((a, i) => renderCard(a, i))}
+        {() => (
+          <div className="network-rows" data-testid="network-card-list" ref={rowsRef}>
+            <div className="network-row network-row--head" aria-hidden="true">
+              <span>{t("network.col_agency")}</span>
+              <span style={{ textAlign: "right" }}>{t("network.col_avg_delay")}</span>
+              <span>{t("network.axis_caption", { max: AXIS_MAX_MIN })}</span>
+              <span style={{ textAlign: "right" }}>{t("network.col_on_time")}</span>
+            </div>
+            {cappedAgencies.visible.map((a) => (
+              <AgencyRow
+                key={a.agency_id}
+                agency={a}
+                isCurrent={currentAgencyId != null && a.agency_id === currentAgencyId}
+                // Falls back to this agency's own unweighted on_time_pct when
+                // the toggle is on but THIS agency has no configured weight --
+                // never blocks rendering, just can't show a weighted figure
+                // that doesn't exist.
+                weightedView={showRidershipWeighted && a.has_ridership_weights}
+                linkSuffix={suffix}
+              />
+            ))}
+            {cappedAgencies.remaining > 0 && (
+              <button type="button" className="btn-ghost" onClick={cappedAgencies.showMore}>
+                {t("common.show_more", { count: cappedAgencies.remaining })}
+              </button>
+            )}
           </div>
         )}
       </AsyncSection>

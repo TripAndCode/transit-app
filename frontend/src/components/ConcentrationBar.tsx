@@ -1,4 +1,3 @@
-// frontend/src/components/ConcentrationBar.tsx
 import { useTranslation } from "react-i18next";
 
 import type { OverviewConcentration, OverviewMovers } from "../api/types";
@@ -131,7 +130,7 @@ export function ConcentrationBar({
             </div>
             <div className="ov-pareto-track">
               <div
-                className="ov-pareto-fill ov-anim-grow-x"
+                className="ov-pareto-fill"
                 style={{
                   width: `${r.share_pct}%`,
                   background: "var(--trend-bad)",

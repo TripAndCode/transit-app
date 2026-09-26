@@ -39,16 +39,16 @@ import clickhouse_connect
 from fastapi import HTTPException
 
 from api.range import RangeCtx
+from pipeline.flags import flag
 from pipeline.query.hallucination_guard import verify_numeric_claims
 from pipeline.query.intent import IntentSignature, canonicalize, derive_confidence, signature_hash
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, get_client
+from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, describe_provider_failure, get_client
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
-    LOCALE_LANGUAGE_NAME,
     SYSTEM_PROMPT,
     TOOLS,
     ToolResult,
@@ -63,7 +63,7 @@ _log = logging.getLogger(__name__)
 
 def _cache_enabled() -> bool:
     """Return True when the intent-cache feature flag is on."""
-    return os.environ.get("ASK_INTENT_CACHE_ENABLED", "false").lower() in ("1", "true", "yes")
+    return flag("ask_intent_cache_enabled", False)
 
 
 def _allowed_providers() -> set[str] | None:
@@ -485,11 +485,11 @@ async def chat_with_tools(
             return None, "rate_limit"
         except BadRequestError:
             return None, "bad_request"
-        except Exception:
+        except Exception as exc:
+            _log.warning("chat: BYOK completion failed (%s)", describe_provider_failure(exc))
             return None, "unexpected"
 
-    language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
-    locale_addendum = f"Respond in {language_name}. " + _chat_str("locale_instruction", locale)
+    locale_addendum = _chat_str("locale_instruction", locale)
     # Normalize once so leading/trailing whitespace doesn't cause cache misses
     # or visible prompt differences; downstream uses (prompt, cache key, log) all
     # benefit. The frontend keeps its own copy of the user's raw input.
