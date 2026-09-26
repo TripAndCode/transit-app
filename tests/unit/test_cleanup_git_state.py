@@ -378,6 +378,24 @@ def test_review_worktrees_survive_their_pr_merging(repository: Path, monkeypatch
     assert review_path.exists()
 
 
+def merge_from_another_clone(tmp_path: Path, branch: str, number: int) -> str:
+    """Extend a pushed branch elsewhere, record it as PR ``number``'s head, and delete the branch.
+
+    Leaves the PR head reachable only through ``refs/pull/<number>/head`` on the remote,
+    the state a squash merge leaves behind once GitHub deletes the head branch.
+    """
+
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", str(tmp_path / "remote.git"), str(other))
+    git(other, "config", "user.name", "Cleanup Test")
+    git(other, "config", "user.email", "cleanup@example.com")
+    git(other, "switch", "-q", branch)
+    pr_head = commit_on(other, "second half")
+    git(other, "push", "-q", "origin", f"{pr_head}:refs/pull/{number}/head")
+    git(other, "push", "-q", "origin", "--delete", branch)
+    return pr_head
+
+
 def test_a_pre_merge_snapshot_is_proven_by_fetching_the_pr_head(
     repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -387,14 +405,7 @@ def test_a_pre_merge_snapshot_is_proven_by_fetching_the_pr_head(
     snapshot = commit_on(repository, "first half")
     git(repository, "switch", "-q", "main")
     git(repository, "push", "-q", "origin", "feature")
-    other = tmp_path / "other"
-    git(tmp_path, "clone", "-q", str(tmp_path / "remote.git"), str(other))
-    git(other, "config", "user.name", "Cleanup Test")
-    git(other, "config", "user.email", "cleanup@example.com")
-    git(other, "switch", "-q", "feature")
-    pr_head = commit_on(other, "second half")
-    git(other, "push", "-q", "origin", f"{pr_head}:refs/pull/7/head")
-    git(other, "push", "-q", "origin", "--delete", "feature")
+    pr_head = merge_from_another_clone(tmp_path, "feature", 7)
     missing = subprocess.run(("git", "-C", str(repository), "cat-file", "-e", pr_head), capture_output=True)
     assert missing.returncode != 0
     merged = cleanup.PullRequest(7, "MERGED", pr_head)
@@ -417,14 +428,7 @@ def test_a_detached_pre_merge_snapshot_is_proven_after_its_branch_is_gone(
     snapshot = commit_on(repository, "first half")
     git(repository, "switch", "-q", "main")
     git(repository, "push", "-q", "origin", "feature")
-    other = tmp_path / "other"
-    git(tmp_path, "clone", "-q", str(tmp_path / "remote.git"), str(other))
-    git(other, "config", "user.name", "Cleanup Test")
-    git(other, "config", "user.email", "cleanup@example.com")
-    git(other, "switch", "-q", "feature")
-    pr_head = commit_on(other, "second half")
-    git(other, "push", "-q", "origin", f"{pr_head}:refs/pull/7/head")
-    git(other, "push", "-q", "origin", "--delete", "feature")
+    pr_head = merge_from_another_clone(tmp_path, "feature", 7)
     git(repository, "branch", "-qD", "feature")
     snapshot_path = tmp_path / "snapshot"
     git(repository, "worktree", "add", "-q", "--detach", str(snapshot_path), snapshot)
@@ -437,6 +441,56 @@ def test_a_detached_pre_merge_snapshot_is_proven_after_its_branch_is_gone(
     assert decision.action == "delete"
     assert "ancestor of merged PR #7" in decision.reason
     assert git(repository, "for-each-ref", "refs/pull") == ""
+
+
+def test_a_renamed_pre_merge_snapshot_is_proven_after_its_pr_branch_is_gone(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """No PR is named after the local branch, so it too pulls in every missing merged head."""
+
+    git(repository, "switch", "-qc", "local-name")
+    snapshot = commit_on(repository, "first half")
+    git(repository, "switch", "-q", "main")
+    git(repository, "push", "-q", "origin", "local-name:feature")
+    pr_head = merge_from_another_clone(tmp_path, "feature", 7)
+    merged = cleanup.PullRequest(7, "MERGED", pr_head)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {"feature": (merged,)})
+
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    decision = next(d for d in plan if d.branch == "local-name")
+
+    assert decision.action == "delete"
+    assert "ancestor of merged PR #7" in decision.reason
+    assert decision.head == snapshot
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({}, True),
+        ({"named": (cleanup.PullRequest(3, "CLOSED", "c" * 40),)}, True),
+        ({"branch": "production"}, False),
+        ({"in_base": True}, False),
+        ({"head": "e" * 40}, False),
+        ({"named": (cleanup.PullRequest(4, "OPEN", "c" * 40),)}, False),
+        ({"named": (cleanup.PullRequest(5, "MERGED", "c" * 40),)}, False),
+    ],
+)
+def test_only_branches_naming_no_candidate_pr_fetch_every_missing_head(overrides: dict[str, object], expected: bool):
+    """Open, merged-by-name, protected, in-base, and exact-head branches never widen the fetch."""
+
+    values: dict[str, object] = {
+        "branch": "local-name",
+        "head": "a" * 40,
+        "in_base": False,
+        "protected": {"main", "production"},
+        "named": (),
+        "merged_heads": {"e" * 40},
+    }
+    values.update(overrides)
+    branch, head = values.pop("branch"), values.pop("head")
+
+    assert cleanup.branch_needs_merged_evidence(branch, head, **values) is expected
 
 
 def test_a_changed_tip_is_retained_when_the_pr_head_cannot_be_fetched(

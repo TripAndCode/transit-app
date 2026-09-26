@@ -398,6 +398,25 @@ def fetch_pull_heads(repo: Path, remote: str, numbers: Iterable[int]) -> None:
     )
 
 
+def branch_needs_merged_evidence(
+    branch: str,
+    head: str,
+    *,
+    in_base: bool,
+    protected: Container[str],
+    named: Sequence[PullRequest],
+    merged_heads: Container[str],
+) -> bool:
+    """Whether a branch no open or merged PR is named after could only be proven disposable as a pre-merge snapshot."""
+
+    return (
+        branch not in protected
+        and not in_base
+        and head not in merged_heads
+        and not any(pr.state in ("OPEN", "MERGED") for pr in named)
+    )
+
+
 def needs_merged_evidence(repo: Path, worktree: Worktree, base: str, merged_heads: Container[str]) -> bool:
     """Whether a detached worktree could only be proven disposable as a pre-merge snapshot."""
 
@@ -482,9 +501,11 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
         for pr in headed:
             if pr.state == "MERGED":
                 merged_numbers.setdefault(oid, set()).add(pr.number)
+    in_base = {branch: is_ancestor(repo, branch, base) for branch in branches}
     # A merged PR head that differs from a local tip may be a later state of it;
-    # fetch missing heads so ancestry can prove a pre-merge snapshot. A branch
-    # names its candidate PRs; a detached HEAD names none, so it needs them all.
+    # fetch missing heads so ancestry can prove a pre-merge snapshot. A branch named
+    # after a merged PR names its candidates; a renamed branch or a detached HEAD
+    # names none, so it needs them all.
     present = present_commits(repo, sorted(merged_numbers))
     missing = {oid: numbers for oid, numbers in merged_numbers.items() if oid not in present}
     wanted = {
@@ -493,7 +514,20 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
         for pr in pull_requests.get(branch, ())
         if pr.state == "MERGED" and pr.head_oid in missing and pr.head_oid != head
     }
-    if missing and any(needs_merged_evidence(repo, worktree, base, merged_numbers) for worktree in worktrees):
+    if missing and (
+        any(
+            branch_needs_merged_evidence(
+                branch,
+                head,
+                in_base=in_base[branch],
+                protected=protected,
+                named=pull_requests.get(branch, ()),
+                merged_heads=merged_numbers,
+            )
+            for branch, head in branches.items()
+        )
+        or any(needs_merged_evidence(repo, worktree, base, merged_numbers) for worktree in worktrees)
+    ):
         wanted.update(number for numbers in missing.values() for number in numbers)
     if wanted:
         fetch_pull_heads(repo, remote, wanted)
@@ -523,7 +557,7 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
                     head=head,
                     protected=branch in protected,
                     current=worktree is not None and worktree.path == current_path,
-                    ancestor_of_base=is_ancestor(repo, branch, base),
+                    ancestor_of_base=in_base[branch],
                     tree_matches_base=tree_of(f"refs/heads/{branch}") == base_tree,
                     pull_requests=pull_requests.get(branch, ()),
                     worktree=worktree,
