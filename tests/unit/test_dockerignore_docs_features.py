@@ -73,19 +73,28 @@ def test_dockerfile_python_minor_matches_ci():
 
     Every workflow pin is checked, not only ci.yml's: the nightly and Ask-eval
     jobs run the same code, and a base-image bump that touches only the
-    Dockerfile would otherwise leave them on the old interpreter unnoticed.
+    Dockerfile would otherwise leave them on the old interpreter unnoticed. A
+    pin this guard cannot read, such as a matrix list or an expression, fails
+    rather than being skipped.
     """
     dockerfile = (_REPO_ROOT / "Dockerfile").read_text()
     image_version = re.search(r"^FROM python:(\d+\.\d+)", dockerfile, re.MULTILINE)
     assert image_version, "Dockerfile has no `FROM python:<major>.<minor>` runtime stage"
 
     pins = [
-        (workflow.name, version)
+        (workflow.name, value.strip())
         for workflow in sorted((_REPO_ROOT / ".github/workflows").glob("*.y*ml"))
-        for version in re.findall(r"""python-version:\s*["']?(\d+\.\d+)""", workflow.read_text())
+        for value in re.findall(r"python-version:(.*)", workflow.read_text())
     ]
     assert any(name == "ci.yml" for name, _ in pins), "ci.yml no longer declares a python-version"
-    stale = [(name, version) for name, version in pins if version != image_version.group(1)]
+    literal = re.compile(r"""["']?(\d+\.\d+)["']?\s*(?:#.*)?""")
+    unreadable = [(name, value) for name, value in pins if not literal.fullmatch(value)]
+    assert not unreadable, f"python-version must be a literal <major>.<minor> for this guard to read it: {unreadable}"
+    stale = [
+        (name, value)
+        for name, value in pins
+        if (match := literal.fullmatch(value)) and match.group(1) != image_version.group(1)
+    ]
     assert not stale, (
         f"Dockerfile runs the API on Python {image_version.group(1)} but these workflows "
         f"pin another minor: {stale}; the image would ship a runtime those runs never exercised"
