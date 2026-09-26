@@ -8,11 +8,9 @@
   color: var(--text-primary);
 }
 
-/* The hero is always dark (it carries `.theme-scope-dark`, see global.css)
-   because the night-map scene is built for a dark ground; the rest of the
-   page follows the visitor's theme. Height is a viewport-relative floor so
-   the scene reads as a scene, capped so a tall screen does not strand the
-   headline; the content column can still grow it. */
+/* Height is a viewport-relative floor so the map reads as a scene, capped so
+   a tall screen does not strand the headline; the content column can still
+   grow it. */
 .landing-hero {
   position: relative;
   min-height: clamp(560px, 82vh, 780px);
@@ -29,27 +27,17 @@
   height: 100%;
 }
 
-/* Radial edge vignette: fades the scene toward the page background at the
-   hero's outer edges. */
-.landing-hero__vignette {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse at center, transparent 40%, var(--bg-page) 100%);
-  pointer-events: none;
-}
-
-/* Dark horizontal gradient band behind the text column -- keeps the
-   headline/subhead/CTA legible regardless of what the animated scene is
-   doing underneath, independent of the vignette above (that fades the
-   scene's outer edges; this specifically shields the text). */
+/* Page-colored band behind the text column -- keeps the headline, subhead
+   and CTA legible whatever the map is doing underneath. It fades out before
+   the map's focal band and the panel (LiveMapHero keeps those right of ~48%). */
 .landing-hero__scrim {
   position: absolute;
   inset: 0;
   background: linear-gradient(
     to right,
     var(--bg-page) 0%,
-    color-mix(in srgb, var(--bg-page) 82%, transparent) 46%,
-    transparent 76%
+    color-mix(in srgb, var(--bg-page) 88%, transparent) 36%,
+    transparent 52%
   );
   pointer-events: none;
 }

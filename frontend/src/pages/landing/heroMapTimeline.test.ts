@@ -1,63 +1,85 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { buildHeroMap } from "./heroMapScene";
-import { SEQUENCE_END, cameraForTime, frameAt } from "./heroMapTimeline";
+import { TRIPS } from "./heroMapScene";
+import { DURATION, LOOP_START, frameAt, type HeroFrame } from "./heroMapTimeline";
 
-const towerCount = buildHeroMap().towers.length;
-const allTowers = (t: number) => Array.from({ length: towerCount }, (_, i) => frameAt(t).towerGrowth(i));
+const kinds = (f: HeroFrame) => f.sections.map((s) => s.kind);
+const settled = (f: HeroFrame) => f.sections.filter((s) => s.enter === 1 && s.exit === 0).map((s) => s.kind);
 
 describe("frameAt", () => {
-  it("opens on an empty map: no routes, towers, callout or caption yet", () => {
+  it("opens on the map alone: no dots, no panel, no caption", () => {
     const f = frameAt(0);
-    expect(f.routeProgress(0)).toBe(0);
-    expect(allTowers(0).every((g) => g === 0)).toBe(true);
-    expect(f.calloutAlpha).toBe(0);
+    expect(TRIPS.every((tp) => f.tripAppear(tp.id) === 0)).toBe(true);
+    expect(f.panelEnter).toBe(0);
+    expect(f.sections).toHaveLength(0);
     expect(f.caption).toBeNull();
   });
 
-  it("plays the acts in order: routes, then delay tint and callout, then towers", () => {
-    expect(frameAt(4.4).routeProgress(0)).toBe(1);
-    expect(frameAt(4.4).delayTint).toBe(0);
-    expect(frameAt(7.5).calloutAlpha).toBe(1);
-    expect(allTowers(7.5).every((g) => g === 0)).toBe(true);
-    expect(frameAt(9.5).calloutAlpha).toBe(0);
-    expect(allTowers(9.5).some((g) => g > 0)).toBe(true);
+  it("plays live operations → trip → playback → overview → live, in that order", () => {
+    expect(settled(frameAt(4.2))).toEqual(["queue"]);
+    expect(settled(frameAt(7.0))).toEqual(["trip"]);
+    expect(settled(frameAt(11.5))).toEqual(["hourly"]);
+    expect(settled(frameAt(15.0))).toEqual(["overview"]);
+    expect(settled(frameAt(18.5))).toEqual(["queue"]);
   });
 
-  it("shows one caption per act", () => {
-    expect(frameAt(3).caption?.index).toBe(0);
-    expect(frameAt(6).caption?.index).toBe(1);
-    expect(frameAt(10.5).caption?.index).toBe(2);
+  it("hands each panel section to the next without a gap", () => {
+    for (let t = 2.4; t < DURATION; t += 0.05) expect(kinds(frameAt(t)).length).toBeGreaterThan(0);
   });
 
-  it("holds the finished state after the script instead of looping back", () => {
-    for (const t of [SEQUENCE_END + 5, SEQUENCE_END + 600]) {
+  it("flies the trail into the trip chart only while the trip section is up", () => {
+    for (const t of [6.9, 7.3, 7.7]) {
       const f = frameAt(t);
-      expect(allTowers(t).every((g) => g === 1)).toBe(true);
-      expect(f.routeProgress(5)).toBe(1);
-      expect(f.towerLabelAlpha).toBe(1);
-      expect(f.caption).toBeNull();
+      expect(f.trailMorph).toBeGreaterThan(0);
+      expect(f.trailMorph).toBeLessThan(1);
+      expect(settled(f)).toContain("trip");
     }
   });
 
-  it("draws a complete scene for the reduced-motion still", () => {
-    const f = frameAt(SEQUENCE_END);
-    expect(allTowers(SEQUENCE_END).every((g) => g === 1)).toBe(true);
-    expect(f.towerLabelAlpha).toBe(1);
-    expect(f.legendAlpha).toBe(1);
+  it("flies the rail's hours into the bars only during playback", () => {
+    const f = frameAt(10.4);
+    expect(f.hourMorph).toBeGreaterThan(0);
+    expect(f.hourMorph).toBeLessThan(1);
+    expect(f.playback.railAlpha).toBe(1);
+  });
+
+  it("hides trip dots during playback, which shows stop circles instead", () => {
+    const f = frameAt(11.5);
+    expect(f.tripsAlpha).toBe(0);
+    expect(f.playback.stopsAlpha).toBe(1);
+  });
+
+  it("jumps trips to their next stop at the refresh instead of gliding them", () => {
+    expect(frameAt(3.2).tripsAtNextStop).toBe(false);
+    expect(frameAt(3.4).tripsBlinking).toBe(true);
+    expect(frameAt(3.6).tripsAtNextStop).toBe(true);
   });
 });
 
-describe("cameraForTime", () => {
-  it("hands off from the scripted path to the orbit without a jump", () => {
-    const before = cameraForTime(SEQUENCE_END - 1e-6);
-    const after = cameraForTime(SEQUENCE_END + 1e-6);
-    for (const key of ["x", "y", "z", "yaw", "pitch"] as const) expect(after[key]).toBeCloseTo(before[key], 3);
+describe("loop seam", () => {
+  it("settles every first-play motion before LOOP_START", () => {
+    const f = frameAt(LOOP_START);
+    expect(f.panelEnter).toBe(1);
+    expect(f.refreshChip).toBe(0);
+    expect(f.tripPop).toBe(1);
+    expect(TRIPS.every((tp) => f.tripAppear(tp.id) === 1)).toBe(true);
   });
 
-  it("keeps the idle orbit within a bounded swing, however long the page stays open", () => {
-    const yaws = Array.from({ length: 200 }, (_, i) => cameraForTime(SEQUENCE_END + i * 7).yaw);
-    const start = cameraForTime(SEQUENCE_END).yaw;
-    for (const yaw of yaws) expect(Math.abs(yaw - start)).toBeLessThanOrEqual(0.35 + 1e-9);
+  it("ends on the same visible state it loops back to", () => {
+    const end = frameAt(DURATION - 1e-6);
+    const start = frameAt(LOOP_START);
+    for (const key of ["zoom", "tripsAtNextStop", "tripsBlinking", "tripsAlpha", "routeReveal", "trailReveal", "refreshChip", "panelEnter"] as const) {
+      expect(end[key]).toBe(start[key]);
+    }
+    for (const key of ["x", "y", "z", "yaw", "pitch", "focal"] as const) expect(end.camera[key]).toBeCloseTo(start.camera[key]);
+    expect(settled(end)).toEqual(settled(start));
+    expect(end.caption?.index).toBe(start.caption?.index);
+  });
+
+  it("finishes the returning queue's counters and rows before the loop", () => {
+    // The panel's last queue row lands 1.1 s + two half-beats into the section.
+    const lastRowLands = 1.1 + 2 * (60 / 128 / 2);
+    const queue = frameAt(DURATION - 1e-6).sections.find((s) => s.kind === "queue")!;
+    expect(queue.since).toBeGreaterThan(lastRowLands);
   });
 });

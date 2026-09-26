@@ -1,45 +1,66 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import type { HeroLabels } from "./heroMapDraw";
+import { DELAY_THRESHOLDS } from "../../styles/tokens";
+import type { HeroLabels } from "./heroCanvas";
+import { OVERVIEW } from "./heroMapScene";
 import { useHeroMapAnimation } from "./useHeroMapAnimation";
 
-/** The landing hero's animated backdrop: a fictional night-time city map on
- *  which routes tint by per-section delay and every stop grows a tower as
- *  tall as its average delay. Decorative (`aria-hidden`) — the headline next
- *  to it carries the page's meaning; the figures are illustrative samples,
- *  which the canvas itself labels. */
+/** The landing hero's animated backdrop: the operations map with trip dots,
+ *  the app's right-hand panel, and morphs that carry a trip's reported
+ *  stops and the day-playback hours from the map into that panel. Every
+ *  element is a real screen of the app; the figures are illustrative
+ *  samples, which the canvas itself says. Decorative (`aria-hidden`) — the
+ *  headline beside it carries the page's meaning. */
 export function LiveMapHero() {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const delay = (minutes: number) => t("landing.hero_map.delay", { minutes: minutes.toFixed(1) });
+  const oneDecimal = (m: number) => (Number.isInteger(m) ? String(m) : m.toFixed(1));
   const labels: HeroLabels = {
-    stations: {
-      central: t("landing.hero_map.stations.central"),
-      harbor: t("landing.hero_map.stations.harbor"),
-      west: t("landing.hero_map.stations.west"),
-      eastHill: t("landing.hero_map.stations.east_hill"),
-      north: t("landing.hero_map.stations.north"),
-      seaside: t("landing.hero_map.stations.seaside"),
+    screens: { live: t("landing.hero_map.screens.live"), period: t("landing.hero_map.screens.period") },
+    captions: { 0: t("landing.hero_map.captions.live"), 1: t("landing.hero_map.captions.trip"), 2: t("landing.hero_map.captions.playback"), 3: t("landing.hero_map.captions.overview") },
+    routes: {
+      rapid: t("landing.hero_map.routes.rapid"),
+      local: t("landing.hero_map.routes.local"),
+      tram3: t("landing.hero_map.routes.tram3"),
+      bus12: t("landing.hero_map.routes.bus12"),
+      bus7: t("landing.hero_map.routes.bus7"),
+      bus3: t("landing.hero_map.routes.bus3"),
     },
-    districts: {
-      north: t("landing.hero_map.districts.north"),
-      riverside: t("landing.hero_map.districts.riverside"),
-      central: t("landing.hero_map.districts.central"),
-      port: t("landing.hero_map.districts.port"),
-      east: t("landing.hero_map.districts.east"),
+    stops: {
+      konan: t("landing.hero_map.stops.konan"),
+      shiyakusho: t("landing.hero_map.stops.shiyakusho"),
+      central: t("landing.hero_map.stops.central"),
+      honmachi: t("landing.hero_map.stops.honmachi"),
+      higashidai: t("landing.hero_map.stops.higashidai"),
+      minatomachi: t("landing.hero_map.stops.minatomachi"),
     },
-    captions: {
-      0: { title: t("landing.hero_map.captions.live.title"), body: t("landing.hero_map.captions.live.body") },
-      1: { title: t("landing.hero_map.captions.sections.title"), body: t("landing.hero_map.captions.sections.body") },
-      2: { title: t("landing.hero_map.captions.towers.title"), body: t("landing.hero_map.captions.towers.body") },
-    },
-    calloutRoute: t("landing.hero_map.callout_route"),
-    calloutWeekOverWeek: (minutes) => t("landing.hero_map.callout_week_over_week", { minutes: minutes.toFixed(1) }),
-    towerLabel: t("landing.hero_map.tower_label"),
-    legendOnTime: t("landing.hero_map.legend_on_time"),
-    legendDelayed: t("landing.hero_map.legend_delayed"),
-    hud: [t("landing.hero_map.hud_title"), t("landing.hero_map.hud_scope"), t("landing.hero_map.hud_sample")],
-    delay,
+    queueTitle: t("landing.hero_map.queue_title"),
+    kpi: { observed: t("landing.hero_map.kpi.observed"), delayedFivePlus: t("landing.hero_map.kpi.delayed"), onTime: t("landing.hero_map.kpi.on_time") },
+    legendBands: [
+      t("landing.hero_map.legend.under", { minutes: DELAY_THRESHOLDS.mild }),
+      t("landing.hero_map.legend.under", { minutes: DELAY_THRESHOLDS.moderate }),
+      t("landing.hero_map.legend.under", { minutes: DELAY_THRESHOLDS.severe }),
+      t("landing.hero_map.legend.over", { minutes: DELAY_THRESHOLDS.severe }),
+    ],
+    legendDisclosure: t("landing.hero_map.legend.disclosure"),
+    tripHeading: t("landing.hero_map.trip_heading"),
+    tripChartTitle: t("landing.hero_map.trip_chart_title"),
+    tripNote: t("landing.hero_map.trip_note"),
+    refresh: t("landing.hero_map.refresh"),
+    playback: t("landing.hero_map.playback"),
+    playbackSpeed: t("landing.hero_map.playback_speed"),
+    hourlyTitle: t("landing.hero_map.hourly_title"),
+    peak: t("landing.hero_map.peak"),
+    overviewAverage: t("landing.hero_map.overview_average"),
+    overviewChange: t("landing.hero_map.overview_change", { minutes: Math.abs(OVERVIEW.changeVsPrevious).toFixed(1) }),
+    overviewDelayedRoutes: t("landing.hero_map.overview_delayed_routes"),
+    routesToCheck: t("landing.hero_map.routes_to_check"),
+    sampleNotice: t("landing.hero_map.sample_notice"),
+    delayShort: (m) => t("landing.hero_map.delay_short", { minutes: oneDecimal(m) }),
+    minutes: (m) => t("landing.hero_map.minutes", { minutes: m.toFixed(1) }),
+    hourOfDay: (hour) => t("landing.hero_map.hour_of_day", { hour }),
+    clock: (hour) => t("landing.hero_map.clock", { hour: String(hour).padStart(2, "0") }),
+    minuteUnit: t("landing.hero_map.minute_unit"),
   };
   useHeroMapAnimation(canvasRef, labels);
 

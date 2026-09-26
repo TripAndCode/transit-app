@@ -1,25 +1,17 @@
 import { useEffect, useEffectEvent, type RefObject } from "react";
-import { drawHeroFrame, type HeroLabels, type HeroPalette } from "./heroMapDraw";
-import { isHexColor } from "./heroMapMath";
-import { buildHeroMap, type HeroMap } from "./heroMapScene";
-import { SEQUENCE_END, frameAt } from "./heroMapTimeline";
+import { DELAY_RAMP } from "../../styles/tokens";
+import type { HeroLabels, HeroPalette } from "./heroCanvas";
+import { drawHeroFrame } from "./heroMapDraw";
+import { isHexColor, luminance, mixHex } from "./heroMapMath";
+import { DURATION, LOOP_START, frameAt } from "./heroMapTimeline";
 
-/** Dark-theme values, used only if a token fails to resolve to `#rrggbb`
- *  (e.g. `global.css` did not load); the hero is always rendered dark. */
-const FALLBACK_PALETTE: HeroPalette = {
-  background: "#0F1119",
-  text: "#FAFAFF",
-  textMuted: "#C9CBDA",
-  accent: "#43c5ba",
-  accentStrong: "#6FD8CC",
-  warning: "#C99A2E",
-  fontBody: "sans-serif",
-  fontMono: "monospace",
-};
+/** Map-only tints with no theme token (water, parks, roads, railways),
+ *  chosen per theme so the basemap reads like the app's own tiles. */
+const LIGHT_MAP = { water: "#D3E2E8", park: "#DDE9D8", road: "#FFFFFF", rail: "#7D838A" };
+const DARK_MAP = { water: "#15283A", park: "#17291F", road: "#252B45", rail: "#6B7280" };
 
-/** Canvas cannot read `var()`, so tokens are resolved once at mount — from
- *  the canvas itself rather than the document root, because the hero scopes
- *  the dark theme to its own section. */
+/** Canvas cannot read `var()`, so tokens are resolved once at mount. Values
+ *  that fail to resolve to `#rrggbb` fall back to the light theme's. */
 function resolvePalette(el: Element): HeroPalette {
   const style = getComputedStyle(el);
   const color = (name: string, fallback: string) => {
@@ -27,15 +19,25 @@ function resolvePalette(el: Element): HeroPalette {
     return isHexColor(value) ? value : fallback;
   };
   const font = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
+  const page = color("--bg-page", "#fafaf8");
+  const dark = luminance(page) < 0.2;
+  const map = dark ? DARK_MAP : LIGHT_MAP;
   return {
-    background: color("--bg-page", FALLBACK_PALETTE.background),
-    text: color("--text-primary", FALLBACK_PALETTE.text),
-    textMuted: color("--text-tertiary", FALLBACK_PALETTE.textMuted),
-    accent: color("--accent", FALLBACK_PALETTE.accent),
-    accentStrong: color("--accent-strong", FALLBACK_PALETTE.accentStrong),
-    warning: color("--color-warning", FALLBACK_PALETTE.warning),
-    fontBody: font("--font-body", FALLBACK_PALETTE.fontBody),
-    fontMono: font("--font-mono", FALLBACK_PALETTE.fontMono),
+    land: dark ? mixHex(page, "#ffffff", 0.03) : mixHex(page, "#d8d4c8", 0.35),
+    ...map,
+    surface: color("--bg-surface", "#ffffff"),
+    text: color("--text-primary", "#2a2a2a"),
+    muted: color("--text-tertiary", "#6e6e6e"),
+    rule: color("--border-subtle", "#e2e2e0"),
+    accent: color("--accent", "#187b80"),
+    delay: {
+      ok: DELAY_RAMP.ok,
+      mild: DELAY_RAMP.mild,
+      moderate: DELAY_RAMP.moderate,
+      severe: color("--delay-severe", "#A8391F"),
+    },
+    fontBody: font("--font-body", "sans-serif"),
+    fontMono: font("--font-mono", "monospace"),
   };
 }
 
@@ -47,18 +49,23 @@ const MAX_PIXEL_RATIO = 2;
  *  tab resumes where it paused instead of skipping ahead through the script. */
 const MAX_STEP_MS = 100;
 
-/** Plays the hero's live-map sequence on a caller-owned canvas. The script
- *  clock only advances while the canvas is on screen and the tab is visible,
- *  so a visitor who scrolls away and back does not miss it. Under reduced
- *  motion it draws the final state once and never schedules a frame. */
+/** Seconds into the script for `elapsed` seconds of play: the first pass
+ *  runs from 0, every later pass resumes at LOOP_START (after the fly-in). */
+export function scriptTime(elapsed: number): number {
+  if (elapsed < DURATION) return elapsed;
+  return LOOP_START + ((elapsed - DURATION) % (DURATION - LOOP_START));
+}
+
+/** Plays the hero's sequence on a caller-owned canvas. The clock only
+ *  advances while the canvas is on screen and the tab is visible, so a
+ *  visitor who scrolls away and back does not miss it. Under reduced motion
+ *  it draws the settled live-operations frame once and never schedules a
+ *  frame. */
 export function useHeroMapAnimation(canvasRef: RefObject<HTMLCanvasElement | null>, labels: HeroLabels): void {
-  // Reads the latest labels without restarting the loop when the language
-  // changes mid-sequence.
-  const render = useEffectEvent(
-    (ctx: CanvasRenderingContext2D, width: number, height: number, t: number, palette: HeroPalette, map: HeroMap) => {
-      drawHeroFrame(ctx, width, height, frameAt(t), map, palette, labels);
-    },
-  );
+  // Reads the latest labels without restarting the loop when the language changes.
+  const render = useEffectEvent((ctx: CanvasRenderingContext2D, width: number, height: number, t: number, palette: HeroPalette) => {
+    drawHeroFrame(ctx, width, height, frameAt(t), palette, labels);
+  });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -70,7 +77,6 @@ export function useHeroMapAnimation(canvasRef: RefObject<HTMLCanvasElement | nul
     const el: HTMLCanvasElement = canvas;
 
     const palette = resolvePalette(el);
-    const map = buildHeroMap();
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     let width = 0;
@@ -84,7 +90,7 @@ export function useHeroMapAnimation(canvasRef: RefObject<HTMLCanvasElement | nul
       el.width = Math.max(1, Math.round(width * dpr));
       el.height = Math.max(1, Math.round(height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      if (reducedMotion) render(ctx, width, height, SEQUENCE_END, palette, map);
+      if (reducedMotion) render(ctx, width, height, LOOP_START, palette);
     }
     resize();
     window.addEventListener("resize", resize);
@@ -107,7 +113,7 @@ export function useHeroMapAnimation(canvasRef: RefObject<HTMLCanvasElement | nul
       last = now;
       if (document.hidden || !onScreen) return;
       elapsedMs += step;
-      render(ctx, width, height, elapsedMs / 1000, palette, map);
+      render(ctx, width, height, scriptTime(elapsedMs / 1000), palette);
     }
     rafId = requestAnimationFrame(frame);
 

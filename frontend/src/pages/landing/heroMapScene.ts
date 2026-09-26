@@ -1,64 +1,32 @@
-// Deterministic geometry for the landing hero's fictional harbor city:
-// coastline, river, parks, streets, and six routes (rail, tram, bus) whose
-// per-section delay profiles drive both the route tint and the stop towers.
-// World units are arbitrary: the ground is the y = 0 plane, x runs east and
-// z runs north. The numbers are illustrative sample data, not live figures.
-
-import type { VehicleMode } from "./vehicleIcons";
+// Deterministic geometry and sample figures for the landing hero's fictional
+// city. Every element stands for something the signed-in app really shows:
+// trip dots at their latest reported stop, one selected route's per-stop
+// average delay, a selected trip's reported-stop history, the day-playback
+// hourly means, and the period-overview numbers. World units are arbitrary:
+// the ground is the y = 0 plane, x runs east and z runs north.
 
 export type Point2 = readonly [number, number];
 
-export type Polyline = {
+type Polyline = {
   points: readonly Point2[];
-  length: number;
   /** Point at fraction `u` (0..1, clamped) of the polyline's arc length. */
   at: (u: number) => Point2;
 };
 
-export type StationId = "central" | "harbor" | "west" | "eastHill" | "north" | "seaside";
-export type DistrictId = "north" | "riverside" | "central" | "port" | "east";
+type VehicleMode = "bus" | "train" | "tram";
+export type RouteKey = "rapid" | "local" | "tram3" | "bus12" | "bus7" | "bus3";
+export type StopKey = "konan" | "shiyakusho" | "central" | "honmachi" | "higashidai" | "minatomachi";
 
-export type MapRoute = {
-  id: string;
-  mode: VehicleMode;
-  path: Polyline;
-  /** Average delay in minutes at fraction `u` along the route. */
-  delayAt: (u: number) => number;
-};
-
-type Station = { id: StationId; x: number; z: number; major: boolean };
-type District = { id: DistrictId; x: number; z: number };
-export type StopTower = { x: number; z: number; delay: number };
-type Street = { points: readonly Point2[]; arterial: boolean };
-
-/** The single most-delayed section, which the hero calls out by name. */
-type Hotspot = { x: number; z: number; delay: number; weekOverWeek: number };
-
-export type HeroMap = {
-  coastline: readonly Point2[];
-  riverBanks: readonly Point2[];
-  parks: readonly (readonly Point2[])[];
-  streets: readonly Street[];
-  routes: readonly MapRoute[];
-  stations: readonly Station[];
-  districts: readonly District[];
-  towers: readonly StopTower[];
-  tallestTower: StopTower;
-  hotspot: Hotspot;
-};
-
-/** Half-width of the world the map is drawn over. Wide enough that the
- *  ground never ends inside the frame at any camera pose the timeline uses. */
-export const WORLD_EXTENT = 120;
+/** A trip dot: sits at its latest reported stop and jumps to `nextU` when
+ *  the feed refreshes — the app places trips at stops, it does not glide
+ *  them along the line. */
+export type Trip = { id: number; route: number; u: number; nextU: number; delay: number; time: string };
 
 export const coastZ = (x: number): number => -6 + 3 * Math.sin(x * 0.13 + 1) + 1.5 * Math.sin(x * 0.37);
 const riverCenterX = (z: number): number => -9 + 4 * Math.sin(z * 0.09 + 0.5);
-const RIVER_HALF_WIDTH = 1.1;
-
-const bump = (u: number, center: number, width: number): number => {
-  const d = (u - center) / width;
-  return Math.exp(-d * d);
-};
+const RIVER_HALF_WIDTH = 1.2;
+/** Far enough that the ground never ends inside the frame at any camera pose. */
+const FAR = 90;
 
 export function polyline(points: readonly Point2[]): Polyline {
   const cumulative = [0];
@@ -78,11 +46,10 @@ export function polyline(points: readonly Point2[]): Polyline {
     const [bx, bz] = points[i];
     return [ax + (bx - ax) * k, az + (bz - az) * k];
   };
-  return { points, length, at };
+  return { points, at };
 }
 
-/** Catmull-Rom spline through `control`, so rail lines curve like real track
- *  instead of kinking at every control point. */
+/** Catmull-Rom spline through `control`, so rail lines curve like track. */
 function smooth(control: readonly Point2[], stepsPerSpan = 12): Point2[] {
   const out: Point2[] = [];
   for (let i = 0; i < control.length - 1; i++) {
@@ -107,133 +74,113 @@ function smooth(control: readonly Point2[], stepsPerSpan = 12): Point2[] {
   return out;
 }
 
-/** Bus route 12's worst section; the callout and the tallest tower both sit
- *  here so the two acts point at the same place. */
-const HOTSPOT_ROUTE_ID = "bus-12";
-const HOTSPOT_U = 0.5;
-const HOTSPOT_WEEK_OVER_WEEK = 2.1;
+const bump = (u: number, center: number, width: number): number => {
+  const d = (u - center) / width;
+  return Math.exp(-d * d);
+};
 
-function buildRoutes(): MapRoute[] {
-  const tramTrack = polyline(
-    Array.from({ length: 28 }, (_, i) => {
-      const x = -27 + i * 2;
-      return [x, coastZ(x) + 3] as Point2;
-    }),
-  );
-  return [
-    {
-      id: "rail-east-west",
-      mode: "train",
-      path: polyline(smooth([[-34, 21], [-16, 18], [-4, 14], [6, 12], [18, 16], [34, 25]])),
-      delayAt: (u) => 0.4 + 0.6 * bump(u, 0.7, 0.2),
-    },
-    {
-      id: "rail-north-south",
-      mode: "train",
-      path: polyline(smooth([[-1, 48], [-3, 30], [-4, 14], [-1, 5], [7, 1]])),
-      delayAt: () => 0.3,
-    },
-    { id: "tram-coast", mode: "tram", path: tramTrack, delayAt: (u) => 0.5 + 2.8 * bump(u, 0.68, 0.16) },
-    {
-      id: HOTSPOT_ROUTE_ID,
-      mode: "bus",
-      path: polyline([[-22, 3], [-12, 7], [-4, 14], [4, 24], [10, 38]]),
-      delayAt: (u) => 0.6 + 6 * bump(u, HOTSPOT_U, 0.17),
-    },
-    {
-      id: "bus-7",
-      mode: "bus",
-      path: polyline([[22, 2], [14, 8], [6, 12], [0, 22], [-12, 30], [-24, 34]]),
-      delayAt: (u) => 0.4 + 4.2 * bump(u, 0.35, 0.15),
-    },
-    {
-      id: "bus-3",
-      mode: "bus",
-      path: polyline([[-28, 28], [-14, 26], [-3, 30], [12, 28], [28, 33]]),
-      delayAt: (u) => 0.3 + 2 * bump(u, 0.6, 0.2),
-    },
-  ];
-}
+const tramTrack: Point2[] = Array.from({ length: 28 }, (_, i) => {
+  const x = -27 + i * 2;
+  return [x, coastZ(x) + 3];
+});
 
-/** Street grid, every fourth line an arterial. North-south streets start at
- *  the shore and cross streets break where they would run over the water.
- *  Static, so it is built once rather than on every frame. */
-function buildStreets(): Street[] {
-  const streets: Street[] = [];
-  for (let x = -70; x <= 70; x += 2.5) {
-    streets.push({ points: [[x, coastZ(x) + 0.4], [x + 5, 90]], arterial: x % 10 === 0 });
-  }
-  for (let z = -4; z <= 90; z += 2.5) {
-    let run: Point2[] = [];
-    const flush = () => {
-      if (run.length > 1) streets.push({ points: run, arterial: z % 10 === 0 });
-      run = [];
-    };
-    for (let x = -72; x <= 72; x += 4) {
-      if (z > coastZ(x) + 0.4) run.push([x + (z + 4) * 0.05, z]);
-      else flush();
-    }
-    flush();
-  }
-  return streets;
-}
+export const ROUTES: readonly { key: RouteKey; mode: VehicleMode; path: Polyline }[] = [
+  { key: "rapid", mode: "train", path: polyline(smooth([[-40, 22], [-16, 18], [-4, 14], [6, 12], [18, 16], [40, 26]])) },
+  { key: "local", mode: "train", path: polyline(smooth([[-1, 50], [-3, 30], [-4, 14], [-1, 5], [7, 1]])) },
+  { key: "tram3", mode: "tram", path: polyline(tramTrack) },
+  { key: "bus12", mode: "bus", path: polyline([[-22, 3], [-12, 7], [-4, 14], [4, 24], [10, 38]]) },
+  { key: "bus7", mode: "bus", path: polyline([[22, 2], [14, 8], [6, 12], [0, 22], [-12, 30], [-24, 34]]) },
+  { key: "bus3", mode: "bus", path: polyline([[-28, 28], [-14, 26], [-3, 30], [12, 28], [28, 33]]) },
+];
 
-/** Evenly spaced interior stops per route; rail stops are sparser than bus
- *  stops, as they are on a real network. */
-function buildTowers(routes: readonly MapRoute[]): StopTower[] {
-  return routes.flatMap((route) => {
-    const count = route.mode === "train" ? 5 : 6;
-    return Array.from({ length: count - 1 }, (_, i) => {
-      const u = (i + 1) / count;
-      const [x, z] = route.path.at(u);
-      return { x, z, delay: route.delayAt(u) };
-    });
-  });
-}
+/** The route the hero selects; its per-stop average delay drives the route's
+ *  gradient, spaced evenly by stop order as the app draws it. */
+export const SELECTED_ROUTE = ROUTES.findIndex((r) => r.key === "bus12");
+export const SELECTED_ROUTE_STOP_AVG: readonly number[] = Array.from({ length: 7 }, (_, i) => 0.6 + 6 * bump(i / 6, 0.5, 0.17));
 
-export function buildHeroMap(): HeroMap {
+/** Distance, as a fraction of each route, from one stop to the next. */
+const STOP_SPACING: readonly number[] = [1 / 7, 1 / 7, 1 / 7, 1 / 6, 1 / 7, 1 / 7];
+
+export const TRIPS: readonly Trip[] = (
+  [
+    [0, 2 / 7, 0.4, "08:10"], [0, 4 / 7, 0.8, "08:11"], [0, 5 / 7, 1.9, "08:12"], [0, 6 / 7, 0.6, "08:09"],
+    [1, 1 / 7, 0.2, "08:12"], [1, 4 / 7, 0.5, "08:10"],
+    [2, 2 / 7, 0.7, "08:11"], [2, 5 / 7, 3.4, "08:12"], [2, 5.4 / 7, 2.6, "08:12"],
+    [3, 1 / 6, 1.2, "08:08"], [3, 3 / 6, 6.0, "08:12"], [3, 4 / 6, 3.1, "08:11"], [3, 5 / 6, 2.1, "08:10"],
+    [4, 2 / 7, 4.1, "08:12"], [4, 5 / 7, 1.0, "08:09"],
+    [5, 2 / 7, 0.5, "08:11"], [5, 4 / 7, 1.7, "08:12"],
+  ] as const
+).map(([route, u, delay, time], id) => ({ id, route, u, nextU: Math.min(1, u + STOP_SPACING[route]), delay, time }));
+
+/** The trip the hero opens: route 12 at 本町, six minutes late — the same
+ *  trip heads the queue list, is ringed on the map, and fills the trip panel. */
+export const SELECTED_TRIP = TRIPS.find((tp) => tp.route === SELECTED_ROUTE && Math.abs(tp.u - 0.5) < 1e-9)!;
+
+/** The selected trip's reported stops, oldest first; its trail on the map
+ *  and the trip panel's per-stop chart are both drawn from this. */
+export const TRIP_HISTORY: readonly { stop: StopKey; u: number; delay: number }[] = [
+  { stop: "konan", u: 0, delay: 0 },
+  { stop: "shiyakusho", u: 1 / 6, delay: 1 },
+  { stop: "central", u: 2 / 6, delay: 3 },
+  { stop: "honmachi", u: 3 / 6, delay: SELECTED_TRIP.delay },
+];
+
+/** Mean delay per hour from 05:00: the playback rail's colors and, for the
+ *  same hours, the hourly-deterioration bars. */
+export const HOURLY_MEANS: readonly number[] = [0.8, 1.2, 2.6, 4.8, 5.6, 3.4, 2.2, 1.6, 1.4, 1.5, 1.7, 2.3, 3.6, 4.6, 3.9, 2.4, 1.6, 1.1, 0.9];
+export const FIRST_SERVICE_HOUR = 5;
+/** All 24 hours for the bars; the small hours before service are quiet. */
+export const HOURLY_24: readonly number[] = [0.3, 0.2, 0.2, 0.2, 0.4, ...HOURLY_MEANS];
+export const PEAK_HOUR = HOURLY_24.indexOf(Math.max(...HOURLY_24));
+
+export const KPI = { observed: 1284, delayedFivePlus: 37, onTimePct: 91 } as const;
+
+export const QUEUE_ROWS: readonly { route: RouteKey; stop: StopKey; delay: number }[] = [
+  { route: "bus12", stop: "honmachi", delay: SELECTED_TRIP.delay },
+  { route: "bus7", stop: "higashidai", delay: 4 },
+  { route: "tram3", stop: "minatomachi", delay: 3 },
+];
+
+export const OVERVIEW = {
+  networkAvg: 2.4,
+  changeVsPrevious: -0.3,
+  delayedRoutes: 12,
+  totalRoutes: 48,
+  trend: [3.1, 2.9, 3.2, 2.8, 2.7, 2.9, 2.6, 2.5, 2.7, 2.4, 2.5, 2.3, 2.4],
+  routesToCheck: [
+    { route: "bus12", delay: 6.6 },
+    { route: "bus7", delay: 4.6 },
+    { route: "tram3", delay: 3.3 },
+    { route: "rapid", delay: 1.9 },
+  ],
+} as const satisfies {
+  networkAvg: number;
+  changeVsPrevious: number;
+  delayedRoutes: number;
+  totalRoutes: number;
+  trend: readonly number[];
+  routesToCheck: readonly { route: RouteKey; delay: number }[];
+};
+
+function buildBasemap() {
   const coastline: Point2[] = [];
-  for (let x = -WORLD_EXTENT; x <= WORLD_EXTENT; x += 2) coastline.push([x, coastZ(x)]);
-
+  for (let x = -FAR; x <= FAR; x += 2) coastline.push([x, coastZ(x)]);
   const left: Point2[] = [];
   const right: Point2[] = [];
-  for (let z = coastZ(riverCenterX(-6)) - 1; z <= WORLD_EXTENT; z += 2) {
+  for (let z = coastZ(riverCenterX(-6)) - 2; z <= FAR; z += 2) {
     left.push([riverCenterX(z) - RIVER_HALF_WIDTH, z]);
     right.push([riverCenterX(z) + RIVER_HALF_WIDTH, z]);
   }
-
-  const routes = buildRoutes();
-  const towers = buildTowers(routes);
-  const tallestTower = towers.reduce((a, b) => (b.delay > a.delay ? b : a));
-  const hotspotRoute = routes.find((r) => r.id === HOTSPOT_ROUTE_ID)!;
-  const [hx, hz] = hotspotRoute.path.at(HOTSPOT_U);
-
-  return {
-    coastline,
-    riverBanks: [...left, ...right.reverse()],
-    parks: [
-      [[8, 30], [16, 30], [17, 36], [9, 37]],
-      [[-20, 38], [-13, 37], [-12, 43], [-21, 44]],
-    ],
-    streets: buildStreets(),
-    routes,
-    stations: [
-      { id: "central", x: -4, z: 14, major: true },
-      { id: "harbor", x: 6, z: 12, major: false },
-      { id: "west", x: -16, z: 18, major: false },
-      { id: "eastHill", x: 18, z: 16, major: false },
-      { id: "north", x: -3, z: 30, major: false },
-      { id: "seaside", x: 7, z: 1, major: false },
-    ],
-    districts: [
-      { id: "north", x: -2, z: 40 },
-      { id: "riverside", x: -22, z: 12 },
-      { id: "central", x: 4, z: 19 },
-      { id: "port", x: 16, z: -1 },
-      { id: "east", x: 24, z: 22 },
-    ],
-    towers,
-    tallestTower,
-    hotspot: { x: hx, z: hz, delay: hotspotRoute.delayAt(HOTSPOT_U), weekOverWeek: HOTSPOT_WEEK_OVER_WEEK },
-  };
+  const sea: Point2[] = [...coastline, [FAR, -FAR], [-FAR, -FAR]];
+  const parks: Point2[][] = [
+    [[8, 30], [16, 30], [17, 36], [9, 37]],
+    [[-20, 38], [-13, 37], [-12, 43], [-21, 44]],
+  ];
+  const roads: Point2[][] = [
+    [[-70, 8], [70, 4]], [[-70, 20], [70, 23]], [[-70, 32], [70, 30]], [[-70, 42], [70, 45]],
+    [[-30, -2], [-26, 70]], [[-14, -4], [-16, 70]], [[8, -4], [12, 70]], [[26, -2], [22, 70]], [[-40, 0], [30, 50]],
+  ];
+  return { sea, river: [...left, ...right.reverse()], parks, roads };
 }
+
+export const BASEMAP = buildBasemap();

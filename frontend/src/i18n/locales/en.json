@@ -29,44 +29,61 @@
       "guest_cta": "Continue as a guest"
     },
     "hero_map": {
-      "stations": {
-        "central": "Central Sta.",
-        "harbor": "Harbor Town",
-        "west": "West Gate",
-        "east_hill": "East Hill",
-        "north": "Kitamachi",
-        "seaside": "Seaside Ave."
-      },
-      "districts": {
-        "north": "North",
-        "riverside": "Riverside",
-        "central": "Central",
-        "port": "Port",
-        "east": "East Hill"
+      "screens": {
+        "live": "Current observations",
+        "period": "Period overview"
       },
       "captions": {
-        "live": {
-          "title": "Every vehicle, moving now",
-          "body": "Buses, trains and trams — several agencies on one map"
-        },
-        "sections": {
-          "title": "Late sections light up",
-          "body": "Teal runs on time; the more amber, the later it runs"
-        },
-        "towers": {
-          "title": "Every stop's delay, as height",
-          "body": "One scale across modes and agencies"
-        }
+        "live": "Current observations",
+        "trip": "Open a Route 12 trip",
+        "playback": "Play the day",
+        "overview": "Period overview"
       },
-      "callout_route": "A Transit Route 12 · Central Sta. → North",
-      "callout_week_over_week": "+{{minutes}} vs last week",
-      "tower_label": "Central Sta.–North · weekday-morning average",
-      "legend_on_time": "On time",
-      "legend_delayed": "Heavy delay",
-      "hud_title": "LIVE MAP · GTFS-RT",
-      "hud_scope": "3 modes · 5 agencies · 6 routes",
-      "hud_sample": "Fictional city · sample data",
-      "delay": "+{{minutes}} min"
+      "routes": {
+        "rapid": "Rapid",
+        "local": "Local",
+        "tram3": "Tram 3",
+        "bus12": "Route 12",
+        "bus7": "Route 7",
+        "bus3": "Route 3"
+      },
+      "stops": {
+        "konan": "Konan",
+        "shiyakusho": "City Hall",
+        "central": "Central Sta.",
+        "honmachi": "Honmachi",
+        "higashidai": "Higashidai",
+        "minatomachi": "Minatomachi"
+      },
+      "queue_title": "Trips to check",
+      "kpi": {
+        "observed": "Observed",
+        "delayed": "Delayed 5+ min",
+        "on_time": "On-time rate"
+      },
+      "legend": {
+        "under": "< {{minutes}} min",
+        "over": "{{minutes}}+ min",
+        "disclosure": "Last reported stop, not GPS"
+      },
+      "trip_heading": "Route 12 · to Kitamachi",
+      "trip_chart_title": "Delay progression by stop",
+      "trip_note": "Grew from Central Sta. to Honmachi",
+      "refresh": "Updated  08:12:30",
+      "playback": "Play the day",
+      "playback_speed": "1×",
+      "hourly_title": "Worst hour of day",
+      "peak": "peak",
+      "overview_average": "Network avg delay",
+      "overview_change": "▼ {{minutes}}  vs previous period",
+      "overview_delayed_routes": "Routes delayed",
+      "routes_to_check": "Routes to check now",
+      "sample_notice": "Sample data · fictional city",
+      "delay_short": "+{{minutes}} min",
+      "minutes": "{{minutes}} min",
+      "hour_of_day": "{{hour}}:00",
+      "clock": "{{hour}}:00",
+      "minute_unit": "min"
     },
     "narrative": {
       "route": {

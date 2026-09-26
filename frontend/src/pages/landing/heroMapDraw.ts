@@ -1,532 +1,417 @@
-// Canvas renderer for one frame of the landing hero's live-map sequence.
-// Stateless: everything it draws is derived from the `HeroFrame` (what the
-// timeline says is visible at time t), the static `HeroMap` geometry, the
-// resolved theme palette, and pre-translated labels.
+// Canvas renderer for one frame of the landing hero. Stateless: everything
+// is derived from the `HeroFrame` (what the timeline says is on screen at
+// time t), the static scene data, the resolved palette and the translated
+// labels. The map layers mirror the operations map's real ones; the panel
+// and the geometry the morphs fly between live in heroPanelDraw.
 
+import { delayColorIn, drawCard, haloText, setFont, type Ctx, type HeroLabels, type HeroPalette } from "./heroCanvas";
+import { backOut, clamp01, expoIn, expoInOut, expoOut, lerp, makeProjector, withAlpha, type Projector } from "./heroMapMath";
 import {
-  makeProjector,
-  mixHex,
-  withAlpha,
-  type Projector,
-} from "./heroMapMath";
-import {
-  WORLD_EXTENT,
-  type DistrictId,
-  type HeroMap,
-  type MapRoute,
+  BASEMAP,
+  FIRST_SERVICE_HOUR,
+  HOURLY_MEANS,
+  ROUTES,
+  SELECTED_ROUTE,
+  SELECTED_ROUTE_STOP_AVG,
+  SELECTED_TRIP,
+  TRIPS,
+  TRIP_HISTORY,
   type Point2,
-  type StationId,
-  type StopTower,
 } from "./heroMapScene";
-import type { CaptionIndex, HeroFrame } from "./heroMapTimeline";
-import { MAKI_VIEWBOX_SIZE, drawVehicleIcon, type VehicleMode } from "./vehicleIcons";
+import type { HeroFrame } from "./heroMapTimeline";
+import {
+  drawHourBars,
+  drawPanel,
+  hourBarsBox,
+  layoutFor,
+  railGeometry,
+  tripChartBox,
+  tripChartPoint,
+  type HeroLayout,
+  type RailGeometry,
+} from "./heroPanelDraw";
 
-/** Theme tokens the renderer needs, resolved from CSS to `#rrggbb` strings
- *  (canvas cannot read `var()`), plus the font stacks. */
-export type HeroPalette = {
-  background: string;
-  text: string;
-  textMuted: string;
-  /** On-time end of the delay ramp. */
-  accent: string;
-  accentStrong: string;
-  /** Delayed end of the delay ramp. Deliberately the warning tone, not a
-   *  danger red: the hero stays calm even where it shows the worst delay. */
-  warning: string;
-  fontBody: string;
-  fontMono: string;
-};
+/** Marker radii the operations map uses: default, 5+ min late, selected. */
+const DOT_RADIUS = { base: 6, severe: 9, selected: 11 } as const;
+/** Dots closer than this many base radii merge into one count circle. */
+const CLUSTER_DISTANCE = 3.2;
+const TAU = Math.PI * 2;
 
-export type HeroLabels = {
-  stations: Record<StationId, string>;
-  districts: Record<DistrictId, string>;
-  captions: Record<CaptionIndex, { title: string; body: string }>;
-  calloutRoute: string;
-  calloutWeekOverWeek: (minutes: number) => string;
-  towerLabel: string;
-  legendOnTime: string;
-  legendDelayed: string;
-  hud: readonly string[];
-  delay: (minutes: number) => string;
-};
-
-/** Map-only tints with no theme meaning (land, water, streets). The hero is
- *  always rendered dark, so these are fixed rather than token-driven. */
-const MAP_TINTS = {
-  land: "#141a2a",
-  water: "#0a1320",
-  park: "#13261f",
-  street: "#6a7fb0",
-  coast: "#3d6f8e",
-  district: "#8a9bc6",
-  busRoute: "#7f93a8",
-  vehicle: "#ffffff",
-  panel: "#0b0e16",
-} as const;
-
-/** Below this width the headline spans the canvas, so the scene drops below
- *  it and every piece of canvas text (callout, tower label, captions, legend,
- *  HUD) is left out rather than drawn under the headline. */
-const WIDE_LAYOUT_MIN_WIDTH = 900;
-
-type Ctx = CanvasRenderingContext2D;
-
-/** `mixHex` with its results remembered. Every blend the renderer asks for
- *  is between fixed palette colors at a small set of fixed fractions (tint
- *  steps, per-tower delays, glow highlights), so the cache stays a few dozen
- *  entries while the idle orbit redraws the same colors every frame. */
-const blendCache = new Map<string, string>();
-function blend(a: string, b: string, k: number): string {
-  const key = `${a}${b}${k}`;
-  let color = blendCache.get(key);
-  if (color === undefined) {
-    color = mixHex(a, b, k);
-    blendCache.set(key, color);
-  }
-  return color;
-}
-type Vec3 = [number, number, number];
-
-const ground = (p: Point2, y = 0.02): Vec3 => [p[0], y, p[1]];
-
-function tracePath(ctx: Ctx, project: Projector, pts: readonly Vec3[]): void {
+function tracePath(ctx: Ctx, project: Projector, pts: readonly Point2[], close = false): boolean {
   ctx.beginPath();
-  let penDown = false;
-  for (const p of pts) {
-    const q = project(p[0], p[1], p[2]);
-    if (!q) {
-      penDown = false;
-      continue;
-    }
-    if (penDown) ctx.lineTo(q[0], q[1]);
+  let drawn = 0;
+  for (const [x, z] of pts) {
+    const q = project(x, 0, z);
+    if (!q) continue;
+    if (drawn++) ctx.lineTo(q[0], q[1]);
     else ctx.moveTo(q[0], q[1]);
-    penDown = true;
+  }
+  if (close) ctx.closePath();
+  return drawn > 1;
+}
+
+function drawBasemap(ctx: Ctx, project: Projector, palette: HeroPalette, height: number): void {
+  ctx.fillStyle = palette.water;
+  if (tracePath(ctx, project, BASEMAP.sea, true)) ctx.fill();
+  if (tracePath(ctx, project, BASEMAP.river, true)) ctx.fill();
+  ctx.fillStyle = palette.park;
+  for (const park of BASEMAP.parks) if (tracePath(ctx, project, park, true)) ctx.fill();
+  ctx.strokeStyle = palette.road;
+  ctx.lineWidth = Math.max(2, height * 0.004);
+  for (const road of BASEMAP.roads) if (tracePath(ctx, project, road)) ctx.stroke();
+  // Railways are part of the basemap, as they are on the app's map tiles.
+  for (const route of ROUTES) {
+    if (route.mode !== "train" || !tracePath(ctx, project, route.path.points)) continue;
+    ctx.strokeStyle = palette.rail;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = palette.surface;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 }
 
-function stroke3(ctx: Ctx, project: Projector, pts: readonly Vec3[]): void {
-  tracePath(ctx, project, pts);
-  ctx.stroke();
-}
-
-function fillGround(ctx: Ctx, project: Projector, pts: readonly Point2[]): void {
-  tracePath(ctx, project, pts.map((p) => ground(p, 0)));
-  ctx.closePath();
-  ctx.fill();
-}
-
-/** Three stacked additive strokes (wide/faint, medium, thin/bright) read as a
- *  glow without the per-stroke cost of `shadowBlur`. */
-function glowStroke(ctx: Ctx, project: Projector, pts: readonly Vec3[], color: string, width: number, alpha: number): void {
-  if (alpha <= 0) return;
-  ctx.globalCompositeOperation = "lighter";
+/** The selected route, colored stop-to-stop by each stop's average delay
+ *  and spaced evenly by stop order; once drawn, a slow teal dash moves along
+ *  it to show direction, as on the operations map. */
+function drawSelectedRoute(ctx: Ctx, project: Projector, palette: HeroPalette, frame: HeroFrame): void {
+  const k = frame.routeReveal;
+  if (k <= 0) return;
+  const path = ROUTES[SELECTED_ROUTE].path;
+  const stops = SELECTED_ROUTE_STOP_AVG.length;
   ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = withAlpha(color, 0.12 * alpha);
-  ctx.lineWidth = width * 6;
-  stroke3(ctx, project, pts);
-  ctx.strokeStyle = withAlpha(color, 0.3 * alpha);
-  ctx.lineWidth = width * 2.4;
-  stroke3(ctx, project, pts);
-  ctx.strokeStyle = withAlpha(blend(color, "#ffffff", 0.45), 0.95 * alpha);
-  ctx.lineWidth = width;
-  stroke3(ctx, project, pts);
-  ctx.globalCompositeOperation = "source-over";
-}
-
-function groundRing(ctx: Ctx, project: Projector, x: number, z: number, radius: number, color: string, alpha: number): void {
-  if (alpha <= 0) return;
-  const pts: Vec3[] = [];
-  for (let k = 0; k <= 24; k++) {
-    const th = (k / 24) * Math.PI * 2;
-    pts.push([x + Math.cos(th) * radius, 0.02, z + Math.sin(th) * radius]);
+  ctx.lineWidth = 5;
+  for (let i = 0; i < stops - 1; i++) {
+    const u0 = i / (stops - 1);
+    if (u0 >= k) break;
+    const u1 = Math.min((i + 1) / (stops - 1), k);
+    const steps = 10;
+    for (let j = 0; j < steps; j++) {
+      const a = path.at(lerp(u0, u1, j / steps));
+      const b = path.at(lerp(u0, u1, (j + 1) / steps));
+      const qa = project(a[0], 0, a[1]);
+      const qb = project(b[0], 0, b[1]);
+      if (!qa || !qb) continue;
+      ctx.strokeStyle = delayColorIn(palette, lerp(SELECTED_ROUTE_STOP_AVG[i], SELECTED_ROUTE_STOP_AVG[i + 1], (j + 0.5) / steps));
+      ctx.beginPath();
+      ctx.moveTo(qa[0], qa[1]);
+      ctx.lineTo(qb[0], qb[1]);
+      ctx.stroke();
+    }
   }
-  ctx.strokeStyle = withAlpha(color, alpha);
-  ctx.lineWidth = 1.2;
-  stroke3(ctx, project, pts);
+  if (k >= 1 && tracePath(ctx, project, path.points)) {
+    ctx.save();
+    ctx.setLineDash([10, 14]);
+    ctx.lineDashOffset = -frame.t * 40;
+    ctx.strokeStyle = palette.accent;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
-function drawIcon(ctx: Ctx, mode: VehicleMode, cx: number, cy: number, size: number, color: string): void {
+/** The selected trip's reported stops: a teal trail with "›" direction
+ *  marks and delay-colored stop circles, the latest one larger. */
+function drawTrail(ctx: Ctx, project: Projector, palette: HeroPalette, labels: HeroLabels, frame: HeroFrame): void {
+  if (frame.trailReveal <= 0) return;
+  const path = ROUTES[SELECTED_ROUTE].path;
+  const shown = TRIP_HISTORY.slice(0, Math.ceil(frame.trailReveal * TRIP_HISTORY.length));
+  const pts = shown.map((h) => ({ h, q: project(...toGround(path.at(h.u))) })).filter((p) => p.q);
   ctx.save();
-  ctx.translate(cx - size / 2, cy - size / 2);
-  ctx.scale(size / MAKI_VIEWBOX_SIZE, size / MAKI_VIEWBOX_SIZE);
-  ctx.fillStyle = color;
+  ctx.globalAlpha *= frame.trailMorph > 0 ? 0.35 : 1;
+  ctx.strokeStyle = palette.accent;
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
   ctx.beginPath();
-  drawVehicleIcon(ctx, mode);
-  ctx.fill();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.q![0], p.q![1]) : ctx.moveTo(p.q![0], p.q![1])));
+  ctx.stroke();
+  setFont(ctx, 900, 16, palette.fontBody);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i].q!;
+    const b = pts[i + 1].q!;
+    ctx.save();
+    ctx.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+    ctx.rotate(Math.atan2(b[1] - a[1], b[0] - a[0]));
+    ctx.fillStyle = palette.accent;
+    ctx.fillText("›", 0, -1);
+    ctx.restore();
+  }
+  pts.forEach((p, i) => {
+    const latest = i === TRIP_HISTORY.length - 1;
+    const r = latest ? 8 : 5;
+    ctx.fillStyle = delayColorIn(palette, p.h.delay);
+    ctx.strokeStyle = palette.surface;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.q![0], p.q![1], r, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+    setFont(ctx, 700, 12, palette.fontBody);
+    ctx.textAlign = "left";
+    haloText(ctx, palette, `${labels.stops[p.h.stop]} +${p.h.delay}`, p.q![0] + r + 5, p.q![1]);
+  });
   ctx.restore();
 }
 
-function drawBaseMap(ctx: Ctx, project: Projector, map: HeroMap, reveal: number): void {
-  if (reveal <= 0) return;
-  const far = WORLD_EXTENT;
-  ctx.fillStyle = withAlpha(MAP_TINTS.land, 0.9 * reveal);
-  fillGround(ctx, project, [[-far, far], [far, far], ...[...map.coastline].reverse()]);
-  ctx.fillStyle = withAlpha(MAP_TINTS.water, reveal);
-  fillGround(ctx, project, [...map.coastline, [far, -far], [-far, -far]]);
-  fillGround(ctx, project, map.riverBanks);
-  ctx.fillStyle = withAlpha(MAP_TINTS.park, 0.9 * reveal);
-  for (const park of map.parks) fillGround(ctx, project, park);
+const toGround = ([x, z]: Point2): [number, number, number] => [x, 0, z];
+const bump = (u: number, c: number, w: number) => Math.exp(-(((u - c) / w) ** 2));
 
-  ctx.strokeStyle = withAlpha(MAP_TINTS.coast, 0.5 * reveal);
-  ctx.lineWidth = 1.2;
-  stroke3(ctx, project, map.coastline.map((p) => ground(p, 0)));
-
-  ctx.lineWidth = 1;
-  for (const street of map.streets) {
-    ctx.strokeStyle = withAlpha(MAP_TINTS.street, (street.arterial ? 0.16 : 0.07) * reveal);
-    stroke3(ctx, project, street.points.map((p) => ground(p, 0)));
-  }
-}
-
-function drawDistricts(ctx: Ctx, project: Projector, map: HeroMap, labels: HeroLabels, palette: HeroPalette, height: number, reveal: number): void {
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (const d of map.districts) {
-    const q = project(d.x, 0, d.z);
-    if (!q) continue;
-    const size = Math.min(40, Math.max(6, (height * 1.2) / q[2]));
-    ctx.font = `600 ${size}px ${palette.fontBody}`;
-    ctx.fillStyle = withAlpha(MAP_TINTS.district, 0.16 * reveal);
-    ctx.fillText(labels.districts[d.id], q[0], q[1]);
-  }
-  ctx.textBaseline = "alphabetic";
-}
-
-function routeColor(route: MapRoute, palette: HeroPalette): string {
-  if (route.mode === "train") return palette.accentStrong;
-  if (route.mode === "tram") return palette.accent;
-  return MAP_TINTS.busRoute;
-}
-
-/** Sections are tinted in this many discrete steps between the base color
- *  and the delay color, so consecutive sections that land on the same step
- *  merge into one stroked run instead of costing a glow stroke each. */
-const TINT_STEPS = 12;
-
-/** Draws the route up to `progress`, each short section tinted from its base
- *  color toward the delay ramp by that section's own average delay. */
-function drawRoute(ctx: Ctx, project: Projector, route: MapRoute, progress: number, tint: number, palette: HeroPalette, width: number): void {
-  const base = routeColor(route, palette);
-  ctx.strokeStyle = withAlpha(base, 0.12);
-  ctx.lineWidth = 1;
-  stroke3(ctx, project, route.path.points.map((p) => ground(p)));
-  if (progress <= 0) return;
-  const sections = 60;
-  const lineWidth = width * 0.0018 * (route.mode === "bus" ? 1 : route.mode === "tram" ? 1.1 : 1.5);
-  let run: Vec3[] = [];
-  let runColor = "";
-  const flush = () => {
-    if (run.length > 1) glowStroke(ctx, project, run, runColor, lineWidth, 0.9);
-  };
-  for (let k = 0; k < sections; k++) {
-    const a = k / sections;
-    if (a >= progress) break;
-    const b = Math.min((k + 1) / sections, progress);
-    const delay = route.delayAt((a + b) / 2) * tint;
-    const step = Math.round(Math.min(1, Math.max(0, (delay - 0.8) / 3)) * TINT_STEPS) / TINT_STEPS;
-    const color = blend(base, palette.warning, step);
-    const end = ground(route.path.at(b));
-    if (color !== runColor) {
-      flush();
-      run = [ground(route.path.at(a))];
-      runColor = color;
+/** Day playback: stop circles colored by the hour's severity. */
+function drawPlaybackStops(ctx: Ctx, project: Projector, palette: HeroPalette, frame: HeroFrame): void {
+  const a = frame.playback.stopsAlpha;
+  if (a <= 0) return;
+  const hourIndex = Math.min(HOURLY_MEANS.length - 1, Math.max(0, Math.floor(frame.playback.hour - FIRST_SERVICE_HOUR)));
+  const mean = HOURLY_MEANS[hourIndex];
+  ctx.save();
+  ctx.globalAlpha *= a;
+  for (const [routeKey, stopCount, weight] of [["bus12", 7, 1], ["tram3", 8, 0.7], ["bus7", 7, 1]] as const) {
+    const path = ROUTES.find((r) => r.key === routeKey)!.path;
+    for (let i = 0; i < stopCount; i++) {
+      const u = i / (stopCount - 1);
+      const q = project(...toGround(path.at(u)));
+      if (!q) continue;
+      const d = mean * (0.35 + 1.1 * bump(u, 0.5, 0.25)) * weight;
+      ctx.fillStyle = delayColorIn(palette, d);
+      ctx.strokeStyle = palette.surface;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(q[0], q[1], d >= 5 ? DOT_RADIUS.severe : DOT_RADIUS.base, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
     }
-    run.push(end);
   }
-  flush();
+  ctx.restore();
 }
 
-function drawVehicles(ctx: Ctx, project: Projector, map: HeroMap, t: number, alpha: number, width: number, height: number): void {
-  if (alpha <= 0) return;
-  map.routes.forEach((route, ri) => {
-    const isRail = route.mode === "train";
-    const count = isRail ? 2 : 3;
-    const speed = isRail ? 9 : 3.4;
-    const trailLength = isRail ? 5 : 2;
-    for (let v = 0; v < count; v++) {
-      const raw = ((t - 3.4) * speed) / route.path.length + v / count + ri * 0.17;
-      const u = ((raw % 1) + 1) % 1;
-      const trail: Vec3[] = [];
-      for (let k = 0; k <= 8; k++) trail.push(ground(route.path.at(u - ((1 - k / 8) * trailLength) / route.path.length), 0.03));
-      for (let k = 0; k < 8; k++) {
-        glowStroke(ctx, project, [trail[k], trail[k + 1]], MAP_TINTS.vehicle, width * 0.0016, ((k + 1) / 8) * 0.6 * alpha);
-      }
-      const head = project(...trail[8]);
-      if (head) {
-        ctx.fillStyle = withAlpha(MAP_TINTS.vehicle, alpha);
-        ctx.beginPath();
-        ctx.arc(head[0], head[1], Math.min(4, Math.max(1.5, (height * 0.5) / head[2])), 0, Math.PI * 2);
-        ctx.fill();
-      }
+/** Trip dots at their latest reported stop, merged into count circles when
+ *  zoomed out; the refresh blinks them and they reappear one stop on. */
+function drawTrips(ctx: Ctx, project: Projector, palette: HeroPalette, frame: HeroFrame): void {
+  if (frame.tripsBlinking || frame.tripsAlpha <= 0) return;
+  const pop = frame.tripsAtNextStop && frame.tripPop < 1 ? backOut(frame.tripPop) : 1;
+  const placed = TRIPS.map((tp) => {
+    const q = project(...toGround(ROUTES[tp.route].path.at(frame.tripsAtNextStop ? tp.nextU : tp.u)));
+    return q ? { tp, x: q[0], y: q[1], appear: frame.tripAppear(tp.id) } : null;
+  }).filter((p): p is NonNullable<typeof p> => p !== null && p.appear > 0);
+  type Placed = (typeof placed)[number];
+  const groups: { x: number; y: number; members: Placed[] }[] = [];
+  for (const p of placed) {
+    const near = frame.zoom < 0.5 ? groups.find((g) => Math.hypot(g.x - p.x, g.y - p.y) < DOT_RADIUS.base * CLUSTER_DISTANCE) : undefined;
+    if (near) near.members.push(p);
+    else groups.push({ x: p.x, y: p.y, members: [p] });
+  }
+  ctx.save();
+  ctx.globalAlpha *= frame.tripsAlpha;
+  const baseAlpha = ctx.globalAlpha;
+  for (const g of groups) {
+    const appear = Math.min(...g.members.map((m) => m.appear));
+    const scale = (appear < 1 ? backOut(appear) : 1) * pop;
+    if (g.members.length > 1) {
+      const mean = g.members.reduce((s, m) => s + m.tp.delay, 0) / g.members.length;
+      const r = 11 * scale;
+      ctx.fillStyle = delayColorIn(palette, mean);
+      ctx.strokeStyle = palette.surface;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(g.x, g.y, r, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+      setFont(ctx, 800, 12, palette.fontBody);
+      ctx.fillStyle = palette.surface;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(g.members.length), g.x, g.y + 0.5);
+      continue;
     }
-  });
-}
-
-function drawStations(ctx: Ctx, project: Projector, map: HeroMap, labels: HeroLabels, palette: HeroPalette, frame: HeroFrame, width: number, height: number): void {
-  const alpha = frame.stationAlpha;
-  if (alpha <= 0) return;
-  for (const s of map.stations) {
-    const q = project(s.x, 0.05, s.z);
-    if (!q) continue;
-    const size = Math.min(9, Math.max(3, (height * 0.9) / q[2])) * (s.major ? 1.4 : 1);
-    ctx.fillStyle = withAlpha(palette.background, alpha);
-    ctx.strokeStyle = withAlpha(MAP_TINTS.vehicle, 0.9 * alpha);
-    ctx.lineWidth = 1.5;
+    const { tp } = g.members[0];
+    const selected = frame.tripSelected && tp.id === SELECTED_TRIP.id;
+    const onRoute = tp.route === SELECTED_ROUTE;
+    ctx.globalAlpha = baseAlpha * (frame.routeReveal > 0.5 && !onRoute ? 0.35 : 1);
+    const r = (selected ? DOT_RADIUS.selected : tp.delay >= 5 ? DOT_RADIUS.severe : DOT_RADIUS.base) * scale;
+    ctx.fillStyle = delayColorIn(palette, tp.delay);
+    ctx.strokeStyle = palette.surface;
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.roundRect(q[0] - size / 2, q[1] - size / 2, size, size, 2);
+    ctx.arc(g.x, g.y, Math.max(0, r), 0, TAU);
     ctx.fill();
     ctx.stroke();
-    if (frame.stationLabels) {
-      const fontSize = Math.min(15, Math.max(9, width * 0.0105 * (s.major ? 1.2 : 1)));
-      ctx.font = `${s.major ? 600 : 400} ${fontSize}px ${palette.fontBody}`;
-      ctx.textAlign = "left";
-      ctx.fillStyle = withAlpha(palette.text, 0.85 * alpha);
-      ctx.fillText(labels.stations[s.id], q[0] + size, q[1] - size * 0.6);
-    }
-  }
-}
-
-function drawCallout(ctx: Ctx, project: Projector, map: HeroMap, labels: HeroLabels, palette: HeroPalette, frame: HeroFrame, width: number, height: number): void {
-  const a = frame.calloutAlpha;
-  if (a <= 0) return;
-  const { x, z, delay, weekOverWeek } = map.hotspot;
-  const q = project(x, 0.05, z);
-  if (!q) return;
-  groundRing(ctx, project, x, z, 1.6 + 0.2 * Math.sin(frame.t * 4), palette.warning, a);
-  const boxX = q[0] + width * 0.03;
-  const boxY = q[1] - height * 0.2;
-  const boxW = Math.max(200, width * 0.19);
-  ctx.strokeStyle = withAlpha(palette.warning, 0.7 * a);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(q[0], q[1]);
-  ctx.lineTo(boxX, boxY + height * 0.08);
-  ctx.stroke();
-  ctx.fillStyle = withAlpha(MAP_TINTS.panel, 0.88 * a);
-  ctx.strokeStyle = withAlpha(palette.warning, 0.5 * a);
-  ctx.beginPath();
-  ctx.roundRect(boxX, boxY - height * 0.02, boxW, height * 0.12, 6);
-  ctx.fill();
-  ctx.stroke();
-  const small = Math.max(10, width * 0.0105);
-  drawIcon(ctx, "bus", boxX + small * 1.5, boxY + height * 0.025, small * 1.3, withAlpha(palette.textMuted, a));
-  ctx.textAlign = "left";
-  ctx.font = `${small}px ${palette.fontBody}`;
-  ctx.fillStyle = withAlpha(palette.textMuted, a);
-  ctx.fillText(labels.calloutRoute, boxX + small * 2.6, boxY + height * 0.03);
-  const big = Math.max(16, width * 0.02);
-  ctx.font = `500 ${big}px ${palette.fontMono}`;
-  ctx.fillStyle = withAlpha(palette.warning, a);
-  const delayText = labels.delay(delay);
-  ctx.fillText(delayText, boxX + small, boxY + height * 0.085);
-  const delayWidth = ctx.measureText(delayText).width;
-  ctx.font = `${small * 0.9}px ${palette.fontBody}`;
-  ctx.fillStyle = withAlpha(palette.textMuted, a);
-  ctx.fillText(labels.calloutWeekOverWeek(weekOverWeek), boxX + small * 2 + delayWidth, boxY + height * 0.083);
-}
-
-const towerHeight = (tower: StopTower): number => 0.4 + tower.delay * 1.5;
-
-function drawTower(ctx: Ctx, project: Projector, tower: StopTower, h: number, color: string): void {
-  const w = 0.55;
-  const corners: Point2[] = [
-    [tower.x - w, tower.z - w],
-    [tower.x + w, tower.z - w],
-    [tower.x + w, tower.z + w],
-    [tower.x - w, tower.z + w],
-  ];
-  const faces = corners.map((p, i) => {
-    const q = corners[(i + 1) % 4];
-    return [project(p[0], 0, p[1]), project(q[0], 0, q[1]), project(q[0], h, q[1]), project(p[0], h, p[1])];
-  });
-  if (faces.some((f) => f.some((v) => !v))) return;
-  const projected = faces as [number, number, number][][];
-  // Painter's order: farthest face first.
-  const order = projected
-    .map((f, i) => ({ i, depth: f.reduce((sum, v) => sum + v[2], 0) }))
-    .sort((m, n) => n.depth - m.depth);
-  for (const { i } of order) {
-    const f = projected[i];
-    const g = ctx.createLinearGradient(0, f[0][1], 0, f[3][1]);
-    g.addColorStop(0, withAlpha(color, 0.1));
-    g.addColorStop(1, withAlpha(color, i % 2 ? 0.55 : 0.75));
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    f.forEach((v, k) => (k ? ctx.lineTo(v[0], v[1]) : ctx.moveTo(v[0], v[1])));
-    ctx.closePath();
-    ctx.fill();
-  }
-  const top = corners.map((p) => project(p[0], h, p[1])!);
-  ctx.fillStyle = blend(color, "#ffffff", 0.35);
-  ctx.beginPath();
-  top.forEach((v, k) => (k ? ctx.lineTo(v[0], v[1]) : ctx.moveTo(v[0], v[1])));
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawTowers(ctx: Ctx, project: Projector, map: HeroMap, palette: HeroPalette, frame: HeroFrame, width: number): void {
-  const visible = map.towers
-    .map((tower, i) => ({ tower, i, growth: frame.towerGrowth(i), base: project(tower.x, 0, tower.z) }))
-    .filter((v) => v.growth > 0 && v.base)
-    .sort((a, b) => b.base![2] - a.base![2]);
-  for (const { tower, growth } of visible) {
-    const h = towerHeight(tower) * growth;
-    const color = blend(palette.accent, palette.warning, (tower.delay - 0.8) / 4);
-    drawTower(ctx, project, tower, h, color);
-    if (tower.delay > 3.5) {
-      const top = project(tower.x, h, tower.z);
-      if (!top) continue;
-      const r = width * 0.02;
-      const g = ctx.createRadialGradient(top[0], top[1], 0, top[0], top[1], r);
-      g.addColorStop(0, withAlpha(palette.warning, 0.4));
-      g.addColorStop(1, withAlpha(palette.warning, 0));
-      ctx.globalCompositeOperation = "lighter";
-      ctx.fillStyle = g;
+    if (selected) {
+      ctx.strokeStyle = palette.accent;
       ctx.beginPath();
-      ctx.arc(top[0], top[1], r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalCompositeOperation = "source-over";
+      ctx.arc(g.x, g.y, r + 4, 0, TAU);
+      ctx.stroke();
+    }
+    if (frame.zoom > 0.5 && (tp.delay >= 3 || selected)) {
+      setFont(ctx, 700, 12, palette.fontBody);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      haloText(ctx, palette, `${tp.time} +${Math.round(tp.delay)}`, g.x + r + 5, g.y);
     }
   }
+  ctx.restore();
 }
 
-function drawTowerLabel(ctx: Ctx, project: Projector, map: HeroMap, labels: HeroLabels, palette: HeroPalette, frame: HeroFrame, width: number, height: number): void {
-  const a = frame.towerLabelAlpha;
+function drawRail(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, rail: RailGeometry, frame: HeroFrame, height: number): void {
+  const a = frame.playback.railAlpha;
   if (a <= 0) return;
-  const tower = map.tallestTower;
-  const q = project(tower.x, towerHeight(tower) + 0.3, tower.z);
-  if (!q) return;
-  // The label leads up and right from the tower top, unless that would run
-  // into the top edge (and the HUD there), in which case it leads down.
-  const leadsUp = q[1] - height * 0.14 > height * 0.2;
-  const lineY = q[1] + (leadsUp ? -1 : 1) * height * 0.06;
-  const textX = q[0] + width * 0.042;
-  const bigSize = Math.max(16, width * 0.02);
-  const smallSize = Math.max(10, width * 0.0105);
-  const delayText = labels.delay(tower.delay);
-  ctx.font = `${smallSize}px ${palette.fontBody}`;
-  const panelW = Math.max(ctx.measureText(labels.towerLabel).width, delayText.length * bigSize * 0.62) + smallSize * 1.4;
-  ctx.fillStyle = withAlpha(MAP_TINTS.panel, 0.72 * a);
-  ctx.beginPath();
-  ctx.roundRect(textX - smallSize * 0.7, lineY - bigSize * 1.35, panelW, bigSize * 1.35 + smallSize * 2.1, 6);
-  ctx.fill();
-  ctx.strokeStyle = withAlpha(palette.warning, 0.8 * a);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(q[0], q[1]);
-  ctx.lineTo(q[0] + width * 0.04, lineY);
-  ctx.lineTo(textX - smallSize * 0.7, lineY);
-  ctx.stroke();
-  ctx.textAlign = "left";
-  ctx.font = `500 ${bigSize}px ${palette.fontMono}`;
-  ctx.fillStyle = withAlpha(palette.warning, a);
-  ctx.fillText(delayText, textX, lineY - bigSize * 0.35);
-  ctx.font = `${smallSize}px ${palette.fontBody}`;
-  ctx.fillStyle = withAlpha(palette.text, a);
-  ctx.fillText(labels.towerLabel, textX, lineY + smallSize * 1.4);
-}
-
-function drawCaption(ctx: Ctx, labels: HeroLabels, palette: HeroPalette, frame: HeroFrame, width: number, height: number): void {
-  if (!frame.caption) return;
-  const { index, alpha } = frame.caption;
-  const { title, body } = labels.captions[index];
-  const right = width * 0.95;
-  const y = height * 0.82;
-  ctx.globalAlpha = alpha;
-  ctx.textAlign = "right";
-  ctx.fillStyle = palette.warning;
-  ctx.fillRect(right - width * 0.02, y - height * 0.075, width * 0.02, 2);
+  const hour = frame.playback.hour;
+  const y = rail.y + (1 - expoOut(a)) * 16;
+  ctx.save();
+  ctx.globalAlpha *= a;
+  setFont(ctx, 800, Math.min(48, height * 0.065), palette.fontMono);
   ctx.fillStyle = palette.text;
-  ctx.font = `600 ${Math.max(14, width * 0.015)}px ${palette.fontBody}`;
-  ctx.fillText(title, right, y - height * 0.02);
-  ctx.fillStyle = palette.textMuted;
-  ctx.font = `${Math.max(11, width * 0.011)}px ${palette.fontBody}`;
-  ctx.fillText(body, right, y + height * 0.035);
-  ctx.globalAlpha = 1;
-}
-
-function drawLegend(ctx: Ctx, labels: HeroLabels, palette: HeroPalette, alpha: number, width: number, height: number): void {
-  if (alpha <= 0) return;
-  const w = width * 0.12;
-  const x = width * 0.95 - w;
-  const y = height * 0.92;
-  const g = ctx.createLinearGradient(x, 0, x + w, 0);
-  g.addColorStop(0, palette.accentStrong);
-  g.addColorStop(1, palette.warning);
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = g;
-  ctx.fillRect(x, y, w, 3);
-  ctx.fillStyle = palette.textMuted;
-  ctx.font = `${Math.max(10, width * 0.0095)}px ${palette.fontBody}`;
   ctx.textAlign = "left";
-  ctx.fillText(labels.legendOnTime, x, y - 6);
-  ctx.textAlign = "right";
-  ctx.fillText(labels.legendDelayed, x + w, y - 6);
-  ctx.globalAlpha = 1;
-}
-
-function drawHud(ctx: Ctx, labels: HeroLabels, palette: HeroPalette, t: number, width: number): void {
-  const alpha = Math.min(1, Math.max(0, (t - 0.3) / 0.7));
-  if (alpha <= 0) return;
-  const margin = width * 0.025;
-  const arm = width * 0.02;
-  const right = width - margin;
-  ctx.globalAlpha = alpha;
-  ctx.strokeStyle = withAlpha(palette.text, 0.4);
-  ctx.lineWidth = 1;
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(labels.clock(Math.min(23, Math.floor(hour))), rail.x, y - 12);
+  drawCard(ctx, palette, rail.x, y, rail.w, rail.h, 10);
+  ctx.fillStyle = palette.text;
   ctx.beginPath();
-  ctx.moveTo(right - arm, margin);
-  ctx.lineTo(right, margin);
-  ctx.lineTo(right, margin + arm);
-  ctx.stroke();
-  ctx.font = `${Math.max(10, width * 0.0095)}px ${palette.fontMono}`;
-  ctx.textAlign = "right";
-  labels.hud.forEach((line, i) => {
-    ctx.fillStyle = withAlpha(palette.text, i === 0 ? 0.8 : 0.6);
-    ctx.fillText(line, right - width * 0.012, margin + width * 0.02 + i * width * 0.015);
-  });
-  ctx.fillStyle = palette.warning;
-  ctx.beginPath();
-  ctx.arc(right - width * 0.012 - ctx.measureText(labels.hud[0] ?? "").width - 8, margin + width * 0.017, 2.5, 0, Math.PI * 2);
+  ctx.moveTo(rail.x + rail.pad, y + rail.h * 0.3);
+  ctx.lineTo(rail.x + rail.pad + rail.h * 0.32, y + rail.h * 0.5);
+  ctx.lineTo(rail.x + rail.pad, y + rail.h * 0.7);
   ctx.fill();
-  ctx.globalAlpha = 1;
+  HOURLY_MEANS.forEach((v, i) => {
+    ctx.fillStyle = delayColorIn(palette, v);
+    ctx.beginPath();
+    ctx.roundRect(rail.bx + i * rail.segW + 1, y + rail.h * 0.42, rail.segW - 2, rail.h * 0.16, 2);
+    ctx.fill();
+  });
+  const px = rail.bx + clamp01((hour - FIRST_SERVICE_HOUR) / (24 - FIRST_SERVICE_HOUR)) * rail.bw;
+  ctx.fillStyle = palette.text;
+  ctx.beginPath();
+  ctx.arc(px, y + rail.h * 0.5, rail.h * 0.16, 0, TAU);
+  ctx.fill();
+  setFont(ctx, 700, 11, palette.fontBody);
+  ctx.fillStyle = palette.muted;
+  ctx.textBaseline = "middle";
+  ctx.fillText(labels.playback, rail.bx, y + rail.h * 0.22);
+  ctx.textAlign = "right";
+  ctx.fillStyle = palette.text;
+  ctx.fillText(labels.playbackSpeed, rail.x + rail.w - rail.pad, y + rail.h * 0.5);
+  ctx.restore();
 }
 
-export function drawHeroFrame(
-  ctx: Ctx,
-  width: number,
-  height: number,
-  frame: HeroFrame,
-  map: HeroMap,
-  palette: HeroPalette,
-  labels: HeroLabels,
-): void {
-  const wide = width >= WIDE_LAYOUT_MIN_WIDTH;
-  ctx.fillStyle = palette.background;
+function drawRefreshChip(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, layout: HeroLayout, frame: HeroFrame, height: number): void {
+  const a = frame.refreshChip;
+  if (a <= 0) return;
+  setFont(ctx, 700, 12, palette.fontBody);
+  const w = ctx.measureText(labels.refresh).width + 44;
+  const h = 32;
+  const x = layout.focusX - w / 2;
+  const y = height * 0.08;
+  drawCard(ctx, palette, x, y, w, h, h / 2, a);
+  ctx.save();
+  ctx.globalAlpha *= a;
+  ctx.fillStyle = palette.accent;
+  ctx.beginPath();
+  ctx.arc(x + 17, y + h / 2, 4, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = palette.text;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(labels.refresh, x + 28, y + h / 2);
+  ctx.restore();
+}
+
+/** Numbered caption naming the screen being shown, revealed through a mask. */
+function drawCaption(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, layout: HeroLayout, frame: HeroFrame, height: number): void {
+  const c = frame.caption;
+  if (!c) return;
+  const k = expoOut(c.enter);
+  const out = expoIn(c.exit);
+  const px = Math.min(24, height * 0.032);
+  const { x, y } = layout.caption;
+  const text = labels.captions[c.index];
+  setFont(ctx, 800, px, palette.fontBody);
+  const w = ctx.measureText(text).width + px * 2.4;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x + w * out, y - px * 2, w * (k - out), px * 3);
+  ctx.clip();
+  setFont(ctx, 700, px * 0.45, palette.fontMono);
+  ctx.fillStyle = palette.accent;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(`0${c.index + 1}`, x, y - px * 1.05);
+  ctx.fillRect(x + px * 1.1, y - px * 1.2, px * 1.6 * k, 2);
+  setFont(ctx, 800, px, palette.fontBody);
+  ctx.fillStyle = palette.text;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/** The trip's reported stops lift off the map and land as the trip panel's
+ *  per-stop chart — the same four readings, the same screen of the app. */
+function drawTrailMorph(ctx: Ctx, project: Projector, palette: HeroPalette, frame: HeroFrame, layout: HeroLayout, height: number): void {
+  const k = frame.trailMorph;
+  if (!layout.panel || k <= 0 || k >= 1) return;
+  const box = tripChartBox(layout.panel);
+  const path = ROUTES[SELECTED_ROUTE].path;
+  const pts = TRIP_HISTORY.map((h, i) => {
+    const q = project(...toGround(path.at(h.u)));
+    const [tx, ty] = tripChartPoint(box, i);
+    const kk = expoInOut(clamp01(k * 1.35 - i * 0.1));
+    return { x: lerp(q ? q[0] : tx, tx, kk), y: lerp(q ? q[1] : ty, ty, kk) - Math.sin(Math.PI * kk) * height * 0.12, d: h.delay, kk };
+  });
+  ctx.strokeStyle = palette.accent;
+  ctx.lineWidth = 3.5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.stroke();
+  for (const p of pts) {
+    ctx.fillStyle = delayColorIn(palette, p.d);
+    ctx.strokeStyle = palette.surface;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, lerp(6, 5 * layout.panel.s, p.kk), 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function drawFrameMarks(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, width: number, height: number): void {
+  const m = Math.max(14, width * 0.016);
+  const arm = Math.max(10, width * 0.009);
+  ctx.strokeStyle = withAlpha(palette.text, 0.35);
+  ctx.lineWidth = 1;
+  for (const [x, y, sx, sy] of [[m, m, 1, 1], [width - m, m, -1, 1], [m, height - m, 1, -1], [width - m, height - m, -1, -1]]) {
+    ctx.beginPath();
+    ctx.moveTo(x + sx * arm, y);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x, y + sy * arm);
+    ctx.stroke();
+  }
+  setFont(ctx, 600, 10, palette.fontBody);
+  ctx.fillStyle = withAlpha(palette.text, 0.5);
+  ctx.textAlign = "right";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(labels.sampleNotice, width - m - arm, height - m - 3);
+}
+
+export function drawHeroFrame(ctx: Ctx, width: number, height: number, frame: HeroFrame, palette: HeroPalette, labels: HeroLabels): void {
+  const layout = layoutFor(width, height);
+  const rail = railGeometry(layout.rail);
+  ctx.fillStyle = palette.land;
   ctx.fillRect(0, 0, width, height);
-  const project = wide
-    ? makeProjector(width, height, frame.camera, width * 0.6)
-    : makeProjector(width, height, frame.camera, width * 0.5, height * 0.72);
-
-  drawBaseMap(ctx, project, map, frame.mapReveal);
-  drawDistricts(ctx, project, map, labels, palette, height, frame.mapReveal);
-  map.routes.forEach((route, i) => drawRoute(ctx, project, route, frame.routeProgress(i), frame.delayTint, palette, width));
-  if (frame.pulseAlpha > 0) {
-    map.stations.forEach((s, i) => {
-      const phase = (frame.t * 0.7 + i * 0.29) % 1;
-      groundRing(ctx, project, s.x, s.z, 0.4 + phase * 3.2, palette.accentStrong, (1 - phase) * 0.55 * frame.pulseAlpha);
-    });
+  const project = makeProjector(width, height, frame.camera, layout.focusX, layout.focusY);
+  drawBasemap(ctx, project, palette, height);
+  drawSelectedRoute(ctx, project, palette, frame);
+  drawTrail(ctx, project, palette, labels, frame);
+  drawPlaybackStops(ctx, project, palette, frame);
+  drawTrips(ctx, project, palette, frame);
+  drawRail(ctx, palette, labels, rail, frame, height);
+  drawRefreshChip(ctx, palette, labels, layout, frame, height);
+  drawCaption(ctx, palette, labels, layout, frame, height);
+  if (layout.panel) {
+    drawPanel(ctx, palette, labels, layout.panel, frame, rail);
+    drawTrailMorph(ctx, project, palette, frame, layout, height);
+    if (frame.hourMorph > 0 && frame.hourMorph < 1) {
+      drawHourBars(ctx, palette, hourBarsBox(layout.panel), frame.hourMorph, frame.playback.hour, rail, layout.panel.s);
+    }
   }
-  drawVehicles(ctx, project, map, frame.t, frame.vehicleAlpha, width, height);
-  drawStations(ctx, project, map, labels, palette, frame, width, height);
-  if (wide) drawCallout(ctx, project, map, labels, palette, frame, width, height);
-  drawTowers(ctx, project, map, palette, frame, width);
-
-  if (wide) {
-    drawTowerLabel(ctx, project, map, labels, palette, frame, width, height);
-    drawCaption(ctx, labels, palette, frame, width, height);
-    drawLegend(ctx, labels, palette, frame.legendAlpha, width, height);
-    drawHud(ctx, labels, palette, frame.t, width);
-  }
+  drawFrameMarks(ctx, palette, labels, width, height);
 }

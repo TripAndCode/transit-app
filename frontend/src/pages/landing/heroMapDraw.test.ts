@@ -1,102 +1,146 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { drawHeroFrame, type HeroLabels, type HeroPalette } from "./heroMapDraw";
-import { buildHeroMap } from "./heroMapScene";
-import { SEQUENCE_END, frameAt } from "./heroMapTimeline";
+import type { HeroLabels, HeroPalette } from "./heroCanvas";
+import { drawHeroFrame } from "./heroMapDraw";
+import { DURATION, LOOP_START, frameAt } from "./heroMapTimeline";
+import { WIDE_LAYOUT_MIN_WIDTH, layoutFor } from "./heroPanelDraw";
 
 /** Recording stand-in for CanvasRenderingContext2D (jsdom has none): every
- *  method is a no-op that logs its name, `fillText` also logs its text, and
- *  gradients accept color stops. */
+ *  method is a no-op, `fillText` records its text, and gradients/metrics
+ *  return plausible stand-ins. */
 function makeFakeCtx() {
-  const calls: string[] = [];
   const texts: string[] = [];
-  const gradient = { addColorStop: () => {} };
   const state: Record<string | symbol, unknown> = {};
   const ctx = new Proxy(state, {
     get(target, prop) {
       if (prop in target) return target[prop];
-      if (prop === "createLinearGradient" || prop === "createRadialGradient") return () => gradient;
       if (prop === "measureText") return (s: string) => ({ width: s.length * 7 });
       if (prop === "fillText") return (s: string) => texts.push(s);
-      return () => calls.push(String(prop));
+      return () => {};
     },
     set(target, prop, value) {
       target[prop] = value;
       return true;
     },
   });
-  return { ctx: ctx as unknown as CanvasRenderingContext2D, calls, texts };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, texts };
 }
 
 const PALETTE: HeroPalette = {
-  background: "#0F1119",
-  text: "#FAFAFF",
-  textMuted: "#C9CBDA",
-  accent: "#43c5ba",
-  accentStrong: "#6FD8CC",
-  warning: "#C99A2E",
+  land: "#efede7",
+  water: "#d3e2e8",
+  park: "#dde9d8",
+  road: "#ffffff",
+  rail: "#7d838a",
+  surface: "#ffffff",
+  text: "#2a2a2a",
+  muted: "#6e6e6e",
+  rule: "#e2e2e0",
+  accent: "#187b80",
+  delay: { ok: "#2EA87A", mild: "#C99A2E", moderate: "#D4622A", severe: "#A8391F" },
   fontBody: "sans-serif",
   fontMono: "monospace",
 };
 
 const LABELS: HeroLabels = {
-  stations: { central: "Central", harbor: "Harbor", west: "West", eastHill: "East Hill", north: "North", seaside: "Seaside" },
-  districts: { north: "N", riverside: "R", central: "C", port: "P", east: "E" },
-  captions: {
-    0: { title: "cap-live", body: "b0" },
-    1: { title: "cap-sections", body: "b1" },
-    2: { title: "cap-towers", body: "b2" },
-  },
-  calloutRoute: "route-12",
-  calloutWeekOverWeek: (m) => `wow ${m.toFixed(1)}`,
-  towerLabel: "tower-label",
-  legendOnTime: "on-time",
-  legendDelayed: "late",
-  hud: ["hud-title", "hud-scope", "hud-sample"],
-  delay: (m) => `+${m.toFixed(1)}`,
+  screens: { live: "tag-live", period: "tag-period" },
+  captions: { 0: "cap-live", 1: "cap-trip", 2: "cap-play", 3: "cap-overview" },
+  routes: { rapid: "Rapid", local: "Local", tram3: "Tram 3", bus12: "Route 12", bus7: "Route 7", bus3: "Route 3" },
+  stops: { konan: "Konan", shiyakusho: "City Hall", central: "Central", honmachi: "Honmachi", higashidai: "Higashidai", minatomachi: "Minato" },
+  queueTitle: "queue-title",
+  kpi: { observed: "kpi-observed", delayedFivePlus: "kpi-delayed", onTime: "kpi-ontime" },
+  legendBands: ["b1", "b2", "b3", "b4"],
+  legendDisclosure: "not-gps",
+  tripHeading: "trip-heading",
+  tripChartTitle: "trip-chart",
+  tripNote: "trip-note",
+  refresh: "refresh-chip",
+  playback: "play-the-day",
+  playbackSpeed: "1x",
+  hourlyTitle: "hourly-title",
+  peak: "peak",
+  overviewAverage: "network-avg",
+  overviewChange: "change",
+  overviewDelayedRoutes: "routes-delayed",
+  routesToCheck: "routes-to-check",
+  sampleNotice: "sample-notice",
+  delayShort: (m) => `+${m}`,
+  minutes: (m) => `${m.toFixed(1)}m`,
+  hourOfDay: (h) => `${h}h`,
+  clock: (h) => `${h}:00`,
+  minuteUnit: "m",
 };
 
-const map = buildHeroMap();
+function textsAt(t: number, width = 1440, height = 740) {
+  const { ctx, texts } = makeFakeCtx();
+  drawHeroFrame(ctx, width, height, frameAt(t), PALETTE, LABELS);
+  return texts;
+}
 
 describe("drawHeroFrame", () => {
-  it("renders every point of the script without throwing", () => {
-    for (let t = 0; t <= 20; t += 0.25) {
-      const { ctx } = makeFakeCtx();
-      expect(() => drawHeroFrame(ctx, 1400, 600, frameAt(t), map, PALETTE, LABELS)).not.toThrow();
+  it("renders every moment of the script, wide and narrow, without throwing", () => {
+    for (let t = 0; t <= DURATION; t += 0.1) {
+      expect(() => textsAt(t)).not.toThrow();
+      expect(() => textsAt(t, 390, 700)).not.toThrow();
     }
   });
 
-  it("names the worst section during the callout, with its delay and weekly change", () => {
-    const { ctx, texts } = makeFakeCtx();
-    drawHeroFrame(ctx, 1400, 600, frameAt(7.5), map, PALETTE, LABELS);
-    expect(texts).toContain("route-12");
-    expect(texts).toContain(`+${map.hotspot.delay.toFixed(1)}`);
-    expect(texts).toContain("wow 2.1");
-    expect(texts).toContain("cap-sections");
+  it("always says the figures are samples", () => {
+    for (const t of [0, LOOP_START, 8, 12, 15]) expect(textsAt(t)).toContain("sample-notice");
   });
 
-  it("labels the tallest tower in the finished still, alongside the sample-data notice", () => {
-    const { ctx, texts } = makeFakeCtx();
-    drawHeroFrame(ctx, 1400, 600, frameAt(SEQUENCE_END), map, PALETTE, LABELS);
-    expect(texts).toContain("tower-label");
-    expect(texts).toContain(`+${map.tallestTower.delay.toFixed(1)}`);
-    expect(texts).toContain("hud-sample");
+  it("shows the live queue with the map's legend and disclosure", () => {
+    const texts = textsAt(LOOP_START);
+    expect(texts).toEqual(expect.arrayContaining(["tag-live", "queue-title", "kpi-observed", "kpi-delayed", "kpi-ontime", "not-gps", "cap-live"]));
+    expect(texts).toContain("Route 12　Honmachi");
   });
 
-  it("merges equally tinted route sections into shared strokes once the tint has settled", () => {
-    const { ctx, calls } = makeFakeCtx();
-    drawHeroFrame(ctx, 1400, 600, frameAt(SEQUENCE_END + 30), map, PALETTE, LABELS);
-    const strokes = calls.filter((c) => c === "stroke").length;
-    // One glow stroke per section would be 60 sections x 3 passes x 6 routes
-    // for the routes alone; batching keeps the whole idle frame well below it.
-    expect(strokes).toBeLessThan(60 * 3 * map.routes.length);
+  it("labels the opened trip's stops on the map, then lands them in the trip chart", () => {
+    const mid = textsAt(6.5);
+    expect(mid).toEqual(expect.arrayContaining(["Konan +0", "Central +3", "Honmachi +6", "08:12 +6", "trip-heading", "trip-chart"]));
+    expect(textsAt(8.6)).toEqual(expect.arrayContaining(["Konan", "City Hall", "Central", "Honmachi", "trip-note"]));
   });
 
-  it("drops corner captions, legend and HUD when the headline covers a narrow canvas", () => {
-    const { ctx, texts } = makeFakeCtx();
-    drawHeroFrame(ctx, 600, 600, frameAt(SEQUENCE_END), map, PALETTE, LABELS);
-    expect(texts).not.toContain("cap-towers");
-    expect(texts).not.toContain("on-time");
-    expect(texts).not.toContain("hud-sample");
+  it("shows the playback rail and clock, then the hourly bars' peak", () => {
+    expect(textsAt(11.6)).toEqual(expect.arrayContaining(["play-the-day", "1x", "tag-period", "hourly-title", "9h", "peak"]));
+  });
+
+  it("builds the period overview", () => {
+    expect(textsAt(15.2)).toEqual(expect.arrayContaining(["network-avg", "change", "routes-delayed", "routes-to-check", "Route 12"]));
+  });
+
+  it("drops the panel and its morphs when the headline spans a narrow canvas", () => {
+    for (const t of [LOOP_START, 7.3, 10.4, 15.2]) {
+      const texts = textsAt(t, 390, 700);
+      expect(texts).not.toContain("queue-title");
+      expect(texts).not.toContain("trip-chart");
+      expect(texts).not.toContain("network-avg");
+    }
+  });
+});
+
+describe("layoutFor", () => {
+  it("keeps the panel and the map's focus clear of the headline column", () => {
+    for (const width of [WIDE_LAYOUT_MIN_WIDTH, 1280, 1440, 1920, 2560]) {
+      const l = layoutFor(width, 740);
+      expect(l.panel).not.toBeNull();
+      expect(l.panel!.x).toBeGreaterThan(width * 0.48);
+      expect(l.panel!.x + l.panel!.w).toBeLessThan(width);
+      expect(l.focusX).toBeGreaterThan(width * 0.48);
+      expect(l.focusX).toBeLessThan(l.panel!.x);
+      expect(l.rail.x + l.rail.w).toBeLessThan(l.panel!.x);
+    }
+  });
+
+  it("fits the panel inside short heroes", () => {
+    const l = layoutFor(1440, 560);
+    expect(l.panel!.y).toBeGreaterThanOrEqual(0);
+    expect(l.panel!.y + l.panel!.h).toBeLessThanOrEqual(560);
+  });
+
+  it("has no panel below the wide breakpoint and pushes the map under the headline", () => {
+    const l = layoutFor(WIDE_LAYOUT_MIN_WIDTH - 1, 700);
+    expect(l.panel).toBeNull();
+    expect(l.focusY).toBeGreaterThan(350);
   });
 });

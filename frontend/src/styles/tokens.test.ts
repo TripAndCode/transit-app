@@ -145,7 +145,7 @@ function decl(body: string, prop: string): string | null {
 }
 
 const rootBlock = ruleBody(globalCss, ":root {");
-const darkBlock = ruleBody(globalCss, ':root[data-theme="dark"], .theme-scope-dark {');
+const darkBlock = ruleBody(globalCss, ':root[data-theme="dark"] {');
 const reduceBlock = ruleBody(globalCss, "@media (prefers-reduced-motion: reduce)");
 const bodyBlock = ruleBody(globalCss, "body {");
 
@@ -354,12 +354,10 @@ describe("one accent identity", () => {
   it("carries no scoped --accent override that would fork the identity", () => {
     // A `.app-shell { --accent: … }` (or any other scoped redefinition) means
     // the signed-in shell and the pre-auth pages render different accents.
-    // The token is only allowed to be declared on the two theme roots. The
-    // always-dark landing hero's `.theme-scope-dark` shares the dark root's
-    // block, so it reuses that identity rather than forking it.
+    // The token is only allowed to be declared on the two theme roots.
     const accentDeclarations = [...globalCss.matchAll(/([^{}]*)\{[^{}]*--accent\s*:/g)]
       .map((m) => m[1].trim().split(/\s*\n\s*/).pop()!.trim());
-    expect(accentDeclarations).toEqual([":root", ':root[data-theme="dark"], .theme-scope-dark']);
+    expect(accentDeclarations).toEqual([":root", ':root[data-theme="dark"]']);
   });
 
   it("keeps the blue-purple as --brand in both themes, not as --accent", () => {

@@ -29,44 +29,61 @@
       "guest_cta": "ゲストとして利用する"
     },
     "hero_map": {
-      "stations": {
-        "central": "中央駅",
-        "harbor": "港町",
-        "west": "西口",
-        "east_hill": "東台",
-        "north": "北町",
-        "seaside": "海岸通"
-      },
-      "districts": {
-        "north": "北区",
-        "riverside": "川西",
-        "central": "中央",
-        "port": "港湾",
-        "east": "東台"
+      "screens": {
+        "live": "現在の運行",
+        "period": "期間概況"
       },
       "captions": {
-        "live": {
-          "title": "いま走っている車両",
-          "body": "バス・電車・路面電車 — 複数の事業者をひとつの地図に"
-        },
-        "sections": {
-          "title": "遅れている区間が色づく",
-          "body": "青緑は定刻、琥珀色ほど遅れが大きい区間"
-        },
-        "towers": {
-          "title": "停留所ごとの遅れを高さで",
-          "body": "同じ尺度で、モードも事業者も比べられる"
-        }
+        "live": "現在の運行",
+        "trip": "12系統の便を選択",
+        "playback": "1日の動きを再生",
+        "overview": "期間概況"
       },
-      "callout_route": "A交通 12系統 · 中央駅 → 北区方面",
-      "callout_week_over_week": "先週比 +{{minutes}}",
-      "tower_label": "中央駅〜北区 · 平日朝の平均",
-      "legend_on_time": "定刻",
-      "legend_delayed": "遅れ大",
-      "hud_title": "LIVE MAP · GTFS-RT",
-      "hud_scope": "3モード · 5事業者 · 6路線",
-      "hud_sample": "架空の都市・サンプルデータ",
-      "delay": "+{{minutes}}分"
+      "routes": {
+        "rapid": "快速",
+        "local": "各停",
+        "tram3": "3号線",
+        "bus12": "12系統",
+        "bus7": "7系統",
+        "bus3": "3系統"
+      },
+      "stops": {
+        "konan": "港南",
+        "shiyakusho": "市役所前",
+        "central": "中央駅",
+        "honmachi": "本町",
+        "higashidai": "東台",
+        "minatomachi": "港町"
+      },
+      "queue_title": "確認したい便",
+      "kpi": {
+        "observed": "観測便",
+        "delayed": "5分以上の遅延",
+        "on_time": "定時運行率"
+      },
+      "legend": {
+        "under": "{{minutes}}分未満",
+        "over": "{{minutes}}分以上",
+        "disclosure": "最新報告停留所の位置（GPSではありません）"
+      },
+      "trip_heading": "12系統 · 北町行",
+      "trip_chart_title": "停留所ごとの遅延推移",
+      "trip_note": "中央駅 → 本町で拡大",
+      "refresh": "更新  08:12:30",
+      "playback": "1日の動きを再生",
+      "playback_speed": "1×",
+      "hourly_title": "時間帯別の悪化",
+      "peak": "ピーク",
+      "overview_average": "ネットワーク平均遅延",
+      "overview_change": "▼ {{minutes}}  前の期間より",
+      "overview_delayed_routes": "遅延中の路線",
+      "routes_to_check": "今すぐ確認すべき路線",
+      "sample_notice": "サンプルデータ · 架空の都市",
+      "delay_short": "+{{minutes}}分",
+      "minutes": "{{minutes}}分",
+      "hour_of_day": "{{hour}}時",
+      "clock": "{{hour}}:00",
+      "minute_unit": "分"
     },
     "narrative": {
       "route": {

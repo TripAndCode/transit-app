@@ -1,114 +1,128 @@
-// The hero's scripted sequence as a pure function of elapsed seconds, in
-// three acts: descend while routes draw on and vehicles run; tint routes by
-// per-section delay and call out the worst section; grow a tower at every
-// stop. The exact windows are the `segment()` calls in `frameAt`. Afterwards
-// the scene holds in a slow orbit rather than looping, since a hard loop
-// would replay the descent every few seconds under the page's headline.
+// The hero's scripted sequence as a pure function of elapsed seconds:
+// live operations (trip dots, the queue panel, one refresh) → the queue's
+// top trip is opened (route gradient, reported-stop trail, which flies into
+// the trip panel's chart) → day playback (the rail's hours fly into the
+// hourly-deterioration bars, which then light with the clock) → the period
+// overview → back to the queue. Everything that only belongs to the first
+// play (fly-in, dots appearing, the refresh) settles before LOOP_START, and
+// the last frame matches the LOOP_START frame, so the loop has no seam.
 
-import {
-  cameraAt,
-  easeInOutCubic,
-  easeOutCubic,
-  segment,
-  type Camera,
-  type CameraKeyframe,
-} from "./heroMapMath";
+import { expoInOut, lerp, mixCamera, segment, type Camera } from "./heroMapMath";
 
-/** Where the scripted camera path ends and the idle orbit takes over. It is
- *  also the still drawn under reduced motion: towers grown, labels shown,
- *  the last act's caption still up. */
-export const SEQUENCE_END = 11.6;
+export const DURATION = 18.75;
+/** Where every later loop resumes; must come after all first-play motion. */
+export const LOOP_START = 4.0;
+/** One beat at 128 BPM; staggers are multiples of it so entrances feel timed. */
+const BEAT = 60 / 128;
 
-const ORBIT_PIVOT = { x: 2, z: 14 };
-const ORBIT_RADIUS = 42;
-const ORBIT_HEIGHT = 33;
-const ORBIT_START_ANGLE = -0.42;
-const ORBIT_SWING = 0.35;
-/** Radians per second of the idle swing's phase; one full swing takes well
- *  over a minute, slow enough to read as ambient rather than as motion. */
-const ORBIT_RATE = 0.08;
+const FLY_IN: Camera = { x: 2, y: 34, z: -24, yaw: 0, pitch: 0.95, focal: 1.2 };
+const NETWORK: Camera = { x: 2, y: 60, z: 16, yaw: 0, pitch: Math.PI / 2 - 1e-4, focal: 1.2 };
+const ROUTE_CLOSE: Camera = { x: 3, y: 60, z: 18, yaw: 0, pitch: Math.PI / 2 - 1e-4, focal: 1.6 };
 
-function orbitCamera(angle: number): Camera {
-  return {
-    x: ORBIT_PIVOT.x - ORBIT_RADIUS * Math.sin(angle),
-    y: ORBIT_HEIGHT,
-    z: ORBIT_PIVOT.z - ORBIT_RADIUS * Math.cos(angle),
-    yaw: angle,
-    pitch: 0.74,
-    focal: 1.1,
-  };
-}
-
-const CAMERA_KEYS: readonly CameraKeyframe[] = [
-  { t: 0, x: 2, y: 64, z: -46, yaw: -0.05, pitch: 0.78, focal: 1.1 },
-  { t: 4.4, x: -1, y: 32, z: -16, yaw: 0.12, pitch: 0.82, focal: 1.1 },
-  { t: 7.6, x: -6, y: 17, z: -3, yaw: 0.3, pitch: 0.7, focal: 1.1 },
-  { t: SEQUENCE_END, ...orbitCamera(ORBIT_START_ANGLE) },
-];
-
-export function cameraForTime(t: number): Camera {
-  if (t <= SEQUENCE_END) return cameraAt(t, CAMERA_KEYS);
-  // Starts at zero velocity, matching the eased arrival of the last keyframe.
-  const swing = (1 - Math.cos((t - SEQUENCE_END) * ORBIT_RATE)) / 2;
-  return orbitCamera(ORBIT_START_ANGLE - ORBIT_SWING * swing);
-}
-
-export type CaptionIndex = 0 | 1 | 2;
+type PanelKind = "queue" | "trip" | "hourly" | "overview";
+/** A panel section on screen: its entrance/exit progress and the seconds
+ *  since it began entering (for counters and staggered rows inside it). */
+export type PanelSection = { kind: PanelKind; enter: number; exit: number; since: number };
+export type CaptionIndex = 0 | 1 | 2 | 3;
 
 export type HeroFrame = {
   t: number;
   camera: Camera;
-  mapReveal: number;
-  /** Draw-on progress (0..1) per route, in `HeroMap.routes` order. */
-  routeProgress: (routeIndex: number) => number;
-  /** How far routes have shifted from their base color to the delay ramp. */
-  delayTint: number;
-  pulseAlpha: number;
-  vehicleAlpha: number;
-  stationAlpha: number;
-  stationLabels: boolean;
-  calloutAlpha: number;
-  towerGrowth: (towerIndex: number) => number;
-  towerLabelAlpha: number;
-  legendAlpha: number;
-  caption: { index: CaptionIndex; alpha: number } | null;
+  /** 0 = whole network, 1 = close on the selected route. */
+  zoom: number;
+  tripAppear: (id: number) => number;
+  tripsAtNextStop: boolean;
+  /** True for the instant between refresh positions, when dots are hidden. */
+  tripsBlinking: boolean;
+  /** Pop-in scale progress after the jump (1 = settled). */
+  tripPop: number;
+  tripsAlpha: number;
+  tripSelected: boolean;
+  refreshChip: number;
+  routeReveal: number;
+  trailReveal: number;
+  /** 0..1: the trail's points flying from the map into the trip chart. */
+  trailMorph: number;
+  playback: { stopsAlpha: number; railAlpha: number; hour: number };
+  /** 0..1: copies of the rail's hour segments flying into the hourly bars. */
+  hourMorph: number;
+  panelEnter: number;
+  sections: PanelSection[];
+  queueRipple: number;
+  tripNote: number;
+  peakLabel: number;
+  caption: { index: CaptionIndex; enter: number; exit: number } | null;
 };
 
-const CAPTION_WINDOWS: readonly [number, number][] = [
-  [1.2, 4.2],
-  [4.8, 8.2],
-  [9.2, SEQUENCE_END + 1],
+const SECTION_WINDOWS: readonly [PanelKind, number, number][] = [
+  ["queue", 1.9, 5.4],
+  ["trip", 5.4, 9.7],
+  ["hourly", 9.7, 13.3],
+  ["overview", 13.3, 17.0],
+  ["queue", 17.0, Infinity],
 ];
+const CAPTION_WINDOWS: readonly [CaptionIndex, number, number][] = [
+  [0, 1.8, 4.8],
+  [1, 5.0, 9.4],
+  [2, 9.8, 13.2],
+  [3, 13.4, 16.9],
+  [0, 17.0, Infinity],
+];
+const ENTER = 0.45;
+const EXIT = 0.3;
 
-function captionAt(t: number): HeroFrame["caption"] {
-  for (let i = 0; i < CAPTION_WINDOWS.length; i++) {
-    const [start, end] = CAPTION_WINDOWS[i];
-    const alpha = segment(t, start, start + 0.6) * (1 - segment(t, end - 0.4, end));
-    if (alpha > 0) return { index: i as CaptionIndex, alpha };
-  }
-  return null;
+/** An open-ended window (`tOut` = Infinity) never starts exiting. */
+function windowState(t: number, tIn: number, tOut: number) {
+  return { enter: segment(t, tIn, tIn + ENTER), exit: Number.isFinite(tOut) ? segment(t, tOut - EXIT, tOut) : 0 };
+}
+
+function cameraAt(t: number): Camera {
+  const landed = mixCamera(FLY_IN, NETWORK, expoInOut(segment(t, 0, 1.6)));
+  return mixCamera(landed, ROUTE_CLOSE, zoomAt(t));
+}
+
+function zoomAt(t: number): number {
+  return expoInOut(segment(t, 4.9, 5.7)) * (1 - expoInOut(segment(t, 9.3, 10.0)));
 }
 
 export function frameAt(t: number): HeroFrame {
-  // Act 3 dims the act-1 layers so the towers read as the subject.
-  const towerPhase = segment(t, 8.2, 9);
+  const zoom = zoomAt(t);
+  const playing = t > 9.7 && t < 13.3;
+  const sections: PanelSection[] = [];
+  for (const [kind, tIn, tOut] of SECTION_WINDOWS) {
+    const { enter, exit } = windowState(t, tIn, tOut);
+    if (enter > 0 && exit < 1) sections.push({ kind, enter, exit, since: t - tIn });
+  }
+  let caption: HeroFrame["caption"] = null;
+  for (const [index, tIn, tOut] of CAPTION_WINDOWS) {
+    const { enter, exit } = windowState(t, tIn, tOut);
+    if (enter > 0 && exit < 1) caption = { index, enter, exit };
+  }
   return {
     t,
-    camera: cameraForTime(t),
-    mapReveal: segment(t, 0, 1.2),
-    routeProgress: (i) => easeInOutCubic(segment(t, 0.8 + i * 0.3, 3.6 + i * 0.3)),
-    delayTint: easeOutCubic(segment(t, 4.4, 7.4)),
-    pulseAlpha: segment(t, 3, 3.6) * (1 - 0.7 * towerPhase),
-    vehicleAlpha: segment(t, 3.4, 4) * (1 - 0.6 * towerPhase),
-    stationAlpha: segment(t, 2, 3) * (1 - 0.55 * towerPhase),
-    stationLabels: t < 9.5,
-    calloutAlpha: segment(t, 6.4, 7) * (1 - segment(t, 8.4, 9)),
-    towerGrowth: (i) => {
-      const start = 8.3 + (i % 7) * 0.12;
-      return easeOutCubic(segment(t, start, start + 2.5));
+    camera: cameraAt(t),
+    zoom,
+    tripAppear: (id) => segment(t, 1.6 + (id % 9) * (BEAT / 3), 1.9 + (id % 9) * (BEAT / 3)),
+    tripsAtNextStop: t >= 3.5,
+    tripsBlinking: t >= 3.3 && t < 3.5,
+    tripPop: t < 3.5 ? 1 : segment(t, 3.5, 3.75),
+    tripsAlpha: playing ? 1 - segment(t, 9.7, 10.0) + segment(t, 13.0, 13.3) : 1,
+    tripSelected: t > 5.3 && t < 9.4,
+    refreshChip: segment(t, 3.1, 3.3) * (1 - segment(t, 3.7, 3.95)),
+    routeReveal: segment(t, 5.3, 6.0) * (1 - segment(t, 9.2, 9.6)),
+    trailReveal: segment(t, 5.8, 6.4) * (1 - segment(t, 9.2, 9.5)),
+    trailMorph: segment(t, 6.7, 7.9),
+    playback: {
+      stopsAlpha: segment(t, 9.7, 10.0) * (1 - segment(t, 13.0, 13.3)),
+      railAlpha: segment(t, 9.8, 10.1) * (1 - segment(t, 13.0, 13.3)),
+      hour: lerp(5, 24, segment(t, 10.0, 13.0)),
     },
-    towerLabelAlpha: segment(t, 10.6, 11.3),
-    legendAlpha: segment(t, 5, 6),
-    caption: captionAt(t),
+    hourMorph: segment(t, 10.0, 10.9),
+    panelEnter: expoInOut(segment(t, 1.2, 1.9)),
+    sections,
+    queueRipple: t > 4.5 && t < 5.1 ? segment(t, 4.5, 5.1) : 0,
+    tripNote: segment(t, 8.0, 8.3),
+    peakLabel: segment(t, 11.0, 11.4),
+    caption,
   };
 }

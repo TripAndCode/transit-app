@@ -18,16 +18,13 @@ export function LandingPage() {
   const { t } = useTranslation();
   return (
     <div className="landing-shell">
-      <section className="landing-hero theme-scope-dark">
+      <section className="landing-hero">
         <LiveMapHero />
-        {/* Both overlays sit above the canvas and below the text content in
-            DOM order (canvas, vignette, scrim, content): the vignette fades
-            the scene's edges, the scrim is the dark horizontal band that
-            keeps the headline legible regardless of what the animation is
-            doing underneath. Reordering these -- or moving the content
-            above them without an explicit stacking context -- lets the
-            scene paint over the text again. */}
-        <div className="landing-hero__vignette" aria-hidden="true" />
+        {/* The scrim sits above the canvas and below the text content in
+            DOM order (canvas, scrim, content) and keeps the headline legible
+            whatever the map is doing underneath. Reordering these -- or
+            moving the content above it without an explicit stacking context
+            -- lets the scene paint over the text again. */}
         <div className="landing-hero__scrim" aria-hidden="true" />
         <div className="landing-hero__content">
           <div className="landing-hero__brand">{t("header.app_title")}</div>
