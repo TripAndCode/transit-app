@@ -107,9 +107,12 @@ it("changing keito scopes both report queries and CSV to the selected code", asy
   const user = setupUser();
   await user.click(screen.getByRole("button", { name: /Filters/ }));
   // The picker labels routes by display name, not code: "1 Coast" is 101 and
-  // "9 Coast" is 999 (short name + long name, per routeDisplayName).
-  await user.click(screen.getByRole("button", { name: "1 Coast" }));   // drop the initial 101
-  await user.click(screen.getByRole("button", { name: "9 Coast" }));
+  // "9 Coast" is 999 (short name + long name, per routeDisplayName). The
+  // space is optional because dom-accessibility-api trims each inline
+  // element's own text, dropping the space that opens the long-name span,
+  // where browsers keep it.
+  await user.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));   // drop the initial 101
+  await user.click(screen.getByRole("button", { name: /^9 ?Coast$/ }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["101"]);
   await user.click(screen.getByRole("button", { name: /Apply/ }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["999"]);
