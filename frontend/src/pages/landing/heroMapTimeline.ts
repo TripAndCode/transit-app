@@ -1,10 +1,8 @@
-// The hero's scripted sequence as a pure function of elapsed seconds:
-//   act 1 (0–4s)    descend over the map; routes draw on; vehicles run
-//   act 2 (4–8s)    routes tint by per-section delay; the worst section is
-//                   called out
-//   act 3 (8–12s)   every stop grows a tower as tall as its average delay
-// After the script ends the scene holds its final state and the camera
-// drifts in a slow orbit, instead of cutting back to the start: a hard loop
+// The hero's scripted sequence as a pure function of elapsed seconds, in
+// three acts: descend while routes draw on and vehicles run; tint routes by
+// per-section delay and call out the worst section; grow a tower at every
+// stop. The exact windows are the `segment()` calls in `frameAt`. Afterwards
+// the scene holds in a slow orbit rather than looping, since a hard loop
 // would replay the descent every few seconds under the page's headline.
 
 import {

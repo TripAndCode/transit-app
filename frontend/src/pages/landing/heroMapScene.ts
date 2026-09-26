@@ -29,6 +29,7 @@ export type MapRoute = {
 type Station = { id: StationId; x: number; z: number; major: boolean };
 type District = { id: DistrictId; x: number; z: number };
 export type StopTower = { x: number; z: number; delay: number };
+type Street = { points: readonly Point2[]; arterial: boolean };
 
 /** The single most-delayed section, which the hero calls out by name. */
 type Hotspot = { x: number; z: number; delay: number; weekOverWeek: number };
@@ -37,6 +38,7 @@ export type HeroMap = {
   coastline: readonly Point2[];
   riverBanks: readonly Point2[];
   parks: readonly (readonly Point2[])[];
+  streets: readonly Street[];
   routes: readonly MapRoute[];
   stations: readonly Station[];
   districts: readonly District[];
@@ -153,6 +155,29 @@ function buildRoutes(): MapRoute[] {
   ];
 }
 
+/** Street grid, every fourth line an arterial. North-south streets start at
+ *  the shore and cross streets break where they would run over the water.
+ *  Static, so it is built once rather than on every frame. */
+function buildStreets(): Street[] {
+  const streets: Street[] = [];
+  for (let x = -70; x <= 70; x += 2.5) {
+    streets.push({ points: [[x, coastZ(x) + 0.4], [x + 5, 90]], arterial: x % 10 === 0 });
+  }
+  for (let z = -4; z <= 90; z += 2.5) {
+    let run: Point2[] = [];
+    const flush = () => {
+      if (run.length > 1) streets.push({ points: run, arterial: z % 10 === 0 });
+      run = [];
+    };
+    for (let x = -72; x <= 72; x += 4) {
+      if (z > coastZ(x) + 0.4) run.push([x + (z + 4) * 0.05, z]);
+      else flush();
+    }
+    flush();
+  }
+  return streets;
+}
+
 /** Evenly spaced interior stops per route; rail stops are sparser than bus
  *  stops, as they are on a real network. */
 function buildTowers(routes: readonly MapRoute[]): StopTower[] {
@@ -190,6 +215,7 @@ export function buildHeroMap(): HeroMap {
       [[8, 30], [16, 30], [17, 36], [9, 37]],
       [[-20, 38], [-13, 37], [-12, 43], [-21, 44]],
     ],
+    streets: buildStreets(),
     routes,
     stations: [
       { id: "central", x: -4, z: 14, major: true },

@@ -11,7 +11,6 @@ import {
 } from "./heroMapMath";
 import {
   WORLD_EXTENT,
-  coastZ,
   type DistrictId,
   type HeroMap,
   type MapRoute,
@@ -71,6 +70,21 @@ const MAP_TINTS = {
 const WIDE_LAYOUT_MIN_WIDTH = 900;
 
 type Ctx = CanvasRenderingContext2D;
+
+/** `mixHex` with its results remembered. Every blend the renderer asks for
+ *  is between fixed palette colors at a small set of fixed fractions (tint
+ *  steps, per-tower delays, glow highlights), so the cache stays a few dozen
+ *  entries while the idle orbit redraws the same colors every frame. */
+const blendCache = new Map<string, string>();
+function blend(a: string, b: string, k: number): string {
+  const key = `${a}${b}${k}`;
+  let color = blendCache.get(key);
+  if (color === undefined) {
+    color = mixHex(a, b, k);
+    blendCache.set(key, color);
+  }
+  return color;
+}
 type Vec3 = [number, number, number];
 
 const ground = (p: Point2, y = 0.02): Vec3 => [p[0], y, p[1]];
@@ -114,7 +128,7 @@ function glowStroke(ctx: Ctx, project: Projector, pts: readonly Vec3[], color: s
   ctx.strokeStyle = withAlpha(color, 0.3 * alpha);
   ctx.lineWidth = width * 2.4;
   stroke3(ctx, project, pts);
-  ctx.strokeStyle = withAlpha(mixHex(color, "#ffffff", 0.45), 0.95 * alpha);
+  ctx.strokeStyle = withAlpha(blend(color, "#ffffff", 0.45), 0.95 * alpha);
   ctx.lineWidth = width;
   stroke3(ctx, project, pts);
   ctx.globalCompositeOperation = "source-over";
@@ -158,24 +172,10 @@ function drawBaseMap(ctx: Ctx, project: Projector, map: HeroMap, reveal: number)
   ctx.lineWidth = 1.2;
   stroke3(ctx, project, map.coastline.map((p) => ground(p, 0)));
 
-  // Street grid, every fourth line a heavier arterial; cross streets stop at
-  // the shore so the grid never runs out over the water.
   ctx.lineWidth = 1;
-  for (let x = -70; x <= 70; x += 2.5) {
-    ctx.strokeStyle = withAlpha(MAP_TINTS.street, (x % 10 === 0 ? 0.16 : 0.07) * reveal);
-    stroke3(ctx, project, [[x, 0, coastZ(x) + 0.4], [x + 5, 0, 90]]);
-  }
-  for (let z = -4; z <= 90; z += 2.5) {
-    ctx.strokeStyle = withAlpha(MAP_TINTS.street, (z % 10 === 0 ? 0.16 : 0.07) * reveal);
-    let run: Vec3[] = [];
-    for (let x = -72; x <= 72; x += 4) {
-      if (z > coastZ(x) + 0.4) run.push([x + (z + 4) * 0.05, 0, z]);
-      else if (run.length) {
-        stroke3(ctx, project, run);
-        run = [];
-      }
-    }
-    if (run.length) stroke3(ctx, project, run);
+  for (const street of map.streets) {
+    ctx.strokeStyle = withAlpha(MAP_TINTS.street, (street.arterial ? 0.16 : 0.07) * reveal);
+    stroke3(ctx, project, street.points.map((p) => ground(p, 0)));
   }
 }
 
@@ -199,6 +199,11 @@ function routeColor(route: MapRoute, palette: HeroPalette): string {
   return MAP_TINTS.busRoute;
 }
 
+/** Sections are tinted in this many discrete steps between the base color
+ *  and the delay color, so consecutive sections that land on the same step
+ *  merge into one stroked run instead of costing a glow stroke each. */
+const TINT_STEPS = 12;
+
 /** Draws the route up to `progress`, each short section tinted from its base
  *  color toward the delay ramp by that section's own average delay. */
 function drawRoute(ctx: Ctx, project: Projector, route: MapRoute, progress: number, tint: number, palette: HeroPalette, width: number): void {
@@ -209,14 +214,27 @@ function drawRoute(ctx: Ctx, project: Projector, route: MapRoute, progress: numb
   if (progress <= 0) return;
   const sections = 60;
   const lineWidth = width * 0.0018 * (route.mode === "bus" ? 1 : route.mode === "tram" ? 1.1 : 1.5);
+  let run: Vec3[] = [];
+  let runColor = "";
+  const flush = () => {
+    if (run.length > 1) glowStroke(ctx, project, run, runColor, lineWidth, 0.9);
+  };
   for (let k = 0; k < sections; k++) {
     const a = k / sections;
     if (a >= progress) break;
     const b = Math.min((k + 1) / sections, progress);
     const delay = route.delayAt((a + b) / 2) * tint;
-    const color = mixHex(base, palette.warning, (delay - 0.8) / 3);
-    glowStroke(ctx, project, [ground(route.path.at(a)), ground(route.path.at(b))], color, lineWidth, 0.9);
+    const step = Math.round(Math.min(1, Math.max(0, (delay - 0.8) / 3)) * TINT_STEPS) / TINT_STEPS;
+    const color = blend(base, palette.warning, step);
+    const end = ground(route.path.at(b));
+    if (color !== runColor) {
+      flush();
+      run = [ground(route.path.at(a))];
+      runColor = color;
+    }
+    run.push(end);
   }
+  flush();
 }
 
 function drawVehicles(ctx: Ctx, project: Projector, map: HeroMap, t: number, alpha: number, width: number, height: number): void {
@@ -340,7 +358,7 @@ function drawTower(ctx: Ctx, project: Projector, tower: StopTower, h: number, co
     ctx.fill();
   }
   const top = corners.map((p) => project(p[0], h, p[1])!);
-  ctx.fillStyle = mixHex(color, "#ffffff", 0.35);
+  ctx.fillStyle = blend(color, "#ffffff", 0.35);
   ctx.beginPath();
   top.forEach((v, k) => (k ? ctx.lineTo(v[0], v[1]) : ctx.moveTo(v[0], v[1])));
   ctx.closePath();
@@ -354,7 +372,7 @@ function drawTowers(ctx: Ctx, project: Projector, map: HeroMap, palette: HeroPal
     .sort((a, b) => b.base![2] - a.base![2]);
   for (const { tower, growth } of visible) {
     const h = towerHeight(tower) * growth;
-    const color = mixHex(palette.accent, palette.warning, (tower.delay - 0.8) / 4);
+    const color = blend(palette.accent, palette.warning, (tower.delay - 0.8) / 4);
     drawTower(ctx, project, tower, h, color);
     if (tower.delay > 3.5) {
       const top = project(tower.x, h, tower.z);

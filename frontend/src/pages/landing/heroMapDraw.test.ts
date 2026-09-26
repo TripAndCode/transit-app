@@ -83,6 +83,15 @@ describe("drawHeroFrame", () => {
     expect(texts).toContain("hud-sample");
   });
 
+  it("merges equally tinted route sections into shared strokes once the tint has settled", () => {
+    const { ctx, calls } = makeFakeCtx();
+    drawHeroFrame(ctx, 1400, 600, frameAt(SEQUENCE_END + 30), map, PALETTE, LABELS);
+    const strokes = calls.filter((c) => c === "stroke").length;
+    // One glow stroke per section would be 60 sections x 3 passes x 6 routes
+    // for the routes alone; batching keeps the whole idle frame well below it.
+    expect(strokes).toBeLessThan(60 * 3 * map.routes.length);
+  });
+
   it("drops corner captions, legend and HUD when the headline covers a narrow canvas", () => {
     const { ctx, texts } = makeFakeCtx();
     drawHeroFrame(ctx, 600, 600, frameAt(SEQUENCE_END), map, PALETTE, LABELS);
