@@ -9,12 +9,22 @@ the head) of a merged PR, whose ``refs/pull/N/head`` GitHub keeps permanently.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Sequence
+
+# `/review-pr`'s own `git worktree add .worktrees/review-<headRefName>` convention
+# (`.claude/commands/review-pr.md`). Review worktrees are left in place by design:
+# `/follow-up-pr-review` diffs the next push against the head they hold. If that
+# command ever renames either part, the match silently stops firing -- named here so
+# the coupling is greppable from both ends, and covered by
+# `test_review_worktree_naming_matches_review_pr_md`.
+REVIEW_WORKTREE_PARENT_DIR = ".worktrees"
+REVIEW_WORKTREE_PREFIX = "review-"
 
 
 class CleanupError(RuntimeError):
@@ -68,6 +78,8 @@ class DetachedFacts:
     primary: bool
     current: bool
     dirty: bool
+    review: bool
+    """The worktree follows `/review-pr`'s naming, which keeps it on purpose."""
     ancestor_of_base: bool
     tree_matches_base: bool
     head_prs: tuple[PullRequest, ...] = ()
@@ -252,7 +264,13 @@ def merged_heads_equal(prs: Sequence[PullRequest], head: str) -> str:
 
 
 def decide_detached(facts: DetachedFacts) -> Decision:
-    """Apply the branch rules to a worktree that has no branch to delete."""
+    """Decide a worktree that has no branch, on the evidence a branch would need.
+
+    Stricter than ``decide_branch`` in two ways, because a worktree is a working
+    area rather than a ref: review worktrees are always kept, and an open PR headed
+    at this commit keeps it even when the commit is already in the base -- someone
+    reviewing that PR (a release PR headed at main, say) may be standing in it.
+    """
 
     worktree = facts.worktree
     head = worktree.head or ""
@@ -267,6 +285,8 @@ def decide_detached(facts: DetachedFacts) -> Decision:
         return keep("primary worktree")
     if facts.current:
         return keep("the invoking worktree")
+    if facts.review:
+        return keep("review worktree; /follow-up-pr-review diffs against the head it holds")
     open_prs = open_pull_requests(facts.head_prs)
     if open_prs:
         return keep(f"open PR {', '.join(f'#{pr.number}' for pr in open_prs)} is headed here")
@@ -287,6 +307,30 @@ def decide_detached(facts: DetachedFacts) -> Decision:
         numbers = ", ".join(f"#{number}" for number in facts.ancestor_of_merged)
         return delete(f"detached HEAD is an ancestor of merged PR {numbers}'s head")
     return keep("detached HEAD with no recoverability evidence")
+
+
+def is_review_worktree(worktree_path: Path) -> bool:
+    """Match `/review-pr`'s own worktree naming shape.
+
+    Matched structurally: a `REVIEW_WORKTREE_PARENT_DIR` segment immediately
+    followed by a `REVIEW_WORKTREE_PREFIX`-prefixed one, and nothing shaped
+    like a further nested worktree after that pair. Not just the last two
+    components, since `/review-pr` names the review worktree after the
+    reviewed branch's own head ref, which can itself contain slashes
+    (`fix/item-85` produces `.worktrees/review-fix/item-85`, three
+    components deep, not two) -- and not anchored to any particular
+    checkout, since `/review-pr` runs its `git worktree add` relative to
+    whichever checkout invokes it, normally but not necessarily the main
+    one. The "nothing nested after" requirement excludes a worktree created
+    *inside* a review worktree (e.g. an agent worktree somehow created
+    from one) from inheriting this exemption.
+    """
+
+    parts = worktree_path.parts
+    for index, (parent, child) in enumerate(itertools.pairwise(parts)):
+        if parent == REVIEW_WORKTREE_PARENT_DIR and child.startswith(REVIEW_WORKTREE_PREFIX):
+            return not any(part in {"worktrees", REVIEW_WORKTREE_PARENT_DIR} for part in parts[index + 2 :])
+    return False
 
 
 def is_ancestor(repo: Path, branch: str, base: str) -> bool:
@@ -472,6 +516,7 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
                     primary=worktree.path == primary_path,
                     current=worktree.path == current_path,
                     dirty=is_dirty(worktree),
+                    review=is_review_worktree(worktree.path),
                     ancestor_of_base=detached_head is not None
                     and inspectable
                     and is_ancestor_commit(repo, detached_head, f"refs/heads/{base}"),

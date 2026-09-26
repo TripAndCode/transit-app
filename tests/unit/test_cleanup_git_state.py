@@ -188,6 +188,7 @@ def detached(**overrides: object):
         "primary": False,
         "current": False,
         "dirty": False,
+        "review": False,
         "ancestor_of_base": False,
         "tree_matches_base": False,
         "head_prs": (),
@@ -208,6 +209,11 @@ def detached(**overrides: object):
         ({"ancestor_of_base": True, "primary": True}, "keep", "primary worktree"),
         ({"ancestor_of_base": True, "current": True}, "keep", "invoking worktree"),
         ({"ancestor_of_base": True, "dirty": True}, "keep", "uncommitted or untracked"),
+        (
+            {"review": True, "head_prs": (cleanup.PullRequest(633, "MERGED", "c" * 40),)},
+            "keep",
+            "review worktree",
+        ),
         (
             {"ancestor_of_base": True, "worktree": cleanup.Worktree(Path("/tmp/d"), None, locked=True, head="c" * 40)},
             "keep",
@@ -334,6 +340,27 @@ def test_detached_worktrees_are_planned_and_only_recoverable_ones_removed(
     assert not at_pr.exists()
     assert unique.exists()
     assert dirty.exists()
+
+
+def test_review_worktrees_survive_their_pr_merging(repository: Path, monkeypatch: pytest.MonkeyPatch):
+    """`/review-pr` leaves its worktree for `/follow-up-pr-review`, merged or not."""
+
+    git(repository, "switch", "-qc", "reviewed")
+    pr_head = commit_on(repository, "reviewed work")
+    git(repository, "switch", "-q", "main")
+    git(repository, "branch", "-qD", "reviewed")
+    review_path = repository / ".worktrees" / "review-fix" / "item-85"
+    git(repository, "worktree", "add", "-q", "--detach", str(review_path), pr_head)
+    merged = cleanup.PullRequest(85, "MERGED", pr_head)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {"fix/item-85": (merged,)})
+
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    review = next(d for d in plan if d.worktree is not None and d.worktree.path == review_path.resolve())
+
+    assert review.action == "keep"
+    assert "review worktree" in review.reason
+    cleanup.apply_plan(repository, plan)
+    assert review_path.exists()
 
 
 def test_a_pre_merge_snapshot_is_proven_by_fetching_the_pr_head(
