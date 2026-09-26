@@ -49,6 +49,15 @@ describe("ThreadSidebar", () => {
     fireEvent.change(search, { target: { value: "" } });
     expect(screen.getByText("Evening service")).toBeInTheDocument();
   });
+  it("summarises a conversation's day filter with the shared day label", () => {
+    mockConversations([
+      conv({ title: "Weekend delays", filter_ctx: { dow: "weekend" } }),
+      conv({ conversation_id: "c2", title: "Weekday delays", filter_ctx: { dow: "weekday" } }),
+    ]);
+    render();
+    expect(screen.getByText(/Weekend\/Holiday/)).toBeInTheDocument();
+    expect(screen.getByText(/Weekday$/)).toBeInTheDocument();
+  });
   it("shows the empty state when there are no conversations", () => {
     mockConversations([]);
     render();

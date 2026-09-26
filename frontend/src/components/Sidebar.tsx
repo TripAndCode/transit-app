@@ -197,7 +197,7 @@ export function Sidebar() {
                     justifyContent: collapsedFlag ? "center" : "flex-start",
                     gap: 12,
                     padding: collapsedFlag ? "12px 0" : "12px 22px",
-                    color: isActive ? "var(--accent)" : "var(--text-primary)",
+                    color: isActive ? "var(--accent-strong)" : "var(--text-primary)",
                     background: isActive ? "var(--accent-soft)" : "transparent",
                     borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
                     textDecoration: "none",
