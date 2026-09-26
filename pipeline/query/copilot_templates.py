@@ -27,7 +27,7 @@ class RenderedInsight(TypedDict):
 
 
 class Template:
-    __slots__ = ("id", "param_schema", "render", "tab")
+    __slots__ = ("id", "param_schema", "render", "tab", "use_when")
 
     def __init__(
         self,
@@ -35,11 +35,13 @@ class Template:
         tab: str,
         param_schema: dict,
         render: Callable[[dict, dict, str], RenderedInsight],
+        use_when: str,
     ) -> None:
         self.id = id
         self.tab = tab
         self.param_schema = param_schema
         self.render = render
+        self.use_when = use_when
 
 
 def _render_overview_top_delay_route(params: dict, payload: dict, locale: str) -> RenderedInsight:
@@ -81,12 +83,18 @@ TEMPLATES: dict[str, Template] = {
         tab="overview",
         param_schema={"type": "object", "properties": {}, "additionalProperties": False},
         render=_render_overview_top_delay_route,
+        use_when=(
+            "names the longest-delay route and compares the all-route average with its "
+            "baseline; use when data.top_delayed.routes is non-empty and "
+            "data.top_delayed.delayed_count > 0."
+        ),
     ),
     NO_SIGNAL_TEMPLATE_ID: Template(
         id=NO_SIGNAL_TEMPLATE_ID,
         tab="*",
         param_schema={"type": "object", "properties": {}, "additionalProperties": False},
         render=_render_no_signal,
+        use_when="says nothing stands out; use when no other template's condition holds.",
     ),
 }
 

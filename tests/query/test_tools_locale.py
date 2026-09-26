@@ -11,6 +11,7 @@ integration tests in tests/test_tool_queries.py.
 """
 
 import asyncio
+import re
 
 import pytest
 
@@ -162,6 +163,17 @@ def test_every_tool_is_documented_in_system_prompt():
     tool_names = {t["function"]["name"] for t in TOOLS}
     missing = {name for name in tool_names if name not in SYSTEM_PROMPT}
     assert not missing, f"tools missing from SYSTEM_PROMPT: {missing}"
+
+
+def test_system_prompt_tool_signatures_match_schemas():
+    """The JSON-mode request sends no TOOLS, so SYSTEM_PROMPT's listing is the
+    model's only view of each tool's parameters there."""
+    listed = dict(re.findall(r"^- (\w+)\(([^)]*)\)", SYSTEM_PROMPT, flags=re.M))
+    for t in TOOLS:
+        fn = t["function"]
+        schema = set(fn.get("parameters", {}).get("properties", {}))
+        prose = {p.strip().rstrip("?") for p in listed.get(fn["name"], "").split(",") if p.strip()}
+        assert prose == schema, fn["name"]
 
 
 def test_json_mode_addendum_is_not_baked_into_system_prompt():
