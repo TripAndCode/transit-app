@@ -493,6 +493,28 @@ def test_only_branches_naming_no_candidate_pr_fetch_every_missing_head(overrides
     assert cleanup.branch_needs_merged_evidence(branch, head, **values) is expected
 
 
+def test_a_branch_whose_tree_matches_the_base_does_not_widen_the_fetch(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Tree equality already proves the branch disposable, so no merged head is fetched for it."""
+
+    git(repository, "switch", "-qc", "local-name")
+    commit_on(repository, "changed")
+    git(repository, "revert", "--no-edit", "HEAD")
+    git(repository, "switch", "-q", "main")
+    merged = cleanup.PullRequest(9, "MERGED", "d" * 40)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {"elsewhere": (merged,)})
+    fetched: list[set[int]] = []
+    monkeypatch.setattr(cleanup, "fetch_pull_heads", lambda _repo, _remote, numbers: fetched.append(set(numbers)))
+
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    decision = next(d for d in plan if d.branch == "local-name")
+
+    assert decision.action == "delete"
+    assert "tree is identical" in decision.reason
+    assert fetched == []
+
+
 def test_a_changed_tip_is_retained_when_the_pr_head_cannot_be_fetched(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ):

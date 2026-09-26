@@ -53,8 +53,8 @@ _CLEANUP_SPEC.loader.exec_module(cleanup_git_state)
 
 # `importlib` hands a type checker a bare `ModuleType`, so an attribute read
 # off `cleanup_git_state` is an untyped value -- usable at runtime, but not
-# valid in an annotation. The static import below names the same two objects
-# from the same file so signatures referring to them stay checkable; the
+# valid in an annotation. The static import below names the same objects from
+# the same file so the type checker sees their real types; the
 # runtime branch keeps using the dynamically loaded module object, which is
 # the only one that exists when `scripts/` isn't importable as a package.
 if TYPE_CHECKING:

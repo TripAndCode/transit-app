@@ -491,6 +491,12 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
     pull_requests = load_pull_requests(repo)
     base_tree = run_git(repo, "rev-parse", f"refs/heads/{base}^{{tree}}").stdout.strip()
 
+    def tree_of(rev: str) -> str:
+        return run_git(repo, "rev-parse", f"{rev}^{{tree}}").stdout.strip()
+
+    ancestor_of_base = {branch: is_ancestor(repo, branch, base) for branch in branches}
+    tree_matches_base = {branch: tree_of(f"refs/heads/{branch}") == base_tree for branch in branches}
+
     by_head: dict[str, list[PullRequest]] = {}
     for named in pull_requests.values():
         for pr in named:
@@ -501,7 +507,6 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
         for pr in headed:
             if pr.state == "MERGED":
                 merged_numbers.setdefault(oid, set()).add(pr.number)
-    in_base = {branch: is_ancestor(repo, branch, base) for branch in branches}
     # A merged PR head that differs from a local tip may be a later state of it;
     # fetch missing heads so ancestry can prove a pre-merge snapshot. A branch named
     # after a merged PR names its candidates; a renamed branch or a detached HEAD
@@ -519,7 +524,7 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
             branch_needs_merged_evidence(
                 branch,
                 head,
-                in_base=in_base[branch],
+                in_base=ancestor_of_base[branch] or tree_matches_base[branch],
                 protected=protected,
                 named=pull_requests.get(branch, ()),
                 merged_heads=merged_numbers,
@@ -535,9 +540,6 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
     merged_heads = MergedPullHeads(
         repo, base, {oid: tuple(sorted(numbers)) for oid, numbers in merged_numbers.items() if oid in present}
     )
-
-    def tree_of(rev: str) -> str:
-        return run_git(repo, "rev-parse", f"{rev}^{{tree}}").stdout.strip()
 
     def is_dirty(worktree: Worktree | None) -> bool:
         return (
@@ -557,8 +559,8 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
                     head=head,
                     protected=branch in protected,
                     current=worktree is not None and worktree.path == current_path,
-                    ancestor_of_base=in_base[branch],
-                    tree_matches_base=tree_of(f"refs/heads/{branch}") == base_tree,
+                    ancestor_of_base=ancestor_of_base[branch],
+                    tree_matches_base=tree_matches_base[branch],
                     pull_requests=pull_requests.get(branch, ()),
                     worktree=worktree,
                     dirty=is_dirty(worktree),
