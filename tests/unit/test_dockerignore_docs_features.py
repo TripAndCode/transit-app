@@ -70,15 +70,32 @@ def test_dockerfile_python_minor_matches_ci():
 
     Matched to the minor, not just the major: 3.12 and 3.14 are as different
     to a C extension as two majors are anywhere else.
+
+    Every workflow pin is checked, not only ci.yml's: the nightly and Ask-eval
+    jobs run the same code, and a base-image bump that touches only the
+    Dockerfile would otherwise leave them on the old interpreter unnoticed. A
+    pin this guard cannot read, such as a matrix list or an expression, fails
+    rather than being skipped.
     """
     dockerfile = (_REPO_ROOT / "Dockerfile").read_text()
-    workflow = (_REPO_ROOT / ".github/workflows/ci.yml").read_text()
-
     image_version = re.search(r"^FROM python:(\d+\.\d+)", dockerfile, re.MULTILINE)
-    ci_version = re.search(r"""python-version:\s*["']?(\d+\.\d+)""", workflow)
     assert image_version, "Dockerfile has no `FROM python:<major>.<minor>` runtime stage"
-    assert ci_version, "ci.yml no longer declares a python-version"
-    assert image_version.group(1) == ci_version.group(1), (
-        f"Dockerfile runs the API on Python {image_version.group(1)} but CI "
-        f"tests on {ci_version.group(1)}; the image would ship a runtime no CI run exercised"
+
+    pins = [
+        (workflow.name, value.strip())
+        for workflow in sorted((_REPO_ROOT / ".github/workflows").glob("*.y*ml"))
+        for value in re.findall(r"python-version:(.*)", workflow.read_text())
+    ]
+    assert any(name == "ci.yml" for name, _ in pins), "ci.yml no longer declares a python-version"
+    literal = re.compile(r"""["']?(\d+\.\d+)["']?\s*(?:#.*)?""")
+    unreadable = [(name, value) for name, value in pins if not literal.fullmatch(value)]
+    assert not unreadable, f"python-version must be a literal <major>.<minor> for this guard to read it: {unreadable}"
+    stale = [
+        (name, value)
+        for name, value in pins
+        if (match := literal.fullmatch(value)) and match.group(1) != image_version.group(1)
+    ]
+    assert not stale, (
+        f"Dockerfile runs the API on Python {image_version.group(1)} but these workflows "
+        f"pin another minor: {stale}; the image would ship a runtime those runs never exercised"
     )
