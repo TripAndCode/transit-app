@@ -19,10 +19,16 @@ from typing import Any
 
 # Per-tool defaults — args whose explicit value equals the default are dropped
 # before hashing so "n=10 (explicit)" and "n omitted (defaults to 10)" collapse.
-# Keep in sync with the actual tool surface in pipeline/query/tools.py.
+# Dispatch runs the canonical args, so each value must equal the handler's own
+# default in pipeline/query/tools.py / meta_tools.py; a callable default is
+# evaluated against the other canonical args.
 _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
-    "top_n": {"n": 10, "best_first": False, "service_type": "all"},
-    "describe_data": {"limit": 50, "offset": 0, "order": "asc"},
+    "top_n": {
+        "n": 10,
+        "best_first": lambda out: out.get("metric", "avg_delay") == "on_time_rate",
+        "service_type": "all",
+    },
+    "describe_data": {"limit": 50, "offset": 0, "order": "desc"},
     "time_series": {"granularity": "day"},
     "compare_segments": {"dimension": "dow"},
     "route_stats": {},
@@ -110,6 +116,8 @@ def canonicalize(tool: str, args: dict[str, Any], ctx: dict[str, Any]) -> dict[s
 
     # 3. Drop args whose value equals the tool's default.
     for k, default in _TOOL_DEFAULTS[tool].items():
+        if callable(default):
+            default = default(out)
         if out.get(k) == default:
             out.pop(k, None)
 
