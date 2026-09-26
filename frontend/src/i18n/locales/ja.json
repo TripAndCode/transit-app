@@ -23,9 +23,50 @@
   },
   "landing": {
     "hero": {
-      "title": "今すぐ何が起きているか。どこで起きているか。",
+      "title_now": "今すぐ何が起きているか。",
+      "title_where": "どこで起きているか。",
       "subtitle": "各事業者の最新報告停留所、現在の遅延、履歴分析、事業者間の比較をまとめて確認できます。",
       "guest_cta": "ゲストとして利用する"
+    },
+    "hero_map": {
+      "stations": {
+        "central": "中央駅",
+        "harbor": "港町",
+        "west": "西口",
+        "east_hill": "東台",
+        "north": "北町",
+        "seaside": "海岸通"
+      },
+      "districts": {
+        "north": "北区",
+        "riverside": "川西",
+        "central": "中央",
+        "port": "港湾",
+        "east": "東台"
+      },
+      "captions": {
+        "live": {
+          "title": "いま走っている車両",
+          "body": "バス・電車・路面電車 — 複数の事業者をひとつの地図に"
+        },
+        "sections": {
+          "title": "遅れている区間が色づく",
+          "body": "青緑は定刻、琥珀色ほど遅れが大きい区間"
+        },
+        "towers": {
+          "title": "停留所ごとの遅れを高さで",
+          "body": "同じ尺度で、モードも事業者も比べられる"
+        }
+      },
+      "callout_route": "A交通 12系統 · 中央駅 → 北区方面",
+      "callout_week_over_week": "先週比 +{{minutes}}",
+      "tower_label": "中央駅〜北区 · 平日朝の平均",
+      "legend_on_time": "定刻",
+      "legend_delayed": "遅れ大",
+      "hud_title": "LIVE MAP · GTFS-RT",
+      "hud_scope": "3モード · 5事業者 · 6路線",
+      "hud_sample": "架空の都市・サンプルデータ",
+      "delay": "+{{minutes}}分"
     },
     "narrative": {
       "route": {

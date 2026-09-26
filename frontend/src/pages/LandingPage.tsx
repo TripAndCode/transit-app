@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { CityMapHero } from "./landing/CityMapHero";
+import { LiveMapHero } from "./landing/LiveMapHero";
 import { ScrollNarrative } from "./landing/ScrollNarrative";
 import "./LandingPage.css";
 
@@ -8,7 +8,7 @@ import "./LandingPage.css";
  *  impression kept deliberately separate from the calm, data-dense signed-
  *  in dashboard (CLAUDE.md's "keep UI calm" rule governs the working
  *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). The hero
- *  (animated scene + headline + sign-in CTA, plus a lower-emphasis "continue
+ *  (animated live-map scene + headline + sign-in CTA, plus a lower-emphasis "continue
  *  as a guest" link to the already-guest-accessible root route) is the
  *  entry point; below it, `ScrollNarrative` mounts three real, working
  *  chart components (fed by static fixtures, not live data) telling the
@@ -18,8 +18,8 @@ export function LandingPage() {
   const { t } = useTranslation();
   return (
     <div className="landing-shell">
-      <section className="landing-hero">
-        <CityMapHero />
+      <section className="landing-hero theme-scope-dark">
+        <LiveMapHero />
         {/* Both overlays sit above the canvas and below the text content in
             DOM order (canvas, vignette, scrim, content): the vignette fades
             the scene's edges, the scrim is the dark horizontal band that
@@ -32,7 +32,12 @@ export function LandingPage() {
         <div className="landing-hero__content">
           <div className="landing-hero__brand">{t("header.app_title")}</div>
           <span className="landing-hero__eyebrow">{t("header.app_tagline")}</span>
-          <h1 className="landing-hero__title">{t("landing.hero.title")}</h1>
+          {/* Two spans so the headline always breaks between its two questions,
+              never mid-phrase; the space keeps the accessible name one sentence. */}
+          <h1 className="landing-hero__title">
+            <span className="landing-hero__title-line">{t("landing.hero.title_now")}</span>{" "}
+            <span className="landing-hero__title-line">{t("landing.hero.title_where")}</span>
+          </h1>
           <p className="landing-hero__subtitle">{t("landing.hero.subtitle")}</p>
           <Link to="/login" className="landing-hero__cta">
             {t("common.login")}

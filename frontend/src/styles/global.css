@@ -214,7 +214,9 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-:root[data-theme="dark"] {
+/* `.theme-scope-dark` applies the dark tokens to one subtree regardless of
+   the visitor's theme (the landing hero is always dark). */
+:root[data-theme="dark"], .theme-scope-dark {
   --bg-page: #0F1119;
   --bg-surface: #141726;
   --bg-soft: #202642;

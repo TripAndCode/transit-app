@@ -2,10 +2,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { drawMakiPath, MAKI_VIEWBOX_SIZE, VEHICLE_ICON_PATHS, type VehicleMode } from "./vehicleIcons";
 
-// Minimal recording stand-in for CanvasRenderingContext2D, matching the
-// pattern in cityMapDraw.test.ts -- jsdom has no real canvas/Path2D support,
-// so drawMakiPath's own command-replay logic is exercised against a plain
-// object implementing just the methods it calls.
+// Minimal recording stand-in for CanvasRenderingContext2D -- jsdom has no
+// real canvas/Path2D support, so drawMakiPath's own command-replay logic is
+// exercised against a plain object implementing just the methods it calls.
 function makeFakeCtx() {
   const calls: string[] = [];
   const ctx = {

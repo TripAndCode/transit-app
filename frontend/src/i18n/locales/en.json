@@ -23,9 +23,50 @@
   },
   "landing": {
     "hero": {
-      "title": "What's happening right now — and where it's happening.",
+      "title_now": "What's happening right now —",
+      "title_where": "and where it's happening.",
       "subtitle": "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track.",
       "guest_cta": "Continue as a guest"
+    },
+    "hero_map": {
+      "stations": {
+        "central": "Central Sta.",
+        "harbor": "Harbor Town",
+        "west": "West Gate",
+        "east_hill": "East Hill",
+        "north": "Kitamachi",
+        "seaside": "Seaside Ave."
+      },
+      "districts": {
+        "north": "North",
+        "riverside": "Riverside",
+        "central": "Central",
+        "port": "Port",
+        "east": "East Hill"
+      },
+      "captions": {
+        "live": {
+          "title": "Every vehicle, moving now",
+          "body": "Buses, trains and trams — several agencies on one map"
+        },
+        "sections": {
+          "title": "Late sections light up",
+          "body": "Teal runs on time; the more amber, the later it runs"
+        },
+        "towers": {
+          "title": "Every stop's delay, as height",
+          "body": "One scale across modes and agencies"
+        }
+      },
+      "callout_route": "A Transit Route 12 · Central Sta. → North",
+      "callout_week_over_week": "+{{minutes}} vs last week",
+      "tower_label": "Central Sta.–North · weekday-morning average",
+      "legend_on_time": "On time",
+      "legend_delayed": "Heavy delay",
+      "hud_title": "LIVE MAP · GTFS-RT",
+      "hud_scope": "3 modes · 5 agencies · 6 routes",
+      "hud_sample": "Fictional city · sample data",
+      "delay": "+{{minutes}} min"
     },
     "narrative": {
       "route": {

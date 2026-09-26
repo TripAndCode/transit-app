@@ -1,4 +1,4 @@
-// Vehicle glyphs for the landing hero's schematic city scene, vendored from
+// Vehicle glyphs for the landing hero's live-map scene, vendored from
 // the Maki icon set (https://github.com/mapbox/maki, CC0 / public domain
 // dedication -- no attribution required). Each `d` string is copied
 // verbatim from that repository's `icons/{bus,rail,rail-light}.svg`, all on
