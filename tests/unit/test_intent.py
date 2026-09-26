@@ -50,6 +50,19 @@ def test_best_first_default_false_collapses():
     assert signature_hash("top_n", a) == signature_hash("top_n", b)
 
 
+def test_on_time_rate_best_first_default_true_collapses():
+    """on_time_rate lists the best routes first when best_first is omitted."""
+    a = canonicalize("top_n", {"metric": "on_time_rate"}, _ctx())
+    b = canonicalize("top_n", {"metric": "on_time_rate", "best_first": True}, _ctx())
+    assert signature_hash("top_n", a) == signature_hash("top_n", b)
+
+
+def test_describe_data_default_order_desc_collapses():
+    a = canonicalize("describe_data", {"kind": "sample_counts"}, _ctx())
+    b = canonicalize("describe_data", {"kind": "sample_counts", "order": "desc"}, _ctx())
+    assert signature_hash("describe_data", a) == signature_hash("describe_data", b)
+
+
 # --- Different-intent pairs that MUST NOT collapse ---
 
 
@@ -86,6 +99,20 @@ def test_best_first_true_does_not_collapse_with_default():
     a = canonicalize("top_n", {"metric": "avg_delay"}, _ctx())
     b = canonicalize("top_n", {"metric": "avg_delay", "best_first": True}, _ctx())
     assert signature_hash("top_n", a) != signature_hash("top_n", b)
+
+
+# Dispatch runs the canonical args, so an argument dropped here falls back to
+# the handler's own default: each kept value below differs from that default.
+
+
+def test_on_time_rate_worst_first_is_kept():
+    out = canonicalize("top_n", {"metric": "on_time_rate", "best_first": False}, _ctx())
+    assert out["best_first"] is False
+
+
+def test_describe_data_ascending_order_is_kept():
+    out = canonicalize("describe_data", {"kind": "sample_counts", "order": "asc"}, _ctx())
+    assert out["order"] == "asc"
 
 
 # --- Identifier / form details ---
