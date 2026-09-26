@@ -103,18 +103,9 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   child resolve poetry itself. Watch for the failure that *passes*: a test
   asserting only a non-zero exit code is satisfied by the crash and silently
   stops checking its actual subject.
-- **`node_modules` sharing is NOT guaranteed — verify before relying on
-  it.** Git worktrees do NOT share gitignored/untracked directories
-  automatically: `frontend/node_modules` is normally a plain directory (not
-  a symlink) in both the main checkout and any freshly-created worktree, so
-  an `npm install` run in one worktree does not cover another. Check with
-  `ls -la frontend/node_modules` (or `python3 -c "import os;
-  print(os.path.islink('frontend/node_modules'))"`) in the SPECIFIC
-  worktree you're fixing before assuming an `npm install` elsewhere already
-  covers it — if it's a plain directory, you must run `npm install`
-  separately in that worktree's own `frontend/`. If a symlink happens to
-  exist, treat it as a possibly-deliberate, worktree-specific setup detail,
-  not a repo-wide guarantee to rely on going forward.
+- `frontend/node_modules` is per-worktree (worktrees don't share untracked
+  directories), so run `npm install` in the `frontend/` of the worktree you
+  are verifying before trusting a frontend check there.
 - `git stash` is repo-wide, not worktree-scoped — a stash pushed from one
   worktree is visible (and droppable) from every other worktree and the main
   checkout, and a dropped stash is recoverable only until `git gc` prunes it.

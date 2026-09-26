@@ -49,7 +49,6 @@ from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, 
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
-    LOCALE_LANGUAGE_NAME,
     SYSTEM_PROMPT,
     TOOLS,
     ToolResult,
@@ -490,8 +489,7 @@ async def chat_with_tools(
             _log.warning("chat: BYOK completion failed (%s)", describe_provider_failure(exc))
             return None, "unexpected"
 
-    language_name = LOCALE_LANGUAGE_NAME.get(locale, LOCALE_LANGUAGE_NAME["ja"])
-    locale_addendum = f"Respond in {language_name}. " + _chat_str("locale_instruction", locale)
+    locale_addendum = _chat_str("locale_instruction", locale)
     # Normalize once so leading/trailing whitespace doesn't cause cache misses
     # or visible prompt differences; downstream uses (prompt, cache key, log) all
     # benefit. The frontend keeps its own copy of the user's raw input.
