@@ -15,7 +15,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Container, Iterable, Literal, Sequence
 
 # `/review-pr`'s own `git worktree add .worktrees/review-<headRefName>` convention
 # (`.claude/commands/review-pr.md`). Review worktrees are left in place by design:
@@ -194,9 +194,11 @@ def decide_branch(facts: BranchFacts) -> Decision:
 
     # An open PR under this branch's name may still receive local work, so it always
     # protects the branch. One matched only by head protects commits the base does
-    # not have; a tip already in the base loses nothing when its ref goes.
+    # not have, and any worktree a reviewer of that PR may be standing in; a bare ref
+    # whose tip is already in the base loses nothing when it goes.
     in_base = facts.ancestor_of_base or facts.tree_matches_base
-    open_prs = open_pull_requests((*facts.pull_requests, *(() if in_base else facts.head_prs)))
+    head_matched = facts.head_prs if facts.worktree is not None or not in_base else ()
+    open_prs = open_pull_requests((*facts.pull_requests, *head_matched))
     if open_prs:
         numbers = ", ".join(f"#{pr.number}" for pr in open_prs)
         return Decision(facts.branch, facts.head, "keep", f"open PR {numbers}", facts.worktree)
@@ -376,15 +378,37 @@ def present_commits(repo: Path, oids: Sequence[str]) -> set[str]:
     return present
 
 
-def fetch_pull_head(repo: Path, remote: str, number: int) -> None:
-    """Fetch a PR's permanent head ref into the object store only.
+def fetch_pull_heads(repo: Path, remote: str, numbers: Iterable[int]) -> None:
+    """Fetch PRs' permanent head refs into the object store only, in one round trip.
 
     Writes no ref and no FETCH_HEAD, so another session's state is untouched. A
     failure (e.g. a remote that is not GitHub) just leaves the evidence missing.
     """
 
-    run_git(
-        repo, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", remote, f"refs/pull/{number}/head", check=False
+    refspecs = "".join(f"refs/pull/{number}/head\n" for number in sorted(set(numbers)))
+    # With no refspec, fetch would fall back to the remote's configured ones and
+    # move remote-tracking refs.
+    if not refspecs:
+        return
+    run_command(
+        ("git", "-C", repo, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--stdin", remote),
+        cwd=repo,
+        check=False,
+        stdin=refspecs,
+    )
+
+
+def needs_merged_evidence(repo: Path, worktree: Worktree, base: str, merged_heads: Container[str]) -> bool:
+    """Whether a detached worktree could only be proven disposable as a pre-merge snapshot."""
+
+    return (
+        worktree.branch is None
+        and worktree.head is not None
+        and worktree.head not in merged_heads
+        and worktree.path.exists()
+        and not (worktree.locked or worktree.prunable)
+        and not is_review_worktree(worktree.path)
+        and not is_ancestor_commit(repo, worktree.head, f"refs/heads/{base}")
     )
 
 
@@ -458,14 +482,22 @@ def build_plan(repo: Path, *, base: str, remote: str, protected: set[str]) -> li
         for pr in headed:
             if pr.state == "MERGED":
                 merged_numbers.setdefault(oid, set()).add(pr.number)
-    # A same-name merged PR whose head differs from the local tip may be a later
-    # state of it; fetch that head so ancestry can prove a pre-merge snapshot.
+    # A merged PR head that differs from a local tip may be a later state of it;
+    # fetch missing heads so ancestry can prove a pre-merge snapshot. A branch
+    # names its candidate PRs; a detached HEAD names none, so it needs them all.
     present = present_commits(repo, sorted(merged_numbers))
-    for branch, head in branches.items():
-        for pr in pull_requests.get(branch, ()):
-            if pr.state == "MERGED" and pr.head_oid and pr.head_oid != head and pr.head_oid not in present:
-                fetch_pull_head(repo, remote, pr.number)
-    present = present_commits(repo, sorted(merged_numbers))
+    missing = {oid: numbers for oid, numbers in merged_numbers.items() if oid not in present}
+    wanted = {
+        pr.number
+        for branch, head in branches.items()
+        for pr in pull_requests.get(branch, ())
+        if pr.state == "MERGED" and pr.head_oid in missing and pr.head_oid != head
+    }
+    if missing and any(needs_merged_evidence(repo, worktree, base, merged_numbers) for worktree in worktrees):
+        wanted.update(number for numbers in missing.values() for number in numbers)
+    if wanted:
+        fetch_pull_heads(repo, remote, wanted)
+        present = present_commits(repo, sorted(merged_numbers))
     merged_heads = MergedPullHeads(
         repo, base, {oid: tuple(sorted(numbers)) for oid, numbers in merged_numbers.items() if oid in present}
     )

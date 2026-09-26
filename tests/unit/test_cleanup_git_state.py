@@ -169,6 +169,21 @@ def test_a_base_tip_is_deletable_even_when_an_open_pr_is_headed_there():
     assert "ancestor of the base" in decision.reason
 
 
+def test_a_base_tip_worktree_is_retained_while_an_open_pr_is_headed_there():
+    """A reviewer of that PR may be standing in the worktree, whatever its branch is called."""
+
+    decision = cleanup.decide_branch(
+        facts(
+            ancestor_of_base=True,
+            worktree=cleanup.Worktree(Path("/tmp/release-prep"), "release-prep"),
+            head_prs=(cleanup.PullRequest(593, "OPEN", "a" * 40),),
+        )
+    )
+
+    assert decision.action == "keep"
+    assert "open PR #593" in decision.reason
+
+
 def test_a_pre_merge_snapshot_of_a_merged_pr_is_deletable():
     """Every commit of a tip that the merged PR head descends from is in that PR."""
 
@@ -391,6 +406,37 @@ def test_a_pre_merge_snapshot_is_proven_by_fetching_the_pr_head(
     assert feature.action == "delete"
     assert "ancestor of merged PR #7" in feature.reason
     assert feature.head == snapshot
+
+
+def test_a_detached_pre_merge_snapshot_is_proven_after_its_branch_is_gone(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """No local branch names the PR, so the detached HEAD pulls in every missing merged head."""
+
+    git(repository, "switch", "-qc", "feature")
+    snapshot = commit_on(repository, "first half")
+    git(repository, "switch", "-q", "main")
+    git(repository, "push", "-q", "origin", "feature")
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", str(tmp_path / "remote.git"), str(other))
+    git(other, "config", "user.name", "Cleanup Test")
+    git(other, "config", "user.email", "cleanup@example.com")
+    git(other, "switch", "-q", "feature")
+    pr_head = commit_on(other, "second half")
+    git(other, "push", "-q", "origin", f"{pr_head}:refs/pull/7/head")
+    git(other, "push", "-q", "origin", "--delete", "feature")
+    git(repository, "branch", "-qD", "feature")
+    snapshot_path = tmp_path / "snapshot"
+    git(repository, "worktree", "add", "-q", "--detach", str(snapshot_path), snapshot)
+    merged = cleanup.PullRequest(7, "MERGED", pr_head)
+    monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {"feature": (merged,)})
+
+    plan = cleanup.build_plan(repository, base="main", remote="origin", protected={"main", "production"})
+    decision = next(d for d in plan if d.worktree is not None and d.worktree.path == snapshot_path.resolve())
+
+    assert decision.action == "delete"
+    assert "ancestor of merged PR #7" in decision.reason
+    assert git(repository, "for-each-ref", "refs/pull") == ""
 
 
 def test_a_changed_tip_is_retained_when_the_pr_head_cannot_be_fetched(
