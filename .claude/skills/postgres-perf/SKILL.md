@@ -5,7 +5,7 @@ description: Performance patterns and known traps for this repo's Postgres/PostG
 
 # Postgres + ClickHouse performance — transit-app
 
-Postgres 16 + PostGIS + pgvector + pg_trgm holds `agg_*`/OLTP/PostGIS/pgvector data.
+Postgres (major version pinned by `db/Dockerfile`) + PostGIS + pgvector + pg_trgm holds `agg_*`/OLTP/PostGIS/pgvector data.
 The raw GTFS-RT `updates` fact table (hundreds of millions of rows across 4
 agencies, and growing) lives in ClickHouse
 instead (migrated from Postgres; the old Postgres `updates` table still exists as
@@ -16,10 +16,10 @@ a date bound (see below) and why `route_code` needed `allow_nullable_key=1` to
 become Nullable.
 
 ## Proven patterns
-- Daily aggregates beat per-row scans. Slow analytical endpoints were fixed by
-  materializing per-day aggregate tables (`agg_stop_daily`, `agg_route_daily`,
-  `agg_route_stop_daily`, `agg_feed_health`, …) instead of scanning raw
-  observations — a per-day aggregate turns an O(rows) scan into an O(days) read.
+- Daily aggregates beat per-row scans. Analytical endpoints read per-day aggregate
+  tables (`agg_stop_daily`, `agg_route_daily`, `agg_route_stop_daily`,
+  `agg_feed_health`, …) instead of scanning raw observations — a per-day
+  aggregate turns an O(rows) scan into an O(days) read.
   Build aggregates in the analyze step. The default (`time_band=all`, no
   service/route filter) request on every
   read endpoint serves from an `agg_*` table — but a `time_band`/custom-threshold/
@@ -43,10 +43,13 @@ become Nullable.
   `WHERE route_code = ...` forces a full-partition scan (hundreds of millions
   of rows, hundreds of milliseconds to low seconds) even for a route that
   doesn't exist. `api/routers/map.py`'s
-  route_trips/route_stop_profile/route_shape bound to
+  route_trips/route_stop_profile bound to
   `max_captured_at(ch, agency_id) - 30 days` — a route ingested but not yet
   analyzed is by definition within the last cron cycle, so 30 days loses
-  nothing real for those. `pipeline/query/tools.py`'s `_is_route_registered`
+  nothing real for those. route_shape (`pipeline/reports/map.py::compute_route_shape`)
+  is bounded by the request's own date filter instead, and uses that 30-day window
+  only as its fallback when the filtered window has no observations.
+  `pipeline/query/tools.py`'s `_is_route_registered`
   needs a DIFFERENT bound: a fixed 30-day window there would report a real,
   merely-idle route as unregistered (see its docstring), so it derives the
   bound from `agg_route_daily`'s own analyze horizon for the agency instead —
@@ -65,10 +68,10 @@ become Nullable.
 - Sargable rewrites don't always help. The "make the predicate index-friendly"
   quick win FAILED here due to agency×captured_at correlation — the planner's row
   estimate is off regardless. Benchmark before assuming an index/sargable win.
-- NULL `service_type` was silently dropped from typed aggregates until explicitly
-  handled. `route_code` is Nullable too (both ClickHouse and
-  the underlying GTFS-RT feeds) — check whether a new aggregate/live-fallback
-  query needs the same COALESCE-sentinel or explicit-filter treatment.
+- `service_type` can be NULL, and `route_code` is Nullable too (both ClickHouse and
+  the underlying GTFS-RT feeds); a typed aggregate that neither COALESCEs nor
+  filters them silently drops the NULL rows. Check whether a new
+  aggregate/live-fallback query needs the COALESCE-sentinel or an explicit filter.
 - ClickHouse's `quantileExact`/`round()` do NOT reproduce Postgres semantics.
   `quantileExact` is a positional pick (`sorted[floor(q*n)]`); Postgres's
   `PERCENT_RANK()` uses min-rank ties — they silently disagree whenever the

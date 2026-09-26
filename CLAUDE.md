@@ -74,8 +74,9 @@ the task needs them.
 
 ## LLM features
 
-- Prefer deterministic SQL tools. New LLM-grounded behavior needs an environment
-  kill switch, graceful disabled path, and objective stopping criterion.
+- Prefer deterministic SQL tools. New LLM-grounded behavior needs a kill switch
+  registered in `pipeline/flags.py`, a graceful disabled path, and an objective
+  stopping criterion.
 
 ## Git and pull requests
 

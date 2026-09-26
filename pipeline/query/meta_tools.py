@@ -4,7 +4,7 @@ surface used to fail on with random tool calls.
 
 Two tools:
 
-* ``describe_data(kind, limit?, filter_substring?)`` — generic SQL-backed
+* ``describe_data(kind, limit?, offset?, filter_substring?, order?)`` — generic SQL-backed
   enumeration. ``kind`` is the only required arg.
 * ``capabilities(category?)`` — curated list of example questions.
 
@@ -539,8 +539,19 @@ META_TOOLS: list[dict] = [
                         "type": "string",
                         "enum": list(VALID_KINDS),
                     },
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
-                    "filter_substring": {"type": "string"},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "description": "Maximum rows returned (default 50).",
+                    },
+                    "filter_substring": {
+                        "type": "string",
+                        "description": (
+                            "Case-insensitive substring match on the route name (kind='routes') "
+                            "or stop name (kind='stops'); ignored for other kinds."
+                        ),
+                    },
                     "order": {
                         "type": "string",
                         "enum": ["desc", "asc"],
