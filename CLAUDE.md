@@ -110,8 +110,9 @@ the task needs them.
   GitHub otherwise closes them.
 - After a PR merge, run `/cleanup-merged` in persistent local/VPS clones. Its
   `scripts/cleanup_git_state.py` dry run is the deletion authority: only clean local
-  worktrees and branches proven recoverable from `main` or an exact merged-PR head
-  may be removed. Remote branches, `production`, and unique post-merge commits stay.
+  worktrees (with or without a branch) proven recoverable from `main` or a merged PR's
+  permanent head ref (the tip is that head or an ancestor of it) may be removed.
+  Remote branches, `production`, and unique post-merge commits stay.
 
 ## Process rules
 
