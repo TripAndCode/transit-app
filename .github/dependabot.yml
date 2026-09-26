@@ -67,8 +67,8 @@ updates:
           - "minor"
           - "patch"
 
-  # Base-image bumps for the app image + `compose.yml` (node:22-alpine,
-  # python:3.12-slim, clickhouse/clickhouse-server).
+  # Base-image bumps for the app image + `compose.yml` (the node and python
+  # bases, clickhouse/clickhouse-server).
   - package-ecosystem: "docker"
     directory: "/"
     schedule:

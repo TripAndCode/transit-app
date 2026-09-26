@@ -372,7 +372,7 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
                 "options": ["avg_delay", "on_time_rate", "worst_5min"],
             },
             {"key": "n", "type": "int", "min": 1, "max": 50, "default": 10},
-            {"key": "best_first", "type": "bool", "default": False},
+            {"key": "best_first", "type": "bool", "optional": True},
         ],
     },
     "time_series": {

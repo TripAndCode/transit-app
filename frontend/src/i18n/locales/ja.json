@@ -23,9 +23,67 @@
   },
   "landing": {
     "hero": {
-      "title": "今すぐ何が起きているか。どこで起きているか。",
+      "title_now": "今すぐ何が起きているか。",
+      "title_where": "どこで起きているか。",
       "subtitle": "各事業者の最新報告停留所、現在の遅延、履歴分析、事業者間の比較をまとめて確認できます。",
       "guest_cta": "ゲストとして利用する"
+    },
+    "hero_map": {
+      "screens": {
+        "live": "現在の運行",
+        "period": "期間概況"
+      },
+      "captions": {
+        "live": "現在の運行",
+        "trip": "12系統の便を選択",
+        "playback": "1日の動きを再生",
+        "overview": "期間概況"
+      },
+      "routes": {
+        "rapid": "快速",
+        "local": "各停",
+        "tram3": "3号線",
+        "bus12": "12系統",
+        "bus7": "7系統",
+        "bus3": "3系統"
+      },
+      "stops": {
+        "konan": "港南",
+        "shiyakusho": "市役所前",
+        "central": "中央駅",
+        "honmachi": "本町",
+        "higashidai": "東台",
+        "minatomachi": "港町"
+      },
+      "queue_title": "確認したい便",
+      "kpi": {
+        "observed": "観測便",
+        "delayed": "5分以上の遅延",
+        "on_time": "定時運行率"
+      },
+      "legend": {
+        "under": "{{minutes}}分未満",
+        "over": "{{minutes}}分以上",
+        "disclosure": "最新報告停留所の位置（GPSではありません）"
+      },
+      "trip_heading": "12系統 · 北町行",
+      "trip_chart_title": "停留所ごとの遅延推移",
+      "trip_note": "中央駅 → 本町で拡大",
+      "refresh": "更新  08:12:30",
+      "playback": "1日の動きを再生",
+      "playback_speed": "1×",
+      "hourly_title": "時間帯別の悪化",
+      "peak": "ピーク",
+      "overview_average": "ネットワーク平均遅延",
+      "overview_change": "▼ {{minutes}}  前の期間より",
+      "overview_delayed_routes": "遅延中の路線",
+      "routes_to_check": "今すぐ確認すべき路線",
+      "sample_notice": "サンプルデータ · 架空の都市",
+      "delay_short": "+{{minutes}}分",
+      "minutes": "{{minutes}}分",
+      "hour_of_day": "{{hour}}時",
+      "clock": "{{hour}}:00",
+      "minute_unit": "分"
     },
     "narrative": {
       "route": {
@@ -175,10 +233,6 @@
     "section_peak_hour": "時間帯別の悪化",
     "peak_hour_callout": "ピークは {{hour}}時〜{{next_hour}}時です (平均 {{avg}} 分)。",
     "section_service_split": "サービス日別",
-    "service_split_label": {
-      "平日": "平日",
-      "土日祝": "土日祝"
-    },
     "hero_row": {
       "avg_delay_label": "ネットワーク平均遅延",
       "baseline_hint_title": "先週比について",
@@ -189,7 +243,8 @@
       "feed_status_label": "フィード状況",
       "feed_status_ok": "正常稼働中",
       "feed_status_stale": "データ遅延あり",
-      "feed_status_updated": "最終更新 {{when}}"
+      "feed_status_updated": "最終更新 {{when}}",
+      "sparkline_baseline": "期間平均 {{value}}分"
     },
     "story": {
       "behind_one": "先週より{{delta}}分遅く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
@@ -216,15 +271,11 @@
       "story_weekday_higher": "平日の遅延は土日祝の {{ratio}}倍です。",
       "story_weekend_higher": "土日祝の遅延は平日の {{ratio}}倍です。",
       "story_same": "平日と土日祝でほぼ差はありません。",
-      "weekday_label": "平日",
-      "weekend_label": "土日祝",
       "daily_label": "平日 vs 土日祝の日次推移"
     },
     "peak_hour": {
       "max_label": "最大 {{avg}}分",
       "avg_label": "平均",
-      "weekday_label": "平日",
-      "weekend_label": "土日祝",
       "weekday_empty": "平日のデータがありません。",
       "weekend_empty": "土日祝のデータがありません。"
     },
@@ -303,17 +354,19 @@
     "service_value": {
       "平日": "平日",
       "土日祝": "土日祝"
-    }
+    },
+    "route": "路線"
   },
   "help": {
     "title": "利用マニュアル",
     "sections_nav": "マニュアルの目次",
-    "search_placeholder": "マニュアル内を検索（近日公開）",
-    "search_disabled_reason": "マニュアル内検索は準備中です。左の目次から選んでください。",
+    "search_placeholder": "マニュアル内を検索",
     "category_shortcut_label": "{{title}}へ移動",
     "hint_text": "はじめての方へ：利用マニュアルで使い方を確認できます。",
     "hint_cta": "ヘルプを見る",
-    "hint_dismiss_aria": "ヘルプのヒントを閉じる"
+    "hint_dismiss_aria": "ヘルプのヒントを閉じる",
+    "search_result_count_one": "該当 {{count}} 件",
+    "search_result_count_other": "該当 {{count}} 件"
   },
   "account": {
     "admin_link": "管理",
@@ -330,7 +383,6 @@
       "status_shared": "無料の共有枠を使用中",
       "status_own": "ご自身の{{provider}}キーを使用中・****{{suffix}}",
       "input_label": "APIキー",
-      "save": "保存",
       "remove": "削除",
       "rejected": "キーが拒否されました。確認して再度お試しください。",
       "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。"
@@ -393,16 +445,11 @@
     },
     "dow": {
       "all": "全曜日",
-      "weekday": "平日",
-      "weekend": "土日祝",
       "label": "曜日"
     },
     "service": {
       "all": "全種別",
-      "weekday": "平日",
-      "weekend": "土日祝",
-      "label": "種別",
-      "label_gtfs": "種別 (GTFS)"
+      "label": "種別"
     },
     "time_band": {
       "all": "全時間帯",
@@ -471,7 +518,7 @@
       "departure": "{{time}}発",
       "reported": "最新報告 {{when}}",
       "progress_title": "便の遅延推移",
-      "progress_disclosure": "TripUpdateの報告進行",
+      "progress_disclosure": "運行データの報告進行",
       "progress_loading": "報告履歴を取得中…",
       "no_progress": "この便の報告履歴はまだありません",
       "select_route": "路線を選ぶか、地図上の便を押すと詳細を表示します。",
@@ -488,7 +535,7 @@
     },
     "empty": {
       "title": "現在表示できる便がありません",
-      "hint": "最新のTripUpdateを待っています。受信後、自動的に表示します。"
+      "hint": "最新の運行データを待っています。受信後、自動的に表示します。"
     },
     "playback": {
       "aria_label": "1日の再生",
@@ -583,8 +630,8 @@
         "export_png": "PNGで保存"
       },
       "badge": {
-        "sql": "SQLのみ",
-        "llm": "LLM"
+        "sql": "集計のみ",
+        "llm": "AI 回答"
       },
       "disclosure_title": "この答えの出どころ",
       "disclosure_route": "路線",
@@ -725,7 +772,6 @@
     "filter_bar": {
       "edit": "編集",
       "apply": "適用",
-      "cancel": "キャンセル",
       "label_date_range": "期間",
       "label_dow": "曜日",
       "label_time_band": "時間帯",
@@ -818,7 +864,6 @@
       "delay_certificate": "遅延証明書"
     },
     "col": {
-      "route": "路線",
       "service": "種別",
       "avg": "平均",
       "median": "中央値",
@@ -827,8 +872,6 @@
       "dow": "曜日",
       "on_time_pct": "定時率",
       "over_5min_count": "5分超回数",
-      "weekday": "平日",
-      "weekend": "土日祝",
       "diff": "差",
       "direction": "向き",
       "confidence": "確信度",
@@ -920,7 +963,6 @@
       "subtitle": "この事業者の高頻度路線（計画運行間隔12分以内）について、超過待ち時間・間隔のばらつき・大きな間隔あきの発生率を表示します。",
       "empty": "この期間で十分なデータがある高頻度路線がありません。",
       "col": {
-        "route": "路線",
         "ewt": "超過待ち時間",
         "cov": "間隔のばらつき(CoV)",
         "long_gap_rate": "大きな間隔あきの発生率",
@@ -932,7 +974,6 @@
       "simulation_badge": "内部シミュレーション（試算） — 請求書ではありません",
       "subtitle": "路線ごとに設定された最低パフォーマンス基準に対する、達成率と概算のボーナス/減額の試算です。",
       "col": {
-        "route": "路線",
         "metric": "指標",
         "threshold": "基準値",
         "actual": "実績値",
@@ -1106,9 +1147,6 @@
       "api_key_copy": "コピー",
       "api_key_copied": "コピーしました",
       "danger_zone_title": "危険な操作"
-    },
-    "drawer": {
-      "close": "閉じる"
     },
     "invite": {
       "trigger": "＋ 招待",
@@ -1305,7 +1343,6 @@
       "reason_label": "理由",
       "reason_placeholder": "この変更の理由を入力してください",
       "confirm": "保存",
-      "cancel": "キャンセル",
       "clear_override": "上書きを解除",
       "clear_error": "上書きを解除できませんでした。",
       "labels": {
@@ -1501,8 +1538,7 @@
     },
     "footer": {
       "navigate": "移動",
-      "select": "実行",
-      "close": "閉じる"
+      "select": "実行"
     },
     "shortcuts": {
       "title": "キーボードショートカット",
@@ -1519,5 +1555,8 @@
       "reset_service": "運行種別をすべてに戻す",
       "jump_latest_data": "最新のデータに移動する"
     }
+  },
+  "glossary": {
+    "gtfs": "GTFS：時刻表や位置情報などの運行データをやり取りするための標準フォーマットです。"
   }
 }

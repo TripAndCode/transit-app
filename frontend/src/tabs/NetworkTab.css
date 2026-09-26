@@ -46,6 +46,9 @@
 .network-row__name { min-width: 0; font-size: var(--text-sm); font-weight: 600; }
 .network-row__name a { color: var(--accent); text-decoration: none; }
 .network-row__name a:hover { text-decoration: underline; }
+/* --accent only clears AA on the plain row background; a current row's link
+   sits on --accent-soft instead, so it needs the deepened text-safe variant. */
+.network-row--current .network-row__name a { color: var(--accent-strong); }
 .network-row__sub { display: block; margin-top: 2px; font-weight: 400; font-size: var(--text-xs); color: var(--text-tertiary); }
 
 .network-row__value { text-align: right; font-size: var(--text-md); font-weight: 700; line-height: 1.1; white-space: nowrap; }

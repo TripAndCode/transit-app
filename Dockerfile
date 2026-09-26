@@ -14,7 +14,7 @@ COPY scripts/strip_vite_manifest.sh /tmp/strip_vite_manifest.sh
 RUN sh /tmp/strip_vite_manifest.sh dist
 
 # ── Stage 2: Python API + bundled static ─────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.14-slim
 WORKDIR /app
 
 RUN pip install --no-cache-dir poetry==1.8.5

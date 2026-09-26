@@ -76,7 +76,10 @@ def _pick_template_tool(tab: str) -> dict:
         "type": "function",
         "function": {
             "name": "pick_template",
-            "description": "Choose which pre-verified insight template best matches the current data.",
+            "description": (
+                "Choose the pre-verified insight template that fits the current data. "
+                + " ".join(f"{t.id}: {t.use_when}" for t in all_candidates)
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

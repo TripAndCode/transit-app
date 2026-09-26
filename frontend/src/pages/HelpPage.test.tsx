@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/renderWithProviders";
-import i18n from "../i18n";
 import { HelpPage } from "./HelpPage";
 
 // Two top-level (`## `) sections -- enough to exercise the sidebar without a
@@ -54,19 +53,6 @@ describe("HelpPage", () => {
     // so it doesn't fire hashchange/reload) -- reset it so one test's
     // selection can't leak into the next test's initial-hash match.
     window.history.replaceState(null, "", window.location.pathname);
-  });
-
-  it("explains why the manual search cannot be used yet", async () => {
-    renderWithProviders(<HelpPage />);
-    const search = await screen.findByRole("searchbox", { name: i18n.t("help.search_placeholder") });
-    expect(search).toHaveAttribute("aria-disabled", "true");
-
-    act(() => {
-      search.focus();
-    });
-    const tip = screen.getByRole("tooltip");
-    expect(tip).toHaveTextContent(i18n.t("help.search_disabled_reason"));
-    expect(search.getAttribute("aria-describedby")).toBe(tip.id);
   });
 
   it("fetches the English manual for the active locale and renders its first section", async () => {
@@ -178,5 +164,69 @@ describe("HelpPage", () => {
     await user.click(screen.getByRole("button", { name: "Table of contents" }));
     await screen.findByRole("heading", { name: "Table of contents", level: 2 });
     expect(screen.getByText("Intro paragraph before any section.")).toBeInTheDocument();
+  });
+
+  describe("search", () => {
+    it("narrows the sidebar and content to sections matching the query text", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section one", level: 2 });
+
+      await user.type(screen.getByRole("searchbox"), "Other manual");
+
+      expect(screen.queryByRole("button", { name: "Section one" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Section two" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Section two", level: 2 })).toBeInTheDocument();
+      expect(screen.getByText("Other manual text.")).toBeInTheDocument();
+    });
+
+    it("matches on a section's own title, not just its body", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section one", level: 2 });
+
+      await user.type(screen.getByRole("searchbox"), "section two");
+
+      expect(screen.queryByRole("button", { name: "Section one" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Section two" })).toBeInTheDocument();
+    });
+
+    it("announces the match count in a live status region", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section one", level: 2 });
+
+      await user.type(screen.getByRole("searchbox"), "Other manual");
+
+      expect(await screen.findByRole("status")).toHaveTextContent("1");
+    });
+
+    it("shows a no-matches message instead of stale content when nothing matches", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section one", level: 2 });
+
+      await user.type(screen.getByRole("searchbox"), "nonexistent phrase xyz");
+
+      expect(screen.getByText("No matches")).toBeInTheDocument();
+      expect(screen.queryByText("Some manual text.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Other manual text.")).not.toBeInTheDocument();
+    });
+
+    it("clearing the query restores the section the user had selected", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section one", level: 2 });
+
+      await user.click(screen.getByRole("button", { name: "Section two" }));
+      await screen.findByRole("heading", { name: "Section two", level: 2 });
+
+      const search = screen.getByRole("searchbox");
+      await user.type(search, "Some manual");
+      await screen.findByRole("heading", { name: "Section one", level: 2 });
+      await user.clear(search);
+
+      expect(await screen.findByRole("heading", { name: "Section two", level: 2 })).toBeInTheDocument();
+    });
   });
 });

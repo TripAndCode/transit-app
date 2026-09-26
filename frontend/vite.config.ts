@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
-import react from "@vitejs/plugin-react";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
 
 export default defineConfig(({ mode }) => {
   // loadEnv (not process.env) so a per-checkout .env.local can set this —
@@ -13,7 +14,7 @@ export default defineConfig(({ mode }) => {
     // React.memo are banned as a hard ESLint error (see eslint.config.js) — a
     // compiler bailout should be fixed at the source, not worked around with
     // manual memoization.
-    plugins: [react({ babel: { plugins: ["babel-plugin-react-compiler"] } })],
+    plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
     server: {
       port: 5173,
       // Backend lives under /api/* and /health. Anything else is owned by

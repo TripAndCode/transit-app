@@ -19,7 +19,17 @@ export
 DATABASE_URL ?=
 
 # Expanded per recipe, not at parse time, so targets that need no database
-# (lint, typecheck, frontend-*) still run without one.
+# (lint, typecheck, frontend-*, bake) still run without one.
+#
+# `unexport` is what makes that true, and it is not optional. The file-wide
+# `export` above hands every variable to each recipe's environment, and
+# building that environment expands them -- including this one, whose
+# expansion IS the error. Exported, a missing DATABASE_URL therefore stops
+# every target that has a recipe at all, echoing its command first so the
+# failure reads like the command's own. Recipes reference $(db_url)
+# explicitly where they need it, so nothing depends on it being in the
+# environment.
+unexport db_url
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 

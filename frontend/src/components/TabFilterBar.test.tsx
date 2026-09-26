@@ -61,6 +61,21 @@ describe("TabFilterBar route chip labels", () => {
   });
 });
 
+describe("TabFilterBar day and service labels", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("labels active chips and popover options from the wire values", async () => {
+    const user = userEvent.setup();
+    renderFilterBar(`/agencies/1/overview?dow=weekend&service=${encodeURIComponent("平日")}`); // i18n-ignore: query contract
+    expect(screen.getByText("Day: Weekend/Holiday")).toBeInTheDocument();
+    expect(screen.getByText("Service: Weekday")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Filters/ }));
+    expect(screen.getAllByRole("button", { name: "Weekday" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Weekend/Holiday" })).toHaveLength(2);
+  });
+});
+
 describe("TabFilterBar popover dismissal", () => {
   afterEach(() => vi.restoreAllMocks());
 

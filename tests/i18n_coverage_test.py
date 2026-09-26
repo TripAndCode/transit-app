@@ -4,7 +4,10 @@ Skip by default (expensive — launches headless browser). Run with:
     RUN_I18N_SCAN=1 pytest tests/i18n_coverage_test.py -v
 
 Pre-requisite: build the SPA first so ``api/static/index.html`` exists.
-    cd frontend && npm run build   # output lands in api/static/
+Building alone is not enough — vite writes ``frontend/dist``, and ``make
+bake`` is what copies that into ``api/static``:
+    cd frontend && npm run build
+    make bake
 If ``api/static/index.html`` is absent the fixture skips with a clear
 message rather than failing opaquely.
 """
@@ -13,13 +16,11 @@ from __future__ import annotations
 
 import os
 import re
-import socket
-import subprocess
-import time
-import urllib.request
 from pathlib import Path
 
 import pytest
+
+from tests.fixtures.uvicorn_server import start_uvicorn
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_I18N_SCAN") != "1",
@@ -63,13 +64,6 @@ def _load_allowlist() -> set[str]:
     }
 
 
-def _free_port() -> int:
-    """Bind to port 0 and return the OS-assigned port number."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -86,47 +80,13 @@ def app_server():
     if not static_index.exists():
         pytest.skip(
             f"SPA not built — {_STATIC_INDEX} is missing. "
-            "Run `cd frontend && npm run build` first, then re-run with RUN_I18N_SCAN=1."
+            "Run `cd frontend && npm run build && cd .. && make bake` first "
+            "(the build alone writes frontend/dist; bake is what fills api/static), "
+            "then re-run with RUN_I18N_SCAN=1."
         )
 
-    port = _free_port()
-    proc = subprocess.Popen(
-        [
-            "poetry",
-            "run",
-            "uvicorn",
-            "api.main:app",
-            "--port",
-            str(port),
-            "--no-access-log",
-        ],
-        env={**os.environ, "ASK_INTENT_CACHE_ENABLED": "true"},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    # Wait up to 30 s for the server to accept connections.
-    deadline = time.time() + 30
-    started = False
-    while time.time() < deadline:
-        try:
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)
-            started = True
-            break
-        except Exception:
-            time.sleep(0.5)
-
-    if not started:
-        proc.kill()
-        pytest.fail("API server did not start within 30 seconds.")
-
-    yield f"http://127.0.0.1:{port}"
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    with start_uvicorn({"ASK_INTENT_CACHE_ENABLED": "true"}) as base_url:
+        yield base_url
 
 
 # ---------------------------------------------------------------------------

@@ -45,7 +45,7 @@ describe("StopEvidenceChart provenance", () => {
   it("extends the existing definition disclosure with route and conditions", () => {
     renderWithProviders(<StopEvidenceChart messageId={1} points={points} message={assistantMessage()} />);
     expect(screen.getByText("A05")).toBeInTheDocument();
-    expect(screen.getByText(t("filters.dow.weekend"))).toBeInTheDocument();
+    expect(screen.getByText(t("common.service_value.土日祝"))).toBeInTheDocument();
   });
 });
 

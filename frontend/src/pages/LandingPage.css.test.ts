@@ -16,8 +16,8 @@ describe("LandingPage.css hero sizing", () => {
     expect(ruleBody(".landing-hero")).not.toMatch(/height:\s*100vh/);
   });
 
-  it(".landing-hero keeps a min-height floor so the scene still has room on a short viewport", () => {
-    expect(ruleBody(".landing-hero")).toMatch(/min-height:\s*\d/);
+  it(".landing-hero keeps a pixel min-height floor so the scene still has room on a short viewport", () => {
+    expect(ruleBody(".landing-hero")).toMatch(/min-height:\s*(clamp\(\s*)?\d+px/);
   });
 
   it(".landing-hero__content sizes from its own content, not a forced 100% height", () => {

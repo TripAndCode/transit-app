@@ -31,7 +31,6 @@ import contextlib
 import fcntl
 import importlib.util
 import io
-import itertools
 import shutil
 import subprocess
 import sys
@@ -54,15 +53,26 @@ _CLEANUP_SPEC.loader.exec_module(cleanup_git_state)
 
 # `importlib` hands a type checker a bare `ModuleType`, so an attribute read
 # off `cleanup_git_state` is an untyped value -- usable at runtime, but not
-# valid in an annotation. The static import below names the same two objects
-# from the same file so signatures referring to them stay checkable; the
+# valid in an annotation. The static import below names the same objects from
+# the same file so the type checker sees their real types; the
 # runtime branch keeps using the dynamically loaded module object, which is
 # the only one that exists when `scripts/` isn't importable as a package.
 if TYPE_CHECKING:
-    from scripts.cleanup_git_state import CleanupError, PullRequest
+    from scripts.cleanup_git_state import (
+        REVIEW_WORKTREE_PARENT_DIR,
+        REVIEW_WORKTREE_PREFIX,
+        CleanupError,
+        PullRequest,
+        is_review_worktree,
+    )
 else:
     PullRequest = cleanup_git_state.PullRequest
     CleanupError = cleanup_git_state.CleanupError
+    # The review-worktree convention lives in cleanup_git_state, the deletion
+    # authority, so the branch/worktree stage and the venv stage read one rule.
+    REVIEW_WORKTREE_PARENT_DIR = cleanup_git_state.REVIEW_WORKTREE_PARENT_DIR
+    REVIEW_WORKTREE_PREFIX = cleanup_git_state.REVIEW_WORKTREE_PREFIX
+    is_review_worktree = cleanup_git_state.is_review_worktree
 
 DEFAULT_LOCK_FILE = Path("/tmp/transit-git-hygiene.lock")
 DEFAULT_LOG_FILE = Path("/root/git-hygiene.log")
@@ -75,14 +85,6 @@ POETRY_ENV_INFO_TIMEOUT_SECONDS = 10
 # matches only this repo's own venvs, never an unrelated project sharing the same
 # shared virtualenvs.path (e.g. a poetry-managed CLI tool used across other work).
 POETRY_VENV_GLOB = "transit-delay-app-*"
-
-# `/review-pr`'s own `git worktree add .worktrees/review-<headRefName>` convention
-# (`.claude/commands/review-pr.md`). If that command ever renames either part, this
-# match silently stops firing, and every orphaned venv is retained fail-closed until
-# a human intervenes -- named here so the coupling is greppable from both ends, and
-# covered by `test_review_worktree_naming_matches_review_pr_md`.
-REVIEW_WORKTREE_PARENT_DIR = ".worktrees"
-REVIEW_WORKTREE_PREFIX = "review-"
 
 
 class HygieneError(RuntimeError):
@@ -280,32 +282,6 @@ def poetry_env_path(location: Path) -> Path | None:
         return None
     path = result.stdout.strip()
     return Path(path).resolve() if path else None
-
-
-def is_review_worktree(worktree_path: Path) -> bool:
-    """Match `/review-pr`'s own worktree naming shape; see `compute_in_use_poetry_venvs`
-    for why this exemption exists and what residual it accepts.
-
-    Matched structurally: a `REVIEW_WORKTREE_PARENT_DIR` segment immediately
-    followed by a `REVIEW_WORKTREE_PREFIX`-prefixed one, and nothing shaped
-    like a further nested worktree after that pair. Not just the last two
-    components, since `/review-pr` names the review worktree after the
-    reviewed branch's own head ref, which can itself contain slashes
-    (`fix/item-85` produces `.worktrees/review-fix/item-85`, three
-    components deep, not two) -- and not anchored to any particular
-    checkout, since `/review-pr` runs its `git worktree add` relative to
-    whichever checkout invokes it, normally but not necessarily the main
-    one. The "nothing nested after" requirement excludes a worktree created
-    *inside* a review worktree (e.g. an agent worktree somehow created
-    from one) from inheriting this exemption -- that
-    shape must still hit this module's ordinary fail-closed handling.
-    """
-
-    parts = worktree_path.parts
-    for index, (parent, child) in enumerate(itertools.pairwise(parts)):
-        if parent == REVIEW_WORKTREE_PARENT_DIR and child.startswith(REVIEW_WORKTREE_PREFIX):
-            return not any(part in {"worktrees", REVIEW_WORKTREE_PARENT_DIR} for part in parts[index + 2 :])
-    return False
 
 
 def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: float) -> set[Path]:

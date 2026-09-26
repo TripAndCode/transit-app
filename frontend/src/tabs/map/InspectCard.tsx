@@ -2,7 +2,6 @@ import type { TFunction } from "i18next";
 import { Pin, PinOff } from "lucide-react";
 import { InlineSparkline } from "../../components/InlineSparkline";
 import { Tooltip } from "../../components/Tooltip";
-import { useCountUp } from "../../hooks/useCountUp";
 import type { LiveTrip, LiveTripProgressResponse } from "../../api/types";
 import "./inspectCard.css";
 
@@ -57,6 +56,11 @@ function worstSegment(progress: LiveTripProgressResponse | undefined): { from: s
  * chose: a preview shows only the headline, because it appears and disappears
  * under a moving pointer and anything more would flicker.
  *
+ * Moving to another vehicle swaps the card's contents outright, behind a
+ * crossfade keyed on the trip. Nothing tweens between two trips: a delay
+ * figure sliding from one vehicle's value to another's spends the whole
+ * sweep displaying a number no vehicle reported.
+ *
  * Deliberately not a live region. Its figures change on their own every thirty
  * seconds, so announcing them would read the whole card aloud twice a minute
  * to a reader who never asked for it; it is a labelled complementary landmark
@@ -74,7 +78,7 @@ export function InspectCard({ trip, routeName, vehicles, progress, pinned, onPin
   onUnpin: () => void;
   t: TFunction;
 }) {
-  const delayMin = useCountUp(trip.dep_delay / 60, { decimals: 1 });
+  const delayMin = trip.dep_delay / 60;
   const hourly = pinned ? hourlyDelayMinutes(progress) : [];
   const segment = pinned ? worstSegment(progress) : null;
 
@@ -83,60 +87,66 @@ export function InspectCard({ trip, routeName, vehicles, progress, pinned, onPin
       className={`ops-inspect${pinned ? "" : " ops-inspect--preview"}`}
       aria-label={t("operations.inspect.label")}
     >
-      <div className="ops-inspect__head">
-        {trip.route_code && <span className="ops-inspect__badge">{trip.route_code}</span>}
-        <div className="ops-inspect__name">
-          <b>{routeName}</b>
-          {trip.headsign && <small>{trip.headsign}</small>}
+      {/* Keyed on the trip so a different vehicle remounts the contents and
+          replays the fade, while the thirty-second refetch of the same trip
+          updates in place -- an entrance twice a minute is the flicker the
+          card exists to end. */}
+      <div className="ops-inspect__body" key={trip.trip_id}>
+        <div className="ops-inspect__head">
+          {trip.route_code && <span className="ops-inspect__badge">{trip.route_code}</span>}
+          <div className="ops-inspect__name">
+            <b>{routeName}</b>
+            {trip.headsign && <small>{trip.headsign}</small>}
+          </div>
+          <Tooltip label={t(pinned ? "operations.inspect.unpin" : "operations.inspect.pin")} placement="left">
+            <button
+              type="button"
+              className="ops-inspect__pin"
+              aria-label={t(pinned ? "operations.inspect.unpin" : "operations.inspect.pin")}
+              aria-pressed={pinned}
+              onClick={pinned ? onUnpin : onPin}
+            >
+              {pinned ? <PinOff size={14} aria-hidden="true" /> : <Pin size={14} aria-hidden="true" />}
+            </button>
+          </Tooltip>
         </div>
-        <Tooltip label={t(pinned ? "operations.inspect.unpin" : "operations.inspect.pin")} placement="left">
-          <button
-            type="button"
-            className="ops-inspect__pin"
-            aria-label={t(pinned ? "operations.inspect.unpin" : "operations.inspect.pin")}
-            aria-pressed={pinned}
-            onClick={pinned ? onUnpin : onPin}
-          >
-            {pinned ? <PinOff size={14} aria-hidden="true" /> : <Pin size={14} aria-hidden="true" />}
-          </button>
-        </Tooltip>
+
+        <p className="ops-inspect__delay">
+          {/* Sign comes from the value, so a trip running early reads "-1.5"
+              rather than a caller-supplied "+" colliding with the minus. */}
+          <b className="num">{`${delayMin < 0 ? "-" : "+"}${Math.abs(delayMin).toFixed(1)}`}</b>
+          <span>{t("operations.inspect.delay_unit")}</span>
+        </p>
+
+        {hourly.length >= 2 && (
+          <div className="ops-inspect__spark" data-testid="inspect-sparkline">
+            <InlineSparkline
+              points={hourly}
+              width={220}
+              height={46}
+              accent="var(--accent)"
+              forceAccent
+              showLabels={false}
+              style={{ display: "block", width: "100%", verticalAlign: "baseline" }}
+            />
+            <small>{t("operations.inspect.hourly_trend")}</small>
+          </div>
+        )}
+
+        {segment && (
+          <p className="ops-inspect__row">
+            <span>{t("operations.inspect.worst_segment")}</span>
+            <b>{t("operations.inspect.segment", { from: segment.from, to: segment.to })}</b>
+          </p>
+        )}
+
+        {pinned && (
+          <p className="ops-inspect__row">
+            <span>{t("operations.inspect.vehicles_label")}</span>
+            <b>{t("operations.inspect.vehicles", { vehicles })}</b>
+          </p>
+        )}
       </div>
-
-      <p className="ops-inspect__delay">
-        {/* Sign comes from the value, so a trip running early reads "-1.5"
-            rather than a caller-supplied "+" colliding with the minus. */}
-        <b className="num">{`${delayMin < 0 ? "-" : "+"}${Math.abs(delayMin).toFixed(1)}`}</b>
-        <span>{t("operations.inspect.delay_unit")}</span>
-      </p>
-
-      {hourly.length >= 2 && (
-        <div className="ops-inspect__spark" data-testid="inspect-sparkline">
-          <InlineSparkline
-            points={hourly}
-            width={220}
-            height={46}
-            accent="var(--accent)"
-            forceAccent
-            showLabels={false}
-            style={{ display: "block", width: "100%", verticalAlign: "baseline" }}
-          />
-          <small>{t("operations.inspect.hourly_trend")}</small>
-        </div>
-      )}
-
-      {segment && (
-        <p className="ops-inspect__row">
-          <span>{t("operations.inspect.worst_segment")}</span>
-          <b>{t("operations.inspect.segment", { from: segment.from, to: segment.to })}</b>
-        </p>
-      )}
-
-      {pinned && (
-        <p className="ops-inspect__row">
-          <span>{t("operations.inspect.vehicles_label")}</span>
-          <b>{t("operations.inspect.vehicles", { vehicles })}</b>
-        </p>
-      )}
     </aside>
   );
 }

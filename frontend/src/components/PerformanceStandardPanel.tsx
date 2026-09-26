@@ -73,7 +73,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Range
           <table style={SHARED_TABLE}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
-                <th style={th({ align: "left" })}>{t("reports.performance_standard.col.route")}</th>
+                <th style={th({ align: "left" })}>{t("common.route")}</th>
                 <th style={th({ align: "left" })}>{t("reports.performance_standard.col.metric")}</th>
                 <th style={th({ align: "right" })}>{t("reports.performance_standard.col.threshold")}</th>
                 <th style={th({ align: "right" })}>{t("reports.performance_standard.col.actual")}</th>

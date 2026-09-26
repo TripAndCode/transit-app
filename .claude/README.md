@@ -69,7 +69,8 @@ describes, never as the rule itself.
 | `branch-reviewer` | Focused reviewer for one merged group of dimensions. It reads the prepared diff once and uses targeted evidence gathering. `.claude/agents/branch-reviewer.md` is the dimension source of truth. | Read, Grep, Glob, Bash (model: sonnet) |
 
 Dimensions as of this writing: `bugs`, `logic`, `consistency`, `perf`, `practices`,
-`comments`, `security`, `alternatives`, plus `enforcement` (conditional — lint/CI/hook
+`comments`, `security`, `alternatives`, plus `api-contract` (conditional — endpoint
+request/response changes only) and `enforcement` (conditional — lint/CI/hook
 diffs only) — this list is a convenience snapshot and can drift; check the agent file
 for the current list and exact scope of
 each (e.g. `security` covers hardcoded creds, CSRF/SSRF, PII/PDPA-APPI,
