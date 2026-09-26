@@ -47,6 +47,12 @@ export const backOut = (x: number, overshoot = 1.9): number => {
   return 1 + c * Math.pow(x - 1, 3) + overshoot * Math.pow(x - 1, 2);
 };
 
+/** Gaussian bump: 1 at `center`, falling off over `width`. */
+export const gaussianBump = (u: number, center: number, width: number): number => {
+  const d = (u - center) / width;
+  return Math.exp(-d * d);
+};
+
 /** `centerX`/`centerY` move the vanishing point off-center, so the scene can
  *  sit beside or below a text column rather than under it. */
 export function makeProjector(

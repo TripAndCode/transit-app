@@ -5,7 +5,7 @@
 // and the geometry the morphs fly between live in heroPanelDraw.
 
 import { delayColorIn, drawCard, haloText, setFont, type Ctx, type HeroLabels, type HeroPalette } from "./heroCanvas";
-import { backOut, clamp01, expoIn, expoInOut, expoOut, lerp, makeProjector, withAlpha, type Projector } from "./heroMapMath";
+import { backOut, clamp01, expoIn, expoInOut, expoOut, gaussianBump, lerp, makeProjector, withAlpha, type Projector } from "./heroMapMath";
 import {
   BASEMAP,
   FIRST_SERVICE_HOUR,
@@ -158,7 +158,6 @@ function drawTrail(ctx: Ctx, project: Projector, palette: HeroPalette, labels: H
 }
 
 const toGround = ([x, z]: Point2): [number, number, number] => [x, 0, z];
-const bump = (u: number, c: number, w: number) => Math.exp(-(((u - c) / w) ** 2));
 
 /** Day playback: stop circles colored by the hour's severity. */
 function drawPlaybackStops(ctx: Ctx, project: Projector, palette: HeroPalette, frame: HeroFrame): void {
@@ -174,7 +173,7 @@ function drawPlaybackStops(ctx: Ctx, project: Projector, palette: HeroPalette, f
       const u = i / (stopCount - 1);
       const q = project(...toGround(path.at(u)));
       if (!q) continue;
-      const d = mean * (0.35 + 1.1 * bump(u, 0.5, 0.25)) * weight;
+      const d = mean * (0.35 + 1.1 * gaussianBump(u, 0.5, 0.25)) * weight;
       ctx.fillStyle = delayColorIn(palette, d);
       ctx.strokeStyle = palette.surface;
       ctx.lineWidth = 2;

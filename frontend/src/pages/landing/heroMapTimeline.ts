@@ -1,11 +1,9 @@
-// The hero's scripted sequence as a pure function of elapsed seconds:
-// live operations (trip dots, the queue panel, one refresh) → the queue's
-// top trip is opened (route gradient, reported-stop trail, which flies into
-// the trip panel's chart) → day playback (the rail's hours fly into the
-// hourly-deterioration bars, which then light with the clock) → the period
-// overview → back to the queue. Everything that only belongs to the first
-// play (fly-in, dots appearing, the refresh) settles before LOOP_START, and
-// the last frame matches the LOOP_START frame, so the loop has no seam.
+// The hero's script as a pure function of elapsed seconds: live operations →
+// the queue's top trip opened (its trail flies into the trip chart) → day
+// playback (the rail's hours fly into the hourly bars) → period overview →
+// back to the queue. First-play-only motion (fly-in, dots appearing, the
+// refresh) settles before LOOP_START, and the last frame matches the
+// LOOP_START frame, so the loop has no seam.
 
 import { expoInOut, lerp, mixCamera, segment, type Camera } from "./heroMapMath";
 

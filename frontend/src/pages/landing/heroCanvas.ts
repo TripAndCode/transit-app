@@ -74,18 +74,23 @@ export function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, 
   ctx.roundRect(x, y, w, h, r);
 }
 
-/** A panel surface in the app's card style: soft shadow, hairline border. */
+/** A panel surface in the app's card style: soft drop shadow, hairline
+ *  border. The shadow is two offset low-alpha fills rather than
+ *  `shadowBlur`, because cards are repainted every frame and a blur pass
+ *  per card per frame is far more expensive than two flat fills. */
 export function drawCard(ctx: Ctx, palette: HeroPalette, x: number, y: number, w: number, h: number, radius: number, alpha = 1): void {
   if (alpha <= 0) return;
   ctx.save();
   ctx.globalAlpha *= alpha;
-  ctx.shadowColor = "rgba(0,0,0,0.12)";
-  ctx.shadowBlur = 18;
-  ctx.shadowOffsetY = 6;
+  ctx.fillStyle = "rgba(0,0,0,0.05)";
+  roundRect(ctx, x - 1, y + 3, w + 2, h + 4, radius + 1);
+  ctx.fill();
+  ctx.fillStyle = "rgba(0,0,0,0.04)";
+  roundRect(ctx, x, y + 1.5, w, h + 1.5, radius);
+  ctx.fill();
   ctx.fillStyle = palette.surface;
   roundRect(ctx, x, y, w, h, radius);
   ctx.fill();
-  ctx.shadowColor = "transparent";
   ctx.strokeStyle = palette.rule;
   ctx.lineWidth = 1;
   ctx.stroke();

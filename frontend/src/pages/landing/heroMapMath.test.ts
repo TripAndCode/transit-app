@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { backOut, expoInOut, luminance, makeProjector, mixCamera, mixHex, segment, withAlpha, type Camera } from "./heroMapMath";
+import { backOut, expoInOut, gaussianBump, luminance, makeProjector, mixCamera, mixHex, segment, withAlpha, type Camera } from "./heroMapMath";
 
 const LEVEL: Camera = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, focal: 1 };
 
@@ -50,6 +50,12 @@ describe("easing", () => {
   it("backOut overshoots before settling at 1", () => {
     expect(backOut(1)).toBeCloseTo(1);
     expect(Math.max(...Array.from({ length: 20 }, (_, i) => backOut(i / 20)))).toBeGreaterThan(1);
+  });
+
+  it("gaussianBump peaks at its center and falls off symmetrically", () => {
+    expect(gaussianBump(0.5, 0.5, 0.2)).toBe(1);
+    expect(gaussianBump(0.3, 0.5, 0.2)).toBeCloseTo(gaussianBump(0.7, 0.5, 0.2));
+    expect(gaussianBump(0.7, 0.5, 0.2)).toBeCloseTo(Math.exp(-1));
   });
 
   it("segment clamps progress through a window", () => {

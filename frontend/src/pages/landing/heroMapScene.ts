@@ -5,6 +5,8 @@
 // hourly means, and the period-overview numbers. World units are arbitrary:
 // the ground is the y = 0 plane, x runs east and z runs north.
 
+import { gaussianBump } from "./heroMapMath";
+
 export type Point2 = readonly [number, number];
 
 type Polyline = {
@@ -74,11 +76,6 @@ function smooth(control: readonly Point2[], stepsPerSpan = 12): Point2[] {
   return out;
 }
 
-const bump = (u: number, center: number, width: number): number => {
-  const d = (u - center) / width;
-  return Math.exp(-d * d);
-};
-
 const tramTrack: Point2[] = Array.from({ length: 28 }, (_, i) => {
   const x = -27 + i * 2;
   return [x, coastZ(x) + 3];
@@ -96,7 +93,7 @@ export const ROUTES: readonly { key: RouteKey; mode: VehicleMode; path: Polyline
 /** The route the hero selects; its per-stop average delay drives the route's
  *  gradient, spaced evenly by stop order as the app draws it. */
 export const SELECTED_ROUTE = ROUTES.findIndex((r) => r.key === "bus12");
-export const SELECTED_ROUTE_STOP_AVG: readonly number[] = Array.from({ length: 7 }, (_, i) => 0.6 + 6 * bump(i / 6, 0.5, 0.17));
+export const SELECTED_ROUTE_STOP_AVG: readonly number[] = Array.from({ length: 7 }, (_, i) => 0.6 + 6 * gaussianBump(i / 6, 0.5, 0.17));
 
 /** Distance, as a fraction of each route, from one stop to the next. */
 const STOP_SPACING: readonly number[] = [1 / 7, 1 / 7, 1 / 7, 1 / 6, 1 / 7, 1 / 7];
