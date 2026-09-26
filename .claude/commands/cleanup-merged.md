@@ -57,7 +57,8 @@ remote clone must already contain `scripts/cleanup_git_state.py`; if it does not
 
 - Delete only entries marked `DELETE` by `cleanup_git_state.py`.
 - Never delete remote/GitHub branches, push, force-push, reset, stash, or discard files.
-- `main`, `production`, the invoking and primary worktrees, open PRs, dirty/locked
-  worktrees, and unmerged work are retained. A local tip that differs from its merged
+- `main`, `production`, the invoking and primary worktrees, `/review-pr` worktrees
+  (`.worktrees/review-*`), open PRs, dirty/locked worktrees, and unmerged work are
+  retained. A local tip that differs from its merged
   PR head is retained unless that head descends from it (a pre-merge snapshot).
 - Additional named keepers use `--protect <branch>`; do not weaken the built-in rules.
