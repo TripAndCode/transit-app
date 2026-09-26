@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
-import { delayColor } from "../styles/tokens";
+import { delayTextColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
+import { periodMean } from "./periodMean";
 import { storySentence } from "./overview/storySentence";
 import { STALE_THRESHOLD_HOURS } from "./DataStalenessBanner";
 
@@ -66,11 +67,15 @@ export function OverviewHeroRow({
     }
   }
 
-  const avgMinColor = headline.avg_min != null ? delayColor(headline.avg_min) : undefined;
+  // The sparkline scales to its own min..max, so it is anchored on the period
+  // mean rather than 0: the absolute figure is already shown beside it, and a
+  // 0 axis would flatten the day-to-day variation the sparkline exists to show.
+  const sparklineMean = periodMean(sparklinePoints);
+
+  const avgMinColor = headline.avg_min != null ? delayTextColor(headline.avg_min) : undefined;
   // Called unconditionally (hooks can't branch on headline.avg_min's
   // nullability) -- the "—" fallback below still renders in place of it when
-  // there is nothing to display. Never animates on first mount, only when
-  // avg_min changes afterward (an agency switch, a live refresh).
+  // there is nothing to display.
   const avgMinDisplay = useCountUp(headline.avg_min ?? 0, { decimals: 1 });
   const delayedCountDisplay = useCountUp(delayedCount, { decimals: 0 });
 
@@ -93,6 +98,7 @@ export function OverviewHeroRow({
           preserveAspectRatio="none"
           showLabels={false}
           showEndDot={false}
+          baseline={sparklineMean ?? undefined}
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         />
         <div className="ov-hero-label">{t("overview.hero_row.avg_delay_label")}</div>
@@ -100,6 +106,11 @@ export function OverviewHeroRow({
           {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
           <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
         </div>
+        {sparklineMean != null && (
+          <div className="ov-hero-baseline">
+            {t("overview.hero_row.sparkline_baseline", { value: sparklineMean.toFixed(1) })}
+          </div>
+        )}
       </div>
       <div>
         {/* A div, not a <p>: InsightHint's root is a div, and a div is not

@@ -9,8 +9,8 @@ Post selected review findings as inline comments on the GitHub PR for the curren
 Nothing gets posted as a review comment without an explicit pick from the user in
 step 2. Listing the findings is not approval — post only the findings the user
 actually selected, never "post everything" by default.
-This gates Step 3 (posting the comments). Step 1's "stop and offer" still applies to
-creating a PR, and every PR this repo opens starts as `--draft` per CLAUDE.md.
+This gates Step 3 (posting the comments). Creating a PR is gated separately by Step 1's
+"stop and offer", and every PR this repo opens starts as `--draft` per CLAUDE.md.
 
 ## Auth
 - Use the `gh` CLI — already authenticated via keyring. Do NOT ask for, paste, or

@@ -29,8 +29,8 @@ import "./ActivityStrip.css";
  * Renders an always-present 24 px row in the App shell. The row is visually
  * transparent when idle and transitions to a soft --accent-soft band with
  * animated dots when `useIsMutating()` reports one or more active mutations.
- * Themed through --accent/--accent-soft (not a hardcoded colour) so the band
- * follows the active theme instead of always rendering the light-mode tint.
+ * Themed through --accent-soft with --accent-strong text (not a hardcoded
+ * colour) so the band follows the active theme and its label stays AA-readable.
  */
 export function ActivityStrip() {
   const mutating = useIsMutating();
@@ -64,7 +64,7 @@ export function ActivityStrip() {
         gap: 10,
         padding: "0 16px",
         fontSize: 12,
-        color: "var(--accent)",
+        color: "var(--accent-strong)",
         opacity: visible ? 1 : 0,
         transition:
           "opacity 200ms ease-out, background 200ms ease-out, border-color 200ms ease-out",

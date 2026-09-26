@@ -61,7 +61,7 @@ PARAPHRASE_PAIRS = [
     (
         "describe_data: default offset/limit/order omitted vs explicit",
         ("describe_data", {"kind": "stops"}),
-        ("describe_data", {"kind": "stops", "offset": 0, "limit": 50, "order": "asc"}),
+        ("describe_data", {"kind": "stops", "offset": 0, "limit": 50, "order": "desc"}),
     ),
     (
         "route_stats: nothing to canonicalize but identifiers preserved",

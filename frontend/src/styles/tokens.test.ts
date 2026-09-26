@@ -1,16 +1,19 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
 import {
   DELAY_RAMP,
+  DELAY_RAMP_TEXT,
   contrastRatio,
   delayColor,
   delayColorResolved,
+  delayTextColor,
   readableInkOn,
   severeColorResolved,
   severityStepColors,
   surfaceColorResolved,
 } from "./tokens";
+import { ruleBody, decl } from "../test/cssRules";
 
 // Two distinct severe-color surfaces:
 //  - `DELAY_RAMP.severe` / `delayColor(>10)` return the LITERAL string
@@ -90,6 +93,23 @@ describe("delayColorResolved() (MapLibre-safe delayColor)", () => {
   });
 });
 
+describe("DELAY_RAMP_TEXT / delayTextColor() (text-safe delay ramp)", () => {
+  it("ok/mild/moderate are the literal per-theme CSS vars, and severe reuses DELAY_RAMP.severe", () => {
+    expect(DELAY_RAMP_TEXT.ok).toBe("var(--delay-text-ok)");
+    expect(DELAY_RAMP_TEXT.mild).toBe("var(--delay-text-mild)");
+    expect(DELAY_RAMP_TEXT.moderate).toBe("var(--delay-text-moderate)");
+    expect(DELAY_RAMP_TEXT.severe).toBe(DELAY_RAMP.severe);
+  });
+
+  it("maps thresholds the same way delayColor() does, but through the text-safe ramp", () => {
+    expect(delayTextColor(0)).toBe(DELAY_RAMP_TEXT.ok);
+    expect(delayTextColor(-3)).toBe(DELAY_RAMP_TEXT.ok);
+    expect(delayTextColor(2)).toBe(DELAY_RAMP_TEXT.mild);
+    expect(delayTextColor(4)).toBe(DELAY_RAMP_TEXT.moderate);
+    expect(delayTextColor(15)).toBe(DELAY_RAMP_TEXT.severe);
+  });
+});
+
 describe("severityStepColors() (MapLibre step-expression stops)", () => {
   afterEach(() => {
     document.documentElement.style.removeProperty("--delay-severe");
@@ -120,29 +140,6 @@ describe("severityStepColors() (MapLibre step-expression stops)", () => {
 // the sentence instead of the declaration.
 const globalCss = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "");
-
-/** Body of the first rule whose selector text starts at `selector`, with
- *  braces balanced so nested at-rules/rules are included. */
-function ruleBody(css: string, selector: string): string {
-  const at = css.indexOf(selector);
-  if (at === -1) throw new Error(`selector not found: ${selector}`);
-  const open = css.indexOf("{", at + selector.length - 1);
-  let depth = 0;
-  for (let i = open; i < css.length; i++) {
-    if (css[i] === "{") depth++;
-    else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
-  }
-  throw new Error(`unbalanced braces after: ${selector}`);
-}
-
-/** Last declared value of `prop` in `body` (later declaration wins, matching
- *  the cascade), with runs of whitespace collapsed. */
-function decl(body: string, prop: string): string | null {
-  const re = new RegExp(`(?:^|[;{\\s])${prop}\\s*:\\s*([^;]+);`, "g");
-  let last: string | null = null;
-  for (const m of body.matchAll(re)) last = m[1].replace(/\s+/g, " ").trim();
-  return last;
-}
 
 const rootBlock = ruleBody(globalCss, ":root {");
 const darkBlock = ruleBody(globalCss, ':root[data-theme="dark"] {');
@@ -389,6 +386,18 @@ describe("one accent identity", () => {
       }
     }
   });
+
+  it("keeps --accent-strong readable as text directly on --accent-soft", () => {
+    // Plain --accent on --accent-soft is only 4.32:1 in light mode -- under
+    // AA -- which is why every "selected"/"active" state that tints its
+    // background with --accent-soft colors its own text --accent-strong
+    // instead (never --accent).
+    for (const block of [rootBlock, darkBlock]) {
+      expect(contrastRatio(decl(block, "--accent-strong")!, decl(block, "--accent-soft")!)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  });
 });
 
 describe("--delay-severe clears AA on its own theme's surface", () => {
@@ -429,6 +438,97 @@ describe("--delay-severe clears AA on its own theme's surface", () => {
     // There is no build-time link between tokens.ts and global.css, so this
     // assertion is what keeps the hand-mirrored pair from drifting.
     expect(severeColorResolved()).toBe(lightSevere);
+  });
+});
+
+/** Every surface a `delayTextColor()` figure actually renders on. Checking
+ *  only `--bg-surface` is what let these tokens ship tuned to clear AA on a
+ *  card while failing on the page, the soft fill and the current-row tint --
+ *  the KPI hero sits on the page, the report bar cell on the page, and the
+ *  network row on `--bg-soft` or `--accent-soft` when it is the active one. */
+const DELAY_TEXT_SURFACES = ["--bg-surface", "--bg-page", "--bg-soft", "--accent-soft"];
+const DELAY_TEXT_TOKENS = ["--delay-text-ok", "--delay-text-mild", "--delay-text-moderate"];
+
+describe("--delay-text-ok/mild/moderate clear AA on every surface they render on", () => {
+  it.each(DELAY_TEXT_TOKENS.flatMap((prop) => DELAY_TEXT_SURFACES.map((surface) => [prop, surface])))(
+    "%s clears 4.5:1 on light %s",
+    (prop, surface) => {
+      expect(contrastRatio(decl(rootBlock, prop)!, decl(rootBlock, surface)!)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  it.each(DELAY_TEXT_TOKENS.flatMap((prop) => DELAY_TEXT_SURFACES.map((surface) => [prop, surface])))(
+    "%s clears 4.5:1 on dark %s",
+    (prop, surface) => {
+      const onDark = decl(darkBlock, surface) ?? decl(rootBlock, surface)!;
+      expect(contrastRatio(decl(darkBlock, prop)!, onDark)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  it("is a distinct set from the plain ramp, which is for fills and fails as text", () => {
+    // The dark ramp reads as AA-passing against a card and is not against the
+    // page tints, so text needs its own values in both themes, not just light.
+    expect(decl(darkBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
+    expect(decl(rootBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
+  });
+});
+
+describe("--color-warning-text clears AA against --bg-surface and --bg-soft, in both themes", () => {
+  it("the light value clears 4.5:1 on both light surfaces", () => {
+    for (const surface of ["--bg-surface", "--bg-soft"]) {
+      expect(contrastRatio(decl(rootBlock, "--color-warning-text")!, decl(rootBlock, surface)!)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  });
+
+  it("the dark value clears 4.5:1 on both dark surfaces", () => {
+    for (const surface of ["--bg-surface", "--bg-soft"]) {
+      expect(contrastRatio(decl(darkBlock, "--color-warning-text")!, decl(darkBlock, surface)!)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  });
+
+  it("the dark value is identical to plain --color-warning (already AA-passing there)", () => {
+    // --color-warning has no dark-theme override, so the value that actually
+    // cascades in dark mode is the one declared on the bare :root.
+    expect(decl(darkBlock, "--color-warning-text")).toBe(decl(rootBlock, "--color-warning"));
+  });
+});
+
+describe("--color-danger is retired outside destructive-action buttons", () => {
+  it("is referenced only where a real destructive-action control uses it", () => {
+    // Alarm red is retired from every severity signal in favor of
+    // --delay-severe (calm, per-theme, AA-passing as text); --color-danger
+    // stays reserved for buttons that actually delete/remove something.
+    const srcDir = resolve(process.cwd(), "src");
+    // Each entry strips exactly the sanctioned text, so any other mention in
+    // the same file still counts as an offender.
+    const allowed = new Map<string, RegExp[]>([
+      [
+        resolve(srcDir, "styles/global.css"),
+        [/^\s*--color-danger:[^;]*;/gm, /\.context-menu__item--danger\s*\{\s*color:\s*var\(--color-danger\);\s*\}/g],
+      ],
+      [resolve(srcDir, "pages/admin/adminControls.tsx"), [/\.admin-btn\.danger[^{]*\{[^}]*\}/g]],
+    ]);
+
+    function walk(dir: string): string[] {
+      return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = resolve(dir, entry.name);
+        if (entry.isDirectory()) return walk(full);
+        if (!/\.(tsx?|css)$/.test(entry.name)) return [];
+        return [full];
+      });
+    }
+
+    const offenders = walk(srcDir).filter((file) => {
+      if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) return false;
+      const text = (allowed.get(file) ?? []).reduce((acc, re) => acc.replace(re, ""), readFileSync(file, "utf8"));
+      return text.includes("--color-danger");
+    });
+
+    expect(offenders).toEqual([]);
   });
 });
 
@@ -553,6 +653,20 @@ describe("progressive reveal (RevealSection.tsx's useInView())", () => {
     const inBody = ruleBody(allowed[0], ".reveal.reveal--in {");
     expect(decl(inBody, "opacity")).toBeNull();
     expect(decl(inBody, "transform")).toBe("translateY(0)");
+  });
+
+  it("staggers the sections of one group off --stagger, so a tab enters once", () => {
+    const allowed = motionAllowedBlocksContaining(".reveal {");
+    const body = ruleBody(allowed[0], ".reveal {");
+    expect(decl(body, "transition-delay")).toBe("calc(var(--stagger, 0) * var(--dur-1))");
+  });
+
+  it("keeps no per-child entrance classes for sections that already enter with their parent", () => {
+    // A bar that grows and a number that fades inside a section that is
+    // itself revealing is the same entrance played twice.
+    expect(globalCss).not.toContain(".ov-anim-fade");
+    expect(globalCss).not.toContain(".ov-anim-grow-x");
+    expect(globalCss).not.toContain("ov-grow-x");
   });
 });
 

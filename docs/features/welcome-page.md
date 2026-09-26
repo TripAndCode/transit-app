@@ -146,7 +146,7 @@ duplicating that flow here.
 |---|---|
 | `frontend/src/pages/LandingPage.tsx` | Hero: headline, sign-in CTA, secondary guest link |
 | `frontend/src/pages/LandingPage.css` | Hero/hero-CTA/guest-link styling |
-| `frontend/src/pages/landing/CityMapHero.tsx` | Animated background scene behind the hero text |
+| `frontend/src/pages/landing/LiveMapHero.tsx` | Animated backdrop behind the hero text: the operations map with trip dots, the app's right-hand panel, and morphs that carry a trip's reported stops and the day-playback hours into that panel. Only real app screens, sample figures on a fictional city. Scene data in `heroMapScene.ts`, script in `heroMapTimeline.ts`, map layers in `heroMapDraw.ts`, panel in `heroPanelDraw.ts`, driven by `useHeroMapAnimation.ts` |
 | `frontend/src/pages/landing/ScrollNarrative.tsx` | Post-hero scroll narrative: three real charts on fixture data |
 | `frontend/src/pages/landing/useRevealOnScroll.ts` | Fade/rise-in-view hook backing the narrative's scroll reveal |
 | `frontend/src/pages/landing/previewData.ts` | Static fixture data consumed by the scroll narrative's charts |
@@ -160,9 +160,12 @@ duplicating that flow here.
 ## i18n
 
 Hero strings live under `landing.hero.*`
-(`frontend/src/i18n/locales/{ja,en}.json`): `title`, `subtitle`,
-`guest_cta`. The primary sign-in CTA reuses the shared `common.login` key
-rather than a `landing`-scoped one. The scroll narrative's three
+(`frontend/src/i18n/locales/{ja,en}.json`): `title_now` and `title_where`
+(the headline's two lines, rendered as separate spans so it never breaks
+mid-phrase), `subtitle`, `guest_cta`. The primary sign-in CTA reuses the
+shared `common.login` key rather than a `landing`-scoped one. Text drawn on
+the hero canvas (screen tags, captions, panel labels, sample route and stop
+names, legend) lives under `landing.hero_map.*`. The scroll narrative's three
 heading/body pairs live under `landing.narrative.{route,trend,ask}.{title,body}`
 in the same locale files.
 

@@ -75,7 +75,7 @@ export function AdminAvatar({ label }: { label: string }) {
         borderRadius: "50%",
         flexShrink: 0,
         background: "var(--accent-soft)",
-        color: "var(--accent)",
+        color: "var(--accent-strong)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -96,8 +96,8 @@ export function AdminAvatar({ label }: { label: string }) {
 export function StatusChip({ tone, children }: { tone: "good" | "warn" | "neutral"; children: ReactNode }) {
   useAdminStyles();
   const styles = {
-    good: { background: "var(--accent-soft)", color: "var(--accent)" },
-    warn: { background: "var(--surface-2)", color: "var(--color-warning, #C99A2E)" },
+    good: { background: "var(--accent-soft)", color: "var(--accent-strong)" },
+    warn: { background: "var(--surface-2)", color: "var(--color-warning-text, #89691F)" },
     neutral: { background: "var(--surface-2)", color: "var(--text-tertiary)" },
   }[tone];
   return (

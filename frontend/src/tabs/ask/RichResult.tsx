@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 import type { ToolResult, TrendDay } from "../../api/types";
 import { DailyChart } from "../../components/charts/DailyChart";
 import { formatNumber } from "../../utils/format";
+import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { exportSvgAsPng } from "./chartPng";
 import { buildNextStepChips, type NextStepAction } from "./nextStepChips";
 import { conditionsLabel, formatWindow, provenancePath, sampleCount, toolLabel } from "./provenance";
@@ -122,7 +123,7 @@ function ResultTable({
                   {j === routeIdx
                     ? formatRoute(cell as string)
                     : j === serviceTypeIdx && cell != null
-                      ? t(`common.service_value.${String(cell)}`, { defaultValue: String(cell) })
+                      ? serviceValueLabel(String(cell), t)
                       : j === lowConfIdx
                         ? cell
                           ? t("ask.low_confidence_mark")
