@@ -9,7 +9,7 @@ aggregates, and application data live in Postgres/PostGIS.
 
 ### Requirements
 
-- Python 3.11+ (CI and the production image both run 3.12)
+- Python 3.11+ (CI and the production image run the same minor version; see `Dockerfile`)
 - [Poetry](https://python-poetry.org/)
 - Docker Desktop
 - A Gemini API key for the optional Ask LLM fallback
