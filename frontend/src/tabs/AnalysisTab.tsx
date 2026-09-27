@@ -267,8 +267,10 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { format: formatRoute } = useRouteNames(id);
-  const cappedRoutes = useCappedList(payload?.routes ?? [], 200, payload);
   const [ctx, update] = useRangeContext();
+  // The agency and filters the report was fetched for identify the list: a
+  // refetch under the same ones is the same list, however new its objects are.
+  const cappedRoutes = useCappedList(payload?.routes ?? [], 200, `${id ?? "none"}:${ctxToQueryString(ctx)}`);
   const jumpToLatestData = useJumpToLatestDataRange(id);
 
   if (!payload || !payload.available) {

@@ -347,8 +347,6 @@
     "theme_dark": "Dark",
     "theme_light": "Light",
     "theme_system": "System",
-    "theme_toggle_to_dark": "Switch to dark mode",
-    "theme_toggle_to_light": "Switch to light mode",
     "decrement_aria": "Decrement",
     "increment_aria": "Increment",
     "service_value": {
