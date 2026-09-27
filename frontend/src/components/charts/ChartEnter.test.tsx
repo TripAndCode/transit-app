@@ -16,12 +16,12 @@ function setReducedMotion(reduce: boolean) {
   }) as unknown as MediaQueryList);
 }
 
-function Harness() {
+function Harness({ d = "M0,0 L10,10" }: { d?: string }) {
   const ref = useRef<SVGPathElement | null>(null);
   useDrawOn(ref);
   return (
     <svg>
-      <path ref={ref} d="M0,0 L10,10" data-testid="p" />
+      <path ref={ref} d={d} data-testid="p" />
     </svg>
   );
 }
@@ -30,8 +30,8 @@ function Harness() {
 // at all -- every SVG element it creates is a plain SVGElement instance with
 // no getTotalLength -- so the mock goes on SVGElement.prototype directly
 // (and is removed again, since the property does not exist there natively).
-function mockGetTotalLength(impl: () => number) {
-  (SVGElement.prototype as unknown as { getTotalLength: () => number }).getTotalLength = impl;
+function mockGetTotalLength(impl: (this: SVGElement) => number) {
+  (SVGElement.prototype as unknown as { getTotalLength: typeof impl }).getTotalLength = impl;
 }
 
 describe("useDrawOn", () => {
@@ -47,6 +47,26 @@ describe("useDrawOn", () => {
     const path = getByTestId("p");
     expect(path.classList.contains("chart-draw-on")).toBe(true);
     expect(path.style.getPropertyValue("--len")).toBe("123.4");
+  });
+
+  it("re-measures --len when the mounted line's geometry changes, without replaying the entrance", () => {
+    setReducedMotion(false);
+    // A length that grows with `d`, so a longer path measures longer.
+    mockGetTotalLength(function () {
+      return (this.getAttribute("d") ?? "").length;
+    });
+    const raf = vi.spyOn(window, "requestAnimationFrame");
+    const short = "M0,0 L10,10";
+    const long = "M0,0 L10,10 L20,0 L30,10 L40,0";
+    const { getByTestId, rerender } = render(<Harness d={short} />);
+    const path = getByTestId("p");
+    expect(path.style.getPropertyValue("--len")).toBe(String(short.length));
+
+    rerender(<Harness d={long} />);
+    expect(getByTestId("p")).toBe(path);
+    expect(path.style.getPropertyValue("--len")).toBe(String(long.length));
+    expect(path.classList.contains("chart-draw-on")).toBe(true);
+    expect(raf).toHaveBeenCalledTimes(1);
   });
 
   it("does nothing under prefers-reduced-motion: reduce", () => {

@@ -13,22 +13,32 @@ import { prefersReducedMotion } from "../../utils/motion";
  * No-ops entirely under `prefers-reduced-motion: reduce` (the line renders
  * fully drawn, immediately) and whenever the element can't report a length --
  * `getTotalLength()` is unimplemented in some test environments, and possibly
- * unavailable for a `display: none` element in a real browser. Runs once per
- * mount; a chart whose data changes in place does not replay the draw-on
- * (it is an entrance effect, not a per-update one).
+ * unavailable for a `display: none` element in a real browser. The draw-on
+ * runs once per mount; a chart whose data changes in place does not replay
+ * it (it is an entrance effect, not a per-update one).
+ *
+ * `--len` itself is re-measured after every render, though. The dasharray
+ * stays on for as long as the class does, so a line that outgrew the length
+ * measured at mount -- a chart kept mounted while its data changes -- would
+ * otherwise break into dash-length segments with gaps between them.
  */
 export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>): void {
+  // Declared ahead of the entrance effect so that at mount, when the class is
+  // not on yet, it leaves the one measurement to that effect.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el?.classList.contains("chart-draw-on")) return;
+    const length = measureLength(el);
+    if (length === null) return;
+    const len = String(length);
+    if (el.style.getPropertyValue("--len") !== len) el.style.setProperty("--len", len);
+  });
+
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || prefersReducedMotion()) return;
-
-    let length: number;
-    try {
-      length = el.getTotalLength();
-    } catch {
-      return;
-    }
-    if (!Number.isFinite(length) || length <= 0) return;
+    const length = measureLength(el);
+    if (length === null) return;
 
     el.style.setProperty("--len", String(length));
     el.classList.add("chart-draw-on");
@@ -38,6 +48,16 @@ export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>
     // stable across renders, so listing it here satisfies exhaustive-deps
     // without changing when the effect re-runs.
   }, [ref]);
+}
+
+function measureLength(el: SVGGeometryElement): number | null {
+  let length: number;
+  try {
+    length = el.getTotalLength();
+  } catch {
+    return null;
+  }
+  return Number.isFinite(length) && length > 0 ? length : null;
 }
 
 type StaggerOptions = {
