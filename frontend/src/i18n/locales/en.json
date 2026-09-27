@@ -1111,7 +1111,8 @@
           "demoted": "Changed {{count}} to standard user"
         },
         "delete_title": "Delete the selected users?",
-        "delete_body": "{{count}} users will be anonymized. This cannot be undone."
+        "delete_body": "{{count}} users will be anonymized. This cannot be undone.",
+        "delete_failed": "Could not delete {{failed}} of {{total}} users; they are still selected: {{emails}}"
       },
       "shortcut": {
         "approve": "Approve AI access",
@@ -1264,8 +1265,6 @@
       "edit_weights": "Edit ridership weights",
       "actions_section": "Actions",
       "action_probe": "Check the feed now",
-      "action_reload_static": "Reload static data",
-      "action_reload_static_hint": "The static reload endpoint is not available yet.",
       "action_reanalyze": "Re-aggregate this agency only",
       "action_reanalyze_disabled_hint": "A disabled agency is skipped by the aggregation run.",
       "probe_done": "Probe recorded ({{samples}} samples).",
@@ -1343,6 +1342,7 @@
       "confirm": "Save",
       "clear_override": "Clear override",
       "clear_error": "Couldn't clear the override.",
+      "save_error": "The change was not saved. Your reason is kept here; try again.",
       "labels": {
         "askRouterEnabled": "Ask: rules router",
         "askFollowupEnabled": "Ask: LLM follow-up",

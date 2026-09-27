@@ -1111,7 +1111,8 @@
           "demoted": "{{count}} 件を一般ユーザーにしました"
         },
         "delete_title": "選択したユーザーを削除しますか？",
-        "delete_body": "{{count}} 件のユーザーを匿名化します。元に戻せません。"
+        "delete_body": "{{count}} 件のユーザーを匿名化します。元に戻せません。",
+        "delete_failed": "{{total}} 件中 {{failed}} 件のユーザーを削除できませんでした。選択したままにしています: {{emails}}"
       },
       "shortcut": {
         "approve": "AI利用を承認",
@@ -1264,8 +1265,6 @@
       "edit_weights": "乗車人員ウェイトを編集",
       "actions_section": "操作",
       "action_probe": "フィードを今すぐ確認",
-      "action_reload_static": "静的データを再読込",
-      "action_reload_static_hint": "静的データ再読込のエンドポイントはまだありません。",
       "action_reanalyze": "この事業者だけ再集計",
       "action_reanalyze_disabled_hint": "無効化された事業者は集計対象から外れます。",
       "probe_done": "プローブを記録しました（標本 {{samples}}）。",
@@ -1343,6 +1342,7 @@
       "confirm": "保存",
       "clear_override": "上書きを解除",
       "clear_error": "上書きを解除できませんでした。",
+      "save_error": "変更を保存できませんでした。入力した理由はそのまま残っています。もう一度お試しください。",
       "labels": {
         "askRouterEnabled": "Ask: ルールルーター",
         "askFollowupEnabled": "Ask: LLM フォローアップ",

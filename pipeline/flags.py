@@ -20,7 +20,8 @@ from where it runs:
 
 - `aflag`/`aget_flag_state` are for anything running on the event loop --
   every `async def` handler. They are the only callers that may perform the
-  blocking refresh, and they do it via `asyncio.to_thread`, never inline.
+  blocking refresh, and they hand it to a worker thread, never inline --
+  one re-read shared by every async reader waiting on it.
 - `flag`/`get_flag_state` are for pipeline and CLI callers, and for the
   synchronous FastAPI dependencies the framework already runs in its
   threadpool. They block on the database only when nothing is cached at
@@ -38,6 +39,7 @@ visible in the response that reports it.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import threading
@@ -124,6 +126,16 @@ _generation = 0
 #: depend on a clock, which a caller (or a test) can move.
 _refresh_seq = 0
 _committed_seq = 0
+#: The re-read every async reader in the owed window waits on, with the
+#: `_generation` it was started under. Process-wide rather than per event
+#: loop: the database round trip is what the sharing saves, and it costs the
+#: same whichever loop asked for it.
+_owed_refresh: tuple[int, concurrent.futures.Future[None]] | None = None
+#: How many shared re-reads one owed async read waits through before settling
+#: for the last committed value. Another round happens only when an
+#: `invalidate()` lands mid-read, so this bounds how long a burst of admin
+#: writes can hold a request.
+_OWED_REFRESH_ROUNDS = 3
 
 
 def _env_bool(env_var: str, default: bool) -> bool:
@@ -285,6 +297,45 @@ def _start_background_refresh() -> None:
         _refresh_thread.start()
 
 
+def _join_owed_refresh() -> concurrent.futures.Future[None]:
+    """The in-flight owed re-read to wait on, starting one if there is none to join.
+
+    A re-read registered under an older generation is never joined: an
+    `invalidate()` has happened since, so its result may predate that write
+    and be discarded by `_refresh`, and waiting on it would only delay the
+    read that can commit. If its thread had not yet begun reading, both
+    reads end up current and one is redundant; `_refresh`'s ticket keeps
+    that harmless. A finished one is never joined either: it failed or was
+    superseded -- or committed just after the caller's `_peek`, which costs
+    one redundant read.
+    """
+    global _owed_refresh
+    with _cache_lock:
+        if _owed_refresh is not None:
+            generation, in_flight = _owed_refresh
+            if generation == _generation and not in_flight.done():
+                return in_flight
+        done: concurrent.futures.Future[None] = concurrent.futures.Future()
+        _owed_refresh = (_generation, done)
+    try:
+        threading.Thread(target=_run_owed_refresh, args=(done,), name="flags-owed-refresh", daemon=True).start()
+    except BaseException as exc:
+        done.set_exception(exc)
+        raise
+    return done
+
+
+def _run_owed_refresh(done: concurrent.futures.Future[None]) -> None:
+    # Settled whatever happens: a future left pending would be joined, and
+    # waited on forever, by every later reader of this generation.
+    try:
+        _refresh()
+    except BaseException as exc:
+        done.set_exception(exc)
+    else:
+        done.set_result(None)
+
+
 def warm() -> None:
     """Resolve every flag now, so no request has to.
 
@@ -373,8 +424,10 @@ async def aget_flag_state(key: str) -> FlagState:
 
     The one read path allowed to perform the blocking refresh, because it is
     the one that can hand it to a worker thread. That makes it also the path
-    that keeps `invalidate()`'s promise: after an admin write, the first
-    async reader does the re-read and everyone else sees the new value.
+    that keeps `invalidate()`'s promise: after an admin write, the async
+    readers that find the re-read owed all wait on one shared re-read, and
+    each answers only once a re-read begun after the latest `invalidate()`
+    has committed -- bounded by `_OWED_REFRESH_ROUNDS`.
     """
     cached, state = _peek(key)
     if state == _FRESH:
@@ -384,7 +437,14 @@ async def aget_flag_state(key: str) -> FlagState:
         assert cached is not None
         _start_background_refresh()
         return cached
-    await asyncio.to_thread(_refresh)
+    for _ in range(_OWED_REFRESH_ROUNDS):
+        # Shielded so that one caller's cancellation leaves the re-read, and
+        # everyone else waiting on it, untouched.
+        await asyncio.shield(asyncio.wrap_future(_join_owed_refresh()))
+        cached, state = _peek(key)
+        if state != _OWED:
+            assert cached is not None
+            return cached
     return _resolve_after_refresh(key, cached)
 
 
@@ -430,7 +490,7 @@ def invalidate() -> None:
         # forward instead of being dropped on the floor.
         _cache_expires_at = 0.0
         # An explicit invalidation is a promise that the next read sees the
-        # new value, so it re-reads on the calling thread rather than
+        # new value, so the next async read waits for a re-read rather than
         # serving a stale entry while a background refresh catches up. The
         # callers are the admin PATCH and the test suite, not a hot path.
         _refresh_owed = True
