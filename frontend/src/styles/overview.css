@@ -474,7 +474,7 @@
 }
 .ov-hero-story {
   font-family: var(--font-display);
-  font-weight: 700;
+  font-weight: 600;
   font-size: var(--text-xl);
   line-height: 1.6;
   color: var(--text-primary);

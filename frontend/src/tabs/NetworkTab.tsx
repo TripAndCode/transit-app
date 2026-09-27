@@ -219,7 +219,9 @@ export function NetworkTab() {
   // changed nothing.
   const orderSignal = ordered.map((a) => a.agency_id).join(",");
   useFlipRows(rowsRef, orderSignal);
-  const cappedAgencies = useCappedList(ordered, 200, data?.agencies);
+  // The filters the summary was fetched for identify the list: a refetch
+  // under the same filters is the same list, however new its objects are.
+  const cappedAgencies = useCappedList(ordered, 200, filterQS);
 
   return (
     <div className="network-page">
