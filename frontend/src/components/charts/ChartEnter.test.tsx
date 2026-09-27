@@ -88,6 +88,28 @@ describe("useDrawOn", () => {
     expect(getTotalLength).toHaveBeenCalledTimes(2);
   });
 
+  it("retries a changed line when its first length measurement fails", () => {
+    setReducedMotion(false);
+    let measurable = true;
+    mockGetTotalLength(function () {
+      if (!measurable) throw new Error("geometry unavailable");
+      return (this.getAttribute("d") ?? "").length;
+    });
+    const short = "M0,0 L10,10";
+    const long = "M0,0 L10,10 L20,0 L30,10";
+    const { getByTestId, rerender } = render(<Harness d={short} />);
+    const path = getByTestId("p");
+    expect(path.style.getPropertyValue("--len")).toBe(String(short.length));
+
+    measurable = false;
+    rerender(<Harness d={long} tick={1} />);
+    expect(path.style.getPropertyValue("--len")).toBe(String(short.length));
+
+    measurable = true;
+    rerender(<Harness d={long} tick={2} />);
+    expect(path.style.getPropertyValue("--len")).toBe(String(long.length));
+  });
+
   it("does nothing under prefers-reduced-motion: reduce", () => {
     setReducedMotion(true);
     mockGetTotalLength(() => 123.4);

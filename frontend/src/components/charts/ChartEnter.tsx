@@ -35,9 +35,10 @@ export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>
     if (!el?.classList.contains("chart-draw-on")) return;
     const geometry = geometryOf(el);
     if (geometry === measuredGeometry.current) return;
-    measuredGeometry.current = geometry;
     const length = measureLength(el);
-    if (length !== null) el.style.setProperty("--len", String(length));
+    if (length === null) return;
+    el.style.setProperty("--len", String(length));
+    measuredGeometry.current = geometry;
   });
 
   useLayoutEffect(() => {
