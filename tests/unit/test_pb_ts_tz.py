@@ -1,13 +1,12 @@
 """_ts() must derive a JST-anchored instant regardless of host timezone.
 
-Regression for the archive-ingest Blocker: _ts() used to return a naive
-ISO string built from the archive filename's date+time. clickhouse-connect
-resolves naive datetimes via the *process-local* timezone when writing
-DateTime64 columns, so on a UTC host (Railway/Docker/CI) every archive row
-landed 9 hours late relative to the JST instant the filename actually
-encodes. _ts() must instead return a timezone-aware ISO string pinned to
-Asia/Tokyo, so the resulting instant is identical no matter what TZ the
-host process happens to run under.
+The archive filename's date+time is a JST wall-clock reading.
+clickhouse-connect resolves naive datetimes via the *process-local* timezone
+when writing DateTime64 columns, so a naive ISO string would land every
+archive row 9 hours late on a UTC host (Railway/Docker/CI). _ts() must
+return a timezone-aware ISO string pinned to Asia/Tokyo, so the resulting
+instant is identical no matter what TZ the host process happens to run
+under.
 """
 
 import os

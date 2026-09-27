@@ -33,11 +33,11 @@ def _post_from(origin: str | None) -> Request:
 
 
 def test_csrf_guard_honors_a_public_base_url_change_immediately(monkeypatch):
-    """The allow-list used to be frozen at import, so a live config flip was
-    never honored without a process restart. It is read per call now, so the
-    change takes effect at once -- and, more to the point, an origin *removed*
-    from the configuration stops being accepted at once, which is the
-    direction that matters for a revocation."""
+    """The allow-list is read per call rather than frozen at import, so a
+    live config flip takes effect without a process restart -- and, more to
+    the point, an origin *removed* from the configuration stops being
+    accepted at once, which is the direction that matters for a
+    revocation."""
     monkeypatch.setenv("CORS_ORIGINS", "")
     monkeypatch.delenv("ALLOW_TEST_ORIGIN", raising=False)
 

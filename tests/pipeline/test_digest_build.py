@@ -359,11 +359,11 @@ def test_route_baseline_sql_pools_exact_sum_delay_sec_not_rounded_avg_min(pg_con
 
 def test_delta_min_only_compares_routes_with_a_baseline(pg_conn, agency_id):
     """delta_min must compare today's avg against the baseline using the SAME
-    route population on both sides. Previously today's avg was weighted over
-    ALL routes (including ones with no baseline at all) while the baseline
-    side only counted routes that have one - a route with no baseline and a
-    large delay could swing the headline delta even though the only route
-    with a real historical baseline showed zero drift."""
+    route population on both sides. Weighting today's avg over ALL routes
+    (including ones with no baseline at all) while the baseline side only
+    counts routes that have one would let a route with no baseline and a
+    large delay swing the headline delta even though the only route with a
+    real historical baseline showed zero drift."""
     with pg_conn.cursor() as cur:
         # Route A: today == baseline (no real change).
         _insert_daily(cur, agency_id, "A", "平日", 300, 100)  # 5.0 min

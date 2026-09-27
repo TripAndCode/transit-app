@@ -867,11 +867,11 @@ async def test_reports_ranking_live_percentile_matches_percent_rank_tie_semantic
 
 @pytest.mark.asyncio
 async def test_reports_ranking_half_up_rounding_matches_agg_and_live(reports_client, ch_client, ch_async_client):
-    """Fix C regression: ClickHouse's round() is round-half-to-even; Postgres'
-    numeric ROUND() (and this codebase's Decimal(ROUND_HALF_UP) helpers) round
-    half away from zero. 12 rows at 127s + 12 rows at 128s average to exactly
+    """ClickHouse's round() is round-half-to-even; Postgres' numeric ROUND()
+    (and this codebase's Decimal(ROUND_HALF_UP) helpers) round half away from
+    zero, and the rankings must follow the latter. 12 rows at 127s + 12 rows at 128s average to exactly
     127.5s = 2.125min — an exact .5 boundary at the 3rd decimal. Half-up
-    rounds to 2.13; ClickHouse's native round() would have given 2.12. Both
+    rounds to 2.13; ClickHouse's native round() would give 2.12. Both
     the ClickHouse live fallback (time_band=morning, _ranking_live) and the
     agg fast path (time_band=all, after analyze(), agg_route_daily_dist) must
     agree on 2.13 for the same underlying data.
@@ -1058,9 +1058,8 @@ async def test_compute_dow_ranking_live_path_without_ch_raises(aconn, aagency_id
 
 @pytest.mark.asyncio
 async def test_compute_compare_ranking_live_path_without_ch_raises(aconn, aagency_id):
-    """Also covers compute_compare_ranking's signature fix: ``ch`` used to be
-    a required positional arg (the only one of the six siblings without a
-    default); it now defaults to None like the rest, so this call is valid
+    """Also covers compute_compare_ranking's signature: like its five
+    sibling rankings it defaults ``ch`` to None, so this call is valid
     without a ch at all."""
     from datetime import date
 
