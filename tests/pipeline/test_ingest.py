@@ -370,11 +370,11 @@ def test_ingest_does_not_double_process_same_file_key_within_one_run(pg_conn, ch
     top of ingest() from ClickHouse and is only updated inside _flush(),
     which runs at most once per _BATCH_ROWS rows (Task 8.9). With only one
     row per file here, no mid-run flush is triggered, so `done` never gets
-    updated between the tarball loop and the loose-.pb loop. Before the fix
-    (an in-memory `seen` set updated at buffer-time, not flush-time), the
-    loose-.pb loop's dedup filter checked the still-stale `done` and did not
-    exclude the tarball's already-buffered file, so the shared key's row
-    landed twice."""
+    updated between the tarball loop and the loose-.pb loop. A loose-.pb
+    dedup filter that checked only that still-stale `done` would not exclude
+    the tarball's already-buffered file, and the shared key's row would land
+    twice; the in-memory `seen` set, updated at buffer time rather than
+    flush time, is what closes that gap."""
     day_dir = tmp_path / "20260401"
     day_dir.mkdir()
     # Loose .pb sharing the exact same "20260401/dup.pb" key as the tarball

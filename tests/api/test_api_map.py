@@ -1659,7 +1659,7 @@ async def test_analyze_builds_agg_route_daily(map_app, ch_client, ch_async_clien
 
 @pytest.mark.asyncio
 async def test_route_summary_degrades_when_clickhouse_freshness_probe_fails(map_app):
-    """Fix B regression: ClickHouse backs ONLY the informational
+    """ClickHouse backs ONLY the informational
     ``latest_captured_at`` freshness header here — every actual route row
     comes from Postgres ``agg_route_daily``. A ClickHouse hiccup on that one
     probe must degrade to ``latest_captured_at: null``, not 500 the whole

@@ -9,6 +9,7 @@ pool, database, or collector subprocess — the same pattern as
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
@@ -19,17 +20,10 @@ from fastapi.testclient import TestClient
 from api.admin_board import BOARD_WINDOW_DAYS, COLLECTOR_ORDER
 from api.deps import get_conn
 from api.routers import admin as admin_router
-from api.security import User, require_admin
+from api.security import require_admin
+from tests.fixtures.users import admin_user
 
-_ADMIN = User(
-    user_id=1,
-    email="admin@example.com",
-    name="Admin",
-    avatar_url=None,
-    role="admin",
-    suspended_at=None,
-    llm_approved=True,
-)
+_ADMIN = admin_user()
 
 _NOW = datetime.now(timezone.utc)
 _YESTERDAY = (_NOW - timedelta(days=1)).date()
@@ -206,25 +200,32 @@ def test_clamped_samples_above_the_threshold_surface_as_a_warn_alert():
     assert alerts["clamp_high"]["level"] == "warn"
 
 
+#: How long a poll may take before the test calls it hung. Only a
+#: regression -- a poll that waits out the wedged collector -- ever runs into
+#: it; a passing poll gives up on its own much shorter budget.
+_HANG_GUARD_SECONDS = 10.0
+
+
 async def test_collectors_are_abandoned_once_the_budget_expires(monkeypatch):
     """A wedged collector costs the endpoint its budget, not the request."""
-    import time
+    release = threading.Event()
 
-    def _hang():
-        # Long relative to the 0.05s budget below, short enough that the
-        # abandoned thread does not hold up interpreter shutdown.
-        time.sleep(2)
+    def _wedged():
+        release.wait()
         return ["never"]
 
     monkeypatch.setattr(admin_router, "_COLLECTOR_BUDGET_SECONDS", 0.05)
-    monkeypatch.setattr(admin_router, "_collect_all", _hang)
+    monkeypatch.setattr(admin_router, "_collect_all", _wedged)
     admin_router._collector_task = None
     try:
-        loop = asyncio.get_running_loop()
-        started = loop.time()
-        assert await _REAL_COLLECT_DOCUMENTS() == []
-        assert loop.time() - started < 5
+        assert await asyncio.wait_for(_REAL_COLLECT_DOCUMENTS(), _HANG_GUARD_SECONDS) == []
+        abandoned = admin_router._collector_task
+        assert abandoned is not None
+        assert not abandoned.done()  # given up on, not finished
     finally:
+        release.set()
+        if admin_router._collector_task is not None:
+            await asyncio.wait([admin_router._collector_task])
         admin_router._collector_task = None
 
 
@@ -232,31 +233,36 @@ async def test_only_one_collection_runs_however_many_polls_arrive(monkeypatch):
     """The default executor is shared with the embedder and the LLM calls
     and holds only a handful of threads, so a board left open in several
     tabs must not spend them all on abandoned collections."""
-    import threading
-    import time
-
     started = 0
     lock = threading.Lock()
+    release = threading.Event()
 
-    def _slow():
+    def _wedged():
         nonlocal started
         with lock:
             started += 1
-        time.sleep(0.4)
+        release.wait()
         return []
 
     monkeypatch.setattr(admin_router, "_COLLECTOR_BUDGET_SECONDS", 0.05)
-    monkeypatch.setattr(admin_router, "_collect_all", _slow)
+    monkeypatch.setattr(admin_router, "_collect_all", _wedged)
     admin_router._collector_task = None
     try:
-        results = await asyncio.gather(*(_REAL_COLLECT_DOCUMENTS() for _ in range(6)))
+        polls = asyncio.gather(*(_REAL_COLLECT_DOCUMENTS() for _ in range(6)))
+        results = await asyncio.wait_for(polls, _HANG_GUARD_SECONDS)
         assert results == [[]] * 6  # every poll gave up on its own budget
 
         shared = admin_router._collector_task
         assert shared is not None
-        await shared  # the abandoned collection is still the only one running
+        assert not shared.done()  # the abandoned collection is still the one running
+        release.set()
+        # Waits for every collection thread, not just the shared one, so a
+        # second collection -- had one been started -- is certain to be counted.
+        await asyncio.get_running_loop().shutdown_default_executor()
+        await shared
         assert started == 1
     finally:
+        release.set()
         admin_router._collector_task = None
 
 

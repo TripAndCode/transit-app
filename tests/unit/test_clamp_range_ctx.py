@@ -117,8 +117,8 @@ def test_valid_service_passes_through(frozen_today, value):
     [("dow", "tuesday"), ("time_band", "brunch"), ("service", "祝日")],
 )
 def test_unknown_enum_value_is_rejected(frozen_today, field, value):
-    """Unknown enums used to be coerced to 'all', quietly answering a
-    different question than the one asked."""
+    """An unknown enum is rejected rather than coerced to 'all', which would
+    quietly answer a different question than the one asked."""
     with pytest.raises(HTTPException) as exc:
         _call(**{field: value})
     assert exc.value.status_code == 422

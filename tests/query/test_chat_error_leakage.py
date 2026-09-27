@@ -1,19 +1,17 @@
-"""Regression: chat_with_tools must never leak raw exception text (e.g. from
+"""chat_with_tools must never leak raw exception text (e.g. from
 clickhouse_connect, or any other backend failure) into the user-facing answer.
 
-Before this fix, every ``except Exception as exc:`` around a ``dispatch(...)``
-call in ``pipeline/query/chat.py`` rendered
-``_chat_str("tool_error", locale, name=name, exc=exc)`` — interpolating the
-raw exception text directly into the chat response. Since this branch ports
-``updates`` reads to ClickHouse, ``clickhouse_connect``'s error strings can
-include the failing SQL fragment, the server version, and the internal query
-endpoint URL — none of which should ever reach an unauthenticated ``/ask``
-client. This mirrors the fix already applied to ``api/routers/ask.py``'s
-Stage 1/2 dispatch (Fix-8f): ClickHouse-unavailable (HTTPException 503) and
-mid-query ClickHouse errors degrade to the existing ``service_unavailable``
-locale string (no interpolation); a non-503 HTTPException still propagates;
-any other exception falls back to the (now non-interpolating) ``tool_error``
-string. All cases must still log the full detail server-side.
+Every ``except`` around a ``dispatch(...)`` call in ``pipeline/query/chat.py``
+answers from a fixed locale string rather than interpolating the exception.
+``updates`` reads go to ClickHouse, and ``clickhouse_connect``'s error strings
+can include the failing SQL fragment, the server version, and the internal
+query endpoint URL — none of which should ever reach an unauthenticated
+``/ask`` client. The same contract holds for ``api/routers/ask.py``'s Stage
+1/2 dispatch: ClickHouse-unavailable (HTTPException 503) and mid-query
+ClickHouse errors degrade to the ``service_unavailable`` locale string (no
+interpolation); a non-503 HTTPException still propagates; any other exception
+falls back to the non-interpolating ``tool_error`` string. All cases must
+still log the full detail server-side.
 """
 
 import logging
@@ -162,9 +160,9 @@ async def test_undefined_table_error_propagates_flag_off_path(monkeypatch):
     """A missing agg_* table (migration/analyze behind) must propagate out of
     chat_with_tools untouched — not be swallowed into a generic 200 tool_error
     — so a caller's registered aggregate_not_ready_handler can turn it into
-    the machine-readable 503 the frontend reacts to (Fix-9i regression:
-    review found the generic ``except Exception`` clause was catching this
-    before it could reach that handler)."""
+    the machine-readable 503 the frontend reacts to. The generic ``except
+    Exception`` clause around dispatch must let it through to that
+    handler."""
 
     async def _raise_undefined_table(*a, **k):
         raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
@@ -179,9 +177,9 @@ async def test_undefined_table_error_propagates_flag_off_path(monkeypatch):
 # ─── Build-mode sentinel site (Site 1: `__build__ TOOL {json}`) ──────────────
 #
 # This is the zero-LLM determinism path the guided builder UI submits — live
-# in production, not gated behind any flag. Fix-9i's review found the initial
-# leakage-test suite only exercised the Stage-2/flag-off site; these pin the
-# same guarantees for build-mode's own try/except around dispatch(...).
+# in production, not gated behind any flag. It has its own try/except around
+# dispatch(...), separate from the Stage-2/flag-off site's, so these pin the
+# same guarantees for it.
 
 
 @pytest.mark.asyncio

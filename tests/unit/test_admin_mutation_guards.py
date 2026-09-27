@@ -45,16 +45,9 @@ from api.middleware.ratelimit import limiter
 from api.security import User, csrf_guard, require_admin
 from pipeline import flags
 from tests.conftest import TEST_ORIGIN
+from tests.fixtures.users import admin_user
 
-_ADMIN = User(
-    user_id=1,
-    email="admin@example.com",
-    name="Admin",
-    avatar_url=None,
-    role="admin",
-    suspended_at=None,
-    llm_approved=True,
-)
+_ADMIN = admin_user()
 
 _NON_ADMIN = User(
     user_id=2,

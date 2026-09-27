@@ -214,10 +214,10 @@ async def test_exclude_exact_tuple_matching_fallback(suggest_agency, ch_client):
 
 @pytest.mark.asyncio
 async def test_on_time_fallback_pools_full_route_before_truncating(suggest_agency, ch_client, monkeypatch):
-    """Regression test for the truncate-then-pool ordering bug: compute_on_time's
-    fetch used to be sliced to ON_TIME_FALLBACK_FETCH_LIMIT *before*
-    _pool_on_time_by_route ran, so a route whose service-type rows straddled
-    the fetch boundary got pooled from a partial subset of its own rows.
+    """compute_on_time's fetch must be pooled by _pool_on_time_by_route
+    *before* it is sliced to ON_TIME_FALLBACK_FETCH_LIMIT: truncating first
+    would pool a route whose service-type rows straddle the fetch boundary
+    from a partial subset of its own rows.
 
     Three (route, service_type) rows this week, ascending by on_time_pct:
       RT/svcA    0%   (samples=30)

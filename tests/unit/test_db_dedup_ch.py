@@ -1,14 +1,11 @@
-"""Proves build_dedup_ch_sql selects the same "latest observation per stop
-event" rows as the Postgres DISTINCT ON version it replaced, on a small
-fixture designed to exercise the tiebreak (two files, same captured_at
-second, different file_name).
+"""Proves build_dedup_ch_sql selects the "latest observation per stop
+event" rows on a small fixture designed to exercise the tiebreak (two
+files, same captured_at second, different file_name).
 
-Also covers the pieces that used to be pinned against the now-deleted
-Postgres builders (`build_dedup_inner_sql` / `_dedup_cte`) in
-tests/pipeline/test_dedup.py: the implausible-delay clamp, the
-`include_captured_at` projection toggle, and `_dedup_cte_ch` — the
-ClickHouse-dialect composition of a range filter + dedup that every
-report/route/overview helper reads live `updates` through."""
+Also covers the implausible-delay clamp, the `include_captured_at`
+projection toggle, and `_dedup_cte_ch` — the ClickHouse-dialect composition
+of a range filter + dedup that every report/route/overview helper reads live
+`updates` through."""
 
 import os
 from datetime import date, datetime, timezone

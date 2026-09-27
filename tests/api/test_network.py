@@ -522,7 +522,7 @@ async def test_network_summary_includes_definition_metadata(net_client):
 
 
 async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(net_pool):
-    """Fix 8a regression: ClickHouse backs ONLY the ``is_stale`` field here —
+    """ClickHouse backs ONLY the ``is_stale`` field here —
     every other field (avg_delay_min, on_time_pct, samples, raw_samples,
     clamp_pct, data_from, data_to) comes from Postgres agg_* tables. A
     ClickHouse hiccup on the per-agency freshness probe must degrade that

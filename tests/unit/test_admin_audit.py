@@ -1,11 +1,9 @@
 """`record_admin_action` writes one `admin_audit` row on the caller's own
 connection.
 
-The seam used to be a log line, so its tests asserted that values stayed out
-of the log. It now writes to a table instead, and these assert what the
-insert actually carries -- including the two shapes callers pass (one row's
-column map, or the rows of a policy table replaced wholesale) and the raw
-database values that reach it.
+These assert what the insert actually carries -- including the two shapes
+callers pass (one row's column map, or the rows of a policy table replaced
+wholesale) and the raw database values that reach it.
 """
 
 import json
