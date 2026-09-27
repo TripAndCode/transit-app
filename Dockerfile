@@ -1,7 +1,7 @@
 # ── Stage 1: build the frontend ──────────────────────────────────────────────
 FROM node:22-alpine AS frontend
 WORKDIR /fe
-COPY frontend/package.json frontend/package-lock.json* ./
+COPY frontend/package.json frontend/package-lock.json* frontend/.npmrc* ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
