@@ -6,8 +6,10 @@
  *  after the redirect element renders once, so the pathname is briefly the
  *  pre-redirect one — listing them avoids a one-frame flash of the chrome.
  *
- *  Anything routed here is a place CopilotPanel can never appear, which is
- *  why `COPILOT_ROUTES` is asserted disjoint from this set. */
+ *  Anything routed here is a place CopilotPanel can never appear, because
+ *  App.tsx mounts it only as `{!focused && <CopilotPanel />}`.
+ *  `CopilotPanel.routing.test.ts` asserts the panel's `COPILOT_INSIGHT_ROUTE`
+ *  stays outside this set. */
 export const FOCUSED_TAB_SEGMENTS = [
   "operations",
   "overview",

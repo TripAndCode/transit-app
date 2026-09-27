@@ -382,15 +382,12 @@ async def append_message_endpoint(
             # A missing agg_* table (migration/analyze behind) must propagate to
             # FastAPI's registered aggregate_not_ready_handler (api/main.py +
             # api/aggregate_errors.py) so the frontend gets the machine-readable
-            # {"code": "aggregate_not_ready"} 503 it reacts to — not a generic
-            # tool_error that masks it (mirrors api/routers/ask.py's Fix-8f
-            # convention). Re-raising immediately, before any further query runs
-            # on this `conn`, also avoids poisoning the still-open
-            # `conn.transaction()` above with a second failing statement (which
-            # would otherwise surface as an unhandled
-            # asyncpg.exceptions.InFailedSQLTransactionError instead of this
-            # error) — the transaction context manager rolls back cleanly once
-            # this propagates out of it.
+            # {"code": "aggregate_not_ready"} 503 it reacts to — not a persisted
+            # tool_error that masks it. Every Ask/chat dispatch path lets this
+            # error propagate the same way (api/routers/ask.py,
+            # pipeline/query/chat.py). Propagating out of the outer
+            # `conn.transaction()` also rolls back user_msg, so the exchange is
+            # not half-written.
             raise
         except Exception:
             # Never interpolate raw exception text into a persisted message —
