@@ -19,6 +19,12 @@ export default defineConfig({
     // jsdom's CSS-color dependency ships ESM that the default `forks` pool
     // can't `require()` under Node; the worker-thread pool loads it cleanly.
     pool: "threads",
+    // Node 25+ enables its own global localStorage and sessionStorage
+    // (localStorage is undefined without --localstorage-file), and the jsdom
+    // environment keeps a global it already finds, so tests would never see
+    // jsdom's Storage. Turning the Node feature off hands both back to jsdom;
+    // on Node 22 and 24 the feature is already off and the flag is a no-op.
+    execArgv: ["--no-experimental-webstorage"],
     // The default (5s) leaves no margin under machine load for the handful
     // of tests that drive several real userEvent interactions against a
     // provider-wrapped tree in one case; a slow CI runner or a busy dev
