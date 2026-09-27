@@ -123,3 +123,45 @@ def test_migration_0007_adds_service_id_to_static_trips(pg_conn):
         """)
         rows = cur.fetchall()
     assert rows == [("service_id", "YES", "text")]
+
+
+def test_migration_0053_backfill_digest_matches_token_hash(pg_conn):
+    """0053 digests credentials that predate it exactly as ``api.security.token_hash`` does.
+
+    Each raw value mixes a backslash escape with non-ASCII text: a ``::bytea``
+    cast would decode the escape, and any encoding other than UTF-8 would
+    change the non-ASCII bytes, either way yielding a digest no request ever
+    matches. Only 0053 is applied on top of 0052, so later migrations cannot
+    change what this checks.
+    """
+    from api.security import token_hash
+    from db.migrate import _run_up
+
+    raw_sid = r"sid\101\\-セッション-é"
+    raw_key = r"key\\-鍵-ü"
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        migrate_down("0052", conn, force_destructive=True)
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO users (email) VALUES ('backfill@example.com') RETURNING user_id")
+            (user_id,) = cur.fetchone()
+            cur.execute(
+                "INSERT INTO sessions (sid, user_id, expires_at) VALUES (%s, %s, now() + interval '1 day')",
+                (raw_sid, user_id),
+            )
+            cur.execute("INSERT INTO api_keys (key, owner_email) VALUES (%s, 'backfill@example.com')", (raw_key,))
+        conn.commit()
+
+        _run_up("0053", conn)
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT max(version) FROM schema_migrations")
+            assert cur.fetchone() == ("0053",)
+            cur.execute("SELECT sid, sid_hash FROM sessions")
+            assert cur.fetchall() == [(raw_sid, token_hash(raw_sid))]
+            cur.execute("SELECT key, key_hash FROM api_keys")
+            assert cur.fetchall() == [(raw_key, token_hash(raw_key))]
+    finally:
+        conn.rollback()
+        migrate_up(conn)
+        conn.close()

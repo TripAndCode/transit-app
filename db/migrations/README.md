@@ -81,11 +81,21 @@ sign anyone in.
 ## Follow-up: dropping the raw `sessions.sid` / `api_keys.key` columns
 
 `0053_hash_tokens` added `sid_hash`/`key_hash` primary keys but left the raw
-`sessions.sid` and `api_keys.key` columns in place and nullable, so a writer
-that has not yet been updated to only write the hash can keep working during a
-rolling deploy. Those raw columns are safe to drop in a follow-up migration
-once every row already carries its hash — i.e. no writer is still inserting a
-hash-less row. `scripts/check_hash_token_cleanup.py` reports that: it runs a
-read-only check against the `DATABASE_URL` it is given and exits non-zero once
-the raw columns still exist but no hash-less rows remain, meaning the drop
+`sessions.sid` and `api_keys.key` columns in place and nullable, holding the
+credentials of rows that predate it, so that rolling 0053 back keeps those
+rows working. The application never reads or writes the raw columns, and its
+new rows leave them NULL. They are safe to drop in a follow-up migration once
+no row holding a raw value is still resolvable by the auth middleware: every
+such session has passed its `expires_at`, and every such API key has been
+revoked or has expired. A suspended user's rows still count, since lifting the
+suspension revives them. Keys that predate 0053 have no `owner_user_id`, which
+the admin API's revoke endpoint requires, so retiring one takes a manual
+`UPDATE` of its `revoked_at` or `expires_at`.
+`scripts/check_hash_token_cleanup.py` reports that: it runs a read-only check
+against the `DATABASE_URL` it is given and exits non-zero once a raw column
+still exists but no resolvable row holds a raw value, meaning the drop
 migration can now be written. Run it via `make check-hash-token-cleanup`.
+That migration must also drop what `0062_hash_tokens_legacy_compat` installed
+on the raw columns, before or together with them (see "Compatibility with
+releases that predate `0053`" above); a due report names whichever of those
+objects still exist.
