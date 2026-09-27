@@ -40,23 +40,53 @@ def test_dockerfile_declares_a_healthcheck():
     assert "HEALTHCHECK " in text
 
 
+def test_dockerfile_frontend_install_sees_the_npm_config():
+    """The image's `npm ci` must resolve with the same npm config as a local install.
+
+    frontend/.npmrc carries install-time settings the lockfile does not, such
+    as peer-range leniency. The build stage copies only the manifest files
+    before installing, so the config has to be among them, or the image's
+    install rejects a tree every local and CI install accepts.
+    """
+    if not (_REPO_ROOT / "frontend/.npmrc").exists():
+        return
+    dockerfile = (_REPO_ROOT / "Dockerfile").read_text()
+    before_install = dockerfile[: dockerfile.index("RUN npm ci")]
+    copies = re.findall(r"^COPY (.+)$", before_install, re.MULTILINE)
+    assert any("frontend/.npmrc" in line for line in copies), (
+        "Dockerfile runs `npm ci` without frontend/.npmrc; copy it with the manifest files"
+    )
+
+
 def test_dockerfile_node_major_matches_ci():
     """The image's frontend build stage must use the Node major CI builds with.
 
-    Asserted against the workflow rather than against a specific version, so
-    the two move together instead of the check rotting into a guard against
-    one particular stale pin.
+    Asserted against the workflows rather than against a specific version, so
+    they move together instead of the check rotting into a guard against one
+    particular stale pin. Every workflow pin is checked, and a pin this guard
+    cannot read (a matrix list or an expression) fails rather than being skipped.
     """
     dockerfile = (_REPO_ROOT / "Dockerfile").read_text()
-    workflow = (_REPO_ROOT / ".github/workflows/ci.yml").read_text()
-
     image_major = re.search(r"^FROM node:(\d+)", dockerfile, re.MULTILINE)
-    ci_major = re.search(r"""node-version:\s*["']?(\d+)""", workflow)
     assert image_major, "Dockerfile has no `FROM node:<major>` build stage"
-    assert ci_major, "ci.yml no longer declares a node-version"
-    assert image_major.group(1) == ci_major.group(1), (
-        f"Dockerfile builds the frontend on Node {image_major.group(1)} but CI "
-        f"uses Node {ci_major.group(1)}; the image would ship a bundle no CI run tested"
+
+    pins = [
+        (workflow.name, value.strip())
+        for workflow in sorted((_REPO_ROOT / ".github/workflows").glob("*.y*ml"))
+        for value in re.findall(r"node-version:(.*)", workflow.read_text())
+    ]
+    assert any(name == "ci.yml" for name, _ in pins), "ci.yml no longer declares a node-version"
+    literal = re.compile(r"""["']?(\d+)["']?\s*(?:#.*)?""")
+    unreadable = [(name, value) for name, value in pins if not literal.fullmatch(value)]
+    assert not unreadable, f"node-version must be a literal <major> for this guard to read it: {unreadable}"
+    stale = [
+        (name, value)
+        for name, value in pins
+        if (match := literal.fullmatch(value)) and match.group(1) != image_major.group(1)
+    ]
+    assert not stale, (
+        f"Dockerfile builds the frontend on Node {image_major.group(1)} but these workflows "
+        f"pin another major: {stale}; the image would ship a bundle those runs never tested"
     )
 
 

@@ -80,3 +80,20 @@ if (typeof window !== "undefined" && typeof ResizeObserver === "undefined") {
   }
   window.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserver;
 }
+
+// vitest's jsdom environment wraps URL.createObjectURL to copy a jsdom Blob
+// into a Node Blob, reaching the bytes through an own Symbol property of the
+// jsdom wrapper. jsdom now keeps that implementation in a private class field,
+// so the wrapper throws for every jsdom Blob: CSV downloads, and maplibre-gl,
+// which registers its worker bundle when the module is imported. No test reads
+// an object URL's contents back, so an opaque unique URL stands in whenever the
+// probe throws. Once the environment can convert jsdom Blobs again, the probe
+// passes and the real implementation stays in place.
+if (typeof window !== "undefined") {
+  try {
+    URL.revokeObjectURL(URL.createObjectURL(new Blob()));
+  } catch {
+    let nextObjectUrl = 0;
+    URL.createObjectURL = () => `blob:${location.origin}/${++nextObjectUrl}`;
+  }
+}
