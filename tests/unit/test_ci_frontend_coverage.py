@@ -44,13 +44,49 @@ def test_coverage_script_takes_its_thresholds_from_the_config() -> None:
     assert [arg for arg in argv if arg.startswith("--coverage")] == ["--coverage"]
 
 
-def test_vitest_config_declares_positive_thresholds() -> None:
+def _coverage_block() -> str:
+    """The body of vitest.config.ts's `coverage: { ... }`, commented-out lines
+    dropped. Braces inside string literals (globs such as `*.{ts,tsx}`) are
+    skipped so they cannot end the block early."""
     config = "\n".join(
         line for line in (FRONTEND / "vitest.config.ts").read_text().splitlines() if not line.lstrip().startswith("//")
     )
-    block = re.search(r"\bthresholds:\s*\{([^{}]*)\}", config)
+    start = re.search(r"\bcoverage:\s*\{", config)
+    assert start, "vitest.config.ts has no `coverage` block, so the coverage run gates nothing"
+    depth, quote, i = 0, "", start.end() - 1
+    while i < len(config):
+        char = config[i]
+        if quote:
+            if char == "\\":
+                i += 1
+            elif char == quote:
+                quote = ""
+        elif char in "\"'`":
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return config[start.end() : i]
+        i += 1
+    raise AssertionError("vitest.config.ts's `coverage` block is never closed")
+
+
+def test_vitest_config_declares_positive_thresholds() -> None:
+    block = re.search(r"\bthresholds:\s*\{([^{}]*)\}", _coverage_block())
     assert block, "vitest.config.ts declares no coverage thresholds, so the coverage run gates nothing"
     values = {name: float(value) for name, value in re.findall(r"\b(\w+):\s*(\d+(?:\.\d+)?)", block.group(1))}
     declared = {name: value for name, value in values.items() if name in METRICS}
     assert declared, f"no threshold names one of {METRICS}: {block.group(1).strip()!r}"
     assert all(value > 0 for value in declared.values()), f"a zero threshold gates nothing: {declared}"
+
+
+def test_vitest_config_does_not_narrow_the_measured_files() -> None:
+    """The thresholds are percentages of whatever is measured, so an `include`
+    naming one well-tested file satisfies them while the gate checks nothing."""
+    narrowing = re.findall(r"""["']?\b(include|exclude)\b["']?\s*:""", _coverage_block())
+    assert not narrowing, (
+        f"the coverage block declares {sorted(set(narrowing))}, which narrows the files the thresholds "
+        "measure; that must be a deliberate, reviewed change, made here together with this test"
+    )
