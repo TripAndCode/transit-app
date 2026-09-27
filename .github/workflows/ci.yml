@@ -103,6 +103,49 @@ jobs:
           npm run build:bundle
           npm run check:entry-chunk
 
+  # Builds the root Dockerfile, which is what Railway deploys. `frontend` and
+  # `test` install dependencies their own way, so a change that breaks only the
+  # image (a base-image bump, npm config the Docker stage cannot see, a
+  # lockfile only one install path accepts, an app import of a dependency
+  # outside Poetry's `main` group) passes both and fails at deploy time.
+  # Not path-filtered: what the image reads is nearly the whole tree, so a
+  # filter could only ever be a stale subset of it. Hosted, like `frontend`,
+  # so it runs alongside `test` instead of queueing on the one VPS runner.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # `context: .` builds the checked-out tree; the action's default is to
+      # fetch its own Git context instead. The gha cache authenticates with
+      # the runner's cache token, not the `permissions` above. `mode=max`
+      # also caches the frontend stage, whose layers the final image does
+      # not contain, and `ignore-error` keeps a refused or throttled cache
+      # write from failing a build that succeeded.
+      - name: Build the production image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: transit-app:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+
+      # No network and no environment: importing the app needs neither,
+      # because env validation and the database connections live in the
+      # lifespan, not at import. What the import does prove is that the
+      # `main` dependency group alone is enough to load every router.
+      - name: Smoke-test the image
+        run: |
+          docker run --rm --network none transit-app:ci python -c "import api.main"
+          docker run --rm --network none transit-app:ci test -f api/static/index.html
+
   test:
     runs-on: [self-hosted, vps]
     timeout-minutes: 45
