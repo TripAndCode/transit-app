@@ -300,11 +300,14 @@ def _start_background_refresh() -> None:
 def _join_owed_refresh() -> concurrent.futures.Future[None]:
     """The in-flight owed re-read to wait on, starting one if there is none to join.
 
-    A re-read begun under an older generation is never joined: an
-    `invalidate()` has happened since, so `_refresh` will discard its result
-    and waiting on it would only delay the read that can commit. A finished
-    one is never joined either: it failed or was superseded -- or committed
-    just after the caller's `_peek`, which costs one redundant read.
+    A re-read registered under an older generation is never joined: an
+    `invalidate()` has happened since, so its result may predate that write
+    and be discarded by `_refresh`, and waiting on it would only delay the
+    read that can commit. If its thread had not yet begun reading, both
+    reads end up current and one is redundant; `_refresh`'s ticket keeps
+    that harmless. A finished one is never joined either: it failed or was
+    superseded -- or committed just after the caller's `_peek`, which costs
+    one redundant read.
     """
     global _owed_refresh
     with _cache_lock:
