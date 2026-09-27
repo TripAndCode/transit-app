@@ -119,7 +119,29 @@ def test_main_not_due_while_a_raw_session_is_live(pg_conn, monkeypatch):
     assert _run_main(monkeypatch) == 0
 
 
-def test_main_due_once_no_raw_credential_is_usable(pg_conn, monkeypatch):
+_COMPAT_OBJECTS = [
+    "function api_keys_fill_key_hash()",
+    "function sessions_fill_sid_hash()",
+    "index idx_api_keys_key",
+    "index idx_sessions_sid",
+    "trigger api_keys_fill_key_hash",
+    "trigger sessions_fill_sid_hash",
+]
+
+
+def test_compat_objects_are_read_while_they_exist(pg_conn):
+    """The drop migration must remove 0062's objects too, so the report lists what is left."""
+    with pg_conn.cursor() as cur:
+        assert cleanup.read_compat_objects(cur) == _COMPAT_OBJECTS
+        cur.execute("DROP TRIGGER sessions_fill_sid_hash ON sessions")
+        cur.execute("DROP INDEX idx_api_keys_key")
+        assert cleanup.read_compat_objects(cur) == [
+            name for name in _COMPAT_OBJECTS if name not in ("trigger sessions_fill_sid_hash", "index idx_api_keys_key")
+        ]
+    pg_conn.rollback()
+
+
+def test_main_due_once_no_raw_credential_is_usable(pg_conn, monkeypatch, capsys):
     with pg_conn.cursor() as cur:
         user_id = _user(cur)
         _session(cur, user_id, raw="raw-expired", expires_at_sql=_PAST)
@@ -127,3 +149,4 @@ def test_main_due_once_no_raw_credential_is_usable(pg_conn, monkeypatch):
         _api_key(cur, raw="raw-key", revoked_at_sql="now()")
     pg_conn.commit()
     assert _run_main(monkeypatch) == 1
+    assert "trigger sessions_fill_sid_hash" in capsys.readouterr().out

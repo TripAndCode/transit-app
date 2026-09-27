@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.check_hash_token_cleanup import CleanupState, cleanup_is_due
+from scripts.check_hash_token_cleanup import CleanupState, cleanup_is_due, due_message
 
 
 @pytest.mark.parametrize(
@@ -29,3 +29,13 @@ from scripts.check_hash_token_cleanup import CleanupState, cleanup_is_due
 def test_cleanup_is_due(live_raw_sessions: int | None, live_raw_api_keys: int | None, due: bool) -> None:
     state = CleanupState(live_raw_sessions=live_raw_sessions, live_raw_api_keys=live_raw_api_keys)
     assert cleanup_is_due(state) is due
+
+
+def test_due_message_names_the_compat_objects_to_drop():
+    message = due_message(["trigger sessions_fill_sid_hash", "index idx_sessions_sid"])
+    assert "trigger sessions_fill_sid_hash, index idx_sessions_sid" in message
+    assert "0062_hash_tokens_legacy_compat" in message
+
+
+def test_due_message_without_compat_objects_mentions_none():
+    assert "0062" not in due_message([])

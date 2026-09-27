@@ -95,3 +95,7 @@ the admin API's revoke endpoint requires, so retiring one takes a manual
 against the `DATABASE_URL` it is given and exits non-zero once a raw column
 still exists but no resolvable row holds a raw value, meaning the drop
 migration can now be written. Run it via `make check-hash-token-cleanup`.
+That migration must also drop what `0062_hash_tokens_legacy_compat` installed
+on the raw columns, before or together with them (see "Compatibility with
+releases that predate `0053`" above); a due report names whichever of those
+objects still exist.
