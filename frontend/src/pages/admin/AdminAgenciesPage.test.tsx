@@ -109,12 +109,12 @@ vi.mock("../../api/admin", () => ({
   usePatchAgencyWeights: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
 }));
 
-function wrap(ui: React.ReactElement) {
+function wrap(ui: React.ReactElement, initialEntries = ["/admin/agencies"]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={qc}>
-        <MemoryRouter>{ui}</MemoryRouter>
+        <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>
   );
@@ -223,6 +223,13 @@ describe("AdminAgenciesPage", () => {
     wrap(<AdminAgenciesPage />);
     await user.click(screen.getByRole("button", { name: /Behind schedule/ }));
     expect(screen.queryByText("Aomori Bus")).toBeNull();
+    expect(screen.getByText("Deleted Bus")).toBeTruthy();
+  });
+
+  it("shows every agency under a pressed All chip for a ?view= it does not offer", () => {
+    wrap(<AdminAgenciesPage />, ["/admin/agencies?view=retired"]);
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Aomori Bus")).toBeTruthy();
     expect(screen.getByText("Deleted Bus")).toBeTruthy();
   });
 

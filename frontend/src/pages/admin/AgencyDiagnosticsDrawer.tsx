@@ -411,14 +411,12 @@ export function AgencyDiagnosticsDrawer({
   onDisable,
   onRestore,
   disablePending = false,
-  staticReloadAvailable = false,
 }: {
   agency: AdminAgency;
   onClose: () => void;
   onDisable: (id: number) => void;
   onRestore: (id: number) => void;
   disablePending?: boolean;
-  staticReloadAvailable?: boolean;
 }) {
   const { t } = useTranslation();
   const { data, isLoading, error } = useAgencyDiagnostics(agency.agency_id);
@@ -567,13 +565,6 @@ export function AgencyDiagnosticsDrawer({
           onClick={() => probe.mutate(agency.agency_id)}
         >
           {t("admin.agency_diag.action_probe")}
-        </AdminButton>
-        <AdminButton
-          variant="secondary"
-          disabled={!staticReloadAvailable}
-          title={staticReloadAvailable ? undefined : t("admin.agency_diag.action_reload_static_hint")}
-        >
-          {t("admin.agency_diag.action_reload_static")}
         </AdminButton>
         <AdminButton
           variant="secondary"
