@@ -1,16 +1,23 @@
 """Reports whether the raw `sessions.sid` / `api_keys.key` columns are safe to drop.
 
-`db/migrations/0053_hash_tokens.up.sql` added `sid_hash`/`key_hash` primary keys
-but left the raw columns in place and nullable, so a writer not yet updated to
-the hash-only path can keep working during a rolling deploy. Those columns stop
-protecting anything once every row already carries its hash -- once no writer
-is still inserting a hash-less row -- at which point a follow-up migration can
-drop them (see `db/migrations/README.md`).
+`db/migrations/0053_hash_tokens.up.sql` moved both tables onto `sid_hash` /
+`key_hash` primary keys. The raw columns survive, nullable, holding the
+credentials of rows that predate it; the application never reads or writes
+them, and its new rows leave them NULL. They exist only so that rolling 0053
+back keeps those older credentials working. Invariant for the follow-up
+migration that drops them: it may run once no row holding a raw value is still
+resolvable, since until then a rollback still has live credentials to preserve.
+
+"Resolvable" mirrors what the auth middleware accepts: a session whose
+`expires_at` is in the future (`api/middleware/session.py`), an API key that
+is neither revoked nor past its expiry (`api/middleware/auth.py`). A
+suspended user does not exclude a row: suspension is reversible, and lifting
+it makes that user's credentials work again.
 
 Read-only: issues SELECTs only, against the DATABASE_URL given via --database-url
-or the environment. Never modifies the database. Exits non-zero when the raw
-columns still exist and no hash-less row remains (cleanup is due); exits 0
-otherwise (either already cleaned up, or not yet safe to clean up).
+or the environment. Never modifies the database. Exits non-zero when at least
+one raw column still exists and no resolvable row holds a raw value (cleanup is
+due); exits 0 otherwise (either already cleaned up, or not yet safe to clean up).
 
 Usage:
     poetry run python scripts/check_hash_token_cleanup.py
@@ -22,6 +29,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import NamedTuple
 
 import psycopg2
 
@@ -37,48 +45,56 @@ SELECT
     ) AS api_keys_key_exists;
 """
 
-_HASHLESS_ROW_COUNTS_SQL = """
-SELECT
-    (SELECT count(*) FROM sessions WHERE sid_hash IS NULL) AS hashless_sessions,
-    (SELECT count(*) FROM api_keys WHERE key_hash IS NULL) AS hashless_api_keys;
+_LIVE_RAW_SESSIONS_SQL = """
+SELECT count(*) FROM sessions
+ WHERE sid IS NOT NULL
+   AND expires_at > now();
+"""
+
+_LIVE_RAW_API_KEYS_SQL = """
+SELECT count(*) FROM api_keys
+ WHERE key IS NOT NULL
+   AND revoked_at IS NULL
+   AND (expires_at IS NULL OR expires_at > now());
 """
 
 
-def cleanup_is_due(
-    *,
-    sessions_sid_exists: bool,
-    api_keys_key_exists: bool,
-    hashless_sessions: int,
-    hashless_api_keys: int,
-) -> bool:
-    """True once the raw columns can be dropped.
+class CleanupState(NamedTuple):
+    """Resolvable rows still holding a raw credential; ``None`` once that raw column is dropped."""
 
-    Pure decision logic, kept apart from the SQL above so it is testable
-    without a database: due when at least one raw column still exists and no
-    row anywhere lacks its hash (every writer is already hash-aware).
-    """
-    columns_exist = sessions_sid_exists or api_keys_key_exists
-    no_hashless_rows = hashless_sessions == 0 and hashless_api_keys == 0
-    return columns_exist and no_hashless_rows
+    live_raw_sessions: int | None
+    live_raw_api_keys: int | None
 
 
-def check(database_url: str) -> bool:
-    """Run the read-only checks against *database_url*. Returns cleanup_is_due()."""
+def cleanup_is_due(state: CleanupState) -> bool:
+    """True when a raw column remains and no resolvable row holds a raw value in any remaining one."""
+    remaining = [n for n in state if n is not None]
+    return bool(remaining) and all(n == 0 for n in remaining)
+
+
+def _count(cur, query: str) -> int:
+    cur.execute(query)
+    return cur.fetchone()[0]
+
+
+def read_state(cur) -> CleanupState:
+    """A dropped raw column reads as ``None``; it is never counted, since the query would fail on it."""
+    cur.execute(_COLUMN_EXISTS_SQL)
+    sessions_sid_exists, api_keys_key_exists = cur.fetchone()
+    return CleanupState(
+        live_raw_sessions=_count(cur, _LIVE_RAW_SESSIONS_SQL) if sessions_sid_exists else None,
+        live_raw_api_keys=_count(cur, _LIVE_RAW_API_KEYS_SQL) if api_keys_key_exists else None,
+    )
+
+
+def check(database_url: str) -> CleanupState:
+    """Run the read-only checks against *database_url*."""
     conn = psycopg2.connect(database_url)
     try:
         with conn.cursor() as cur:
-            cur.execute(_COLUMN_EXISTS_SQL)
-            sessions_sid_exists, api_keys_key_exists = cur.fetchone()
-            cur.execute(_HASHLESS_ROW_COUNTS_SQL)
-            hashless_sessions, hashless_api_keys = cur.fetchone()
+            return read_state(cur)
     finally:
         conn.close()
-    return cleanup_is_due(
-        sessions_sid_exists=sessions_sid_exists,
-        api_keys_key_exists=api_keys_key_exists,
-        hashless_sessions=hashless_sessions,
-        hashless_api_keys=hashless_api_keys,
-    )
 
 
 def main() -> int:
@@ -91,13 +107,21 @@ def main() -> int:
         print("check_hash_token_cleanup: DATABASE_URL is not set; refusing to run.", file=sys.stderr)
         return 2
 
-    if check(database_url):
+    state = check(database_url)
+    if cleanup_is_due(state):
         print(
-            "check_hash_token_cleanup: raw sessions.sid/api_keys.key still exist and every row "
-            "already has a hash -- safe to write the follow-up migration that drops them."
+            "check_hash_token_cleanup: raw sessions.sid/api_keys.key remain but no resolvable row "
+            "holds a raw value -- safe to write the follow-up migration that drops them."
         )
         return 1
-    print("check_hash_token_cleanup: not due (columns already dropped, or hash-less rows remain).")
+    if state.live_raw_sessions is None and state.live_raw_api_keys is None:
+        print("check_hash_token_cleanup: not due (raw columns already dropped).")
+        return 0
+    sessions, api_keys = ("column dropped" if n is None else n for n in state)
+    print(
+        "check_hash_token_cleanup: not due -- resolvable rows still holding a raw credential: "
+        f"sessions={sessions}, api_keys={api_keys}."
+    )
     return 0
 
 
