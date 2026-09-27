@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
 import {
   DELAY_RAMP,
@@ -155,6 +155,17 @@ const ovKpiValueBlock = ruleBody(overviewCss, ".ov-kpi-value {");
 
 const indexHtml = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
 
+const srcDir = resolve(process.cwd(), "src");
+
+function walk(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = resolve(dir, entry.name);
+    if (entry.isDirectory()) return walk(full);
+    if (!/\.(tsx?|css)$/.test(entry.name)) return [];
+    return [full];
+  });
+}
+
 describe("motion tokens", () => {
   it.each([
     ["--dur-1", "150ms"],
@@ -276,6 +287,44 @@ describe("--font-display policy", () => {
     const preceding = rawGlobalCss.slice(Math.max(0, idx - 400), idx);
     expect(preceding).toMatch(/brand wordmark/);
     expect(preceding).toMatch(/welcome headline/i);
+  });
+
+  // A weight index.html does not request is synthesized by the browser, which
+  // smears kanji strokes. Only an explicitly declared weight can be checked
+  // statically; an inherited one is out of reach here.
+  it("is only set at a weight index.html loads for Noto Serif JP", () => {
+    const loaded = new Set(
+      indexHtml.match(/<link href="[^"]*Noto\+Serif\+JP:wght@([\d;]+)[^"]*" rel="stylesheet">/)?.[1].split(";"),
+    );
+    const keywordWeights: Record<string, string> = { normal: "400", bold: "700" };
+    const sites: { where: string; weight: string | null }[] = [];
+
+    for (const file of walk(srcDir)) {
+      if (/\.test\.tsx?$/.test(file)) continue;
+      const rel = relative(srcDir, file);
+      const raw = readFileSync(file, "utf8");
+      const text = file.endsWith(".css") ? raw.replace(/\/\*[\s\S]*?\*\//g, "") : raw;
+
+      for (const [, selector, body] of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (decl(body, "font-family")?.includes("var(--font-display)")) {
+          sites.push({ where: `${rel}: ${selector.trim().replace(/\s+/g, " ")}`, weight: decl(body, "font-weight") });
+        }
+      }
+
+      for (const m of text.matchAll(/fontFamily:\s*["']var\(--font-display\)["']/g)) {
+        const start = text.lastIndexOf("{", m.index);
+        const end = text.indexOf("}", m.index);
+        const weight = text.slice(start, end).match(/fontWeight:\s*["']?([\w-]+)/)?.[1] ?? null;
+        sites.push({ where: `${rel}:${text.slice(0, m.index).split("\n").length}`, weight });
+      }
+    }
+
+    expect(loaded.size).toBeGreaterThan(0);
+    expect(sites.length).toBeGreaterThan(0);
+    const offenders = sites
+      .filter(({ weight }) => weight !== null && !loaded.has(keywordWeights[weight] ?? weight))
+      .map(({ where, weight }) => `${where} (${weight})`);
+    expect(offenders).toEqual([]);
   });
 });
 
@@ -502,7 +551,6 @@ describe("--color-danger is retired outside destructive-action buttons", () => {
     // Alarm red is retired from every severity signal in favor of
     // --delay-severe (calm, per-theme, AA-passing as text); --color-danger
     // stays reserved for buttons that actually delete/remove something.
-    const srcDir = resolve(process.cwd(), "src");
     // Each entry strips exactly the sanctioned text, so any other mention in
     // the same file still counts as an offender.
     const allowed = new Map<string, RegExp[]>([
@@ -512,15 +560,6 @@ describe("--color-danger is retired outside destructive-action buttons", () => {
       ],
       [resolve(srcDir, "pages/admin/adminControls.tsx"), [/\.admin-btn\.danger[^{]*\{[^}]*\}/g]],
     ]);
-
-    function walk(dir: string): string[] {
-      return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-        const full = resolve(dir, entry.name);
-        if (entry.isDirectory()) return walk(full);
-        if (!/\.(tsx?|css)$/.test(entry.name)) return [];
-        return [full];
-      });
-    }
 
     const offenders = walk(srcDir).filter((file) => {
       if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) return false;

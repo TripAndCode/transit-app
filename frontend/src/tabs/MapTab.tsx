@@ -482,7 +482,9 @@ export function MapTab() {
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
   const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
   const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
-  const delayedRowsResetKey = `${id ?? "none"}:${liveQuery.dataUpdatedAt}:${ctx.routes.join(",")}`;
+  // Names the list, not one fetch of it: a poll must not collapse rows the
+  // operator has already expanded.
+  const delayedRowsResetKey = `${id ?? "none"}:${ctx.routes.join(",")}`;
   const cappedDelayedRows = useCappedList(delayedRows, DELAYED_TRIPS_CAP, delayedRowsResetKey);
 
   // A hovered vehicle always wins the card: the pointer is the more recent

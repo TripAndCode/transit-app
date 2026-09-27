@@ -85,6 +85,29 @@ describe("SidebarUserMenu", () => {
     expect(screen.getByRole("menuitemradio", { name: "System" }).getAttribute("aria-checked")).toBe("false");
   });
 
+  it("sets each of the three theme values from the radio set", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    for (const [label, value] of [
+      ["Light", "light"],
+      ["Dark", "dark"],
+      ["System", "system"],
+    ] as const) {
+      await user.click(screen.getByRole("menuitemradio", { name: label }));
+      expect(localStorage.getItem("transit.theme")).toBe(value);
+      const checked = screen.getAllByRole("menuitemradio").filter((o) => o.getAttribute("aria-checked") === "true");
+      expect(checked.map((o) => o.textContent)).toEqual([label]);
+    }
+  });
+
+  it("offers the theme only through the radio set, with no separate two-way toggle", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    expect(screen.queryByRole("menuitem", { name: /dark|light|theme/i })).toBeNull();
+  });
+
   it("calls onOpenSettings and closes the popover when the settings menu item is clicked", async () => {
     const user = userEvent.setup();
     const { onOpenSettings } = renderMenu();

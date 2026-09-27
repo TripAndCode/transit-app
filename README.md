@@ -12,13 +12,15 @@ aggregates, and application data live in Postgres/PostGIS.
 - Python 3.11+ (CI and the production image run the same minor version; see `Dockerfile`)
 - [Poetry](https://python-poetry.org/)
 - Docker Desktop
-- A Gemini API key for the optional Ask LLM fallback
+- An LLM provider API key (Gemini by default; see `CHAT_PROVIDERS`). The API
+  refuses to start without one; any non-empty value boots it, but LLM-backed
+  answers need a real key.
 
 ### Local setup
 
 ```bash
 cp .env.example .env
-# Set GEMINI_API_KEY in .env. Other settings have local defaults.
+# Set GEMINI_API_KEY in .env (required to start). Other settings have local defaults.
 make bootstrap
 make doctor
 make serve
@@ -216,7 +218,9 @@ curl -X POST http://localhost:8000/api/1/ask \
 Copy `.env.example` and set only what your environment needs. Important groups:
 
 - `DATABASE_URL`, `CLICKHOUSE_*`: database connections.
-- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder. At
+  least one provider listed in `CHAT_PROVIDERS` needs a key, or the API will
+  not start.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
 - `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
   `PUBLIC_BASE_URL`, `ADMIN_EMAILS`: optional authentication and admin setup.
@@ -235,12 +239,9 @@ Copy `.env.example` and set only what your environment needs. Important groups:
 
 ### Feature kill switches
 
-Every entry in `pipeline/flags.py`'s registry resolves as: a `feature_flags`
-DB override (set via `PATCH /api/admin/flags/{key}`, see the admin control
-room's flags page) wins when present, otherwise the flag falls back to its
-env var, otherwise to its hardcoded default. An override, once written,
-takes effect everywhere within 30 seconds (the in-process cache's TTL) —
-immediately for the process that wrote it.
+Each key can be overridden from the admin control room's flags page;
+`pipeline/flags.py` owns the resolution and caching rules. "Default" is the
+value when neither an override nor the env var is set.
 
 | Key | Env var | Default |
 | --- | --- | --- |
@@ -254,10 +255,8 @@ immediately for the process that wrote it.
 | `openapi_docs_enabled` | `OPENAPI_DOCS_ENABLED` | off |
 | `perf_debug_enabled` | `PERF_DEBUG_ENABLED` | off |
 
-`openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json` and is
-registered like every other key above — it takes a DB override the same as
-the rest, not env-only. Off unless set, so a deployment that configures
-nothing publishes no schema; `.env.example` turns it on for local dev.
+`openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json`;
+`.env.example` turns it on for local dev.
 
 Leaving all OAuth variables unset runs the app in anonymous-only mode. Do not
 commit `.env`, API keys, OAuth secrets, database passwords, or private keys.
