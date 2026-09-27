@@ -89,13 +89,14 @@ async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id, ch_cl
 
 @pytest.mark.asyncio
 async def test_route_dow_breakdown_half_up_rounding_at_exact_boundary(aconn, aagency_id, ch_client, ch_async_client):
-    """Fix 8c regression: ``round(avg(dep_delay) / 60.0, 2)`` was computed in
-    ClickHouse SQL, which rounds half-to-even (banker's rounding). Postgres'
-    numeric ROUND() (and this codebase's Decimal(ROUND_HALF_UP) helpers, e.g.
-    pipeline.reports.rankings._round2) round half away from zero instead. 12
-    rows at 127s + 12 rows at 128s average to exactly 127.5s = 2.125min — an
-    exact .5 boundary at the 3rd decimal. Half-up rounds to 2.13; ClickHouse's
-    native round() would give 2.12.
+    """``round(avg(dep_delay) / 60.0, 2)`` must round half away from zero,
+    like Postgres' numeric ROUND() and this codebase's Decimal(ROUND_HALF_UP)
+    helpers (e.g. pipeline.reports.rankings._round2) — not half-to-even
+    (banker's rounding), which is what ClickHouse's native round() does when
+    the rounding happens in its SQL. 12 rows at 127s + 12 rows at 128s
+    average to exactly 127.5s = 2.125min — an exact .5 boundary at the 3rd
+    decimal. Half-up rounds to 2.13; ClickHouse's native round() would give
+    2.12.
     """
     # Dedup keys on (route_code, service_type, scheduled_time, trip_id,
     # captured_at::date, stop_sequence) — vary stop_sequence per row so all
@@ -127,8 +128,9 @@ async def test_route_dow_breakdown_half_up_rounding_at_exact_boundary(aconn, aag
 
 @pytest.mark.asyncio
 async def test_route_compare_service_half_up_rounding_at_exact_boundary(aconn, aagency_id, ch_client, ch_async_client):
-    """Same fix 8c regression as test_route_dow_breakdown_half_up_rounding_at_exact_boundary,
-    for route_compare_service's identical inline ``round(avg(dep_delay) / 60.0, 2)``.
+    """The same half-up rounding contract as
+    test_route_dow_breakdown_half_up_rounding_at_exact_boundary, for
+    route_compare_service's identical inline ``round(avg(dep_delay) / 60.0, 2)``.
     """
     # See test_route_dow_breakdown_half_up_rounding_at_exact_boundary for why
     # stop_sequence must vary per row (dedup-key collision otherwise).

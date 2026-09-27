@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { fireEvent, screen } from "@testing-library/react";
+import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
 import { MapTab } from "./MapTab";
 import { stubReducedMotion } from "../test/reducedMotion";
-import type { LiveTripsResponse, RouteSummaryResponse } from "../api/types";
+import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse } from "../api/types";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
 
@@ -125,5 +125,84 @@ describe("MapTab basemap style from the URL", () => {
     const src = renderWithStyle("?style=garbage");
     expect(src).toContain("/pale/");
     expect(src).not.toContain("tile.openstreetmap.org");
+  });
+});
+
+describe("MapTab delayed-trips cap", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function delayedTrip(route: string, index: number, capturedAt: string): LiveTrip {
+    return {
+      trip_id: `${route}-${index}`,
+      route_code: route,
+      service_type: null,
+      scheduled_time: "08:00:00",
+      dep_delay: 600 + index,
+      captured_at: capturedAt,
+      stop_id: `s${index}`,
+      stop_sequence: 1,
+      stop_name: `Stop ${index}`,
+      stop_lat: 40.8,
+      stop_lon: 140.7,
+      headsign: "Downtown",
+    };
+  }
+
+  /** Stands in for the filter dock: a route-filter change is a URL change. */
+  function FilterRoutes() {
+    const navigate = useNavigate();
+    return <button type="button" onClick={() => navigate("/agencies/1/map?routes=R1,R3")}>refilter</button>;
+  }
+
+  it("keeps a raised cap across a live refetch and resets it when the route filter changes", () => {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useRouteStopProfile").mockReturnValue({ data: undefined } as never);
+    const capturedAt = new Date().toISOString();
+    // Either two-route filter holds just past the 200-row cap. Two routes
+    // rather than one keeps any single route from being focused, which would
+    // render its every trip a second time in the trip panel.
+    const rows = [
+      ...Array.from({ length: 201 }, (_, i) => delayedTrip("R1", i, capturedAt)),
+      delayedTrip("R2", 0, capturedAt),
+      delayedTrip("R3", 0, capturedAt),
+    ];
+    let liveResult = { data: liveTrips(rows), dataUpdatedAt: 1 };
+    vi.spyOn(hooks, "useLiveTrips").mockImplementation(() => ({
+      ...liveResult,
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    }) as never);
+    // A fresh element per call: re-rendering with the same element object
+    // lets React bail out before MapTab ever sees the refetched result.
+    const tree = () => (
+      <MemoryRouter initialEntries={["/agencies/1/map?routes=R1,R2"]}>
+        <FilterRoutes />
+        <Routes>
+          <Route path="/agencies/:agencyId/map" element={<MapTab />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const { rerender } = renderWithProviders(tree());
+
+    // Text queries, not role queries: resolving accessible names walks every
+    // rendered row on each call.
+    const remainder = "Show 2 more";
+    fireEvent.click(screen.getByText(remainder));
+    expect(screen.queryByText(remainder)).not.toBeInTheDocument();
+
+    liveResult = { data: liveTrips(rows), dataUpdatedAt: 2 };
+    rerender(tree());
+    expect(screen.queryByText(remainder)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("refilter"));
+    expect(screen.getByText(remainder)).toBeInTheDocument();
   });
 });

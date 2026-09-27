@@ -48,7 +48,7 @@ def test_multiple_routes_preserve_order():
 
 
 def test_pools_exact_sum_delay_sec_not_rounded_avg_delay_sec():
-    """Proves the fix: pooling from the raw sum_delay_sec differs from
+    """Pooling from the raw sum_delay_sec differs from
     re-weighting each service_type's already-rounded avg_delay_sec whenever
     that per-row average isn't itself exactly representable in whole seconds.
 

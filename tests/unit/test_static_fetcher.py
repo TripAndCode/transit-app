@@ -116,8 +116,8 @@ def test_direct_url_ssrf_rejection_degrades_gracefully(tmp_path):
 
 
 def test_direct_url_rejects_unsafe_static_url(tmp_path):
-    """static_url must be SSRF-validated exactly like feed_url is - previously
-    it wasn't validated at all. No opener mock here: a real blocked-host
+    """static_url must be SSRF-validated exactly like feed_url is: it is just
+    as admin-supplied a fetch target. No opener mock here: a real blocked-host
     rejection must happen before any fetch is attempted, and (like a
     network failure) degrades to a no-op rather than raising out of fetch()."""
     result = direct_url.fetch(8, "http://169.254.169.254/latest/meta-data/", tmp_path)
@@ -204,8 +204,8 @@ def test_aomori_scrape_non_zip_body_returns_none(tmp_path):
 
 def test_aomori_scrape_rejects_zip_url_scraped_to_a_blocked_host(tmp_path):
     """The zip_url isn't admin-configured - it's scraped out of index_url's
-    own HTML - so it must be validated exactly like any other fetch target.
-    Previously it wasn't validated at all, not even the scheme. Degrades
+    own HTML - so it must be validated exactly like any other fetch target,
+    scheme included, before anything is fetched from it. Degrades
     gracefully (like a network failure) rather than raising out of fetch(),
     matching the sibling except clauses in the same function."""
     html = b'<html><a href="http://169.254.169.254/latest/meta-data/gtfs-aomoricitybus.zip">x</a></html>'

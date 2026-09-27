@@ -1,14 +1,16 @@
 """Unit + integration coverage for api.range's ClickHouse-dialect filter
-builders (build_updates_filter_ch and friends) — the sibling of the asyncpg
-build_updates_filter used by map.py's /route-shape and rankings.py's
-_compare_ranking_live once they read the live `updates` table from
-ClickHouse instead of Postgres.
+builders (build_updates_filter_ch and its clause helpers), which the
+pipeline/reports queries over the live ClickHouse `updates` table filter
+through.
 
-Pure-logic tests (fragment shape) run without any DB. The JST-boundary test
-needs a real ClickHouse instance (RUN_CH_INTEGRATION=1 / `make ch-test`) —
-mirrors tests/unit/test_db_dedup_ch.py's proof for build_dedup_ch_sql: this
-is the same "toDate(captured_at, 'Asia/Tokyo') not bare toDate(captured_at)"
-bug class, guarded the same way, for a different SQL builder.
+The unit tests run without any DB and assert only the shape of the generated
+SQL fragment and its bound parameters: that the JST-aware and normalizing
+expressions are present, not that ClickHouse evaluates them to the intended
+rows. That behavioral proof (JST day bucketing, ISO weekday numbering, band
+placement of 5-char and >= 24h scheduled times) comes from the
+RUN_CH_INTEGRATION=1 tests below, which need a real ClickHouse
+(`make ch-test`) and skip otherwise — the same split
+tests/unit/test_db_dedup_ch.py uses for build_dedup_ch_sql.
 """
 
 import os
@@ -91,9 +93,10 @@ def test_time_band_clause_ch_morning_band():
 
 def test_time_band_clause_ch_normalizes_extended_hours_modulo_24():
     """GTFS writes post-midnight continuations of a service day as hours
-    >= 24 ("25:30:00"). Banding must wrap the hour onto the same-day clock
-    so such a trip lands in the band a rider actually experiences
-    (25:30 -> 01:30 -> late_night) instead of falling outside every band."""
+    >= 24 ("25:30:00"), so the fragment must take the hour modulo 24. This
+    only checks that the expression is present;
+    test_time_band_clause_ch_places_extended_hour_in_its_same_day_band proves
+    a 25:30 trip actually lands in late_night."""
     frag, _ = time_band_clause_ch(_ctx(time_band="late_night"))
     assert "% 24" in frag
 

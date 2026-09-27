@@ -383,8 +383,8 @@ async def test_anomalies_null_day_excluded_from_series_and_stats(movers_pool):
     """A date whose only row has samples but a NULL sum_delay_sec (not yet
     re-analyzed since migration 0028) must render avg_delay=None for that
     date, and must be excluded from the mean/std/z-score population --
-    previously it was coerced to 0.0, which biased the network mean down
-    and could flag the missing day as a false anomaly.
+    coercing it to 0.0 would bias the network mean down and could flag the
+    missing day as a false anomaly.
     """
     pool, agency_id = movers_pool
     await _seed_trend(

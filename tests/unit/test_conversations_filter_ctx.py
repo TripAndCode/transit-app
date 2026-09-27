@@ -1,9 +1,10 @@
 """A conversation's stored ``filter_ctx`` is client-supplied state that was
 persisted verbatim, so it gets the same validation as a live request.
 
-It used to be fed straight into ``RangeCtx(...)``: ``date.fromisoformat``
-raised an unhandled ValueError (500) on a malformed date, and an arbitrary
-``dow``/``time_band``/``service`` string reached the SQL builders unchecked.
+Fed straight into ``RangeCtx(...)``, a malformed date would make
+``date.fromisoformat`` raise an unhandled ValueError (500), and an arbitrary
+``dow``/``time_band``/``service`` string would reach the SQL builders
+unchecked.
 """
 
 from datetime import date, datetime, timedelta, timezone

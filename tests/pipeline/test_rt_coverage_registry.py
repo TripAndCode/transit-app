@@ -9,7 +9,7 @@ code change, so these tests drive it exclusively through those public entry
 points.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import pytest
 
@@ -64,8 +64,12 @@ async def test_recorded_probe_persists_provenance(aconn, aagency_id):
     feed it came from, and when -- enough to judge a stale verdict later
     without re-deriving it from logs."""
     await _set_strategy(aconn, aagency_id, "static_join")
-    before = datetime.now(timezone.utc)
+    # Bracketed by the database's own clock, which is the one `probed_at`
+    # comes from: the test host's clock can disagree with it by far more than
+    # any tolerance a "just now" check could afford.
+    before = await aconn.fetchval("SELECT now()")
     await record_field_coverage_probe(aconn, aagency_id, _cov(), "https://feed.example/tu.bin", ttl_days=30)
+    after = await aconn.fetchval("SELECT now()")
 
     rows = await aconn.fetch(
         "SELECT field_name, confirmed, coverage, sample_size, source_feed, probed_at, expires_at "
@@ -79,7 +83,7 @@ async def test_recorded_probe_persists_provenance(aconn, aagency_id):
     for r in rows:
         assert r["sample_size"] == 100
         assert r["source_feed"] == "https://feed.example/tu.bin"
-        assert r["probed_at"] >= before - timedelta(seconds=5)
+        assert before <= r["probed_at"] <= after
         # ~30 days out, checked loosely: the exact instant depends on the
         # DB clock, only the horizon is being asserted.
         assert timedelta(days=29) < r["expires_at"] - r["probed_at"] < timedelta(days=31)

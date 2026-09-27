@@ -1,11 +1,10 @@
 """dispatch() must validate tool_name against the known-handler allowlist
-BEFORE creating any perf label from it. Previously perf.timed_block wrapped
-the whole dispatch body including the "unsupported tool" check, so any
-caller-supplied tool_name - however bogus - got a permanent, never-evicted
-entry in the process-global perf._stats dict. An authenticated user could
-grow that dict unbounded by POSTing a unique made-up tool string on every
-call (see api/routers/conversations.py's AppendMessage.tool, which never
-validates against an allowlist itself).
+BEFORE creating any perf label from it. Every perf label is a permanent,
+never-evicted entry in the process-global perf._stats dict, so a label
+minted from a caller-supplied tool_name - however bogus - would let an
+authenticated user grow that dict unbounded by POSTing a unique made-up tool
+string on every call (see api/routers/conversations.py's AppendMessage.tool,
+which never validates against an allowlist itself).
 
 DB-free: the unsupported-tool path returns before touching conn/agency_id.
 """

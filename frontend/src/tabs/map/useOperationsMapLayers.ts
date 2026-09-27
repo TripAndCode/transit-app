@@ -13,6 +13,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useThemeSignal } from "../../styles/theme";
 import { revealAgency } from "./cameraChoreography";
 import { whenStyleReady } from "./styleReady";
+import { repaintLayer } from "./repaintLayer";
 import { hhmm } from "./format";
 
 export const LIVE_TRIPS_SOURCE = "live-trips";
@@ -116,6 +117,24 @@ export function labelPaint(): SymbolPaint {
     "text-color": readableInkOn(surface),
     "text-halo-color": surface,
     "text-halo-width": 1.2,
+  };
+}
+
+function tripProgressLinePaint(): LinePaint {
+  return { "line-color": accentColorResolved(), "line-width": 6, "line-opacity": 0.9 };
+}
+
+function tripProgressDirectionPaint(): SymbolPaint {
+  const accent = accentColorResolved();
+  return { "text-color": readableInkOn(accent), "text-halo-color": accent, "text-halo-width": 1 };
+}
+
+function tripProgressStopsPaint(): CirclePaint {
+  return {
+    "circle-radius": ["case", ["boolean", ["get", "latest"], false], 10, 6],
+    "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
+    "circle-stroke-color": surfaceColorResolved(),
+    "circle-stroke-width": ["case", ["boolean", ["get", "latest"], false], 3, 2],
   };
 }
 
@@ -236,6 +255,10 @@ export function useOperationsMapLayers(
       const existing = map.getSource(LIVE_TRIPS_SOURCE) as maplibregl.GeoJSONSource | undefined;
       if (existing) {
         existing.setData(collection);
+        repaintLayer(map, LIVE_TRIPS_CLUSTER_LAYER, clusterCirclePaint());
+        repaintLayer(map, LIVE_TRIPS_CLUSTER_COUNT_LAYER, clusterCountPaint());
+        repaintLayer(map, LIVE_TRIPS_LAYER, vehicleCirclePaint());
+        repaintLayer(map, LIVE_TRIPS_LABEL_LAYER, labelPaint());
       } else {
         map.addSource(LIVE_TRIPS_SOURCE, {
           type: "geojson",
@@ -425,6 +448,9 @@ export function useOperationsMapLayers(
       const existing = map.getSource(TRIP_PROGRESS_SOURCE) as maplibregl.GeoJSONSource | undefined;
       if (existing) {
         existing.setData(collection);
+        repaintLayer(map, TRIP_PROGRESS_LINE_LAYER, tripProgressLinePaint());
+        repaintLayer(map, TRIP_PROGRESS_DIRECTION_LAYER, tripProgressDirectionPaint());
+        repaintLayer(map, TRIP_PROGRESS_STOPS_LAYER, tripProgressStopsPaint());
         return;
       }
       map.addSource(TRIP_PROGRESS_SOURCE, { type: "geojson", data: collection });
@@ -435,7 +461,7 @@ export function useOperationsMapLayers(
         source: TRIP_PROGRESS_SOURCE,
         filter: ["==", ["geometry-type"], "LineString"],
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": accentColorResolved(), "line-width": 6, "line-opacity": 0.9 },
+        paint: tripProgressLinePaint(),
       }, beforeId);
       map.addLayer({
         id: TRIP_PROGRESS_DIRECTION_LAYER,
@@ -451,23 +477,14 @@ export function useOperationsMapLayers(
           "text-keep-upright": false,
           "text-rotation-alignment": "map",
         },
-        paint: {
-          "text-color": readableInkOn(accentColorResolved()),
-          "text-halo-color": accentColorResolved(),
-          "text-halo-width": 1,
-        },
+        paint: tripProgressDirectionPaint(),
       }, beforeId);
       map.addLayer({
         id: TRIP_PROGRESS_STOPS_LAYER,
         type: "circle",
         source: TRIP_PROGRESS_SOURCE,
         filter: ["==", ["geometry-type"], "Point"],
-        paint: {
-          "circle-radius": ["case", ["boolean", ["get", "latest"], false], 10, 6],
-          "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
-          "circle-stroke-color": surfaceColorResolved(),
-          "circle-stroke-width": ["case", ["boolean", ["get", "latest"], false], 3, 2],
-        },
+        paint: tripProgressStopsPaint(),
       }, beforeId);
       map.addLayer({
         id: TRIP_PROGRESS_LABELS_LAYER,

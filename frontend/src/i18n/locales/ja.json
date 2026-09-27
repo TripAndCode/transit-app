@@ -347,8 +347,6 @@
     "theme_dark": "ダーク",
     "theme_light": "ライト",
     "theme_system": "システム",
-    "theme_toggle_to_dark": "ダークモードに切り替え",
-    "theme_toggle_to_light": "ライトモードに切り替え",
     "decrement_aria": "減らす",
     "increment_aria": "増やす",
     "service_value": {

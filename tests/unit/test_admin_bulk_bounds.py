@@ -21,20 +21,13 @@ from fastapi.testclient import TestClient
 
 from api.deps import get_conn
 from api.routers import admin as admin_router
-from api.security import User, require_admin
+from api.security import require_admin
 from tests.conftest import TEST_ORIGIN
+from tests.fixtures.users import admin_user
 
 _ORIGIN = {"Origin": TEST_ORIGIN}
 
-_ADMIN = User(
-    user_id=1,
-    email="admin@example.com",
-    name="Admin",
-    avatar_url=None,
-    role="admin",
-    suspended_at=None,
-    llm_approved=True,
-)
+_ADMIN = admin_user()
 
 
 class _UntouchedConn:
