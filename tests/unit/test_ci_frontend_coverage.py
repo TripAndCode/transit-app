@@ -16,6 +16,8 @@ from tests.unit.test_ci_workflow_gates import ROOT, _workflow_yaml
 
 FRONTEND = ROOT / "frontend"
 METRICS = ("lines", "statements", "branches", "functions")
+#: The floors this gate enforces; a change to the set is a policy change, made here.
+REQUIRED_METRICS = {"lines", "statements"}
 
 
 def _frontend_commands() -> list[list[str]]:
@@ -34,6 +36,22 @@ def test_frontend_job_runs_the_suite_through_the_coverage_script() -> None:
     assert ["npm", "run", "test"] not in commands, (
         "the coverage run already is the test run; a second plain pass doubles the job's slowest step"
     )
+
+
+def test_the_coverage_step_is_never_skipped() -> None:
+    """An `if:` on the step or the job would keep the command in the file
+    while CI stops running it."""
+    job = _workflow_yaml()["jobs"]["frontend"]
+    assert "if" not in job, f"the frontend job runs conditionally: {job['if']!r}"
+    steps = [
+        step
+        for step in job["steps"]
+        if ["npm", "run", "test:coverage"]
+        in (shlex.split(line, comments=True) for line in step.get("run", "").splitlines())
+    ]
+    assert steps, "no frontend step runs the coverage script"
+    for step in steps:
+        assert "if" not in step, f"the coverage step runs conditionally: {step['if']!r}"
 
 
 def test_coverage_script_takes_its_thresholds_from_the_config() -> None:
@@ -79,6 +97,8 @@ def test_vitest_config_declares_positive_thresholds() -> None:
     values = {name: float(value) for name, value in re.findall(r"\b(\w+):\s*(\d+(?:\.\d+)?)", block.group(1))}
     declared = {name: value for name, value in values.items() if name in METRICS}
     assert declared, f"no threshold names one of {METRICS}: {block.group(1).strip()!r}"
+    missing = REQUIRED_METRICS - declared.keys()
+    assert not missing, f"the gate no longer enforces {sorted(missing)}: {declared}"
     assert all(value > 0 for value in declared.values()), f"a zero threshold gates nothing: {declared}"
 
 
