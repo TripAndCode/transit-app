@@ -281,16 +281,22 @@ def _unsweepable_mounted_routes() -> list[tuple[str, str | None]]:
 
     A websocket handshake or a plain Starlette route carries the session
     cookie like any other request, and a mounted sub-app hides whatever it
-    serves. The one exception is the SPA's static-asset mount: it serves files
-    and reads no session -- unless it sits under the admin prefix, where it
-    would bypass the role check.
+    serves. The one exception is the SPA's own static-asset mount (named
+    ``assets``): it serves the built bundle and reads no session -- unless it
+    sits under the admin prefix, where it would bypass the role check. Any
+    other static mount is flagged, since what it serves is not known here.
     """
     found = []
     for context in iter_route_contexts(main.app.routes):
         route = context.original_route
         if isinstance(route, APIRoute):
             continue
-        if isinstance(route, Mount) and isinstance(route.app, StaticFiles) and not _is_admin_path(route.path):
+        if (
+            isinstance(route, Mount)
+            and route.name == "assets"
+            and isinstance(route.app, StaticFiles)
+            and not _is_admin_path(route.path)
+        ):
             continue
         found.append((type(route).__name__, context.path or getattr(route, "path", None)))
     return found
@@ -363,8 +369,9 @@ def test_every_csrf_exempt_route_rejects_a_request_without_its_secret(monkeypatc
     failures = []
     for route in _exempt_routes():
         response = client.request(route.method, _concrete_path(route.path))
-        if response.status_code != 401:
-            failures.append((route.method, route.path, _outcome(response)))
+        outcome = _outcome(response)
+        if (outcome[0], outcome[2]) != (401, _qualified_name(route.endpoint)):
+            failures.append((route.method, route.path, outcome))
     assert failures == [], f"these CSRF-exempt routes did not answer 401 to a request lacking their secret: {failures}"
 
 
@@ -376,8 +383,9 @@ def test_every_csrf_exempt_route_fails_closed_while_its_secret_is_unset(monkeypa
     failures = []
     for route in _exempt_routes():
         response = client.request(route.method, _concrete_path(route.path))
-        if response.status_code != 503:
-            failures.append((route.method, route.path, _outcome(response)))
+        outcome = _outcome(response)
+        if (outcome[0], outcome[2]) != (503, _qualified_name(route.endpoint)):
+            failures.append((route.method, route.path, outcome))
     assert failures == [], f"these CSRF-exempt routes did not answer 503 while no secret is configured: {failures}"
 
 
