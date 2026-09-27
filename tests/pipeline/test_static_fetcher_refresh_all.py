@@ -32,7 +32,7 @@ def test_refresh_all_skips_deleted_agency(pg_conn, tmp_path):
 def test_refresh_all_continues_past_one_agencys_failure(pg_conn, tmp_path):
     """One agency's refresh_static raising must not abort the rest of the
     run - matching cmd_analyze_all's per-agency isolation. Uses a real
-    connection (not a mock) so the fix's rollback is genuinely exercised:
+    connection (not a mock) so the per-agency rollback is genuinely exercised:
     without it, psycopg2 leaves the transaction aborted and the next
     agency's own query fails too."""
     with pg_conn.cursor() as cur:
@@ -58,7 +58,7 @@ def test_refresh_all_continues_past_one_agencys_failure(pg_conn, tmp_path):
     assert n == 0  # both successful calls returned None (no change)
     assert total == 3
     assert failed == [ids[1]]
-    # Connection must still be usable after the fix's rollback - the fixture's
+    # Connection must still be usable after the per-agency rollback - the fixture's
     # own TRUNCATE teardown will raise if it isn't.
     with pg_conn.cursor() as cur:
         cur.execute("SELECT 1")

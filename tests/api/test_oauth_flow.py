@@ -30,16 +30,15 @@ def _set_oauth_env(monkeypatch):
     directly instead (see test_admin_email_promotes) — cheaper and more
     explicit than reloading the whole module to re-freeze it.
 
-    Historical note: this fixture used to importlib.reload(api.routers.auth)
-    on every test. That's unnecessary (everything it "refreshed" either reads
-    env live already, per above, or — like the oauth-tx signer — is fine
-    staying frozen at whatever it was on first import, since every test
-    round-trips through the same frozen instance). Worse, the reload re-ran
-    auth.py's `@limiter.limit(...)` decorators each time, registering a
-    duplicate rate-limit rule against the shared slowapi Limiter singleton
-    per test — 12 tests here meant 12 accumulated duplicate rules for any
-    rate-limited auth route, which was silently starving that route's quota
-    in a DIFFERENT test file's tests whenever both ran in the same session.
+    Do not importlib.reload(api.routers.auth) here. Nothing needs it
+    (everything else either reads env live already, per above, or — like the
+    oauth-tx signer — is fine staying frozen at whatever it was on first
+    import, since every test round-trips through the same frozen instance),
+    and a reload re-runs auth.py's `@limiter.limit(...)` decorators,
+    registering a duplicate rate-limit rule against the shared slowapi
+    Limiter singleton each time. Those accumulate across tests and silently
+    starve a rate-limited auth route's quota in a DIFFERENT test file's tests
+    whenever both run in the same session.
     """
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "g")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "gs")

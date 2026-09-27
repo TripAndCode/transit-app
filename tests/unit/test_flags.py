@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 
@@ -281,9 +283,9 @@ def test_a_missing_table_is_not_treated_as_a_read_failure(monkeypatch):
 
 
 def test_an_unrecognised_env_value_keeps_the_flags_own_default(monkeypatch):
-    """The default-on switches were previously read as "off only when the
-    value is exactly false", so an unrecognised value must not disable
-    them -- a deployment using `on` or `enabled` would go dark."""
+    """An unrecognised value must not disable a default-on switch: those
+    are off only for an explicit false value, and a deployment that set one
+    to `on` or `enabled` would otherwise go dark."""
     monkeypatch.setenv("ASK_QUERY_LOG_ENABLED", "on")
     flags.invalidate()
     assert flags.flag("ask_query_log_enabled", True) is True
@@ -299,42 +301,64 @@ def test_an_unrecognised_env_value_keeps_the_flags_own_default(monkeypatch):
     assert flags.flag("ask_intent_cache_enabled", False) is False
 
 
+#: How long a stand-in database read may be held before a watchdog releases
+#: it. Only a regression -- a reader that waits on the held read -- ever runs
+#: into it, and the watchdog turns that hang into a failure; a passing run
+#: releases the read itself long before.
+_HANG_GUARD_SECONDS = 10.0
+
+
+@contextmanager
+def _held_read() -> Iterator[threading.Event]:
+    """An event a stand-in `_load_overrides` blocks on, set on leaving the block."""
+    release = threading.Event()
+    watchdog = threading.Timer(_HANG_GUARD_SECONDS, release.set)
+    watchdog.start()
+    try:
+        yield release
+    finally:
+        release.set()
+        watchdog.cancel()
+
+
 def test_a_slow_refresh_does_not_block_readers(monkeypatch):
     """`flag()` is called from async request handlers, so a refresh must
     never be something a caller waits on -- not even by way of the lock the
-    refresh holds while it swaps its result in."""
-    import threading
+    refresh holds while it swaps its result in.
 
-    refresh_seconds = 0.3
-
-    def slow_load():
-        time.sleep(refresh_seconds)
-        return {"ask_intent_cache_enabled": (False, "held", 1, None)}
-
-    monkeypatch.setattr(flags, "_load_overrides", slow_load)
-    monkeypatch.setattr(flags, "_CACHE_TTL_SECONDS", 0.05)
+    The refresh is held inside its database read for as long as the readers
+    run, so every reader that returns before the read is released was
+    answered without waiting on it.
+    """
+    key = "ask_intent_cache_enabled"
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {key: (False, "cached", 1, None)})
     flags.warm()
 
-    slowest = 0.0
+    in_read = threading.Event()
+    served: list[bool] = []
+    with _held_read() as release:
 
-    def reader():
-        nonlocal slowest
-        for _ in range(20):
-            started = time.monotonic()
-            flags.flag("ask_intent_cache_enabled", True)
-            slowest = max(slowest, time.monotonic() - started)
-            time.sleep(0.01)
+        def held_load():
+            in_read.set()
+            release.wait()
+            return {key: (True, "refreshed", 1, None)}
 
-    threads = [threading.Thread(target=reader) for _ in range(4)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=20)
-    assert all(not t.is_alive() for t in threads)
-    assert slowest < refresh_seconds / 3, f"a reader waited {slowest * 1000:.0f}ms on the refresh"
+        monkeypatch.setattr(flags, "_load_overrides", held_load)
+        flags._cache_expires_at = 0.0
+        served.append(flags.flag(key, True))  # starts the refresh behind this reader
+        assert in_read.wait(_HANG_GUARD_SECONDS), "an expired read did not start a refresh"
+        for _ in range(3):
+            # Expired again mid-refresh, so each read also passes through the
+            # "is a refresh already running" check under the cache lock.
+            flags._cache_expires_at = 0.0
+            served.append(flags.flag(key, True))
+        waited = release.is_set()
+    assert not waited, "a reader waited on the refresh"
+    assert served == [False] * 4
 
     if flags._refresh_thread is not None:
-        flags._refresh_thread.join(timeout=5)
+        flags._refresh_thread.join(timeout=_HANG_GUARD_SECONDS)
+    assert flags.get_flag_state(key).reason == "refreshed"
 
 
 def test_a_refresh_that_began_before_a_write_cannot_overwrite_it(monkeypatch):
@@ -343,28 +367,32 @@ def test_a_refresh_that_began_before_a_write_cannot_overwrite_it(monkeypatch):
     predates the write, and the PATCH is promised the next read sees the
     new value."""
     key = "ask_intent_cache_enabled"
-    calls = {"n": 0}
-
-    def staged_load():
-        calls["n"] += 1
-        if calls["n"] == 1:
-            time.sleep(0.4)
-            return {key: (True, "before-the-write", 1, None)}
-        return {key: (False, "after-the-write", 1, None)}
-
     monkeypatch.setattr(flags, "_load_overrides", lambda: {})
     flags.warm()
-    monkeypatch.setattr(flags, "_load_overrides", staged_load)
 
-    flags._cache_expires_at = 0.0
-    flags.flag(key, True)  # starts the slow pre-write read in the background
-    time.sleep(0.05)
+    pre_write_read = threading.Event()
+    calls = {"n": 0}
+    with _held_read() as release:
 
-    flags.invalidate()  # the PATCH
-    assert asyncio.run(flags.aget_flag_state(key)).reason == "after-the-write"
+        def staged_load():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                pre_write_read.set()
+                release.wait()
+                return {key: (True, "before-the-write", 1, None)}
+            return {key: (False, "after-the-write", 1, None)}
 
+        monkeypatch.setattr(flags, "_load_overrides", staged_load)
+        flags._cache_expires_at = 0.0
+        flags.flag(key, True)  # starts the pre-write read in the background
+        assert pre_write_read.wait(_HANG_GUARD_SECONDS), "an expired read did not start a refresh"
+
+        flags.invalidate()  # the PATCH
+        assert asyncio.run(flags.aget_flag_state(key)).reason == "after-the-write"
+    # Released only now, so the pre-write read is certain to finish last.
     if flags._refresh_thread is not None:
-        flags._refresh_thread.join(timeout=5)
+        flags._refresh_thread.join(timeout=_HANG_GUARD_SECONDS)
+
     state = flags.get_flag_state(key)
     assert state.reason == "after-the-write", "a refresh that predates the write overwrote it"
     assert state.value is False

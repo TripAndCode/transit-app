@@ -85,13 +85,12 @@ async def test_cache_miss_writes_cache_row(pool_with_agency, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_force_tool_call_appends_json_mode_directive_under_cache(pool_with_agency, monkeypatch):
-    """item 8 review finding: force_tool_call was a silent no-op under
-    ASK_INTENT_CACHE_ENABLED, since JSON mode (response_format=json_object)
-    can't be combined with tool_choice at all — the fix only reached the
-    non-cache branch. Pins that force_tool_call=True instead appends
-    JSON_MODE_FORCE_TOOL_ADDENDUM's prompt-level directive so the model is
-    told it must resolve to a real tool, not null/omitted, even in
-    cache-enabled deployments.
+    """force_tool_call must not be a silent no-op under
+    ASK_INTENT_CACHE_ENABLED. JSON mode (response_format=json_object) can't
+    be combined with tool_choice at all, so under the cache
+    force_tool_call=True appends JSON_MODE_FORCE_TOOL_ADDENDUM's
+    prompt-level directive instead, telling the model it must resolve to a
+    real tool, not null/omitted, even in cache-enabled deployments.
     """
     pool, agency_id = pool_with_agency
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")

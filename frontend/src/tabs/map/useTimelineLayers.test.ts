@@ -1,8 +1,9 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { makeMockMap } from "../../test/mockMap";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeMockMap, type MockLayer } from "../../test/mockMap";
 import { severityStepColors, surfaceColorResolved } from "../../styles/tokens";
+import { applyTheme } from "../../styles/theme";
 import { CROSS_FADE_MS, GHOST_OPACITY } from "./playbackFrames";
 import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
 import {
@@ -122,5 +123,51 @@ describe("useTimelineLayers", () => {
     rerender({ active: false });
     map.fire("dragstart");
     expect(onInteract).not.toHaveBeenCalled();
+  });
+});
+
+describe("useTimelineLayers repaints an existing playback layer", () => {
+  const LIGHT = { "--bg-surface": "#ffffff", "--delay-severe": "#A8391F" };
+  const DARK = { "--bg-surface": "#141726", "--delay-severe": "#F0837A" };
+
+  function paintTokens(tokens: typeof LIGHT) {
+    for (const [prop, value] of Object.entries(tokens)) document.documentElement.style.setProperty(prop, value);
+  }
+
+  afterEach(() => {
+    for (const prop of Object.keys(LIGHT)) document.documentElement.style.removeProperty(prop);
+    delete document.documentElement.dataset.theme;
+  });
+
+  it("re-resolves every theme colour when the theme toggles mid-playback", () => {
+    document.documentElement.dataset.theme = "light";
+    paintTokens(LIGHT);
+    const map = makeMockMap();
+    mount(map, [0, FRAMES, 0, true, false, vi.fn()]);
+
+    paintTokens(DARK);
+    act(() => applyTheme("dark"));
+
+    for (const [property, value] of Object.entries(timelineCirclePaint(CROSS_FADE_MS))) {
+      expect(map.getPaintProperty(TIMELINE_LAYER, property), property).toEqual(value);
+    }
+    expect(map.getPaintProperty(TIMELINE_LAYER, "circle-stroke-color")).toBe(DARK["--bg-surface"]);
+    expect(map.getPaintProperty(TIMELINE_LAYER, "circle-color")).toContain(DARK["--delay-severe"]);
+  });
+
+  it("drops the cross-fade once playback falls back to stepping", () => {
+    const map = makeMockMap();
+    const { rerender } = renderHook(
+      ({ steppingOnly }: { steppingOnly: boolean }) => {
+        const mapRef = useRef(map as never);
+        useTimelineLayers(mapRef, 0, FRAMES, 0, true, steppingOnly, vi.fn());
+      },
+      { initialProps: { steppingOnly: false } },
+    );
+    expect((map.getLayer(TIMELINE_LAYER) as MockLayer).paint?.["circle-opacity-transition"])
+      .toEqual({ duration: CROSS_FADE_MS, delay: 0 });
+
+    rerender({ steppingOnly: true });
+    expect(map.getPaintProperty(TIMELINE_LAYER, "circle-opacity-transition")).toEqual({ duration: 0, delay: 0 });
   });
 });

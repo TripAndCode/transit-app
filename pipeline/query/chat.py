@@ -551,8 +551,8 @@ async def chat_with_tools(
                 # An agg_* table missing (migration/analyze behind) must propagate
                 # to FastAPI's registered aggregate_not_ready_handler so the
                 # frontend gets the machine-readable {"code": "aggregate_not_ready"}
-                # 503 it reacts to — not a generic 200 tool_error that masks it
-                # (mirrors api/routers/ask.py's Fix-8f convention).
+                # 503 it reacts to — not a generic 200 tool_error that masks it,
+                # the same carve-out _dispatch_and_respond makes.
                 raise
             except Exception:
                 _log.exception("Build-mode dispatch failed for %s", build_tool)

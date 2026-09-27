@@ -13,11 +13,14 @@ export function PatternFilters({ agencyId, codes, onChange }: {
   const query = useRoutes(agencyId);
   const routes = query.data ?? [];
   const groups = routeGroups(routes);
+  const routesByGroup = new Map(groups);
+  // Both `selectedGroup` and the line select name groups from this same list,
+  // so a lookup misses only for "": no line selected, or "All lines" chosen.
   const group = selectedGroup(routes, codes);
-  const options = group ? (groups.find(([name]) => name === group)?.[1] ?? routes) : routes;
+  const options = routesByGroup.get(group) ?? routes;
   return <>
     <label>{t("line")}<select value={group} disabled={query.isPending} onChange={(e) => {
-      onChange(e.target.value ? [...new Set((groups.find(([name]) => name === e.target.value)?.[1] ?? routes).flatMap((r) => r.route_code ? [r.route_code] : []))] : []);
+      onChange([...new Set((routesByGroup.get(e.target.value) ?? []).flatMap((r) => r.route_code ? [r.route_code] : []))]);
     }}><option value="">{t("allLines")}</option>{groups.map(([name]) => <option key={name} value={name}>{name}</option>)}</select></label>
     <label>{t("pattern")}<select value={codes.length === 1 ? codes[0] : ""} disabled={query.isPending} onChange={(e) => {
       onChange(e.target.value ? [e.target.value] : group ? options.flatMap((r) => r.route_code ? [r.route_code] : []) : []);

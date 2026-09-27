@@ -18,18 +18,11 @@ from fastapi.testclient import TestClient
 
 from api.deps import get_conn
 from api.routers import admin_flags
-from api.security import User, require_admin
+from api.security import require_admin
 from pipeline import flags
+from tests.fixtures.users import admin_user
 
-_ADMIN = User(
-    user_id=42,
-    email="admin@example.com",
-    name="Admin",
-    avatar_url=None,
-    role="admin",
-    suspended_at=None,
-    llm_approved=True,
-)
+_ADMIN = admin_user(user_id=42)
 
 _KEY = "weather_ingest_enabled"
 

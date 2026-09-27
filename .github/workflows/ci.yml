@@ -75,8 +75,11 @@ jobs:
       - name: Dead-code check
         run: npm run deadcode
 
-      - name: Unit tests
-        run: npm run test
+      # The coverage run is the unit-test run, not a second pass over the
+      # suite: it fails on a failing test and on coverage below the thresholds
+      # in vitest.config.ts alike, which nothing else enforces.
+      - name: Unit tests + coverage thresholds
+        run: npm run test:coverage
 
       # Fixture-based positive/negative controls for check-entry-chunk.mjs
       # itself — doesn't need a real build, just proves the detection logic

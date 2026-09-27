@@ -22,18 +22,11 @@ from fastapi.testclient import TestClient
 
 from api.deps import get_conn
 from api.routers import admin as admin_router
-from api.security import User, require_admin
+from api.security import require_admin
 from pipeline.query import admin_audit as aa
+from tests.fixtures.users import admin_user
 
-_ADMIN = User(
-    user_id=1,
-    email="admin@example.com",
-    name="Admin",
-    avatar_url=None,
-    role="admin",
-    suspended_at=None,
-    llm_approved=True,
-)
+_ADMIN = admin_user()
 
 T0 = datetime(2026, 9, 20, 12, 0, 0, tzinfo=timezone.utc)
 
