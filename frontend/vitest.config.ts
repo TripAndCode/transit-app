@@ -36,7 +36,10 @@ export default defineConfig({
     // and the next one silently inherits them.
     unstubGlobals: true,
     // Provided by the `@vitest/coverage-v8` dev dependency (see
-    // package.json), matching this repo's vitest ^4.1.8.
+    // package.json), matching this repo's vitest ^4.1.8. CI's frontend job
+    // runs the suite as `test:coverage`, so these thresholds gate every pull
+    // request. With no `include`, only files some test loads are measured: a
+    // module no test imports lowers nothing.
     coverage: {
       provider: "v8",
       reporter: ["text-summary"],
