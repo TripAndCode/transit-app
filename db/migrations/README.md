@@ -51,6 +51,33 @@ add a migration that uses `CONCURRENTLY`; it will fail at apply time with a
 without locking out writes on a large table needs a one-off script run outside
 `migrate up`, not a migration file.
 
+The migration keeps its plain `CREATE INDEX IF NOT EXISTS`, which builds the
+index on a fresh database. On a database that already holds the data, the same
+name and definition is built `CONCURRENTLY` before the release is promoted, and
+the migration then finds it and skips the build.
+`scripts/prebuild_indexes_concurrently.sql` is that script: an index belongs in
+it, under a guard on its migration's version, when that migration builds it on
+a table that already exists. Its header covers running it and recovering from a
+failed build; `tests/unit/test_prebuild_indexes_script.py` holds each statement
+to its migration's.
+
+## Compatibility with releases that predate `0053`
+
+`0062_hash_tokens_legacy_compat` keeps a release older than `0053_hash_tokens`
+working against the hashed tables: a trigger derives `sid_hash` / `key_hash`
+for a row inserted with only the raw `sid` / `key`, and `idx_sessions_sid` /
+`idx_api_keys_key` index the raw columns that release looks rows up by. It is
+needed for as long as such a release can serve against the database: during
+the deploy that applies `0053`, and after any rollback of the app to such a
+release.
+
+Drop the two triggers, their functions and the two indexes in a later release,
+before or in the same migration as the one that drops the raw `sid` / `key`
+columns. The functions read `NEW.sid` / `NEW.key`, so dropping a column while
+its trigger exists makes every insert into that table fail. Dropping them also
+ends any rollback of the app to a release older than `0053`: it could no longer
+sign anyone in.
+
 ## Follow-up: dropping the raw `sessions.sid` / `api_keys.key` columns
 
 `0053_hash_tokens` added `sid_hash`/`key_hash` primary keys but left the raw
