@@ -88,7 +88,7 @@ const STATIC_CLOSURE_BUDGET_BYTES = 600 * 1024;
 // static closure ships every visitor a language they may never see. The
 // budget above has room for one, so this is checked by name. A locale
 // folded into a shared chunk loses its manifest key; the build's
-// locale-chunk-map plugin (vite.config.ts) fails on that case.
+// locale-chunk-map plugin (scripts/localeChunkMap.mjs) fails on that case.
 const LOCALE_MANIFEST_KEY_RE = /^src\/i18n\/locales\/[^/]+\.json$/;
 
 // Matches <script ... src="...">, <link ... href="...">, single- or
