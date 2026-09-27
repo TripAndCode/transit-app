@@ -23,9 +23,10 @@
     <script>
       // Starts downloading the active language's strings alongside the entry
       // chunk instead of after it runs. Mirrors the language resolution in
-      // src/i18n/index.ts (stored choice, then navigator, else ja);
-      // src/i18n/localeLoading.test.tsx asserts the two agree. The build
-      // replaces the placeholder with each language's chunk URL.
+      // src/i18n/index.ts (stored choice, then navigator, else ja); the
+      // "index.html locale preload" tests in src/i18n/localeLoading.test.tsx
+      // keep the two in agreement. The build replaces the placeholder with
+      // each language's chunk URL.
       (function (chunks) {
         function has(code) {
           return Object.prototype.hasOwnProperty.call(chunks, code);

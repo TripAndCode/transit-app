@@ -1,12 +1,15 @@
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { LocaleUnavailable } from "./components/LocaleUnavailable";
 
-const { localeReady, createRoot } = vi.hoisted(() => {
-  let resolve!: () => void;
-  const promise = new Promise<void>((r) => (resolve = r));
-  const render = () => {};
+const { localeReady, createRoot, renderRoot } = vi.hoisted(() => {
+  let resolve!: (loaded: boolean) => void;
+  const promise = new Promise<boolean>((r) => (resolve = r));
+  const renderRoot = vi.fn();
   return {
     localeReady: { promise, resolve },
-    createRoot: vi.fn(() => ({ render })),
+    createRoot: vi.fn(() => ({ render: renderRoot })),
+    renderRoot,
   };
 });
 
@@ -24,7 +27,9 @@ describe("app bootstrap", () => {
     await Promise.resolve();
     expect(createRoot).not.toHaveBeenCalled();
 
-    localeReady.resolve();
+    localeReady.resolve(true);
     await vi.waitFor(() => expect(createRoot).toHaveBeenCalledTimes(1));
+    const [tree] = renderRoot.mock.calls[0] as [ReactElement<{ children: ReactElement }>];
+    expect(tree.props.children.type).not.toBe(LocaleUnavailable);
   });
 });

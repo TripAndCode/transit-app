@@ -42,6 +42,7 @@ export const design = {
     filterNote: "路線は系統番号を除いた路線名でまとめています。系統番号は配信元の識別子です。",
     exportMenu: "エクスポート", downloadPng: "PNG画像をダウンロード",
     copyLinkFallback: "このリンクを選択してコピーしてください", pngFailed: "画像を作成できませんでした",
+    stringsUnavailable: "画面の表示に必要なデータを読み込めませんでした。再読み込みしてください。", reload: "再読み込み",
   },
   en: {
     overview: "Overview", operations: "Operations", period_overview: "Period overview", analysis: "Segment analysis", reports: "Reports", live: "Current observations",
@@ -86,5 +87,6 @@ export const design = {
     filterNote: "Routes are grouped by name with the pattern number removed. Pattern codes are the source identifiers.",
     exportMenu: "Export", downloadPng: "Download PNG",
     copyLinkFallback: "Select this link to copy it", pngFailed: "Could not create the image",
+    stringsUnavailable: "The app's text could not be loaded. Please reload the page.", reload: "Reload",
   },
 };

@@ -72,10 +72,33 @@ describe("locale loading", () => {
     expect(localStorage.getItem("app.locale")).toBe("en");
   });
 
+  it("retries a failed fetch of the active language before first render", async () => {
+    localStorage.setItem("app.locale", "ja");
+    const loadJa = vi
+      .fn<() => Promise<typeof ja>>()
+      .mockRejectedValueOnce(new Error("network blip"))
+      .mockImplementation(async () => (await import("./locales/ja.json")).default);
+    const instance = i18next.createInstance();
+    const loaded = await initI18n(instance, { ja: loadJa, en: async () => (await import("./locales/en.json")).default });
+    expect(loadJa).toHaveBeenCalledTimes(2);
+    expect(loaded).toBe(true);
+    expect(instance.t(KEY)).toBe(ja.common.language_aria);
+  });
+
+  it("reports the active language unavailable once its retries run out", async () => {
+    localStorage.setItem("app.locale", "ja");
+    const loadJa = vi.fn(() => Promise.reject(new Error("chunk removed by a deploy")));
+    const instance = i18next.createInstance();
+    const loaded = await initI18n(instance, { ja: loadJa, en: async () => (await import("./locales/en.json")).default });
+    expect(loaded).toBe(false);
+    expect(loadJa.mock.calls.length).toBeGreaterThan(1);
+    expect(instance.hasResourceBundle("ja", "translation")).toBe(false);
+  });
+
   it("stays on the current language when the other can't be fetched", async () => {
     localStorage.setItem("app.locale", "ja");
     const instance = await initFresh({
-      ja: () => import("./locales/ja.json"),
+      ja: async () => (await import("./locales/ja.json")).default,
       en: () => Promise.reject(new Error("network down")),
     });
     await changeLocale(instance, "en");
