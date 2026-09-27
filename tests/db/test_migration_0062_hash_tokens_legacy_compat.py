@@ -163,8 +163,24 @@ async def test_the_legacy_api_key_lookup_works(aconn):
 def test_raw_lookups_can_use_the_raw_index(pg_conn, statement, index):
     """The partial index is usable for a bound parameter, which is how the
     release issues these (asyncpg prepares every statement). A generic plan
-    is the case that proves it: a custom plan sees the literal value."""
+    is the case that proves it: a custom plan sees the literal value.
+
+    The tables are filled and analyzed first. Nearly empty, every index costs
+    about the same, so the planner's pick would depend on whatever statistics
+    earlier tests left behind rather than on this index being usable."""
     with pg_conn.cursor() as cur:
+        cur.execute("INSERT INTO users (email, name, role) VALUES ('plan@test', 'Plan', 'user') RETURNING user_id")
+        (user_id,) = cur.fetchone()
+        cur.execute(
+            "INSERT INTO sessions (sid, user_id, expires_at) "
+            "SELECT 'sid-' || g, %s, now() + interval '1 day' FROM generate_series(1, 2000) g",
+            (user_id,),
+        )
+        cur.execute(
+            "INSERT INTO api_keys (key, owner_email) SELECT 'key-' || g, 'plan@test' FROM generate_series(1, 2000) g"
+        )
+        cur.execute("ANALYZE sessions")
+        cur.execute("ANALYZE api_keys")
         cur.execute("SET enable_seqscan = off")
         cur.execute("SET plan_cache_mode = force_generic_plan")
         cur.execute(f"PREPARE legacy_lookup(text) AS {statement}")
