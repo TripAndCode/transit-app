@@ -204,6 +204,17 @@ describe("DataTable", () => {
     expect(stale).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("presses the first saved view for a ?view= id it does not offer", () => {
+    // A stale or hand-edited link must still leave one chip describing
+    // what the page is showing, not none.
+    wrap(
+      <Harness savedViews={[{ id: "all", label: "All" }, { id: "stale", label: "Stale" }]} />,
+      ["/admin/agencies?view=retired"],
+    );
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Stale" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("renders an empty state instead of a body when there are no rows", () => {
     render(
       <I18nextProvider i18n={i18n}>
