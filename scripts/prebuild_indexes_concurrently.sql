@@ -68,6 +68,9 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ask_conversations_user_agency_pinned
     ON ask_conversations (user_id, agency_id, pinned DESC, updated_at DESC);
 \endif
 
+-- 0060's admin_audit and pipeline_runs indexes are left to 0060: those tables
+-- come from 0057 / 0059, which the same `migrate up` applies, so here they do
+-- not exist yet and when 0060 builds the indexes they are empty.
 \if :pending_0060
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ask_query_log_created_id
     ON ask_query_log (created_at DESC, id DESC);

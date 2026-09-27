@@ -17,6 +17,19 @@ _CREATE_INDEX_RE = re.compile(r"^CREATE\s+(UNIQUE\s+)?INDEX\b", re.IGNORECASE)
 _CONCURRENTLY_RE = re.compile(r"^(CREATE\s+(?:UNIQUE\s+)?INDEX)\s+CONCURRENTLY\b", re.IGNORECASE)
 _GUARD_RE = re.compile(r"^\\if\s+:pending_(\d{4})\s*$")
 _GUARD_VAR_RE = re.compile(r"version\s*=\s*'(\d{4})'\s*\)\s*AS\s+pending_(\d{4})", re.IGNORECASE)
+_INDEX_NAME_RE = re.compile(
+    r"^CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(\w+)", re.IGNORECASE
+)
+
+#: Indexes a guarded migration builds that the script deliberately does not,
+#: keyed by (migration version, index name): their table is created by an
+#: earlier migration of the same release, so it does not exist when the script
+#: runs and is empty when the migration builds the index.
+_LEFT_TO_ITS_MIGRATION = {
+    ("0060", "idx_admin_audit_actor_at"): "admin_audit is created by 0057",
+    ("0060", "idx_admin_audit_action_at"): "admin_audit is created by 0057",
+    ("0060", "pipeline_runs_running_started_at_idx"): "pipeline_runs is created by 0059",
+}
 
 
 def _normalize(statement: str) -> str:
@@ -79,6 +92,30 @@ def test_every_index_matches_its_guarding_migration():
         assert as_migrated in _migration_create_indexes(guard), (
             f"{statement!r} does not match any CREATE INDEX in migration {guard}"
         )
+
+
+def _index_name(statement: str) -> str:
+    match = _INDEX_NAME_RE.match(statement)
+    assert match, statement
+    return match.group(1)
+
+
+def test_every_index_a_guarded_migration_builds_is_prebuilt_or_deliberately_left():
+    """The converse of the check above: a guarded migration's index missing
+    from the script must be a listed, explained exception, not an oversight."""
+    prebuilt: dict[str, set[str]] = {}
+    for guard, statement in _script_create_indexes():
+        assert guard is not None
+        prebuilt.setdefault(guard, set()).add(_index_name(statement))
+    for version, names in prebuilt.items():
+        built = {_index_name(s) for s in _migration_create_indexes(version)}
+        left = {name for (v, name) in _LEFT_TO_ITS_MIGRATION if v == version}
+        assert built - names == left, (
+            f"migration {version} builds {sorted(built - names - left)} which the script neither "
+            f"pre-builds nor lists in _LEFT_TO_ITS_MIGRATION; stale entries: {sorted(left - (built - names))}"
+        )
+    unguarded = {v for v, _ in _LEFT_TO_ITS_MIGRATION} - prebuilt.keys()
+    assert not unguarded, f"_LEFT_TO_ITS_MIGRATION names migrations the script does not guard: {unguarded}"
 
 
 def test_every_guard_tests_its_own_migration():
