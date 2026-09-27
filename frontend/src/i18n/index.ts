@@ -96,9 +96,12 @@ export async function initI18n(instance: I18n, loaders: TranslationLoaders = tra
 
 /** Switches the UI language once its strings have loaded. i18next would
  *  switch even when the fetch fails and render bare keys, so a failed fetch
- *  leaves the current language in place instead. */
+ *  leaves the current language in place instead. The strings are read with
+ *  `reloadResources`, not `loadLanguages`: the latter remembers a language
+ *  as requested even when its load failed and never asks again, so a switch
+ *  that failed once would do nothing for the rest of the page. */
 export async function changeLocale(instance: I18n, lng: Locale): Promise<void> {
-  await instance.loadLanguages(lng);
+  if (!instance.hasResourceBundle(lng, "translation")) await instance.reloadResources(lng, "translation");
   if (instance.hasResourceBundle(lng, "translation")) await instance.changeLanguage(lng);
 }
 

@@ -106,6 +106,25 @@ describe("locale loading", () => {
     expect(instance.t(KEY)).toBe(ja.common.language_aria);
   });
 
+  it("switches on a later attempt once a language that failed to load can be fetched", async () => {
+    localStorage.setItem("app.locale", "ja");
+    let enReachable = false;
+    const instance = await initFresh({
+      ja: async () => (await import("./locales/ja.json")).default,
+      en: async () => {
+        if (!enReachable) throw new Error("network down");
+        return (await import("./locales/en.json")).default;
+      },
+    });
+    await changeLocale(instance, "en");
+    expect(instance.language).toBe("ja");
+
+    enReachable = true;
+    await changeLocale(instance, "en");
+    expect(instance.language).toBe("en");
+    expect(instance.t(KEY)).toBe(en.common.language_aria);
+  });
+
   it("renders the active language's strings first and the other's after switching", async () => {
     localStorage.setItem("app.locale", "ja");
     const instance = await initFresh();
