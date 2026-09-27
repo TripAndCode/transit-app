@@ -66,14 +66,14 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
     cursor: cursorStack[pageIndex],
   });
   const promote = usePromoteAskQuery();
-  /** The row a promotion is in flight for. Only that row's button goes
+  /** The rows a promotion is in flight for. Only those rows' buttons go
    *  pending — one slow embedding must not disable every other row's. */
-  const [promotingId, setPromotingId] = useState<number | null>(null);
+  const [promotingIds, setPromotingIds] = useState<ReadonlySet<number>>(() => new Set());
   const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
 
   async function handlePromote(queryLogId: number) {
     setPromoteMessage(null);
-    setPromotingId(queryLogId);
+    setPromotingIds((ids) => new Set(ids).add(queryLogId));
     try {
       const result = await promote.mutateAsync(queryLogId);
       if (result.promoted) {
@@ -86,7 +86,11 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
     } catch {
       setPromoteMessage(t("admin.ask_ops.promote_error"));
     } finally {
-      setPromotingId(null);
+      setPromotingIds((ids) => {
+        const next = new Set(ids);
+        next.delete(queryLogId);
+        return next;
+      });
     }
   }
 
@@ -145,7 +149,7 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
         row.promotable ? (
           <AdminButton
             variant="secondary"
-            disabled={promotingId !== null}
+            disabled={promotingIds.has(row.id)}
             onClick={() => handlePromote(row.id)}
           >
             {t("admin.ask_ops.promote_action")}
