@@ -11,7 +11,7 @@ import {
   ToggleLeft,
   type LucideIcon,
 } from "lucide-react";
-import { useAdminUsers } from "../../api/admin";
+import { usePendingApprovalCount } from "./pendingApprovals";
 
 type NavItem = { to: string; end?: boolean; labelKey: string; Icon: LucideIcon; badge?: "approvals" };
 
@@ -46,20 +46,12 @@ const NAV_GROUPS: readonly { groupKey: string; items: readonly NavItem[] }[] = [
   },
 ];
 
-/** Users who can sign in but cannot use the AI features yet — the one admin
- *  queue that builds up silently, so it gets a badge rather than waiting to
- *  be discovered on the users page. */
-function useApprovalsWaiting(): number {
-  // `total` counts every match, so this asks the server the question rather
-  // than filtering a page of rows -- a page-limited list stops counting once
-  // the table outgrows it, and the badge silently undercounts from then on.
-  const { data } = useAdminUsers({ llmApproved: "false", suspended: "false", limit: 1 });
-  return data?.total ?? 0;
-}
-
 export function AdminLayout() {
   const { t } = useTranslation();
-  const approvals = useApprovalsWaiting();
+  // Users who can sign in but cannot use the AI features yet -- the one
+  // admin queue that builds up silently, so it gets a badge rather than
+  // waiting to be discovered on the users page.
+  const approvals = usePendingApprovalCount();
 
   return (
     <div style={{ display: "flex", minHeight: "100%", flex: 1 }}>

@@ -22,11 +22,15 @@ function FlagReasonDialog({
   onCancel,
   onConfirm,
   isPending,
+  failed,
 }: {
   pending: PendingChange;
   onCancel: () => void;
   onConfirm: (reason: string) => void;
   isPending: boolean;
+  /** The last confirm did not save. Said here, beside the reason it kept,
+   *  because the dialog stays open over the page. */
+  failed: boolean;
 }) {
   const { t } = useTranslation();
   const [reason, setReason] = useState("");
@@ -67,6 +71,14 @@ function FlagReasonDialog({
             boxSizing: "border-box",
           }}
         />
+        {failed && (
+          <p
+            role="alert"
+            style={{ margin: "10px 0 0", fontSize: "var(--text-sm)", color: "var(--color-warning-text, #89691F)" }}
+          >
+            {t("admin.flags.save_error")}
+          </p>
+        )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
           <AdminButton variant="secondary" onClick={onCancel} disabled={isPending}>
             {t("common.cancel")}
@@ -145,7 +157,15 @@ export function AdminFlagsPage() {
     {
       key: "value",
       header: t("admin.flags.col_value"),
-      render: (f) => <FlagToggle flag={f} onRequestChange={(nextValue) => setPending({ flag: f, nextValue })} />,
+      render: (f) => (
+        <FlagToggle
+          flag={f}
+          onRequestChange={(nextValue) => {
+            patch.reset();
+            setPending({ flag: f, nextValue });
+          }}
+        />
+      ),
     },
     {
       key: "source",
@@ -200,6 +220,7 @@ export function AdminFlagsPage() {
         <FlagReasonDialog
           pending={pending}
           isPending={patch.isPending}
+          failed={patch.error != null}
           onCancel={() => setPending(null)}
           onConfirm={(reason) => {
             patch.mutate(

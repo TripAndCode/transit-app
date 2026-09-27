@@ -122,14 +122,6 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             <span>{t("common.language_aria")}</span>
             <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>{LOCALE_LABELS[current]}</span>
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            style={popItemStyle}
-          >
-            <span>{theme === "dark" ? t("common.theme_toggle_to_light") : t("common.theme_toggle_to_dark")}</span>
-          </button>
           {/* Three states, not a two-way toggle: "system" has to be reachable
               and distinguishable from whichever theme it currently resolves
               to. menuitemradio (not radio) because these live inside a menu,

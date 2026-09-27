@@ -275,12 +275,11 @@ def date_range_clause(
 
     ``column_type="timestamptz"`` (``updates.captured_at``): emits half-open
     timestamptz bounds (midnight-to-midnight in the session timezone — JST,
-    set by api/main._init_connection) instead of the previous
-    ``column::date BETWEEN $a AND $b``. The cast on the *column* side defeated
-    ``idx_updates_agency_at`` and forced full seq scans of ``updates``; the
-    half-open form is index-sargable and date-equivalent under the same
-    session TZ (verified row-count-identical on live data; a 7-day window
-    scan went 340ms → 70ms).
+    set by api/main._init_connection) rather than
+    ``column::date BETWEEN $a AND $b``. A cast on the *column* side defeats
+    ``idx_updates_agency_at`` and forces a full seq scan of ``updates``; the
+    half-open form is index-sargable and selects the same rows under the same
+    session TZ.
 
     ``column_type="text_date"`` (agg tables store ISO date strings): keeps the
     ``column::date BETWEEN`` form — those tables are small aggregates with no
