@@ -185,11 +185,11 @@ describe("AgencyDiagnosticsDrawer", () => {
     expect(screen.getByText("Kanazawa (47605)")).toBeTruthy();
   });
 
-  it("offers the three feed actions, with static reload disabled until its endpoint exists", () => {
+  it("offers only the feed actions that have an endpoint behind them", () => {
     renderDrawer();
     expect(screen.getByRole("button", { name: /check the feed now/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /reload static data/i })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: /re-aggregate this agency only/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /reload static/i })).toBeNull();
   });
 
   it("triggers a probe and a re-aggregate for this agency", async () => {

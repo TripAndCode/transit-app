@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useNavigate } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { AdminUsersPage } from "./AdminUsersPage";
+import { AdminLayout } from "./AdminLayout";
+import { PENDING_APPROVAL_FILTER } from "./pendingApprovals";
 import { ToastProvider } from "../../components/ui/Toast";
 import { ApiError } from "../../api/client";
 
@@ -127,7 +129,8 @@ describe("AdminUsersPage", () => {
     useSessionMock.mockReturnValue({ data: { user_id: 999, role: "admin" } });
     patchMutate.mockClear();
     patchReset.mockClear();
-    delMutate.mockClear();
+    delMutate.mockReset();
+    delMutate.mockResolvedValue(undefined);
     delReset.mockClear();
     bulkMutate.mockClear();
   });
@@ -399,7 +402,33 @@ describe("AdminUsersPage", () => {
       expect(delMutate).toHaveBeenCalledWith(1);
       expect(delMutate).toHaveBeenCalledWith(2);
       expect(screen.queryByRole("dialog")).toBeNull();
+      await vi.waitFor(() => expect(screen.queryByTestId("admin-users-bulk-bar")).toBeNull());
       confirmSpy.mockRestore();
+    });
+
+    it("attempts every id of a bulk delete, names the ones that failed, and keeps only those selected", async () => {
+      // One failure must not strand the rest of the batch unattempted, and
+      // the operator has to learn which rows are still there to retry.
+      delMutate.mockImplementation((uid: number) =>
+        uid === 1 ? Promise.reject(new ApiError(400, JSON.stringify({ detail: "would leave no admins" }))) : Promise.resolve(),
+      );
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+      await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Delete" }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+
+      await vi.waitFor(() => expect(delMutate).toHaveBeenCalledTimes(2));
+      expect(delMutate).toHaveBeenCalledWith(1);
+      expect(delMutate).toHaveBeenCalledWith(2);
+      const notice = await screen.findByRole("alert");
+      expect(notice).toHaveTextContent(
+        i18n.t("admin.users.bulk.delete_failed", { failed: 1, total: 2, emails: "active@example.com" }),
+      );
+      expect(notice).not.toHaveTextContent("suspended@example.com");
+      expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", true);
+      expect(screen.getByRole("checkbox", { name: "Select suspended@example.com" })).toHaveProperty("checked", false);
+      expect(screen.getByText("1 selected")).toBeTruthy();
     });
 
     it("deletes nothing when the bulk delete dialog is cancelled", async () => {
@@ -434,14 +463,64 @@ describe("AdminUsersPage", () => {
       expect(screen.getByText("2")).toBeTruthy();
     });
 
-    it("selecting the pending-approval view sets llm_approved=false and clears role/suspended", async () => {
+    it("selecting the pending-approval view applies the shared pending filter and clears role", async () => {
       const user = userEvent.setup();
       wrap(["/admin/users?role=admin&suspended=true"]);
       useAdminUsersMock.mockClear();
       await user.click(screen.getByRole("button", { name: /Pending approval/ }));
       expect(useAdminUsersMock).toHaveBeenLastCalledWith(
-        expect.objectContaining({ role: "", suspended: "", llmApproved: "false" }),
+        expect.objectContaining({ role: "", ...PENDING_APPROVAL_FILTER }),
       );
+      expect(screen.getByRole("button", { name: /Pending approval/ })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("counts the same users in the nav badge, the Pending chip, and the Pending view's rows", async () => {
+      // A suspended user -- every soft-deleted one included -- is not
+      // waiting on an approval decision, so it must be in none of the three.
+      const people = [
+        { ...twoUsers().data.users[0], user_id: 1, email: "waiting@example.com", role: "user" as const },
+        { ...twoUsers().data.users[1], user_id: 2, email: "deleted-2@local" },
+        { ...twoUsers().data.users[0], user_id: 3, email: "approved@example.com", role: "user" as const, llm_approved: true },
+      ];
+      useAdminUsersMock.mockImplementation(
+        (params: { role?: string; suspended?: string; llmApproved?: string; limit?: number }) => {
+          const matched = people.filter(
+            (u) =>
+              (!params.role || u.role === params.role) &&
+              (!params.suspended || (u.suspended_at !== null) === (params.suspended === "true")) &&
+              (!params.llmApproved || u.llm_approved === (params.llmApproved === "true")),
+          );
+          return {
+            data: { users: matched.slice(0, params.limit ?? 50), total: matched.length },
+            isLoading: false,
+            error: null,
+          };
+        },
+      );
+      const user = userEvent.setup();
+      render(
+        <I18nextProvider i18n={i18n}>
+          <QueryClientProvider client={new QueryClient()}>
+            <MemoryRouter initialEntries={["/admin/users"]}>
+              <ToastProvider>
+                <Routes>
+                  <Route path="/admin" element={<AdminLayout />}>
+                    <Route path="users" element={<AdminUsersPage />} />
+                  </Route>
+                </Routes>
+              </ToastProvider>
+            </MemoryRouter>
+          </QueryClientProvider>
+        </I18nextProvider>,
+      );
+      const chip = screen.getByRole("button", { name: /Pending approval/ });
+      await user.click(chip);
+
+      const badge = screen.getByTestId("nav-badge").textContent;
+      expect(badge).toBe("1");
+      expect(within(chip).getByText(badge!)).toBeTruthy();
+      expect(dataRows()).toHaveLength(Number(badge));
+      expect(within(screen.getByRole("grid")).getByText("waiting@example.com")).toBeTruthy();
     });
 
     it("marks the admins view active from the role=admin URL param", () => {

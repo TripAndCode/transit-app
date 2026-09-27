@@ -392,4 +392,37 @@ describe("NetworkTab", () => {
     expect(inputs.length).toBe(2);
     inputs.forEach((el) => expect(el.getAttribute("lang")).toBe("en"));
   });
+
+  it("keeps a raised agency cap across a refetch of the same range and re-caps when the range changes", async () => {
+    const user = userEvent.setup();
+    // A fresh payload per call: every refetch hands back new objects even
+    // when nothing in them changed.
+    const summary = () => ({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: Array.from({ length: 250 }, (_, i) => row({ agency_id: i + 1, agency_name: `Agency ${i + 1}` })),
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    });
+    let current = summary();
+    vi.spyOn(hooks, "useNetworkSummary").mockImplementation(() => current as never);
+    const ui = () => (
+      <MemoryRouter initialEntries={["/agencies/1/network?from=2026-04-01&to=2026-04-07"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/network" element={<NetworkTab />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const { rerender } = renderWithProviders(ui());
+    expect(screen.getAllByTestId("network-row")).toHaveLength(200);
+    await user.click(screen.getByRole("button", { name: "Show 50 more" }));
+    expect(screen.getAllByTestId("network-row")).toHaveLength(250);
+
+    current = summary();
+    rerender(ui());
+    expect(screen.getAllByTestId("network-row")).toHaveLength(250);
+
+    fireEvent.change(document.querySelector("input[type='date']")!, { target: { value: "2026-03-25" } });
+    expect(screen.getAllByTestId("network-row")).toHaveLength(200);
+  });
 });

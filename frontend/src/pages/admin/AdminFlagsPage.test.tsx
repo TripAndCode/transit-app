@@ -11,12 +11,31 @@ const patchMutate = vi.fn();
 const clearMutate = vi.fn();
 const clearState = { mutate: clearMutate, isPending: false, error: null as Error | null };
 const useFeatureFlagsMock = vi.fn();
+/** What the next PATCH fails with; `null` lets it succeed. */
+let patchFailure: Error | null = null;
 
-vi.mock("../../api/admin", () => ({
-  useFeatureFlags: () => useFeatureFlagsMock(),
-  usePatchFeatureFlag: () => ({ mutate: patchMutate, isPending: false, error: null }),
-  useClearFeatureFlag: () => clearState,
-}));
+vi.mock("../../api/admin", async () => {
+  // The PATCH hook keeps its error in React state, as react-query's does,
+  // so a failed save re-renders the page the way the real one would.
+  const { useState } = await import("react");
+  return {
+    useFeatureFlags: () => useFeatureFlagsMock(),
+    usePatchFeatureFlag: () => {
+      const [error, setError] = useState<Error | null>(null);
+      return {
+        mutate: (vars: unknown, opts?: { onSuccess?: () => void }) => {
+          patchMutate(vars, opts);
+          if (patchFailure) setError(patchFailure);
+          else opts?.onSuccess?.();
+        },
+        reset: () => setError(null),
+        isPending: false,
+        error,
+      };
+    },
+    useClearFeatureFlag: () => clearState,
+  };
+});
 
 function twoFlags() {
   return {
@@ -72,6 +91,7 @@ describe("AdminFlagsPage", () => {
     useFeatureFlagsMock.mockReset();
     useFeatureFlagsMock.mockReturnValue(twoFlags());
     patchMutate.mockClear();
+    patchFailure = null;
     clearMutate.mockClear();
     clearState.isPending = false;
     clearState.error = null;
@@ -138,6 +158,25 @@ describe("AdminFlagsPage", () => {
       { key: "ask_router_enabled", value: false, reason: "turning it off for a load test" },
       expect.anything()
     );
+  });
+
+  it("keeps the dialog open with a message when the save fails, and starts the next one clean", async () => {
+    patchFailure = new Error("nope");
+    const user = userEvent.setup();
+    wrap();
+    const row = screen.getByText("Ask: rules router").closest("tr")!;
+    await user.click(within(row).getByRole("switch"));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox"), "turning it off for a load test");
+    await user.click(within(dialog).getByRole("button", { name: /confirm|save/i }));
+
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(i18n.t("admin.flags.save_error"));
+    expect(within(dialog).getByRole("textbox")).toHaveValue("turning it off for a load test");
+
+    await user.click(within(dialog).getByRole("button", { name: /cancel/i }));
+    await user.click(within(row).getByRole("switch"));
+    expect(within(screen.getByRole("dialog")).queryByRole("alert")).toBeNull();
   });
 
   it("closes the dialog without mutating on cancel", async () => {
