@@ -18,6 +18,8 @@ FRONTEND = ROOT / "frontend"
 METRICS = ("lines", "statements", "branches", "functions")
 #: The floors this gate enforces; a change to the set is a policy change, made here.
 REQUIRED_METRICS = {"lines", "statements"}
+#: Keys that keep the coverage step in the workflow without it failing the check.
+_DISARMING_KEYS = ("if", "continue-on-error")
 
 
 def _frontend_commands() -> list[list[str]]:
@@ -38,11 +40,13 @@ def test_frontend_job_runs_the_suite_through_the_coverage_script() -> None:
     )
 
 
-def test_the_coverage_step_is_never_skipped() -> None:
+def test_the_coverage_step_always_runs_and_can_fail() -> None:
     """An `if:` on the step or the job would keep the command in the file
-    while CI stops running it."""
+    while CI stops running it, and `continue-on-error` would keep running it
+    while a failure no longer fails the check."""
     job = _workflow_yaml()["jobs"]["frontend"]
-    assert "if" not in job, f"the frontend job runs conditionally: {job['if']!r}"
+    for key in _DISARMING_KEYS:
+        assert key not in job, f"the frontend job sets {key}: {job[key]!r}"
     steps = [
         step
         for step in job["steps"]
@@ -51,7 +55,8 @@ def test_the_coverage_step_is_never_skipped() -> None:
     ]
     assert steps, "no frontend step runs the coverage script"
     for step in steps:
-        assert "if" not in step, f"the coverage step runs conditionally: {step['if']!r}"
+        for key in _DISARMING_KEYS:
+            assert key not in step, f"the coverage step sets {key}: {step[key]!r}"
 
 
 def test_coverage_script_takes_its_thresholds_from_the_config() -> None:
