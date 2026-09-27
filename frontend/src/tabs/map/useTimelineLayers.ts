@@ -5,6 +5,7 @@ import { DELAY_THRESHOLDS, severityStepColors, surfaceColorResolved } from "../.
 import { useThemeSignal } from "../../styles/theme";
 import { CROSS_FADE_MS, GHOST_OPACITY, timelineFeatures } from "./playbackFrames";
 import { whenStyleReady } from "./styleReady";
+import { repaintLayer } from "./repaintLayer";
 import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
 
 export const TIMELINE_SOURCE = "timeline";
@@ -107,6 +108,7 @@ export function useTimelineLayers(
       const existing = map.getSource(TIMELINE_SOURCE) as { setData: (d: unknown) => void } | undefined;
       if (existing) {
         existing.setData(data);
+        repaintLayer(map, TIMELINE_LAYER, timelineCirclePaint(crossFadeMs));
         return;
       }
       map.addSource(TIMELINE_SOURCE, { type: "geojson", data });
