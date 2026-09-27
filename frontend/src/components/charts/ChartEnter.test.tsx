@@ -16,11 +16,11 @@ function setReducedMotion(reduce: boolean) {
   }) as unknown as MediaQueryList);
 }
 
-function Harness({ d = "M0,0 L10,10" }: { d?: string }) {
+function Harness({ d = "M0,0 L10,10", tick = 0 }: { d?: string; tick?: number }) {
   const ref = useRef<SVGPathElement | null>(null);
   useDrawOn(ref);
   return (
-    <svg>
+    <svg data-tick={tick}>
       <path ref={ref} d={d} data-testid="p" />
     </svg>
   );
@@ -67,6 +67,25 @@ describe("useDrawOn", () => {
     expect(path.style.getPropertyValue("--len")).toBe(String(long.length));
     expect(path.classList.contains("chart-draw-on")).toBe(true);
     expect(raf).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the length read on a re-render that leaves the geometry unchanged", () => {
+    setReducedMotion(false);
+    const getTotalLength = vi.fn(function (this: SVGElement) {
+      return (this.getAttribute("d") ?? "").length;
+    });
+    mockGetTotalLength(getTotalLength);
+    const { container, rerender } = render(<Harness d="M0,0 L10,10" tick={0} />);
+    expect(getTotalLength).toHaveBeenCalledTimes(1);
+
+    // `tick` only changes an attribute on the <svg>, proving the re-render
+    // committed while the path's own geometry stayed the same.
+    rerender(<Harness d="M0,0 L10,10" tick={1} />);
+    expect(container.querySelector("svg")?.getAttribute("data-tick")).toBe("1");
+    expect(getTotalLength).toHaveBeenCalledTimes(1);
+
+    rerender(<Harness d="M0,0 L10,10 L20,0" tick={2} />);
+    expect(getTotalLength).toHaveBeenCalledTimes(2);
   });
 
   it("does nothing under prefers-reduced-motion: reduce", () => {

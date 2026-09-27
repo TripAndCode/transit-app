@@ -1,4 +1,4 @@
-import { useLayoutEffect, type CSSProperties, type RefObject } from "react";
+import { useLayoutEffect, useRef, type CSSProperties, type RefObject } from "react";
 import { prefersReducedMotion } from "../../utils/motion";
 
 /**
@@ -17,21 +17,27 @@ import { prefersReducedMotion } from "../../utils/motion";
  * runs once per mount; a chart whose data changes in place does not replay
  * it (it is an entrance effect, not a per-update one).
  *
- * `--len` itself is re-measured after every render, though. The dasharray
- * stays on for as long as the class does, so a line that outgrew the length
- * measured at mount -- a chart kept mounted while its data changes -- would
- * otherwise break into dash-length segments with gaps between them.
+ * `--len` itself is re-measured whenever the line's geometry (`d` or
+ * `points`) changes, though. The dasharray stays on for as long as the class
+ * does, so a line that outgrew the length measured at mount -- a chart kept
+ * mounted while its data changes -- would otherwise break into dash-length
+ * segments with gaps between them. The attribute comparison comes first
+ * because `getTotalLength()` forces a synchronous layout, and charts
+ * re-render on every hover without changing their line.
  */
 export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>): void {
+  const measuredGeometry = useRef<string | null>(null);
+
   // Declared ahead of the entrance effect so that at mount, when the class is
   // not on yet, it leaves the one measurement to that effect.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el?.classList.contains("chart-draw-on")) return;
+    const geometry = geometryOf(el);
+    if (geometry === measuredGeometry.current) return;
+    measuredGeometry.current = geometry;
     const length = measureLength(el);
-    if (length === null) return;
-    const len = String(length);
-    if (el.style.getPropertyValue("--len") !== len) el.style.setProperty("--len", len);
+    if (length !== null) el.style.setProperty("--len", String(length));
   });
 
   useLayoutEffect(() => {
@@ -40,6 +46,7 @@ export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>
     const length = measureLength(el);
     if (length === null) return;
 
+    measuredGeometry.current = geometryOf(el);
     el.style.setProperty("--len", String(length));
     el.classList.add("chart-draw-on");
     const raf = requestAnimationFrame(() => el.classList.add("chart-draw-on--active"));
@@ -48,6 +55,10 @@ export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>
     // stable across renders, so listing it here satisfies exhaustive-deps
     // without changing when the effect re-runs.
   }, [ref]);
+}
+
+function geometryOf(el: SVGGeometryElement): string | null {
+  return el.getAttribute("d") ?? el.getAttribute("points");
 }
 
 function measureLength(el: SVGGeometryElement): number | null {
