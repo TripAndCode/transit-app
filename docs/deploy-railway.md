@@ -388,6 +388,15 @@ git push origin origin/main:production
 the `git diff` step and review `main`'s full history, or `git log`, before
 tagging and promoting.)
 
+Before step 2, if the diff adds a migration that builds an index on a table
+that already holds production data, pre-build it: `migrate up` builds indexes
+inside a transaction that blocks writes to the table until the build
+finishes. Run `scripts/prebuild_indexes_concurrently.sql` with `psql -f`
+against the production database, over the same private route as step 7's
+backups; it builds them `CONCURRENTLY` and skips any whose migration is
+already applied. Check for invalid indexes afterwards as its header
+describes.
+
 Railway rebuilds from whatever `production` now points to, runs
 `migrate up` (pre-deploy), then swaps in the new release once `/health`
 passes. The `db` service only redeploys when `db/Dockerfile` itself
