@@ -20,6 +20,36 @@
         }
       })();
     </script>
+    <script>
+      // Starts downloading the active language's strings alongside the entry
+      // chunk instead of after it runs. Mirrors the language resolution in
+      // src/i18n/index.ts (stored choice, then navigator, else ja);
+      // src/i18n/localeLoading.test.tsx asserts the two agree. The build
+      // replaces the placeholder with each language's chunk URL.
+      (function (chunks) {
+        function has(code) {
+          return Object.prototype.hasOwnProperty.call(chunks, code);
+        }
+        var codes = [];
+        try {
+          var stored = localStorage.getItem("app.locale");
+          if (stored) codes.push(stored);
+        } catch (e) {}
+        var nav = navigator.languages || [];
+        for (var i = 0; i < nav.length; i++) codes.push(nav[i]);
+        if (navigator.language) codes.push(navigator.language);
+        var lng;
+        for (i = 0; i < codes.length && !lng; i++) if (has(codes[i])) lng = codes[i];
+        for (i = 0; i < codes.length && !lng; i++) if (has(codes[i].split("-")[0])) lng = codes[i].split("-")[0];
+        lng = lng || "ja";
+        if (!has(lng)) return;
+        var link = document.createElement("link");
+        link.rel = "modulepreload";
+        link.crossOrigin = "";
+        link.href = chunks[lng];
+        document.head.appendChild(link);
+      })(/*__LOCALE_CHUNKS__*/ {});
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com">

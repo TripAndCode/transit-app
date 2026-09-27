@@ -131,6 +131,52 @@ test("mermaid only in a dynamic (lazy) chunk -> exit 0 (lazy loading is allowed)
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
+test("a locale bundle statically reachable from the entry -> exit 1", () => {
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": {
+        file: "assets/index.js",
+        isEntry: true,
+        imports: ["src/i18n/locales/en.json"],
+        dynamicImports: ["src/MapTab.tsx", "src/i18n/locales/ja.json"],
+      },
+      "src/i18n/locales/en.json": { file: "assets/en.js", src: "src/i18n/locales/en.json", isDynamicEntry: true },
+      "src/i18n/locales/ja.json": { file: "assets/ja.js", src: "src/i18n/locales/ja.json", isDynamicEntry: true },
+      "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
+    }),
+    "assets/index.js": "console.log('hello');",
+    "assets/en.js": "export default {};",
+    "assets/ja.js": "export default {};",
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /"src\/i18n\/locales\/en\.json".*locale/);
+  assert.doesNotMatch(result.stderr, /ja\.json/);
+});
+
+test("locale bundles only as dynamic chunks -> exit 0", () => {
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": {
+        file: "assets/index.js",
+        isEntry: true,
+        imports: [],
+        dynamicImports: ["src/MapTab.tsx", "src/i18n/locales/en.json", "src/i18n/locales/ja.json"],
+      },
+      "src/i18n/locales/en.json": { file: "assets/en.js", src: "src/i18n/locales/en.json", isDynamicEntry: true },
+      "src/i18n/locales/ja.json": { file: "assets/ja.js", src: "src/i18n/locales/ja.json", isDynamicEntry: true },
+      "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
+    }),
+    "assets/index.js": "console.log('hello');",
+    "assets/en.js": "export default {};",
+    "assets/ja.js": "export default {};",
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
 test("MapLibre CSS statically reachable via entry.css -> exit 1", () => {
   const dist = makeDist({
     ".vite/manifest.json": JSON.stringify({
@@ -175,7 +221,7 @@ test("app-authored MapLibre class overrides in entry CSS do not false-positive (
 });
 
 test("vendor split defeats a naive entry-only budget, but the summed static closure still fails", () => {
-  // Generously over the script's STATIC_CLOSURE_BUDGET_BYTES (640 KiB as of
+  // Generously over the script's STATIC_CLOSURE_BUDGET_BYTES (600 KiB as of
   // writing) -- not derived from it (the script has no exports), so if that
   // constant is ever raised well past 4 MiB this fixture needs bumping too.
   const bigChunk = "x".repeat(4 * 1024 * 1024);

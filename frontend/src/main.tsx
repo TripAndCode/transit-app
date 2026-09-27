@@ -19,7 +19,7 @@ import {
   loadReportsHomeTab,
   loadRouteAnalysisTab,
 } from "./routes/lazyTabs";
-import "./i18n";
+import { i18nReady } from "./i18n";
 import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
@@ -166,12 +166,16 @@ const router = createBrowserRouter([
   },
 ]);
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <RouterProvider router={router} future={{ v7_startTransition: true }} />
-      </ToastProvider>
-    </QueryClientProvider>
-  </React.StrictMode>,
-);
+// Mounting waits for the active language's strings so the first paint is
+// already translated. i18next settles this even when the fetch fails.
+void i18nReady.then(() => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <RouterProvider router={router} future={{ v7_startTransition: true }} />
+        </ToastProvider>
+      </QueryClientProvider>
+    </React.StrictMode>,
+  );
+});
