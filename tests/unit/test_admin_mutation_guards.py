@@ -8,13 +8,15 @@ silently shipping an action any cross-site page, or any signed-in user, could
 trigger.
 
 Requests are served by a minimal standalone app assembled from every router
-under ``api.routers``, with ``get_conn``/``get_ch`` overridden to stand-ins
-that raise if ever touched -- a guard that let a request through would
-otherwise fail with a confusing downstream error instead of naming the
-missing guard. Each response also names the endpoint that served it, and the
-sweeps require that to be the mounted route under test: a route the
-standalone app does not reproduce, or whose filled-in path lands on a
-neighbouring route, cannot pass on some other handler's guard.
+under ``api.routers`` (subpackages included), with ``get_conn``/``get_ch``
+overridden to stand-ins that raise if ever touched -- a guard that let a
+request through would otherwise fail with a confusing downstream error
+instead of naming the missing guard. That app must serve every route the
+sweeps take from ``api.main.app``, and each response names the endpoint that
+served it, which the sweeps require to be the mounted route under test: a
+route whose filled-in path lands on a neighbouring route cannot pass on some
+other handler's guard. Only ``APIRoute``s can be swept this way, so any other
+kind of mounted route that could carry the session cookie fails on its own.
 """
 
 from __future__ import annotations
@@ -31,8 +33,10 @@ import httpx
 import pytest
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.routing import APIRoute, iter_route_contexts
+from fastapi.staticfiles import StaticFiles
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from starlette.routing import Mount
 
 import api.routers
 from api import main
@@ -66,19 +70,18 @@ _MUTATING_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 
 _ADMIN_PREFIX = "/api/admin"
 
-#: Mutating routes that deliberately make no ``csrf_guard`` call. CSRF abuses
-#: a credential the browser attaches on its own (the session cookie); these
-#: read no session and authenticate only by a shared secret in a request
-#: header, which a cross-site page cannot supply. Every entry must name a
-#: mounted route and that route must reject a request lacking its secret.
-_CSRF_EXEMPT = frozenset(
-    {
-        # Scheduler trigger for the fallback ingest; X-Cron-Secret only.
-        ("POST", "/internal/cron/ingest"),
-        # Oracle collector push; X-Collector-Secret only.
-        ("POST", "/internal/collector/updates/{agency_id}"),
-    }
-)
+#: Mutating routes that deliberately make no ``csrf_guard`` call, each mapped
+#: to the env var holding its secret. CSRF abuses a credential the browser
+#: attaches on its own (the session cookie); these read no session and
+#: authenticate only by a shared secret in a request header, which a
+#: cross-site page cannot supply. Every entry must name a mounted route, and
+#: that route must reject a request lacking its secret.
+_CSRF_EXEMPT: dict[tuple[str, str], str] = {
+    # Scheduler trigger for the fallback ingest; X-Cron-Secret only.
+    ("POST", "/internal/cron/ingest"): "CRON_SECRET",
+    # Oracle collector push; X-Collector-Secret only.
+    ("POST", "/internal/collector/updates/{agency_id}"): "COLLECTOR_INGEST_SECRET",
+}
 
 #: Routes discovery must always find, one per shape the sweeps rely on, so a
 #: walk that silently stopped reaching a class of route fails here first.
@@ -150,9 +153,10 @@ def _qualified_name(endpoint: Any) -> str:
 
 
 def _routers() -> list[APIRouter]:
-    """Every router object defined anywhere under ``api.routers``."""
+    """Every router object held at module level anywhere under
+    ``api.routers``, subpackages included."""
     found: dict[int, APIRouter] = {}
-    for module_info in pkgutil.iter_modules(api.routers.__path__, f"{api.routers.__name__}."):
+    for module_info in pkgutil.walk_packages(api.routers.__path__, prefix=f"{api.routers.__name__}."):
         module = importlib.import_module(module_info.name)
         for value in vars(module).values():
             if isinstance(value, APIRouter):
@@ -253,8 +257,43 @@ def _csrf_swept_routes() -> list[_Route]:
     return [r for r in _mounted_routes() if r.method in _MUTATING_METHODS and (r.method, r.path) not in _CSRF_EXEMPT]
 
 
+def _exempt_routes() -> list[_Route]:
+    exempt = [r for r in _mounted_routes() if (r.method, r.path) in _CSRF_EXEMPT]
+    assert exempt, "no mounted route matched a CSRF exemption"
+    return exempt
+
+
+def _is_admin_path(path: str) -> bool:
+    return path == _ADMIN_PREFIX or path.startswith(f"{_ADMIN_PREFIX}/")
+
+
 def _admin_routes() -> list[_Route]:
-    return [r for r in _mounted_routes() if r.path == _ADMIN_PREFIX or r.path.startswith(f"{_ADMIN_PREFIX}/")]
+    return [r for r in _mounted_routes() if _is_admin_path(r.path)]
+
+
+def _swept_routes() -> list[_Route]:
+    """Every route some test below sends a request to."""
+    return [r for r in _mounted_routes() if r.method in _MUTATING_METHODS or _is_admin_path(r.path)]
+
+
+def _unsweepable_mounted_routes() -> list[tuple[str, str | None]]:
+    """Mounted routes that are not ``APIRoute``s, which the sweeps skip.
+
+    A websocket handshake or a plain Starlette route carries the session
+    cookie like any other request, and a mounted sub-app hides whatever it
+    serves. The one exception is the SPA's static-asset mount: it serves files
+    and reads no session -- unless it sits under the admin prefix, where it
+    would bypass the role check.
+    """
+    found = []
+    for context in iter_route_contexts(main.app.routes):
+        route = context.original_route
+        if isinstance(route, APIRoute):
+            continue
+        if isinstance(route, Mount) and isinstance(route.app, StaticFiles) and not _is_admin_path(route.path):
+            continue
+        found.append((type(route).__name__, context.path or getattr(route, "path", None)))
+    return found
 
 
 def _rejection(guard: Callable[[Request], Any], *, user: User | None = None) -> tuple[int, Any]:
@@ -285,25 +324,61 @@ def test_route_discovery_finds_the_mounted_routes_the_sweeps_depend_on():
     assert len(_admin_routes()) >= 25, _admin_routes()
 
 
+def test_the_sweep_app_serves_every_route_the_sweeps_take_from_the_mounted_app():
+    served = {
+        (method, context.path, context.endpoint)
+        for context in iter_route_contexts(_build_app(_ADMIN).routes)
+        for method in context.methods or ()
+    }
+    missing = sorted(
+        (r.method, r.path, _qualified_name(r.endpoint))
+        for r in _swept_routes()
+        if (r.method, r.path, r.endpoint) not in served
+    )
+    assert missing == [], (
+        "api.main.app mounts these routes but the sweep app does not serve them, so no sweep can "
+        f"exercise their guards; include their source in _build_app: {missing}"
+    )
+
+
+def test_the_mounted_app_has_no_route_the_sweeps_cannot_exercise():
+    unsweepable = _unsweepable_mounted_routes()
+    assert unsweepable == [], (
+        "api.main.app mounts these non-APIRoute routes, which neither the CSRF nor the admin "
+        f"sweep exercises; extend the sweeps to cover them before mounting them: {unsweepable}"
+    )
+
+
 def test_every_csrf_exemption_names_a_mounted_mutating_route():
     mounted = {(r.method, r.path) for r in _mounted_routes() if r.method in _MUTATING_METHODS}
-    stale = sorted(_CSRF_EXEMPT - mounted)
+    stale = sorted(_CSRF_EXEMPT.keys() - mounted)
     assert stale == [], f"these CSRF exemptions match no mounted mutating route; remove them: {stale}"
 
 
-def test_every_csrf_exempt_route_rejects_a_request_without_its_secret():
-    """The exemption rests on the shared-secret check: 401 without the
-    header, or 503 while no secret is configured, both fail closed."""
+def test_every_csrf_exempt_route_rejects_a_request_without_its_secret(monkeypatch):
+    for secret_env in _CSRF_EXEMPT.values():
+        monkeypatch.setenv(secret_env, "sweep-secret")
     client = TestClient(_build_app(_ADMIN), raise_server_exceptions=False)
-    exempt = [r for r in _mounted_routes() if (r.method, r.path) in _CSRF_EXEMPT]
-    assert exempt, "no mounted route matched a CSRF exemption"
 
     failures = []
-    for route in exempt:
+    for route in _exempt_routes():
         response = client.request(route.method, _concrete_path(route.path))
-        if response.status_code not in (401, 503):
+        if response.status_code != 401:
             failures.append((route.method, route.path, _outcome(response)))
-    assert failures == [], f"these CSRF-exempt routes did not reject a request lacking their secret: {failures}"
+    assert failures == [], f"these CSRF-exempt routes did not answer 401 to a request lacking their secret: {failures}"
+
+
+def test_every_csrf_exempt_route_fails_closed_while_its_secret_is_unset(monkeypatch):
+    for secret_env in _CSRF_EXEMPT.values():
+        monkeypatch.delenv(secret_env, raising=False)
+    client = TestClient(_build_app(_ADMIN), raise_server_exceptions=False)
+
+    failures = []
+    for route in _exempt_routes():
+        response = client.request(route.method, _concrete_path(route.path))
+        if response.status_code != 503:
+            failures.append((route.method, route.path, _outcome(response)))
+    assert failures == [], f"these CSRF-exempt routes did not answer 503 while no secret is configured: {failures}"
 
 
 def test_every_mutating_route_rejects_a_request_with_no_valid_origin():
