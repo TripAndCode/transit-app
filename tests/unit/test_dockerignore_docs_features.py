@@ -40,6 +40,24 @@ def test_dockerfile_declares_a_healthcheck():
     assert "HEALTHCHECK " in text
 
 
+def test_dockerfile_frontend_install_sees_the_npm_config():
+    """The image's `npm ci` must resolve with the same npm config as a local install.
+
+    frontend/.npmrc carries install-time settings the lockfile does not, such
+    as peer-range leniency. The build stage copies only the manifest files
+    before installing, so the config has to be among them, or the image's
+    install rejects a tree every local and CI install accepts.
+    """
+    if not (_REPO_ROOT / "frontend/.npmrc").exists():
+        return
+    dockerfile = (_REPO_ROOT / "Dockerfile").read_text()
+    before_install = dockerfile[: dockerfile.index("RUN npm ci")]
+    copies = re.findall(r"^COPY (.+)$", before_install, re.MULTILINE)
+    assert any("frontend/.npmrc" in line for line in copies), (
+        "Dockerfile runs `npm ci` without frontend/.npmrc; copy it with the manifest files"
+    )
+
+
 def test_dockerfile_node_major_matches_ci():
     """The image's frontend build stage must use the Node major CI builds with.
 
