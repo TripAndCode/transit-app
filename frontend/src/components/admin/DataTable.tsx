@@ -131,7 +131,12 @@ export function DataTable<Row>({
 }: DataTableProps<Row>) {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const activeView = controlledView ?? params.get(savedViewParam) ?? savedViews?.[0]?.id;
+  // An id from the URL that no chip offers (a stale or hand-edited link)
+  // falls back to the first view, as a missing one does, so exactly one
+  // chip is always pressed. A controlled caller resolves its own view.
+  const urlView = params.get(savedViewParam);
+  const activeView =
+    controlledView ?? (savedViews?.some((view) => view.id === urlView) ? urlView : savedViews?.[0]?.id);
 
   // Which row holds the table's single tab stop. Derived rather than
   // synchronized: when the row set changes under it, a remembered key that

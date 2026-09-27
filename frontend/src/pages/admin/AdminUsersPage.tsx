@@ -19,6 +19,7 @@ import { DataTable, type DataTableColumn } from "../../components/admin/DataTabl
 import { Modal } from "../../components/Modal";
 import { InviteDialog } from "./InviteDialog";
 import { pageItems } from "./pageItems";
+import { PENDING_APPROVAL_FILTER, usePendingApprovalCount } from "./pendingApprovals";
 import { isTypingTarget } from "../../utils/isTypingTarget";
 
 const PAGE_SIZE = 50;
@@ -127,11 +128,9 @@ export function AdminUsersPage() {
 
   const { data: me } = useSession();
 
-  // Badge count for the "awaiting approval" saved view — a separate,
-  // cheap (limit=1) query so the count stays accurate regardless of the
-  // currently-active filters/page.
-  const { data: pendingData } = useAdminUsers({ llmApproved: "false", limit: 1, offset: 0 });
-  const pendingCount = pendingData?.total ?? 0;
+  // Its own query rather than a count of this page's rows, so the Pending
+  // chip's number stays right whatever filter or page is showing.
+  const pendingCount = usePendingApprovalCount();
 
   const { data, isLoading, isPlaceholderData, error, refetch } = useAdminUsers({
     q,
@@ -175,12 +174,17 @@ export function AdminUsersPage() {
   const rowSetKey = `${q}|${role}|${suspended}|${llmApproved}|${page}`;
   const [priorRowSetKey, setPriorRowSetKey] = useState(rowSetKey);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [bulkDeleteIds, setBulkDeleteIds] = useState<number[] | null>(null);
+  /** The rows the last bulk delete could not remove, labelled as they were
+   *  when it was confirmed. */
+  const [bulkDeleteFailures, setBulkDeleteFailures] = useState<{ attempted: number; labels: string[] } | null>(
+    null,
+  );
   if (rowSetKey !== priorRowSetKey) {
     setPriorRowSetKey(rowSetKey);
     setSelected(new Set());
+    setBulkDeleteFailures(null);
   }
-
-  const [bulkDeleteIds, setBulkDeleteIds] = useState<number[] | null>(null);
   const bulkDeleteTitleId = useId();
 
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -251,14 +255,38 @@ export function AdminUsersPage() {
     if (targets.length > 0) setBulkDeleteIds(targets);
   }
 
+  function rowLabel(uid: number): string {
+    return rows.find((u) => u.user_id === uid)?.email ?? String(uid);
+  }
+
   async function confirmBulkDelete() {
     const ids = bulkDeleteIds ?? [];
     setBulkDeleteIds(null);
+    setBulkDeleteFailures(null);
     patch.reset();
+    const deleted = new Set<number>();
+    const failed: number[] = [];
+    // One at a time, and every id attempted whatever the others do. Each
+    // delete locks every active admin's row for the last-admin guard, so
+    // sent together they would only queue in the database, each holding a
+    // pooled connection while it waits.
     for (const uid of ids) {
-      await del.mutateAsync(uid);
+      try {
+        await del.mutateAsync(uid);
+        deleted.add(uid);
+      } catch {
+        failed.push(uid);
+      }
     }
-    setSelected(new Set());
+    // The batch reports its own outcome below; the hook's error describes
+    // only whichever id ran last.
+    del.reset();
+    // Deleted rows leave the selection and the ones that failed stay in it,
+    // ready to retry from the bulk bar. Filtering the current selection,
+    // rather than replacing it, keeps a page or filter change made while
+    // the batch ran from reviving ids that are no longer on screen.
+    setSelected((current) => new Set([...current].filter((uid) => !deleted.has(uid))));
+    if (failed.length > 0) setBulkDeleteFailures({ attempted: ids.length, labels: failed.map(rowLabel) });
   }
 
   function setFilter(key: "role" | "suspended", value: string) {
@@ -271,12 +299,14 @@ export function AdminUsersPage() {
 
   const VIEW_PARAMS: Record<SavedView, { role: string; suspended: string; llmApproved: string }> = {
     all: { role: "", suspended: "", llmApproved: "" },
-    pending: { role: "", suspended: "", llmApproved: "false" },
+    pending: { role: "", ...PENDING_APPROVAL_FILTER },
     admin: { role: "admin", suspended: "", llmApproved: "" },
     suspended: { role: "", suspended: "true", llmApproved: "" },
   };
+  const showsPending =
+    llmApproved === PENDING_APPROVAL_FILTER.llmApproved && suspended === PENDING_APPROVAL_FILTER.suspended;
   const activeView: SavedView =
-    suspended === "true" ? "suspended" : role === "admin" ? "admin" : llmApproved === "false" ? "pending" : "all";
+    suspended === "true" ? "suspended" : role === "admin" ? "admin" : showsPending ? "pending" : "all";
 
   function selectView(view: SavedView) {
     const target = VIEW_PARAMS[view];
@@ -506,6 +536,16 @@ export function AdminUsersPage() {
       {(patch.error || del.error || bulkPatch.error) && (
         <ErrorBanner error={patch.error || del.error || bulkPatch.error} />
       )}
+      {bulkDeleteFailures && (
+        <ErrorBanner
+          error={null}
+          message={t("admin.users.bulk.delete_failed", {
+            failed: bulkDeleteFailures.labels.length,
+            total: bulkDeleteFailures.attempted,
+            emails: bulkDeleteFailures.labels.join(", "),
+          })}
+        />
+      )}
       <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
           {t("admin.users.total", { count: total })}
@@ -612,7 +652,7 @@ export function AdminUsersPage() {
         </p>
         <ul style={{ margin: "0 0 16px", paddingLeft: 18, fontSize: "var(--text-sm)", maxHeight: 200, overflowY: "auto" }}>
           {(bulkDeleteIds ?? []).map((uid) => (
-            <li key={uid}>{rows.find((u) => u.user_id === uid)?.email ?? uid}</li>
+            <li key={uid}>{rowLabel(uid)}</li>
           ))}
         </ul>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
