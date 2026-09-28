@@ -65,7 +65,7 @@ describe("locale loading", () => {
     const switching = changeLocale(instance, "en");
     expect(instance.language).toBe("ja");
     expect(instance.t(KEY)).toBe(ja.common.language_aria);
-    await switching;
+    expect(await switching).toBe(true);
 
     expect(instance.language).toBe("en");
     expect(shownWhenSwitched).toEqual([en.common.language_aria]);
@@ -101,7 +101,7 @@ describe("locale loading", () => {
       ja: async () => (await import("./locales/ja.json")).default,
       en: () => Promise.reject(new Error("network down")),
     });
-    await changeLocale(instance, "en");
+    expect(await changeLocale(instance, "en")).toBe(false);
     expect(instance.language).toBe("ja");
     expect(instance.t(KEY)).toBe(ja.common.language_aria);
   });

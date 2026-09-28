@@ -6,6 +6,7 @@ import { I18nextProvider } from "react-i18next";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
+import { ToastProvider } from "./ui/Toast";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
 
 vi.mock("../routes/lazyTabs", () => ({ prefetchRouteChunk: vi.fn() }));
@@ -17,11 +18,13 @@ function renderSidebar(path = "/agencies/1/overview") {
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
-        <MemoryRouter initialEntries={[path]}>
-          <Routes>
-            <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
-          </Routes>
-        </MemoryRouter>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
       </I18nextProvider>
     </QueryClientProvider>,
   );

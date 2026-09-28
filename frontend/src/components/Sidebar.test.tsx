@@ -6,6 +6,7 @@ import { I18nextProvider } from "react-i18next";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
+import { ToastProvider } from "./ui/Toast";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 
 function mockMatchMedia(matches: boolean) {
@@ -26,11 +27,13 @@ function renderSidebar(path = "/agencies/1/operations") {
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
-        <MemoryRouter initialEntries={[path]}>
-          <Routes>
-            <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
-          </Routes>
-        </MemoryRouter>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
       </I18nextProvider>
     </QueryClientProvider>
   );
@@ -81,9 +84,11 @@ describe("Sidebar", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <I18nextProvider i18n={i18n}>
-          <MemoryRouter initialEntries={["/"]}>
-            <Sidebar />
-          </MemoryRouter>
+          <ToastProvider>
+            <MemoryRouter initialEntries={["/"]}>
+              <Sidebar />
+            </MemoryRouter>
+          </ToastProvider>
         </I18nextProvider>
       </QueryClientProvider>
     );
@@ -127,9 +132,11 @@ describe("Sidebar", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <I18nextProvider i18n={i18n}>
-          <MemoryRouter initialEntries={["/"]}>
-            <Sidebar />
-          </MemoryRouter>
+          <ToastProvider>
+            <MemoryRouter initialEntries={["/"]}>
+              <Sidebar />
+            </MemoryRouter>
+          </ToastProvider>
         </I18nextProvider>
       </QueryClientProvider>
     );
@@ -268,9 +275,11 @@ describe("Sidebar", () => {
       render(
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
           <I18nextProvider i18n={i18n}>
-            <MemoryRouter initialEntries={["/"]}>
-              <Sidebar />
-            </MemoryRouter>
+            <ToastProvider>
+              <MemoryRouter initialEntries={["/"]}>
+                <Sidebar />
+              </MemoryRouter>
+            </ToastProvider>
           </I18nextProvider>
         </QueryClientProvider>
       );
