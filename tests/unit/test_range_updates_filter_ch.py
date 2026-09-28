@@ -239,16 +239,16 @@ def test_time_band_clause_ch_boundary_matches_5char_scheduled_time():
     """Agency 1 (青森市バス, aomori_regex ingest strategy) writes 5-char
     "HH:MM" `scheduled_time` values (see pipeline/strategies/aomori_regex.py
     — no seconds), unlike every static_join agency's 8-char "HH:MM:SS".
-    Under the old Postgres TIME column this didn't matter (Postgres
-    normalizes both to the same internal value); ClickHouse's `String`
-    column does not, so a raw lexicographic compare puts every band
-    boundary (05:00, 09:00, ...) in the PREVIOUS band instead of its own.
+    A Postgres TIME column would normalize both to the same internal value;
+    ClickHouse's `String` column does not, so a raw lexicographic compare
+    puts every band boundary (05:00, 09:00, ...) in the PREVIOUS band
+    instead of its own.
 
     A trip scheduled at exactly 09:00 (the morning/forenoon boundary) must
     land in "forenoon" (its own band, [09:00, 12:00)), never "morning"
-    ([05:00, 09:00)) — the bug this regresses would have matched the old
-    (previous) band because a raw compare treats the 5-char form as
-    lexicographically less than its own 8-char equivalent."""
+    ([05:00, 09:00)) — a raw compare would match the previous band because
+    it treats the 5-char form as lexicographically less than its own 8-char
+    equivalent."""
     from db.clickhouse.bootstrap import apply_schema
     from pipeline.clickhouse import insert_updates
 

@@ -34,7 +34,7 @@ describe("ReportTable route column", () => {
   });
 
   it("falls back to the bare route_code when no static route matches (data gap, not a crash)", () => {
-    // Regression guard for the reported bug: a route_code with no matching
+    // A route_code with no matching
     // static_routes row (via api/routers/static.py's regexp_replace(route_id)
     // extraction) must still render something readable rather than throwing —
     // "Route <code>" is the documented, accepted fallback for a genuine gap.

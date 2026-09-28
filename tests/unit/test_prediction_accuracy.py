@@ -1,7 +1,7 @@
 """Pure-math tests for pipeline.prediction_accuracy (no DB).
 
-Covers the "known final vs. early prediction produces the expected bucketed
-error" fixture item 96's own acceptance criteria call for.
+Includes a known-final vs. early-prediction fixture whose bucketed errors
+are hand-computed.
 """
 
 from datetime import date, datetime, time, timezone

@@ -96,8 +96,9 @@ def test_get_range_ctx_future_to_date_with_earlier_from_clamps_and_keeps_order(m
 
 
 def test_get_range_ctx_rejects_a_malformed_date_instead_of_defaulting():
-    """A typo'd `from` used to fall through to the default 30-day window and
-    return a confident answer for a period the caller never asked for."""
+    """A typo'd `from` must be rejected rather than fall through to the
+    default 30-day window and return a confident answer for a period the
+    caller never asked for."""
     import pytest
     from fastapi import HTTPException
 

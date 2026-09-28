@@ -88,11 +88,10 @@ async def test_anomaly_today_wins_when_present(suggest_agency, ch_client):
 async def test_anomaly_fires_when_wall_clock_today_has_zero_rows(suggest_agency, ch_client):
     """analyze() normally lags the wall clock by >= 1 day, so wall-clock
     "today" has zero agg rows at the moment the Insight Panel is viewed --
-    exactly the scenario that used to make rule 1 always fall through (see
-    the module's rewrite: anchoring on jst_today() instead of the latest
-    analyzed date). Seed data only through "yesterday" (nothing for
-    jst_today() itself) and confirm the anomaly rule still fires, anchored
-    on the latest analyzed date.
+    exactly the scenario in which anchoring on jst_today() instead of the
+    latest analyzed date would make rule 1 always fall through. Seed data
+    only through "yesterday" (nothing for jst_today() itself) and confirm the
+    anomaly rule still fires, anchored on the latest analyzed date.
     """
     pool, agency_id = suggest_agency
     today = jst_today()
@@ -227,14 +226,14 @@ async def test_on_time_fallback_pools_full_route_before_truncating(suggest_agenc
     on-time than R_other's 30%, so R_other is genuinely this week's
     worst-on-time ROUTE, at 30%.
 
-    With a too-small fetch limit (2, monkeypatched below to reproduce the old
-    bug's mechanism at a scale that doesn't need 50+ real rows), the fetch
+    With a too-small fetch limit (2, monkeypatched below to reproduce the
+    truncation at a scale that doesn't need 50+ real rows), the fetch
     truncates to just [RT/svcA, R_other] before RT/svcB is ever pooled in:
     RT's pooled pct collapses to 0% (only svcA counted). The fallback then
     both picks the WRONG route (RT instead of R_other) and reports the WRONG
-    percentage for it (0% instead of 50%) -- exactly the failure mode seen on
-    real data with the old ``ON_TIME_FALLBACK_FETCH_LIMIT = 50`` once an
-    agency had more than 50 qualifying rows. A limit that comfortably covers
+    percentage for it (0% instead of 50%) -- exactly the failure mode an
+    ``ON_TIME_FALLBACK_FETCH_LIMIT`` of 50 produces on real data once an
+    agency has more than 50 qualifying rows. A limit that comfortably covers
     all 3 rows (the module's real, shipped value -- exercised unpatched
     below) must not reproduce that truncation, correctly reporting R_other
     at 30%. (The shipped constant's magnitude relative to real per-agency
@@ -256,9 +255,9 @@ async def test_on_time_fallback_pools_full_route_before_truncating(suggest_agenc
     week_ctx = RangeCtx(from_date=jst_today(), to_date=jst_today())
 
     async with pool.acquire() as conn:
-        # Reproduce the old bug's mechanism with a deliberately tiny fetch
-        # limit -- this is what ON_TIME_FALLBACK_FETCH_LIMIT = 50 did on real
-        # data once an agency had more than 50 qualifying rows.
+        # Reproduce the truncation with a deliberately tiny fetch limit --
+        # what any limit below an agency's qualifying-row count does on real
+        # data.
         with patch("pipeline.reports.suggest.ON_TIME_FALLBACK_FETCH_LIMIT", 2):
             truncated = await _on_time_fallback(agency_id, conn, ch_client, week_ctx, frozenset(), "ja")
         assert truncated is not None

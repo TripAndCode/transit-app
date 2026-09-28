@@ -3,11 +3,10 @@ RangeCtx entry point goes through (the FastAPI query dependency, the Ask
 request body, the Ask-dashboard query params, and a conversation's stored
 ``filter_ctx``).
 
-Each rule pinned here used to exist in three hand-copied variants that had
-already drifted apart: one silently swallowed malformed dates, one skipped
-the route cap, one skipped enum validation entirely. Divergence is the bug
-class these tests guard against, so they assert the rules on the shared
-function rather than on any one caller.
+Hand-copied variants of these rules drift apart (one silently swallowing
+malformed dates, one skipping the route cap, one skipping enum validation
+entirely). Divergence is the bug class these tests guard against, so they
+assert the rules on the shared function rather than on any one caller.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -84,8 +83,9 @@ def test_overwide_range_is_clamped_at_the_start(frozen_today):
 
 @pytest.mark.parametrize("field", ["from_", "to"])
 def test_malformed_date_is_rejected_not_silently_defaulted(frozen_today, field):
-    """A non-empty but unparseable date used to fall through to the default
-    window, so a typo silently returned data for a different period."""
+    """A non-empty but unparseable date must be rejected: falling through to
+    the default window would let a typo silently return data for a different
+    period."""
     with pytest.raises(HTTPException) as exc:
         _call(**{field: "not-a-date"})
     assert exc.value.status_code == 422
