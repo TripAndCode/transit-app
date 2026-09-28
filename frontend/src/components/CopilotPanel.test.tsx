@@ -171,8 +171,8 @@ describe("CopilotPanel", () => {
     await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
   });
 
-  // `/ask/` is the one Ask URL App mounts the panel on: FOCUSED_TAB_PATTERN
-  // is anchored without a trailing slash, while useMatch ignores one.
+  // The component's own route gate, independent of App's focused-tab gate:
+  // useMatch ignores a trailing slash, so `/ask/` is checked here too.
   it.each(["/agencies/1/map", "/agencies/1/ask/"])(
     "renders nothing and requests no insight on %s, even with the flag on",
     async (path) => {
