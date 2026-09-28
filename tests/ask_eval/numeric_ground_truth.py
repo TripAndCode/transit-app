@@ -24,7 +24,7 @@ def extract_avg_min(response_json: dict, route_code: str, service_type: str) -> 
     ``TypeError`` from indexing a missing column.
 
     Ignores ``dow`` and returns the first matching row, which is only correct
-    because every item-21 pattern currently in use puts all of its rows on a
+    because every synthetic pattern currently in use puts all of its rows on a
     single calendar day (one ``dow`` group). A future multi-day pattern would
     produce more than one row here and this would need to pick (or average)
     across ``dow`` explicitly instead of taking the first match.
@@ -49,13 +49,13 @@ def extract_avg_min(response_json: dict, route_code: str, service_type: str) -> 
 def assert_matches_ground_truth(response_json: dict, pattern: SyntheticPattern, places: int = 2) -> None:
     """Assert the API's numeric answer for *pattern* matches its hand-computed
     ``expected["agg_route_stats"]["avg_min"]`` — the same ground truth
-    ``tests/pipeline/test_synthetic_agg_e2e.py`` (item 21) asserts against.
+    ``tests/pipeline/test_synthetic_agg_e2e.py`` asserts against.
 
     Checks the tool call name first so a wrong-tool failure reads distinctly
     from a wrong-number failure (both are real defects, but the fix differs;
     a model that skips tool dispatch entirely and answers from free text —
-    e.g. stale conversation history, item 16's original bug shape — also
-    fails here first, since it returns ``tool_call: None``).
+    e.g. anchored by unrelated conversation history — also fails here
+    first, since it returns ``tool_call: None``).
     """
     tool_call = response_json.get("tool_call") or {}
     assert tool_call.get("name") == "route_stats", (

@@ -152,10 +152,7 @@ def test_include_captured_at_flag_adds_last_captured_at_projection():
 def test_dedup_ch_excludes_implausible_delay_spikes():
     """The dedup drops |dep_delay| > MAX_PLAUSIBLE_DELAY_SEC (frozen-feed
     spikes), so every aggregate/report built from it is protected — not just
-    the heatmap. Regression for the 2026-06-07 馬木料金所前 false average (see
-    pipeline/db.py's MAX_PLAUSIBLE_DELAY_SEC docstring). Ports
-    tests/pipeline/test_dedup.py's equivalent assertion against the
-    now-deleted Postgres `build_dedup_inner_sql`."""
+    the heatmap (see pipeline/db.py's MAX_PLAUSIBLE_DELAY_SEC comment)."""
     from db.clickhouse.bootstrap import apply_schema
     from pipeline.clickhouse import insert_updates
 

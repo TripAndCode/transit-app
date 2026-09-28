@@ -1,13 +1,13 @@
 """Unit tests for the Insight Panel rule chain's route-grain pooling helpers
 (pipeline/reports/suggest.py::_pool_ranking_by_route / _pool_on_time_by_route).
 
-Pure functions, no DB -- see CLAUDE.md's tests/unit/ convention. These cover
-finding #3 from the final branch review: compute_ranking/compute_on_time
-return one row per (route_code, service_type) pair (a route commonly has
-~3 service-type variants on real data), and the old rule chain collapsed
-that to one row per route_code via last-wins dict construction on an
-avg-descending-sorted list -- which systematically picked the route's
-LOWEST-avg variant, not a genuine route-grain figure.
+Pure functions, no DB -- see CLAUDE.md's tests/unit/ convention.
+compute_ranking/compute_on_time return one row per (route_code,
+service_type) pair (a route commonly has several service-type variants), so
+the rule chain must pool them into a genuine route-grain figure. Collapsing
+them to one row per route_code via last-wins dict construction on an
+avg-descending-sorted list would systematically pick the route's
+LOWEST-avg variant instead.
 """
 
 from decimal import Decimal
@@ -27,18 +27,17 @@ def test_on_time_fallback_fetch_limit_covers_real_agency_scale():
     tests/pipeline/test_suggest.py::test_on_time_fallback_pools_full_route_before_truncating
     for the mechanism).
 
-    The old ``ON_TIME_FALLBACK_FETCH_LIMIT = 50`` was already exceeded on
-    real data (confirmed live: 822 pairs for one agency, 219 for another) --
-    this asserts a floor with real headroom above that, so a future
-    regression back toward that scale fails this test immediately, without
-    needing a 50+ row DB fixture.
+    Real agencies return hundreds of (route_code, service_type) pairs, so a
+    limit on the order of 50 truncates on real data -- this asserts a floor
+    with real headroom above that scale, so a regression back toward it
+    fails this test immediately, without needing a 50+ row DB fixture.
     """
     assert ON_TIME_FALLBACK_FETCH_LIMIT >= 2000
 
 
 def test_pool_ranking_by_route_is_sample_weighted_not_last_wins():
     """Two service-type rows for the same route, in the avg-descending order
-    compute_ranking actually returns them in. The old
+    compute_ranking actually returns them in. A
     `{r[0]: r[2] for r in baseline_rows}` dict construction would silently
     pick whichever row sorted last -- here, the 1.0-avg row, since it's
     smaller and compute_ranking sorts avg-descending. The correct

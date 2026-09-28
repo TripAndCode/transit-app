@@ -286,7 +286,7 @@ async def test_append_message_default_window_uses_jst_today(conv_app, monkeypatc
     """When a conversation's filter_ctx has no explicit dates, the default
     30-day window built for tool dispatch must anchor on the JST civil
     calendar (jst_today()), not the server's local/UTC date - the same
-    class of bug fixed elsewhere via api.range.jst_today()."""
+    JST anchoring api.range.jst_today() provides everywhere else."""
     import api.range as range_mod
     import api.routers.conversations as conv_router
 
@@ -978,7 +978,8 @@ async def test_followup_anonymous_caller_rejected_before_any_other_check(conv_ap
         cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
         conv_id = cr.json()["conversation_id"]
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        # No context at all -- would have 400'd on the old anon path.
+        # No context at all -- the context_message_id check would 400 this, so
+        # the 403 proves the anonymous rejection runs first.
         r = await c.post(
             f"/api/{agency}/conversations/{conv_id}/followup",
             json={"question": "q"},

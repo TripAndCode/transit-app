@@ -1,4 +1,4 @@
-"""Pure-logic tests for `api.routers.admin`'s feature-doc helpers (item 25):
+"""Pure-logic tests for `api.routers.admin`'s feature-doc helpers:
 `_feature_doc_title` (title derivation, no filesystem/DB) and
 `_list_feature_docs` (real filesystem glob against this repo's own
 `docs/features/`, still no DB). Lives under `tests/unit/` per CLAUDE.md's

@@ -35,8 +35,8 @@ describe("rangeLabel", () => {
   });
 
   it("falls back to the literal from/to dates joined by the locale-aware separator for a non-preset range", () => {
-    // The bug fixed twice in this branch: this line must use t("common.range_separator"),
-    // never a hardcoded "〜", or English UI shows the Japanese wave dash.
+    // This line must use t("common.range_separator"), never a hardcoded "〜",
+    // or English UI shows the Japanese wave dash.
     expect(rangeLabel({ ...baseCtx, from_date: "2026-06-01", to_date: "2026-07-15" }, t)).toBe("2026-06-01 – 2026-07-15");
   });
 });

@@ -180,9 +180,8 @@ def test_json_mode_addendum_is_not_baked_into_system_prompt():
     """JSON_MODE_ADDENDUM must stay a separate constant, appended to the
     prompt only for the JSON-mode (intent-cache) request in
     pipeline.query.chat — never unconditionally part of SYSTEM_PROMPT, which
-    is also used for the native tool_calls request. Reproduced
-    deterministically (temperature=0) that leaking this into the native
-    tool_calls prompt made the model echo the JSON-mode shape as plain
-    message content instead of issuing a real tool_calls entry, for some
-    tools. Regression guard for that specific fix."""
+    is also used for the native tool_calls request. Leaking this into the
+    native tool_calls prompt makes the model echo the JSON-mode shape as
+    plain message content instead of issuing a real tool_calls entry, for
+    some tools (reproducible deterministically at temperature=0)."""
     assert JSON_MODE_ADDENDUM not in SYSTEM_PROMPT

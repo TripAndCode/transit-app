@@ -29,8 +29,8 @@ from pipeline.strategies._time import normalize_departure_time, parse_departure_
         ("ab:05:00", (None, "bad")),
         ("07:99:00", (None, "bad")),
         ("07:05:99", (None, "bad")),
-        # 3-digit hour: a fine 2-char prefix ("12") under the old sched[:2]
-        # check, but not a valid 1-2 digit hour -- the exact split-brain bug
+        # 3-digit hour: a fine 2-char prefix ("12") under a naive sched[:2]
+        # check, but not a valid 1-2 digit hour -- the exact split-brain case
         # this function exists to close.
         ("125:30:00", (None, "bad")),
         ("07:05:00:00", (None, "bad")),

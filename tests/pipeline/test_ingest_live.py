@@ -82,8 +82,8 @@ def test_ingest_live_fetches_and_ingests(tmp_path):
 def test_ingest_live_skips_duplicate_poll_within_same_second(tmp_path):
     """Two invocations landing in the same second (a double cron poke, or a
     retried BackgroundTask on the cron endpoint) would produce the identical
-    second-granularity file_name. Postgres's UNIQUE(agency_id, file_name,
-    trip_id, stop_sequence) + ON CONFLICT DO NOTHING used to absorb this
+    second-granularity file_name. A Postgres UNIQUE(agency_id, file_name,
+    trip_id, stop_sequence) + ON CONFLICT DO NOTHING would absorb this
     for free; ClickHouse has no equivalent, so ingest_live must check first
     and skip entirely rather than double-insert the same poll."""
     mock_conn = MagicMock()
