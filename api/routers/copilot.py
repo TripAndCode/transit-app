@@ -28,11 +28,14 @@ _MAX_PAYLOAD_BYTES = 256 * 1024
 
 
 class CopilotInsightRequest(BaseModel):
+    """Takes no filters: the insight is a function of the view payload alone,
+    which already reflects them. A client that still sends ``filters`` is
+    accepted and the field is ignored."""
+
     tab: str
-    filters: dict
     view_payload: dict
 
-    @field_validator("filters", "view_payload")
+    @field_validator("view_payload")
     @classmethod
     def _bounded_payload(cls, v: dict) -> dict:
         size = len(json.dumps(v).encode())

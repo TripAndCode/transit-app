@@ -40,7 +40,7 @@ export function CopilotPanel() {
   // instance.
 
   const tab = overviewMatch && enabled ? "overview" : null;
-  const { insight, loading, error } = useCopilotInsight(agencyId, tab, filters, overviewQuery.data ?? null);
+  const { insight, loading, error } = useCopilotInsight(agencyId, tab, overviewQuery.data ?? null);
 
   // The kill switch removes the panel outright rather than showing an empty
   // shell — a disabled feature should be invisible, not broken-looking.

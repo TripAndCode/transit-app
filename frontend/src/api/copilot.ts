@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
-import type { RangeCtx } from "./rangeContext";
 
 type CopilotInsight = { text: string; cite: string; lowConfidence: boolean };
 
@@ -10,19 +9,15 @@ export const DEBOUNCE_MS = 800;
 type CopilotParams = {
   agencyId: number;
   tab: string;
-  filters: RangeCtx;
   viewPayload: unknown;
 };
 
-function buildKey(
-  agencyId: number | null,
-  tab: string | null,
-  filters: RangeCtx,
-  viewPayload: unknown,
-): string | null {
+/** The insight is a function of the payload alone, so the key carries no
+ *  filters: the payload already reflects them. */
+function buildKey(agencyId: number | null, tab: string | null, viewPayload: unknown): string | null {
   return agencyId == null || tab == null || !viewPayload
     ? null
-    : `${agencyId}:${tab}:${JSON.stringify(filters)}:${JSON.stringify(viewPayload)}`;
+    : `${agencyId}:${tab}:${JSON.stringify(viewPayload)}`;
 }
 
 /** The Copilot kill switch (`COPILOT_INSIGHT_ENABLED` server-side).
@@ -45,10 +40,9 @@ export function useCopilotEnabled(agencyId: number | null) {
 export function useCopilotInsight(
   agencyId: number | null,
   tab: string | null,
-  filters: RangeCtx,
   viewPayload: unknown,
 ): { insight: CopilotInsight | null; loading: boolean; error: unknown } {
-  const key = buildKey(agencyId, tab, filters, viewPayload);
+  const key = buildKey(agencyId, tab, viewPayload);
 
   // Only the request *key* is debounced here; useQuery (queryKey
   // ["copilot-insight", debouncedKey]) owns the fetch, loading/error state,
@@ -71,7 +65,7 @@ export function useCopilotInsight(
     const id = setTimeout(() => {
       setDebounced({
         key,
-        params: key == null ? null : { agencyId: agencyId!, tab: tab!, filters, viewPayload },
+        params: key == null ? null : { agencyId: agencyId!, tab: tab!, viewPayload },
       });
     }, DEBOUNCE_MS);
     return () => clearTimeout(id);
@@ -84,7 +78,7 @@ export function useCopilotInsight(
       const params = debounced.params!;
       return apiPost<{ text: string; cite: string; low_confidence: boolean }>(
         `/api/${params.agencyId}/copilot/insight`,
-        { tab: params.tab, filters: params.filters, view_payload: params.viewPayload },
+        { tab: params.tab, view_payload: params.viewPayload },
         { signal },
       );
     },

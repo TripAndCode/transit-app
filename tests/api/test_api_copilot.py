@@ -82,7 +82,7 @@ async def test_copilot_insight_returns_rendered_text(copilot_client, monkeypatch
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
-        json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        json={"tab": "overview", "view_payload": {"headline": {"samples": 1}}},
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200
@@ -103,7 +103,7 @@ async def test_copilot_insight_renders_the_template_from_the_posted_payload(copi
     }
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
-        json={"tab": "overview", "filters": {}, "view_payload": view_payload},
+        json={"tab": "overview", "view_payload": view_payload},
         headers={"Origin": TEST_ORIGIN, "Accept-Language": "en"},
     )
     assert resp.status_code == 200, resp.text
@@ -122,7 +122,7 @@ async def test_copilot_insight_rejects_empty_payload(copilot_client, monkeypatch
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
-        json={"tab": "overview", "filters": {}, "view_payload": {}},
+        json={"tab": "overview", "view_payload": {}},
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 422
@@ -143,7 +143,7 @@ async def test_copilot_insight_rejects_cross_origin(copilot_client, monkeypatch)
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", must_not_be_called)
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
-        json={"tab": "overview", "filters": {}, "view_payload": {}},
+        json={"tab": "overview", "view_payload": {}},
         headers={"Origin": "https://evil.example.com"},
     )
     assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text[:200]}"
@@ -162,7 +162,7 @@ async def test_copilot_insight_serves_an_anonymous_caller(copilot_client, monkey
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
-        json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        json={"tab": "overview", "view_payload": {"headline": {"samples": 1}}},
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200, resp.text
@@ -181,7 +181,7 @@ async def test_copilot_insight_serves_an_unapproved_signed_in_caller(copilot_cli
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
-        json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        json={"tab": "overview", "view_payload": {"headline": {"samples": 1}}},
         headers={"Origin": TEST_ORIGIN},
         cookies={"sid": sid},
     )
@@ -199,7 +199,7 @@ async def test_copilot_insight_threads_accept_language_locale(copilot_client, mo
         return {"text": "ok", "cite": "c", "low_confidence": False}
 
     monkeypatch.setattr("api.routers.copilot.generate_proactive_insight", fake_insight)
-    body = {"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}}
+    body = {"tab": "overview", "view_payload": {"headline": {"samples": 1}}}
     for header, expected in (("en", "en"), ("ja", "ja")):
         resp = await client.post(
             f"/api/{agency_id}/copilot/insight",
@@ -223,7 +223,7 @@ async def test_copilot_insight_returns_503_when_disabled(copilot_client, monkeyp
 
     resp = await client.post(
         f"/api/{agency_id}/copilot/insight",
-        json={"tab": "overview", "filters": {}, "view_payload": {"headline": {"samples": 1}}},
+        json={"tab": "overview", "view_payload": {"headline": {"samples": 1}}},
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 503
