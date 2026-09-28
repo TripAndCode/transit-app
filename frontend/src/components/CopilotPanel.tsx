@@ -21,12 +21,7 @@ export const COPILOT_INSIGHT_ROUTE = "/agencies/:agencyId/period-overview";
 export function CopilotPanel() {
   const { t } = useTranslation();
   const overviewMatch = useMatch(COPILOT_INSIGHT_ROUTE);
-  const askMatch = useMatch("/agencies/:agencyId/ask");
-  const agencyId = overviewMatch
-    ? Number(overviewMatch.params.agencyId)
-    : askMatch
-      ? Number(askMatch.params.agencyId)
-      : null;
+  const agencyId = overviewMatch ? Number(overviewMatch.params.agencyId) : null;
   const [filters] = useRangeContext();
   // Anything but an explicit true is treated as off, so an unresolved or
   // failed flag check never reaches the insight POST.
@@ -36,7 +31,7 @@ export function CopilotPanel() {
   // OverviewTab already issues under the same query key, and the insight
   // POST is withheld by `tab` below. Gating it here would only stall the
   // insight behind the flag round trip on the enabled path.
-  const overviewQuery = useOverviewSummary(overviewMatch ? agencyId : null, filters);
+  const overviewQuery = useOverviewSummary(agencyId, filters);
   // Every hook below must run on every render regardless of which tab is
   // active — react-hooks/rules-of-hooks forbids branching before a hook
   // call, and this panel persists across tab navigation (it's mounted
@@ -51,19 +46,11 @@ export function CopilotPanel() {
   // shell — a disabled feature should be invisible, not broken-looking.
   if (!enabled) return null;
 
-  if (askMatch) {
-    return (
-      <aside className="copilot-panel" aria-label={t("copilot.title")}>
-        <p>{t("copilot.ask_step_back")}</p>
-      </aside>
-    );
-  }
-
   // Every other route (Operations, Analysis, Network, Account, Admin, root
   // redirect, ...) has nothing for this panel to show — it only ever has
-  // content on Period overview (the proactive insight) or Ask (handled
-  // above). Placed after every hook call above so the hook count stays
-  // identical across renders of this always-mounted instance.
+  // content on Period overview (the proactive insight). Placed after every
+  // hook call above so the hook count stays identical across renders of this
+  // always-mounted instance.
   if (!overviewMatch) return null;
 
   return (

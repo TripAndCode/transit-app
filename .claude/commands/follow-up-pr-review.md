@@ -193,11 +193,11 @@ phase, and no decision carries over to another item.
    opened, this command stops at replying.
 4. Report each posted reply and comment with its URL.
 
-## Reply-style rule (hard constraint)
+## Reply style
 
 Plain English: short, concrete, addressing the author directly ("you", "I"), stating
-what you think and why in one or two sentences, with no unexplained jargon. For a
-dismissal, give the actual reason rather than a brush-off.
+what you think and why in as few sentences as the point needs, with no unexplained
+jargon. For a dismissal, give the actual reason rather than a brush-off.
 
 ## Boundaries
 

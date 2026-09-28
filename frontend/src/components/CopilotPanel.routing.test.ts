@@ -24,6 +24,12 @@ describe("CopilotPanel reachability", () => {
     expect(FOCUSED_TAB_SEGMENTS).not.toContain(segment);
   });
 
+  it("treats a trailing slash as the same focused tab, as the router's own matching does", () => {
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/ask/")).toBe(true);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/operations/")).toBe(true);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/period-overview/")).toBe(false);
+  });
+
   it("is still a real trailing segment, so the check above cannot pass vacuously", () => {
     expect(segment).toBe("period-overview");
     expect(FOCUSED_TAB_PATTERN.test("/agencies/1/operations")).toBe(true);
