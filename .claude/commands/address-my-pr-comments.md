@@ -72,7 +72,7 @@ Boundaries.
 **Scale how you do this to the thread count.** **Group threads by file/topic first**,
 then batch those groups (bounded so each subagent handles a set that fits comfortably
 in one context, ~10 threads) so threads making the same point stay in one batch.
-Dispatch with `subagent_type: Explore` — it has no Edit/Write tools, so the read-only rail below is tool-enforced rather than prompt-only — and only when that grouping yields **2 or more** batches — a single
+Dispatch with `subagent_type: Explore` — it has no Edit/Write tools, though it keeps Bash, so the verbatim read-only line below is still what keeps it off `gh` writes and shell edits — and only when that grouping yields **2 or more** batches — a single
 batch is pure overhead (one extra dispatch, a merge pass with nothing to merge, and you
 lose the code grounding Phase 2's replies need), so judge those yourself directly.
 If one group alone exceeds the bound, keep it whole and let that batch run long rather
@@ -166,7 +166,8 @@ different thread.
 ## Reply style
 Write replies in plain English — the reviewer reads them without this session's context:
 - Short and concrete; address the reviewer directly ("you", "I").
-- State what you did and why — or, if you disagree, why — in one or two sentences.
+- State what you did and why — or, if you disagree, why — in as few sentences as the
+  point needs.
 - No unexplained jargon, acronyms, or cryptic shorthand. If a term is unavoidable,
   define it in the same breath.
 - For a change: name what changed and where (e.g. "Moved the null check above the
