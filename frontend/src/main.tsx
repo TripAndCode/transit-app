@@ -1,6 +1,6 @@
 import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import {
   RedirectReportsToAnalysis,
@@ -20,6 +20,7 @@ import {
   loadRouteAnalysisTab,
 } from "./routes/lazyTabs";
 import { i18nReady } from "./i18n";
+import { refreshAuthStateOn401, retryUnlessAuthRequired } from "./api/authExpiry";
 import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
@@ -85,11 +86,14 @@ function el(node: React.ReactNode) {
   return <Suspense fallback={<ChunkLoading />}>{node}</Suspense>;
 }
 
-const queryClient = new QueryClient({
+const queryClient: QueryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: (err) => onAuthError(err) }),
+  mutationCache: new MutationCache({ onError: (err) => onAuthError(err) }),
   defaultOptions: {
-    queries: { retry: 1, refetchOnWindowFocus: false },
+    queries: { retry: retryUnlessAuthRequired, refetchOnWindowFocus: false },
   },
 });
+const onAuthError = refreshAuthStateOn401(queryClient);
 
 const router = createBrowserRouter([
   // /welcome and /login both render outside <App /> so they own the full
