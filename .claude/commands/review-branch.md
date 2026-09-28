@@ -34,17 +34,20 @@ otherwise:
 
 - **Trivial:** human-facing Markdown outside `.claude/**` and root `CLAUDE.md`, with
   no executable instructions. Review directly; no subagent.
-- **Process-doc:** only `.claude/**` and/or root `CLAUDE.md`. Dispatch one
-  `branch-reviewer` for `logic+consistency+practices+comments+security`. If
-  `enforcement` is true, add one standalone `enforcement` call.
+- **Process-doc:** only Markdown under `.claude/**` and/or root `CLAUDE.md`. Dispatch
+  one `branch-reviewer` for `logic+consistency+practices+comments+security`. If
+  `enforcement` is true, add one standalone `enforcement` call. Code or config under
+  `.claude/**` (hooks, `settings.json`) routes as Standard even when the manifest
+  suggests `process-doc`.
 - **Standard:** dispatch exactly two `branch-reviewer` calls:
   1. `bugs+logic+consistency`
   2. `perf+practices+comments+alternatives`
   Add one standalone `enforcement` call only when the manifest flag is true and the
   diff actually changes a quality gate.
 
-A process-doc diff is Markdown, which `comment_lint.py` does not read, so `comments`
-runs there on its empty-list fallback. The agent file owns what that fallback is.
+A Markdown-only process-doc diff gives `comment_lint.py` nothing to read, so `comments`
+runs there on its empty-list fallback; a `.claude/hooks/*.py` change is linted
+normally. The agent file owns what that fallback is.
 
 **API-contract overlay:** when the diff changes an endpoint's request or response
 shape, fold `api-contract` into the first group rather than adding a call. Both sides
@@ -52,17 +55,24 @@ live in this repository, so the reviewer needs the whole prepared diff, not a sl
 
 **High-risk overlay:** auth/session/admin authorization, credential or PII handling,
 user-supplied URLs, schema/data migrations, destructive data paths, or security
-controls. For these diffs, the invoking coordinator owns the `security` review
-directly from the prepared manifest and worktree; do not dispatch a reviewer with
-the `security` dimension. This avoids provider-level reviewer dispatch blocks while
-keeping the security gate mandatory.
+controls, including the tests and gates that exercise them (e.g. a CSRF or
+admin-guard sweep). For these diffs, the invoking coordinator reviews the security
+subject matter directly from the prepared manifest and worktree: always the
+`security` dimension, and `enforcement` as well whenever the gate under review is a
+security control, whether or not the manifest's `enforcement` flag is set. Do not
+dispatch a reviewer with either assignment for that subject matter. Provider-level
+safeguards can block a reviewer dispatch on security-control subject matter under
+any dimension label, so keeping it with the coordinator keeps the security gate
+mandatory.
 
 The direct security review must inspect changed code and relevant call sites for
 credential exposure, authorization bypass, injection/SSRF, unsafe migrations,
-untrusted file/network handling, and sensitive-data leakage. Apply the same
-evidence-backed Major-finding gate and targeted verification as a dispatched
-reviewer. If it cannot be completed, stop and report that the security gate is
-incomplete; never treat an omitted dispatch as clean.
+untrusted file/network handling, and sensitive-data leakage; when it also covers
+`enforcement`, apply the agent file's enforcement criteria (a positive control that
+is caught, a legitimate negative control that passes, scope matching the stated
+policy). Apply the same evidence-backed Major-finding gate and targeted verification
+as a dispatched reviewer. If it cannot be completed, stop and report that the
+security gate is incomplete; never treat an omitted dispatch as clean.
 
 Every dispatch receives only: manifest path, diff path, objective, assigned
 dimensions, worktree path, and this exact line:
@@ -111,8 +121,8 @@ it; otherwise mark it as already raised and keep it active.
   and a short success summary; on failure, read only the useful tail and debug before
   claiming completion.
 - Invoke `superpowers:verification-before-completion` if available. Invoke
-  `systematic-debugging` only after a check fails; load `postgres-perf` or
-  `maplibre-map` only when the diff touches their domains.
+  `superpowers:systematic-debugging` (if available) only after a check fails; load
+  `postgres-perf` or `maplibre-map` only when the diff touches their domains.
 
 ## Boundaries
 
