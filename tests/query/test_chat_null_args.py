@@ -111,9 +111,7 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -128,9 +126,7 @@ async def test_rag_examples_appended_to_system_prompt(monkeypatch):
         Match(chunk_id="g-2", content="国道線の傾向", tool="time_series", args={}, distance=0.10),
     ]
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
-    await chat.chat_with_tools(
-        "もっと変な質問", ctx, conn=None, agency_id=1, model=None, locale="ja", rag_examples=examples
-    )
+    await chat.chat_with_tools("もっと変な質問", ctx, conn=None, agency_id=1, locale="ja", rag_examples=examples)
 
     system = captured["messages"][0]["content"]
     assert "中央大橋線の遅延" in system
@@ -149,9 +145,7 @@ async def test_panel_ctx_tab_appended_to_system_prompt(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -167,7 +161,6 @@ async def test_panel_ctx_tab_appended_to_system_prompt(monkeypatch):
         ctx,
         conn=None,
         agency_id=1,
-        model=None,
         locale="ja",
         panel_ctx={"tab": "overview"},
     )
@@ -187,9 +180,7 @@ async def test_panel_ctx_omitted_leaves_system_prompt_unchanged(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -200,7 +191,7 @@ async def test_panel_ctx_omitted_leaves_system_prompt_unchanged(monkeypatch):
     from api.range import RangeCtx
 
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
-    await chat.chat_with_tools("遅延はどう？", ctx, conn=None, agency_id=1, model=None, locale="ja")
+    await chat.chat_with_tools("遅延はどう？", ctx, conn=None, agency_id=1, locale="ja")
 
     system = captured["messages"][0]["content"]
     assert "currently viewing" not in system
@@ -216,9 +207,7 @@ async def test_history_injected_into_prompt(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -258,9 +247,7 @@ async def test_force_tool_call_sets_tool_choice_required(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["tool_choice"] = tool_choice
             return SimpleNamespace(content="ok", tool_calls=None), None
 
@@ -424,9 +411,7 @@ async def test_history_block_scopes_use_to_explicit_references(monkeypatch):
     captured = {}
 
     class _FakeClient:
-        def chat_completions(
-            self, *, messages, tools, tool_choice, temperature, model_override, allowed_providers=None
-        ):
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
             captured["messages"] = messages
             return SimpleNamespace(content="ok", tool_calls=None), None
 

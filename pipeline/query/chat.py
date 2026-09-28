@@ -45,7 +45,14 @@ from pipeline.query.intent import IntentSignature, canonicalize, derive_confiden
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import _PROVIDER_DEFAULTS, _build_create_kwargs, describe_provider_failure, get_client
+from pipeline.query.llm_client import (
+    _PROVIDER_DEFAULTS,
+    REQUEST_TIMEOUT,
+    _build_create_kwargs,
+    describe_provider_failure,
+    get_client,
+    log_usage,
+)
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
     JSON_MODE_FORCE_TOOL_ADDENDUM,
@@ -201,7 +208,6 @@ def _completion_with_key(
     tools: list[dict] | None = None,
     tool_choice: str = "auto",
     temperature: float = 0.0,
-    model_override: str | None = None,
     response_format: dict | None = None,
 ) -> Any:
     """Make one completion call against a signed-in user's own stored BYOK key.
@@ -230,9 +236,9 @@ def _completion_with_key(
     upper = provider.upper()
     base_url = os.environ.get(f"{upper}_BASE_URL", defaults["base_url"])
     model = os.environ.get(f"{upper}_MODEL", defaults["model"])
-    one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0)
+    one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=REQUEST_TIMEOUT)
     create_kwargs = _build_create_kwargs(
-        model=model_override or model,
+        model=model,
         messages=messages,
         temperature=temperature,
         tools=tools,
@@ -240,6 +246,7 @@ def _completion_with_key(
         response_format=response_format,
     )
     resp = one_off.chat.completions.create(**create_kwargs)
+    log_usage(provider, model, resp)
     return resp.choices[0].message
 
 
@@ -374,7 +381,6 @@ async def chat_with_tools(
     ctx: RangeCtx,
     conn,
     agency_id: int,
-    model: str | None = None,
     locale: str = "ja",
     rag_examples: list | None = None,
     history: list | None = None,
@@ -456,14 +462,10 @@ async def chat_with_tools(
     tables) when present. ``locale`` ∈ {``"ja"``, ``"en"``} chooses the
     user-facing language across the entire flow.
 
-    Model selection
-    ---------------
-    The ``model`` parameter is forwarded to the LLM adapter as a
-    per-call override. When ``model=None`` (the default), the adapter
-    uses each provider's own configured default (``{PROVIDER}_MODEL``
-    env var, e.g. ``GEMINI_MODEL`` / ``OPENAI_MODEL``). Passing a
-    vendor-specific model name only works if every provider in the
-    fallback ladder accepts it.
+    Each provider runs its own configured model (``{PROVIDER}_MODEL``, e.g.
+    ``GEMINI_MODEL`` / ``OPENAI_MODEL``). There is no per-request model
+    choice: no single model name is valid on every provider in the fallback
+    ladder, so one would leave every other rung unable to answer.
     """
     client = _get_client()
     # Skip the lookup (a DB round-trip + Fernet decrypt) entirely when the
@@ -730,7 +732,6 @@ async def chat_with_tools(
             return _call_llm(
                 messages=messages,
                 temperature=0.0,
-                model_override=model,
                 response_format={"type": "json_object"},
             )
         return _call_llm(
@@ -738,7 +739,6 @@ async def chat_with_tools(
             tools=TOOLS,
             tool_choice="required" if force_tool_call else "auto",
             temperature=0.0,
-            model_override=model,
         )
 
     # -----------------------------------------------------------------------
