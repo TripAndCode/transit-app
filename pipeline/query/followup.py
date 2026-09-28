@@ -11,6 +11,7 @@ path up front).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -137,7 +138,8 @@ async def answer_followup(
     user = f"{context_block}\n\nQuestion: {q}"
 
     client = get_client()
-    msg, err = client.chat_completions(
+    msg, err = await asyncio.to_thread(
+        client.chat_completions,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},

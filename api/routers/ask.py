@@ -92,7 +92,6 @@ class PanelCtx(BaseModel):
 
 class AskRequest(BaseModel):
     question: str = Field(max_length=MAX_QUESTION_CHARS)
-    model: str | None = None
     ctx: AskCtx | None = None
     history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
     # Threaded through to chat_with_tools's system-prompt addendum only — never
@@ -296,7 +295,6 @@ async def ask(
             ctx,
             conn,
             agency_id,
-            model=body.model,
             locale=locale,
             rag_examples=examples,
             history=history,
