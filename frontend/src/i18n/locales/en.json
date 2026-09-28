@@ -343,6 +343,7 @@
     "rel_seconds_ago": "{{count}}s ago",
     "range_separator": "–",
     "language_aria": "Language",
+    "language_switch_error": "Couldn't switch the language. Please check your connection and try again.",
     "theme_aria": "Appearance",
     "theme_dark": "Dark",
     "theme_light": "Light",
