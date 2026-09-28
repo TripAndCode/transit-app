@@ -271,9 +271,9 @@ async def test_compute_service_delivered_clamps_non_executed_exceeding_planned(n
 
 
 async def test_compute_supply_metrics_vehicle_km_delivered_uses_service_delivered_ratio(net_pool, ch_async_client):
-    """Item 98: vehicle_km_delivered_pct is item 92's executed/planned trip
-    ratio applied to the current static-version's planned vehicle-km, once
-    BOTH are available."""
+    """vehicle_km_delivered_pct is the service-delivered (executed/planned
+    trip) ratio applied to the current static-version's planned vehicle-km,
+    once BOTH are available."""
     pool, a, _b, _cc = net_pool
     await _seed_static_version_summary(pool, a, "v1", trip_count=10, vehicle_km=100.0)
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2", "T3", "T4", "T5"], svc_date="20260401")
@@ -293,8 +293,8 @@ async def test_compute_supply_metrics_vehicle_km_delivered_uses_service_delivere
 async def test_compute_supply_metrics_falls_back_to_trip_count_only_without_shapes(net_pool, ch_async_client):
     """No shapes.txt loaded for this static version (vehicle_km NULL) ->
     vehicle_km_delivered_pct reads None (trip-count-only fallback) even
-    though item 92's ratio IS available -- planned_trip_count alone still
-    carries the headline."""
+    though the service-delivered ratio IS available -- planned_trip_count
+    alone still carries the headline."""
     pool, a, _b, _cc = net_pool
     await _seed_static_version_summary(pool, a, "v1", trip_count=10, vehicle_km=None)
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2", "T3", "T4", "T5"], svc_date="20260401")
@@ -397,16 +397,16 @@ async def test_compute_rollups_ranking_and_freshness(net_pool, ch_client, ch_asy
 async def test_compute_network_summary_falls_back_to_latest_completed_day_when_today_has_rows(
     net_pool, ch_client, ch_async_client
 ):
-    """Regression: an agency ingesting continuously (a completed day AFTER
-    its agg's newest day, PLUS a row from right now) must still be flagged
-    stale — is_stale must not silently flip to False just because the
-    unconditional MAX(captured_at) happens to land on today (the normal,
-    healthy, continuously-ingesting case in production).
+    """An agency ingesting continuously (a completed day AFTER its agg's
+    newest day, PLUS a row from right now) must still be flagged stale —
+    is_stale must not silently flip to False just because the unconditional
+    MAX(captured_at) happens to land on today (the normal, healthy,
+    continuously-ingesting case in production).
 
-    A prior version computed MAX(captured_at) over the whole table and only
-    accepted it in Python if it was already before today's JST midnight —
-    so it never fell back to the latest prior completed day when today also
-    had rows, defeating staleness detection under normal conditions.
+    Computing MAX(captured_at) over the whole table and accepting it only if
+    it is already before today's JST midnight would never fall back to the
+    latest prior completed day when today also has rows, defeating staleness
+    detection under normal conditions.
     """
     pool, a, _b, _cc = net_pool
     # agg only knows about 2026-04-01 ...

@@ -1,10 +1,10 @@
 """Behaviour of the abandoned-container reaper.
 
 Driven through a shimmed `docker` rather than asserted against the script's
-text. The bug this replaces was a `docker ps --filter until=...` call — a
-filter `docker ps` does not have, which fails the daemon call outright. A
-test that grepped the script for `until=` passed the whole time; only
-executing it against something that answers like Docker catches that class.
+text. A call using a filter `docker ps` does not have (e.g. `--filter
+until=...`) fails the daemon call outright, yet a test that greps the script
+for `until=` passes; only executing it against something that answers like
+Docker catches that class.
 """
 
 from __future__ import annotations

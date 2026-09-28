@@ -94,7 +94,7 @@ describe("resetKey identity", () => {
   });
 
   it("resets the cap on every render when the key is freshly allocated", async () => {
-    // What MapTab used to pass: the derived array itself. `Object.is` never
+    // A caller passing the derived array itself as the key: `Object.is` never
     // matches, so the cap cannot stay raised -- and since the reset runs
     // during render, React sees a render that always schedules another.
     const user = userEvent.setup();

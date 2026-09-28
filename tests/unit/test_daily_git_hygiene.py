@@ -671,7 +671,7 @@ def test_review_worktree_naming_matches_review_pr_md():
     """Upgrades the naming coupling `REVIEW_WORKTREE_PARENT_DIR`'s own comment calls
     "greppable" into an enforced check: if `/review-pr` ever renames its worktree
     convention without updating these constants, this fails loudly instead of the
-    exemption silently stopping firing and the disk-full incident recurring."""
+    exemption silently stopping firing and review worktrees filling the disk."""
 
     review_pr_doc = (ROOT / ".claude" / "commands" / "review-pr.md").read_text(encoding="utf-8")
 

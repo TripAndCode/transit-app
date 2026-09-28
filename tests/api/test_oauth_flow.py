@@ -491,12 +491,12 @@ async def test_logout_deletes_session(auth_client, aconn):
 
 @pytest.mark.asyncio
 async def test_real_login_then_callback_does_not_raise_duplicate_code_verifier(auth_client, aconn, monkeypatch):
-    """Regression test for a real bug that broke every production login: the
-    callback passed ``code_verifier`` explicitly to ``authorize_access_token``,
-    but Authlib's own ``_format_state_params`` also injects ``code_verifier``
-    from the Starlette session state that ``authorize_redirect`` (in /login)
-    already stored there — passing both raised ``TypeError: got multiple
-    values for keyword argument 'code_verifier'`` on every real attempt.
+    """The callback must not pass ``code_verifier`` explicitly to
+    ``authorize_access_token``: Authlib's own ``_format_state_params``
+    already injects ``code_verifier`` from the Starlette session state that
+    ``authorize_redirect`` (in /login) stored there, and passing both raises
+    ``TypeError: got multiple values for keyword argument 'code_verifier'``
+    on every real login attempt.
 
     Unlike the other tests in this file, this one does NOT mock
     ``authorize_access_token`` itself (that would mock away the exact bug).

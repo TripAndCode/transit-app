@@ -45,8 +45,8 @@ async def test_route_dow_breakdown_returns_per_dow_rows(aconn, aagency_id, ch_cl
     """Three observations across two DOWs for one route. Helper should
     collapse to one row per (service_type, DOW).
 
-    Task 8.5: ``route_dow_breakdown`` always reads live ``updates`` from
-    ClickHouse now (there is no agg-table fast path for it), so this seeds
+    ``route_dow_breakdown`` always reads live ``updates`` from
+    ClickHouse (there is no agg-table fast path for it), so this seeds
     Postgres `updates` (for readability / consistency with other fixtures)
     then mirrors into ClickHouse before calling the helper with a real `ch`.
 
@@ -171,7 +171,7 @@ async def test_route_dow_breakdown_returns_empty_without_ch(aconn, aagency_id):
 
 @pytest.mark.asyncio
 async def test_route_compare_service_returns_per_service_type(aconn, aagency_id, ch_client, ch_async_client):
-    """One row per service_type for one route (Task 8.5: live ClickHouse path)."""
+    """One row per service_type for one route (live ClickHouse path)."""
     now = datetime.now(timezone(timedelta(hours=9)))
     rows = [
         ("pb_h", now, "平日", 60),
@@ -348,7 +348,7 @@ async def test_schedule_realism_segments_flags_growing_delay(aconn, aagency_id, 
 async def test_schedule_realism_segments_partitions_recurring_trip_id_by_date(
     aconn, aagency_id, ch_client, ch_async_client
 ):
-    """Regression guard: `trip_id` in this feed is a recurring GTFS schedule
+    """`trip_id` in this feed is a recurring GTFS schedule
     identifier (e.g. "平日_8時15分_系統3", see pipeline/strategies/aomori_regex.py),
     NOT a per-day run identifier — the same trip_id recurs on every day that
     service pattern operates. The window function must partition by
@@ -364,12 +364,12 @@ async def test_schedule_realism_segments_partitions_recurring_trip_id_by_date(
     (5*5 + 2 + 8) / 7 == 5.0 average and samples == 7 is only reproduced
     when each day's run of "trip_recur" is windowed independently.
 
-    Confirmed empirically (ad hoc ClickHouse query against this exact
-    fixture shape) that partitioning by trip_id alone — the pre-fix
-    behaviour — instead yields samples == 6 and avg_added_min == 4.50 for
-    this fixture: one of the two correct (2 min, 8 min) trip_recur
-    observations is lost/miscounted when the two calendar days' rows share
-    one partition ordered only by stop_sequence.
+    Partitioning by trip_id alone instead yields samples == 6 and
+    avg_added_min == 4.50 for this fixture (confirmed with an ad hoc
+    ClickHouse query against this exact fixture shape): one of the two
+    correct (2 min, 8 min) trip_recur observations is lost/miscounted when
+    the two calendar days' rows share one partition ordered only by
+    stop_sequence.
     """
     now = jst_midday()
     for i in range(5):
@@ -634,10 +634,10 @@ async def test_route_hour_dow_pattern_returns_worst_first(aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_route_hour_dow_pattern_pools_exact_sum_delay_sec_not_reweighted_avg(aconn, aagency_id):
     """route_hour_dow_pattern pools multiple service_type rows for the same
-    (dow, hour) via SUM(sum_delay_sec)/SUM(samples) (exact), not the old
+    (dow, hour) via SUM(sum_delay_sec)/SUM(samples) (exact), not a
     SUM(avg_min * samples)/SUM(samples) reweighting of an already-rounded
-    per-row average -- mirrors api/routers/reports.py's forecast_heatmap
-    identical fix (migration 0028's sum_delay_sec rollout)."""
+    per-row average -- the same rule api/routers/reports.py's
+    forecast_heatmap applies (the sum_delay_sec column from migration 0028)."""
     from pipeline.query.tool_queries import route_hour_dow_pattern
 
     await aconn.execute(

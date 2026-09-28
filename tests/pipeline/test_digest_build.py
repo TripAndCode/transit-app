@@ -266,7 +266,7 @@ def test_low_confidence_anomaly_caps_at_watch(pg_conn, agency_id):
 def test_null_service_route_gets_route_grain_baseline(pg_conn, agency_id):
     """A NULL-service route (stored as '' in agg_route_daily) finds the route's
     overall baseline (aggregated across service_types in agg_route_stats) and is
-    triaged as a mover — proving '' rows are no longer dropped by the baseline join."""
+    triaged as a mover — proving '' rows are not dropped by the baseline join."""
     with pg_conn.cursor() as cur:
         # Daily row with empty-string service_type (the COALESCE'd NULL case).
         _insert_daily(cur, agency_id, "44372", "", 480, 50)
@@ -326,7 +326,7 @@ def test_route_baseline_sql_pools_exact_sum_delay_sec_not_rounded_avg_min(pg_con
     124 (analyze() would round that group's own avg_min to 0.69 min) and 7
     samples whose raw-seconds sum is 700 (rounds to 1.67 min). Pooling the
     exact sums gives (124+700)/10/60 = 1.37333... min; re-weighting the
-    rounded 0.69/1.67 instead (the pre-fix pattern) gives
+    rounded 0.69/1.67 instead gives
     (0.69*3 + 1.67*7)/10 = 1.376 min -- these round to a different whole
     second (82 vs 83) once converted the way build_digest actually consumes
     this figure, proving the two methods diverge."""
