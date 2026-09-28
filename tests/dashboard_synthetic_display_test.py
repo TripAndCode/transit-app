@@ -1,19 +1,19 @@
-"""Frontend dashboard display check against item 21's synthetic ground truth.
+"""Frontend dashboard display check against the synthetic GTFS fixture's ground truth.
 
-Item 21 (`tests/pipeline/test_synthetic_agg_e2e.py`) proved `pipeline/analyze.py`
+`tests/pipeline/test_synthetic_agg_e2e.py` proves `pipeline/analyze.py`
 builds numerically-correct `agg_*` rows from a hand-computable synthetic
-GTFS static+RT fixture. It never rendered anything — a request/response or
+GTFS static+RT fixture. It never renders anything — a request/response or
 frontend-formatting bug downstream of `agg_*` (a unit mix-up, an off-by-one
 in a query filter, a component reading the wrong field) could still show a
 wrong number on screen while every `agg_*` row is correct. This module
 closes that specific gap for the Overview and Analysis/ranking tabs (the two
 most numeric-heavy report surfaces — see `docs/features/overview-tab.md` and
-`docs/features/analysis-tab.md`): it seeds one dedicated agency per item 21
+`docs/features/analysis-tab.md`): it seeds one dedicated agency per synthetic
 pattern into the throwaway Postgres (`:5544`)/ClickHouse (`:8124`) stack,
 runs `analyze()`, launches the real FastAPI app (serving the built SPA) as a
 subprocess, and uses Playwright to load the actual Overview and Analysis
 ranking pages and scrape the on-screen numbers — asserting them against the
-SAME `pattern.expected["agg_route_stats"]` dict item 21 itself imports
+SAME `pattern.expected["agg_route_stats"]` dict the aggregate e2e test imports
 (`tests.fixtures.synthetic_gtfs`), never a second hand-copied/re-derived
 value.
 
@@ -28,15 +28,15 @@ this test checks — the Overview headline's agency-wide `avg_min`
 (`OverviewHeroRow.tsx`), and the Analysis ranking table's per-route
 `avg_min`/`samples` (`ReportTable.tsx`) — is exactly that ONE pattern's
 `agg_route_stats` value, with no need to hand-derive a second, cross-route
-combined expectation this test and item 21 could then silently disagree
-about.
+combined expectation this test and the aggregate e2e test could then
+silently disagree about.
 
 Why Overview's "Routes to check" list and headline DELTA are NOT the check
-target here (both considered and rejected while writing this test):
+target here:
 - "Routes to check" (`RoutesToCheckList.tsx`) excludes the "ok" severity
   band (< 1.5 min, `frontend/src/styles/tokens.ts`'s `delayBand`) from its
   rendered groups entirely (`routesToCheckBands.ts`'s `groupBySeverityBand`)
-  — ALL THREE of item 21's patterns (0.5 / 0.88 / 1.0 min) fall under 1.5,
+  — ALL THREE synthetic patterns (0.5 / 0.88 / 1.0 min) fall under 1.5,
   so this list always renders empty for this fixture regardless of
   correctness. Not a usable check target.
 - The headline's delta-vs-prior-week (`hasBaseline` in `OverviewHeroRow.tsx`)
@@ -50,15 +50,15 @@ target here (both considered and rejected while writing this test):
   — so `_headline_stats` (`SUM(avg_min*samples)/SUM(samples)` over
   `agg_daily_trend`) reduces to that agency's one route's own `avg_min`.
 
-Why the Analysis ranking table's median/p90 columns are NOT checked here
-(also considered and rejected): `pipeline/reports/rankings.py`'s
-`compute_ranking` fast path reads `agg_route_daily_dist`'s per-day delay
-HISTOGRAM and interpolates p50/p90 from it (`percentile_from_hist`) — a
-different algorithm from `agg_route_stats`'s `PERCENTILE_DISC()`-based
-formula item 21 hand-verified (see that function's own docstring). An
+Why the Analysis ranking table's median/p90 columns are NOT checked here:
+`pipeline/reports/rankings.py`'s `compute_ranking` fast path reads
+`agg_route_daily_dist`'s per-day delay HISTOGRAM and interpolates p50/p90
+from it (`percentile_from_hist`) — a different algorithm from
+`agg_route_stats`'s `PERCENTILE_DISC()`-based formula the aggregate e2e
+test hand-verifies (see that function's own docstring). An
 interpolating histogram estimate and an exact discrete percentile over the
 same underlying data are not guaranteed to agree bucket-for-bucket —
-asserting item 21's `p50_min`/`p90_min` against the ranking table's columns
+asserting the fixture's `p50_min`/`p90_min` against the ranking table's columns
 would be checking a real, intentional methodological difference, not a
 rendering bug. Only `avg_min` (plain `SUM(sum_delay_sec)/SUM(samples)`,
 identical math on both tables) and `samples` (an exact count, identical on
@@ -115,7 +115,7 @@ _STATIC_INDEX = Path("api/static/index.html")
 
 @pytest.fixture
 def seeded_agencies(tmp_path, pg_conn, ch_client) -> dict[str, tuple[int, SyntheticPattern]]:
-    """Seed one dedicated agency per item-21 pattern; return name -> (agency_id, pattern)."""
+    """Seed one dedicated agency per synthetic pattern; return name -> (agency_id, pattern)."""
     out: dict[str, tuple[int, SyntheticPattern]] = {}
     for pattern_fn in ALL_PATTERNS:
         pattern = pattern_fn()

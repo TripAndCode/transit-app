@@ -1,14 +1,14 @@
-"""Pure helpers for comparing a scraped dashboard DOM string against item 21's
-hand-computed ground truth (item 22 — "does the frontend actually render
-`agg_*` numbers correctly, not just does the pipeline compute them
-correctly").
+"""Pure helpers for comparing a scraped dashboard DOM string against the
+synthetic GTFS fixture's hand-computed ground truth — "does the frontend
+actually render `agg_*` numbers correctly, not just does the pipeline
+compute them correctly".
 
 Split out from `tests/dashboard_synthetic_display_test.py` (which needs a
 real browser + the throwaway Postgres/ClickHouse stack and is skipped by
 default — see that module's docstring) so the comparison LOGIC itself can be
 exercised by fast, offline, always-run tests too
-(`tests/unit/test_dashboard_value_check.py`), mirroring item 23's
-`tests/ask_eval/numeric_ground_truth.py` split: prove the check isn't
+(`tests/unit/test_dashboard_value_check.py`), mirroring the live-LLM
+numeric eval's `tests/ask_eval/numeric_ground_truth.py` split: prove the check isn't
 vacuous without needing a browser/DB at all.
 
 Every dashboard surface this repo's ``ReportTable.tsx``/``OverviewHeroRow.tsx``
@@ -16,7 +16,7 @@ render numbers through JS ``toFixed(1)`` (see ``fmtMin`` in
 ``frontend/src/components/ReportTable.tsx`` and the inline
 ``headline.avg_min.toFixed(1)`` in
 ``frontend/src/components/OverviewHeroRow.tsx``), one more rounding step past
-item 21's 2-decimal-place `agg_route_stats` values — so comparisons here
+the fixture's 2-decimal-place `agg_route_stats` values — so comparisons here
 round the *expected* side to 1dp before comparing, rather than comparing at
 2dp and risking a spurious failure on the display layer's own (correct)
 rounding.
@@ -45,13 +45,13 @@ def extract_leading_number(text: str) -> float:
 
 
 def assert_avg_min_matches(cell_text: str, expected_avg_min: float, *, label: str) -> None:
-    """Compare a scraped avg-delay cell against item 21's raw (2dp)
+    """Compare a scraped avg-delay cell against the fixture's raw (2dp)
     ``agg_route_stats``/``agg_route_daily``-derived ``avg_min`` expectation.
 
     Rounds the expected side to 1dp with Python's ``round()`` (round-half-
     to-even) before comparing, since every on-screen surface this test
     checks re-rounds to 1dp for display via JS ``toFixed`` (round-half-up).
-    The two algorithms only agree for item 21's current pattern values
+    The two algorithms only agree for the fixture's current pattern values
     (0.5/0.88/1.0) because none of them land exactly on a `.x5` boundary in
     binary floating point — they are NOT equivalent in general. A future
     pattern whose ``avg_min`` does land on such a boundary (e.g. ``0.85``)
@@ -69,7 +69,7 @@ def assert_avg_min_matches(cell_text: str, expected_avg_min: float, *, label: st
 
 
 def assert_samples_matches(cell_text: str, expected_samples: int, *, label: str) -> None:
-    """Compare a scraped sample-count cell against item 21's expected count."""
+    """Compare a scraped sample-count cell against the fixture's expected count."""
     actual = extract_leading_number(cell_text)
     if actual != expected_samples:
         raise AssertionError(

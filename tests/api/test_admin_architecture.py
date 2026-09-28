@@ -1,5 +1,5 @@
 """Tests for GET /api/admin/architecture/docs[/{slug}] -- the developer-only
-`/admin/architecture` page's backing endpoints (item 25).
+`/admin/architecture` page's backing endpoints.
 
 Both routes are filesystem-only (no DB query), but still sit behind
 `require_admin`, which itself needs a real session row to resolve

@@ -40,8 +40,8 @@ async def _seed_agg_daily(
     exact whenever every observation behind this row shares ``avg_min``'s
     sign (true of every caller that seeds a uniformly early or uniformly
     late day). A caller exercising a day that MIXES early and late trips —
-    exactly the case where the per-observation clamped sum and the
-    clamped-average approximation this column replaced used to diverge —
+    exactly the case where the per-observation clamped sum and a
+    clamped-average approximation diverge —
     must pass the true value explicitly; there is no way to derive it from
     ``avg_min``/``samples`` alone.
     """
@@ -281,8 +281,8 @@ async def test_headline_pools_exact_sum_delay_sec_not_rounded_avg_min(aconn, aag
     Day 1 (3 samples, raw-seconds sum 124 -> analyze() rounds that day's own
     avg_min to 0.69 min) and day 2 (7 samples, raw-seconds sum 700 -> rounds
     to 1.67 min). Pooling the exact sums gives (124+700)/10/60 = 1.37333...
-    -> rounds to 1.37; re-weighting the rounded 0.69/1.67 instead (the
-    pre-fix pattern) gives (0.69*3 + 1.67*7)/10 = 1.376 -> rounds to 1.38, a
+    -> rounds to 1.37; re-weighting the rounded 0.69/1.67 instead gives
+    (0.69*3 + 1.67*7)/10 = 1.376 -> rounds to 1.38, a
     measurably different (and wrong) answer that exists purely from the
     intermediate rounding.
     """
@@ -781,16 +781,16 @@ async def test_concentration_fast_path_counts_clamped_observations_not_clamped_a
     per-observation clamped lateness, not its already-signed average
     clamped to zero.
 
-    R_MIX runs 5 trips at +10 min and 5 at -8 min: avg_min = +1.0. The old
-    ``SUM(GREATEST(avg_min, 0) * samples)`` approximation would have scored
+    R_MIX runs 5 trips at +10 min and 5 at -8 min: avg_min = +1.0. A
+    ``SUM(GREATEST(avg_min, 0) * samples)`` approximation would score
     this as ``1.0 * 10 = 10`` late-minutes. The true clamped sum — what
-    ``sum_late_sec`` now stores exactly — is ``5 * 10 = 50`` (the -8 min
+    ``sum_late_sec`` stores exactly — is ``5 * 10 = 50`` (the -8 min
     trips contribute 0, never a negative offset). R_OTHER runs uniformly at
     +2 min for the same 10 samples: true total ``2.0 * 10 = 20``.
 
-    Under the old approximation R_OTHER (20) would have outranked R_MIX
-    (10) — backwards, since R_MIX's real contribution (50) is more than
-    double R_OTHER's. The fix must rank R_MIX first.
+    Under that approximation R_OTHER (20) would outrank R_MIX (10) —
+    backwards, since R_MIX's real contribution (50) is more than double
+    R_OTHER's. R_MIX must rank first.
     """
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_MIX", "平日", 1.0, 10, sum_late_sec=3000)
     await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_OTHER", "平日", 2.0, 10)
@@ -812,7 +812,7 @@ async def test_concentration_fast_and_slow_paths_agree_on_mixed_early_late_day(
 ):
     """The fast (``time_band='all'``) and slow (any other ``time_band``) paths
     must score an identical mixed early/late day identically — the exact
-    case ``SUM(GREATEST(avg_min, 0) * samples)`` used to understate relative
+    case where ``SUM(GREATEST(avg_min, 0) * samples)`` would understate relative
     to the slow path's per-observation ``SUM(GREATEST(dep_delay, 0))``, which
     could rank routes differently depending only on which ``time_band`` a
     request happened to use, not on the underlying data.
@@ -929,8 +929,7 @@ async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_top_delayed_routes_falls_back_to_live_under_time_band(aconn, aagency_id, ch_client, ch_async_client):
     """Non-default time_band bypasses agg_daily_trend and reads updates
-    directly (ClickHouse, Task 8.5), same fallback _concentration() already
-    uses."""
+    directly (ClickHouse), the same fallback _concentration() uses."""
     base = datetime.combine(date(2026, 5, 18), time(8, 0), tzinfo=timezone.utc)
     for i, dep in enumerate([300, 360]):  # 5.0, 6.0 min -> avg 5.5
         await aconn.execute(
@@ -1107,7 +1106,7 @@ async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aag
 @pytest.mark.asyncio
 async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id, ch_client, ch_async_client):
     """When ``ctx.time_band != 'all'``, the headline must read from live
-    ``updates`` (ClickHouse, Task 8.5) so the hour-of-day filter actually
+    ``updates`` (ClickHouse) so the hour-of-day filter actually
     applies. The four seeded rows span morning / noon / evening;
     ``time_band='morning'`` must keep only the two scheduled inside
     05:00-09:00."""
@@ -1181,10 +1180,10 @@ async def test_peak_hour_weekday_weekend_split_from_agg(aconn, aagency_id):
 async def test_peak_hour_by_dow_pools_exact_sum_delay_sec_not_reweighted_avg(aconn, aagency_id):
     """_peak_hour_by_dow's fast path pools multiple agg_hour_daily days for the
     same hour. Pooling must use SUM(sum_delay_sec)/SUM(samples) (exact), not
-    the old SUM(avg_min * samples)/SUM(samples) reweighting of an
-    already-rounded per-day average -- mirrors peak_hour_breakdown's identical
-    fix for agg_route_hour_dow (migration 0028's sum_delay_sec rollout,
-    extended to agg_hour_daily)."""
+    a SUM(avg_min * samples)/SUM(samples) reweighting of an
+    already-rounded per-day average -- the same rule peak_hour_breakdown
+    applies to agg_route_hour_dow (agg_hour_daily's sum_delay_sec comes from
+    migration 0030)."""
     # Two weekday Tuesdays at hour 15, with non-round per-row avg_min values
     # whose sum_delay_sec is seeded to the TRUE underlying sum rather than
     # backed out from the rounded avg_min, so the two pooling formulas diverge.
@@ -1223,7 +1222,7 @@ async def test_peak_hour_agg_sample_weights_across_days(aconn, aagency_id):
 @pytest.mark.asyncio
 async def test_peak_hour_falls_back_to_live_under_service_filter(aconn, aagency_id, ch_client, ch_async_client):
     """A service filter (the agg has no service dimension) routes peak-hour to
-    the live scan (ClickHouse, Task 8.5), which still partitions weekday/weekend
+    the live scan (ClickHouse), which still partitions weekday/weekend
     correctly."""
     weekday_dt = datetime.combine(date(2026, 5, 19), time(8, 0), tzinfo=timezone.utc)
     weekend_dt = datetime.combine(date(2026, 5, 23), time(17, 0), tzinfo=timezone.utc)
@@ -1517,9 +1516,9 @@ async def test_peak_hour_breakdown_no_dow_aggregates_all(client, aconn, aagency_
 async def test_peak_hour_breakdown_no_dow_pools_exact_sum_delay_sec_not_reweighted_avg(client, aconn, aagency_id):
     """Without dow, peak_hour_breakdown pools multiple dow rows for the same
     route/service/hour. Pooling must use SUM(sum_delay_sec)/SUM(samples)
-    (exact), not the old SUM(avg_min * samples)/SUM(samples) reweighting of
-    an already-rounded per-row average -- mirrors forecast_heatmap's
-    identical fix (migration 0028's sum_delay_sec rollout)."""
+    (exact), not a SUM(avg_min * samples)/SUM(samples) reweighting of
+    an already-rounded per-row average -- the same rule forecast_heatmap
+    applies (the sum_delay_sec column from migration 0028)."""
     await _seed_agg_route_hour_dow(aconn, aagency_id, "Q1", "平日", 3, 15, 1.61, 3, sum_delay_sec=290)
     await _seed_agg_route_hour_dow(aconn, aagency_id, "Q1", "平日", 4, 15, 2.0, 1000, sum_delay_sec=100000)
     r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 15})
@@ -1565,12 +1564,12 @@ async def test_peak_hour_breakdown_no_dow_skips_all_null_sum_delay_sec_group(cli
 # ---------------------------------------------------------------------------
 # Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
 #
-# Every slow-path stage helper used to run its OWN dedup scan of `updates`
-# (~12 per request), each one slow enough on its own to risk blowing the
-# ClickHouse client's 30s max_execution_time. They now all derive from a
-# single `_fetch_grain` round trip. These tests pin both halves of that: the
-# round-trip count, and the semantics that the consolidation had to preserve
-# (per-consumer date windows, per-consumer DOW, hour-of-day extraction).
+# Every slow-path stage helper derives from a single `_fetch_grain` round
+# trip rather than running its OWN dedup scan of `updates` — a dozen scans
+# per request, each slow enough on its own to risk the ClickHouse client's
+# max_execution_time. These tests pin both halves of that: the round-trip
+# count, and the semantics the consolidation has to preserve (per-consumer
+# date windows, per-consumer DOW, hour-of-day extraction).
 # ---------------------------------------------------------------------------
 
 
@@ -1718,13 +1717,13 @@ async def test_narrow_ctx_baseline_matches_current_window_width(aconn, aagency_i
     more days further back (05-09, 05-12) that only an unclamped 7-day
     baseline would reach. Those two extra days are seeded with a sharply
     different average (15.0 min) from the 05-13..05-15 tier (1.0 min) —
-    seeding them uniformly, or leaving them empty, would make the old
-    (buggy) 7-day-wide baseline and the fixed same-width baseline produce
+    seeding them uniformly, or leaving them empty, would make a
+    7-day-wide baseline and the correct same-width baseline produce
     the identical result, so this test would pass either way and catch
-    nothing. With the distinct third tier, the old formula's
+    nothing. With the distinct third tier, a 7-day-wide formula's
     baseline_avg_min would be pulled toward the 15.0-min days while the
-    fixed formula's stays at exactly 1.0, so only the fixed code satisfies
-    the assertion below.
+    same-width formula's stays at exactly 1.0, so only the same-width code
+    satisfies the assertion below.
     """
     for d, dep in [
         (date(2026, 5, 9), 900),
@@ -1838,11 +1837,11 @@ async def test_slow_path_movers_tie_break_is_deterministic(aconn, aagency_id, ch
 
     `_movers` ranks on `(raw delta_min, route_code)` — a total order, since
     route_codes are distinct — which is what makes the ranking independent of
-    the order `set(cur) & set(prv)` happens to be iterated in. It used to rank
-    on the ROUNDED delta and lean on a stable sort, so Python's per-process
-    string-hash randomization decided which routes made the top-10 and in what
-    order; the same request against the same data returned different movers
-    after an app restart.
+    the order `set(cur) & set(prv)` happens to be iterated in. Ranking on the
+    ROUNDED delta and leaning on a stable sort would let Python's per-process
+    string-hash randomization decide which routes make the top-10 and in what
+    order, so the same request against the same data could return different
+    movers after an app restart.
     """
     cur_day = datetime.combine(date(2026, 5, 24), time(12, 0), tzinfo=timezone.utc)
     prv_day = cur_day - timedelta(days=7)

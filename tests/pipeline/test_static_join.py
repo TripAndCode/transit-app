@@ -177,11 +177,12 @@ def test_static_join_isolates_schedule_tables_across_agencies_sharing_one_connec
 
 def test_static_join_zero_pads_single_digit_hour_scheduled_time(pg_conn):
     """GTFS's departure_time is raw, unpadded text — "7:05:00" is as valid
-    as "07:05:00" per spec. Postgres's old TIME column normalized this for
-    free; ClickHouse's plain String does not, and every hour-extraction
-    read site downstream assumes a 2-digit hour. Regression: static_join
-    must zero-pad at write time so a single-digit-hour departure_time
-    doesn't sort into the wrong time band or crash toUInt8() reads."""
+    as "07:05:00" per spec. ClickHouse stores scheduled_time as a plain
+    String, which (unlike a Postgres TIME column) does not normalize this,
+    and every hour-extraction read site downstream assumes a 2-digit hour.
+    static_join must zero-pad at write time so a single-digit-hour
+    departure_time doesn't sort into the wrong time band or crash toUInt8()
+    reads."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "

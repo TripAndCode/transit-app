@@ -315,9 +315,9 @@ def test_ingest_agency_isolated(pg_conn, ch_client, tmp_path):
 
 
 def test_ingest_batches_clickhouse_inserts_across_files(pg_conn, ch_client, agency_id, tmp_path):
-    """Task 8.9: ingest() must not call insert_updates once per source file -
-    that fixed ~100ms-per-call overhead is what turned a real agency-1
-    backfill into 7h36m wall-clock for 15m of actual CPU work. With 10 loose
+    """ingest() must not call insert_updates once per source file - each
+    call carries a fixed round-trip overhead that, multiplied over a
+    backfill's many small files, dominates its wall-clock time. With 10 loose
     .pb files of 5 rows each (50 rows total, well under _BATCH_ROWS),
     insert_updates should be called once - at ingest()'s trailing flush -
     not 10 times, while every row still lands and the total inserted count
@@ -368,7 +368,7 @@ def test_ingest_does_not_double_process_same_file_key_within_one_run(pg_conn, ch
 
     `done` (the set of already-ingested file keys) is computed once at the
     top of ingest() from ClickHouse and is only updated inside _flush(),
-    which runs at most once per _BATCH_ROWS rows (Task 8.9). With only one
+    which runs at most once per _BATCH_ROWS rows. With only one
     row per file here, no mid-run flush is triggered, so `done` never gets
     updated between the tarball loop and the loose-.pb loop. A loose-.pb
     dedup filter that checked only that still-stale `done` would not exclude
@@ -544,7 +544,7 @@ def test_ingest_flush_non_dataerror_falls_back_to_whole_batch_discard_no_per_fil
     batch never reached the server, so retrying file-by-file could either
     hammer an already-struggling server with hundreds of doomed inserts, or
     duplicate rows that actually committed despite the client raising.
-    Confirm the old whole-batch-discard behavior: insert_updates is called
+    Confirm the whole-batch-discard behavior: insert_updates is called
     exactly ONCE (no per-file retry calls at all, even for files that would
     have succeeded), zero rows land, and every file - including the ones
     that were never actually bad - is retried on the next run."""

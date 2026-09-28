@@ -193,8 +193,8 @@ def test_reset_cache_forgets_even_an_override(monkeypatch):
 
 
 def test_registry_covers_every_known_gated_env_var():
-    """Regression guard for the nine kill switches this task registers --
-    a name dropped from the registry silently stops being overridable from
+    """Every gated env var must stay registered -- a name dropped from the
+    registry silently stops being overridable from
     the admin UI (the call site would still work off its env default, but a
     PATCH against it would 404/never apply)."""
     expected = {

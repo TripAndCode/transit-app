@@ -57,9 +57,8 @@ class _EditorConn:
     async def execute(self, sql: str, *args: Any) -> str:
         # The editors bind one array per column and expand them with
         # `unnest(...)`, so every row of a request arrives in one call. The
-        # fake mirrors that rather than the per-row loop it replaced -- a fake
-        # modelling the old shape would be exercising a call the router no
-        # longer makes.
+        # fake mirrors that rather than a per-row loop -- a fake modelling
+        # per-row calls would be exercising a call the router never makes.
         if "INSERT INTO route_performance_standards" in sql:
             _agency_id, route_codes, metric_types, thresholds, rates = args
             for route_code, metric_type, threshold_value, bonus_malus_rate in zip(

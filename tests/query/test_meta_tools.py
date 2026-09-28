@@ -118,8 +118,8 @@ async def conn_with_observations(conn_with_seed):
 async def conn_with_observations_ch(conn_with_observations, ch_client, ch_async_client):
     """`conn_with_observations` plus the same rows mirrored into ClickHouse
     and a wired async client — needed by describe_data's `date_range` /
-    `sample_counts` / `overview` kinds, which now read live `updates` from
-    ClickHouse instead of Postgres (Task 8)."""
+    `sample_counts` / `overview` kinds, which read live `updates` from
+    ClickHouse instead of Postgres."""
     pool, agency_id = conn_with_observations
     from tests.conftest import mirror_updates_to_ch
 
