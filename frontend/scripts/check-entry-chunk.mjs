@@ -81,12 +81,15 @@ const MERMAID_JS_MARKER = "mermaidAPI";
 // "current measured size" — it's headroom, not a baseline to keep in
 // sync by hand. MapLibre alone adds ~800 KiB, so this still catches a
 // MapLibre-scale regression with room to spare.
-//
-// The largest single occupant is not a library: both locale bundles are
-// imported eagerly by i18n's init, so every translated string in the app
-// ships in the entry. Moving them to a per-language fetch would free well
-// over a tenth of this budget and is the real reduction available here.
-const STATIC_CLOSURE_BUDGET_BYTES = 640 * 1024;
+const STATIC_CLOSURE_BUDGET_BYTES = 600 * 1024;
+
+// Each language's strings are their own dynamic chunk (src/i18n/index.ts)
+// so a visitor downloads only the active one. A locale chunk in an entry's
+// static closure ships every visitor a language they may never see. The
+// budget above has room for one, so this is checked by name. A locale
+// folded into a shared chunk loses its manifest key; the build's
+// locale-chunk-map plugin (scripts/localeChunkMap.mjs) fails on that case.
+const LOCALE_MANIFEST_KEY_RE = /^src\/i18n\/locales\/[^/]+\.json$/;
 
 // Matches <script ... src="...">, <link ... href="...">, single- or
 // double-quoted, tag attributes in any order/case. Also matches HTML5's
@@ -261,6 +264,14 @@ for (const [entryKey] of entries) {
   for (const key of closureKeys) {
     const node = manifest[key];
     if (!node) continue;
+
+    if (LOCALE_MANIFEST_KEY_RE.test(key)) {
+      console.error(
+        `check-entry-chunk: FAIL — "${key}" (statically reachable from entry "${entryKey}") is a locale bundle. ` +
+          "Load locale JSON only through the dynamic loaders in src/i18n/index.ts, never with a static import.",
+      );
+      failed = true;
+    }
 
     if (node.file) {
       const filePath = join(DIST_DIR, node.file);

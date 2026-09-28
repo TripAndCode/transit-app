@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeAll } from "vitest";
 import { cleanup } from "@testing-library/react";
-import i18n from "../i18n";
+import i18n, { i18nReady, SUPPORTED_LOCALES } from "../i18n";
 
 // Ensure React Testing Library unmounts components and clears the DOM between
 // tests so state never leaks across cases.
@@ -9,12 +9,15 @@ afterEach(() => {
   cleanup();
 });
 
-// i18next's LanguageDetector reads navigator.language at init, so a test's
-// starting locale otherwise depends on the environment running it rather
-// than the fixture data it renders. Pin every test file to English up front;
-// a test that specifically exercises the Japanese strings still opts in with
-// its own `i18n.changeLanguage("ja")`.
+// The app fetches one language's strings at a time. Tests load every locale
+// up front so a test can switch language and assert on the next line.
+//
+// LanguageDetector reads navigator.language at init, so the starting locale
+// would depend on the environment. Every test file starts in English; one
+// exercising Japanese opts in with its own `i18n.changeLanguage("ja")`.
 beforeAll(async () => {
+  await i18nReady;
+  await i18n.loadLanguages([...SUPPORTED_LOCALES]);
   await i18n.changeLanguage("en");
 });
 

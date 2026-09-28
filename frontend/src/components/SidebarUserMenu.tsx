@@ -5,7 +5,7 @@ import { useSession } from "../api/auth";
 import { useConfig } from "../api/config";
 import { useTheme } from "../styles/useTheme";
 import type { Theme } from "../styles/theme";
-import { SUPPORTED_LOCALES, type Locale } from "../i18n";
+import { changeLocale, SUPPORTED_LOCALES, type Locale } from "../i18n";
 import { Z_INDEX } from "../styles/zIndex";
 
 const LOCALE_LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
@@ -118,7 +118,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           <Link role="menuitem" to="/help" onClick={() => setOpen(false)} style={popItemStyle}>
             <span>{t("nav.help")}</span>
           </Link>
-          <button type="button" role="menuitem" onClick={() => void i18n.changeLanguage(other)} style={popItemStyle}>
+          <button type="button" role="menuitem" onClick={() => void changeLocale(i18n, other)} style={popItemStyle}>
             <span>{t("common.language_aria")}</span>
             <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>{LOCALE_LABELS[current]}</span>
           </button>

@@ -19,10 +19,11 @@ import {
   loadReportsHomeTab,
   loadRouteAnalysisTab,
 } from "./routes/lazyTabs";
-import "./i18n";
+import { i18nReady } from "./i18n";
 import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
+import { LocaleUnavailable } from "./components/LocaleUnavailable";
 import { RouteError } from "./components/RouteError";
 import { ToastProvider } from "./components/ui/Toast";
 import { ChunkLoading } from "./components/RoutePlaceholders";
@@ -166,12 +167,24 @@ const router = createBrowserRouter([
   },
 ]);
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <RouterProvider router={router} future={{ v7_startTransition: true }} />
-      </ToastProvider>
-    </QueryClientProvider>
-  </React.StrictMode>,
-);
+// Mounting waits for the active language's strings so the first paint is
+// already translated. If they can't be fetched even after retries, a reload
+// notice replaces an app that would show bare keys everywhere. Falling back
+// to the other language is not attempted: whatever blocked one chunk (the
+// network, a deploy that removed old chunks) blocks the other too, and
+// switching would overwrite the visitor's stored language choice.
+void i18nReady.then((stringsLoaded) => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      {stringsLoaded ? (
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <RouterProvider router={router} future={{ v7_startTransition: true }} />
+          </ToastProvider>
+        </QueryClientProvider>
+      ) : (
+        <LocaleUnavailable />
+      )}
+    </React.StrictMode>,
+  );
+});
