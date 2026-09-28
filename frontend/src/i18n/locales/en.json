@@ -368,7 +368,6 @@
   },
   "account": {
     "admin_link": "Admin",
-    "guest_prompt": "Sign in to save your filters.",
     "title": "Account",
     "role_label": "Role",
     "role": {

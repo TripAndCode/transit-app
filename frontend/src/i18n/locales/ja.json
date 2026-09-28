@@ -368,7 +368,6 @@
   },
   "account": {
     "admin_link": "管理",
-    "guest_prompt": "ログインするとフィルター条件を保存できます。",
     "title": "アカウント",
     "role_label": "ロール",
     "role": {

@@ -8,7 +8,6 @@ import { ActivityStrip } from "./components/ActivityStrip";
 import { CopilotPanel } from "./components/CopilotPanel";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
-import { GuestPrompt } from "./components/GuestPrompt";
 import { HelpHint } from "./components/HelpHint";
 import { FirstRunTour } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
@@ -58,7 +57,6 @@ export default function App() {
         <div className="app-notice-stack">
           {!focused && <DataStalenessBanner />}
           {!focused && <FeedHealthBanner />}
-          {!focused && <GuestPrompt />}
           <ActivityStrip />
         </div>
         {!focused && <HelpHint />}
@@ -81,7 +79,7 @@ export default function App() {
         </RouteTransition>
       </main>
       {!focused && <CopilotPanel />}
-      {/* Persisted like welcomeSeen.ts (transit.tourSeen); a no-op render
+      {/* Persisted in localStorage (transit.tourSeen); a no-op render
           once a visitor has finished or dismissed it. Mounted here rather
           than per-tab so its "Ask" step (anchored on the always-rendered
           Sidebar nav link) survives navigating away from the filter/map

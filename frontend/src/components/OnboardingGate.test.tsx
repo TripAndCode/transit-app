@@ -4,13 +4,7 @@ import { MemoryRouter, Routes, Route, useParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OnboardingGate } from "./OnboardingGate";
 import * as hooks from "../api/hooks";
-import { resetWelcomeSeenMemoryForTests } from "../api/welcomeSeen";
 import type { Agency } from "../api/types";
-
-const useSessionMock = vi.fn();
-vi.mock("../api/auth", () => ({
-  useSession: () => useSessionMock(),
-}));
 
 function agency(over: Partial<Agency>): Agency {
   return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, latest_data_date: null, ...over };
@@ -21,17 +15,12 @@ function MapProbe() {
   return <div>landed:{agencyId}</div>;
 }
 
-function WelcomeProbe() {
-  return <div>landed:welcome</div>;
-}
-
 function renderGate() {
   return renderWithProviders(
     <MemoryRouter initialEntries={["/"]}>
       <Routes>
         <Route path="/" element={<OnboardingGate />} />
         <Route path="/agencies/:agencyId/operations" element={<MapProbe />} />
-        <Route path="/welcome" element={<WelcomeProbe />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -54,14 +43,6 @@ function mockAgencies(
 describe("OnboardingGate", () => {
   beforeEach(() => {
     localStorage.clear();
-    resetWelcomeSeenMemoryForTests();
-    // Every pre-existing test in this file exercises the agency-picker
-    // behavior below the welcome gate, not the gate itself — default to an
-    // anonymous, already-past-the-gate visitor (flag set, no session) so
-    // that behavior is unaffected. The dedicated "welcome redirect" tests
-    // below override this per case.
-    localStorage.setItem("transit.welcomeSeen", "1");
-    useSessionMock.mockReturnValue({ data: null, isLoading: false });
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -152,97 +133,11 @@ describe("OnboardingGate", () => {
     vi.useRealTimers();
   });
 
-  describe("welcome redirect", () => {
-    it("redirects a fresh anonymous browser (no flag, no session) to /welcome", () => {
-      localStorage.clear();
-      useSessionMock.mockReturnValue({ data: null, isLoading: false });
-      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
-      renderGate();
-      expect(screen.getByText("landed:welcome")).toBeTruthy();
-      expect(screen.queryByText("First")).toBeNull();
-    });
-
-    it("sets the flag on the first visit so a second anonymous visit no longer redirects", () => {
-      localStorage.clear();
-      useSessionMock.mockReturnValue({ data: null, isLoading: false });
-      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
-      const first = renderGate();
-      expect(screen.getByText("landed:welcome")).toBeTruthy();
-      expect(localStorage.getItem("transit.welcomeSeen")).toBe("1");
-      first.unmount();
-
-      renderGate();
-      expect(screen.queryByText("landed:welcome")).toBeNull();
-      expect(screen.getByText("First")).toBeTruthy();
-    });
-
-    it("never redirects a signed-in visitor, regardless of the flag", () => {
-      localStorage.clear();
-      useSessionMock.mockReturnValue({ data: { user_id: 1 }, isLoading: false });
-      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
-      renderGate();
-      expect(screen.queryByText("landed:welcome")).toBeNull();
-      expect(screen.getByText("First")).toBeTruthy();
-    });
-
-    it("does not redirect when the session check errors instead of confirming anonymity", () => {
-      localStorage.clear();
-      useSessionMock.mockReturnValue({ data: undefined, isLoading: false, isError: true });
-      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
-      renderGate();
-      expect(screen.queryByText("landed:welcome")).toBeNull();
-      expect(screen.getByText("First")).toBeTruthy();
-    });
-
-    it("does not redirect a returning anonymous visitor who already has the flag set", () => {
-      localStorage.clear();
-      localStorage.setItem("transit.welcomeSeen", "1");
-      useSessionMock.mockReturnValue({ data: null, isLoading: false });
-      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
-      renderGate();
-      expect(screen.queryByText("landed:welcome")).toBeNull();
-      expect(screen.getByText("First")).toBeTruthy();
-    });
-
-    it("shows the loading placeholder while the session is still resolving", () => {
-      localStorage.clear();
-      useSessionMock.mockReturnValue({ data: undefined, isLoading: true });
-      mockAgencies([agency({ agency_id: 1, agency_name: "First" })]);
-      renderGate();
-      expect(screen.getByText("Loading agencies...")).toBeTruthy();
-      expect(screen.queryByText("landed:welcome")).toBeNull();
-      expect(screen.queryByText(/^landed:\d/)).toBeNull();
-    });
-
-    it("does not redirect (and so cannot loop) for an anonymous visitor when localStorage.getItem throws", () => {
-      const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-        throw new Error("localStorage unavailable");
-      });
-      useSessionMock.mockReturnValue({ data: null, isLoading: false });
-      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
-      renderGate();
-      expect(screen.queryByText("landed:welcome")).toBeNull();
-      expect(screen.getByText("First")).toBeTruthy();
-      spy.mockRestore();
-    });
-
-    it("breaks the loop on a second mount when only localStorage.setItem throws (write never lands, reads still succeed)", () => {
-      localStorage.clear();
-      const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-        throw new Error("localStorage unavailable");
-      });
-      useSessionMock.mockReturnValue({ data: null, isLoading: false });
-      mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
-
-      const first = renderGate();
-      expect(screen.getByText("landed:welcome")).toBeTruthy();
-      expect(localStorage.getItem("transit.welcomeSeen")).toBeNull();
-      first.unmount();
-
-      renderGate();
-      expect(screen.queryByText("landed:welcome")).toBeNull();
-      expect(screen.getByText("First")).toBeTruthy();
-      spy.mockRestore();
-    });
+  it("leaves a fresh signed-out browser on the picker; RequireAuth owns sending it to /welcome", () => {
+    localStorage.clear();
+    mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
+    renderGate();
+    expect(screen.getByText("First")).toBeTruthy();
+    expect(screen.queryByText("landed:welcome")).toBeNull();
   });
 });
