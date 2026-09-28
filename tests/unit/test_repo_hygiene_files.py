@@ -133,12 +133,10 @@ def _is_ignored(relative_path: str) -> bool:
 
 
 def test_local_only_trees_stay_ignored():
-    """The blanket `docs/*` rule used to cover everything under docs/.
-
-    With docs/ tracked by default, this enumeration is the only thing keeping
-    local planning material and Finder droppings out of a `git add -A`. Asking
-    git directly means the test fails when a name is dropped from .gitignore,
-    not merely when the file's text changes.
+    """docs/ is tracked by default, so this enumeration is the only thing
+    keeping local planning material and Finder droppings out of a `git add
+    -A`. Asking git directly means the test fails when a name is dropped from
+    .gitignore, not merely when the file's text changes.
     """
     for path in (
         "docs/superpowers/notes.md",

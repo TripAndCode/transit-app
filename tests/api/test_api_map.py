@@ -249,17 +249,18 @@ async def test_live_trip_progress_returns_nearest_reported_stop_trail(map_app_ch
 
 @pytest.mark.asyncio
 async def test_live_delays_latest_day_has_no_non_null_delay(map_app_ch, ch_client):
-    """Regression for a 500: the freshness probe (`latest_ts`) has no
-    `dep_delay` filter, but the rows query adds `AND dep_delay IS NOT NULL`.
+    """A latest day with no non-NULL delay must not 500: the freshness probe
+    (`latest_ts`) has no `dep_delay` filter, but the rows query adds
+    `AND dep_delay IS NOT NULL`.
     When the agency's only/latest observation has a NULL dep_delay (routine —
     arrival-only StopTimeUpdates, or a degraded poll), `latest_ts` resolves
     to a real timestamp while the rows query legitimately matches zero rows.
     clickhouse-connect returns `column_names == ()` for that zero-row result,
-    so deriving `cols.index("captured_at")` up front raised an unhandled
+    so deriving `cols.index("captured_at")` up front would raise an unhandled
     `ValueError` -> 500. This differs from `test_live_delays_empty` (zero
     rows at all, which short-circuits on `latest_ts is None` before ever
-    running the rows query) -- here `latest_ts` IS set, and the crash was in
-    the second query's row-building code."""
+    running the rows query) -- here `latest_ts` IS set, and the failure point
+    is the second query's row-building code."""
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
@@ -454,11 +455,11 @@ async def test_heatmap_does_not_merge_same_name_stops_far_apart(map_app):
     """Two same-named stops ~841m apart (beyond `eps`) must stay two dots.
 
     DBSCAN with minpoints := 1 makes every point a core point, so clusters
-    chain transitively — an `eps` reused from the old grid's ~5.5km cell
-    SIZE (rather than sized as an actual merge radius) bridged genuinely
-    distant same-named stops on real data (confirmed: agency 10's 公会堂前,
-    two unrelated locations ~3km apart, merged into one dot). This pins the
-    tuned eps (~550m) actually rejecting a same-name pair well beyond it."""
+    chain transitively — an `eps` sized like a kilometre-scale grid cell
+    (rather than as an actual merge radius) bridges genuinely distant
+    same-named stops on real data, merging two unrelated locations a few km
+    apart into one dot. This pins the tuned eps (~550m) actually rejecting
+    a same-name pair well beyond it."""
     app, agency_id = map_app
     pool = app.state.pool
     async with pool.acquire() as conn:
@@ -641,15 +642,15 @@ async def test_route_shape_falls_back_to_bounded_window_shape_when_ctx_window_is
 
 @pytest.mark.asyncio
 async def test_route_shape_shape_vote_ignores_null_delay_only_trips(map_app_ch, ch_client):
-    """The shape-vote's per-trip weights are now derived from the dedup
-    query's own rows (perf(map) b16fd70), which are filtered by `dep_delay
+    """The shape-vote's per-trip weights are derived from the dedup
+    query's own rows, which are filtered by `dep_delay
     IS NOT NULL` before the argMax GROUP BY (trip_id, stop_sequence) dedup —
     the same filter-before-dedup ordering used everywhere else in this
     codebase (see `pipeline/db.py::build_dedup_ch_sql`). A trip whose every observed
     StopTimeUpdate is arrival-only (no `dep_delay` — common at a route's
     terminal stop in GTFS-RT) therefore contributes ZERO weight to the vote,
-    not the full raw-row count the old separate `COUNT(*)` query would have
-    given it. This is a disclosed, accepted trade-off, not a bug — but the
+    not the full raw-row count a separate `COUNT(*)` query would give it.
+    This is a disclosed, accepted trade-off, not a bug — but the
     vote must still land on the shape with real weighted support rather
     than getting thrown off (e.g. picking the NULL-only shape, or None)
     by the presence of arrival-only trips on a competing shape variant.
@@ -793,10 +794,10 @@ class _ExplodingChClient:
     """Stand-in ``ch`` that fails the test if route_shape ever reaches
     ClickHouse -- proves the agg_route_daily existence precheck at the TOP
     of the function short-circuits before the ctx-bounded dedup query, not
-    just that the two happen to produce the same output. A prior version of
-    this precheck sat inside the empty-window fallback branch instead, so a
-    fabricated route_code under a wide ctx window still paid for the
-    ctx-bounded dedup query's full cost before ever reaching the precheck --
+    just that the two happen to produce the same output. Were this precheck
+    inside the empty-window fallback branch instead, a fabricated route_code
+    under a wide ctx window would still pay for the ctx-bounded dedup
+    query's full cost before ever reaching the precheck --
     an assertion on the response body alone can't tell those two placements
     apart."""
 
@@ -833,12 +834,12 @@ async def _seed_route(pool, agency_id, route_code, service_type, day_rows, basel
     ch_client: optional sync ClickHouse client — when given, the raw rows
     seeded into Postgres `updates` below are ALSO mirrored into ClickHouse
     (via tests.conftest.mirror_updates_to_ch) since the trips/stop-profile
-    drilldowns and route-summary's freshness header now read live `updates`
-    from ClickHouse (Task 8), not Postgres.
+    drilldowns and route-summary's freshness header read live `updates`
+    from ClickHouse, not Postgres.
 
     Seeds raw `updates` (for the trips/stop-profile drilldowns, which read
     them from ClickHouse when `ch_client` is given) AND the precomputed
-    `agg_route_daily` row the route-summary endpoint now reads — computed
+    `agg_route_daily` row the route-summary endpoint reads — computed
     here from day_rows rather than via a full analyze(), so the hand-set
     baseline in agg_route_stats isn't clobbered. analyze()'s own builder
     is covered separately by test_analyze_builds_agg_route_daily."""
@@ -1122,7 +1123,7 @@ async def test_route_summary_route_grain_baseline_pools_exact_sum_delay_sec(map_
         resp = await client.get(f"/api/{agency_id}/today/route-summary")
     r = {x["route_code"]: x for x in resp.json()["routes"]}["R_EXACTPOOL"]
     # Exact: (600 + 60000) / 60 / (10 + 1000) = 1010 / 1010 = 1.0 min = 60s.
-    # The old biased pattern would instead give (1.0*10 + 5.0*1000) / 1010 =
+    # The biased avg_min*samples reweighting would give (1.0*10 + 5.0*1000) / 1010 =
     # 4.9604 min ~= 298s -- an unambiguously different answer.
     assert r["baseline_avg_sec"] == 60
     assert r["baseline_samples"] == 1010
@@ -1289,8 +1290,8 @@ async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_clie
     existence precheck) but whose only ClickHouse observations are older
     than the 30-day bound anchored to the agency's own latest activity must
     resolve to the empty response, not resurrect that stale data as if it
-    were "today's". Regression for the pre-bound behavior, which scanned all
-    history and would have returned the 60-day-old trip as current."""
+    were "today's". Scanning all history without the bound would return the
+    60-day-old trip as current."""
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
@@ -1451,11 +1452,10 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app_c
 async def test_route_shape_returns_stops_when_no_trip_has_a_shape_id(map_app_ch, ch_client):
     """shapes.txt is optional in GTFS -- an agency that never loaded one has
     static_trips.shape_id NULL for every trip, so chosen_shape_id is always
-    None. Regression: gating the per-stop stats query on chosen_shape_id
-    (an earlier version of the route_shape query-bounding fix did) silently
-    dropped `stops` to `[]` for every route on such an agency -- main only
-    ever used shape_id to PIN stops to one variant when multiple existed,
-    never to gate whether stats ran at all."""
+    None. The per-stop stats query must still run: shape_id only PINS stops
+    to one variant when multiple exist, never gates whether stats run at
+    all -- gating the stats query on chosen_shape_id would silently drop
+    `stops` to `[]` for every route on such an agency."""
     app, agency_id = map_app_ch
     pool = app.state.pool
     async with pool.acquire() as conn:
@@ -1529,18 +1529,17 @@ async def _seed_heatmap(pool, agency_id):
 
 
 def _run_analyze(agency_id, ch_client):
-    """analyze()'s dedup materialization now reads ClickHouse (Task 6); every
-    test in this file seeds Postgres `updates` directly (pre-dating that
-    migration), so mirror the same rows into ClickHouse first — see
-    tests.conftest.mirror_updates_to_ch.
+    """analyze()'s dedup materialization reads ClickHouse, but every test in
+    this file seeds Postgres `updates` directly, so mirror the same rows into
+    ClickHouse first — see tests.conftest.mirror_updates_to_ch.
 
     Pins `SET TIME ZONE 'Asia/Tokyo'` on the analyze connection, matching
     every real analyze() caller (gtfs_pipeline._get_conn, the cron endpoint)
-    — without it, this connection defaults to UTC, which happened to mask a
-    real bug: analyze() bulk-loading ClickHouse's naive-UTC captured_at
-    values straight into a timestamptz column is only safe under a UTC
-    session; under the JST session production actually uses, it silently
-    shifted every captured_at (and last_seen_at) by 9 hours."""
+    — without it, this connection defaults to UTC, which masks a real defect
+    class: bulk-loading ClickHouse's naive-UTC captured_at values straight
+    into a timestamptz column is only safe under a UTC session; under the
+    JST session production uses, it silently shifts every captured_at (and
+    last_seen_at) by 9 hours."""
 
     import psycopg2
 
@@ -1695,7 +1694,7 @@ async def test_route_summary_degrades_when_clickhouse_freshness_probe_fails(map_
 @pytest.mark.asyncio
 async def test_route_summary_keeps_null_service_routes(map_app, ch_client, ch_async_client):
     """NULL service_type routes (no typed baseline) must still surface in triage —
-    the old raw endpoint never filtered them, so the agg path must not either."""
+    the agg path must not filter them out."""
     from datetime import datetime, time, timezone
 
     app, agency_id = map_app

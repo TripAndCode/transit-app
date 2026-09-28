@@ -14,10 +14,9 @@ def _analyze_sync(agency_id, ch_client):
     """Build the agg_* tables (JST-pinned, like the real pipeline) so the
     aggregate-backed tool paths have data.
 
-    analyze()'s dedup materialization now reads ClickHouse (Task 6); the
-    fixture below seeds Postgres `updates` directly (pre-dating that
-    migration), so mirror the same rows into ClickHouse first — see
-    tests.conftest.mirror_updates_to_ch."""
+    analyze()'s dedup materialization reads ClickHouse, but the fixture
+    below seeds Postgres `updates` directly, so mirror the same rows into
+    ClickHouse first — see tests.conftest.mirror_updates_to_ch."""
     import psycopg2
 
     from pipeline.analyze import analyze
@@ -190,7 +189,7 @@ async def conn_two_routes_obs(apply_schema, ch_client):
 @pytest.mark.asyncio
 async def test_dispatch_time_series_applies_route_filter(conn_two_routes_obs):
     """time_series called with a route arg must narrow compute_trend_series to
-    only that route's observations (regression for missing ctx.routes push)."""
+    only that route's observations (the route arg must reach ctx.routes)."""
     pool, agency_id = conn_two_routes_obs
     async with pool.acquire() as conn:
         # First: series without a route arg returns all-route sample count.
@@ -278,7 +277,7 @@ async def test_is_route_registered_falls_back_to_clickhouse_when_agg_stale(
 async def test_is_route_registered_no_horizon_scans_unbounded_not_fixed_30_days(
     aconn, aagency_id, ch_client, ch_async_client
 ):
-    """Regression: when an agency has ZERO agg_route_daily rows at all (the
+    """When an agency has ZERO agg_route_daily rows at all (the
     normal state right after a bulk historical backfill, before analyze()
     has ever completed -- not a rare corner), there is no analyze horizon to
     bound against. A fixed 30-day-off-max_captured_at bound in that state
@@ -294,7 +293,7 @@ async def test_is_route_registered_no_horizon_scans_unbounded_not_fixed_30_days(
         [("old.pb", now - timedelta(days=60), "trip_old", "平日", "10:00:00", "OLDROUTE", 1, 60)],
     )
     # Unrelated recent traffic so the agency's overall latest captured_at is
-    # today, not day-60 -- this is what made the old fixed-30-day bound
+    # today, not day-60 -- this is what makes a fixed-30-day bound
     # (today - 30d) exclude OLDROUTE's day-60 observation.
     insert_updates(
         ch_client,
@@ -318,7 +317,7 @@ async def test_is_route_registered_returns_false_when_absent_everywhere(aconn, a
 async def test_is_route_registered_uses_analyze_horizon_not_a_fixed_window(
     aconn, aagency_id, ch_client, ch_async_client
 ):
-    """Regression: the ClickHouse fallback's bound must reflect how far
+    """The ClickHouse fallback's bound must reflect how far
     behind analyze() actually is for this agency, not a fixed 30-day window
     off ClickHouse's own latest data.
 
@@ -374,7 +373,7 @@ async def test_is_route_registered_uses_analyze_horizon_not_a_fixed_window(
 async def test_dispatch_segment_hotspots_returns_table(aconn, aagency_id, ch_client, ch_async_client):
     """dispatch('segment_hotspots', ...) with live ClickHouse data for a
     registered-by-observation route must return a table with the worst
-    stop_sequence(s) by average delay (Task 1: WHERE delay accumulates)."""
+    stop_sequence(s) by average delay (it answers WHERE delay accumulates)."""
     now = datetime.now(timezone.utc)
     for i in range(6):
         await aconn.execute(
@@ -420,8 +419,8 @@ async def test_dispatch_segment_hotspots_returns_table(aconn, aagency_id, ch_cli
 async def test_dispatch_schedule_realism_returns_table(aconn, aagency_id, ch_client, ch_async_client):
     """dispatch('schedule_realism', ...) with live ClickHouse data for a
     registered-by-observation route must return a table flagging the
-    stop-to-stop segment where delay is systematically ADDED (Task 3: is
-    the timetable itself too tight)."""
+    stop-to-stop segment where delay is systematically ADDED (it answers:
+    is the timetable itself too tight?)."""
     now = datetime.now(timezone.utc)
     for i in range(6):
         trip = f"trip_grow_{i}"
@@ -526,7 +525,7 @@ async def test_dispatch_schedule_realism_prefers_padding_view_for_static_join_ag
 async def test_dispatch_time_pattern_returns_table(aconn, aagency_id):
     """dispatch('time_pattern', ...) reads agg_route_hour_dow directly (pure
     Postgres, no ClickHouse involved) and must sort the worst hour x
-    day-of-week combination first (Task 2: WHEN delay is worst).
+    day-of-week combination first (it answers WHEN delay is worst).
 
     Registers R1 via agg_route_daily (the _is_route_registered fast path)
     rather than seeding static_routes, since this tool's own data source
@@ -568,7 +567,7 @@ async def test_dispatch_trend_shift_returns_kv(aconn, aagency_id):
     """dispatch('trend_shift', ...) reads agg_daily_trend directly (pure
     Postgres, no ClickHouse involved, same as time_pattern) and must report
     a large positive delta_min for a route whose delay jumps partway
-    through the window (Task 4: chronic pattern vs regime shift).
+    through the window (it answers: chronic pattern or regime shift?).
 
     Registers R1 via agg_route_daily (the _is_route_registered fast path),
     same convention as test_dispatch_time_pattern_returns_table.

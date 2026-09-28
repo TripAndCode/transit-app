@@ -103,8 +103,8 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    // The secondary figures now carry their own label in the row's meta
-    // line, so the value is no longer an element's whole text.
+    // The secondary figures carry their own label in the row's meta
+    // line, so the value is not an element's whole text.
     expect(screen.getByText(/96\.7%/)).toBeInTheDocument();
     const aomoriCard = screen.getByText("Aomori").closest(".network-row");
     expect(aomoriCard).toHaveTextContent("—");
@@ -263,8 +263,8 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    // Behind "How these are calculated": still one click away, no longer
-    // competing with the comparison it annotates.
+    // Behind "How these are calculated": one click away, not competing
+    // with the comparison it annotates.
     const disclosure = screen.getByText("How these are calculated").closest("details");
     expect(disclosure).not.toBeNull();
     expect(disclosure).not.toHaveAttribute("open");

@@ -62,7 +62,7 @@ class _Conn:
     def transaction(self) -> "_Txn":
         """`record_admin_action` wraps its insert in a savepoint so a failure
         cannot abort the caller's transaction; without this the fake raises
-        `AttributeError` there, which the audit write no longer swallows."""
+        `AttributeError` there, which the audit write does not swallow."""
         return _Txn()
 
     async def fetchrow(self, sql: str = "", *args: Any, **_kwargs: Any) -> dict[str, Any] | None:

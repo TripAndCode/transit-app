@@ -58,10 +58,10 @@ describe("useBasemapDim", () => {
   });
 
   it("re-attaches even when a styledata fires before the style is ready", () => {
-    // The race that broke the locale switch: a styledata arrives while
+    // The race a locale switch hits: a styledata arrives while
     // isStyleLoaded() is still false (tiles loading). whenStyleReady must keep
     // listening and apply on the LATER styledata once the style is ready,
-    // rather than giving up like the old one-shot once("style.load").
+    // rather than giving up the way a one-shot once("style.load") would.
     const map = makeMockMap([{ id: "basemap", type: "raster" }], false);
     run(map);
     map.fire("styledata"); // early event, style not ready yet → must NOT apply

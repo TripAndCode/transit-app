@@ -2,10 +2,10 @@
 
 The lookup must narrow to the routes actually needed rather than reading an
 agency's whole `static_routes` table. Both `movers` and `_build_heatmap` need
-that, and they used to carry separate copies of the SQL — so these assert on
-the shared definition *and* that each caller still routes through it, since a
-caller quietly reintroducing its own unfiltered copy is the way this
-regresses. Source-text inspection; no DB needed.
+that from one shared definition of the SQL — so these assert on the shared
+definition *and* that each caller still routes through it, since a caller
+quietly reintroducing its own unfiltered copy is the way this regresses.
+Source-text inspection; no DB needed.
 """
 
 from __future__ import annotations

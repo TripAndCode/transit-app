@@ -33,7 +33,7 @@ def test_assert_matches_ground_truth_accepts_correct_number():
 def test_assert_matches_ground_truth_rejects_wrong_number():
     """Deliberately corrupt the returned avg_min and confirm the check fails —
     guards against this test suite silently passing no matter what number
-    comes back (the exact failure mode item 23 exists to catch)."""
+    comes back (the exact failure mode the live-LLM numeric eval exists to catch)."""
     pattern = uniform_delays()
     correct = pattern.expected["agg_route_stats"]["avg_min"]
     wrong = (correct or 0.0) + 100.0

@@ -1,4 +1,4 @@
-"""API tests for GET /api/{agency_id}/headway_quality (item 94).
+"""API tests for GET /api/{agency_id}/headway_quality.
 
 Seeds `agg_route_headway`/`agg_route_headway_daily` directly via asyncpg
 (like tests/api/test_forecast_overview_endpoint.py) rather than driving the

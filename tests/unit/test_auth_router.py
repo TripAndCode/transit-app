@@ -1,9 +1,9 @@
 """Unit tests for pure-Python helpers in api.routers.auth.
 
 DB-backed login flows are covered by tests/api; these pin the two
-import-time hygiene fixes that don't need a DB connection to verify:
-the OAuth-transaction signer reading its key lazily, and the failed-
-local-login audit fingerprint no longer retaining the raw username.
+import-time hygiene properties that don't need a DB connection to verify:
+the OAuth-transaction signer reads its key lazily, and the failed-
+local-login audit fingerprint never retains the raw username.
 """
 
 from api.routers.auth import _get_signer, _username_fingerprint
