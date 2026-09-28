@@ -33,7 +33,7 @@
 # concurrent job that is minutes per run. Set COVERAGE=1 when the number
 # itself is the point.
 #
-# Requires: docker, poetry (with `poetry install` already run in this
+# Requires: docker, curl, poetry (with `poetry install` already run in this
 # worktree's own virtualenv -- this script does not install dependencies).
 set -euo pipefail
 case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
@@ -129,10 +129,19 @@ if [ "$pg_ready" != "1" ]; then
   exit 1
 fi
 
+# Probed from the host through the published port -- the way the schema
+# step and the tests connect -- not with `docker exec`: the image's first run
+# answers /ping inside the container from a temporary init server while it
+# creates CLICKHOUSE_DB, then restarts into the real server. That init
+# server listens on the container's loopback only, so through the port it
+# is unreachable and the first answer here is the real server's. Naming
+# the database makes that answer also prove the credentials and database
+# the schema step connects with.
 echo "→ waiting for ClickHouse readiness"
 ch_ready=0
 for _ in $(seq 1 60); do
-  if docker exec "$ch_name" wget --spider -q http://localhost:8123/ping >/dev/null 2>&1; then
+  if curl -fs -o /dev/null --max-time 2 -u transit:transit \
+      "http://127.0.0.1:${ch_port}/?database=transit_test" --data-binary 'SELECT 1'; then
     ch_ready=1
     break
   fi
