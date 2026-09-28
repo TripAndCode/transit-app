@@ -76,7 +76,7 @@ _KV = {
         ["Stops", "24 stops"],
         ["First departure", "05:12"],
         ["Last departure", "23:48"],
-        ["Daily trips", "312 trips"],
+        ["Scheduled trips", "312 trips"],
     ],
 }
 _STOP_COUNT = "24"  # the only stop figure present
