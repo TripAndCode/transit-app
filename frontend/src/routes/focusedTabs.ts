@@ -19,4 +19,6 @@ export const FOCUSED_TAB_SEGMENTS = [
   "ask",
 ] as const;
 
-export const FOCUSED_TAB_PATTERN = new RegExp(`/agencies/[^/]+/(${FOCUSED_TAB_SEGMENTS.join("|")})$`);
+/** A trailing slash is the same tab: react-router's matching ignores one, so
+ *  the pattern must too or `/agencies/1/ask/` renders the tab with its chrome. */
+export const FOCUSED_TAB_PATTERN = new RegExp(`/agencies/[^/]+/(${FOCUSED_TAB_SEGMENTS.join("|")})/?$`);

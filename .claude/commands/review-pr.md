@@ -20,14 +20,15 @@ cleaned-up branch.
 
 ## 1. Resolve the PR
 
-1. `gh pr view <arg> --json number,url,title,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeStateStatus`,
+1. `gh pr view <arg> --json number,url,title,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus`,
    and resolve your own login once with `gh api user --jq .login`.
 2. If `author.login` equals your own login, stop and point at `/review-branch` (own
    branch) or `/address-my-pr-comments` (own PR's threads) instead.
 3. Flag a `baseRefName` other than `main`, and record `headRefOid` as the expected
    head for the rest of the run.
 4. Open the report with the PR's `url` and `number`, and state up front when `isDraft`
-   is true or `mergeStateStatus` is `DIRTY`/`CONFLICTING`: the first says the author
+   is true or when `mergeable` is `CONFLICTING` or `mergeStateStatus` is `DIRTY`: the
+   first says the author
    may still be working, the second that the diff you are reading will change before
    it can merge. Both change how much weight a finding deserves; neither stops the
    review.
