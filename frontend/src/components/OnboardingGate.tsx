@@ -15,17 +15,13 @@ import type { Agency } from "../api/types";
 // --transition ever grows past this.
 const SELECT_TRANSITION_MS = 250;
 
-/** Owns the "/" landing decision: a first-time visitor with a confirmed-absent
- *  auth session is sent to "/welcome" instead of ever seeing the dashboard or
- *  agency picker below; everyone else — including a session check that errors
- *  rather than confirming anonymity — falls through to the pre-existing
- *  behavior.
- *  Once past that gate, while agencies load, show the existing placeholder;
+/** Owns the "/" landing decision for a visitor RequireAuth has let through:
+ *  while agencies load, show the existing placeholder;
  *  once loaded, instantly redirect (via the declarative <Navigate> element —
  *  this runs at render time, so calling useNavigate() imperatively here
  *  instead would violate render purity) for the single-agency or
- *  remembered-choice case, identical to the old silent auto-redirect; only
- *  render the picker overlay when there's a real choice to make. */
+ *  remembered-choice case; only render the picker overlay when there's a
+ *  real choice to make. */
 export function OnboardingGate() {
   const { t } = useTranslation();
   const navigate = useNavigate();

@@ -9,9 +9,8 @@ import "./LandingPage.css";
  *  impression kept deliberately separate from the calm, data-dense signed-
  *  in dashboard (CLAUDE.md's "keep UI calm" rule governs the working
  *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). The hero
- *  (animated live-map scene + headline + sign-in CTA, plus a lower-emphasis "continue
- *  as a guest" link to the already-guest-accessible root route) is the
- *  entry point; below it, `ScrollNarrative` mounts three real, working
+ *  (animated live-map scene + headline + the sign-in CTA, the only way into
+ *  the app) is the entry point; below it, `ScrollNarrative` mounts three real, working
  *  chart components (fed by static fixtures, not live data) telling the
  *  product's story, rather than the retired `DashboardPreview` mocked
  *  sidebar shell. */
