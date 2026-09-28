@@ -124,7 +124,7 @@ export function ErrorBanner({ error, onRetry, message }: Props) {
   // cannot.
   if (message != null) return <Alert onRetry={onRetry}>{message}</Alert>;
 
-  // Admin-approval-required 403 (Copilot insight, Ask follow-up) — a standing
+  // Admin-approval-required 403 (Ask follow-up) — a standing
   // condition until an admin flips users.llm_approved, not a service problem
   // or something signing in again fixes, so this gets a calm explanation with
   // no login link and no retry button.

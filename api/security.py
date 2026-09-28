@@ -129,7 +129,7 @@ def require_llm_approved(user: User | None) -> User:
     set. Anonymous callers (``user is None``) never have a row to check, so
     they 403 here too -- there is no separate 401-then-403 distinction for
     this gate, matching the single ``llm_not_approved`` contract every
-    LLM-only endpoint (``/followup``, ``/copilot/insight``) shares.
+    LLM-only endpoint (``/followup``) shares.
 
     Takes an already-resolved ``user`` rather than ``Request`` (and isn't
     itself wired up via ``Depends``) for two reasons: callers need to run

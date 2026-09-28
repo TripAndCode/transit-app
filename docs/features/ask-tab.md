@@ -150,16 +150,19 @@ unwired/consumed elsewhere rather than assuming it's live in this UI.
 ## Who may reach the Stage-3 LLM
 
 Reaching an LLM requires a signed-in caller whose `users.llm_approved` flag an
-admin has set. The three LLM-backed surfaces enforce it in two different
-places, for one structural reason:
+admin has set. The two LLM-backed surfaces enforce it in different places, for
+one structural reason:
 
 | Surface | Where the gate runs | Rejected caller sees |
 | --- | --- | --- |
-| `POST /copilot/insight` | `require_llm_approved(user)` at the top of the handler (`api/security.py`) | `403 llm_not_approved` |
-| `POST /conversations/{id}/followup` | same | `403 llm_not_approved` |
+| `POST /conversations/{id}/followup` | `require_llm_approved(user)` at the top of the handler (`api/security.py`) | `403 llm_not_approved` |
 | `POST /ask` | inside `chat_with_tools`'s `_call_llm` (`pipeline/query/chat.py`), via the `llm_approved` argument the router threads in | `200` with an honest-degradation answer |
 
-`/ask` cannot reject the whole request upfront the way the other two do:
+The Copilot panel's `POST /copilot/insight` calls no LLM (its template is
+chosen and filled in code, `pipeline/query/copilot.py`), so it is open to every
+caller while `copilot_insight_enabled` is on.
+
+`/ask` cannot reject the whole request upfront the way the follow-up does:
 Stages 1 and 2 (regex rules, embedding nearest-neighbour) answer many
 questions with no LLM at all, and those stay open to everyone. So the flag
 travels into the orchestrator and short-circuits only the Stage-3 call,

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
-import type { RangeCtx } from "./rangeContext";
 
 type CopilotInsight = { text: string; cite: string; lowConfidence: boolean };
 
@@ -10,19 +9,15 @@ export const DEBOUNCE_MS = 800;
 type CopilotParams = {
   agencyId: number;
   tab: string;
-  filters: RangeCtx;
   viewPayload: unknown;
 };
 
-function buildKey(
-  agencyId: number | null,
-  tab: string | null,
-  filters: RangeCtx,
-  viewPayload: unknown,
-): string | null {
+/** The insight is a function of the payload alone, so the key carries no
+ *  filters: the payload already reflects them. */
+function buildKey(agencyId: number | null, tab: string | null, viewPayload: unknown): string | null {
   return agencyId == null || tab == null || !viewPayload
     ? null
-    : `${agencyId}:${tab}:${JSON.stringify(filters)}:${JSON.stringify(viewPayload)}`;
+    : `${agencyId}:${tab}:${JSON.stringify(viewPayload)}`;
 }
 
 /** The Copilot kill switch (`COPILOT_INSIGHT_ENABLED` server-side).
@@ -30,7 +25,7 @@ function buildKey(
  * Cached for an hour like `useFollowupEnabled`: it is deployment
  * configuration, not per-request state. Callers must treat anything other
  * than an explicit `true` as off, so an unresolved or failed check never
- * fires the billed insight POST.
+ * fires the insight POST.
  */
 export function useCopilotEnabled(agencyId: number | null) {
   return useQuery({
@@ -45,10 +40,9 @@ export function useCopilotEnabled(agencyId: number | null) {
 export function useCopilotInsight(
   agencyId: number | null,
   tab: string | null,
-  filters: RangeCtx,
   viewPayload: unknown,
 ): { insight: CopilotInsight | null; loading: boolean; error: unknown } {
-  const key = buildKey(agencyId, tab, filters, viewPayload);
+  const key = buildKey(agencyId, tab, viewPayload);
 
   // Only the request *key* is debounced here; useQuery (queryKey
   // ["copilot-insight", debouncedKey]) owns the fetch, loading/error state,
@@ -59,7 +53,7 @@ export function useCopilotInsight(
   // Starts at {key: null, params: null} rather than the current `key` so the
   // very first request also waits DEBOUNCE_MS -- a mount that immediately has
   // a `key` (e.g. Overview already has a cached viewPayload) would otherwise
-  // fire the billed insight POST synchronously instead of coalescing with
+  // fire the insight POST synchronously instead of coalescing with
   // whatever prop changes settle within the debounce window right after mount.
   const [debounced, setDebounced] = useState<{ key: string | null; params: CopilotParams | null }>({
     key: null,
@@ -71,7 +65,7 @@ export function useCopilotInsight(
     const id = setTimeout(() => {
       setDebounced({
         key,
-        params: key == null ? null : { agencyId: agencyId!, tab: tab!, filters, viewPayload },
+        params: key == null ? null : { agencyId: agencyId!, tab: tab!, viewPayload },
       });
     }, DEBOUNCE_MS);
     return () => clearTimeout(id);
@@ -84,19 +78,20 @@ export function useCopilotInsight(
       const params = debounced.params!;
       return apiPost<{ text: string; cite: string; low_confidence: boolean }>(
         `/api/${params.agencyId}/copilot/insight`,
-        { tab: params.tab, filters: params.filters, view_payload: params.viewPayload },
+        { tab: params.tab, view_payload: params.viewPayload },
         { signal },
       );
     },
     enabled: debounced.params != null,
-    // This POST bills a provider call per attempt, so react-query's default
-    // retry would silently pay twice for what the user experiences as one
-    // request. Never retry it, regardless of the global QueryClient default.
+    // The POST fires from a page view with no user action, so a failure is
+    // shown rather than repeated behind the user's back. Never retry it,
+    // regardless of the global QueryClient default.
     retry: false,
-    // One insight per view state, not per subscription. Without this, leaving
-    // Overview and coming back re-runs the query for an unchanged key and
-    // bills another LLM call — the debounce above only coalesces key changes,
-    // it does not stop a refetch for a key that is already cached.
+    // One insight per view state, not per subscription: the server renders
+    // the same insight for the same payload. Without this, leaving Overview
+    // and coming back re-runs the query for an unchanged key — the debounce
+    // above only coalesces key changes, it does not stop a refetch for a key
+    // that is already cached.
     staleTime: 10 * 60 * 1000,
   });
 

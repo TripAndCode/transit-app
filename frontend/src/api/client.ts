@@ -31,7 +31,7 @@ export function isAggregateNotReady(err: unknown): boolean {
   }
 }
 
-/** Detail string the API returns (403) on /copilot/insight and /followup when
+/** Detail string the API returns (403) on /followup when
  * the caller isn't an admin-approved signed-in user — anonymous callers 403
  * here too. Mirrors api/security.py::require_llm_approved. */
 const LLM_NOT_APPROVED_DETAIL = "llm_not_approved";
@@ -67,8 +67,8 @@ export async function apiGetOrNull<T>(path: string, opts?: { signal?: AbortSigna
  * `/admin/users/:uid` PATCH) don't have to narrow — callers of
  * 204-only endpoints should type T as `void`. Accepts an optional `signal`
  * (mirroring `apiGet`) so a react-query `queryFn` can abort a superseded,
- * still-in-flight POST instead of letting it run to completion unseen — this
- * matters for side-effecting/quota-consuming POSTs like Copilot insight. */
+ * still-in-flight POST instead of letting it run to completion unseen, as the
+ * Copilot insight query does. */
 export async function apiPost<T>(path: string, body: unknown, opts?: { signal?: AbortSignal }): Promise<T> {
   return requestMaybeEmpty<T>(path, {
     method: "POST",
