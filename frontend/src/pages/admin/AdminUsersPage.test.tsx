@@ -661,8 +661,8 @@ describe("AdminUsersPage", () => {
   it("shows an ErrorBanner instead of a raw error string when the user list fails to load", () => {
     useAdminUsersMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error("network down"), refetch: vi.fn() });
     wrap();
-    // ErrorBanner's generic-network branch renders role="alert"; the old
-    // raw formatApiError(error) text node had no such role.
+    // ErrorBanner's generic-network branch renders role="alert"; a raw
+    // formatApiError(error) text node has no such role.
     expect(screen.getByRole("alert")).toBeTruthy();
   });
 
@@ -670,7 +670,7 @@ describe("AdminUsersPage", () => {
     patchMutationError = new ApiError(403, JSON.stringify({ detail: "llm_not_approved" }));
     wrap();
     // ErrorBanner's admin-approval-required branch renders role="status" with
-    // its own calm copy -- the old raw formatApiError(error) rendering had no
+    // its own calm copy -- a raw formatApiError(error) rendering has no
     // such special-casing, just the generic status-code text in a plain div.
     expect(screen.getByRole("status")).toBeTruthy();
   });

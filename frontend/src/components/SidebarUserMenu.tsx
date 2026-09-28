@@ -7,6 +7,8 @@ import { useTheme } from "../styles/useTheme";
 import type { Theme } from "../styles/theme";
 import { changeLocale, SUPPORTED_LOCALES, type Locale } from "../i18n";
 import { Z_INDEX } from "../styles/zIndex";
+import { Spinner } from "./Spinner";
+import { useToast } from "./ui/toastContext";
 
 const LOCALE_LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
 
@@ -52,7 +54,9 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const { data: config, isLoading: configLoading } = useConfig();
   const { data: session, isLoading: sessionLoading } = useSession();
   const [theme, setTheme] = useTheme();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
+  const [switchingLocale, setSwitchingLocale] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -81,6 +85,17 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const other = SUPPORTED_LOCALES.find((l) => l !== current) ?? current;
   const displayName = session ? session.name || session.email : t("common.guest");
   const initial = displayName.slice(0, 1).toUpperCase();
+
+  // The other language may still have to be fetched, so a switch can take a
+  // moment; clicks while one is in flight would only queue more switches.
+  // A failed fetch leaves the current language in place, which alone would
+  // read as an ignored click.
+  async function switchLocale() {
+    if (switchingLocale) return;
+    setSwitchingLocale(true);
+    const switched = await changeLocale(i18n, other).finally(() => setSwitchingLocale(false));
+    if (!switched) toast.show(t("common.language_switch_error"));
+  }
 
   return (
     <div ref={ref} style={{ position: "relative", margin: "4px 10px 0" }}>
@@ -118,9 +133,21 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           <Link role="menuitem" to="/help" onClick={() => setOpen(false)} style={popItemStyle}>
             <span>{t("nav.help")}</span>
           </Link>
-          <button type="button" role="menuitem" onClick={() => void changeLocale(i18n, other)} style={popItemStyle}>
+          {/* aria-disabled rather than disabled: disabling the focused
+              button would drop keyboard focus out of the open menu. */}
+          <button
+            type="button"
+            role="menuitem"
+            aria-busy={switchingLocale}
+            aria-disabled={switchingLocale}
+            onClick={() => void switchLocale()}
+            style={switchingLocale ? { ...popItemStyle, cursor: "default" } : popItemStyle}
+          >
             <span>{t("common.language_aria")}</span>
-            <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>{LOCALE_LABELS[current]}</span>
+            <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
+              {switchingLocale && <Spinner size={12} inline />}
+              {LOCALE_LABELS[current]}
+            </span>
           </button>
           {/* Three states, not a two-way toggle: "system" has to be reachable
               and distinguishable from whichever theme it currently resolves

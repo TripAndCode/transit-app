@@ -68,11 +68,11 @@ def test_dash_c_captures_directory():
 
 
 def test_multiline_cd_then_push_is_not_collapsed_into_one_statement():
-    """The bug: shlex.split() treats a bare newline as ordinary whitespace,
-    so a `cd` line followed by a `git push` line on separate physical lines
-    used to merge into a single statement, and the `cd`-capture heuristic
-    (which only recognizes a statement whose *first* token is literally
-    "cd") never fired."""
+    """shlex.split() treats a bare newline as ordinary whitespace, so a
+    `cd` line followed by a `git push` line on separate physical lines must
+    still parse as two statements: merged into one, the `cd`-capture
+    heuristic (which only recognizes a statement whose *first* token is
+    literally "cd") would never fire."""
     command = "echo starting deploy\ncd /Users/example/worktree\ngit push origin somebranch"
     parsed = _parse(command)
     assert parsed["cd_dir"] == "/Users/example/worktree"
@@ -87,10 +87,10 @@ def test_multiline_with_preceding_unrelated_statement_still_resolves_cd():
 
 
 def test_backslash_newline_line_continuation_does_not_corrupt_the_next_token():
-    """The bug: an unquoted backslash-newline is a real shell line
-    continuation (both characters vanish, joining the two physical lines),
-    but a naive newline-to-separator rewrite left the backslash in place
-    and shlex.split() then kept the following newline as a literal
+    """An unquoted backslash-newline is a real shell line continuation
+    (both characters vanish, joining the two physical lines). A naive
+    newline-to-separator rewrite would leave the backslash in place, and
+    shlex.split() would then keep the following newline as a literal
     character glued onto the next token instead of eliding the pair --
     corrupting cd_dir with an embedded newline rather than a clean path."""
     command = "cd \\\n/some/worktree\ngit push origin somebranch"
@@ -156,10 +156,10 @@ def _bash_refspec_source_half(ref: str) -> str:
 
 
 def test_refspec_source_half_extraction_takes_the_local_branch_not_the_remote_name():
-    """The bug: `${ref##*:}` (destination half) was used where the source
-    half -- the actual local branch being pushed -- was needed, so an
-    explicit `src:dst` refspec resolved to a remote-side name that
-    typically isn't a local branch/worktree at all."""
+    """An explicit `src:dst` refspec must yield its source half -- the
+    actual local branch being pushed. The destination half (`${ref##*:}`)
+    is a remote-side name that typically isn't a local branch/worktree at
+    all."""
     assert _bash_refspec_source_half("local-feature:renamed-remote-branch") == "local-feature"
     assert _bash_refspec_source_half("refs/heads/local-feature:refs/heads/renamed") == "local-feature"
     assert _bash_refspec_source_half("plain-branch") == "plain-branch"

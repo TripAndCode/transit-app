@@ -312,7 +312,7 @@ async def test_stop_profile_outlier_true(stop_profile_client):
 @pytest.fixture
 async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
     """Fixture whose cohort rows have deliberately unequal `samples` so a
-    naive per-row AVG (the pre-fix behavior) and a samples-weighted average
+    naive per-row AVG and a samples-weighted average
     diverge. `stop_profile_client` above can't distinguish the two: every
     one of its agg_route_stop_daily rows has samples=1, so a plain AVG of
     each row's ratio happens to equal the samples-weighted average."""

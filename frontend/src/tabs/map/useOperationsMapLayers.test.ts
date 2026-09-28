@@ -191,7 +191,7 @@ describe("operations-map mark paint (pure builders)", () => {
       10, CLUSTER_RADIUS.medium,
       50, CLUSTER_RADIUS.large,
     ]);
-    // Even the largest cluster stays well below the old flat 24px puck.
+    // Even the largest cluster stays below a flat 24px puck.
     expect(CLUSTER_RADIUS.large).toBeLessThan(24);
   });
 
@@ -229,12 +229,12 @@ describe("operations-map layers use resolved tokens, never literal hexes", () =>
       .toEqual(LIVE_TRIPS_CLUSTER_PROPERTIES);
     expect((map.getLayer(LIVE_TRIPS_CLUSTER_LAYER) as MockLayer).paint).toEqual(clusterCirclePaint());
     expect((map.getLayer(LIVE_TRIPS_LAYER) as MockLayer).paint).toEqual(vehicleCirclePaint());
-    // The heavy dark casing ring under every vehicle is gone: the thin
-    // surface-coloured stroke on the mark itself is what separates it now.
+    // No heavy dark casing ring under each vehicle: the thin
+    // surface-coloured stroke on the mark itself is what separates it.
     expect(map.getLayer("live-trip-casing")).toBeUndefined();
     expect((map.getLayer("trip-progress-line") as MockLayer).paint?.["line-color"]).not.toBe("#2bc5aa");
-    // The marker labels lost the dark casing that used to back them, so they
-    // take the theme's ink and halo instead of a fixed white.
+    // With no dark casing behind them, the marker labels take the theme's
+    // ink and halo instead of a fixed white.
     expect((map.getLayer(LIVE_TRIPS_LABEL_LAYER) as MockLayer).paint).toEqual(labelPaint());
     expect(labelPaint()["text-color"]).not.toBe(labelPaint()["text-halo-color"]);
   });

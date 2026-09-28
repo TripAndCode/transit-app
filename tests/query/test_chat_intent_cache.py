@@ -309,3 +309,103 @@ async def test_cache_paraphrase_collapses_to_same_dispatch(pool_with_agency, mon
         rows = await conn.fetch("SELECT signature_hash, hit_count FROM ask_intent_cache")
     assert len(rows) == 1, "Both calls share one cache row (same sig_hash)"
     assert rows[0]["hit_count"] == 2
+
+
+def _json_message(payload: dict):
+    import json
+
+    return SimpleNamespace(content=json.dumps(payload), tool_calls=None)
+
+
+async def _dispatch_must_not_run(*args, **kwargs):
+    raise AssertionError("a JSON-mode answer that names no tool must not be dispatched")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"tool": None, "reply": "このチャットでは運賃は扱えません。代わりに『路線22171の遅延』が答えられます"},
+        {"tool": "none", "reply": "このチャットでは運賃は扱えません。代わりに『路線22171の遅延』が答えられます"},
+        {"reply": "このチャットでは運賃は扱えません。代わりに『路線22171の遅延』が答えられます"},
+    ],
+)
+async def test_no_tool_with_reply_returns_the_reply(pool_with_agency, monkeypatch, payload):
+    """SYSTEM_PROMPT rule 3 answers out-of-scope questions in text. JSON mode
+    carries that text as ``{"tool": null, "reply": ...}``: the reply is the
+    answer, nothing is dispatched, and nothing is cached as an intent."""
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient(_json_message(payload)))
+    monkeypatch.setattr(chat_module, "_dispatch_and_respond", _dispatch_must_not_run)
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools("運賃はいくら？", _ctx(), conn, agency_id, locale="ja")
+        cached = await conn.fetchval("SELECT COUNT(*) FROM ask_intent_cache")
+
+    assert result["answer"] == payload["reply"]
+    assert result["tool_call"] is None
+    assert result["success"] is True
+    assert cached == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [{"tool": None}, {"tool": "none", "args": {}}, {"tool": None, "reply": "   "}, {"tool": None, "reply": 3}],
+)
+async def test_no_tool_without_reply_falls_back_to_refusal(pool_with_agency, monkeypatch, payload):
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient(_json_message(payload)))
+    monkeypatch.setattr(chat_module, "_dispatch_and_respond", _dispatch_must_not_run)
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools("運賃はいくら？", _ctx(), conn, agency_id, locale="ja")
+        cached = await conn.fetchval("SELECT COUNT(*) FROM ask_intent_cache")
+
+    assert result["answer"] == chat_module._chat_str("refusal_fallback", "ja")
+    assert result["tool_call"] is None
+    assert result["success"] is False
+    assert cached == 0
+
+
+@pytest.mark.asyncio
+async def test_forced_continuation_does_not_accept_a_reply(pool_with_agency, monkeypatch):
+    """A recognized continuation must resolve to a tool call (see
+    JSON_MODE_FORCE_TOOL_ADDENDUM), so a text reply there is not served."""
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    payload = {"tool": None, "reply": "続きはありません"}
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient(_json_message(payload)))
+    monkeypatch.setattr(chat_module, "_dispatch_and_respond", _dispatch_must_not_run)
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools(
+            "次の50件",
+            _ctx(),
+            conn,
+            agency_id,
+            locale="ja",
+            history=[{"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}}],
+            force_tool_call=True,
+        )
+
+    assert result["answer"] == chat_module._chat_str("refusal_fallback", "ja")
+    assert result["tool_call"] is None
+
+
+@pytest.mark.asyncio
+async def test_named_tool_is_dispatched_even_with_a_reply(pool_with_agency, monkeypatch):
+    pool, agency_id = pool_with_agency
+    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    payload = {"tool": "capabilities", "args": {}, "confidence": 0.9, "reply": "使われない本文"}
+    monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient(_json_message(payload)))
+
+    async with pool.acquire() as conn:
+        result = await chat_with_tools("何ができる？", _ctx(), conn, agency_id, locale="ja")
+        cached = await conn.fetchval("SELECT COUNT(*) FROM ask_intent_cache WHERE tool = 'capabilities'")
+
+    assert result["tool_call"]["name"] == "capabilities"
+    assert result["answer"] != payload["reply"]
+    assert cached == 1

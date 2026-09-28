@@ -63,7 +63,7 @@ def test_ungrounded_answer_passes_through_whatever_it_contains():
     an invented statistic too. None of them can be traced to anything, so this
     function reports no violation rather than guessing which is which."""
     for text in (
-        "天気データはありません。代わりに『22171の平日と土日祝の比較』が答えられます",
+        "このチャットでは天気との比較は扱えません。代わりに『22171の平日と土日祝の比較』が答えられます",
         "直近2週間の傾向なら答えられます。",
         "答えられる質問を3件挙げます。",
         "時刻 7時30分の便が最も遅れています",

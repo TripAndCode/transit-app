@@ -1,5 +1,5 @@
 """Tests for scripts/ops_status_server.py: the authenticated HTTP front end serving the
-item-123 combined operations-status document as HTML / compact text / JSON, all gated
+combined operations-status document as HTML / compact text / JSON, all gated
 behind the same shared-secret (`OPS_STATUS_TOKEN`) HTTP Basic check.
 """
 

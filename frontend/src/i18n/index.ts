@@ -94,15 +94,22 @@ export async function initI18n(instance: I18n, loaders: TranslationLoaders = tra
   return instance.hasResourceBundle(instance.language, "translation");
 }
 
-/** Switches the UI language once its strings have loaded. i18next would
- *  switch even when the fetch fails and render bare keys, so a failed fetch
- *  leaves the current language in place instead. The strings are read with
- *  `reloadResources`, not `loadLanguages`: the latter remembers a language
- *  as requested even when its load failed and never asks again, so a switch
- *  that failed once would do nothing for the rest of the page. */
-export async function changeLocale(instance: I18n, lng: Locale): Promise<void> {
+/** Switches the UI language once its strings have loaded, and resolves to
+ *  whether they did. i18next would switch even when the fetch fails and
+ *  render bare keys, so a failed fetch leaves the current language in place
+ *  instead. The strings are read with `reloadResources`, not
+ *  `loadLanguages`: the latter remembers a language as requested even when
+ *  its load failed and never asks again, so a switch that failed once would
+ *  do nothing for the rest of the page.
+ *
+ *  The result comes from the resource store, not `instance.language`: the
+ *  i18n object `useTranslation` hands a component is a snapshot whose
+ *  language fields keep their old values after the switch. */
+export async function changeLocale(instance: I18n, lng: Locale): Promise<boolean> {
   if (!instance.hasResourceBundle(lng, "translation")) await instance.reloadResources(lng, "translation");
-  if (instance.hasResourceBundle(lng, "translation")) await instance.changeLanguage(lng);
+  if (!instance.hasResourceBundle(lng, "translation")) return false;
+  await instance.changeLanguage(lng);
+  return true;
 }
 
 export const i18nReady = initI18n(i18n.use(initReactI18next));

@@ -524,13 +524,11 @@ META_TOOLS: list[dict] = [
         "function": {
             "name": "describe_data",
             "description": (
-                "Answer 'what data do you have?'-class questions deterministically. "
-                "Use whenever the user asks about routes/stops the dataset contains, "
-                "data freshness, sample counts, or a general dataset overview. "
-                "Prefer this over guessing with route_meta or route_stats when the user "
-                "did NOT specify a route. Examples in Japanese: "
-                "「どんな路線がある？」→kind=routes, 「いつから？」→kind=date_range, "
-                "「サンプル数の多い路線」→kind=sample_counts, 「全体感」→kind=overview."
+                "Answer 'what data do you have?'-class questions from the database: which routes "
+                "and stops the dataset contains, how far back observations go, per-route sample "
+                "counts, the caller's agency, a dataset overview, or which metrics are available. "
+                "Prefer this over guessing with route_meta or route_stats when the user did NOT "
+                "specify a route. The kind parameter selects which of these is returned."
             ),
             "parameters": {
                 "type": "object",
@@ -538,12 +536,25 @@ META_TOOLS: list[dict] = [
                     "kind": {
                         "type": "string",
                         "enum": list(VALID_KINDS),
+                        "description": (
+                            "routes: route codes and names from the static timetable (filterable, "
+                            "paginated). stops: stop IDs and names (filterable, paginated). date_range: "
+                            "first/last observation time, distinct observed days and total observation "
+                            "rows over all history. agencies: the caller's own agency only. "
+                            "sample_counts: per-route deduplicated sample counts within the request "
+                            "window and UI filters (order, paginated). overview: all-time counts of "
+                            "routes, stops and observations with first/last observation time. metrics: "
+                            "the list of metrics the assistant can compute."
+                        ),
                     },
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 200,
-                        "description": "Maximum rows returned (default 50).",
+                        "description": (
+                            "Maximum rows returned (default 50). Honored only for kind=routes, stops "
+                            "and sample_counts; other kinds ignore it."
+                        ),
                     },
                     "filter_substring": {
                         "type": "string",
@@ -565,7 +576,8 @@ META_TOOLS: list[dict] = [
                         "type": "integer",
                         "minimum": 0,
                         "description": (
-                            "Row offset for pagination; for a 'next page' follow-up, re-call with offset += limit."
+                            "Row offset for pagination, honored only for kind=routes, stops and "
+                            "sample_counts; for a 'next page' follow-up, re-call with offset += limit."
                         ),
                     },
                 },
@@ -578,16 +590,20 @@ META_TOOLS: list[dict] = [
         "function": {
             "name": "capabilities",
             "description": (
-                "Return a curated list of example questions the assistant can answer. "
-                "Use this when the user's question is vague (「やばい路線」「いつものやつ」), "
-                "out of scope, or when you cannot map their question to any analytic tool. "
-                "Prefer this over refusing in free text."
+                "Return example questions the assistant can answer, grouped by category, as "
+                "(category, examples) pairs. Use when the question is vague (「やばい路線」"
+                "「いつものやつ」), asks what the assistant can do, or is about this dataset but "
+                "maps to no analytic tool. Questions these tools cannot answer at all (weather, "
+                "fares, accidents, vehicles) get a plain reply without any tool call."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "category": {
                         "type": "string",
+                        "description": (
+                            "Optional; returns only that category's examples. Omit it to get every category."
+                        ),
                         "enum": [
                             "single_route",
                             "ranking",

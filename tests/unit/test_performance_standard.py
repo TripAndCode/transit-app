@@ -1,4 +1,4 @@
-"""Pure-logic tests for the item-104 bonus/malus formula -- no DB fixtures
+"""Pure-logic tests for the performance-standard bonus/malus formula -- no DB fixtures
 (see pipeline.reports.performance_standard's module docstring for the
 formula this exercises directly)."""
 
