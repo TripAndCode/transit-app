@@ -44,10 +44,14 @@ the task needs them.
 ## Verification commands
 
 - Backend: `make serve`, `make test`, `make check`, `poetry run ruff check`,
-  `poetry run ruff format --check`, `poetry run mypy`. Never let `make test/check`
-  inherit the default `:5433` URL; point it at `:5544`. `make fmt` rewrites files
-  rather than reporting, so it does not verify formatting.
-- Frontend: `npm run typecheck`, `npm run test`, `npm run lint`, `npm run lint:i18n`,
+  `poetry run ruff format --check`, `poetry run mypy`. `make test`/`make check`
+  force the throwaway `:5544`/`:8124` block via `scripts/run_integration_tests.sh`;
+  a bare `poetry run pytest` inherits the shell's `DATABASE_URL`/`CLICKHOUSE_*`, so
+  run it only with `transit-app-gotchas`' test environment block. `make fmt` rewrites
+  files rather than reporting, so it does not verify formatting.
+- Frontend: `npm run typecheck`, `npm run test:coverage` (the unit tests plus the
+  `vitest.config.ts` coverage thresholds CI gates on; `npm run test` skips them),
+  `npm run lint`, `npm run lint:i18n`,
   `npm run lint:i18n-strings`, `npm run deadcode`, `npm run test:check-entry-chunk`,
   `npm run test:check-css-tokens`, `npm run check:css-tokens`, then
   `npm run build:bundle && npm run check:entry-chunk`.

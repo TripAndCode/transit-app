@@ -145,19 +145,6 @@ function mockApiGet(opts: { enabled?: boolean; llmApproved?: boolean } = {}) {
 }
 
 describe("CopilotPanel", () => {
-  it("shows a step-back note on the Ask tab instead of calling the insight endpoint", async () => {
-    mockApiGet();
-    const spy = vi.spyOn(client, "apiPost");
-    renderPanel("/agencies/1/ask");
-    await waitFor(() => expect(screen.getByRole("complementary")).toBeTruthy());
-    // Bilingual match — jsdom's detected language isn't pinned here (unlike
-    // renderWithProviders, which forces "en"), so this must tolerate either
-    // resource bundle resolving, matching the existing ErrorBanner.test.tsx
-    // convention for un-pinned-locale assertions.
-    expect(screen.getByText(/こちらで会話が続いています|already in the full conversation/i)).toBeTruthy();
-    expect(spy).not.toHaveBeenCalled();
-  });
-
   it("never fires the insight POST for a caller an admin hasn't approved", async () => {
     // The insight fires from a pageview, not a user action, and the endpoint
     // 403s an unapproved caller -- and `llm_approved` is false for every new
@@ -184,10 +171,19 @@ describe("CopilotPanel", () => {
     await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
   });
 
-  it("does not render anything on routes other than Overview/Ask", () => {
-    const { container } = renderPanel("/agencies/1/map");
-    expect(container.querySelector(".copilot-panel")).toBeNull();
-  });
+  // The component's own route gate, independent of App's focused-tab gate:
+  // useMatch ignores a trailing slash, so `/ask/` is checked here too.
+  it.each(["/agencies/1/map", "/agencies/1/ask/"])(
+    "renders nothing and requests no insight on %s, even with the flag on",
+    async (path) => {
+      mockApiGet();
+      const postSpy = vi.spyOn(client, "apiPost");
+      const { container } = renderPanel(path);
+      await act(() => vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 300));
+      expect(container.querySelector(".copilot-panel")).toBeNull();
+      expect(postSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it("shows the calm admin-approval-required banner instead of the generic error message", async () => {
     mockApiGet();

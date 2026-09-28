@@ -12,10 +12,13 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   production readers.
   `agg_*`/OLTP/PostGIS/pgvector stay on Postgres.
 - Dev Postgres read-only rule, and which port actually holds the data (read
-  `DATABASE_URL`; it need not be `compose.yml`'s `:5433`): canonical in `CLAUDE.md`. Too big to clone whole — to demo on
-  real data, slice one agency + a few days via read-only
-  `\copy (SELECT … WHERE agency_id=… AND captured_at::date IN (…)) TO …` into a
-  throwaway DB on a spare port, then migrate + analyze there.
+  `DATABASE_URL`; it need not be `compose.yml`'s `:5433`): canonical in `CLAUDE.md`.
+  Too big to clone whole. `analyze` reads `updates` from ClickHouse, so a real-data
+  demo needs a read-only `SELECT` of one agency + a few days from dev ClickHouse
+  loaded into a throwaway ClickHouse, plus the Postgres rows that agency needs
+  (agency, static GTFS) in a throwaway Postgres on a spare port, then migrate +
+  analyze there. The old Postgres `updates` table no longer receives ingest and is
+  not a usable source.
 - Same rule applies to dev ClickHouse (`docker compose exec clickhouse`,
   hundreds of millions of real rows across 4 agencies). The one sanctioned
   exception is
@@ -56,16 +59,18 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `scripts/run_integration_tests.sh` itself also accepts `TEST_PG_PORT`/
   `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
   for a caller that starts its own containers by some other means.
-- `run_full_ci.sh` does NOT measure coverage by default, and neither does
-  the CI run that gates a PR: `ci.yml` measures it on `main` only, since
-  nothing gates on the number. Pass `COVERAGE=1` when the number itself is
-  what you want. The instrumentation adds minutes per run, and this gate is
-  often paid more than once per branch.
+- `run_full_ci.sh` mirrors only the backend `test` job and does NOT measure pytest
+  coverage by default, matching `ci.yml`, which measures backend coverage on `main`
+  pushes only since nothing gates on that number. Pass `COVERAGE=1` when the number
+  itself is what you want. The instrumentation adds minutes per run, and this gate is
+  often paid more than once per branch. Frontend coverage does gate: CI's `frontend`
+  job runs `npm run test:coverage` against `vitest.config.ts`'s thresholds on every PR.
 
-## Frontend dev proxy — two config files
-- `frontend/` ships BOTH `vite.config.ts` (tracked) and a gitignored
-  `vite.config.js` — **vite reads the `.js`**. Editing only the `.ts` silently
-  no-ops the dev proxy. Change both (or the `.js`) when repointing `/api`.
+## Frontend dev proxy
+- `frontend/vite.config.ts` is the only dev-proxy config; `tsc -b` emits into
+  `frontend/node_modules/.tmp`, not beside it. A leftover gitignored `frontend/vite.config.js` from an older checkout
+  shadows it (Vite prefers `.js`): delete it and `vite.config.d.ts` rather than
+  editing it.
 
 ## Frontend i18n
 - Every user-visible string goes through `t()` with keys in BOTH

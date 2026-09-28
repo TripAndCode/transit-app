@@ -65,9 +65,9 @@ become Nullable.
 - `GROUP BY` binds the input column, not the output alias. A COALESCE-sentinel
   aggregate (e.g. `COALESCE(service_type, '∅')`) MUST `GROUP BY` the same COALESCE
   expression — grouping by the bare column duplicates the PK and aborts analyze.
-- Sargable rewrites don't always help. The "make the predicate index-friendly"
-  quick win FAILED here due to agency×captured_at correlation — the planner's row
-  estimate is off regardless. Benchmark before assuming an index/sargable win.
+- Sargable rewrites don't always help: when filter columns are correlated (e.g.
+  `agency_id` with a time column), the planner's row estimate stays off whatever the
+  predicate's shape. Benchmark before assuming an index/sargable win.
 - `service_type` can be NULL, and `route_code` is Nullable too (both ClickHouse and
   the underlying GTFS-RT feeds); a typed aggregate that neither COALESCEs nor
   filters them silently drops the NULL rows. Check whether a new

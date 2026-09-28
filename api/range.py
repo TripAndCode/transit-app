@@ -268,34 +268,17 @@ def date_range_clause(
     column: str,
     ctx: RangeCtx,
     next_param: int,
-    *,
-    column_type: str = "timestamptz",
 ) -> tuple[str, list, int]:
-    """Date-range WHERE fragment for ``column``.
+    """Inclusive date-range WHERE fragment for an agg table's date ``column``.
 
-    ``column_type="timestamptz"`` (``updates.captured_at``): emits half-open
-    timestamptz bounds (midnight-to-midnight in the session timezone — JST,
-    set by api/main._init_connection) rather than
-    ``column::date BETWEEN $a AND $b``. A cast on the *column* side defeats
-    ``idx_updates_agency_at`` and forces a full seq scan of ``updates``; the
-    half-open form is index-sargable and selects the same rows under the same
-    session TZ.
-
-    ``column_type="text_date"`` (agg tables store ISO date strings): keeps the
-    ``column::date BETWEEN`` form — those tables are small aggregates with no
-    index at stake.
+    ``column::date`` accepts both ways the agg tables store a date: a DATE
+    column, where the cast is a no-op, and ISO date strings in a TEXT column.
 
     The ``::text`` coercion keeps asyncpg sending the params as TEXT instead
     of trying (and failing) to infer a native type; ``str()`` normalizes the
     mixed caller types (ISO str from the API ctx, datetime.date from tests).
     """
-    if column_type == "text_date":
-        fragment = f"{column}::date BETWEEN (${next_param}::text)::date AND (${next_param + 1}::text)::date"
-    else:
-        fragment = (
-            f"({column} >= ((${next_param}::text)::date)::timestamptz "
-            f"AND {column} < (((${next_param + 1}::text)::date + 1))::timestamptz)"
-        )
+    fragment = f"{column}::date BETWEEN (${next_param}::text)::date AND (${next_param + 1}::text)::date"
     return fragment, [str(ctx.from_date), str(ctx.to_date)], next_param + 2
 
 
@@ -316,9 +299,9 @@ def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     """ClickHouse-dialect counterpart of :func:`date_range_clause` for the
     live `updates` table (ClickHouse's own ``captured_at`` column).
 
-    Buckets by the JST civil day, not UTC — every Postgres connection that
-    ever touched `updates` pinned ``SET TIME ZONE 'Asia/Tokyo'``, so
-    `date_range_clause`'s bounds have always meant the JST calendar day.
+    Buckets by the JST civil day, not UTC — analyze dates every agg_* row on
+    the JST calendar, so the same window must select the same days whether it
+    is served from an aggregate (`date_range_clause`) or from `updates`.
     ``toDate(captured_at, 'Asia/Tokyo')`` (never a bare ``toDate(captured_at)``)
     matches the same JST-not-UTC translation already proven in
     ``pipeline/db.py::build_dedup_ch_sql``.
@@ -472,7 +455,7 @@ def build_agg_stop_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, in
     params: list = []
     n = next_param
 
-    frag, p, n = date_range_clause("date", ctx, n, column_type="text_date")
+    frag, p, n = date_range_clause("date", ctx, n)
     parts.append(frag)
     params.extend(p)
 
@@ -500,7 +483,7 @@ def build_agg_daily_trend_filter(ctx: RangeCtx, next_param: int) -> tuple[str, l
     params: list = []
     n = next_param
 
-    frag, p, n = date_range_clause("date", ctx, n, column_type="text_date")
+    frag, p, n = date_range_clause("date", ctx, n)
     parts.append(frag)
     params.extend(p)
 
