@@ -24,6 +24,7 @@ import { refreshAuthStateOn401, retryUnlessAuthRequired } from "./api/authExpiry
 import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
+import { RequireAuth } from "./components/RequireAuth";
 import { LocaleUnavailable } from "./components/LocaleUnavailable";
 import { RouteError } from "./components/RouteError";
 import { ToastProvider } from "./components/ui/Toast";
@@ -97,15 +98,13 @@ const onAuthError = refreshAuthStateOn401(queryClient);
 
 const router = createBrowserRouter([
   // /welcome and /login both render outside <App /> so they own the full
-  // viewport (no Header, sidebar, or guest-prompt strip). /welcome is the
-  // pre-authentication marketing entry point -- strictly separate from "/"
-  // below, which stays the existing post-login/guest dashboard landing
-  // (OnboardingGate) and is deliberately untouched by this route.
+  // viewport (no Header or sidebar), and outside RequireAuth so a signed-out
+  // visitor can reach them.
   { path: "/welcome", element: el(<LandingPage />), errorElement: <RouteError /> },
   { path: "/login", element: el(<LoginPage />), errorElement: <RouteError /> },
   {
     path: "/",
-    element: <App />,
+    element: <RequireAuth><App /></RequireAuth>,
     // Catches render errors from any child route — a broken tab degrades to
     // an inline message instead of white-screening the whole app.
     errorElement: <RouteError />,
