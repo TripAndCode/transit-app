@@ -1,5 +1,6 @@
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useSession } from "../api/auth";
 import { LiveMapHero } from "./landing/LiveMapHero";
 import { ScrollNarrative } from "./landing/ScrollNarrative";
 import "./LandingPage.css";
@@ -16,6 +17,8 @@ import "./LandingPage.css";
  *  sidebar shell. */
 export function LandingPage() {
   const { t } = useTranslation();
+  const { data: session } = useSession();
+  if (session) return <Navigate to="/" replace />;
   return (
     <div className="landing-shell">
       <section className="landing-hero">
@@ -38,15 +41,6 @@ export function LandingPage() {
           <p className="landing-hero__subtitle">{t("landing.hero.subtitle")}</p>
           <Link to="/login" className="landing-hero__cta">
             {t("common.login")}
-          </Link>
-          {/* Lower-emphasis text link, not a second same-weight button: the
-              app already allows guest browsing (App.tsx renders
-              GuestPrompt with no auth guard on the root route), so this
-              link keeps the page honest about that rather than granting
-              new access. One obvious default action (sign in) plus one
-              clearly secondary, still-discoverable alternative. */}
-          <Link to="/" className="landing-hero__guest-cta">
-            {t("landing.hero.guest_cta")}
           </Link>
         </div>
       </section>

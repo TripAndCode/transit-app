@@ -25,8 +25,7 @@
     "hero": {
       "title_now": "What's happening right now —",
       "title_where": "and where it's happening.",
-      "subtitle": "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track.",
-      "guest_cta": "Continue as a guest"
+      "subtitle": "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track."
     },
     "hero_map": {
       "screens": {
