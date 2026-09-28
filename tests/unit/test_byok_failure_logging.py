@@ -27,7 +27,6 @@ SECRET = "sk-live-thisistheusers-secret-key"
 PROVIDER_CALL_MODULES = (
     "pipeline/query/llm_client.py",
     "pipeline/query/chat.py",
-    "pipeline/query/copilot.py",
 )
 
 

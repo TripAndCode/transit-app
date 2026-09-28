@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from pipeline.query import copilot_templates
 from pipeline.query.copilot_templates import NO_SIGNAL_TEMPLATE_ID, render_template
 
 OVERVIEW_PAYLOAD: dict[str, Any] = {
@@ -22,7 +23,7 @@ PAYLOAD_NUMBERS = {"14.2", "12", "9.8", "7", "6.4", "4.1", "2.3", "56.1", "812",
 @pytest.mark.parametrize("locale", ["ja", "en"])
 def test_overview_top_delay_route_interpolates_only_payload_numbers(locale):
     """The zero-numeric-hallucination guarantee must hold in every locale."""
-    rendered = render_template("overview_top_delay_route", {}, OVERVIEW_PAYLOAD, locale)
+    rendered = render_template("overview_top_delay_route", OVERVIEW_PAYLOAD, locale)
     assert "14.2" in rendered["text"]
     for match in re.findall(r"\d+\.?\d*", rendered["text"]):
         assert match in PAYLOAD_NUMBERS, f"unexplained number {match!r} in {rendered['text']!r}"
@@ -30,12 +31,12 @@ def test_overview_top_delay_route_interpolates_only_payload_numbers(locale):
 
 def test_overview_top_delay_route_defaults_to_japanese():
     """Default locale is ja, matching pipeline.query.tools._summary."""
-    explicit = render_template("overview_top_delay_route", {}, OVERVIEW_PAYLOAD, "ja")
-    assert render_template("overview_top_delay_route", {}, OVERVIEW_PAYLOAD) == explicit
+    explicit = render_template("overview_top_delay_route", OVERVIEW_PAYLOAD, "ja")
+    assert render_template("overview_top_delay_route", OVERVIEW_PAYLOAD) == explicit
 
 
 def test_overview_top_delay_route_ja_renders_japanese():
-    rendered = render_template("overview_top_delay_route", {}, OVERVIEW_PAYLOAD, "ja")
+    rendered = render_template("overview_top_delay_route", OVERVIEW_PAYLOAD, "ja")
     assert "路線" in rendered["text"]
     assert "増加" in rendered["text"]
     assert "Route" not in rendered["text"]
@@ -44,14 +45,14 @@ def test_overview_top_delay_route_ja_renders_japanese():
 
 def test_overview_top_delay_route_ja_shows_decrease_when_delay_improved():
     payload = {**OVERVIEW_PAYLOAD, "headline": {**OVERVIEW_PAYLOAD["headline"], "delta_pct": -12.3}}
-    rendered = render_template("overview_top_delay_route", {}, payload, "ja")
+    rendered = render_template("overview_top_delay_route", payload, "ja")
     assert "減少" in rendered["text"]
     assert "増加" not in rendered["text"]
     assert "-12.3" not in rendered["text"]
 
 
 def test_overview_top_delay_route_en_renders_english():
-    rendered = render_template("overview_top_delay_route", {}, OVERVIEW_PAYLOAD, "en")
+    rendered = render_template("overview_top_delay_route", OVERVIEW_PAYLOAD, "en")
     assert "Route 12" in rendered["text"]
     assert "up 56.1%" in rendered["text"]
     assert rendered["cite"] == "Overview · 812 samples · top_delayed[0]"
@@ -59,7 +60,7 @@ def test_overview_top_delay_route_en_renders_english():
 
 def test_overview_top_delay_route_en_shows_down_when_delay_improved():
     payload = {**OVERVIEW_PAYLOAD, "headline": {**OVERVIEW_PAYLOAD["headline"], "delta_pct": -12.3}}
-    rendered = render_template("overview_top_delay_route", {}, payload, "en")
+    rendered = render_template("overview_top_delay_route", payload, "en")
     assert "down 12.3%" in rendered["text"]
     assert "up" not in rendered["text"]
     assert "-12.3" not in rendered["text"]
@@ -67,19 +68,19 @@ def test_overview_top_delay_route_en_shows_down_when_delay_improved():
 
 def test_unsupported_locale_falls_back_to_japanese():
     """Mirrors _summary: an unknown locale renders ja rather than raising."""
-    fallback = render_template("overview_top_delay_route", {}, OVERVIEW_PAYLOAD, "fr")
-    assert fallback == render_template("overview_top_delay_route", {}, OVERVIEW_PAYLOAD, "ja")
+    fallback = render_template("overview_top_delay_route", OVERVIEW_PAYLOAD, "fr")
+    assert fallback == render_template("overview_top_delay_route", OVERVIEW_PAYLOAD, "ja")
 
 
 @pytest.mark.parametrize("locale", ["ja", "en"])
 def test_no_signal_template_has_no_numbers(locale):
-    rendered = render_template(NO_SIGNAL_TEMPLATE_ID, {}, OVERVIEW_PAYLOAD, locale)
+    rendered = render_template(NO_SIGNAL_TEMPLATE_ID, OVERVIEW_PAYLOAD, locale)
     assert re.findall(r"\d", rendered["text"]) == []
 
 
 def test_no_signal_template_is_localized():
-    ja = render_template(NO_SIGNAL_TEMPLATE_ID, {}, OVERVIEW_PAYLOAD, "ja")
-    en = render_template(NO_SIGNAL_TEMPLATE_ID, {}, OVERVIEW_PAYLOAD, "en")
+    ja = render_template(NO_SIGNAL_TEMPLATE_ID, OVERVIEW_PAYLOAD, "ja")
+    en = render_template(NO_SIGNAL_TEMPLATE_ID, OVERVIEW_PAYLOAD, "en")
     assert ja["text"] != en["text"]
     assert "目立った" in ja["text"]
     assert en["text"].startswith("Nothing stands out")
@@ -87,12 +88,12 @@ def test_no_signal_template_is_localized():
 
 def test_unknown_template_id_raises():
     with pytest.raises(KeyError):
-        render_template("not_a_real_template", {}, OVERVIEW_PAYLOAD, "ja")
+        render_template("not_a_real_template", OVERVIEW_PAYLOAD, "ja")
 
 
 def test_overview_top_delay_route_requires_top_delayed_routes():
     with pytest.raises(KeyError):
-        render_template("overview_top_delay_route", {}, {"headline": OVERVIEW_PAYLOAD["headline"]}, "ja")
+        render_template("overview_top_delay_route", {"headline": OVERVIEW_PAYLOAD["headline"]}, "ja")
 
 
 def test_overview_top_delay_route_requires_nonempty_routes():
@@ -101,4 +102,38 @@ def test_overview_top_delay_route_requires_nonempty_routes():
         "top_delayed": {"routes": [], "delayed_count": 0},
     }
     with pytest.raises(KeyError):
-        render_template("overview_top_delay_route", {}, payload, "ja")
+        render_template("overview_top_delay_route", payload, "ja")
+
+
+_ROUTE = OVERVIEW_PAYLOAD["top_delayed"]["routes"][0]
+
+
+def _with_top_delayed(top_delayed):
+    return {**OVERVIEW_PAYLOAD, "top_delayed": top_delayed}
+
+
+def test_a_delayed_route_on_overview_selects_the_top_delay_template():
+    assert copilot_templates.select_template_id("overview", OVERVIEW_PAYLOAD) == "overview_top_delay_route"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _with_top_delayed({"routes": [], "delayed_count": 3}),
+        _with_top_delayed({"routes": [_ROUTE], "delayed_count": 0}),
+        _with_top_delayed({"routes": [_ROUTE], "delayed_count": None}),
+        _with_top_delayed({"routes": [_ROUTE]}),
+        _with_top_delayed(None),
+        {"headline": OVERVIEW_PAYLOAD["headline"]},
+        # The payload is client-posted: a malformed one selects no-signal
+        # rather than failing the request.
+        _with_top_delayed([_ROUTE]),
+        _with_top_delayed({"routes": [_ROUTE], "delayed_count": "3"}),
+    ],
+)
+def test_without_a_delayed_route_nothing_stands_out(payload):
+    assert copilot_templates.select_template_id("overview", payload) == NO_SIGNAL_TEMPLATE_ID
+
+
+def test_a_tab_without_templates_of_its_own_selects_no_signal():
+    assert copilot_templates.select_template_id("map", OVERVIEW_PAYLOAD) == NO_SIGNAL_TEMPLATE_ID

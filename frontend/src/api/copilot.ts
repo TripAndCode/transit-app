@@ -30,7 +30,7 @@ function buildKey(
  * Cached for an hour like `useFollowupEnabled`: it is deployment
  * configuration, not per-request state. Callers must treat anything other
  * than an explicit `true` as off, so an unresolved or failed check never
- * fires the billed insight POST.
+ * fires the insight POST.
  */
 export function useCopilotEnabled(agencyId: number | null) {
   return useQuery({
@@ -59,7 +59,7 @@ export function useCopilotInsight(
   // Starts at {key: null, params: null} rather than the current `key` so the
   // very first request also waits DEBOUNCE_MS -- a mount that immediately has
   // a `key` (e.g. Overview already has a cached viewPayload) would otherwise
-  // fire the billed insight POST synchronously instead of coalescing with
+  // fire the insight POST synchronously instead of coalescing with
   // whatever prop changes settle within the debounce window right after mount.
   const [debounced, setDebounced] = useState<{ key: string | null; params: CopilotParams | null }>({
     key: null,
@@ -89,14 +89,15 @@ export function useCopilotInsight(
       );
     },
     enabled: debounced.params != null,
-    // This POST bills a provider call per attempt, so react-query's default
-    // retry would silently pay twice for what the user experiences as one
-    // request. Never retry it, regardless of the global QueryClient default.
+    // The POST fires from a page view with no user action, so a failure is
+    // shown rather than repeated behind the user's back. Never retry it,
+    // regardless of the global QueryClient default.
     retry: false,
-    // One insight per view state, not per subscription. Without this, leaving
-    // Overview and coming back re-runs the query for an unchanged key and
-    // bills another LLM call — the debounce above only coalesces key changes,
-    // it does not stop a refetch for a key that is already cached.
+    // One insight per view state, not per subscription: the server renders
+    // the same insight for the same payload. Without this, leaving Overview
+    // and coming back re-runs the query for an unchanged key — the debounce
+    // above only coalesces key changes, it does not stop a refetch for a key
+    // that is already cached.
     staleTime: 10 * 60 * 1000,
   });
 

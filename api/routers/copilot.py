@@ -1,9 +1,9 @@
 """Copilot proactive-insight endpoint.
 
-See ``pipeline.query.copilot`` for the template-selection-only LLM call this
-wraps: it renders a canned template filled with numbers pulled from the
-caller's own view payload, never free-form user text, which is why this
-route needs no RAG grounding or answer verification unlike ``/ask``.
+See ``pipeline.query.copilot``: the insight is a canned template chosen and
+filled in code from the caller's own view payload, never model output, so
+this route needs no RAG grounding, answer verification, or LLM approval,
+unlike ``/ask`` and the follow-up.
 """
 
 import json
@@ -11,11 +11,10 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from api.deps import get_agency, get_current_user_optional, get_locale
+from api.deps import get_agency, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.security import User, csrf_guard, require_llm_approved
+from api.security import csrf_guard
 from pipeline.query.copilot import NoInsightAvailable, ais_enabled, generate_proactive_insight
-from pipeline.query.user_llm_keys import get_user_llm_key
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["copilot"])
 
@@ -55,38 +54,14 @@ async def copilot_insight(
     body: CopilotInsightRequest,
     agency_id: int = Depends(get_agency),
     locale: str = Depends(get_locale),
-    user: User | None = Depends(get_current_user_optional),
 ) -> CopilotInsightResponse:
     csrf_guard(request)
     if not await ais_enabled():
-        # Short-circuit ahead of the approval gate: a disabled feature must
-        # not 403 an unapproved caller, and the panel hides itself off the
-        # ``/copilot/enabled`` flag rather than relying on this response.
+        # The panel hides itself off ``/copilot/enabled`` rather than relying
+        # on this response.
         raise HTTPException(status_code=503, detail="copilot_disabled")
-    # Called directly (not via Depends) on the already-resolved `user` so it
-    # runs after the kill-switch check above, not before it -- FastAPI
-    # resolves Depends() params before the endpoint body, which would
-    # reverse that precedence.
-    user = require_llm_approved(user)
-
-    # Resolve the caller's BYOK key (if any) with a pool connection acquired
-    # and released *before* the LLM call below — never held across it, which
-    # can run for several seconds. This route otherwise has no reason to
-    # touch Postgres at all (unlike ``/ask``, which already threads ``conn``
-    # through for tool dispatch regardless of BYOK), so avoid declaring
-    # ``conn=Depends(get_conn)`` for the whole handler, matching
-    # ``api/routers/me.py``'s ``put_llm_key`` lazy-acquire pattern.
-    async with request.app.state.pool.acquire() as conn:
-        user_key = await get_user_llm_key(conn, user.user_id)
-
     try:
-        result = await generate_proactive_insight(
-            body.tab,
-            body.filters,
-            body.view_payload,
-            locale=locale,
-            user_key=user_key,
-        )
+        result = await generate_proactive_insight(body.tab, body.view_payload, locale=locale)
     except NoInsightAvailable as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return CopilotInsightResponse(**result)
