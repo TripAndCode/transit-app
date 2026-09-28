@@ -377,7 +377,7 @@
     },
     "linked_providers": "Linked providers",
     "llm_key": {
-      "title": "AI Copilot key",
+      "title": "AI key for Ask",
       "status_shared": "Using the shared free tier",
       "status_own": "Using your own {{provider}} key · ****{{suffix}}",
       "input_label": "API key",
