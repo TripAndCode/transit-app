@@ -67,8 +67,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   job runs `npm run test:coverage` against `vitest.config.ts`'s thresholds on every PR.
 
 ## Frontend dev proxy
-- `frontend/vite.config.ts` is the only dev-proxy config; `tsc -b` emits outside
-  `frontend/`. A leftover gitignored `frontend/vite.config.js` from an older checkout
+- `frontend/vite.config.ts` is the only dev-proxy config; `tsc -b` emits into
+  `frontend/node_modules/.tmp`, not beside it. A leftover gitignored `frontend/vite.config.js` from an older checkout
   shadows it (Vite prefers `.js`): delete it and `vite.config.d.ts` rather than
   editing it.
 
