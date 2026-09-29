@@ -15,7 +15,8 @@ Pure ASGI rather than ``BaseHTTPMiddleware``: it runs inside
 ``request.state`` into ``scope["state"]``, so it reads the caller from
 there.
 
-The same pass counts each authenticated request into api.activity's buffer.
+The same pass counts each authenticated request to a gated path into
+api.activity's buffer.
 """
 
 from __future__ import annotations
@@ -79,9 +80,11 @@ class LoginRequiredMiddleware:
 
 
 def _record(scope: Scope, status_code: int) -> None:
-    """Count one finished request against its user. Skipped for anything
-    without an attributable user, for the OpenAPI docs, and for requests no
-    API route matched (the SPA fallback answers unknown /api paths)."""
+    """Count one finished request against its user. Only gated paths reach
+    here (public ones such as /api/config return earlier); skipped for
+    anything without an attributable user, for the OpenAPI docs, and for
+    requests no API route matched (the SPA fallback answers unknown /api
+    paths)."""
     if not scope["path"].startswith("/api/"):
         return
     route = scope.get("route")

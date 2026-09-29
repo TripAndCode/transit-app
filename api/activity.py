@@ -110,7 +110,10 @@ async def flush(buffer: ActivityBuffer, pool: Any) -> int:
 async def _flush_periodically(app: Any) -> None:
     while True:
         await asyncio.sleep(FLUSH_INTERVAL_SECONDS)
-        await flush(BUFFER, app.state.pool)
+        # Shielded: the batch leaves the buffer before the write starts, so a
+        # shutdown's cancel landing mid-write would lose it. The write runs to
+        # completion on its own; the pool's close waits for its connection.
+        await asyncio.shield(flush(BUFFER, app.state.pool))
 
 
 def start(app: Any) -> None:

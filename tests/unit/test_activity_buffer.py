@@ -37,3 +37,38 @@ def test_a_failed_flush_drops_its_batch_instead_of_keeping_it():
     buf.record(_KEY, is_error=False)
     assert asyncio.run(flush(buf, _FailingPool())) == 0
     assert buf.drain() == {}
+
+
+def test_stopping_during_a_periodic_flush_lets_that_write_finish(monkeypatch):
+    """A shutdown that lands mid-write must not cancel it: the batch has
+    already left the buffer, so an interrupted write would lose it silently."""
+    from types import SimpleNamespace
+
+    from api import activity
+
+    monkeypatch.setattr(activity, "FLUSH_INTERVAL_SECONDS", 0.0)
+    written: list[list[int]] = []
+
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+
+        class _SlowPool:
+            async def execute(self, sql, *args):
+                started.set()
+                await release.wait()
+                written.append(args[6])
+
+        app = SimpleNamespace(state=SimpleNamespace(pool=_SlowPool()))
+        activity.BUFFER.drain()
+        activity.BUFFER.record(_KEY, is_error=False)
+        activity.start(app)
+        await started.wait()
+        stopping = asyncio.create_task(activity.stop(app))
+        await asyncio.sleep(0)
+        release.set()
+        await stopping
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+    assert written == [[1]]
