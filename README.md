@@ -112,6 +112,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make ask-eval` | CI gate: verify Ask builder coverage against the gold question set |
 | `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
 | `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (matches the deploy's data-retention horizon) |
+| `make prune-personal-data` | Delete usage counts and login history older than 25 months, and expired sessions (the API also runs this daily) |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
 | `make verify-secrets` | On-demand gitleaks scan of the full git history |

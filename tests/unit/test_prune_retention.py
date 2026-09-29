@@ -58,3 +58,30 @@ def test_the_prune_builders_coerce_the_interval_they_interpolate():
         assert "INTERVAL '7 days'" in builder("7"), "a numeric string is still a day count"
         with pytest.raises(ValueError):
             builder("1 days'; DROP TABLE admin_audit; --")
+
+
+def test_personal_data_is_kept_for_the_policys_25_months():
+    from pipeline import retention
+
+    assert retention.PERSONAL_DATA_RETENTION_MONTHS == 25
+
+
+def test_personal_data_prune_covers_usage_login_history_and_expired_sessions():
+    from pipeline import retention
+
+    sqls = retention.personal_data_prune_sql(25)
+    assert any(s.startswith("DELETE FROM user_activity_daily") and "INTERVAL '25 months'" in s for s in sqls)
+    assert any(
+        s.startswith("DELETE FROM login_events") and "created_at < now() - INTERVAL '25 months'" in s for s in sqls
+    )
+    assert "DELETE FROM sessions WHERE expires_at < now()" in sqls
+
+
+def test_prune_personal_data_subcommand_dispatches(monkeypatch):
+    from pipeline import retention
+
+    called = {}
+    monkeypatch.setattr(gtfs_pipeline, "cmd_prune_personal_data", lambda args: called.setdefault("months", args.months))
+    monkeypatch.setattr("sys.argv", ["gtfs_pipeline.py", "prune-personal-data"])
+    gtfs_pipeline.main()
+    assert called["months"] == retention.PERSONAL_DATA_RETENTION_MONTHS

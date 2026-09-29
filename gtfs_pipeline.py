@@ -686,6 +686,31 @@ def cmd_prune_admin_audit(args):
     asyncio.run(run())
 
 
+def cmd_prune_personal_data(args):
+    """Delete personal data past the privacy policy's retention (usage counts, login history, expired sessions)."""
+    import asyncio
+
+    import asyncpg
+
+    from pipeline.retention import personal_data_prune_sql
+
+    months = int(args.months)
+
+    async def run():
+        """Async body executed via asyncio.run()."""
+        _log_target()
+        conn = await asyncpg.connect(DATABASE_URL)
+        try:
+            await guard_async_conn(conn)
+            for sql in personal_data_prune_sql(months):
+                result = await conn.execute(sql)
+                logger.info(f"prune_personal_data: {sql.split()[2]}: {result}")
+        finally:
+            await conn.close()
+
+    asyncio.run(run())
+
+
 def cmd_ingest_weather(args):
     """Fetch observed daily weather for every configured representative station."""
     from pipeline.weather import PUBLICATION_WINDOW_DAYS, ingest_weather
@@ -775,6 +800,13 @@ def main():
     p_prune_audit = sub.add_parser("prune-admin-audit", help="Delete admin_audit rows older than N days")
     p_prune_audit.add_argument("--days", type=int, default=ADMIN_AUDIT_RETENTION_DAYS)
 
+    from pipeline.retention import PERSONAL_DATA_RETENTION_MONTHS
+
+    p_prune_personal = sub.add_parser(
+        "prune-personal-data", help="Delete usage counts and login history older than N months, and expired sessions"
+    )
+    p_prune_personal.add_argument("--months", type=int, default=PERSONAL_DATA_RETENTION_MONTHS)
+
     p_weather = sub.add_parser(
         "ingest_weather",
         help="Fetch observed daily weather for each agency's representative station",
@@ -823,6 +855,8 @@ def main():
         cmd_prune_pipeline_runs(args)
     elif args.command == "prune-admin-audit":
         cmd_prune_admin_audit(args)
+    elif args.command == "prune-personal-data":
+        cmd_prune_personal_data(args)
     elif args.command == "ingest_weather":
         cmd_ingest_weather(args)
     else:
