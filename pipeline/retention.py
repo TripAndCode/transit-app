@@ -1,11 +1,11 @@
 """Retention windows and the DELETE text that enforces them.
 
-The operational logs (`ask_query_log`, `pipeline_runs`, `admin_audit`) are
-pruned by their `gtfs_pipeline.py` commands. The personal data the privacy
-policy states a period for -- per-user usage counts and login history, kept
-for ``PERSONAL_DATA_RETENTION_MONTHS``, and session rows past their expiry --
-is also pruned daily by the API process (``api/retention.py``), so the stated
-periods hold without an external scheduler.
+Each window can be pruned by hand with its `gtfs_pipeline.py` command. Every
+period the privacy policy states -- per-user usage counts and login history
+(``PERSONAL_DATA_RETENTION_MONTHS``), sessions past their expiry, the unlinked
+Ask question log and the admin audit log -- is also pruned daily by the API
+process (``api/retention.py`` via ``policy_prune_sql``), so the stated periods
+hold without an external scheduler.
 
 Intervals are embedded as text rather than bound as parameters: asyncpg has
 no placeholder for an INTERVAL literal. Each builder applies ``int()`` itself
@@ -51,4 +51,14 @@ def personal_data_prune_sql(months: int) -> list[str]:
         f"DELETE FROM user_activity_daily WHERE day < (now() AT TIME ZONE 'Asia/Tokyo')::date - INTERVAL '{m} months'",
         f"DELETE FROM login_events WHERE created_at < now() - INTERVAL '{m} months'",
         "DELETE FROM sessions WHERE expires_at < now()",
+    ]
+
+
+def policy_prune_sql() -> list[str]:
+    """Every DELETE the privacy policy's stated periods depend on, in the order
+    the daily pass runs them."""
+    return [
+        *personal_data_prune_sql(PERSONAL_DATA_RETENTION_MONTHS),
+        prune_query_log_sql(QUERY_LOG_RETENTION_DAYS),
+        prune_admin_audit_sql(ADMIN_AUDIT_RETENTION_DAYS),
     ]
