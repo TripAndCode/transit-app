@@ -30,7 +30,7 @@ from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.locale import LocaleMiddleware
-from api.middleware.login_gate import LoginRequiredMiddleware
+from api.middleware.login_gate import LoginRequiredMiddleware, enforcement_active
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
@@ -104,6 +104,13 @@ def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
             "CORS_ORIGINS contains '*' but allow_credentials=True. "
             "The CORS spec forbids the combination — list explicit origins."
         )
+
+
+def _warn_if_login_gate_inactive(sso_enabled: bool) -> None:
+    """A deployment that asks for sign-in but has no SSO configured is open to
+    everyone; say so at boot rather than let it pass silently."""
+    if not sso_enabled and flag("login_required", True):
+        _log.warning("login_required is on but SSO is not configured: the API is open to signed-out callers")
 
 
 def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> None:
@@ -215,6 +222,7 @@ async def lifespan(app: FastAPI):
         # that would otherwise land on the event loop -- inside whichever
         # request happened to touch a flag first.
         await asyncio.to_thread(warm_flags)
+        _warn_if_login_gate_inactive(enabled)
         # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
         # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
         # heatmap, any time_band="all" report path reading agg_* tables) have
@@ -384,6 +392,7 @@ class HealthStatus(BaseModel):
 class ClientConfig(BaseModel):
     auth_enabled: bool
     local_admin_enabled: bool
+    login_required: bool
 
 
 @app.get("/health", response_model=HealthStatus)
@@ -395,9 +404,14 @@ async def health():
 @app.get("/api/config", response_model=ClientConfig)
 async def config():
     """Public client config. Lets the SPA hide login UI when SSO is unconfigured,
-    and separately show/hide the break-glass local-admin password form."""
+    show/hide the break-glass local-admin password form, and send signed-out
+    visitors to sign in while ``login_required`` says the API refuses them."""
     enabled, _ = auth_status()
-    return {"auth_enabled": enabled, "local_admin_enabled": local_admin_enabled()}
+    return {
+        "auth_enabled": enabled,
+        "local_admin_enabled": local_admin_enabled(),
+        "login_required": await enforcement_active(),
+    }
 
 
 def _maybe_mount_static(app: FastAPI) -> None:

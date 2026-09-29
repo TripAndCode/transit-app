@@ -99,3 +99,13 @@ async def test_the_kill_switch_reopens_the_api(client, sso_on, monkeypatch):
     invalidate_flags()
     r = await client.get("/api/agencies")
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_config_reports_whether_sign_in_is_required(client, sso_on):
+    assert (await client.get("/api/config")).json()["login_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_config_reports_sign_in_not_required_without_sso(client):
+    assert (await client.get("/api/config")).json()["login_required"] is False
