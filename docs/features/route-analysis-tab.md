@@ -6,11 +6,15 @@ saved-analysis bookmarks — scoped to exactly one selected route.
 
 ## How a user reaches it
 
-- Route: `/agencies/:agencyId/route-analysis`, registered in
-  `frontend/src/main.tsx` (`React.lazy`-loaded).
-- Sidebar nav link: `frontend/src/components/sidebarNavItems.ts`'s
-  `SIDEBAR_NAV_ITEMS` (`route-analysis` entry, labeled from the `design`
-  i18n namespace's `analysis` key — "Segment analysis" / "区間分析").
+- Route: the Analysis workspace's Where lens,
+  `/agencies/:agencyId/analysis/where`, rendered by
+  `frontend/src/tabs/AnalysisWorkspace.tsx` (`React.lazy`-loaded). The old
+  `/agencies/:agencyId/route-analysis` URL redirects here, keeping its query
+  (`routes`, `sub_tab`, `compare`).
+- Reached from the Analysis sidebar entry (`nav.analysis`) and then the
+  "Where" lens tab (`frontend/src/components/LensTabs.tsx`), or from links
+  that open a route directly: the command palette's route items, the Live
+  trip panel, and Saved & export's routes-to-check rows and saved analyses.
 - Top-level component: `frontend/src/tabs/RouteAnalysisTab.tsx` — owns the
   compare-with-previous-week toggle (`?compare=1` search param), the
   selected stop, and which of the four sub-tabs (trend / marey / map /
@@ -98,8 +102,8 @@ What the user sees/does:
 1. `make bootstrap && make serve` (+ `make frontend-dev`). Load and analyze
    data first: `make fetch-ingest` (or `ingest_live` + `make load_static`),
    then `make analyze` for the agency.
-2. Click "Segment analysis" in the sidebar → URL
-   `/agencies/:agencyId/route-analysis`; expect the "choose a route" empty
+2. Click "Analysis" in the sidebar, then the "Where" lens → URL
+   `/agencies/:agencyId/analysis/where`; expect the "choose a route" empty
    state until exactly one route is selected in the filter.
 3. Select one route — expect the stop chart, Marey diagram, map, and by-stop
    table to populate; switch between the four sub-tabs.

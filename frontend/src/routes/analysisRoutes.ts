@@ -2,7 +2,7 @@ import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 
 /** The Analysis workspace's lenses. `predict` exists as a route id so saved
  *  links survive, but it isn't listed until its data ships. */
-export const LENS_IDS = ["overview", "when", "where", "why", "rider", "compare", "predict"] as const;
+const LENS_IDS = ["overview", "when", "where", "why", "rider", "compare", "predict"] as const;
 export type LensId = (typeof LENS_IDS)[number];
 export const VISIBLE_LENSES: readonly LensId[] = ["overview", "when", "where", "why", "rider", "compare"];
 
