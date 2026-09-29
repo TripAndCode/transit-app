@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "../i18n";
+import { AnalysisWorkspace } from "./AnalysisWorkspace";
 
 vi.mock("../routes/lazyTabs", () => ({
   loadOverviewTab: () => Promise.resolve({ default: () => <div>overview-tab</div> }),
@@ -14,8 +15,6 @@ vi.mock("../routes/lazyTabs", () => ({
       default: ({ reportTypes }: { reportTypes: readonly string[] }) => <div>analysis-tab:{reportTypes.join(",")}</div>,
     }),
 }));
-
-import { AnalysisWorkspace } from "./AnalysisWorkspace";
 
 void i18n.changeLanguage("en");
 

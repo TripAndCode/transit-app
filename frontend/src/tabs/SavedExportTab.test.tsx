@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "../i18n";
+import { SavedExportTab } from "./SavedExportTab";
 
 vi.mock("../routes/lazyTabs", () => ({
   loadReportsHomeTab: () => Promise.resolve({ default: () => <div>reports-home</div> }),
@@ -12,8 +13,6 @@ vi.mock("../routes/lazyTabs", () => ({
       default: ({ reportTypes }: { reportTypes: readonly string[] }) => <div>analysis-tab:{reportTypes.join(",")}</div>,
     }),
 }));
-
-import { SavedExportTab } from "./SavedExportTab";
 
 void i18n.changeLanguage("en");
 
