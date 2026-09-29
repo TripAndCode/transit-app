@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout, useSession } from "../api/auth";
-import { apiDelete, apiGet, apiPut } from "../api/client";
+import { apiDelete, apiErrorDetail, apiGet, apiPut } from "../api/client";
 import { formatDateTime } from "../utils/format";
 import { Card } from "../components/ui/Card";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Section } from "../components/ui/Section";
 import { Toolbar } from "../components/ui/Toolbar";
+import { Modal } from "../components/Modal";
 
 type SessionRow = {
   sid_prefix: string;
@@ -101,6 +102,86 @@ function LlmKeySection() {
   );
 }
 
+const DELETE_ERROR_KEYS: Record<string, string> = {
+  last_admin: "account.data.error_last_admin",
+  managed_account: "account.data.error_managed",
+};
+
+/** Download everything the app holds about you, or delete the account for
+ *  good. Deletion is a hard delete on the server, so the confirm button waits
+ *  for the account's own email to be typed. */
+function DataSection({ email }: { email: string }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const titleId = useId();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const remove = useMutation({
+    mutationFn: () => apiDelete("/api/me", { body: { confirm_email: typed } }),
+    onSuccess: () => {
+      qc.clear();
+      navigate("/welcome", { replace: true });
+    },
+  });
+  const matches = typed.trim().toLowerCase() === email.toLowerCase();
+  const detail = remove.error ? apiErrorDetail(remove.error) : null;
+  const errorKey = remove.error ? (DELETE_ERROR_KEYS[detail ?? ""] ?? "account.data.error_generic") : null;
+
+  return (
+    <Section title={t("account.data.title")} description={t("account.data.description")}>
+      <Toolbar>
+        <a href="/api/me/export" download>
+          {t("account.data.export")}
+        </a>
+        <button
+          onClick={() => {
+            setTyped("");
+            remove.reset();
+            setOpen(true);
+          }}
+        >
+          {t("account.data.delete")}
+        </button>
+      </Toolbar>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        labelledBy={titleId}
+        style={{
+          width: "min(460px, calc(100vw - 32px))",
+          padding: 20,
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius)",
+          boxShadow: "var(--el-2)",
+        }}
+      >
+        <h2 id={titleId} style={{ margin: "0 0 8px", fontSize: 16 }}>
+          {t("account.data.delete_title")}
+        </h2>
+        <p style={{ margin: "0 0 12px", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+          {t("account.data.delete_body")}
+        </p>
+        <label style={{ display: "block", marginBottom: 12, fontSize: "var(--text-sm)" }}>
+          {t("account.data.delete_confirm_label", { email })}
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4 }} />
+        </label>
+        {errorKey && (
+          <p role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+            {t(errorKey)}
+          </p>
+        )}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={() => setOpen(false)}>{t("common.cancel")}</button>
+          <button onClick={() => remove.mutate()} disabled={!matches || remove.isPending}>
+            {t("account.data.delete_confirm")}
+          </button>
+        </div>
+      </Modal>
+    </Section>
+  );
+}
+
 /** Self-service profile + active sessions + logout. */
 export function AccountPage() {
   const { t } = useTranslation();
@@ -137,6 +218,7 @@ export function AccountPage() {
           </Card>
         ))}
       </Section>
+      <DataSection email={session.email} />
       <button
         onClick={() => logout.mutate(undefined, { onSuccess: () => (window.location.href = "/") })}
         disabled={logout.isPending}
