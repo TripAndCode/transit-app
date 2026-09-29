@@ -1,8 +1,8 @@
-"""Pure SQL text for the `prune-pipeline-runs` and `prune-admin-audit` CLI
-commands (`gtfs_pipeline.py`), next to the existing `prune_query_log`.
+"""Retention windows and DELETE text (`pipeline/retention.py`) and the
+`gtfs_pipeline.py` prune commands that run them.
 
-DB-free: these only build the DELETE text; `cmd_prune_pipeline_runs`/
-`cmd_prune_admin_audit` (not exercised here) open the real connection.
+DB-free: these only build the DELETE text; the `cmd_prune_*` bodies (not
+exercised here) open the real connection.
 """
 
 import pytest
@@ -85,3 +85,13 @@ def test_prune_personal_data_subcommand_dispatches(monkeypatch):
     monkeypatch.setattr("sys.argv", ["gtfs_pipeline.py", "prune-personal-data"])
     gtfs_pipeline.main()
     assert called["months"] == retention.PERSONAL_DATA_RETENTION_MONTHS
+
+
+def test_every_prune_builder_lives_in_pipeline_retention():
+    from pipeline import retention
+
+    assert (
+        retention.prune_query_log_sql(90) == "DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '90 days'"
+    )
+    assert gtfs_pipeline.prune_pipeline_runs_sql is retention.prune_pipeline_runs_sql
+    assert gtfs_pipeline.prune_admin_audit_sql is retention.prune_admin_audit_sql
