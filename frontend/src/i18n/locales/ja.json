@@ -1144,7 +1144,13 @@
       "api_key_issued_notice": "このキーは今すぐコピーしてください。二度と表示されません。",
       "api_key_copy": "コピー",
       "api_key_copied": "コピーしました",
-      "danger_zone_title": "危険な操作"
+      "danger_zone_title": "危険な操作",
+      "activity_title": "利用状況（直近30日）",
+      "activity_empty": "直近30日のリクエスト記録はありません。",
+      "activity_col_route": "エンドポイント",
+      "activity_col_requests": "リクエスト数",
+      "activity_col_errors": "エラー数",
+      "activity_agency": "事業者 {{id}}"
     },
     "invite": {
       "trigger": "＋ 招待",
@@ -1352,7 +1358,7 @@
         "weatherIngestEnabled": "気象: 観測データ取り込み",
         "openapiDocsEnabled": "API: OpenAPI ドキュメント",
         "perfDebugEnabled": "API: パフォーマンスデバッグ面",
-      "loginRequired": "アクセス: ログイン必須"
+        "loginRequired": "アクセス: ログイン必須"
       }
     },
     "table": {

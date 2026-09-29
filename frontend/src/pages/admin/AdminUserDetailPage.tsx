@@ -8,7 +8,7 @@ import { usePatchUser, useDeleteUser } from "../../api/admin";
 import { useSession } from "../../api/auth";
 import { AdminButton } from "./adminControls";
 import { Drawer } from "../../components/admin/Drawer";
-import { ApiKeysSection, SessionsSection } from "./UserDrawerSections";
+import { ActivitySection, ApiKeysSection, SessionsSection } from "./UserDrawerSections";
 
 type AdminUserDetail = {
   user_id: number;
@@ -246,6 +246,7 @@ function AdminUserDetailBody({
 
         <SessionsSection uid={data.user_id} />
         <ApiKeysSection uid={data.user_id} />
+        <ActivitySection uid={data.user_id} />
 
         <section style={{ marginBottom: 24 }}>
           <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("account.linked_providers")}</h2>

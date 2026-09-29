@@ -14,6 +14,9 @@ Pure ASGI rather than ``BaseHTTPMiddleware``: it runs inside
 ``SessionMiddleware`` and ``APIKeyMiddleware``, which write
 ``request.state`` into ``scope["state"]``, so it reads the caller from
 there.
+
+The same pass counts each authenticated request to a gated path into
+api.activity's buffer.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from api.activity import BUFFER, ActivityKey, agency_id_from, today_jst
 from api.sso import sso_status
 from pipeline.flags import aflag
 
@@ -62,4 +66,41 @@ class LoginRequiredMiddleware:
         if not signed_in and await enforcement_active():
             await JSONResponse(AUTH_REQUIRED, status_code=401)(scope, receive, send)
             return
-        await self.app(scope, receive, send)
+        status = {"code": 0}
+
+        async def send_wrapper(message) -> None:
+            if message["type"] == "http.response.start":
+                status["code"] = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            _record(scope, status["code"])
+
+
+def _record(scope: Scope, status_code: int) -> None:
+    """Count one finished request against its user. Only gated paths reach
+    here (public ones such as /api/config return earlier); skipped for
+    anything without an attributable user, for the OpenAPI docs, and for
+    requests no API route matched (the SPA fallback answers unknown /api
+    paths)."""
+    if not scope["path"].startswith("/api/"):
+        return
+    route = scope.get("route")
+    template = getattr(route, "path", None)
+    if template is None or getattr(route, "name", None) == "spa_fallback":
+        return
+    state = request_state(scope)
+    user = state.get("user")
+    if user is not None:
+        user_id, via_api_key = user.user_id, False
+    elif state.get("api_key_owner_id") is not None:
+        user_id, via_api_key = state["api_key_owner_id"], True
+    else:
+        return
+    key = ActivityKey(
+        user_id, today_jst(), template, scope["method"], agency_id_from(scope.get("path_params")), via_api_key
+    )
+    # status 0: the app raised before starting a response.
+    BUFFER.record(key, is_error=status_code >= 400 or status_code == 0)

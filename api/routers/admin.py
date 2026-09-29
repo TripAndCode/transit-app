@@ -35,7 +35,7 @@ import re
 import secrets
 import time
 from collections.abc import Iterator
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -602,6 +602,38 @@ async def list_user_sessions(
         )
         for r in rows
     ]
+
+
+class ActivityTotal(BaseModel):
+    """One user's requests to one route and agency over the window, summed across days."""
+
+    route: str
+    method: str
+    agency_id: int | None
+    requests: int
+    errors: int
+
+
+@router.get("/users/{uid}/activity", response_model=list[ActivityTotal])
+async def user_activity(
+    uid: int,
+    days: int = Query(30, ge=1, le=365),
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[ActivityTotal]:
+    since = today_jst(datetime.now(timezone.utc)) - timedelta(days=days)
+    rows = await conn.fetch(
+        """
+        SELECT route, method, agency_id, SUM(requests)::int AS requests, SUM(errors)::int AS errors
+        FROM user_activity_daily
+        WHERE user_id = $1 AND day > $2
+        GROUP BY route, method, agency_id
+        ORDER BY requests DESC, route, method, agency_id NULLS FIRST
+        """,
+        uid,
+        since,
+    )
+    return [ActivityTotal(**dict(r)) for r in rows]
 
 
 @router.delete("/users/{uid}/sessions/{sid_prefix}", status_code=204)

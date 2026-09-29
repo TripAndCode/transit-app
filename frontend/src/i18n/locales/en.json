@@ -1144,7 +1144,13 @@
       "api_key_issued_notice": "Copy this key now — it won't be shown again.",
       "api_key_copy": "Copy",
       "api_key_copied": "Copied",
-      "danger_zone_title": "Danger zone"
+      "danger_zone_title": "Danger zone",
+      "activity_title": "Usage (last 30 days)",
+      "activity_empty": "No recorded requests in the last 30 days.",
+      "activity_col_route": "Endpoint",
+      "activity_col_requests": "Requests",
+      "activity_col_errors": "Errors",
+      "activity_agency": "agency {{id}}"
     },
     "invite": {
       "trigger": "+ Invite",
@@ -1352,7 +1358,7 @@
         "weatherIngestEnabled": "Weather: observed-data ingest",
         "openapiDocsEnabled": "API: OpenAPI docs",
         "perfDebugEnabled": "API: perf debug surface",
-      "loginRequired": "Access: sign-in required"
+        "loginRequired": "Access: sign-in required"
       }
     },
     "table": {
