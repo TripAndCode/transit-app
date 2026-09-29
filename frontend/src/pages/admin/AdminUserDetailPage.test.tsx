@@ -39,6 +39,7 @@ const apiGetMock = vi.hoisted(() =>
   vi.fn((url: string) => {
     if (url.includes("/sessions")) return Promise.resolve([]);
     if (url.includes("/api-keys")) return Promise.resolve({ keys: [], truncated: false });
+    if (url.includes("/activity")) return Promise.resolve([]);
     return Promise.resolve(mockDetail);
   })
 );

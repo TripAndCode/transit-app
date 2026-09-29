@@ -494,6 +494,21 @@ export function useUserSessions(uid: number) {
   });
 }
 
+export type UserActivityTotal = {
+  route: string;
+  method: string;
+  agency_id: number | null;
+  requests: number;
+  errors: number;
+};
+
+export function useUserActivity(uid: number) {
+  return useQuery({
+    queryKey: ["adminUserActivity", uid],
+    queryFn: ({ signal }) => apiGet<UserActivityTotal[]>(`/api/admin/users/${uid}/activity?days=30`, { signal }),
+  });
+}
+
 /** Mutation: revoke one session by its prefix; refetches the session list. */
 export function useRevokeSession(uid: number) {
   const qc = useQueryClient();

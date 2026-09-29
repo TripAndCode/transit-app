@@ -5,6 +5,7 @@ import {
   useIssueApiKey,
   useRevokeApiKey,
   useRevokeSession,
+  useUserActivity,
   useUserSessions,
   type AdminApiKeyIssued,
 } from "../../api/admin";
@@ -161,6 +162,52 @@ export function ApiKeysSection({ uid }: { uid: number }) {
         <div role="alert" style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
           {formatApiError(revoke.error)}
         </div>
+      )}
+    </section>
+  );
+}
+
+const activityCell = { textAlign: "left" as const, padding: "4px 8px 4px 0" };
+const activityNumber = { textAlign: "right" as const, padding: "4px 0 4px 8px", fontVariantNumeric: "tabular-nums" as const };
+
+export function ActivitySection({ uid }: { uid: number }) {
+  const { t } = useTranslation();
+  const { data, isLoading, error } = useUserActivity(uid);
+
+  return (
+    <section style={{ marginBottom: 24 }}>
+      <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t("admin.user_detail.activity_title")}</h2>
+      {isLoading && <div>{t("common.loading")}</div>}
+      {error && (
+        <div role="alert" style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
+          {formatApiError(error)}
+        </div>
+      )}
+      {data?.length === 0 && (
+        <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>{t("admin.user_detail.activity_empty")}</div>
+      )}
+      {data && data.length > 0 && (
+        <table style={{ fontSize: 13, borderCollapse: "collapse", width: "100%" }}>
+          <thead>
+            <tr>
+              <th style={activityCell}>{t("admin.user_detail.activity_col_route")}</th>
+              <th style={activityNumber}>{t("admin.user_detail.activity_col_requests")}</th>
+              <th style={activityNumber}>{t("admin.user_detail.activity_col_errors")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((a) => (
+              <tr key={`${a.method} ${a.route} ${a.agency_id ?? ""}`}>
+                <td style={activityCell}>
+                  <code>{`${a.method} ${a.route}`}</code>
+                  {a.agency_id != null && ` · ${t("admin.user_detail.activity_agency", { id: a.agency_id })}`}
+                </td>
+                <td style={activityNumber}>{a.requests}</td>
+                <td style={activityNumber}>{a.errors}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </section>
   );
