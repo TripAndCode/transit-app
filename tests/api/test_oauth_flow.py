@@ -9,6 +9,7 @@ database side effects (users, oauth_identities, sessions, login_events).
 
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -535,3 +536,25 @@ async def test_real_login_then_callback_does_not_raise_duplicate_code_verifier(a
     assert resp.status_code == 302
     assert resp.headers["location"] == "/"
     assert "error=" not in resp.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_keeps_next_for_the_retry(auth_client):
+    """A sign-in that fails at token exchange sends the visitor back to /login
+    with the page they were headed for, so their retry lands there."""
+    from api.routers import auth as auth_mod
+
+    destination = "/agencies/1/analysis?route=12"
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": destination, "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(side_effect=RuntimeError("provider down"))
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    assert location.startswith("/login?error=provider_down&next=")
+    assert location.endswith(quote(destination, safe=""))
