@@ -12,7 +12,10 @@
     "mobile_tabbar_label": "Primary navigation",
     "more": "More",
     "more_menu_label": "More options",
-    "close_menu": "Close menu"
+    "close_menu": "Close menu",
+    "live": "Live",
+    "analysis": "Analysis",
+    "saved": "Saved & export"
   },
   "lens": {
     "nav_label": "Analysis views",
@@ -27,6 +30,12 @@
   "compare": {
     "mode_periods": "Periods and routes",
     "mode_agencies": "Agencies"
+  },
+  "saved": {
+    "title": "Saved & export",
+    "view_summary": "Period summary",
+    "view_saved": "Saved analyses",
+    "view_reports": "Council summary & delay reference"
   },
   "sheet": {
     "handle": "Sheet handle"

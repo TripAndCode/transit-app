@@ -41,7 +41,7 @@ export function ReportsHomeTab() {
   const { t } = useTranslation("design");
   const [ctx, update] = useRangeContext();
   const jumpToLatestData = useJumpToLatestDataRange(id);
-  const [view, setView] = useUrlState<"summary" | "saved">("view", "summary");
+  const [view] = useUrlState<"summary" | "saved">("view", "summary");
   const savedTab = view === "saved";
   const trend = useReport(id, savedTab ? null : "trend", ctx);
   const ranking = useReport(id, savedTab ? null : "ranking", ctx);
@@ -80,7 +80,6 @@ export function ReportsHomeTab() {
         }}
       />}
     </header>
-    <div className="focus-tabs">{(["summary", "saved"] as const).map((v) => <button key={v} aria-pressed={view === v} onClick={() => { setSaved(readAnalyses()); setView(v); }}>{t(v === "saved" ? "savedAnalyses" : "summary")}</button>)}</div>
     {notice && <p role="status">{notice}</p>}
     {savedTab ? <section><p className="focus-muted">{t("localOnly")}</p>
       {!saved.some((s) => s.agencyId === id) && <EmptyState title={t("noSaved")} />}

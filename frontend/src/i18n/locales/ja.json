@@ -12,7 +12,10 @@
     "mobile_tabbar_label": "メインナビゲーション",
     "more": "その他",
     "more_menu_label": "その他のメニュー",
-    "close_menu": "メニューを閉じる"
+    "close_menu": "メニューを閉じる",
+    "live": "ライブ",
+    "analysis": "分析",
+    "saved": "保存と出力"
   },
   "lens": {
     "nav_label": "分析の角度",
@@ -27,6 +30,12 @@
   "compare": {
     "mode_periods": "期間・路線どうし",
     "mode_agencies": "事業者どうし"
+  },
+  "saved": {
+    "title": "保存と出力",
+    "view_summary": "期間のまとめ",
+    "view_saved": "保存した分析",
+    "view_reports": "協議会向けまとめ・遅延の参考資料"
   },
   "sheet": {
     "handle": "シートの持ち手"

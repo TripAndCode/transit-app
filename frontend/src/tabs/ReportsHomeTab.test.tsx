@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
@@ -37,9 +36,9 @@ function mockReports(trend: ReportResponse, ranking: ReportResponse) {
   });
 }
 
-function renderTab() {
+function renderTab(path = "/agencies/1/reports") {
   renderWithProviders(
-    <MemoryRouter initialEntries={["/agencies/1/reports"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/agencies/:agencyId/reports" element={<ReportsHomeTab />} />
       </Routes>
@@ -65,13 +64,18 @@ describe("ReportsHomeTab", () => {
     expect(screen.getAllByText("No observations match these filters")).toHaveLength(2);
   });
 
-  it("switches to the saved-analyses view and shows its local-only note", async () => {
+  it("shows the saved-analyses view and its local-only note from the view param", () => {
     mockReports(trendResponse(), rankingResponse());
-    renderTab();
-    await userEvent.click(screen.getByRole("button", { name: "Saved analyses" }));
+    renderTab("/agencies/1/reports?view=saved");
     expect(
       screen.getByText("Filters saved in this browser. Opening them queries the latest available data."),
     ).toBeInTheDocument();
+  });
+
+  it("leaves switching views to the Saved & export strip", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab();
+    expect(screen.queryByRole("button", { name: "Saved analyses" })).toBeNull();
   });
 });
 
