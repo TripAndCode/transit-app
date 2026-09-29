@@ -81,12 +81,12 @@ describe("CommandPalette", () => {
     renderPalette();
     openWithCtrlK();
     const input = screen.getByRole("combobox");
-    await user.type(input, "Reports");
-    expect(screen.getByText("Reports")).toBeInTheDocument();
-    expect(screen.queryByText("Segment analysis")).toBeNull();
+    await user.type(input, "Saved");
+    expect(screen.getByText("Saved & export")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).toBeNull();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/reports");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/saved");
   });
 
   it("shows no-results copy when nothing matches", async () => {
@@ -113,47 +113,38 @@ describe("CommandPalette", () => {
   });
 
   describe("go-to chords", () => {
-    it("navigates on g then o/a/r/q when nothing is focused in a text field", () => {
+    it("navigates to live on g then l when nothing is focused in a text field", () => {
       renderPalette();
       fireEvent.keyDown(document, { key: "g" });
-      fireEvent.keyDown(document, { key: "o" });
-      // `/overview` is only a legacy alias that redirects to `operations`,
-      // so the chord must not route through it.
-      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/operations");
+      fireEvent.keyDown(document, { key: "l" });
+      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/live");
     });
 
-    it("navigates to route-analysis on g then a", () => {
+    it("navigates to analysis on g then a", () => {
       renderPalette();
       fireEvent.keyDown(document, { key: "g" });
       fireEvent.keyDown(document, { key: "a" });
-      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/route-analysis");
+      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/analysis");
     });
 
-    it("navigates to period-overview on g then p", () => {
+    it("navigates to saved & export on g then s", () => {
       renderPalette();
       fireEvent.keyDown(document, { key: "g" });
-      fireEvent.keyDown(document, { key: "p" });
-      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/period-overview");
-    });
-
-    it("navigates to network on g then n", () => {
-      renderPalette();
-      fireEvent.keyDown(document, { key: "g" });
-      fireEvent.keyDown(document, { key: "n" });
-      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/network");
+      fireEvent.keyDown(document, { key: "s" });
+      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/saved");
     });
 
     it("ignores the chord while focus is in a text input", () => {
       renderPalette("/agencies/1/overview", <input data-testid="outside-input" />);
       const outside = screen.getByTestId("outside-input");
       fireEvent.keyDown(outside, { key: "g" });
-      fireEvent.keyDown(outside, { key: "o" });
+      fireEvent.keyDown(outside, { key: "l" });
       expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/overview");
     });
 
-    it("does not fire on a bare 'o' without a preceding 'g'", () => {
+    it("does not fire on a bare 'l' without a preceding 'g'", () => {
       renderPalette();
-      fireEvent.keyDown(document, { key: "o" });
+      fireEvent.keyDown(document, { key: "l" });
       expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/overview");
       expect(screen.queryByRole("dialog")).toBeNull();
     });
@@ -163,11 +154,9 @@ describe("CommandPalette", () => {
     renderPalette();
     fireEvent.keyDown(document, { key: "?" });
     const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
-    expect(within(dialog).getByText("Go to Operations")).toBeInTheDocument();
-    expect(within(dialog).getByText("Go to Period overview")).toBeInTheDocument();
-    expect(within(dialog).getByText("Go to Segment analysis")).toBeInTheDocument();
-    expect(within(dialog).getByText("Go to Compare agencies")).toBeInTheDocument();
-    expect(within(dialog).getByText("Go to Reports")).toBeInTheDocument();
+    expect(within(dialog).getByText("Go to Live")).toBeInTheDocument();
+    expect(within(dialog).getByText("Go to Analysis")).toBeInTheDocument();
+    expect(within(dialog).getByText("Go to Saved & export")).toBeInTheDocument();
     expect(within(dialog).getByText("Go to Ask")).toBeInTheDocument();
     expect(within(dialog).getByText("Show this shortcut list")).toBeInTheDocument();
   });
@@ -180,14 +169,26 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("selecting a route sets the routes filter and jumps to segment analysis", async () => {
+  it("selecting a route sets the routes filter and jumps to the where lens", async () => {
     const user = userEvent.setup();
     renderPalette();
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "42");
     await user.click(screen.getByText("42 (42)"));
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/route-analysis");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/analysis/where");
     expect(screen.getByTestId("search").textContent).toContain("routes=42");
+  });
+
+  it("selecting a report opens the lens that hosts it", async () => {
+    const user = userEvent.setup();
+    renderPalette("/agencies/1/live?from=2026-06-01&to=2026-06-07");
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Dwell");
+    await user.click(screen.getByText("Dwell/running time"));
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/analysis/why");
+    const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(search.get("report")).toBe("dwell_run");
+    expect(search.get("from")).toBe("2026-06-01");
   });
 
   it("selecting a time band updates the current page's query string", async () => {
@@ -200,23 +201,23 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("search").textContent).toContain("time_band=morning");
   });
 
-  it("switching agencies keeps the current tab and the active range context", async () => {
+  it("switching agencies keeps the current lens and the active range context", async () => {
     const user = userEvent.setup();
-    renderPalette("/agencies/1/route-analysis?from=2026-06-01&to=2026-06-07");
+    renderPalette("/agencies/1/analysis/where?from=2026-06-01&to=2026-06-07");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
     await user.click(screen.getByText("Kaga Bay Bus"));
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/route-analysis");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/analysis/where");
     expect(screen.getByTestId("search").textContent).toBe("?from=2026-06-01&to=2026-06-07");
   });
 
-  it("switching agencies falls back to operations, with the active range context, when there is no current tab", async () => {
+  it("switching agencies falls back to the overview lens, with the active range context, when there is no current tab", async () => {
     const user = userEvent.setup();
     renderPalette("/agencies/1?from=2026-06-01&to=2026-06-07");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
     await user.click(screen.getByText("Kaga Bay Bus"));
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/operations");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/analysis/overview");
     expect(screen.getByTestId("search").textContent).toBe("?from=2026-06-01&to=2026-06-07");
   });
 
@@ -224,11 +225,11 @@ describe("CommandPalette", () => {
     const user = userEvent.setup();
     renderPalette();
     openWithCtrlK();
-    await user.type(screen.getByRole("combobox"), "Reports");
-    await user.click(screen.getByText("Reports"));
+    await user.type(screen.getByRole("combobox"), "Saved");
+    await user.click(screen.getByText("Saved & export"));
 
     const stored = JSON.parse(localStorage.getItem("transit.commandPaletteRecents") ?? "[]");
-    expect(stored).toContain("nav:reports");
+    expect(stored).toContain("nav:saved");
 
     openWithCtrlK();
     expect(screen.getByText("Recent")).toBeInTheDocument();
@@ -242,12 +243,12 @@ describe("CommandPalette", () => {
     );
     renderPalette();
     openWithCtrlK();
-    await user.type(screen.getByRole("combobox"), "Reports");
-    await user.click(screen.getByText("Reports"));
+    await user.type(screen.getByRole("combobox"), "Saved");
+    await user.click(screen.getByText("Saved & export"));
 
     const stored: string[] = JSON.parse(localStorage.getItem("transit.commandPaletteRecents") ?? "[]");
     expect(stored.length).toBe(8);
-    expect(stored[0]).toBe("nav:reports");
+    expect(stored[0]).toBe("nav:saved");
     expect(stored).not.toContain("action:theme");
   });
 
@@ -258,8 +259,8 @@ describe("CommandPalette", () => {
     });
     renderPalette();
     openWithCtrlK();
-    await user.type(screen.getByRole("combobox"), "Reports");
-    await expect(user.click(screen.getByText("Reports"))).resolves.not.toThrow();
+    await user.type(screen.getByRole("combobox"), "Saved");
+    await expect(user.click(screen.getByText("Saved & export"))).resolves.not.toThrow();
   });
 
   it("exposes each option's id via aria-activedescendant on the input, tracking arrow-key navigation", () => {

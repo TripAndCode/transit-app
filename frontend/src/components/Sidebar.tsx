@@ -298,7 +298,7 @@ export function Sidebar() {
                   {t("nav.prototype_onboarding")}
                 </button>
                 <NavLink
-                  to={`/agencies/${agencyId}/operations${suffix}`}
+                  to={`/agencies/${agencyId}/live${suffix}`}
                   onClick={() => onNavigate?.()}
                   style={{
                     display: "flex",
@@ -314,7 +314,7 @@ export function Sidebar() {
                   {t("nav.prototype_stale_feed")}
                 </NavLink>
                 <NavLink
-                  to={`/agencies/${agencyId}/period-overview?from=2030-01-01&to=2030-01-07`}
+                  to={`/agencies/${agencyId}/analysis/overview?from=2030-01-01&to=2030-01-07`}
                   onClick={() => onNavigate?.()}
                   style={{
                     display: "flex",

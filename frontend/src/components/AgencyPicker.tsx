@@ -21,7 +21,7 @@ export function AgencyPicker() {
   const { t } = useTranslation();
   const { data: agencies, isLoading } = useAgencies();
   const navigate = useNavigate();
-  const tabMatch = useMatch("/agencies/:agencyId/:tab/*");
+  const tabMatch = useMatch("/agencies/:agencyId/*");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const ref = useRef<HTMLDivElement>(null);
@@ -56,7 +56,7 @@ export function AgencyPicker() {
   function selectAgency(id: number) {
     setOpen(false);
     setFilter("");
-    const tab = tabMatch?.params.tab ?? "operations";
+    const tab = tabMatch?.params["*"] || "analysis/overview";
     navigate(`/agencies/${id}/${tab}`);
   }
 

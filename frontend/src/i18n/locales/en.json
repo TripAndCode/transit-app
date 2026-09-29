@@ -1559,6 +1559,8 @@
     "aria_label": "Command palette",
     "no_results": "No matching items",
     "nav_ask_sublabel": "Ask about routes, stops, and time bands",
+    "nav_analysis_sublabel": "When, where and why delay happens",
+    "nav_saved_sublabel": "Saved analyses and exports",
     "hint": "Command",
     "hint_aria": "Open the command palette (⌘K)",
     "group": {

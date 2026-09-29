@@ -21,6 +21,7 @@ import { onActivateKey } from "../utils/a11y";
 import { modifierKeyLabel } from "../utils/platform";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
 import { GO_TO_TARGETS } from "./paletteNavTargets";
+import { lensHref, reportHref } from "../routes/analysisRoutes";
 import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
 import "./commandPalette.css";
@@ -146,7 +147,7 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const location = useLocation();
   const agencyParam = useMatch("/agencies/:agencyId/*")?.params.agencyId;
-  const tabParam = useMatch("/agencies/:agencyId/:tab/*")?.params.tab;
+  const tabRest = useMatch("/agencies/:agencyId/*")?.params["*"];
   const agencyId = agencyParam ? Number(agencyParam) : null;
   const [ctx] = useRangeContext();
   const [theme, setTheme] = useTheme();
@@ -187,18 +188,18 @@ export function CommandPalette() {
   }
 
   function goToAgency(id: number) {
-    navigate(`/agencies/${id}/${tabParam ?? "operations"}${ctxSuffix}`);
+    navigate(`/agencies/${id}/${tabRest || "analysis/overview"}${ctxSuffix}`);
   }
 
   function goToRoute(code: string) {
     if (agencyId == null) return;
     const qs = ctxToQueryString({ ...ctx, routes: [code] });
-    navigate(`/agencies/${agencyId}/route-analysis${qs ? `?${qs}` : ""}`);
+    navigate(lensHref(agencyId, "where", qs ? `?${qs}` : ""));
   }
 
   function goToReport(reportType: string) {
     if (agencyId == null) return;
-    navigate(`/agencies/${agencyId}/analysis/${reportType}${ctxSuffix}`);
+    navigate(reportHref(agencyId, reportType, ctxSuffix));
   }
 
   function goToTimeBand(band: TimeBand) {

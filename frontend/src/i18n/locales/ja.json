@@ -1559,6 +1559,8 @@
     "aria_label": "コマンドパレット",
     "no_results": "一致する項目がありません",
     "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
+    "nav_analysis_sublabel": "いつ・どこ・なぜ遅れるか",
+    "nav_saved_sublabel": "保存した分析と出力",
     "hint": "コマンド",
     "hint_aria": "コマンドパレットを開く（⌘K）",
     "group": {

@@ -13,7 +13,7 @@ vi.mock("../routes/lazyTabs", () => ({ prefetchRouteChunk: vi.fn() }));
 
 const prefetch = vi.mocked(prefetchRouteChunk);
 
-function renderSidebar(path = "/agencies/1/overview") {
+function renderSidebar(path = "/agencies/1/live") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -39,15 +39,15 @@ describe("Sidebar chunk prefetch", () => {
     const user = userEvent.setup();
     renderSidebar();
 
-    await user.hover(screen.getByRole("link", { name: /Reports/ }));
-    expect(prefetch).toHaveBeenCalledWith("reports");
+    await user.hover(screen.getByRole("link", { name: /Saved & export/ }));
+    expect(prefetch).toHaveBeenCalledWith("saved");
   });
 
   it("warms the chunk on keyboard focus too, not just hover", async () => {
     renderSidebar();
 
-    screen.getByRole("link", { name: /Segment analysis/ }).focus();
-    expect(prefetch).toHaveBeenCalledWith("route-analysis");
+    screen.getByRole("link", { name: /Analysis/ }).focus();
+    expect(prefetch).toHaveBeenCalledWith("analysis");
   });
 
   it("warms the Ask chunk from its CTA", async () => {
