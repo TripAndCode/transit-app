@@ -1,6 +1,6 @@
 /**
- * Fourth metric panel shown alongside the `on_time` report (item 130):
- * observed rain-vs-dry average delay from `useWeatherDelay` (item 129).
+ * The Why lens's rain panel, shown beside the `dwell_run` report: observed
+ * rain-vs-dry average delay from `useWeatherDelay`.
  * `available: false` is an expected, common configuration -- most agencies
  * have no representative weather station mapped yet -- so it renders one
  * calm line, never `ErrorBanner`/red styling. The server's own

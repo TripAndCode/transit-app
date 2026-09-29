@@ -1,11 +1,12 @@
 /**
- * Second metric panel shown alongside the `on_time` report (item 94):
+ * Headway panel shown beside the Why lens's `dwell_run` report and the For
+ * riders lens's `on_time` report (see AnalysisTab.tsx):
  * Excess Waiting Time, spacing coefficient of variation, and long-gap rate
  * for this agency's routes classified high-frequency by
  * `agg_route_headway.is_high_frequency` (pipeline/headways.py). Renders
  * nothing extra for a non-high-frequency route -- such routes simply never
  * appear in `rows` (see pipeline/reports/headway_quality.py), and the
- * `on_time` table above this panel is completely unaffected either way.
+ * report above this panel is completely unaffected either way.
  */
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
