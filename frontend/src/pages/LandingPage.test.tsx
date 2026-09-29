@@ -50,6 +50,12 @@ describe("LandingPage", () => {
     expect(screen.queryByRole("link", { name: "Continue as a guest" })).toBeNull();
   });
 
+  it("links to the terms of service and privacy policy", () => {
+    renderLanding();
+    expect(screen.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "/terms");
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
+  });
+
   it("sends a signed-in visitor straight to the dashboard", () => {
     mockUseSession.mockReturnValue({ data: { user_id: 1 }, isLoading: false });
     renderLanding();

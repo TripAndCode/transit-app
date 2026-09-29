@@ -50,6 +50,12 @@ describe("AccountPage — your data", () => {
     expect(link).toHaveAttribute("download");
   });
 
+  it("links to the privacy policy that describes this data, and the terms", () => {
+    renderPage();
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
+    expect(screen.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "/terms");
+  });
+
   it("enables deletion only once the typed email matches, ignoring case", async () => {
     renderPage();
     await openDeleteDialog();

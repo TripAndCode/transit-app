@@ -50,6 +50,7 @@ const LandingPage = lazy(() => import("./pages/LandingPage").then((m) => ({ defa
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
 const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })));
 const HelpPage = lazy(() => import("./pages/HelpPage").then((m) => ({ default: m.HelpPage })));
+const LegalPage = lazy(() => import("./pages/LegalPage").then((m) => ({ default: m.LegalPage })));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
 const AdminUserDetailPage = lazy(() =>
   import("./pages/admin/AdminUserDetailPage").then((m) => ({ default: m.AdminUserDetailPage })),
@@ -79,7 +80,7 @@ const AdminAskOpsPage = lazy(() =>
   import("./pages/admin/AdminAskOpsPage").then((m) => ({ default: m.AdminAskOpsPage }))
 );
 
-/** Wrap a lazy route element in its own Suspense fallback. Only the two
+/** Wrap a lazy route element in its own Suspense fallback. Only the
  *  routes that render outside <App /> need this — everything under "/"
  *  shares the one boundary App keeps above the Outlet, which is what lets
  *  a navigation's outgoing tab stay painted while the next chunk loads. */
@@ -97,11 +98,13 @@ const queryClient: QueryClient = new QueryClient({
 const onAuthError = refreshAuthStateOn401(queryClient);
 
 const router = createBrowserRouter([
-  // /welcome and /login both render outside <App /> so they own the full
-  // viewport (no Header or sidebar), and outside RequireAuth so a signed-out
-  // visitor can reach them.
+  // /welcome, /login and the two legal pages render outside <App /> so they
+  // own the full viewport (no Header or sidebar), and outside RequireAuth so a
+  // signed-out visitor can reach them.
   { path: "/welcome", element: el(<LandingPage />), errorElement: <RouteError /> },
   { path: "/login", element: el(<LoginPage />), errorElement: <RouteError /> },
+  { path: "/privacy", element: el(<LegalPage doc="privacy" />), errorElement: <RouteError /> },
+  { path: "/terms", element: el(<LegalPage doc="terms" />), errorElement: <RouteError /> },
   {
     path: "/",
     element: <RequireAuth><App /></RequireAuth>,

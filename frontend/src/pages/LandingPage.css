@@ -135,3 +135,17 @@
 .landing-hero__cta:hover { opacity: 0.9; }
 .landing-hero__cta:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
 
+.landing-footer {
+  padding: 24px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-page);
+  font-size: var(--text-sm);
+}
+
+.landing-footer__links {
+  justify-content: center;
+}
+
+.landing-footer__links a {
+  color: var(--text-secondary);
+}
