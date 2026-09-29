@@ -1,5 +1,6 @@
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useSession } from "../api/auth";
 import { LiveMapHero } from "./landing/LiveMapHero";
 import { ScrollNarrative } from "./landing/ScrollNarrative";
 import "./LandingPage.css";
@@ -8,14 +9,15 @@ import "./LandingPage.css";
  *  impression kept deliberately separate from the calm, data-dense signed-
  *  in dashboard (CLAUDE.md's "keep UI calm" rule governs the working
  *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). The hero
- *  (animated live-map scene + headline + sign-in CTA, plus a lower-emphasis "continue
- *  as a guest" link to the already-guest-accessible root route) is the
- *  entry point; below it, `ScrollNarrative` mounts three real, working
+ *  (animated live-map scene + headline + the sign-in CTA, the only way into
+ *  the app) is the entry point; below it, `ScrollNarrative` mounts three real, working
  *  chart components (fed by static fixtures, not live data) telling the
  *  product's story, rather than the retired `DashboardPreview` mocked
  *  sidebar shell. */
 export function LandingPage() {
   const { t } = useTranslation();
+  const { data: session } = useSession();
+  if (session) return <Navigate to="/" replace />;
   return (
     <div className="landing-shell">
       <section className="landing-hero">
@@ -38,15 +40,6 @@ export function LandingPage() {
           <p className="landing-hero__subtitle">{t("landing.hero.subtitle")}</p>
           <Link to="/login" className="landing-hero__cta">
             {t("common.login")}
-          </Link>
-          {/* Lower-emphasis text link, not a second same-weight button: the
-              app already allows guest browsing (App.tsx renders
-              GuestPrompt with no auth guard on the root route), so this
-              link keeps the page honest about that rather than granting
-              new access. One obvious default action (sign in) plus one
-              clearly secondary, still-discoverable alternative. */}
-          <Link to="/" className="landing-hero__guest-cta">
-            {t("landing.hero.guest_cta")}
           </Link>
         </div>
       </section>

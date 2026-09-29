@@ -11,15 +11,14 @@ const HIDE_AFTER_MS = 5 * 60 * 1000;
 /**
  * One-time, dismissable hint pointing a brand-new visitor at the User Manual
  * (`/help`) — today it's only reachable via the account-menu popover
- * (`SidebarUserMenu`), which nothing nudges a first-time user toward. Unlike
- * `GuestPrompt` (a recurring engagement nudge that re-appears after a
- * dismissal), this is a one-time orientation aid: once dismissed, or once the
+ * (`SidebarUserMenu`), which nothing nudges a first-time user toward. This is a
+ * one-time orientation aid: once dismissed, or once the
  * first-visit window has passed, it never shows again for this browser. Not
  * gated on anonymous/logged-in status — the Help page is equally useful to
  * both, and restricting it would add complexity with no clear benefit.
  *
  * Rendered as a small fixed corner pill rather than a fourth top banner —
- * DataStalenessBanner/FeedHealthBanner/GuestPrompt already stack up to three
+ * DataStalenessBanner/FeedHealthBanner already stack two
  * deep above the content, and this is an orientation aid, not a persistent
  * warning or conversion nudge, so it shouldn't compete for that same space.
  */
@@ -44,8 +43,7 @@ export function HelpHint() {
     if (remaining <= SHOW_AFTER_MS) return;
 
     // Deferred through a timer (never fires synchronously in the effect) so
-    // this never trips the React Compiler's set-state-in-effect rule —
-    // same pattern GuestPrompt already uses.
+    // this never trips the React Compiler's set-state-in-effect rule.
     const showTimer = setTimeout(() => setShow(true), SHOW_AFTER_MS);
     const hideTimer = setTimeout(() => setShow(false), remaining);
     return () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { RequireAdmin } from "./RequireAdmin";
 
 const mockUseSession = vi.fn();
@@ -8,11 +8,16 @@ vi.mock("../api/auth", () => ({
   useSession: () => mockUseSession(),
 }));
 
+function LoginProbe() {
+  const l = useLocation();
+  return <div>login page{l.search}</div>;
+}
+
 function renderGuarded() {
   return render(
     <MemoryRouter initialEntries={["/admin/users"]}>
       <Routes>
-        <Route path="/login" element={<div>login page</div>} />
+        <Route path="/login" element={<LoginProbe />} />
         <Route path="/" element={<div>home page</div>} />
         <Route
           path="/admin/users"
@@ -39,10 +44,10 @@ describe("RequireAdmin", () => {
     expect(container.querySelectorAll(".skeleton").length).toBeGreaterThan(0);
   });
 
-  it("redirects an unauthenticated visitor to /login", () => {
+  it("redirects an unauthenticated visitor to /login, keeping where they were going", () => {
     mockUseSession.mockReturnValue({ data: null, isLoading: false });
     renderGuarded();
-    expect(screen.getByText("login page")).toBeTruthy();
+    expect(screen.getByText(`login page?next=${encodeURIComponent("/admin/users")}`)).toBeTruthy();
   });
 
   it("redirects a signed-in non-admin to /", () => {

@@ -27,7 +27,7 @@ const FIND_RETRY_MS = 250;
  * Three-step first-run coach mark over the real, signed-in dashboard
  * (filter bar -> map/inspect -> Ask), anchored with the same
  * viewport-aware positioning `Tooltip` uses (`computeTooltipPosition`).
- * Persistence mirrors `welcomeSeen.ts`: "seen" is written only when a
+ * Persistence: "seen" is written only when a
  * visitor finishes the last step or explicitly dismisses the tour; "later"
  * closes it for this mount without writing, so it resumes on the next one.
  *

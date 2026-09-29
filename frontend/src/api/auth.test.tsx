@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useLogout } from "./auth";
+import { loginUrl, useLogout } from "./auth";
 import * as client from "./client";
 
 vi.mock("./client", async (importOriginal) => {
@@ -34,5 +34,15 @@ describe("useLogout", () => {
     await waitFor(() => expect(qc.getQueryData(["me"])).toBeUndefined());
     expect(qc.getQueryData(["adminUsers"])).toBeUndefined();
     expect(qc.getQueryData(["conversations", 5])).toBeUndefined();
+  });
+});
+
+describe("loginUrl", () => {
+  it("defaults next to the current path, query and fragment", () => {
+    window.history.pushState({}, "", "/agencies/1/analysis?route=12#chart");
+    expect(loginUrl("google")).toBe(
+      `/api/auth/google/login?next=${encodeURIComponent("/agencies/1/analysis?route=12#chart")}`,
+    );
+    window.history.pushState({}, "", "/");
   });
 });

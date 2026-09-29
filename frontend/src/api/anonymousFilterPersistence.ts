@@ -51,8 +51,7 @@ function writeStored(agencyId: number, value: StoredFilter): void {
  * fresh visit that has no explicit filter params in the URL. This targets a
  * distinct, smaller friction than PresetMenu's login-gated named presets
  * (`/api/me/presets`): a single "remember what I was just looking at" slot
- * rather than durable, named, multi-slot filter sets. GuestPrompt's "sign in
- * to save your filters" nudge still points at the stronger presets feature —
+ * rather than durable, named, multi-slot filter sets —
  * this only removes the friction of every anonymous page load starting from
  * a blank filter state, it doesn't let an anonymous user save/name/switch
  * between multiple filter sets the way signing in does.

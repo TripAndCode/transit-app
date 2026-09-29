@@ -8,7 +8,6 @@ import { ActivityStrip } from "./components/ActivityStrip";
 import { CopilotPanel } from "./components/CopilotPanel";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
-import { GuestPrompt } from "./components/GuestPrompt";
 import { HelpHint } from "./components/HelpHint";
 import { FirstRunTour } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
@@ -50,15 +49,10 @@ export default function App() {
         {/* Scoped to the content area, not the whole app shell — these are
             notices about the agency data being viewed, not app-wide chrome,
             so they shouldn't span above the sidebar (a full-height nav rail
-            that has nothing to do with feed staleness or in-flight mutations).
-            Data-quality warnings render before the guest-login nudge: both are
-            persistent until dismissed, but a warning about the data itself
-            should outrank a suggestion to sign in when more than one banner
-            is showing at once. */}
+            that has nothing to do with feed staleness or in-flight mutations). */}
         <div className="app-notice-stack">
           {!focused && <DataStalenessBanner />}
           {!focused && <FeedHealthBanner />}
-          {!focused && <GuestPrompt />}
           <ActivityStrip />
         </div>
         {!focused && <HelpHint />}
@@ -81,7 +75,7 @@ export default function App() {
         </RouteTransition>
       </main>
       {!focused && <CopilotPanel />}
-      {/* Persisted like welcomeSeen.ts (transit.tourSeen); a no-op render
+      {/* Persisted in localStorage (transit.tourSeen); a no-op render
           once a visitor has finished or dismissed it. Mounted here rather
           than per-tab so its "Ask" step (anchored on the always-rendered
           Sidebar nav link) survives navigating away from the filter/map

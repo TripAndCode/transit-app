@@ -47,7 +47,7 @@
   --map-badge-bg: color-mix(in srgb, var(--bg-surface) 97%, transparent);
   /* --surface-1/--surface-2 alias the two existing surface tiers under names
      already used by several admin pages (AdminOpsPage, AdminAgenciesPage,
-     HeaderUserMenu, PresetMenu, GuestPrompt, AccountPage, AdminUser*Page) —
+     HeaderUserMenu, PresetMenu, AccountPage, AdminUser*Page) —
      those files reference --surface-1/--surface-2 but neither was ever
      defined, so they've been silently rendering with no background. */
   --surface-1: var(--bg-surface);

@@ -1,10 +1,11 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useSession } from "../api/auth";
 import { Skeleton } from "./Skeleton";
 
-/** Route guard: sends unauthenticated callers to ``/login`` and signed-in
+/** Route guard: sends unauthenticated callers to ``/login`` (keeping their URL as ``next``) and signed-in
  *  non-admins to ``/``. Only ``role=admin`` reaches the wrapped children. */
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
   const { data: session, isLoading } = useSession();
   if (isLoading) {
     // The session query is a useQuery, so ActivityStrip (mutation-only) won't
@@ -17,7 +18,10 @@ export function RequireAdmin({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (!session) return <Navigate to="/login" replace />;
+  if (!session) {
+    const next = location.pathname + location.search + location.hash;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
   if (session.role !== "admin") return <Navigate to="/" replace />;
   return <>{children}</>;
 }
