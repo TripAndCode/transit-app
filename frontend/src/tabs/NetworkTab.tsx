@@ -103,7 +103,7 @@ function AgencyRow({
     >
       <span className="network-row__name">
         <Tooltip label={t("network.view_agency", { name: a.agency_name })}>
-          <Link to={`/agencies/${a.agency_id}/operations${linkSuffix}`}>{a.agency_name}</Link>
+          <Link to={`/agencies/${a.agency_id}/live${linkSuffix}`}>{a.agency_name}</Link>
         </Tooltip>
         {isCurrent && (
           <span data-testid="you-badge" className="network-row__you">

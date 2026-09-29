@@ -72,6 +72,19 @@ describe("ReportsHomeTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens a ranking row and the detailed reports in the workspace lenses", () => {
+    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 4] as unknown as RankingRow]));
+    renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07");
+    const open = new URL(screen.getByRole("link", { name: "Open analysis →" }).getAttribute("href")!, "http://x");
+    expect(open.pathname).toBe("/agencies/1/analysis/where");
+    expect(open.searchParams.get("routes")).toBe("101");
+    expect(open.searchParams.get("service")).toBe("平日");
+    const detailed = new URL(screen.getByRole("link", { name: "Detailed reports →" }).getAttribute("href")!, "http://x");
+    expect(detailed.pathname).toBe("/agencies/1/analysis/when");
+    expect(detailed.searchParams.get("report")).toBe("trend");
+    expect(detailed.searchParams.get("from")).toBe("2026-06-01");
+  });
+
   it("leaves switching views to the Saved & export strip", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();
