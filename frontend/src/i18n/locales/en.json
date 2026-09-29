@@ -14,6 +14,20 @@
     "more_menu_label": "More options",
     "close_menu": "Close menu"
   },
+  "lens": {
+    "nav_label": "Analysis views",
+    "overview": "Overview",
+    "when": "When",
+    "where": "Where",
+    "why": "Why",
+    "rider": "For riders",
+    "compare": "Compare",
+    "predict": "Prediction accuracy"
+  },
+  "compare": {
+    "mode_periods": "Periods and routes",
+    "mode_agencies": "Agencies"
+  },
   "sheet": {
     "handle": "Sheet handle"
   },

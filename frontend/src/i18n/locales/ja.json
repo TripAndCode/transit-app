@@ -14,6 +14,20 @@
     "more_menu_label": "その他のメニュー",
     "close_menu": "メニューを閉じる"
   },
+  "lens": {
+    "nav_label": "分析の角度",
+    "overview": "概要",
+    "when": "いつ",
+    "where": "どこ",
+    "why": "なぜ",
+    "rider": "乗る人にとって",
+    "compare": "比べる",
+    "predict": "予測の精度"
+  },
+  "compare": {
+    "mode_periods": "期間・路線どうし",
+    "mode_agencies": "事業者どうし"
+  },
   "sheet": {
     "handle": "シートの持ち手"
   },
