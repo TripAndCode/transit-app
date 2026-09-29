@@ -199,6 +199,8 @@ The main endpoints are:
 | `/api/admin/ask/*` | Ask query log, funnel, intent-cache promotion, eval result |
 | `/api/admin/architecture/*` | Serves `docs/features/*.md` to the in-product architecture page |
 | `/api/admin/api-keys`, `/api/admin/invites` | Issue/revoke API keys, invite new users |
+| `/api/me/export` | Download everything the app holds about you (JSON) |
+| `DELETE /api/me` | Delete your own account and its personal data (confirm with your email) |
 
 Most data endpoints accept `from`, `to`, `dow`, `time_band`, `service`, and
 `routes` filters. API documentation is available from FastAPI at `/docs`
