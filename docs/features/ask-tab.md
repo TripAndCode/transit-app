@@ -64,7 +64,7 @@ What the user sees/does:
 `pipeline.query.tools.dispatch` directly — no router/LLM stages at all,
 since the frontend template already supplies `tool`/`args`.
 
-**Anonymous user, same templates:** `useAppendMessage`'s anon branch
+**Anonymous user (anonymous-only mode), same templates:** `useAppendMessage`'s anon branch
 builds a synthetic `question = "__build__ <tool> <json-args>"` and calls
 `POST /api/{agency_id}/ask` (`api/routers/ask.py: ask()`). This still
 passes through Stage 1 (regex `_RULES`) and Stage 2 (embedding NN) first
@@ -164,7 +164,7 @@ caller while `copilot_insight_enabled` is on.
 
 `/ask` cannot reject the whole request upfront the way the follow-up does:
 Stages 1 and 2 (regex rules, embedding nearest-neighbour) answer many
-questions with no LLM at all, and those stay open to everyone. So the flag
+questions with no LLM at all, and those stay open to every caller the login gate admits (everyone in anonymous-only mode). So the flag
 travels into the orchestrator and short-circuits only the Stage-3 call,
 returning `error_kind="not_approved"` before any provider or BYOK key is
 touched. Anonymous callers have no user row, so the router passes
