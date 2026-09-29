@@ -1,14 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import {
-  ROUTE_CHUNK_LOADERS,
-  loadAnalysisWorkspace,
-  loadMapTab,
-  loadSavedExportTab,
-  prefetchRouteChunk,
-} from "./lazyTabs";
+import { ROUTE_CHUNK_LOADERS, loadMapTab, loadSavedExportTab, prefetchRouteChunk } from "./lazyTabs";
 import { SIDEBAR_NAV_ITEMS } from "../components/sidebarNavItems";
+
+vi.mock("../tabs/AnalysisWorkspace", () => ({ AnalysisWorkspace: () => null }));
+vi.mock("../tabs/OverviewTab", () => ({ OverviewTab: () => null }));
 
 const mainTsx = readFileSync(resolve(process.cwd(), "src/main.tsx"), "utf8");
 const appTsx = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
@@ -24,8 +21,14 @@ describe("ROUTE_CHUNK_LOADERS", () => {
   it("maps each destination to the chunk it renders, and nothing else", () => {
     expect(Object.keys(ROUTE_CHUNK_LOADERS).sort()).toEqual(["analysis", "ask", "live", "saved"]);
     expect(ROUTE_CHUNK_LOADERS.live).toBe(loadMapTab);
-    expect(ROUTE_CHUNK_LOADERS.analysis).toBe(loadAnalysisWorkspace);
     expect(ROUTE_CHUNK_LOADERS.saved).toBe(loadSavedExportTab);
+  });
+
+  it("warms the Overview lens with the workspace, since Analysis lands there", async () => {
+    const { AnalysisWorkspace } = await import("../tabs/AnalysisWorkspace");
+    const { OverviewTab } = await import("../tabs/OverviewTab");
+    const loaded = await ROUTE_CHUNK_LOADERS.analysis();
+    expect(loaded).toEqual([{ default: AnalysisWorkspace }, { default: OverviewTab }]);
   });
 
   it("is the only place the routed tabs are dynamically imported", () => {

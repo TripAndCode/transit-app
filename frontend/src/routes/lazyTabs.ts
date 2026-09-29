@@ -39,7 +39,8 @@ export const loadSavedExportTab: TabLoader = () =>
  */
 export const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
   live: loadMapTab,
-  analysis: loadAnalysisWorkspace,
+  // The Analysis link lands on the Overview lens, a chunk of its own.
+  analysis: () => Promise.all([loadAnalysisWorkspace(), loadOverviewTab()]),
   saved: loadSavedExportTab,
   ask: loadAskTab,
 };
