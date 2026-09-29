@@ -13,19 +13,12 @@ type NavTo = (typeof SIDEBAR_NAV_ITEMS)[number]["to"] | "ask";
  *  palette and globally (see `handleGlobalKeyDown` in CommandPalette.tsx).
  *  Assigned here, not on `SIDEBAR_NAV_ITEMS`, since the sidebar itself has
  *  no notion of chords. */
-const CHORD_KEYS: Record<NavTo, string> = {
-  operations: "o",
-  "period-overview": "p",
-  "route-analysis": "a",
-  network: "n",
-  reports: "r",
-  ask: "q",
-};
+const CHORD_KEYS: Record<NavTo, string> = { live: "l", analysis: "a", saved: "s", ask: "q" };
 
 const SUBLABEL_KEYS: Partial<Record<NavTo, string>> = {
-  operations: "design:live",
-  "route-analysis": "design:investigate",
-  reports: "design:summary",
+  live: "design:live",
+  analysis: "palette.nav_analysis_sublabel",
+  saved: "palette.nav_saved_sublabel",
   ask: "palette.nav_ask_sublabel",
 };
 

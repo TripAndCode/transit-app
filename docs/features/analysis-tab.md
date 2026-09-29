@@ -7,35 +7,40 @@ with a proactive "Insight Panel" suggesting what to look at next.
 
 ## How a user reaches it
 
-- Routes: `/agencies/:agencyId/analysis` and
-  `/agencies/:agencyId/analysis/:reportType`, registered in
-  `frontend/src/main.tsx` (`React.lazy`-loaded). The old
+- Hosted by the Analysis workspace (`frontend/src/tabs/AnalysisWorkspace.tsx`,
+  route `/agencies/:agencyId/analysis/:lens`). Each lens passes AnalysisTab
+  the report types it owns (`lensReportTypes` in
+  `frontend/src/routes/analysisRoutes.ts`):
+  - When — `trend`, `dow_weekday`, `dow_weekend`, `route_forecast`;
+  - Why — `dwell_run`;
+  - For riders — `ranking`, `ranking_best`, `on_time`, `worst_5min`;
+  - Compare (its default "periods and routes" mode) — `compare_ranking`.
+
+  The export-style types, `council_summary` and `delay_certificate`, render
+  in Saved & export instead (`/agencies/:agencyId/saved?view=reports`, see
+  `docs/features/reports-tab.md`).
+- Old URLs keep working: `/agencies/:agencyId/analysis/:reportType` (the same
+  route shape as a lens) forwards a report-type segment to the lens hosting
+  it and any other unknown segment to Overview;
   `/agencies/:agencyId/reports/:reportType` and `/agencies/:agencyId/forecast`
-  URLs redirect here via dedicated components
-  (`frontend/src/routes/legacyRedirects.tsx`:
-  `RedirectReportsToAnalysis`/`RedirectForecastToAnalysis`) — Forecast was
-  folded into Analysis as the `route_forecast` report type. The bare
-  `/agencies/:agencyId/reports` URL (no `:reportType`) is a separate, live
-  route rendering `ReportsHomeTab` — see `docs/features/reports-tab.md`.
-- This tab has no entry in the sidebar's main nav (`SIDEBAR_NAV_ITEMS` in
-  `frontend/src/components/sidebarNavItems.ts` lists `operations`,
-  `period-overview`, `route-analysis`, `network`, and `reports` — no
-  `analysis` entry); reach it by direct URL or from `ReportsHomeTab`'s
-  "Detailed reports" link (see `docs/features/reports-tab.md`).
-- Top-level component: `frontend/src/tabs/AnalysisTab.tsx` — owns which
-  report type is selected (via the `:reportType` URL param) and composes the
-  report list, the selected report's body, and the Insight Panel.
+  redirect the same way (`frontend/src/routes/legacyRedirects.tsx`). An
+  unknown report type lands on Overview.
+- Reach it from the Analysis sidebar entry and the lens tabs
+  (`frontend/src/components/LensTabs.tsx`), the command palette's report
+  items, the Insight Panel's suggestion, or Saved & export's "Detailed
+  reports" link.
+- Top-level component: `frontend/src/tabs/AnalysisTab.tsx`, which takes
+  `reportTypes` and reads the selected one from the `report` search param
+  (defaulting to the lens's first type, and falling back to it when the
+  param names a type the lens doesn't host). It composes the report list,
+  the selected report's body, and the Insight Panel.
 
 What the user sees/does:
 
 - **Filter bar** — `frontend/src/components/TabFilterBar.tsx`.
-- **Report list** (left column) — one button per report type
-  (`ranking`, `ranking_best`, `on_time`, `worst_5min`, `trend`,
-  `compare_ranking`, `dow_weekday`, `dow_weekend`, `dwell_run`,
-  `council_summary`, `delay_certificate`) plus a separate `route_forecast`
-  entry; clicking navigates to
-  `/agencies/{id}/analysis/{reportType}` carrying the current filter as a
-  query string. A `?` hint icon (`frontend/src/components/InsightHint.tsx`)
+- **Report list** (left column) — one button per report type the hosting
+  lens owns; clicking sets `report={reportType}` on the current URL, keeping
+  the filter query string. A `?` hint icon (`frontend/src/components/InsightHint.tsx`)
   explains what each report type means.
 - **Report body** (center column) — for most report types,
   `frontend/src/components/ReportTable.tsx` renders the rows, with a CSV
@@ -133,13 +138,14 @@ What the user sees/does:
    `make fetch-ingest` (or `ingest_live` + `make load_static`), then
    `make analyze` for the agency - otherwise every report shows the
    no-data empty state.
-2. Click "Analysis" in the sidebar -> URL `/agencies/:agencyId/analysis`;
-   expect the "select a report" prompt until one is picked.
-3. Click each report-type button in the left column - expect the URL to
-   update to `/agencies/{id}/analysis/{reportType}` and the body to show
-   either a table (with a working CSV download link) or, for `trend`, the
-   daily chart + hourly heatmap + dow-band grid.
-4. Click "Route forecast" - expect the agency-wide grid/route list; select
+2. Click "Analysis" in the sidebar, then the "When" lens -> URL
+   `/agencies/:agencyId/analysis/when`; expect the lens's first report
+   (`trend`) to be selected.
+3. Click each report-type button in the left column, and repeat on the Why,
+   For riders and Compare lenses - expect the URL's `report` param to update
+   and the body to show either a table (with a working CSV download link) or,
+   for `trend`, the daily chart + hourly heatmap + dow-band grid.
+4. On the When lens, click "Route forecast" - expect the agency-wide grid/route list; select
    exactly one route in the filter bar - expect the view to switch to the
    per-route detail (band-collapsed grid, worst-window sentence).
 5. Change the filter bar's date range / dow / time_band - expect the
@@ -154,8 +160,7 @@ What the user sees/does:
 - Frontend strings live under the `reports.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
   `npm run lint:i18n`), plus `forecast.*` (dow/band labels shared with
-  `RouteForecastSection`). This tab has no sidebar nav entry of its own, so
-  it needs no `nav.*` label key.
+  `RouteForecastSection`). The lens tabs' labels are the `lens.*` keys.
 - Server-side CSV column headers are hardcoded Japanese in
   `api/routers/reports.py`'s `_REPORT_CSV_COLUMNS` (operator-facing
   downloads, not routed through `_LOCALES` - update this table directly if a

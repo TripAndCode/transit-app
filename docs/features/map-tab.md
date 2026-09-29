@@ -12,7 +12,7 @@ A day-playback mode (below) replays how delay moved across the whole service
 day on this same map, so a look back at "how did today unfold" never needs a
 second map screen. Deeper historical analysis — trend lines, route
 comparisons, forecasts — stays in Analysis; a delayed trip's row in the
-attention panel links straight to that route's Route analysis view.
+attention panel links straight to that route's Where lens.
 
 ## Location semantics
 
@@ -40,18 +40,17 @@ but are not plotted.
 
 ## User flow
 
-- The sidebar's first entry (`SIDEBAR_NAV_ITEMS` in
-  `frontend/src/components/sidebarNavItems.ts`, labeled from the
-  `design:overview` i18n key) opens `/agencies/:agencyId/operations`, the
-  single mount point for this tab. A bare `/agencies/:agencyId` lands here
-  too.
-- `/agencies/:agencyId/overview`, `/agencies/:agencyId/map` and
-  `/agencies/:agencyId/live` all redirect here, preserving the agency and
+- The sidebar's Live entry (`SIDEBAR_NAV_ITEMS` in
+  `frontend/src/components/sidebarNavItems.ts`, labeled from the `nav.live`
+  i18n key) opens `/agencies/:agencyId/live`, the single mount point for this
+  tab.
+- `/agencies/:agencyId/operations`, `/agencies/:agencyId/overview` and
+  `/agencies/:agencyId/map` all redirect here, preserving the agency and
   query string. They render a redirect only — this component is mounted once,
   so navigating between those URLs never tears down and rebuilds MapLibre's GL
   context.
-- The period-summary view at `/agencies/:agencyId/period-overview` is a
-  different tab — see `docs/features/overview-tab.md`.
+- The period summary is the Analysis workspace's Overview lens at
+  `/agencies/:agencyId/analysis/overview` — see `docs/features/overview-tab.md`.
 - With all routes selected, the right panel lists routes from the latest
   observation by maximum delay instead of leaving the panel empty.
 - Selecting a route groups simultaneous trips by GTFS `direction_id`, falling
@@ -68,7 +67,7 @@ but are not plotted.
   environments without that transport use the agency's live feed URL as a
   fallback, then the client reads the newly persisted data.
 - A delayed trip's row in the attention panel links to
-  `/agencies/:agencyId/route-analysis?routes=<route_code>`, the one deep link
+  `/agencies/:agencyId/analysis/where?routes=<route_code>`, the one deep link
   from this tab into a historical view.
 
 ## Day playback
@@ -149,7 +148,8 @@ Automated coverage:
   no-baseline classification, including service-type matching.
 - `frontend/src/tabs/map/OperationsTripPanel.test.tsx` verifies direction,
   concurrent-trip selection, and stop progression.
-- `frontend/src/routes/legacyRedirects.test.tsx` verifies the `/live` redirect.
+- `frontend/src/routes/legacyRedirects.test.tsx` verifies the `operations`,
+  `overview` and `map` redirects to `/live`.
 - `frontend/src/tabs/map/playbackFrames.test.ts` verifies frame-index math
   (advance, wrap, clamp) and the ghost-trail GeoJSON builder.
 - `frontend/src/tabs/map/useDayPlayback.test.ts` verifies the playback clock,

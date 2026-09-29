@@ -3,22 +3,14 @@ import ReactDOM from "react-dom/client";
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import {
-  RedirectReportsToAnalysis,
-  RedirectForecastToAnalysis,
-  RedirectLiveToOperations,
-  RedirectOverviewToOperations,
-  RedirectMapToOperations,
+  RedirectToLive,
+  RedirectToLens,
+  RedirectReportsToSaved,
+  RedirectReportTypeToLens,
+  RedirectForecastToWhen,
 } from "./routes/legacyRedirects";
 import { RedirectNetworkToAgencyNetwork } from "./routes/networkRedirect";
-import {
-  loadAnalysisTab,
-  loadAskTab,
-  loadMapTab,
-  loadNetworkTab,
-  loadOverviewTab,
-  loadReportsHomeTab,
-  loadRouteAnalysisTab,
-} from "./routes/lazyTabs";
+import { loadAnalysisWorkspace, loadAskTab, loadMapTab, loadSavedExportTab } from "./routes/lazyTabs";
 import { i18nReady } from "./i18n";
 import { refreshAuthStateOn401, retryUnlessAuthRequired } from "./api/authExpiry";
 import App from "./App";
@@ -39,13 +31,10 @@ import "./styles/global.css";
 // on the "/" redirect-critical path (hit by every visitor) and has no heavy
 // deps of its own, so lazy-splitting it would only add a chunk-fetch delay
 // with no bundle-size benefit.
-const OverviewTab = lazy(loadOverviewTab);
 const MapTab = lazy(loadMapTab);
 const AskTab = lazy(loadAskTab);
-const AnalysisTab = lazy(loadAnalysisTab);
-const RouteAnalysisTab = lazy(loadRouteAnalysisTab);
-const ReportsHomeTab = lazy(loadReportsHomeTab);
-const NetworkTab = lazy(loadNetworkTab);
+const AnalysisWorkspace = lazy(loadAnalysisWorkspace);
+const SavedExportTab = lazy(loadSavedExportTab);
 const LandingPage = lazy(() => import("./pages/LandingPage").then((m) => ({ default: m.LandingPage })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
 const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })));
@@ -113,35 +102,27 @@ const router = createBrowserRouter([
     errorElement: <RouteError />,
     children: [
       // Index has no static target — OnboardingGate owns the redirect once
-      // agencies load. Sending Navigate to="operations" here loops with the
-      // catch-all because /operations is not a registered route.
+      // agencies load. Sending Navigate to="analysis/overview" here loops with
+      // the catch-all because /analysis/overview is not a registered route.
       { index: true, element: <OnboardingGate /> },
-      { path: "agencies/:agencyId", element: <Navigate to="operations" replace /> },
+      { path: "agencies/:agencyId", element: <Navigate to="analysis/overview" replace /> },
       // The single canonical mount point for MapTab -- MapLibre owns
       // expensive GL context/tile state that must not be torn down and
       // rebuilt by navigating between sibling routes that both rendered it.
-      { path: "agencies/:agencyId/operations", element: <MapTab /> },
-      { path: "agencies/:agencyId/period-overview", element: <OverviewTab /> },
-      // Pre-rename URLs redirect to the single mount point above rather than
-      // rendering MapTab a second time.
-      { path: "agencies/:agencyId/overview", element: <RedirectOverviewToOperations /> },
-      { path: "agencies/:agencyId/map", element: <RedirectMapToOperations /> },
+      { path: "agencies/:agencyId/live", element: <MapTab /> },
+      { path: "agencies/:agencyId/operations", element: <RedirectToLive /> },
+      { path: "agencies/:agencyId/overview", element: <RedirectToLive /> },
+      { path: "agencies/:agencyId/map", element: <RedirectToLive /> },
+      { path: "agencies/:agencyId/analysis", element: <RedirectToLens lens="overview" /> },
+      { path: "agencies/:agencyId/analysis/:lens", element: <AnalysisWorkspace /> },
+      { path: "agencies/:agencyId/period-overview", element: <RedirectToLens lens="overview" /> },
+      { path: "agencies/:agencyId/route-analysis", element: <RedirectToLens lens="where" /> },
+      { path: "agencies/:agencyId/network", element: <RedirectToLens lens="compare" extra={{ mode: "agencies" }} /> },
+      { path: "agencies/:agencyId/saved", element: <SavedExportTab /> },
+      { path: "agencies/:agencyId/reports", element: <RedirectReportsToSaved /> },
+      { path: "agencies/:agencyId/reports/:reportType", element: <RedirectReportTypeToLens /> },
+      { path: "agencies/:agencyId/forecast", element: <RedirectForecastToWhen /> },
       { path: "agencies/:agencyId/ask", element: <AskTab /> },
-      { path: "agencies/:agencyId/live", element: <RedirectLiveToOperations /> },
-      { path: "agencies/:agencyId/analysis", element: <AnalysisTab /> },
-      { path: "agencies/:agencyId/route-analysis", element: <RouteAnalysisTab /> },
-      { path: "agencies/:agencyId/analysis/:reportType", element: <AnalysisTab /> },
-      // Network was promoted from a standalone /network route into the
-      // sidebar's uniform nav (artifact-parity Branch 2) — it needs an
-      // agencyId in the URL now so the sidebar doesn't blank out when a
-      // user lands here (Sidebar bails with no agencyId, matching every
-      // other agency-scoped tab).
-      { path: "agencies/:agencyId/network", element: <NetworkTab /> },
-      { path: "agencies/:agencyId/reports", element: <ReportsHomeTab /> },
-      // Old URLs from before Reports was renamed to Analysis and Forecast was
-      // folded into it.
-      { path: "agencies/:agencyId/reports/:reportType", element: <RedirectReportsToAnalysis /> },
-      { path: "agencies/:agencyId/forecast", element: <RedirectForecastToAnalysis /> },
       // Legacy bare /network bookmark, from before the route above existed.
       { path: "network", element: <RedirectNetworkToAgencyNetwork /> },
       { path: "me", element: <AccountPage /> },

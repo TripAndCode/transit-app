@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
+import { lensHref } from "../routes/analysisRoutes";
 import { useTranslation } from "react-i18next";
 import { Download, Maximize2, RefreshCw } from "lucide-react";
 import { FilterDock } from "./map/FilterDock";
@@ -523,7 +524,7 @@ export function MapTab() {
               <span>{routeNames.format(trip.route_code)}<small>{hhmm(trip)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
               <b>{signedMin(trip.dep_delay, t)}</b>
             </button>
-            {trip.route_code && <Link to={`/agencies/${id}/route-analysis?${new URLSearchParams({ routes: trip.route_code })}`}>{td("openAnalysis")}</Link>}
+            {trip.route_code && <Link to={lensHref(String(id), "where", `?${new URLSearchParams({ routes: trip.route_code })}`)}>{td("openAnalysis")}</Link>}
           </div>)}
           {cappedDelayedRows.remaining > 0 && (
             <button type="button" className="btn-ghost" onClick={cappedDelayedRows.showMore}>

@@ -1,19 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { InsightPanel } from "./InsightPanel";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
 
 function renderPanel(agencyId = "1") {
-  return renderWithProviders(
-    <MemoryRouter initialEntries={[`/agencies/${agencyId}/analysis/trend`]}>
-      <Routes>
-        <Route path="/agencies/:agencyId/analysis/:reportType" element={<InsightPanel />} />
-      </Routes>
-    </MemoryRouter>,
+  const router = createMemoryRouter(
+    [{ path: "/agencies/:agencyId/analysis/:lens", element: <InsightPanel /> }],
+    { initialEntries: [`/agencies/${agencyId}/analysis/when?report=trend`] },
   );
+  const result = renderWithProviders(<RouterProvider router={router} />);
+  return Object.assign(result, { router });
 }
 
 describe("InsightPanel", () => {
@@ -105,6 +104,23 @@ describe("InsightPanel", () => {
     // (not just get written to sessionStorage), otherwise the next poll
     // would re-suggest the just-shown route.
     expect(spy).toHaveBeenLastCalledWith(1, ["trend:R1"]);
+  });
+
+  it("opens the lens that hosts the suggested report, pinned to the suggestion's window", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    vi.spyOn(hooks, "useSuggestion").mockReturnValue({
+      data: { report_type: "dwell_run", route_code: "R1", reason_text: "Route R1 dwell grew", severity: "notable", from_date: "2026-08-15", to_date: "2026-08-20" },
+      isPending: false,
+      error: null,
+    } as never);
+    const { router } = renderPanel();
+    fireEvent.click(screen.getByText("View"));
+    expect(router.state.location.pathname).toBe("/agencies/1/analysis/why");
+    const params = new URLSearchParams(router.state.location.search);
+    expect(params.get("report")).toBe("dwell_run");
+    expect(params.get("routes")).toBe("R1");
+    expect(params.get("from")).toBe("2026-08-15");
+    expect(params.get("to")).toBe("2026-08-20");
   });
 
   it("shows the calm no-signal message when the endpoint returns null", () => {

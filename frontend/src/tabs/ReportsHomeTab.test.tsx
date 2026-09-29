@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
@@ -37,9 +36,9 @@ function mockReports(trend: ReportResponse, ranking: ReportResponse) {
   });
 }
 
-function renderTab() {
+function renderTab(path = "/agencies/1/reports") {
   renderWithProviders(
-    <MemoryRouter initialEntries={["/agencies/1/reports"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/agencies/:agencyId/reports" element={<ReportsHomeTab />} />
       </Routes>
@@ -65,13 +64,37 @@ describe("ReportsHomeTab", () => {
     expect(screen.getAllByText("No observations match these filters")).toHaveLength(2);
   });
 
-  it("switches to the saved-analyses view and shows its local-only note", async () => {
+  it("shows the saved-analyses view and its local-only note from the view param", () => {
     mockReports(trendResponse(), rankingResponse());
-    renderTab();
-    await userEvent.click(screen.getByRole("button", { name: "Saved analyses" }));
+    renderTab("/agencies/1/reports?view=saved");
     expect(
       screen.getByText("Filters saved in this browser. Opening them queries the latest available data."),
     ).toBeInTheDocument();
+  });
+
+  it("opens a ranking row and the detailed reports in the workspace lenses", () => {
+    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 4] as unknown as RankingRow]));
+    renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07");
+    const open = new URL(screen.getByRole("link", { name: "Open analysis →" }).getAttribute("href")!, "http://x");
+    expect(open.pathname).toBe("/agencies/1/analysis/where");
+    expect(open.searchParams.get("routes")).toBe("101");
+    expect(open.searchParams.get("service")).toBe("平日");
+    const detailed = new URL(screen.getByRole("link", { name: "Detailed reports →" }).getAttribute("href")!, "http://x");
+    expect(detailed.pathname).toBe("/agencies/1/analysis/when");
+    expect(detailed.searchParams.get("report")).toBe("trend");
+    expect(detailed.searchParams.get("from")).toBe("2026-06-01");
+  });
+
+  it("points an empty saved view at the Where lens, where analyses are saved", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?view=saved");
+    expect(screen.getByText("Save filters in the Where lens to see them here")).toBeInTheDocument();
+  });
+
+  it("leaves switching views to the Saved & export strip", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab();
+    expect(screen.queryByRole("button", { name: "Saved analyses" })).toBeNull();
   });
 });
 

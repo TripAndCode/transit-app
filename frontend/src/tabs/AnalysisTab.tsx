@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
@@ -35,17 +35,25 @@ import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
 
-export function AnalysisTab() {
+/** One lens's reports: the list shows only `reportTypes`, and the open report
+ *  is the `report` search param when it belongs to them, else the first one,
+ *  so a stale link from another lens never opens a report this lens doesn't
+ *  host. */
+export function AnalysisTab({ reportTypes }: { reportTypes: readonly string[] }) {
   const { t } = useTranslation();
-  const { reportType } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requested = searchParams.get("report");
+  const reportType = requested != null && reportTypes.includes(requested) ? requested : (reportTypes[0] ?? null);
   const id = useAgencyId();
-  const navigate = useNavigate();
   const [ctx, update] = useRangeContext();
   const jumpToLatestData = useJumpToLatestDataRange(id);
-  // Build the filter querystring from ctx so navigating between reports
-  // carries only the filter dimensions — not unrelated keys like ?admin=1.
-  const filterQS = ctxToQueryString(ctx);
-  const filterSuffix = filterQS ? `?${filterQS}` : "";
+  function selectReport(type: string) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("report", type);
+      return next;
+    });
+  }
   const list = useReports(id);
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
@@ -53,7 +61,9 @@ export function AnalysisTab() {
   // `route_forecast` is served by its own endpoint, so the reports list never
   // returns it -- it is appended here as list data rather than re-rendered as
   // a second, hand-copied button underneath the list.
-  const listedTypes = [...(list.data ?? []).map((r) => r.report_type), "route_forecast"];
+  const listedTypes = [...(list.data ?? []).map((r) => r.report_type), "route_forecast"].filter((type) =>
+    reportTypes.includes(type),
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -91,7 +101,7 @@ export function AnalysisTab() {
           <ReportList
             types={listedTypes}
             active={reportType ?? null}
-            onSelect={(type) => navigate(`/agencies/${id}/analysis/${type}${filterSuffix}`)}
+            onSelect={selectReport}
           />
         )}
       </div>

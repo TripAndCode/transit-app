@@ -9,7 +9,7 @@ import { CopilotPanel } from "./components/CopilotPanel";
 import { DataStalenessBanner } from "./components/DataStalenessBanner";
 import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { HelpHint } from "./components/HelpHint";
-import { FirstRunTour } from "./components/FirstRunTour";
+import { FirstRunTourOnLive } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import { RouteTransition } from "./components/RouteTransition";
 import { Sidebar } from "./components/Sidebar";
@@ -32,9 +32,7 @@ export default function App() {
   useDocumentTitle();
   // Remount the routed tab when the agency changes so no tab carries another
   // agency's in-component state across a switch (e.g. a selected Ask thread or
-  // forecast route). Non-agency routes (account) share the "root" key — Network
-  // is now agency-scoped (agencies/:agencyId/network) and remounts like every
-  // other tab.
+  // forecast route). Non-agency routes (account) share the "root" key.
   const agencyId = useMatch("/agencies/:agencyId/*")?.params.agencyId;
   const agencyIdNum = useAgencyId();
   const { pathname } = useLocation();
@@ -76,11 +74,9 @@ export default function App() {
       </main>
       {!focused && <CopilotPanel />}
       {/* Persisted in localStorage (transit.tourSeen); a no-op render
-          once a visitor has finished or dismissed it. Mounted here rather
-          than per-tab so its "Ask" step (anchored on the always-rendered
-          Sidebar nav link) survives navigating away from the filter/map
-          steps' own tab. */}
-      <FirstRunTour />
+          once a visitor has finished or dismissed it. Leaving Live mid-tour
+          closes it for that visit without marking it seen. */}
+      <FirstRunTourOnLive />
     </div>
   );
 }

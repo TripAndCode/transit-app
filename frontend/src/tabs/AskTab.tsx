@@ -227,7 +227,7 @@ export function AskTab() {
       return;
     }
     if (action.kind === "map") {
-      if (id != null) navigate(`/agencies/${id}/map?routes=${encodeURIComponent(action.route)}`);
+      if (id != null) navigate(`/agencies/${id}/live?routes=${encodeURIComponent(action.route)}`);
       return;
     }
     if (action.kind === "compare_previous") {

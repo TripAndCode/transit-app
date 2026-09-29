@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import { ROUTE_CHUNK_LOADERS, prefetchRouteChunk } from "./lazyTabs";
+import {
+  ROUTE_CHUNK_LOADERS,
+  loadAnalysisWorkspace,
+  loadMapTab,
+  loadSavedExportTab,
+  prefetchRouteChunk,
+} from "./lazyTabs";
 import { SIDEBAR_NAV_ITEMS } from "../components/sidebarNavItems";
 
 const mainTsx = readFileSync(resolve(process.cwd(), "src/main.tsx"), "utf8");
@@ -15,6 +21,13 @@ describe("ROUTE_CHUNK_LOADERS", () => {
     expect(ROUTE_CHUNK_LOADERS.ask).toBeTypeOf("function");
   });
 
+  it("maps each destination to the chunk it renders, and nothing else", () => {
+    expect(Object.keys(ROUTE_CHUNK_LOADERS).sort()).toEqual(["analysis", "ask", "live", "saved"]);
+    expect(ROUTE_CHUNK_LOADERS.live).toBe(loadMapTab);
+    expect(ROUTE_CHUNK_LOADERS.analysis).toBe(loadAnalysisWorkspace);
+    expect(ROUTE_CHUNK_LOADERS.saved).toBe(loadSavedExportTab);
+  });
+
   it("is the only place the routed tabs are dynamically imported", () => {
     // The prefetch and the route's own lazy() must go through the same
     // import expression, or the browser fetches two different chunks.
@@ -24,8 +37,8 @@ describe("ROUTE_CHUNK_LOADERS", () => {
 
 describe("prefetchRouteChunk", () => {
   it("invokes the loader for a known route segment", () => {
-    const loader = vi.spyOn(ROUTE_CHUNK_LOADERS, "reports").mockResolvedValue({ default: () => null });
-    prefetchRouteChunk("reports");
+    const loader = vi.spyOn(ROUTE_CHUNK_LOADERS, "saved").mockResolvedValue({ default: () => null });
+    prefetchRouteChunk("saved");
     expect(loader).toHaveBeenCalledTimes(1);
     loader.mockRestore();
   });
@@ -35,8 +48,8 @@ describe("prefetchRouteChunk", () => {
   });
 
   it("swallows a failed chunk fetch — a prefetch must never surface an error", async () => {
-    const loader = vi.spyOn(ROUTE_CHUNK_LOADERS, "reports").mockRejectedValue(new Error("offline"));
-    expect(() => prefetchRouteChunk("reports")).not.toThrow();
+    const loader = vi.spyOn(ROUTE_CHUNK_LOADERS, "saved").mockRejectedValue(new Error("offline"));
+    expect(() => prefetchRouteChunk("saved")).not.toThrow();
     await Promise.resolve();
     loader.mockRestore();
   });

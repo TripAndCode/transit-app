@@ -3,8 +3,9 @@ import type { ComponentType } from "react";
 /**
  * The one place the routed tabs are dynamically imported.
  *
- * `main.tsx` builds its `React.lazy` routes from these loaders and the sidebar
- * prefetches through the same ones on hover/focus. That shared identity is the
+ * `main.tsx` and the workspace screens build their `React.lazy` components
+ * from these loaders, and the sidebar prefetches through the same ones on
+ * hover/focus. That shared identity is the
  * point: the bundler keys a chunk by the import expression, so a prefetch
  * written as a second `import()` of the same module would warm a chunk the
  * route then never uses.
@@ -18,7 +19,7 @@ export const loadOverviewTab: TabLoader = () =>
   import("../tabs/OverviewTab").then((m) => ({ default: m.OverviewTab }));
 export const loadMapTab: TabLoader = () => import("../tabs/MapTab").then((m) => ({ default: m.MapTab }));
 export const loadAskTab: TabLoader = () => import("../tabs/AskTab").then((m) => ({ default: m.AskTab }));
-export const loadAnalysisTab: TabLoader = () =>
+export const loadAnalysisTab = () =>
   import("../tabs/AnalysisTab").then((m) => ({ default: m.AnalysisTab }));
 export const loadRouteAnalysisTab: TabLoader = () =>
   import("../tabs/RouteAnalysisTab").then((m) => ({ default: m.RouteAnalysisTab }));
@@ -26,24 +27,21 @@ export const loadReportsHomeTab: TabLoader = () =>
   import("../tabs/ReportsHomeTab").then((m) => ({ default: m.ReportsHomeTab }));
 export const loadNetworkTab: TabLoader = () =>
   import("../tabs/NetworkTab").then((m) => ({ default: m.NetworkTab }));
+export const loadAnalysisWorkspace: TabLoader = () =>
+  import("../tabs/AnalysisWorkspace").then((m) => ({ default: m.AnalysisWorkspace }));
+export const loadSavedExportTab: TabLoader = () =>
+  import("../tabs/SavedExportTab").then((m) => ({ default: m.SavedExportTab }));
 
 /**
  * Agency-relative route segment → the chunk that segment renders. Keyed by the
  * segment rather than the full path because that is what a nav link knows
  * about its own destination before the router has resolved it.
  */
-export const ROUTE_CHUNK_LOADERS: Record<string, TabLoader> = {
-  operations: loadMapTab,
-  "period-overview": loadOverviewTab,
-  // The pre-rename URLs still resolve, via redirects to /operations, so a
-  // hover on a stale bookmark warms the chunk it will actually land on.
-  overview: loadMapTab,
-  map: loadMapTab,
+export const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
+  live: loadMapTab,
+  analysis: loadAnalysisWorkspace,
+  saved: loadSavedExportTab,
   ask: loadAskTab,
-  analysis: loadAnalysisTab,
-  "route-analysis": loadRouteAnalysisTab,
-  network: loadNetworkTab,
-  reports: loadReportsHomeTab,
 };
 
 /**

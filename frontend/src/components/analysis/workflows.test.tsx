@@ -71,18 +71,18 @@ const ctx = { from: "2026-09-07", to: "2026-09-12", dow: "weekday" as const, tim
 // Reports now renders TabFilterBar, whose PresetMenu calls useQueryClient to
 // invalidate saved presets -- so the tree needs a provider even though no test
 // here asserts on a query.
-function show(tab: "route-analysis" | "reports", search = "") {
+function show(tab: "analysis/where" | "reports", search = "") {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={[`/agencies/1/${tab}?from=${ctx.from}&to=${ctx.to}&routes=101&dow=weekday&time_band=morning${search}`]}>
-        <Routes><Route path="/agencies/:agencyId/route-analysis" element={<RouteAnalysisTab />} /><Route path="/agencies/:agencyId/reports" element={<ReportsHomeTab />} /></Routes>
+        <Routes><Route path="/agencies/:agencyId/analysis/where" element={<RouteAnalysisTab />} /><Route path="/agencies/:agencyId/reports" element={<ReportsHomeTab />} /></Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
 it("keeps pattern and period in exported observations and saved analysis", async () => {
-  show("route-analysis");
+  show("analysis/where");
   const user = setupUser();
   await user.click(screen.getByRole("button", { name: "Download CSV" }));
   const rows = vi.mocked(downloadCsv).mock.calls[0][1];
@@ -128,7 +128,9 @@ it("saved analyses stay agency-scoped and open with their original filters", asy
   saveAnalysis(8, "Other agency", ctx, false);
   show("reports", "&view=saved");
   expect(screen.queryByText("Other agency")).toBeNull();
-  expect(screen.getByRole("link", { name: "Coast mornings" }).getAttribute("href")).toContain("compare=1");
+  const href = screen.getByRole("link", { name: "Coast mornings" }).getAttribute("href")!;
+  expect(href).toMatch(/^\/agencies\/1\/analysis\/where\?/);
+  expect(href).toContain("compare=1");
   await setupUser().click(screen.getByRole("button", { name: "Delete: Coast mornings" }));
   expect(readAnalyses()).toHaveLength(1);
   expect(readAnalyses()[0].agencyId).toBe(8);
@@ -152,7 +154,7 @@ it("defers the analysis filters until Apply instead of querying mid-selection", 
   // narrowing to one passes through a multi-code state, so committing each
   // step dropped it into its empty state mid-selection. The selection must
   // therefore not reach the shape query until Apply.
-  show("route-analysis");
+  show("analysis/where");
   const user = setupUser();
   // The tab calls useRouteShape twice per render -- once for the period and
   // once for the comparison window, which passes null while compare is off --
@@ -170,7 +172,7 @@ it("defers the analysis filters until Apply instead of querying mid-selection", 
 });
 
 it("keeps the route map mounted across tab switches instead of recreating its WebGL context", async () => {
-  show("route-analysis");
+  show("analysis/where");
   const user = setupUser();
   await user.click(screen.getByRole("tab", { name: "Map" }));
   // The map is a lazy chunk behind a Suspense boundary, so its first mount
@@ -187,7 +189,7 @@ it("keeps the route map mounted across tab switches instead of recreating its We
 });
 
 it("gives the route map a real height rather than leaving it at the collapsed default", async () => {
-  show("route-analysis");
+  show("analysis/where");
   await setupUser().click(screen.getByRole("tab", { name: "Map" }));
   await waitFor(() => expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ height: 420 })));
 });

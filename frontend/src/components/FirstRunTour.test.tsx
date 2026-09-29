@@ -3,7 +3,8 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
-import { FirstRunTour } from "./FirstRunTour";
+import { MemoryRouter } from "react-router-dom";
+import { FirstRunTour, FirstRunTourOnLive } from "./FirstRunTour";
 import { readTourSeen, resetTourSeenMemoryForTests } from "../api/tourSeen";
 
 void i18n.changeLanguage("en");
@@ -280,5 +281,37 @@ describe("FirstRunTour", () => {
       vi.unstubAllGlobals();
       vi.useRealTimers();
     }
+  });
+});
+
+describe("FirstRunTourOnLive", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetTourSeenMemoryForTests();
+  });
+
+  function renderAt(path: string, anchors: boolean) {
+    return render(
+      <I18nextProvider i18n={i18n}>
+        <MemoryRouter initialEntries={[path]}>
+          <button type="button">page control</button>
+          {anchors && <div data-tour="filter-bar">filter dock</div>}
+          <FirstRunTourOnLive />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+  }
+
+  it("stays off a screen without the tour's anchors, leaving Tab to the page", async () => {
+    const user = userEvent.setup();
+    renderAt("/agencies/1/analysis/overview", false);
+    expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "page control" })).toHaveFocus();
+  });
+
+  it("runs on Live, where its steps are anchored", () => {
+    renderAt("/agencies/1/live", true);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

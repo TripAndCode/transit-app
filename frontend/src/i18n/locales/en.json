@@ -12,7 +12,30 @@
     "mobile_tabbar_label": "Primary navigation",
     "more": "More",
     "more_menu_label": "More options",
-    "close_menu": "Close menu"
+    "close_menu": "Close menu",
+    "live": "Live",
+    "analysis": "Analysis",
+    "saved": "Saved & export"
+  },
+  "lens": {
+    "nav_label": "Analysis views",
+    "overview": "Overview",
+    "when": "When",
+    "where": "Where",
+    "why": "Why",
+    "rider": "For riders",
+    "compare": "Compare",
+    "predict": "Prediction accuracy"
+  },
+  "compare": {
+    "mode_periods": "Periods and routes",
+    "mode_agencies": "Agencies"
+  },
+  "saved": {
+    "title": "Saved & export",
+    "view_summary": "Period summary",
+    "view_saved": "Saved analyses",
+    "view_reports": "Council summary & delay reference"
   },
   "sheet": {
     "handle": "Sheet handle"
@@ -1219,7 +1242,7 @@
       "age_hours": "{{h}} h ago",
       "age_minutes": "{{m}} min ago",
       "unknown": "Unknown",
-      "network_link": "For per-route delay comparison, see the Network tab."
+      "network_link": "To compare delay across agencies, open Analysis → Compare."
     },
     "agencies": {
       "title": "Agencies",
@@ -1542,6 +1565,8 @@
     "aria_label": "Command palette",
     "no_results": "No matching items",
     "nav_ask_sublabel": "Ask about routes, stops, and time bands",
+    "nav_analysis_sublabel": "When, where and why delay happens",
+    "nav_saved_sublabel": "Saved analyses and exports",
     "hint": "Command",
     "hint_aria": "Open the command palette (⌘K)",
     "group": {
