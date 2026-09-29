@@ -56,3 +56,14 @@ async def test_the_export_holds_the_users_data_and_no_secrets(aconn, aagency_id)
     assert data["conversations"][0]["messages"][0]["rendered_summary"] == "q?"
     text = json.dumps(data, default=str)
     assert not any(column in text for column in _SECRET_COLUMNS)
+
+
+@pytest.mark.asyncio
+async def test_the_export_lists_legacy_keys_owned_by_email_that_deletion_would_remove(aconn):
+    uid = await aconn.fetchval("INSERT INTO users (email) VALUES ('legacy@x') RETURNING user_id")
+    await aconn.execute(
+        "INSERT INTO api_keys (key_hash, owner_email, tier, label) VALUES ($1, 'legacy@x', 'pro', 'old key')",
+        token_hash("legacy-own"),
+    )
+    data = await collect_user_data(aconn, uid)
+    assert [k["label"] for k in data["api_keys"]] == ["old key"]

@@ -54,10 +54,13 @@ async def collect_user_data(conn: asyncpg.Connection, user_id: int) -> dict[str,
         user_id,
     )
     llm_key = await conn.fetchrow("SELECT provider, key_suffix FROM user_llm_keys WHERE user_id = $1", user_id)
+    # The same ownership erase_user deletes by: issued to the account, or a
+    # legacy ownerless key recorded under its exact email.
     api_keys = await conn.fetch(
         "SELECT label, tier, created_at, expires_at, revoked_at FROM api_keys"
-        " WHERE owner_user_id = $1 ORDER BY created_at",
+        " WHERE owner_user_id = $1 OR (owner_user_id IS NULL AND owner_email = $2) ORDER BY created_at",
         user_id,
+        profile["email"] if profile else None,
     )
     usage = await conn.fetch(
         "SELECT day, route, method, agency_id, via_api_key, requests, errors FROM user_activity_daily"

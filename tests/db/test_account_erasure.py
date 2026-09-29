@@ -173,3 +173,16 @@ async def test_the_break_glass_local_admin_cannot_be_erased(aconn):
         async with aconn.transaction():
             await erase_user(aconn, uid)
     assert exc.value.reason == "managed_account"
+
+
+@pytest.mark.asyncio
+async def test_another_users_legacy_key_survives_even_if_their_email_differs_only_in_case(aconn):
+    await _user(aconn, "boss2@x", role="admin")
+    uid = await _user(aconn, "casey@x")
+    await _user(aconn, "CASEY@x")
+    await aconn.execute(
+        "INSERT INTO api_keys (key_hash, owner_email, tier) VALUES ($1, 'CASEY@x', 'pro')", token_hash("legacy-other")
+    )
+    async with aconn.transaction():
+        await erase_user(aconn, uid)
+    assert await aconn.fetchval("SELECT count(*) FROM api_keys WHERE owner_email = 'CASEY@x'") == 1

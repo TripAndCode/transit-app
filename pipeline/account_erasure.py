@@ -89,7 +89,9 @@ async def erase_user(conn: asyncpg.Connection, user_id: int) -> None:
     await conn.execute("DELETE FROM login_events WHERE user_id = $1", user_id)
     await conn.execute("UPDATE login_events SET ip = NULL, user_agent = NULL WHERE actor_id = $1", user_id)
     await conn.execute(
-        "DELETE FROM api_keys WHERE owner_user_id = $1 OR (owner_user_id IS NULL AND lower(owner_email) = lower($2))",
+        # Exact match: users.email is case-sensitive, so another account can
+        # hold the same address in different case and its legacy key is theirs.
+        "DELETE FROM api_keys WHERE owner_user_id = $1 OR (owner_user_id IS NULL AND owner_email = $2)",
         user_id,
         email,
     )
