@@ -49,6 +49,13 @@ describe("LegalPage", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
+  it("says the document is loading until it arrives", () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
+    renderDoc("terms");
+
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
+  });
+
   it("links back to the app", () => {
     stubDocFetch("# Privacy Policy\n");
     renderDoc("privacy");

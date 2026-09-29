@@ -39,6 +39,7 @@ export function LegalPage({ doc }: { doc: LegalDoc }) {
       </header>
       <main className="legal-page__main">
         <h1 className="legal-page__title">{doc === "privacy" ? t("legal.privacy") : t("legal.terms")}</h1>
+        {data == null && error == null && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
         {error != null && <ErrorBanner error={error} onRetry={() => void refetch()} />}
         {data != null && (
           <article className="user-manual-content">

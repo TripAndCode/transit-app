@@ -51,7 +51,7 @@ You can read about the United States' personal-information protection system in 
 
 ## What you can do
 
-- **Download your data:** from your account page, download everything the Service holds about you as JSON.
+- **Download your data:** from your account page, download the data the Service holds about you as JSON. The admin action log isn't included; request its disclosure through the contact above.
 - **Delete your account:** from your account page, delete your account. Everything in the tables above that concerns you is removed immediately. Your email address and name in the admin action log are masked. Only Ask questions not linked to your account remain, until their 90 days pass.
 - **Other requests:** requests for disclosure, correction, suspension of use and the like go to the contact above.
 
