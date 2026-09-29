@@ -33,6 +33,11 @@ describe("CopilotPanel reachability", () => {
   it("focuses the where lens and Saved & export but not the other lenses", () => {
     expect(FOCUSED_TAB_PATTERN.test("/agencies/1/analysis/where")).toBe(true);
     expect(FOCUSED_TAB_PATTERN.test("/agencies/1/saved")).toBe(true);
+    // Old export-type bookmarks redirect into Saved & export, so they count
+    // as focused while the redirect renders; other report types do not.
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/reports/council_summary")).toBe(true);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/reports/delay_certificate")).toBe(true);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/reports/dwell_run")).toBe(false);
     expect(FOCUSED_TAB_PATTERN.test("/agencies/1/analysis/when")).toBe(false);
   });
 

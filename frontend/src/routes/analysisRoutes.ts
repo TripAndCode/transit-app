@@ -40,8 +40,13 @@ export function lensReportTypes(lens: LensId): readonly string[] {
 /** The params that pick which screen a URL shows rather than what it
  *  filters. An agency switch keeps these even where it drops the rest. */
 export function screenParams(search: string): Record<string, string> {
-  const mode = new URLSearchParams(search).get("mode");
-  return mode ? { mode } : {};
+  const params = new URLSearchParams(search);
+  const kept: Record<string, string> = {};
+  for (const key of ["mode", "view"]) {
+    const value = params.get(key);
+    if (value) kept[key] = value;
+  }
+  return kept;
 }
 
 export function mergeSearch(search: string, extra: Record<string, string>): string {

@@ -146,8 +146,9 @@ export function CommandPalette() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const agencyParam = useMatch("/agencies/:agencyId/*")?.params.agencyId;
-  const tabRest = useMatch("/agencies/:agencyId/*")?.params["*"];
+  const agencyMatch = useMatch("/agencies/:agencyId/*");
+  const agencyParam = agencyMatch?.params.agencyId;
+  const tabRest = agencyMatch?.params["*"];
   const agencyId = agencyParam ? Number(agencyParam) : null;
   const [ctx] = useRangeContext();
   const [theme, setTheme] = useTheme();

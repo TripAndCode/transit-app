@@ -5,6 +5,7 @@ import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useAgencyId } from "../api/useAgencyId";
 import { SAVED_REPORT_TYPES, mergeSearch } from "../routes/analysisRoutes";
 import { loadAnalysisTab, loadReportsHomeTab } from "../routes/lazyTabs";
+import { SCREEN_STRIP_STYLE, screenStripLinkStyle } from "../components/screenStrip";
 
 const ReportsHomeTab = lazy(loadReportsHomeTab);
 const AnalysisTab = lazy(loadAnalysisTab);
@@ -36,22 +37,13 @@ export function SavedExportTab() {
   if (id == null) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <nav
-        aria-label={t("saved.title")}
-        style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--border-soft)", marginBottom: 12 }}
-      >
+      <nav aria-label={t("saved.title")} style={SCREEN_STRIP_STYLE}>
         {VIEWS.map(([v, key]) => (
           <Link
             key={v}
             to={`/agencies/${id}/saved${mergeSearch(ctxToQueryString(ctx), v === "summary" ? {} : { view: v })}`}
             aria-current={v === view ? "page" : undefined}
-            style={{
-              padding: "9px 12px 8px",
-              fontSize: "var(--text-sm)",
-              textDecoration: "none",
-              color: v === view ? "var(--text-primary)" : "var(--text-secondary)",
-              borderBottom: `2px solid ${v === view ? "var(--accent)" : "transparent"}`,
-            }}
+            style={screenStripLinkStyle(v === view)}
           >
             {t(key)}
           </Link>
