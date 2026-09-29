@@ -24,6 +24,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware as StarletteSessionMiddleware
 
+from api import activity
 from api.aggregate_errors import aggregate_not_ready_handler
 from api.clickhouse import get_ch_client
 from api.logging_config import configure as configure_logging
@@ -266,6 +267,7 @@ async def lifespan(app: FastAPI):
         embedder = get_embedder()
         if not embedder.available:
             _log.warning("Embedder unavailable at startup — Phase 2 router degrades to LLM-only")
+        activity.start(app)
     except Exception:
         # Close what startup already opened, in the same order the shutdown
         # path below uses. The ClickHouse client is opened inside this same
@@ -277,6 +279,7 @@ async def lifespan(app: FastAPI):
         raise
 
     yield
+    await activity.stop(app)
     await _close_startup_resources(app)
 
 
