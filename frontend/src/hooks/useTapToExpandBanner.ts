@@ -13,11 +13,10 @@ type MessageProps = {
 
 /**
  * Shared "single line on mobile, tap to expand" behavior for the app's
- * persistent top banners (DataStalenessBanner, FeedHealthBanner,
- * GuestPrompt). Below the shared 640px breakpoint these otherwise each cost a
- * fixed per-banner height even though the wrapped message rarely needs more
- * than one line once actually read — with up to three stacked at once (item
- * 19's banner-hierarchy work), that adds up disproportionately on a phone
+ * persistent top banners (DataStalenessBanner, FeedHealthBanner). Below the
+ * shared 640px breakpoint these otherwise each cost a fixed per-banner height
+ * even though the wrapped message rarely needs more than one line once
+ * actually read — with both stacked at once, that adds up disproportionately on a phone
  * viewport. Desktop is unaffected: always the full, never-truncated message.
  *
  * A real toggle: the row stays a keyboard- and screen-reader-reachable

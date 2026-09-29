@@ -38,7 +38,11 @@ export function useLogout() {
   });
 }
 
-/** Build the OAuth start URL for ``provider``, preserving the current path as ``next``. */
-export function loginUrl(provider: "google" | "github", next: string = window.location.pathname) {
+/** Build the OAuth start URL for ``provider``; ``next`` defaults to the whole current URL
+ *  (path, query and fragment) so the visitor returns to exactly where they were. */
+export function loginUrl(
+  provider: "google" | "github",
+  next: string = window.location.pathname + window.location.search + window.location.hash,
+) {
   return `/api/auth/${provider}/login?next=${encodeURIComponent(next)}`;
 }

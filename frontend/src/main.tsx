@@ -1,6 +1,6 @@
 import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import {
   RedirectReportsToAnalysis,
@@ -20,9 +20,11 @@ import {
   loadRouteAnalysisTab,
 } from "./routes/lazyTabs";
 import { i18nReady } from "./i18n";
+import { refreshAuthStateOn401, retryUnlessAuthRequired } from "./api/authExpiry";
 import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
+import { RequireAuth } from "./components/RequireAuth";
 import { LocaleUnavailable } from "./components/LocaleUnavailable";
 import { RouteError } from "./components/RouteError";
 import { ToastProvider } from "./components/ui/Toast";
@@ -85,23 +87,24 @@ function el(node: React.ReactNode) {
   return <Suspense fallback={<ChunkLoading />}>{node}</Suspense>;
 }
 
-const queryClient = new QueryClient({
+const queryClient: QueryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: (err) => onAuthError(err) }),
+  mutationCache: new MutationCache({ onError: (err) => onAuthError(err) }),
   defaultOptions: {
-    queries: { retry: 1, refetchOnWindowFocus: false },
+    queries: { retry: retryUnlessAuthRequired, refetchOnWindowFocus: false },
   },
 });
+const onAuthError = refreshAuthStateOn401(queryClient);
 
 const router = createBrowserRouter([
   // /welcome and /login both render outside <App /> so they own the full
-  // viewport (no Header, sidebar, or guest-prompt strip). /welcome is the
-  // pre-authentication marketing entry point -- strictly separate from "/"
-  // below, which stays the existing post-login/guest dashboard landing
-  // (OnboardingGate) and is deliberately untouched by this route.
+  // viewport (no Header or sidebar), and outside RequireAuth so a signed-out
+  // visitor can reach them.
   { path: "/welcome", element: el(<LandingPage />), errorElement: <RouteError /> },
   { path: "/login", element: el(<LoginPage />), errorElement: <RouteError /> },
   {
     path: "/",
-    element: <App />,
+    element: <RequireAuth><App /></RequireAuth>,
     // Catches render errors from any child route — a broken tab degrades to
     // an inline message instead of white-screening the whole app.
     errorElement: <RouteError />,

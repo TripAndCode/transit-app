@@ -7,7 +7,7 @@ import { CopilotPanel } from "./CopilotPanel";
 import * as client from "../api/client";
 import { DEBOUNCE_MS } from "../api/copilot";
 
-// Matches the rest of the suite's convention (e.g. GuestPrompt.test.tsx,
+// Matches the rest of the suite's convention (e.g.
 // ReportTable.test.tsx): without this, vi.spyOn(client, ...) across tests
 // keeps stacking onto the same spy, so later tests' call counts/histories
 // leak earlier tests' calls.
