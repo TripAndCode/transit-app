@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import { ROUTE_CHUNK_LOADERS, prefetchRouteChunk } from "./lazyTabs";
+import {
+  ROUTE_CHUNK_LOADERS,
+  loadAnalysisWorkspace,
+  loadMapTab,
+  loadSavedExportTab,
+  prefetchRouteChunk,
+} from "./lazyTabs";
 import { SIDEBAR_NAV_ITEMS } from "../components/sidebarNavItems";
 
 const mainTsx = readFileSync(resolve(process.cwd(), "src/main.tsx"), "utf8");
@@ -13,6 +19,16 @@ describe("ROUTE_CHUNK_LOADERS", () => {
       expect(ROUTE_CHUNK_LOADERS[item.to]).toBeTypeOf("function");
     }
     expect(ROUTE_CHUNK_LOADERS.ask).toBeTypeOf("function");
+  });
+
+  it("points every legacy segment at the chunk its redirect lands on", () => {
+    expect(ROUTE_CHUNK_LOADERS.live).toBe(loadMapTab);
+    expect(ROUTE_CHUNK_LOADERS.operations).toBe(loadMapTab);
+    expect(ROUTE_CHUNK_LOADERS.analysis).toBe(loadAnalysisWorkspace);
+    expect(ROUTE_CHUNK_LOADERS["route-analysis"]).toBe(loadAnalysisWorkspace);
+    expect(ROUTE_CHUNK_LOADERS.network).toBe(loadAnalysisWorkspace);
+    expect(ROUTE_CHUNK_LOADERS.saved).toBe(loadSavedExportTab);
+    expect(ROUTE_CHUNK_LOADERS.reports).toBe(loadSavedExportTab);
   });
 
   it("is the only place the routed tabs are dynamically imported", () => {
