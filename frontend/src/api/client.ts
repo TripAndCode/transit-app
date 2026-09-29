@@ -96,9 +96,17 @@ export async function apiPut<T>(path: string, body: unknown, opts?: { signal?: A
   }) as Promise<T>;
 }
 
-/** DELETE — handles 204 No Content (returns undefined when no JSON body). */
-export async function apiDelete<T = void>(path: string, opts?: { signal?: AbortSignal }): Promise<T | undefined> {
-  return requestMaybeEmpty<T>(path, { method: "DELETE", signal: opts?.signal });
+/** DELETE — handles 204 No Content (returns undefined when no JSON body). ``body``,
+ *  when given, is sent as JSON (e.g. a typed confirmation). */
+export async function apiDelete<T = void>(
+  path: string,
+  opts?: { signal?: AbortSignal; body?: unknown },
+): Promise<T | undefined> {
+  return requestMaybeEmpty<T>(path, {
+    method: "DELETE",
+    body: opts?.body === undefined ? undefined : JSON.stringify(opts.body),
+    signal: opts?.signal,
+  });
 }
 
 /** Parsed `detail` field of an `ApiError`'s JSON body, e.g. FastAPI's
