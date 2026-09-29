@@ -1351,7 +1351,8 @@
         "askQueryLogEnabled": "Ask: query log",
         "weatherIngestEnabled": "Weather: observed-data ingest",
         "openapiDocsEnabled": "API: OpenAPI docs",
-        "perfDebugEnabled": "API: perf debug surface"
+        "perfDebugEnabled": "API: perf debug surface",
+      "loginRequired": "Access: sign-in required"
       }
     },
     "table": {

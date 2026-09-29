@@ -21,7 +21,7 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -438,8 +438,12 @@ def _set_session_cookie(resp: Response, sid: str) -> None:
     )
 
 
-async def _fail_login(conn: asyncpg.Connection, request: Request, provider: str, reason: str) -> RedirectResponse:
-    """Audit + redirect helper for OAuth callback failure paths."""
+async def _fail_login(
+    conn: asyncpg.Connection, request: Request, provider: str, reason: str, next_url: str | None = None
+) -> RedirectResponse:
+    """Audit + redirect helper for OAuth callback failure paths. ``next_url``,
+    when the transaction cookie was readable, rides along so the retry from
+    /login still returns to the page the visitor was headed for."""
     await record_event(
         conn,
         user_id=None,
@@ -450,7 +454,10 @@ async def _fail_login(conn: asyncpg.Connection, request: Request, provider: str,
         user_agent=request.headers.get("user-agent"),
         meta={"reason": reason},
     )
-    return RedirectResponse(url=f"/login?error={reason}", status_code=302)
+    url = f"/login?error={reason}"
+    if next_url:
+        url += f"&next={quote(sanitize_next(next_url), safe='')}"
+    return RedirectResponse(url=url, status_code=302)
 
 
 @router.get("/{provider}/callback")
@@ -490,12 +497,12 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
         token = await client.authorize_access_token(request)
     except Exception:
         _log.exception("OAuth token exchange failed for provider=%s", provider)
-        return await _fail_login(conn, request, provider, "provider_down")
+        return await _fail_login(conn, request, provider, "provider_down", tx.get("next"))
 
     info = await _fetch_userinfo(client, token, provider)
     if not info["email"] or not info["email_verified"]:
         code = "unverified_email" if info["email"] else "no_email"
-        return await _fail_login(conn, request, provider, code)
+        return await _fail_login(conn, request, provider, code, tx.get("next"))
 
     ua = request.headers.get("user-agent")
     ip = request.client.host if request.client else None
@@ -504,7 +511,7 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
             uid, _role = await _upsert_user(conn, provider, info, ip=ip, user_agent=ua)
             sid = await _mint_session_and_log_login(conn, uid, ua, ip, provider)
     except LocalAccountConflict:
-        return await _fail_login(conn, request, provider, "local_account_conflict")
+        return await _fail_login(conn, request, provider, "local_account_conflict", tx.get("next"))
 
     next_url = sanitize_next(tx.get("next"))
     resp = RedirectResponse(url=next_url, status_code=302)

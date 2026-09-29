@@ -30,6 +30,7 @@ from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.locale import LocaleMiddleware
+from api.middleware.login_gate import LoginRequiredMiddleware, enforcement_active
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
@@ -54,6 +55,8 @@ from api.routers.overview import router as overview_router
 from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
 from api.security import cookie_secure
+from api.sso import SSO_ENV as _AUTH_ENV
+from api.sso import sso_status as auth_status
 from pipeline.flags import flag
 from pipeline.query.llm_client import ProviderConfig
 from pipeline.runs import reap_abandoned_runs_best_effort
@@ -89,22 +92,6 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     await conn.execute("SET statement_timeout = '30s'")
 
 
-_AUTH_ENV = (
-    "SESSION_SIGNING_KEY",
-    "GOOGLE_CLIENT_ID",
-    "GOOGLE_CLIENT_SECRET",
-    "GITHUB_CLIENT_ID",
-    "GITHUB_CLIENT_SECRET",
-)
-
-
-def auth_status() -> tuple[bool, list[str]]:
-    """Read env every call so test monkeypatching + runtime config-flip both
-    take effect without re-importing the app. Enabled iff all five vars set."""
-    missing = [k for k in _AUTH_ENV if not os.environ.get(k)]
-    return (not missing, missing)
-
-
 def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
     """Reject the spec-incompatible CORS combo: ``*`` + ``Allow-Credentials``.
 
@@ -117,6 +104,13 @@ def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
             "CORS_ORIGINS contains '*' but allow_credentials=True. "
             "The CORS spec forbids the combination — list explicit origins."
         )
+
+
+def _warn_if_login_gate_inactive(sso_enabled: bool) -> None:
+    """A deployment that asks for sign-in but has no SSO configured is open to
+    everyone; say so at boot rather than let it pass silently."""
+    if not sso_enabled and flag("login_required", True):
+        _log.warning("login_required is on but SSO is not configured: the API is open to signed-out callers")
 
 
 def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> None:
@@ -228,6 +222,7 @@ async def lifespan(app: FastAPI):
         # that would otherwise land on the event loop -- inside whichever
         # request happened to touch a flag first.
         await asyncio.to_thread(warm_flags)
+        _warn_if_login_gate_inactive(enabled)
         # Non-fatal: ClickHouse only backs a subset of routes (live-fallback
         # scans over `updates`). Postgres-only routes (auth, admin, PostGIS
         # heatmap, any time_band="all" report path reading agg_* tables) have
@@ -312,6 +307,7 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 #   StarletteSessionMiddleware  (Authlib needs request.session)
 #   SessionMiddleware           (loads request.state.user from sid cookie)
 #   APIKeyMiddleware            (loads request.state.tier from X-API-Key)
+#   LoginRequiredMiddleware     (401s a signed-out caller while sign-in is required)
 #   LocaleMiddleware            (parses Accept-Language → request.state.locale)
 # That means require_user/require_admin see request.state.user before any
 # router runs, which is what we want. LocaleMiddleware is innermost (cheap,
@@ -322,6 +318,7 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 # design — see api/middleware/cancel_on_disconnect.py.
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
+app.add_middleware(LoginRequiredMiddleware)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SessionMiddleware)
 app.add_middleware(
@@ -395,6 +392,7 @@ class HealthStatus(BaseModel):
 class ClientConfig(BaseModel):
     auth_enabled: bool
     local_admin_enabled: bool
+    login_required: bool
 
 
 @app.get("/health", response_model=HealthStatus)
@@ -406,9 +404,14 @@ async def health():
 @app.get("/api/config", response_model=ClientConfig)
 async def config():
     """Public client config. Lets the SPA hide login UI when SSO is unconfigured,
-    and separately show/hide the break-glass local-admin password form."""
+    show/hide the break-glass local-admin password form, and send signed-out
+    visitors to sign in while ``login_required`` says the API refuses them."""
     enabled, _ = auth_status()
-    return {"auth_enabled": enabled, "local_admin_enabled": local_admin_enabled()}
+    return {
+        "auth_enabled": enabled,
+        "local_admin_enabled": local_admin_enabled(),
+        "login_required": await enforcement_active(),
+    }
 
 
 def _maybe_mount_static(app: FastAPI) -> None:

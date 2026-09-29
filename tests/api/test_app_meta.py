@@ -17,6 +17,7 @@ async def test_config_exposes_both_auth_switches(client):
     resp = await client.get("/api/config")
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"auth_enabled", "local_admin_enabled"}
+    assert set(body) == {"auth_enabled", "local_admin_enabled", "login_required"}
+    assert isinstance(body["login_required"], bool)
     assert isinstance(body["auth_enabled"], bool)
     assert isinstance(body["local_admin_enabled"], bool)

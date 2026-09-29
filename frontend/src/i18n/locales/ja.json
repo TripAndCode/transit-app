@@ -1351,7 +1351,8 @@
         "askQueryLogEnabled": "Ask: クエリログ",
         "weatherIngestEnabled": "気象: 観測データ取り込み",
         "openapiDocsEnabled": "API: OpenAPI ドキュメント",
-        "perfDebugEnabled": "API: パフォーマンスデバッグ面"
+        "perfDebugEnabled": "API: パフォーマンスデバッグ面",
+      "loginRequired": "アクセス: ログイン必須"
       }
     },
     "table": {

@@ -348,6 +348,17 @@ def mirror_updates_to_ch(ch_client, agency_id) -> None:
     insert_updates(ch_client, agency_id, ch_rows)
 
 
+@pytest.fixture(autouse=True)
+def _sso_off_unless_a_test_turns_it_on(monkeypatch):
+    """The login gate enforces only while SSO is configured. A shell that
+    exports the OAuth block would otherwise gate every anonymous read in the
+    suite; a test that needs SSO sets the variables itself."""
+    from api.sso import SSO_ENV
+
+    for var in SSO_ENV:
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 async def aconn(apply_schema, reset_sql):
     import asyncpg

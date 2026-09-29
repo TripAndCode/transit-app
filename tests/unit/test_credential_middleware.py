@@ -38,9 +38,10 @@ def _app(middleware, fetchrow_result):
 # --- API keys -------------------------------------------------------------
 
 
-def _key_row(*, tier="pro", revoked_at=None, expires_at=None, owner_suspended_at=None):
+def _key_row(*, tier="pro", owner_user_id=None, revoked_at=None, expires_at=None, owner_suspended_at=None):
     return {
         "tier": tier,
+        "owner_user_id": owner_user_id,
         "revoked_at": revoked_at,
         "expires_at": expires_at,
         "owner_suspended_at": owner_suspended_at,

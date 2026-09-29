@@ -207,9 +207,12 @@ Configuration below).
 Example:
 
 ```bash
+# While sign-in is required, pass a session cookie from a signed-in browser
+# (or an X-API-Key header issued from the admin console).
 curl -X POST http://localhost:8000/api/1/ask \
   -H 'Content-Type: application/json' \
   -H 'Origin: http://localhost:8000' \
+  -H 'Cookie: sid=<your session cookie>' \
   -d '{"question":"系統5の遅延は？"}'
 ```
 
@@ -254,11 +257,18 @@ value when neither an override nor the env var is set.
 | `weather_ingest_enabled` | `WEATHER_INGEST_ENABLED` | off |
 | `openapi_docs_enabled` | `OPENAPI_DOCS_ENABLED` | off |
 | `perf_debug_enabled` | `PERF_DEBUG_ENABLED` | off |
+| `login_required` | `LOGIN_REQUIRED` | on |
 
 `openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json`;
 `.env.example` turns it on for local dev.
 
-Leaving all OAuth variables unset runs the app in anonymous-only mode. Do not
+`login_required` makes every `/api/*` route and the OpenAPI docs refuse a
+signed-out caller with `401 {"detail": "auth required"}`, except the sign-in
+flow (`/api/auth/*`) and `/api/config`. It is enforced only while SSO is
+configured.
+
+Leaving all OAuth variables unset runs the app in anonymous-only mode: nobody
+can sign in, so the login gate stays open and every page works signed out. Do not
 commit `.env`, API keys, OAuth secrets, database passwords, or private keys.
 
 ### Secret scanning
