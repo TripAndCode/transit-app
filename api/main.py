@@ -30,6 +30,7 @@ from api.logging_config import configure as configure_logging
 from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.locale import LocaleMiddleware
+from api.middleware.login_gate import LoginRequiredMiddleware
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
@@ -54,6 +55,8 @@ from api.routers.overview import router as overview_router
 from api.routers.reports import router as reports_router
 from api.routers.static import router as static_router
 from api.security import cookie_secure
+from api.sso import SSO_ENV as _AUTH_ENV
+from api.sso import sso_status as auth_status
 from pipeline.flags import flag
 from pipeline.query.llm_client import ProviderConfig
 from pipeline.runs import reap_abandoned_runs_best_effort
@@ -87,22 +90,6 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     (analyze/ingest run on their own psycopg2 connections, not this pool.)"""
     await conn.execute("SET TIME ZONE 'Asia/Tokyo'")
     await conn.execute("SET statement_timeout = '30s'")
-
-
-_AUTH_ENV = (
-    "SESSION_SIGNING_KEY",
-    "GOOGLE_CLIENT_ID",
-    "GOOGLE_CLIENT_SECRET",
-    "GITHUB_CLIENT_ID",
-    "GITHUB_CLIENT_SECRET",
-)
-
-
-def auth_status() -> tuple[bool, list[str]]:
-    """Read env every call so test monkeypatching + runtime config-flip both
-    take effect without re-importing the app. Enabled iff all five vars set."""
-    missing = [k for k in _AUTH_ENV if not os.environ.get(k)]
-    return (not missing, missing)
 
 
 def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
@@ -312,6 +299,7 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 #   StarletteSessionMiddleware  (Authlib needs request.session)
 #   SessionMiddleware           (loads request.state.user from sid cookie)
 #   APIKeyMiddleware            (loads request.state.tier from X-API-Key)
+#   LoginRequiredMiddleware     (401s a signed-out caller while sign-in is required)
 #   LocaleMiddleware            (parses Accept-Language → request.state.locale)
 # That means require_user/require_admin see request.state.user before any
 # router runs, which is what we want. LocaleMiddleware is innermost (cheap,
@@ -322,6 +310,7 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 # design — see api/middleware/cancel_on_disconnect.py.
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
+app.add_middleware(LoginRequiredMiddleware)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SessionMiddleware)
 app.add_middleware(
