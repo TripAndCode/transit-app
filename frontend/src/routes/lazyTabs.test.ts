@@ -21,14 +21,11 @@ describe("ROUTE_CHUNK_LOADERS", () => {
     expect(ROUTE_CHUNK_LOADERS.ask).toBeTypeOf("function");
   });
 
-  it("points every legacy segment at the chunk its redirect lands on", () => {
+  it("maps each destination to the chunk it renders, and nothing else", () => {
+    expect(Object.keys(ROUTE_CHUNK_LOADERS).sort()).toEqual(["analysis", "ask", "live", "saved"]);
     expect(ROUTE_CHUNK_LOADERS.live).toBe(loadMapTab);
-    expect(ROUTE_CHUNK_LOADERS.operations).toBe(loadMapTab);
     expect(ROUTE_CHUNK_LOADERS.analysis).toBe(loadAnalysisWorkspace);
-    expect(ROUTE_CHUNK_LOADERS["route-analysis"]).toBe(loadAnalysisWorkspace);
-    expect(ROUTE_CHUNK_LOADERS.network).toBe(loadAnalysisWorkspace);
     expect(ROUTE_CHUNK_LOADERS.saved).toBe(loadSavedExportTab);
-    expect(ROUTE_CHUNK_LOADERS.reports).toBe(loadSavedExportTab);
   });
 
   it("is the only place the routed tabs are dynamically imported", () => {
@@ -40,8 +37,8 @@ describe("ROUTE_CHUNK_LOADERS", () => {
 
 describe("prefetchRouteChunk", () => {
   it("invokes the loader for a known route segment", () => {
-    const loader = vi.spyOn(ROUTE_CHUNK_LOADERS, "reports").mockResolvedValue({ default: () => null });
-    prefetchRouteChunk("reports");
+    const loader = vi.spyOn(ROUTE_CHUNK_LOADERS, "saved").mockResolvedValue({ default: () => null });
+    prefetchRouteChunk("saved");
     expect(loader).toHaveBeenCalledTimes(1);
     loader.mockRestore();
   });
@@ -51,8 +48,8 @@ describe("prefetchRouteChunk", () => {
   });
 
   it("swallows a failed chunk fetch — a prefetch must never surface an error", async () => {
-    const loader = vi.spyOn(ROUTE_CHUNK_LOADERS, "reports").mockRejectedValue(new Error("offline"));
-    expect(() => prefetchRouteChunk("reports")).not.toThrow();
+    const loader = vi.spyOn(ROUTE_CHUNK_LOADERS, "saved").mockRejectedValue(new Error("offline"));
+    expect(() => prefetchRouteChunk("saved")).not.toThrow();
     await Promise.resolve();
     loader.mockRestore();
   });

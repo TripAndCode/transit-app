@@ -42,15 +42,6 @@ export const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
   analysis: loadAnalysisWorkspace,
   saved: loadSavedExportTab,
   ask: loadAskTab,
-  // Pre-workspace segments still resolve through redirects, so a hover on a
-  // stale link warms the chunk the redirect lands on.
-  operations: loadMapTab,
-  overview: loadMapTab,
-  map: loadMapTab,
-  "period-overview": loadAnalysisWorkspace,
-  "route-analysis": loadAnalysisWorkspace,
-  network: loadAnalysisWorkspace,
-  reports: loadSavedExportTab,
 };
 
 /**

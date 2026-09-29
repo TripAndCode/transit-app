@@ -1236,7 +1236,7 @@
       "age_hours": "{{h}} h ago",
       "age_minutes": "{{m}} min ago",
       "unknown": "Unknown",
-      "network_link": "For per-route delay comparison, see the Network tab."
+      "network_link": "To compare delay across agencies, open Analysis → Compare."
     },
     "agencies": {
       "title": "Agencies",

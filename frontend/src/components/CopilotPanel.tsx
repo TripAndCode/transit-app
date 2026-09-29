@@ -46,9 +46,9 @@ export function CopilotPanel() {
   // shell — a disabled feature should be invisible, not broken-looking.
   if (!enabled) return null;
 
-  // Every other route (Operations, Analysis, Network, Account, Admin, root
-  // redirect, ...) has nothing for this panel to show — it only ever has
-  // content on Period overview (the proactive insight). Placed after every
+  // Every other route (Live, the other lenses, Saved & export, Account,
+  // Admin, root redirect, ...) has nothing for this panel to show — it only
+  // ever has content on the Overview lens (the proactive insight). Placed after every
   // hook call above so the hook count stays identical across renders of this
   // always-mounted instance.
   if (!overviewMatch) return null;

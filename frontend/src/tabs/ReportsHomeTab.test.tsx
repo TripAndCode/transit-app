@@ -85,6 +85,12 @@ describe("ReportsHomeTab", () => {
     expect(detailed.searchParams.get("from")).toBe("2026-06-01");
   });
 
+  it("points an empty saved view at the Where lens, where analyses are saved", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?view=saved");
+    expect(screen.getByText("Save filters in the Where lens to see them here")).toBeInTheDocument();
+  });
+
   it("leaves switching views to the Saved & export strip", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();

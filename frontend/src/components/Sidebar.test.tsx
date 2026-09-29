@@ -242,13 +242,13 @@ describe("Sidebar", () => {
       vi.restoreAllMocks();
     });
 
-    it("renders the four destinations (three tabs plus Ask) as labelled links", () => {
+    it("renders Live, Analysis and Ask as tabs, leaving Saved & export to the More sheet", () => {
       renderSidebar();
       const nav = screen.getByRole("navigation", { name: "Primary navigation" });
       expect(within(nav).getByRole("link", { name: /Live/ })).toBeTruthy();
       expect(within(nav).getByRole("link", { name: /Analysis/ })).toBeTruthy();
-      expect(within(nav).getByRole("link", { name: /Saved & export/ })).toBeTruthy();
       expect(within(nav).getByRole("link", { name: /Ask/ })).toBeTruthy();
+      expect(within(nav).queryByRole("link", { name: /Saved & export/ })).toBeNull();
     });
 
     it("marks the active tab", () => {
@@ -312,6 +312,14 @@ describe("Sidebar", () => {
       // The nav destinations already live in the tab bar underneath; the
       // sheet must not repeat them.
       expect(within(dialog).queryByRole("link", { name: /Live/ })).toBeNull();
+    });
+
+    it("carries Saved & export, which has no tab of its own on a phone", async () => {
+      const user = userEvent.setup();
+      renderSidebar("/agencies/1/live?from=2026-06-01&to=2026-06-07");
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const link = within(screen.getByRole("dialog")).getByRole("link", { name: "Saved & export" });
+      expect(link).toHaveAttribute("href", "/agencies/1/saved?from=2026-06-01&to=2026-06-07");
     });
 
     it("closes when the close button inside it is clicked", async () => {

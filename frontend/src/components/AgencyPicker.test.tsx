@@ -50,4 +50,12 @@ describe("AgencyPicker", () => {
     await user.click(screen.getByRole("option", { name: "Hiroshima Bus" }));
     expect(screen.getByTestId("location").textContent).toBe("/agencies/9/analysis/when");
   });
+
+  it("keeps the agencies board when switching agency on it", async () => {
+    const user = userEvent.setup();
+    renderPicker("/agencies/1/analysis/compare?mode=agencies&from=2026-08-01");
+    await user.click(screen.getByRole("button", { name: /Aomori City Bus/ }));
+    await user.click(screen.getByRole("option", { name: "Hiroshima Bus" }));
+    expect(screen.getByTestId("location").textContent).toBe("/agencies/9/analysis/compare?mode=agencies");
+  });
 });

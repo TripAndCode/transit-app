@@ -4,9 +4,9 @@ Magazine-style "how's the agency doing" landing page: one round-trip returns
 a headline delta, a concentration/movers module, a peak-hour ribbon, and a
 weekday-vs-weekend split, each expandable into a bigger modal view.
 
-This is the period-summary view, not the realtime one. The sidebar's first
-entry, labeled "Overview", opens the Operations map (see
-`docs/features/map-tab.md`); this tab sits below it as "Period overview".
+This is the period-summary view, not the realtime one: it is the Analysis
+workspace's Overview lens, while the sidebar's Live entry opens the realtime
+map (see `docs/features/map-tab.md`).
 
 ## How a user reaches it
 

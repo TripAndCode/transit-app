@@ -31,6 +31,13 @@ type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
 const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
+/** On a phone the bottom bar holds Live, Analysis and Ask; Saved & export is
+ *  reached from the More sheet instead, which keeps each tab's label on one
+ *  line at phone widths. */
+const MORE_SHEET_DESTINATIONS: ReadonlySet<string> = new Set(["saved"]);
+const TAB_BAR_ITEMS = ITEMS.filter((item) => !MORE_SHEET_DESTINATIONS.has(item.to));
+const MORE_SHEET_ITEMS = ITEMS.filter((item) => MORE_SHEET_DESTINATIONS.has(item.to));
+
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
 
 /** The bottom tab bar's fixed height below `BP.sm`. `global.css`'s
@@ -170,10 +177,11 @@ export function Sidebar() {
   // (collapsedFlag reflects the persisted rail preference) and the mobile
   // "more" sheet (always rendered expanded; onNavigate closes the sheet
   // after a link is followed, mirroring ThreadSidebar's onSelect-closes-
-  // drawer UX). `includeNav` is false for the mobile sheet: those
-  // destinations already live in the bottom tab bar, so repeating them here
-  // would be the same four links twice on screen at once.
-  function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void, includeNav = true) {
+  // drawer UX). `inSheet` lists only the destinations the bottom tab bar
+  // leaves out and skips Ask: the rest already live in the bar, and repeating
+  // them here would put the same links twice on screen at once.
+  function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void, inSheet = false) {
+    const navItems = inSheet ? MORE_SHEET_ITEMS : ITEMS;
     return (
       <>
         {!collapsedFlag && (
@@ -181,9 +189,9 @@ export function Sidebar() {
             <AgencyPicker />
           </div>
         )}
-        {includeNav && agencyId && (
+        {navItems.length > 0 && agencyId && (
           <nav style={{ display: "flex", flexDirection: "column" }}>
-            {ITEMS.map((item) => (
+            {navItems.map((item) => (
               <RailTooltip key={item.to} collapsed={collapsedFlag} label={t(item.labelKey)}>
                 <NavLink
                   to={`/agencies/${agencyId}/${item.to}${suffix}`}
@@ -220,10 +228,9 @@ export function Sidebar() {
           <>
             {/* Distinct CTA below the uniform nav list, matching the artifact
                 mockup's dashed-border Ask button — Ask is deliberately not in the
-                ITEMS loop above so it reads as an action, not a peer tab. Also
-                skipped on the mobile sheet: Ask is one of the four bottom tabs
-                there. */}
-            {includeNav && (
+                nav loop above so it reads as an action, not a peer tab. Also
+                skipped on the mobile sheet: Ask has its own bottom tab there. */}
+            {!inSheet && (
             <RailTooltip collapsed={collapsedFlag} label={t("nav.ask")}>
               <NavLink
                 to={`/agencies/${agencyId}/ask${suffix}`}
@@ -490,7 +497,7 @@ export function Sidebar() {
           }}
         >
           {agencyId &&
-            ITEMS.map((item) => (
+            TAB_BAR_ITEMS.map((item) => (
               <NavLink
                 key={item.to}
                 to={`/agencies/${agencyId}/${item.to}${suffix}`}
@@ -554,7 +561,7 @@ export function Sidebar() {
                 <X size={18} strokeWidth={1.5} aria-hidden="true" />
               </button>
             </div>
-            {renderNavAndFooter(false, () => setMoreOpen(false), false)}
+            {renderNavAndFooter(false, () => setMoreOpen(false), true)}
           </MoreSheet>
         )}
 

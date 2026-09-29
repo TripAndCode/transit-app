@@ -211,6 +211,18 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("search").textContent).toBe("?from=2026-06-01&to=2026-06-07");
   });
 
+  it("switching agencies on the agencies board stays on the board", async () => {
+    const user = userEvent.setup();
+    renderPalette("/agencies/1/analysis/compare?mode=agencies&from=2026-06-01&to=2026-06-07");
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
+    await user.click(screen.getByText("Kaga Bay Bus"));
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/analysis/compare");
+    const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(search.get("mode")).toBe("agencies");
+    expect(search.get("from")).toBe("2026-06-01");
+  });
+
   it("switching agencies falls back to the overview lens, with the active range context, when there is no current tab", async () => {
     const user = userEvent.setup();
     renderPalette("/agencies/1?from=2026-06-01&to=2026-06-07");

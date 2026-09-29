@@ -83,6 +83,11 @@ describe("AdminOpsPage", () => {
     expect(screen.getByText(/schema up to date/i)).toBeTruthy();
   });
 
+  it("points the cross-agency comparison at the Compare lens", () => {
+    wrap(<AdminOpsPage />);
+    expect(screen.getByText("To compare delay across agencies, open Analysis → Compare.")).toBeTruthy();
+  });
+
   it("renders agency row", () => {
     wrap(<AdminOpsPage />);
     expect(screen.getByText("Aomori Bus")).toBeTruthy();

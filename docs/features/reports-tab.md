@@ -14,7 +14,8 @@ plus a link out to the full Analysis tab for deeper reports.
   (`council_summary`, `delay_certificate`) implies `reports`.
   `/agencies/:agencyId/reports` redirects here, keeping `view`;
   `/agencies/:agencyId/reports/:reportType` goes to the Analysis lens that
-  hosts the type instead (see `docs/features/analysis-tab.md`).
+  hosts the type (see `docs/features/analysis-tab.md`), or here with
+  `report` set for the two export types.
 - Sidebar nav link: `frontend/src/components/sidebarNavItems.ts`'s
   `SIDEBAR_NAV_ITEMS` (`nav.saved` — "Saved & export" / "保存と出力").
 - The `summary` and `saved` views render `frontend/src/tabs/ReportsHomeTab.tsx`,

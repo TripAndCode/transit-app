@@ -1236,7 +1236,7 @@
       "age_hours": "{{h}} 時間前",
       "age_minutes": "{{m}} 分前",
       "unknown": "不明",
-      "network_link": "路線別遅延は事業者比較タブで確認できます。"
+      "network_link": "事業者どうしの遅延比較は「分析」→「比べる」で確認できます。"
     },
     "agencies": {
       "title": "事業者管理",

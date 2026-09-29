@@ -35,6 +35,20 @@ describe("SavedExportTab", () => {
     open("/agencies/9/saved");
     expect(await screen.findByText("reports-home")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Period summary" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Saved analyses" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: "Council summary & delay reference" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps the shared scope on every view link, but not another view's report", async () => {
+    open("/agencies/9/saved?report=council_summary&from=2026-08-01&to=2026-08-31");
+    await screen.findByText("analysis-tab:council_summary,delay_certificate");
+    const href = (name: string) =>
+      new URLSearchParams(screen.getByRole("link", { name }).getAttribute("href")!.split("?")[1] ?? "");
+    expect(href("Saved analyses").get("from")).toBe("2026-08-01");
+    expect(href("Saved analyses").get("view")).toBe("saved");
+    expect(href("Period summary").get("to")).toBe("2026-08-31");
+    expect(href("Period summary").has("view")).toBe(false);
+    expect(href("Period summary").has("report")).toBe(false);
   });
 
   it("shows the council summary and delay reference in reports view", async () => {

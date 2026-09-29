@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -51,6 +52,21 @@ describe("AnalysisWorkspace", () => {
   it("switches the compare lens to the network board in agencies mode", async () => {
     open("/agencies/9/analysis/compare?mode=agencies");
     expect(await screen.findByText("network-tab")).toBeInTheDocument();
+  });
+
+  it("shows which compare mode is on and switches back to periods", async () => {
+    const router = open("/agencies/9/analysis/compare?mode=agencies&from=2026-08-01");
+    await screen.findByText("network-tab");
+    const agencies = screen.getByRole("button", { name: "Agencies" });
+    const periods = screen.getByRole("button", { name: "Periods and routes" });
+    expect(agencies).toHaveAttribute("aria-pressed", "true");
+    expect(periods).toHaveAttribute("aria-pressed", "false");
+    expect(agencies.style.background).not.toBe(periods.style.background);
+    await userEvent.click(periods);
+    expect(await screen.findByText("analysis-tab:compare_ranking")).toBeInTheDocument();
+    const search = new URLSearchParams(router.state.location.search);
+    expect(search.has("mode")).toBe(false);
+    expect(search.get("from")).toBe("2026-08-01");
   });
 
   it("redirects an old report-type segment to the lens hosting it", async () => {

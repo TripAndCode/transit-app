@@ -21,7 +21,7 @@ import { onActivateKey } from "../utils/a11y";
 import { modifierKeyLabel } from "../utils/platform";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
 import { GO_TO_TARGETS } from "./paletteNavTargets";
-import { lensHref, reportHref } from "../routes/analysisRoutes";
+import { lensHref, mergeSearch, reportHref, screenParams } from "../routes/analysisRoutes";
 import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
 import "./commandPalette.css";
@@ -188,7 +188,7 @@ export function CommandPalette() {
   }
 
   function goToAgency(id: number) {
-    navigate(`/agencies/${id}/${tabRest || "analysis/overview"}${ctxSuffix}`);
+    navigate(`/agencies/${id}/${tabRest || "analysis/overview"}${mergeSearch(ctxQueryString, screenParams(location.search))}`);
   }
 
   function goToRoute(code: string) {

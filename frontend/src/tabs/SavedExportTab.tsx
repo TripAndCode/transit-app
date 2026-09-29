@@ -1,8 +1,9 @@
 import { lazy } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { useAgencyId } from "../api/useAgencyId";
-import { SAVED_REPORT_TYPES } from "../routes/analysisRoutes";
+import { SAVED_REPORT_TYPES, mergeSearch } from "../routes/analysisRoutes";
 import { loadAnalysisTab, loadReportsHomeTab } from "../routes/lazyTabs";
 
 const ReportsHomeTab = lazy(loadReportsHomeTab);
@@ -17,10 +18,13 @@ const VIEWS: [View, string][] = [
 ];
 
 /** Saved & export: the printable period summary, the saved analyses list,
- *  and the export-style report types (council summary, delay reference). */
+ *  and the export-style report types (council summary, delay reference).
+ *  The view links carry only the shared scope plus `view`: every view shares
+ *  one path, and a leftover `report` would force the reports view. */
 export function SavedExportTab() {
   const { t } = useTranslation();
   const [params] = useSearchParams();
+  const [ctx] = useRangeContext();
   const id = useAgencyId();
   const report = params.get("report");
   const requested = params.get("view");
@@ -37,9 +41,9 @@ export function SavedExportTab() {
         style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--border-soft)", marginBottom: 12 }}
       >
         {VIEWS.map(([v, key]) => (
-          <NavLink
+          <Link
             key={v}
-            to={`/agencies/${id}/saved${v === "summary" ? "" : `?view=${v}`}`}
+            to={`/agencies/${id}/saved${mergeSearch(ctxToQueryString(ctx), v === "summary" ? {} : { view: v })}`}
             aria-current={v === view ? "page" : undefined}
             style={{
               padding: "9px 12px 8px",
@@ -50,7 +54,7 @@ export function SavedExportTab() {
             }}
           >
             {t(key)}
-          </NavLink>
+          </Link>
         ))}
       </nav>
       <div style={{ flex: 1, minHeight: 0 }}>
