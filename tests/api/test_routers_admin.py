@@ -410,3 +410,32 @@ async def test_user_detail_reports_byok_provider_without_the_key(admin_client, a
     assert body["byok_provider"] == "openai"
     assert "key" not in body
     assert "abcd" not in str(body)
+
+
+@pytest.mark.asyncio
+async def test_user_activity_sums_the_window_per_route(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid, _ = await _seed(aconn, email="usage@x")
+    await aconn.execute(
+        """
+        INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, via_api_key, requests, errors)
+        VALUES ($1, current_date,      '/api/{agency_id}/overview/summary', 'GET', 1, false, 3, 1),
+               ($1, current_date - 1,  '/api/{agency_id}/overview/summary', 'GET', 1, false, 2, 0),
+               ($1, current_date - 40, '/api/{agency_id}/overview/summary', 'GET', 1, false, 9, 9)
+        """,
+        uid,
+    )
+    r = await admin_client.get(f"/api/admin/users/{uid}/activity?days=30", cookies={"sid": sid_admin})
+    assert r.status_code == 200
+    assert r.json() == [
+        {"route": "/api/{agency_id}/overview/summary", "method": "GET", "agency_id": 1, "requests": 5, "errors": 1}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_user_activity_is_admin_only_and_bounded(admin_client, aconn):
+    sid_user, uid, _ = await _seed(aconn, role="user")
+    assert (await admin_client.get(f"/api/admin/users/{uid}/activity", cookies={"sid": sid_user})).status_code == 403
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    r = await admin_client.get(f"/api/admin/users/{uid}/activity?days=366", cookies={"sid": sid_admin})
+    assert r.status_code == 422
