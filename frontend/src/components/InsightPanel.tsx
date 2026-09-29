@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { useSuggestion } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { delayColor } from "../styles/tokens";
+import { reportHref } from "../routes/analysisRoutes";
 
 // Map the backend's binary severity onto the existing delay warm ramp
 // (CLAUDE.md: "Severity uses the existing warm ramp") via representative
@@ -128,7 +129,7 @@ export function InsightPanel({ className }: { className?: string } = {}) {
       from: data.from_date,
       to: data.to_date,
     });
-    navigate(`/agencies/${id}/analysis/${data.report_type}?${qs.toString()}`);
+    navigate(reportHref(id, data.report_type, `?${qs.toString()}`));
   }
 
   return (
