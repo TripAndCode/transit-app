@@ -6,11 +6,17 @@ from typing import Any
 import asyncpg
 import openai
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.session import SESSION_COOKIE_NAME
+from api.range import jst_today
 from api.security import User, csrf_guard, require_user
+from pipeline.account_erasure import ErasureRefused, erase_user
+from pipeline.account_export import collect_user_data
 from pipeline.query.llm_key_validation import validate_provider_key
 from pipeline.query.user_llm_keys import (
     ALLOWED_PROVIDERS,
@@ -316,3 +322,59 @@ async def delete_llm_key(
     csrf_guard(request)
     await delete_user_llm_key(conn, user.user_id)
     return Response(status_code=204)
+
+
+class DeleteMeBody(BaseModel):
+    """The caller types their own email to confirm deleting the account."""
+
+    confirm_email: str
+
+
+@router.delete("/me", status_code=204)
+@limiter.limit("5/minute")
+async def delete_me(
+    body: DeleteMeBody,
+    request: Request,
+    user: User = Depends(require_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> Response:
+    """Hard-delete the caller's account and every personal row tied to it."""
+    csrf_guard(request)
+    if body.confirm_email.strip().lower() != user.email.lower():
+        raise HTTPException(status_code=400, detail="confirmation_mismatch")
+    try:
+        async with conn.transaction():
+            await erase_user(conn, user.user_id)
+    except ErasureRefused as exc:
+        raise HTTPException(status_code=409, detail=exc.reason) from None
+    resp = Response(status_code=204)
+    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return resp
+
+
+class AccountExport(BaseModel):
+    """The download's JSON shape: everything the app holds about the caller."""
+
+    exported_at: Any
+    profile: dict[str, Any] | None
+    identities: list[dict[str, Any]]
+    sessions: list[dict[str, Any]]
+    login_events: list[dict[str, Any]]
+    presets: list[dict[str, Any]]
+    conversations: list[dict[str, Any]]
+    llm_key: dict[str, Any] | None
+    api_keys: list[dict[str, Any]]
+    usage_daily: list[dict[str, Any]]
+
+
+@router.get("/me/export", response_model=AccountExport)
+@limiter.limit("5/minute")
+async def export_me(
+    request: Request,
+    user: User = Depends(require_user),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> JSONResponse:
+    """Everything the app holds about the caller, as a JSON download."""
+    data = await collect_user_data(conn, user.user_id)
+    filename = f"transit-app-export-{jst_today().isoformat()}.json"
+    return JSONResponse(jsonable_encoder(data), headers={"Content-Disposition": f'attachment; filename="{filename}"'})
