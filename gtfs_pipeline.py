@@ -11,6 +11,16 @@ import psycopg2
 
 from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
+from pipeline.retention import (
+    ADMIN_AUDIT_RETENTION_DAYS,
+    PERSONAL_DATA_RETENTION_MONTHS,
+    PIPELINE_RUNS_RETENTION_DAYS,
+    QUERY_LOG_RETENTION_DAYS,
+    personal_data_prune_sql,
+    prune_admin_audit_sql,
+    prune_pipeline_runs_sql,
+    prune_query_log_sql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -606,40 +616,12 @@ def cmd_prune_query_log(args):
         conn = await asyncpg.connect(DATABASE_URL)
         try:
             await guard_async_conn(conn)
-            result = await conn.execute(f"DELETE FROM ask_query_log WHERE created_at < now() - INTERVAL '{days} days'")
+            result = await conn.execute(prune_query_log_sql(days))
             logger.info(f"prune_query_log: {result}")
         finally:
             await conn.close()
 
     asyncio.run(run())
-
-
-#: The control board reads pipeline_runs one JST day at a time (see
-#: api/admin_runs.py); a run this far back has no viewer left to show it to.
-PIPELINE_RUNS_RETENTION_DAYS = 90
-
-#: Matches the deploy's own 400-day data-retention horizon (RETENTION_DAYS in
-#: docs/deploy-railway.md), so the audit trail never outlives the operational
-#: data it explains changes to.
-ADMIN_AUDIT_RETENTION_DAYS = 400
-
-
-def prune_pipeline_runs_sql(days: int) -> str:
-    """DELETE text for the `pipeline_runs` retention prune.
-
-    The interval is embedded as text rather than bound as a parameter,
-    matching `cmd_prune_query_log`: asyncpg has no placeholder for an
-    INTERVAL literal. `int()` here rather than trusting the annotation --
-    argparse coerces the CLI path, but this builder is importable and the
-    coercion is what makes the interpolation safe, so it belongs where the
-    string is built rather than one call site away.
-    """
-    return f"DELETE FROM pipeline_runs WHERE started_at < now() - INTERVAL '{int(days)} days'"
-
-
-def prune_admin_audit_sql(days: int) -> str:
-    """DELETE text for the `admin_audit` retention prune. See `prune_pipeline_runs_sql`."""
-    return f"DELETE FROM admin_audit WHERE at < now() - INTERVAL '{int(days)} days'"
 
 
 def cmd_prune_pipeline_runs(args):
@@ -680,6 +662,29 @@ def cmd_prune_admin_audit(args):
             await guard_async_conn(conn)
             result = await conn.execute(prune_admin_audit_sql(days))
             logger.info(f"prune_admin_audit: {result}")
+        finally:
+            await conn.close()
+
+    asyncio.run(run())
+
+
+def cmd_prune_personal_data(args):
+    """Delete personal data past the privacy policy's retention (usage counts, login history, expired sessions)."""
+    import asyncio
+
+    import asyncpg
+
+    months = int(args.months)
+
+    async def run():
+        """Async body executed via asyncio.run()."""
+        _log_target()
+        conn = await asyncpg.connect(DATABASE_URL)
+        try:
+            await guard_async_conn(conn)
+            for sql in personal_data_prune_sql(months):
+                result = await conn.execute(sql)
+                logger.info(f"prune_personal_data: {sql.split()[2]}: {result}")
         finally:
             await conn.close()
 
@@ -767,13 +772,18 @@ def main():
     p_rag.add_argument("--all-agencies", action="store_true")
 
     p_prune = sub.add_parser("prune_query_log", help="Delete ask_query_log rows older than N days")
-    p_prune.add_argument("--days", type=int, default=90)
+    p_prune.add_argument("--days", type=int, default=QUERY_LOG_RETENTION_DAYS)
 
     p_prune_runs = sub.add_parser("prune-pipeline-runs", help="Delete pipeline_runs rows older than N days")
     p_prune_runs.add_argument("--days", type=int, default=PIPELINE_RUNS_RETENTION_DAYS)
 
     p_prune_audit = sub.add_parser("prune-admin-audit", help="Delete admin_audit rows older than N days")
     p_prune_audit.add_argument("--days", type=int, default=ADMIN_AUDIT_RETENTION_DAYS)
+
+    p_prune_personal = sub.add_parser(
+        "prune-personal-data", help="Delete usage counts and login history older than N months, and expired sessions"
+    )
+    p_prune_personal.add_argument("--months", type=int, default=PERSONAL_DATA_RETENTION_MONTHS)
 
     p_weather = sub.add_parser(
         "ingest_weather",
@@ -823,6 +833,8 @@ def main():
         cmd_prune_pipeline_runs(args)
     elif args.command == "prune-admin-audit":
         cmd_prune_admin_audit(args)
+    elif args.command == "prune-personal-data":
+        cmd_prune_personal_data(args)
     elif args.command == "ingest_weather":
         cmd_ingest_weather(args)
     else:
