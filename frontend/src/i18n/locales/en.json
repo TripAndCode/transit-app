@@ -388,6 +388,19 @@
     "session_last_seen": "Last seen: {{when}}",
     "logout": "Sign out",
     "logout_error": "Couldn't sign out. Please check your connection and try again.",
+    "data": {
+      "title": "Your data",
+      "description": "Download everything this app holds about you, or delete your account.",
+      "export": "Download my data",
+      "delete": "Delete account",
+      "delete_title": "Delete your account?",
+      "delete_body": "This permanently deletes your account, sign-in history, saved filters, Ask conversations, AI key and usage history. It can't be undone.",
+      "delete_confirm_label": "Type {{email}} to confirm",
+      "delete_confirm": "Delete permanently",
+      "error_last_admin": "You're the only admin, so this account can't be deleted. Make someone else an admin first.",
+      "error_managed": "This is the operator's built-in account and can't be deleted here.",
+      "error_generic": "Couldn't delete the account. Please check your connection and try again."
+    },
     "login": {
       "error": {
         "state": "Your sign-in request has expired. Please try again.",
