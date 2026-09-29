@@ -79,6 +79,17 @@ describe("AccountPage — your data", () => {
     expect(confirm).toBeDisabled();
   });
 
+  it("cannot be dismissed once the deletion is in flight", async () => {
+    vi.spyOn(client, "apiDelete").mockReturnValue(new Promise(() => {}));
+    renderPage();
+    await openDeleteDialog();
+    await userEvent.type(screen.getByRole("textbox"), "yo@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
   it("explains why the last admin cannot delete their account", async () => {
     vi.spyOn(client, "apiDelete").mockRejectedValue(new client.ApiError(409, JSON.stringify({ detail: "last_admin" })));
     renderPage();

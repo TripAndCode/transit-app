@@ -146,7 +146,9 @@ function DataSection({ email }: { email: string }) {
       </Toolbar>
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          if (!remove.isPending) setOpen(false);
+        }}
         labelledBy={titleId}
         style={{
           width: "min(460px, calc(100vw - 32px))",
@@ -172,7 +174,9 @@ function DataSection({ email }: { email: string }) {
           </p>
         )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={() => setOpen(false)}>{t("common.cancel")}</button>
+          <button onClick={() => setOpen(false)} disabled={remove.isPending}>
+            {t("common.cancel")}
+          </button>
           <button onClick={() => remove.mutate()} disabled={!matches || remove.isPending}>
             {t("account.data.delete_confirm")}
           </button>
