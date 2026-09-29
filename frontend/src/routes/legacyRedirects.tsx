@@ -1,43 +1,35 @@
 import { Navigate, useLocation, useParams } from "react-router-dom";
+import { lensHref, mergeSearch, reportHref, type LensId } from "./analysisRoutes";
 
-/** Redirect old Reports URLs to the equivalent Analysis route. */
-export function RedirectReportsToAnalysis() {
+/** Every pre-workspace URL keeps working: each one replaces itself with its
+ *  new home, carrying the query string so filters and deep links survive. */
+
+export function RedirectToLive() {
+  const { agencyId } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={`/agencies/${agencyId}/live${search}`} replace />;
+}
+
+export function RedirectToLens({ lens, extra = {} }: { lens: LensId; extra?: Record<string, string> }) {
+  const { agencyId } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={lensHref(agencyId ?? "", lens, search, extra)} replace />;
+}
+
+export function RedirectReportsToSaved() {
+  const { agencyId } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={`/agencies/${agencyId}/saved${mergeSearch(search, {})}`} replace />;
+}
+
+export function RedirectReportTypeToLens() {
   const { agencyId, reportType } = useParams();
-  const location = useLocation();
-  const target = reportType
-    ? `/agencies/${agencyId}/analysis/${reportType}`
-    : `/agencies/${agencyId}/analysis`;
-  return <Navigate to={`${target}${location.search}`} replace />;
+  const { search } = useLocation();
+  return <Navigate to={reportHref(agencyId ?? "", reportType ?? "", search)} replace />;
 }
 
-/** Redirect the old Forecast URL to the Analysis route-forecast view. */
-export function RedirectForecastToAnalysis() {
+export function RedirectForecastToWhen() {
   const { agencyId } = useParams();
-  const location = useLocation();
-  return <Navigate to={`/agencies/${agencyId}/analysis/route_forecast${location.search}`} replace />;
-}
-
-/** Redirect the former standalone live board to the unified Operations map. */
-export function RedirectLiveToOperations() {
-  const { agencyId } = useParams();
-  const location = useLocation();
-  return <Navigate to={`/agencies/${agencyId}/operations${location.search}`} replace />;
-}
-
-/** Redirect the pre-rename Overview URL (the map tab's former path) to the
- *  renamed Operations route. */
-export function RedirectOverviewToOperations() {
-  const { agencyId } = useParams();
-  const location = useLocation();
-  return <Navigate to={`/agencies/${agencyId}/operations${location.search}`} replace />;
-}
-
-/** Redirect the pre-rename Map URL to the renamed Operations route. Kept
- *  distinct from `RedirectOverviewToOperations` (rather than reused under one
- *  name) so each legacy entry point's intent stays traceable at the call
- *  site in `main.tsx`. */
-export function RedirectMapToOperations() {
-  const { agencyId } = useParams();
-  const location = useLocation();
-  return <Navigate to={`/agencies/${agencyId}/operations${location.search}`} replace />;
+  const { search } = useLocation();
+  return <Navigate to={reportHref(agencyId ?? "", "route_forecast", search)} replace />;
 }
