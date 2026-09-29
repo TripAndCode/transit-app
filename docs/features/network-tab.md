@@ -6,14 +6,14 @@ compares to the whole network at a glance.
 
 ## How a user reaches it
 
-- Route: `/agencies/:agencyId/network`, registered in `frontend/src/main.tsx`
-  (`React.lazy`-loaded). A legacy bare `/network` bookmark still works via
-  `frontend/src/routes/networkRedirect.tsx: RedirectNetworkToAgencyNetwork`,
-  which forwards to the current agency's `/agencies/{id}/network`.
-- Sidebar nav link: `frontend/src/components/sidebarNavItems.ts`'s
-  `SIDEBAR_NAV_ITEMS`. Unlike its siblings the label comes from the default
-  `translation` namespace (`network.title`), not `design:` — the string
-  already existed there as the tab's own heading.
+- Route: the Analysis workspace's Compare lens in agencies mode,
+  `/agencies/:agencyId/analysis/compare?mode=agencies`, rendered by
+  `frontend/src/tabs/AnalysisWorkspace.tsx`; the lens's mode switch
+  (`compare.mode_periods` / `compare.mode_agencies`) toggles between this
+  board and the `compare_ranking` report. `/agencies/:agencyId/network`
+  redirects here, and so does a legacy bare `/network` bookmark, via
+  `frontend/src/routes/networkRedirect.tsx: RedirectNetworkToAgencyNetwork`
+  (to the last-used agency).
 - Top-level component: `frontend/src/tabs/NetworkTab.tsx`. Unlike every other
   tab, it does **not** use the shared `TabFilterBar`/`useRangeContext`
   dow/service/time_band/route filters — only a plain `from`/`to` date-range
@@ -28,7 +28,7 @@ What the user sees/does:
   independent of the shared range context.
 - **Ranked agency card list** — one card per agency, sorted worst-avg-delay
   first (server-side order), each showing: rank, agency name (links to that
-  agency's Operations tab, carrying the current date range), avg delay (color
+  agency's Live view, carrying the current date range), avg delay (color
   by `delayColor()`) + on-time % + service-delivered % (executed trips ÷
   planned trips from the static GTFS schedule — reads "—" rather than a
   misleading 100% for an agency whose feed doesn't report cancellations),
@@ -71,7 +71,7 @@ What the user sees/does:
 | File | Role |
 |---|---|
 | `frontend/src/tabs/NetworkTab.tsx` | Network tab: date pickers, ranked card list rendering |
-| `frontend/src/routes/networkRedirect.tsx` | Legacy bare `/network` → `/agencies/{currentAgencyId}/network` redirect |
+| `frontend/src/routes/networkRedirect.tsx` | Legacy bare `/network` → `/agencies/{lastAgencyId}/analysis/compare?mode=agencies` redirect |
 | `frontend/src/styles/tokens.ts` | `delayColor()` — shared warm-ramp coloring used by the delay value/bar |
 | `frontend/src/api/hooks.ts` | `useNetworkSummary` |
 
@@ -102,12 +102,12 @@ What the user sees/does:
    `make fetch-ingest` (or `ingest_live` + `make load_static`) then
    `make analyze` per agency — a single agency still renders (one card),
    just without a comparison.
-2. Click "Compare agencies" / "事業者比較" in the sidebar → URL
-   `/agencies/:agencyId/network`.
+2. Click "Analysis" in the sidebar, then the "Compare" lens and its
+   "Agencies" mode → URL `/agencies/:agencyId/analysis/compare?mode=agencies`.
 3. Expect a ranked card list, worst-avg-delay first, with the current
    agency's card visually highlighted and tagged "YOU".
 4. Click another agency's name — expect navigation to that agency's
-   Overview tab, carrying the same date range in the URL query string.
+   Live view, carrying the same date range in the URL query string.
 5. Change the from/to date pickers — expect the whole list to refetch and
    re-rank (note: this does **not** honor the dow/service/time_band/route
    filters used elsewhere, by design).
@@ -115,7 +115,7 @@ What the user sees/does:
    "stale" badge to render on that card; hover the badge for its tooltip
    text.
 7. Visit the bare `/network` URL directly — expect an immediate redirect to
-   `/agencies/{lastKnownAgencyId}/network`.
+   `/agencies/{lastKnownAgencyId}/analysis/compare?mode=agencies`.
 8. With no rows in `ridership_weights` for any agency, expect no
    "Weight by ridership" checkbox at all. Insert a row (e.g.
    `INSERT INTO ridership_weights (agency_id, route_code, weight) VALUES
@@ -129,6 +129,4 @@ What the user sees/does:
 - Frontend strings live under the `network.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
   `npm run lint:i18n`), plus the shared `common.range_separator` string used
-  in the coverage line. The sidebar entry reuses `network.title` rather than
-  adding a label key of its own, so the nav and the page heading cannot drift
-  apart.
+  in the coverage line.

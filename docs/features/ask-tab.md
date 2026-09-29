@@ -8,9 +8,10 @@ this doc expands on with file-level detail.
 
 - Route: `/agencies/:agencyId/ask`, registered in `frontend/src/main.tsx`
   (`React.lazy`-loaded). It is **not** the default landing tab — a bare
-  `agencies/:agencyId` navigates to `operations`
+  `agencies/:agencyId` navigates to `analysis/overview`
   (`frontend/src/main.tsx`), and `frontend/src/components/OnboardingGate.tsx`
-  redirects a fresh/remembered agency selection to `/agencies/{id}/operations`.
+  redirects a fresh/remembered agency selection to
+  `/agencies/{id}/analysis/overview`.
   Reach the Ask tab by clicking "Ask" in the sidebar.
 - Sidebar link: `frontend/src/components/Sidebar.tsx` (`nav.ask` i18n key —
   "Ask" / "質問"). It is deliberately **not** a `SIDEBAR_NAV_ITEMS` entry: it
@@ -291,9 +292,10 @@ so it is a separate mechanism to build, not a knob to turn on.
    unstamped legacy rows) and logs a one-off "re-index required" warning
    when other-version rows are present, so re-run the same command after
    changing `EMBEDDING_MODEL_ID` or bumping the library's major.
-4. Open the app — the default route lands on Operations, the map
-   (`/agencies/{id}/operations`; a fresh/remembered agency selection
-   redirects there too). Click "Ask" in the sidebar to reach this tab.
+4. Open the app — the default route lands on the Analysis workspace's
+   Overview lens (`/agencies/{id}/analysis/overview`; a fresh/remembered
+   agency selection redirects there too). Click "Ask" in the sidebar to reach
+   this tab.
 5. On the empty-thread landing view, click an instant card (e.g.
    "🏆 Top-N delays") — expect an immediate assistant bubble with a ranked
    table (deterministic `conversations/{cid}/messages` → `dispatch` path,

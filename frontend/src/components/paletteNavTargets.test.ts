@@ -19,6 +19,10 @@ describe("GO_TO_TARGETS", () => {
     }
   });
 
+  it("lists the workspace destinations in sidebar order, then Ask", () => {
+    expect(GO_TO_TARGETS.map((g) => g.to)).toEqual(["live", "analysis", "saved", "ask"]);
+  });
+
   it("also includes Ask, which the sidebar renders as a CTA rather than a nav item", () => {
     expect(GO_TO_TARGETS.some((t) => t.to === "ask")).toBe(true);
   });

@@ -7,17 +7,20 @@ plus a link out to the full Analysis tab for deeper reports.
 
 ## How a user reaches it
 
-- Route: `/agencies/:agencyId/reports`, registered in `frontend/src/main.tsx`
-  (`React.lazy`-loaded). This is distinct from
-  `/agencies/:agencyId/reports/:reportType`, which redirects to the Analysis
-  tab (see `docs/features/analysis-tab.md`) — only the bare `/reports` URL
-  (no `:reportType`) renders this tab.
+- Route: Saved & export at `/agencies/:agencyId/saved`, rendered by
+  `frontend/src/tabs/SavedExportTab.tsx` (`React.lazy`-loaded). Its strip
+  switches the `view` search param between `summary` (the default),
+  `saved`, and `reports`; a `report` param naming an export type
+  (`council_summary`, `delay_certificate`) implies `reports`.
+  `/agencies/:agencyId/reports` redirects here, keeping `view`;
+  `/agencies/:agencyId/reports/:reportType` goes to the Analysis lens that
+  hosts the type (see `docs/features/analysis-tab.md`), or here with
+  `report` set for the two export types.
 - Sidebar nav link: `frontend/src/components/sidebarNavItems.ts`'s
-  `SIDEBAR_NAV_ITEMS` (`reports` entry, labeled from the `design` i18n
-  namespace's `reports` key — "Reports" / "レポート").
-- Top-level component: `frontend/src/tabs/ReportsHomeTab.tsx` — owns which
-  of the two views ("summary" vs. "saved", via the `?view=saved` search
-  param) is shown.
+  `SIDEBAR_NAV_ITEMS` (`nav.saved` — "Saved & export" / "保存と出力").
+- The `summary` and `saved` views render `frontend/src/tabs/ReportsHomeTab.tsx`,
+  which reads the same `view` param; the `reports` view renders `AnalysisTab`
+  with the two export types.
 
 What the user sees/does:
 
@@ -26,15 +29,16 @@ What the user sees/does:
   - **Trend section** — a daily mean-delay line chart
     (`frontend/src/components/analysis/PeriodChart.tsx`) with a CSV download.
   - **Routes-to-check section** — a ranked pattern table (route, days,
-    mean delay, samples), each row linking to the Route analysis tab
-    (`/agencies/:agencyId/route-analysis`) pre-filtered to that route (and
+    mean delay, samples), each row linking to the Where lens
+    (`/agencies/:agencyId/analysis/where`) pre-filtered to that route (and
     service type, when the row is weekday/weekend-specific), plus its own
     CSV download.
   - A **definitions** `<details>` showing the active filter window and a
     `DefinitionMetaBlock` (on-time/late tolerance, measurement point, dedup
     rule, exclusion threshold) from the trend report's `definition` field,
-    plus a **"Detailed reports →"** link to
-    `/agencies/:agencyId/analysis/trend` carrying the same filter.
+    plus a **"Detailed reports →"** link to the When lens's `trend` report
+    (`/agencies/:agencyId/analysis/when?report=trend`) carrying the same
+    filter.
   - A **footer** with a combined CSV download (trend + ranking rows) and a
     "copy share link" button that copies the current URL with its filter
     query string.
@@ -42,7 +46,7 @@ What the user sees/does:
     print/PDF.
 - **Saved view** (`?view=saved`) — lists this browser's saved analyses for
   the current agency (`frontend/src/components/analysis/savedAnalyses.ts`),
-  each linking back into Route analysis with its saved filter query; an
+  each linking back into the Where lens with its saved filter query; an
   `EmptyState` shows when none exist for this agency. Bookmarks are
   browser-local filter snapshots, not immutable historical results —
   opening one re-queries the API with today's data under that filter.
@@ -65,7 +69,8 @@ issuing their own requests.
 
 | File | Role |
 |---|---|
-| `frontend/src/tabs/ReportsHomeTab.tsx` | Tab shell: summary/saved view state, trend + ranking sections, CSV/share/print actions |
+| `frontend/src/tabs/SavedExportTab.tsx` | Saved & export shell: the view strip and which screen each view renders |
+| `frontend/src/tabs/ReportsHomeTab.tsx` | Summary and saved views: trend + ranking sections, saved-analysis list, CSV/share/print actions |
 | `frontend/src/components/analysis/PeriodChart.tsx` | Daily mean-delay trend chart |
 | `frontend/src/components/analysis/savedAnalyses.ts` | Browser-local saved-analysis read/write/delete |
 | `frontend/src/components/analysis/csv.ts` | `downloadCsv()` shared by every analysis/report screen |
@@ -88,7 +93,7 @@ issuing their own requests.
 
 - Frontend: `frontend/src/components/analysis/workflows.test.tsx` (renders
   `ReportsHomeTab` and `RouteAnalysisTab` together on their real routes,
-  including the routes-to-check → route-analysis link).
+  including the routes-to-check → Where lens link).
 - Backend: `tests/api/test_reports.py`, `tests/unit/test_reports_rounding.py`
   (both shared with the Analysis tab, since both read the same
   `/reports/{report_type}` endpoint).
@@ -98,22 +103,22 @@ issuing their own requests.
 1. `make bootstrap && make serve` (+ `make frontend-dev`). Load and analyze
    data first: `make fetch-ingest` (or `ingest_live` + `make load_static`),
    then `make analyze` for the agency.
-2. Click "Reports" in the sidebar → URL `/agencies/:agencyId/reports`;
+2. Click "Saved & export" in the sidebar → URL `/agencies/:agencyId/saved`;
    expect the trend chart and routes-to-check table to populate (or the
    empty state with no data).
 3. Change the filter bar's date range / dow / time_band / route selection —
    expect both sections to refetch.
-4. Click a route in the routes-to-check table — expect navigation to Route
-   analysis pre-filtered to that route.
+4. Click a route in the routes-to-check table — expect navigation to the
+   Where lens pre-filtered to that route.
 5. Click "Detailed reports →" — expect navigation to
-   `/agencies/:agencyId/analysis/trend` carrying the same filter.
+   `/agencies/:agencyId/analysis/when?report=trend` carrying the same filter.
 6. Click each CSV download button — expect a file per section plus one
    combined file from the footer button.
 7. Click "Create share link" — expect a clipboard-copy confirmation; paste
    the URL in a new tab and confirm the same filter loads.
 8. Click "Print / Save PDF" — expect the browser print dialog.
 9. Switch to the "Saved analyses" view — expect any bookmarks saved from
-   Route analysis for this agency to appear, each linking back with its
+   the Where lens for this agency to appear, each linking back with its
    saved filter; delete one and confirm it disappears.
 
 ## i18n

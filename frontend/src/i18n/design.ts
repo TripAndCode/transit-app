@@ -1,6 +1,6 @@
 export const design = {
   ja: {
-    overview: "概況", operations: "運行状況", period_overview: "期間概況", analysis: "区間分析", reports: "レポート", live: "現在の運行",
+    overview: "概況", reports: "レポート", live: "現在の運行",
     aggregateDate: "最新集計日", excluded: "除外した異常値", lastObserved: "最新の観測日時",
     mapUnavailable: "この環境では地図を表示できません。観測データは引き続き確認できます。",
     investigate: "遅れが増えた区間を調べる", reportTitle: "運行の傾向を、一枚にまとめる",
@@ -33,7 +33,7 @@ export const design = {
     ribbonLabel: "停留所別の平均遅延（{{from}}–{{to}}）",
     save: "この分析を保存", saved: "保存しました", saveFailed: "このブラウザーには保存できませんでした",
     shareLink: "共有リンクを作成", copied: "リンクをコピーしました", copyFailed: "コピーできませんでした",
-    summary: "期間のまとめ", savedAnalyses: "保存した分析", noSaved: "区間分析で保存した条件がここに表示されます",
+    noSaved: "分析の「どこ」で保存した条件がここに表示されます",
     localOnly: "このブラウザーに保存した条件です。開くと最新のデータで再集計します。",
     print: "印刷 / PDF保存", trend: "期間中の平均遅延", routesToCheck: "系統別の平均遅延",
     reportNote: "欠測を定時運行として扱いません。観測がある期間のみ表示します。",
@@ -45,7 +45,7 @@ export const design = {
     stringsUnavailable: "画面の表示に必要なデータを読み込めませんでした。再読み込みしてください。", reload: "再読み込み",
   },
   en: {
-    overview: "Overview", operations: "Operations", period_overview: "Period overview", analysis: "Segment analysis", reports: "Reports", live: "Current observations",
+    overview: "Overview", reports: "Reports", live: "Current observations",
     aggregateDate: "Latest aggregate date", excluded: "Excluded implausible observations", lastObserved: "Latest observation timestamp",
     mapUnavailable: "The map is unavailable in this environment. Observation data remains available.",
     investigate: "Where does delay build up?", reportTitle: "Summarize service performance in one page",
@@ -78,7 +78,7 @@ export const design = {
     ribbonLabel: "Mean delay by stop ({{from}}–{{to}})",
     save: "Save analysis", saved: "Saved", saveFailed: "Cannot save in this browser",
     shareLink: "Create share link", copied: "Link copied", copyFailed: "Could not copy the link",
-    summary: "Period summary", savedAnalyses: "Saved analyses", noSaved: "Save filters in segment analysis to see them here",
+    noSaved: "Save filters in the Where lens to see them here",
     localOnly: "Filters saved in this browser. Opening them queries the latest available data.",
     print: "Print / Save PDF", trend: "Mean delay over time", routesToCheck: "Mean delay by service pattern",
     reportNote: "Missing observations are not counted as on time. Only observed periods are shown.",

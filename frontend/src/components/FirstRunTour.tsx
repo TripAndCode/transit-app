@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { computeTooltipPosition, type TooltipPlacement } from "./tooltipPosition";
@@ -166,4 +167,11 @@ export function FirstRunTour() {
     </div>,
     document.body,
   );
+}
+
+/** The tour walks the Live screen: its filter and map steps anchor there.
+ *  Mounted anywhere else it would sit hidden with its focus trap active,
+ *  swallowing Tab on a page that shows no tour at all. */
+export function FirstRunTourOnLive() {
+  return useMatch("/agencies/:agencyId/live") ? <FirstRunTour /> : null;
 }

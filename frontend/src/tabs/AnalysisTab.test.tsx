@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import { AnalysisTab } from "./AnalysisTab";
@@ -32,22 +32,23 @@ function mockSupportHooks() {
   vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: null, isLoading: false } as never);
 }
 
-function renderAnalysis(initialPath: string) {
-  renderWithProviders(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <Routes>
-        <Route path="/agencies/:agencyId/analysis/:reportType?" element={<AnalysisTab />} />
-      </Routes>
-    </MemoryRouter>,
+function renderAnalysis(initialPath: string, reportTypes: readonly string[] = ["ranking", "on_time"]) {
+  const router = createMemoryRouter(
+    [{ path: "/agencies/:agencyId/analysis/:lens", element: <AnalysisTab reportTypes={reportTypes} /> }],
+    { initialEntries: [initialPath] },
   );
+  renderWithProviders(<RouterProvider router={router} />);
+  return { router };
 }
+
+const WHEN_TYPES = ["trend", "dow_weekday", "dow_weekend", "route_forecast"] as const;
 
 describe("AnalysisTab", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("prompts to select a report when none is chosen yet", () => {
+  it("opens its first report when no report is chosen", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({
       data: [reportMeta("ranking"), reportMeta("on_time")],
@@ -55,10 +56,58 @@ describe("AnalysisTab", () => {
       error: null,
       refetch: vi.fn(),
     } as never);
-    vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
-    renderAnalysis("/agencies/1/analysis");
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderAnalysis("/agencies/1/analysis/rider");
     expect(screen.getByText("Reports")).toBeInTheDocument();
-    expect(screen.getByText("Select a report")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Delay ranking/ })).toHaveAttribute("aria-pressed", "true");
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe("ranking");
+  });
+
+  it("lists only the report types it is given", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({
+      data: [reportMeta("ranking"), reportMeta("trend"), reportMeta("dow_weekday"), reportMeta("dwell_run")],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderAnalysis("/agencies/1/analysis/when", WHEN_TYPES);
+    expect(screen.getByRole("button", { name: /^Trend/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Route forecast/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Dwell\/running time/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Delay ranking/ })).toBeNull();
+  });
+
+  it("falls back to its first report when the report param belongs to another lens", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({
+      data: [reportMeta("trend"), reportMeta("dwell_run")],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderAnalysis("/agencies/1/analysis/why?report=trend", ["dwell_run"]);
+    expect(screen.getByRole("button", { name: /^Dwell\/running time/ })).toHaveAttribute("aria-pressed", "true");
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe("dwell_run");
+  });
+
+  it("selecting a report sets the report param, keeps the filters, and adds a history entry", async () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({
+      data: [reportMeta("trend"), reportMeta("dow_weekday"), reportMeta("dow_weekend")],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
+    const { router } = renderAnalysis("/agencies/1/analysis/when?routes=50", WHEN_TYPES);
+    await userEvent.click(screen.getByRole("button", { name: /^Weekday pattern/ }));
+    const params = new URLSearchParams(router.state.location.search);
+    expect(params.get("report")).toBe("dow_weekday");
+    expect(params.get("routes")).toBe("50");
+    expect(router.state.historyAction).toBe("PUSH");
   });
 
   it("shows the no-data empty state when the selected report has no rows", () => {
@@ -75,7 +124,7 @@ describe("AnalysisTab", () => {
       error: null,
       refetch: vi.fn(),
     } as never);
-    renderAnalysis("/agencies/1/analysis/ranking");
+    renderAnalysis("/agencies/1/analysis/rider?report=ranking");
     expect(screen.getByText("No matching data")).toBeInTheDocument();
   });
 
@@ -88,7 +137,7 @@ describe("AnalysisTab", () => {
       refetch: vi.fn(),
     } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
-    renderAnalysis("/agencies/1/analysis");
+    renderAnalysis("/agencies/1/analysis/rider");
 
     // The grouped list puts the report's one-line description inside the
     // same button, so its accessible name is the label plus that sentence.
@@ -119,7 +168,7 @@ function emptyReport(reportType: string): ReportResponse {
   } as ReportResponse;
 }
 
-function renderRecoveryTab(path: string, reportType = "ranking") {
+function renderRecoveryTab(path: string, reportType = "ranking", reportTypes: readonly string[] = ["ranking"]) {
   vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null } as never);
   vi.spyOn(hooks, "useReport").mockReturnValue({
     data: emptyReport(reportType),
@@ -135,7 +184,7 @@ function renderRecoveryTab(path: string, reportType = "ranking") {
   renderWithProviders(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/agencies/:agencyId/analysis/:reportType" element={<AnalysisTab />} />
+        <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={reportTypes} />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -143,12 +192,12 @@ function renderRecoveryTab(path: string, reportType = "ranking") {
 
 describe("AnalysisTab empty state recoveries", () => {
   it("offers a jump-to-latest-data recovery for an empty ranking report", () => {
-    renderRecoveryTab("/agencies/8/analysis/ranking?from=2020-01-01&to=2020-01-07");
+    renderRecoveryTab("/agencies/8/analysis/rider?report=ranking&from=2020-01-01&to=2020-01-07");
     expect(screen.getByRole("button", { name: "Jump to the latest data" })).toBeInTheDocument();
   });
 
   it("offers a clear-routes recovery when routes are scoped", () => {
-    renderRecoveryTab("/agencies/8/analysis/ranking?from=2020-01-01&to=2020-01-07&routes=A05");
+    renderRecoveryTab("/agencies/8/analysis/rider?report=ranking&from=2020-01-01&to=2020-01-07&routes=A05");
     expect(screen.getByRole("button", { name: "Clear the route filter" })).toBeInTheDocument();
   });
 
@@ -166,9 +215,9 @@ describe("AnalysisTab empty state recoveries", () => {
       refetch: vi.fn(),
     } as never);
     renderWithProviders(
-      <MemoryRouter initialEntries={["/agencies/8/analysis/dwell_run?from=2020-01-01&to=2020-01-07&routes=A05"]}>
+      <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07&routes=A05"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/analysis/:reportType" element={<AnalysisTab />} />
+          <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -184,7 +233,7 @@ describe("AnalysisTab dwell_run route cap", () => {
   function SwitchAgency() {
     const navigate = useNavigate();
     return (
-      <button type="button" onClick={() => navigate("/agencies/9/analysis/dwell_run?from=2020-01-01&to=2020-01-07")}>
+      <button type="button" onClick={() => navigate("/agencies/9/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07")}>
         switch agency
       </button>
     );
@@ -226,10 +275,10 @@ describe("AnalysisTab dwell_run route cap", () => {
     vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
     vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
     const ui = () => (
-      <MemoryRouter initialEntries={["/agencies/8/analysis/dwell_run?from=2020-01-01&to=2020-01-07"]}>
+      <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07"]}>
         <SwitchAgency />
         <Routes>
-          <Route path="/agencies/:agencyId/analysis/:reportType" element={<AnalysisTab />} />
+          <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
         </Routes>
       </MemoryRouter>
     );

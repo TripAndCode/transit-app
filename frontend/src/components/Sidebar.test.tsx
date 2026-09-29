@@ -22,7 +22,7 @@ function mockMatchMedia(matches: boolean) {
   } as unknown as MediaQueryList);
 }
 
-function renderSidebar(path = "/agencies/1/operations") {
+function renderSidebar(path = "/agencies/1/live") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -40,47 +40,34 @@ function renderSidebar(path = "/agencies/1/operations") {
 }
 
 describe("Sidebar", () => {
-  it("renders the five nav destinations, including Period overview and Network", () => {
+  it("renders the three nav destinations and the Ask CTA", () => {
     renderSidebar();
-    expect(screen.getByText("Operations")).toBeTruthy();
-    expect(screen.getByText("Period overview")).toBeTruthy();
-    expect(screen.getByText("Segment analysis")).toBeTruthy();
-    expect(screen.getByText("Compare agencies")).toBeTruthy();
-    expect(screen.getByText("Reports")).toBeTruthy();
-    expect(screen.queryByText("Agencies")).toBeNull();
-    expect(screen.queryByText("Latest observations")).toBeNull();
-  });
-
-  it("renders Ask as a distinct CTA", () => {
-    renderSidebar();
+    expect(screen.getByRole("link", { name: "Live" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Analysis" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Saved & export" })).toBeTruthy();
     expect(screen.getByText("Ask")).toBeTruthy();
+    expect(screen.queryByText("Period overview")).toBeNull();
+    expect(screen.queryByText("Compare agencies")).toBeNull();
   });
 
-  it("folds the former Live view into Operations", () => {
-    renderSidebar("/agencies/8/operations");
-    expect(screen.getByRole("link", { name: "Operations" })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /Latest observations/ })).toBeNull();
+  it("points Live at the current agency's live route, preserving the filter query string", () => {
+    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+    const link = screen.getByRole("link", { name: "Live" });
+    expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
   });
 
-  it("points Operations at the current agency's operations route, preserving the filter query string", () => {
-    renderSidebar("/agencies/8/operations?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: "Operations" });
-    expect(link).toHaveAttribute("href", "/agencies/8/operations?from=2026-06-01&to=2026-06-07");
+  it("points Analysis at the agency's analysis route, preserving the filter query string", () => {
+    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+    const link = screen.getByRole("link", { name: "Analysis" });
+    expect(link).toHaveAttribute("href", "/agencies/8/analysis?from=2026-06-01&to=2026-06-07");
   });
 
-  it("points Period overview at the agency's period-overview route, preserving the filter query string", () => {
-    renderSidebar("/agencies/8/operations?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: "Period overview" });
-    expect(link).toHaveAttribute("href", "/agencies/8/period-overview?from=2026-06-01&to=2026-06-07");
+  it("marks Analysis active on any lens", () => {
+    renderSidebar("/agencies/8/analysis/when");
+    expect(screen.getByRole("link", { name: "Analysis" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("points Network at the agency's network route", () => {
-    renderSidebar("/agencies/8/operations");
-    const link = screen.getByRole("link", { name: "Compare agencies" });
-    expect(link.getAttribute("href")).toMatch(/^\/agencies\/8\/network/);
-  });
-
-  it("does not render Operations outside any agency context", () => {
+  it("does not render Live outside any agency context", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <I18nextProvider i18n={i18n}>
@@ -92,12 +79,12 @@ describe("Sidebar", () => {
         </I18nextProvider>
       </QueryClientProvider>
     );
-    expect(screen.queryByRole("link", { name: /Operations/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Live/ })).toBeNull();
   });
 
   it("marks the current route's nav link as active", () => {
-    renderSidebar("/agencies/1/operations");
-    const mapLink = screen.getByRole("link", { name: "Operations" });
+    renderSidebar("/agencies/1/live");
+    const mapLink = screen.getByRole("link", { name: "Live" });
     expect(mapLink.getAttribute("aria-current")).toBe("page");
   });
 
@@ -142,7 +129,7 @@ describe("Sidebar", () => {
     );
     expect(screen.getByText("Delay Dashboard")).toBeTruthy();
     expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
-    expect(screen.queryByText("Operations")).toBeNull();
+    expect(screen.queryByText("Live")).toBeNull();
   });
 
   it("renders the dev-only PROTOTYPE section with all three state links", () => {
@@ -162,15 +149,15 @@ describe("Sidebar", () => {
   });
 
   it("points the no-data prototype link at a far-future date range on the current agency", () => {
-    renderSidebar("/agencies/8/operations");
+    renderSidebar("/agencies/8/live");
     const link = screen.getByRole("link", { name: "No-data state" });
-    expect(link).toHaveAttribute("href", "/agencies/8/period-overview?from=2030-01-01&to=2030-01-07");
+    expect(link).toHaveAttribute("href", "/agencies/8/analysis/overview?from=2030-01-01&to=2030-01-07");
   });
 
-  it("points the feed-stale prototype link at the current agency's operations view, preserving the active filter", () => {
-    renderSidebar("/agencies/8/operations?from=2026-06-01&to=2026-06-07");
+  it("points the feed-stale prototype link at the current agency's live view, preserving the active filter", () => {
+    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
     const link = screen.getByRole("link", { name: "Feed-stale state" });
-    expect(link).toHaveAttribute("href", "/agencies/8/operations?from=2026-06-01&to=2026-06-07");
+    expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
   });
 
   describe("collapse", () => {
@@ -180,10 +167,10 @@ describe("Sidebar", () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-      expect(screen.queryByText("Operations")).toBeNull();
+      expect(screen.queryByText("Live")).toBeNull();
       expect(screen.queryByText("What's happening right now")).toBeNull();
       expect(screen.queryByText("PROTOTYPE")).toBeNull();
-      expect(screen.getByRole("link", { name: "Operations" })).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Live" })).toBeTruthy();
     });
 
     it("shows an expand toggle once collapsed, which restores the labels when clicked", async () => {
@@ -191,13 +178,13 @@ describe("Sidebar", () => {
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
-      expect(screen.getByText("Operations")).toBeTruthy();
+      expect(screen.getByText("Live")).toBeTruthy();
     });
 
     it("persists the collapsed state to localStorage and restores it on remount", () => {
       localStorage.setItem("transit.sidebarCollapsed", "1");
       renderSidebar();
-      expect(screen.queryByText("Operations")).toBeNull();
+      expect(screen.queryByText("Live")).toBeNull();
       expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
     });
 
@@ -233,7 +220,7 @@ describe("Sidebar", () => {
       // width. Conditionally rendering on isMobile means it's now absent
       // entirely on a wide viewport.
       expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
-      expect(screen.getAllByRole("link", { name: /Operations/ }).length).toBe(1);
+      expect(screen.getAllByRole("link", { name: /Live/ }).length).toBe(1);
     });
 
     it("renders the bottom tab bar (no desktop rail) on a narrow viewport", () => {
@@ -255,20 +242,19 @@ describe("Sidebar", () => {
       vi.restoreAllMocks();
     });
 
-    it("renders the four destinations (three tabs plus Ask) as labelled links", () => {
+    it("renders Live, Analysis and Ask as tabs, leaving Saved & export to the More sheet", () => {
       renderSidebar();
       const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-      expect(within(nav).getByRole("link", { name: /Operations/ })).toBeTruthy();
-      expect(within(nav).getByRole("link", { name: /Segment analysis/ })).toBeTruthy();
-      expect(within(nav).getByRole("link", { name: /Reports/ })).toBeTruthy();
+      expect(within(nav).getByRole("link", { name: /Live/ })).toBeTruthy();
+      expect(within(nav).getByRole("link", { name: /Analysis/ })).toBeTruthy();
       expect(within(nav).getByRole("link", { name: /Ask/ })).toBeTruthy();
+      expect(within(nav).queryByRole("link", { name: /Saved & export/ })).toBeNull();
     });
 
     it("marks the active tab", () => {
-      // `/overview` only redirects to `operations`, so a tab never matches it.
-      renderSidebar("/agencies/1/operations");
+      renderSidebar("/agencies/1/live");
       const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-      expect(within(nav).getByRole("link", { name: /Operations/ })).toHaveAttribute("aria-current", "page");
+      expect(within(nav).getByRole("link", { name: /Live/ })).toHaveAttribute("aria-current", "page");
     });
 
     it("does not render the four destinations outside any agency context", () => {
@@ -283,7 +269,7 @@ describe("Sidebar", () => {
           </I18nextProvider>
         </QueryClientProvider>
       );
-      expect(screen.queryByRole("link", { name: /Operations/ })).toBeNull();
+      expect(screen.queryByRole("link", { name: /Live/ })).toBeNull();
       expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
     });
 
@@ -325,7 +311,15 @@ describe("Sidebar", () => {
       expect(await within(dialog).findByRole("button", { name: "Account menu" })).toBeTruthy();
       // The nav destinations already live in the tab bar underneath; the
       // sheet must not repeat them.
-      expect(within(dialog).queryByRole("link", { name: /Operations/ })).toBeNull();
+      expect(within(dialog).queryByRole("link", { name: /Live/ })).toBeNull();
+    });
+
+    it("carries Saved & export, which has no tab of its own on a phone", async () => {
+      const user = userEvent.setup();
+      renderSidebar("/agencies/1/live?from=2026-06-01&to=2026-06-07");
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const link = within(screen.getByRole("dialog")).getByRole("link", { name: "Saved & export" });
+      expect(link).toHaveAttribute("href", "/agencies/1/saved?from=2026-06-01&to=2026-06-07");
     });
 
     it("closes when the close button inside it is clicked", async () => {

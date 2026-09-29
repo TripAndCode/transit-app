@@ -12,7 +12,30 @@
     "mobile_tabbar_label": "メインナビゲーション",
     "more": "その他",
     "more_menu_label": "その他のメニュー",
-    "close_menu": "メニューを閉じる"
+    "close_menu": "メニューを閉じる",
+    "live": "ライブ",
+    "analysis": "分析",
+    "saved": "保存と出力"
+  },
+  "lens": {
+    "nav_label": "分析の角度",
+    "overview": "概要",
+    "when": "いつ",
+    "where": "どこ",
+    "why": "なぜ",
+    "rider": "乗る人にとって",
+    "compare": "比べる",
+    "predict": "予測の精度"
+  },
+  "compare": {
+    "mode_periods": "期間・路線どうし",
+    "mode_agencies": "事業者どうし"
+  },
+  "saved": {
+    "title": "保存と出力",
+    "view_summary": "期間のまとめ",
+    "view_saved": "保存した分析",
+    "view_reports": "協議会向けまとめ・遅延の参考資料"
   },
   "sheet": {
     "handle": "シートの持ち手"
@@ -1213,7 +1236,7 @@
       "age_hours": "{{h}} 時間前",
       "age_minutes": "{{m}} 分前",
       "unknown": "不明",
-      "network_link": "路線別遅延は事業者比較タブで確認できます。"
+      "network_link": "事業者どうしの遅延比較は「分析」→「比べる」で確認できます。"
     },
     "agencies": {
       "title": "事業者管理",
@@ -1536,6 +1559,8 @@
     "aria_label": "コマンドパレット",
     "no_results": "一致する項目がありません",
     "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
+    "nav_analysis_sublabel": "いつ・どこ・なぜ遅れるか",
+    "nav_saved_sublabel": "保存した分析と出力",
     "hint": "コマンド",
     "hint_aria": "コマンドパレットを開く（⌘K）",
     "group": {

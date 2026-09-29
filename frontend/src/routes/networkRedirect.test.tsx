@@ -10,19 +10,22 @@ function DummyTarget({ label }: { label: string }) {
 describe("RedirectNetworkToAgencyNetwork", () => {
   beforeEach(() => localStorage.clear());
 
-  it("redirects to the last-selected agency's network view, preserving the query string", () => {
+  it("redirects to the last-selected agency's compare lens in agencies mode, preserving the query string", () => {
     localStorage.setItem("transit.lastAgency", "8");
     const router = createMemoryRouter(
       [
         { path: "network", element: <RedirectNetworkToAgencyNetwork /> },
-        { path: "agencies/:agencyId/network", element: <DummyTarget label="agency-network" /> },
+        { path: "agencies/:agencyId/analysis/:lens", element: <DummyTarget label="agency-network" /> },
       ],
       { initialEntries: ["/network?from=2026-06-07&to=2026-06-10"] },
     );
     render(<RouterProvider router={router} />);
     expect(screen.getByText("agency-network")).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/agencies/8/network");
-    expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
+    expect(router.state.location.pathname).toBe("/agencies/8/analysis/compare");
+    const params = new URLSearchParams(router.state.location.search);
+    expect(params.get("mode")).toBe("agencies");
+    expect(params.get("from")).toBe("2026-06-07");
+    expect(params.get("to")).toBe("2026-06-10");
     expect(router.state.historyAction).toBe("REPLACE");
   });
 

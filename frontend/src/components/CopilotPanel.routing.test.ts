@@ -13,7 +13,7 @@ import { COPILOT_INSIGHT_ROUTE } from "./CopilotPanel";
  * between the two files instead.
  */
 describe("CopilotPanel reachability", () => {
-  const segment = COPILOT_INSIGHT_ROUTE.split("/").pop()!;
+  const tail = COPILOT_INSIGHT_ROUTE.replace("/agencies/:agencyId/", "");
 
   it("renders on a route App does not treat as focused", () => {
     const path = COPILOT_INSIGHT_ROUTE.replace(":agencyId", "1");
@@ -21,17 +21,28 @@ describe("CopilotPanel reachability", () => {
   });
 
   it("does not name a focused tab segment", () => {
-    expect(FOCUSED_TAB_SEGMENTS).not.toContain(segment);
+    expect(FOCUSED_TAB_SEGMENTS).not.toContain(tail);
   });
 
   it("treats a trailing slash as the same focused tab, as the router's own matching does", () => {
     expect(FOCUSED_TAB_PATTERN.test("/agencies/1/ask/")).toBe(true);
-    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/operations/")).toBe(true);
-    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/period-overview/")).toBe(false);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/live/")).toBe(true);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/analysis/overview/")).toBe(false);
   });
 
-  it("is still a real trailing segment, so the check above cannot pass vacuously", () => {
-    expect(segment).toBe("period-overview");
-    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/operations")).toBe(true);
+  it("focuses the where lens and Saved & export but not the other lenses", () => {
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/analysis/where")).toBe(true);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/saved")).toBe(true);
+    // Old export-type bookmarks redirect into Saved & export, so they count
+    // as focused while the redirect renders; other report types do not.
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/reports/council_summary")).toBe(true);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/reports/delay_certificate")).toBe(true);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/reports/dwell_run")).toBe(false);
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/analysis/when")).toBe(false);
+  });
+
+  it("is still a real route, so the checks above cannot pass vacuously", () => {
+    expect(COPILOT_INSIGHT_ROUTE).toBe("/agencies/:agencyId/analysis/overview");
+    expect(FOCUSED_TAB_PATTERN.test("/agencies/1/live")).toBe(true);
   });
 });

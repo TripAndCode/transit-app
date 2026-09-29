@@ -164,7 +164,7 @@ describe("NetworkTab", () => {
     const link = screen.getByRole("link", { name: "Hiroden" });
     expect(link).toHaveAttribute(
       "href",
-      "/agencies/7/operations?from=2026-04-01&to=2026-04-07",
+      "/agencies/7/live?from=2026-04-01&to=2026-04-07",
     );
     // The description moved off `title` and onto the Tooltip primitive, which
     // shows on focus as well as hover and is wired as aria-describedby.

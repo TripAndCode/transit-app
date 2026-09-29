@@ -41,7 +41,7 @@ export function OnboardingGate() {
   // instead of leaving it to call navigate() on a gone component.
   useEffect(() => {
     if (selectedId == null) return;
-    const id = setTimeout(() => navigate(`/agencies/${selectedId}/operations`, { replace: true }), SELECT_TRANSITION_MS);
+    const id = setTimeout(() => navigate(`/agencies/${selectedId}/analysis/overview`, { replace: true }), SELECT_TRANSITION_MS);
     return () => clearTimeout(id);
   }, [selectedId, navigate]);
 
@@ -62,11 +62,11 @@ export function OnboardingGate() {
   }
 
   if (agencies.length === 1) {
-    return <Navigate to={`/agencies/${agencies[0].agency_id}/operations`} replace />;
+    return <Navigate to={`/agencies/${agencies[0].agency_id}/analysis/overview`} replace />;
   }
 
   if (remembered != null && agencies.some((a) => a.agency_id === remembered)) {
-    return <Navigate to={`/agencies/${remembered}/operations`} replace />;
+    return <Navigate to={`/agencies/${remembered}/analysis/overview`} replace />;
   }
 
   function select(agency: Agency) {

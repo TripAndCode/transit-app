@@ -1,106 +1,95 @@
+import type { ReactNode } from "react";
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import {
-  RedirectReportsToAnalysis,
-  RedirectForecastToAnalysis,
-  RedirectLiveToOperations,
-  RedirectOverviewToOperations,
-  RedirectMapToOperations,
+  RedirectToLive,
+  RedirectToLens,
+  RedirectReportsToSaved,
+  RedirectReportTypeToLens,
+  RedirectForecastToWhen,
 } from "./legacyRedirects";
 
-function DummyTarget({ label }: { label: string }) {
+function Target({ label }: { label: string }) {
   return <div>{label}</div>;
 }
 
+function go(path: string, element: ReactNode, from: string, targetPath: string) {
+  const router = createMemoryRouter(
+    [
+      { path, element },
+      { path: targetPath, element: <Target label="landed" /> },
+    ],
+    { initialEntries: [from] },
+  );
+  render(<RouterProvider router={router} />);
+  expect(screen.getByText("landed")).toBeInTheDocument();
+  expect(router.state.historyAction).toBe("REPLACE");
+  return router.state.location;
+}
+
 describe("legacy redirects", () => {
-  it("redirects /agencies/:id/reports to /agencies/:id/analysis, preserving the query string", () => {
-    const router = createMemoryRouter(
-      [
-        { path: "agencies/:agencyId/reports", element: <RedirectReportsToAnalysis /> },
-        { path: "agencies/:agencyId/analysis", element: <DummyTarget label="analysis-landing" /> },
-      ],
-      { initialEntries: ["/agencies/8/reports?from=2026-06-07&to=2026-06-10"] },
-    );
-    render(<RouterProvider router={router} />);
-    expect(screen.getByText("analysis-landing")).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/agencies/8/analysis");
-    expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
-    expect(router.state.historyAction).toBe("REPLACE");
+  it.each(["operations", "overview", "map"])("sends /%s to live with its filters", (seg) => {
+    const loc = go(`agencies/:agencyId/${seg}`, <RedirectToLive />, `/agencies/9/${seg}?routes=50`, "agencies/:agencyId/live");
+    expect(loc.pathname).toBe("/agencies/9/live");
+    expect(loc.search).toBe("?routes=50");
   });
 
-  it("redirects /agencies/:id/reports/:reportType to /agencies/:id/analysis/:reportType", () => {
-    const router = createMemoryRouter(
-      [
-        { path: "agencies/:agencyId/reports/:reportType", element: <RedirectReportsToAnalysis /> },
-        { path: "agencies/:agencyId/analysis/:reportType", element: <DummyTarget label="analysis-detail" /> },
-      ],
-      { initialEntries: ["/agencies/8/reports/trend?from=2026-06-07&to=2026-06-10"] },
+  it("sends period-overview to the overview lens", () => {
+    const loc = go(
+      "agencies/:agencyId/period-overview",
+      <RedirectToLens lens="overview" />,
+      "/agencies/9/period-overview?from=2026-08-20",
+      "agencies/:agencyId/analysis/:lens",
     );
-    render(<RouterProvider router={router} />);
-    expect(screen.getByText("analysis-detail")).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/agencies/8/analysis/trend");
-    expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
-    expect(router.state.historyAction).toBe("REPLACE");
+    expect(loc.pathname).toBe("/agencies/9/analysis/overview");
+    expect(loc.search).toBe("?from=2026-08-20");
   });
 
-  it("redirects /agencies/:id/forecast to /agencies/:id/analysis/route_forecast", () => {
-    const router = createMemoryRouter(
-      [
-        { path: "agencies/:agencyId/forecast", element: <RedirectForecastToAnalysis /> },
-        { path: "agencies/:agencyId/analysis/:reportType", element: <DummyTarget label="route-forecast-landing" /> },
-      ],
-      { initialEntries: ["/agencies/8/forecast?from=2026-06-07&to=2026-06-10"] },
+  it("sends route-analysis to the where lens, keeping the route and sub-tab", () => {
+    const loc = go(
+      "agencies/:agencyId/route-analysis",
+      <RedirectToLens lens="where" />,
+      "/agencies/9/route-analysis?routes=50&sub_tab=marey",
+      "agencies/:agencyId/analysis/:lens",
     );
-    render(<RouterProvider router={router} />);
-    expect(screen.getByText("route-forecast-landing")).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/agencies/8/analysis/route_forecast");
-    expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
-    expect(router.state.historyAction).toBe("REPLACE");
+    expect(loc.pathname).toBe("/agencies/9/analysis/where");
+    expect(loc.search).toBe("?routes=50&sub_tab=marey");
   });
 
-  it("redirects /agencies/:id/live to Operations and preserves filters", () => {
-    const router = createMemoryRouter(
-      [
-        { path: "agencies/:agencyId/live", element: <RedirectLiveToOperations /> },
-        { path: "agencies/:agencyId/operations", element: <DummyTarget label="operations" /> },
-      ],
-      { initialEntries: ["/agencies/8/live?from=2026-06-07&to=2026-06-10"] },
+  it("sends network to the compare lens in agencies mode, keeping the dates once", () => {
+    const loc = go(
+      "agencies/:agencyId/network",
+      <RedirectToLens lens="compare" extra={{ mode: "agencies" }} />,
+      "/agencies/9/network?from=2026-08-20&to=2026-09-18",
+      "agencies/:agencyId/analysis/:lens",
     );
-    render(<RouterProvider router={router} />);
-    expect(screen.getByText("operations")).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/agencies/8/operations");
-    expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
-    expect(router.state.historyAction).toBe("REPLACE");
+    expect(loc.pathname).toBe("/agencies/9/analysis/compare");
+    expect(new URLSearchParams(loc.search).getAll("from")).toEqual(["2026-08-20"]);
+    expect(new URLSearchParams(loc.search).get("mode")).toBe("agencies");
   });
 
-  it("redirects the pre-rename /agencies/:id/overview to /agencies/:id/operations, preserving filters", () => {
-    const router = createMemoryRouter(
-      [
-        { path: "agencies/:agencyId/overview", element: <RedirectOverviewToOperations /> },
-        { path: "agencies/:agencyId/operations", element: <DummyTarget label="operations" /> },
-      ],
-      { initialEntries: ["/agencies/8/overview?from=2026-06-07&to=2026-06-10"] },
-    );
-    render(<RouterProvider router={router} />);
-    expect(screen.getByText("operations")).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/agencies/8/operations");
-    expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
-    expect(router.state.historyAction).toBe("REPLACE");
+  it("sends reports (either view) to saved, keeping the view", () => {
+    const loc = go("agencies/:agencyId/reports", <RedirectReportsToSaved />, "/agencies/9/reports?view=saved", "agencies/:agencyId/saved");
+    expect(loc.pathname).toBe("/agencies/9/saved");
+    expect(loc.search).toBe("?view=saved");
   });
 
-  it("redirects the pre-rename /agencies/:id/map to /agencies/:id/operations, preserving filters", () => {
-    const router = createMemoryRouter(
-      [
-        { path: "agencies/:agencyId/map", element: <RedirectMapToOperations /> },
-        { path: "agencies/:agencyId/operations", element: <DummyTarget label="operations" /> },
-      ],
-      { initialEntries: ["/agencies/8/map?from=2026-06-07&to=2026-06-10"] },
+  it("sends reports/:reportType to the lens that hosts it", () => {
+    const loc = go(
+      "agencies/:agencyId/reports/:reportType",
+      <RedirectReportTypeToLens />,
+      "/agencies/9/reports/dwell_run?routes=50",
+      "agencies/:agencyId/analysis/:lens",
     );
-    render(<RouterProvider router={router} />);
-    expect(screen.getByText("operations")).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/agencies/8/operations");
-    expect(router.state.location.search).toBe("?from=2026-06-07&to=2026-06-10");
-    expect(router.state.historyAction).toBe("REPLACE");
+    expect(loc.pathname).toBe("/agencies/9/analysis/why");
+    expect(new URLSearchParams(loc.search).get("report")).toBe("dwell_run");
+    expect(new URLSearchParams(loc.search).get("routes")).toBe("50");
+  });
+
+  it("sends forecast to the when lens's route forecast", () => {
+    const loc = go("agencies/:agencyId/forecast", <RedirectForecastToWhen />, "/agencies/9/forecast?routes=50", "agencies/:agencyId/analysis/:lens");
+    expect(loc.pathname).toBe("/agencies/9/analysis/when");
+    expect(new URLSearchParams(loc.search).get("report")).toBe("route_forecast");
   });
 });
