@@ -45,7 +45,7 @@ describe("parseScope", () => {
     expect(s).toMatchObject({ from: "2026-09-01", dow: "all", time_band: "all", service: "all", hour: null, dir: null, late: null, early: null });
   });
 
-  it("leaves compare to the lens that owns it", () => {
+  it("leaves compare to the screen that owns it", () => {
     expect(parse("compare=1")).not.toHaveProperty("compare");
     const next = applyScopePatch(new URLSearchParams("compare=1"), presetScopePatch({ dow: "weekday" }));
     expect(next.get("compare")).toBe("1");

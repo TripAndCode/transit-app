@@ -26,9 +26,9 @@
   --d3: #E39556;
   --d4: #BC523A;
   --none: #EEF1F5;
-  /* The former accent, kept as a separate identity rather than a second one:
-     it marks a route (the operations route badge) and the pre-auth wordmark,
-     and nothing else. --on-brand is theme-split because the dark brand is
+  /* A separate identity from the accent, not a second accent: it marks a
+     route (the operations route badge) and the pre-auth wordmark, and nothing
+     else. --on-brand is theme-split because the dark brand is
      light enough that white text on it falls below AA. */
   --brand: #5b6cad;
   --on-brand: #ffffff;

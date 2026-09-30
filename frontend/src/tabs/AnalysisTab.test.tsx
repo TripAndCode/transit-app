@@ -108,7 +108,7 @@ describe("AnalysisTab", () => {
     expect(screen.queryByRole("button", { name: /^Delay ranking/ })).toBeNull();
   });
 
-  it("falls back to its first report when the report param belongs to another lens", () => {
+  it("falls back to its first report when the report param belongs to another screen", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({
       data: [reportMeta("trend"), reportMeta("dwell_run")],
@@ -327,7 +327,7 @@ describe("AnalysisTab dwell_run route cap", () => {
   });
 });
 
-describe("AnalysisTab lens panels", () => {
+describe("AnalysisTab evidence panels", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -351,7 +351,7 @@ describe("AnalysisTab lens panels", () => {
     expect(screen.queryByText("standards-panel")).toBeNull();
   });
 
-  it("puts the headway and targets panels beside on-time in For riders, without rain", () => {
+  it("puts the headway and targets panels beside on-time, without rain", () => {
     show("/agencies/1/analysis/rider", "on_time", []);
     expect(screen.getByText("headway-panel")).toBeInTheDocument();
     expect(screen.getByText("standards-panel")).toBeInTheDocument();

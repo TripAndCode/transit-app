@@ -1,5 +1,5 @@
 /**
- * The Why lens's rain panel, shown beside the `dwell_run` report: observed
+ * Why's rain panel, shown beside the `dwell_run` report: observed
  * rain-vs-dry average delay from `useWeatherDelay`.
  * `available: false` is an expected, common configuration -- most agencies
  * have no representative weather station mapped yet -- so it renders one

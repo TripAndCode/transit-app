@@ -178,10 +178,10 @@ export function AnalysisTab({
                 })}
               />
             )}
-            {/* Each lens's evidence panels, rendered alongside (never instead
-                of) the report above: Why pairs dwell vs run with rain and long
-                gaps; For riders pairs on-time with headway quality and the
-                agency's performance targets. The targets panel renders nothing
+            {/* Evidence panels, rendered alongside (never instead of) the
+                report above: dwell vs run pairs with rain and long gaps;
+                on-time pairs with headway quality and the agency's
+                performance targets. The targets panel renders nothing
                 when no standards are configured; the rain panel says so when
                 no weather station is mapped. */}
             {detail.data.report_type === "dwell_run" && id != null && (

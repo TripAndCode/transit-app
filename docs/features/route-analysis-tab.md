@@ -6,15 +6,25 @@ saved-analysis bookmarks — scoped to exactly one selected route.
 
 ## How a user reaches it
 
-- Route: the Analysis workspace's Where lens,
-  `/agencies/:agencyId/analysis/where`, rendered by
-  `frontend/src/tabs/AnalysisWorkspace.tsx` (`React.lazy`-loaded). The old
-  `/agencies/:agencyId/route-analysis` URL redirects here, keeping its query
-  (`routes`, `sub_tab`, `compare`).
-- Reached from the Analysis sidebar entry (`nav.analysis`) and then the
-  "Where" lens tab (`frontend/src/components/LensTabs.tsx`), or from links
-  that open a route directly: the command palette's route items, the Live
-  trip panel, and Saved & export's routes-to-check rows and saved analyses.
+- Route: the route dossier, `/agencies/:agencyId/routes/:routeCode`,
+  rendered by `frontend/src/tabs/RouteDossier.tsx` (`React.lazy`-loaded),
+  which renders `RouteAnalysisTab`. The path's route is mirrored into the
+  scope's `routes` param. Picking one different route inside moves the
+  dossier to that route's path; picking several hands the selection to the
+  Routes list (`/agencies/:agencyId/routes`).
+- `/agencies/:agencyId/route-analysis` and `/agencies/:agencyId/analysis/where`
+  redirect here when their `routes` names exactly one route, to
+  `routes/<route_code>?tab=stops` with `routes` dropped and the rest of the
+  query (`sub_tab`, `compare`, the filter) kept; any other selection goes to
+  the Routes list.
+- Reached from the rail's Routes entry (`nav.routes`) and then the list's
+  route opener (`routesIndex.open_route`, a `<select>` in
+  `frontend/src/tabs/RoutesIndex.tsx`), or from links that open a route
+  directly, all built by `routeHref`/`routesHref` in
+  `frontend/src/routes/destinations.ts`: the command palette's route items
+  (with the active scope), the Live trip panel
+  (`routes/<route_code>?tab=stops`), and Reports' routes-to-check rows and
+  saved analyses.
 - Top-level component: `frontend/src/tabs/RouteAnalysisTab.tsx` — owns the
   compare-with-previous-week toggle (`?compare=1` search param), the
   selected stop, and which of the four sub-tabs (trend / marey / map /
@@ -23,8 +33,11 @@ saved-analysis bookmarks — scoped to exactly one selected route.
 What the user sees/does:
 
 - **Route/keito filter** — `frontend/src/components/analysis/AnalysisFilters.tsx`.
-  With no single route selected (`ctx.routes.length !== 1`) the tab shows an
-  `EmptyState` prompting the user to choose one instead of rendering data.
+  Inside the dossier the scope always holds the path's one route, since
+  `RouteDossier` re-seeds an empty `routes` from the path and leaves the
+  dossier for any other selection. `RouteAnalysisTab` itself shows an
+  `EmptyState` prompting the user to choose one route whenever
+  `ctx.routes.length !== 1`, instead of rendering data.
 - **Header actions** — a CSV download button (disabled while loading, on
   error, or while a requested comparison is still fetching) and a "Save this
   analysis" button that writes a browser-local bookmark
@@ -65,6 +78,7 @@ What the user sees/does:
 
 | File | Role |
 |---|---|
+| `frontend/src/tabs/RouteDossier.tsx` | Dossier route: mirrors the path's route into `routes`, follows a different single route, hands several to the Routes list |
 | `frontend/src/tabs/RouteAnalysisTab.tsx` | Tab shell: compare toggle, stop selection, sub-tab state |
 | `frontend/src/components/analysis/AnalysisFilters.tsx` | Route/keito filter UI |
 | `frontend/src/components/analysis/StopChart.tsx` | Per-stop delay chart (current + optional previous-week overlay) |
@@ -90,6 +104,11 @@ What the user sees/does:
 
 - Frontend: `frontend/src/components/analysis/workflows.test.tsx` (renders
   `RouteAnalysisTab` and `ReportsHomeTab` together on their real routes),
+  `frontend/src/tabs/RouteDossier.test.tsx` (path ↔ `routes` mirroring and
+  the hand-off to the Routes list), `frontend/src/tabs/RoutesIndex.test.tsx`
+  (the route opener),
+  `frontend/src/routes/legacyRedirects.test.tsx` (the `route-analysis` and
+  `analysis/where` redirects),
   `frontend/src/components/analysis/StopChart.test.ts`,
   `frontend/src/components/charts/MareyDiagram.test.tsx`,
   `frontend/src/components/charts/mareyLayout.test.ts`.
@@ -102,18 +121,20 @@ What the user sees/does:
 1. `make bootstrap && make serve` (+ `make frontend-dev`). Load and analyze
    data first: `make fetch-ingest` (or `ingest_live` + `make load_static`),
    then `make analyze` for the agency.
-2. Click "Analysis" in the sidebar, then the "Where" lens → URL
-   `/agencies/:agencyId/analysis/where`; expect the "choose a route" empty
-   state until exactly one route is selected in the filter.
-3. Select one route — expect the stop chart, Marey diagram, map, and by-stop
-   table to populate; switch between the four sub-tabs.
+2. Click "Routes" in the rail → URL `/agencies/:agencyId/routes`; choose a
+   route in "Open a route" → URL `/agencies/:agencyId/routes/<route_code>`.
+3. Expect the stop chart, Marey diagram, map, and by-stop table to
+   populate; switch between the four sub-tabs. Pick one different route in
+   the filter — expect the path to move to that route; pick several —
+   expect the Routes list.
 4. Toggle "Compare with one week earlier" — expect a second series on the
    trend chart and ghost trips behind the Marey diagram, or a "no comparison
    data" message where the prior week has none.
 5. Click a stop in the chart or the aside's dropdown — expect the selection
    to sync across the chart and the aside's delay/sample readout.
-6. Click "Save this analysis" — expect a saved-confirmation notice; reload
-   `ReportsHomeTab`'s saved-analyses view to find the bookmark listed.
+6. Click "Save this analysis" — expect a saved-confirmation notice; open
+   Reports' "Saved analyses" view (`/agencies/:agencyId/reports?doc=saved`)
+   to find the bookmark listed.
 7. Click the CSV download button — expect a file with per-stop rows plus a
    comparison-window footer when compare is on.
 

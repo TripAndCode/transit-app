@@ -64,7 +64,7 @@ describe("SavedExportTab", () => {
     expect(screen.getByRole("link", { name: "Saved analyses" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("replaces a Saved & export view param with its document", async () => {
+  it("replaces a legacy view param with its document", async () => {
     const router = open("/agencies/9/reports?view=saved&from=2026-09-01");
     await screen.findByText("reports-home");
     expect(router.state.historyAction).toBe("REPLACE");

@@ -107,7 +107,7 @@ describe("ReportsHomeTab", () => {
     localStorage.removeItem("transit.savedAnalyses.v1");
   });
 
-  it("leaves switching views to the Saved & export strip", () => {
+  it("leaves switching documents to the Reports strip", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();
     expect(screen.queryByRole("button", { name: "Saved analyses" })).toBeNull();

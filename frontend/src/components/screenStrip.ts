@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 
-/** The look shared by the workspace's in-page navigation strips (the lens
- *  tabs and Saved & export's views), so the two cannot drift apart. */
+/** The look of an in-page navigation strip (Reports' document views), kept
+ *  in one place so a second strip cannot drift from it. */
 export const SCREEN_STRIP_STYLE: CSSProperties = {
   display: "flex",
   gap: 2,

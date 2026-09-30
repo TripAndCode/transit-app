@@ -1,6 +1,6 @@
 /**
- * Headway panel shown beside the Why lens's `dwell_run` report and the For
- * riders lens's `on_time` report (see AnalysisTab.tsx):
+ * Headway panel shown beside the `dwell_run` report on Why and the `on_time`
+ * report on Routes (see AnalysisTab.tsx):
  * Excess Waiting Time, spacing coefficient of variation, and long-gap rate
  * for this agency's routes classified high-frequency by
  * `agg_route_headway.is_high_frequency` (pipeline/headways.py). Renders

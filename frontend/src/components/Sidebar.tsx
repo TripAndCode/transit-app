@@ -167,14 +167,15 @@ export function Sidebar() {
   // almost no room for tab content. isMobile renders only the active
   // variant rather than mounting both and hiding one with CSS `display`,
   // which would double the nav's DOM nodes and listeners at every width.
-  // The four destinations live in the persistent tab bar on mobile; only
-  // the "more" sheet is mounted on demand, so its contents cannot break a
-  // single-match query while it is closed.
+  // Pulse, Routes, Live and Ask live in the persistent tab bar on mobile;
+  // only the "more" sheet is mounted on demand, so its contents cannot break
+  // a single-match query while it is closed.
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   // Below BP.sm the rail's nav links move into a persistent bottom tab bar
   // (thumb-reachable, and it gives the tab content back the width the rail
-  // used to take); this sheet holds what doesn't fit in four tab slots --
-  // the agency picker and the settings/account controls -- behind "…".
+  // used to take); this sheet holds what doesn't fit in the tab slots --
+  // the agency picker, the other destinations, the Other group and the
+  // settings/account controls -- behind "…".
   const [moreOpen, setMoreOpen] = useState(false);
 
   function toggleCollapsed() {

@@ -28,7 +28,7 @@
     "mode_agencies": "Agencies"
   },
   "saved": {
-    "title": "Saved & export",
+    "title": "Reports",
     "view_summary": "Period summary",
     "view_saved": "Saved analyses",
     "view_reports": "Council summary & delay reference"
@@ -106,7 +106,7 @@
     "narrative": {
       "route": {
         "title": "Delay builds along a route",
-        "body": "The same stop-by-stop chart from Analysis, with example data — watch how a route's delay compounds stop after stop against a calmer week-earlier comparison."
+        "body": "The same stop-by-stop chart as each route's page, with example data — watch how a route's delay compounds stop after stop against a calmer week-earlier comparison."
       },
       "trend": {
         "title": "Every day, compared",
@@ -1235,7 +1235,7 @@
       "age_hours": "{{h}} h ago",
       "age_minutes": "{{m}} min ago",
       "unknown": "Unknown",
-      "network_link": "To compare delay across agencies, open Analysis → Compare."
+      "network_link": "To compare delay across agencies, open Compare and choose Agencies."
     },
     "agencies": {
       "title": "Agencies",

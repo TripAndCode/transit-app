@@ -7,41 +7,55 @@ with a proactive "Insight Panel" suggesting what to look at next.
 
 ## How a user reaches it
 
-- Hosted by the Analysis workspace (`frontend/src/tabs/AnalysisWorkspace.tsx`,
-  route `/agencies/:agencyId/analysis/:lens`). Each lens passes AnalysisTab
-  the report types it owns (`lensReportTypes` in
-  `frontend/src/routes/analysisRoutes.ts`):
-  - When — `trend`, `dow_weekday`, `dow_weekend`, `route_forecast`;
-  - Why — `dwell_run`, with the rain (`WeatherDelayPanel`) and long-gap
+- Hosted by four of the rail's destinations. Each passes AnalysisTab the
+  report types it hosts (the per-screen lists in
+  `frontend/src/routes/destinations.ts`):
+  - Routes (`/agencies/:agencyId/routes`, `frontend/src/tabs/RoutesIndex.tsx`)
+    — `ranking`, `ranking_best`, `on_time`, `worst_5min`, with
+    `HeadwayQualityPanel` and `PerformanceStandardPanel` beside `on_time`.
+    A route opener `<select>` above the reports opens a route's dossier, and
+    `?sort=<report type>` picks which report opens when no `report` param is
+    set;
+  - Time (`/agencies/:agencyId/time`, `frontend/src/tabs/TimeTab.tsx`) —
+    `trend`, `dow_weekday`, `dow_weekend`, `route_forecast`;
+  - Why (`/agencies/:agencyId/why`, `frontend/src/tabs/WhyTab.tsx`) —
+    `dwell_run`, with the rain (`WeatherDelayPanel`) and long-gap
     (`HeadwayQualityPanel`) panels beside it;
-  - For riders — `ranking`, `ranking_best`, `on_time`, `worst_5min`, with
-    `HeadwayQualityPanel` and `PerformanceStandardPanel` beside `on_time`;
-  - Compare (its default "periods and routes" mode) — `compare_ranking`.
+  - Compare (`/agencies/:agencyId/compare`, `frontend/src/tabs/CompareTab.tsx`)
+    for any `by` other than `agencies` (default `periods`) —
+    `compare_ranking`.
 
-  The export-style types, `council_summary` and `delay_certificate`, render
-  in Saved & export instead (`/agencies/:agencyId/saved?view=reports`, see
-  `docs/features/reports-tab.md`).
-- Old URLs keep working: `/agencies/:agencyId/analysis/:reportType` (the same
-  route shape as a lens) forwards a report-type segment to the lens hosting
-  it and any other unknown segment to Overview;
-  `/agencies/:agencyId/reports/:reportType` and `/agencies/:agencyId/forecast`
-  redirect the same way (`frontend/src/routes/legacyRedirects.tsx`). An
-  unknown report type lands on Overview.
-- Reach it from the Analysis sidebar entry and the lens tabs
-  (`frontend/src/components/LensTabs.tsx`), the command palette's report
-  items, the Insight Panel's suggestion, or Saved & export's "Detailed
-  reports" link.
+  Reports hosts it too, for the export-style types `council_summary` and
+  `delay_certificate` (`/agencies/:agencyId/reports?doc=council` or
+  `?doc=certificate`, see `docs/features/reports-tab.md`).
+- Redirects keep the query string: `/agencies/:agencyId/analysis/:reportType`
+  and `/agencies/:agencyId/reports/:reportType` send a report-type segment to
+  the screen hosting it (with `report=<type>` on Routes, Time, Why or Compare,
+  and `doc=council` / `doc=certificate` on Reports). The named `analysis/`
+  segments go to their screens: `when` to Time, `why` to Why, `rider` to
+  `routes?sort=on_time`, `compare` to `compare?by=periods` (`by=agencies`
+  when `mode=agencies`), `overview` and `predict` to Pulse, and `where` as
+  described in `docs/features/route-analysis-tab.md`. Any other
+  `analysis/` or `reports/` segment goes to Pulse.
+  `/agencies/:agencyId/forecast` goes to `time?report=route_forecast`
+  (`frontend/src/routes/legacyRedirects.tsx`, through `reportHref` in
+  `destinations.ts`).
+- Reach it from the Routes, Time, Why and Compare rail entries, the command
+  palette's report items, the Insight Panel's suggestion (both through
+  `reportHref`, which opens the screen hosting the type), or the Reports
+  period summary's "Detailed reports →" link (`time?report=trend`).
 - Top-level component: `frontend/src/tabs/AnalysisTab.tsx`, which takes
-  `reportTypes` and reads the selected one from the `report` search param
-  (defaulting to the lens's first type, and falling back to it when the
-  param names a type the lens doesn't host). It composes the report list,
-  the selected report's body, and the Insight Panel.
+  `reportTypes` and an optional `defaultReport`, and reads the selected one
+  from the `report` search param: the param when the screen hosts that type,
+  else `defaultReport` when the screen hosts it, else the screen's first
+  type. It composes the report list, the selected report's body, and the
+  Insight Panel.
 
 What the user sees/does:
 
 - **Filter bar** — `frontend/src/components/TabFilterBar.tsx`.
 - **Report list** (left column) — one button per report type the hosting
-  lens owns; clicking sets `report={reportType}` on the current URL, keeping
+  screen owns; clicking sets `report={reportType}` on the current URL, keeping
   the filter query string. A `?` hint icon (`frontend/src/components/InsightHint.tsx`)
   explains what each report type means.
 - **Report body** (center column) — for most report types,
@@ -68,7 +82,7 @@ What the user sees/does:
   ("this route's trend just shifted", "on-time rate dropped", etc.),
   dismissible per-suggestion (persisted to `sessionStorage`, keyed by
   agency) and toggleable off entirely; defaults on in dev builds, opt-in in
-  production (same `import.meta.env.DEV` default pattern as the sidebar's
+  production (same `import.meta.env.DEV` default pattern as the rail's
   prototype section).
 - Below ~640px (`MOBILE_BREAKPOINT_PX`,
   `frontend/src/hooks/useMediaQuery.ts`) the three columns stack vertically
@@ -77,7 +91,7 @@ What the user sees/does:
 
 ## Scope
 
-Every lens reads and writes one shared scope in the URL through
+Every analysis screen reads and writes one shared scope in the URL through
 `frontend/src/api/scope.ts` (`useScope`, `parseScope`, `scopeToQueryString`,
 `applyScopePatch`). The backend validates the same parameters in
 `api/range.py`'s `clamp_range_ctx`.
@@ -106,12 +120,14 @@ Rules the two sides share:
   condition's default instead of reaching the API. The API itself answers
   422 for an invalid value, as it does for the older fields.
 - **Unknown params survive.** `scope.ts` writes only its own params, so
-  lens-local ones survive a scope change: `report`, `sub_tab`, `mode`, and
-  the Where lens's `compare=1` (the week-earlier overlay). Links between lenses carry only the scope.
+  screen-local ones survive a scope change: `report`, `sort`, `by`, `doc`,
+  `sub_tab`, and the route dossier's `compare=1` (the week-earlier overlay).
+  Rail links carry only the scope. An agency switch keeps the destination
+  plus `by` and `doc` (`agencySwitchHref` in `destinations.ts`).
 
-Every lens endpoint returns `scope_applied`: one boolean per field in
-`api/scope_applied.py`'s `SCOPE_FIELDS`, saying whether this response
-honoured that field.
+Every endpoint behind these screens returns `scope_applied`: one boolean per
+field in `api/scope_applied.py`'s `SCOPE_FIELDS`, saying whether this
+response honoured that field.
 
 - **Where it is declared.** The honoured sets sit beside each endpoint.
   Per-report sets are `_REPORT_HONOURS` in `api/routers/reports.py`, and the
@@ -148,7 +164,8 @@ honoured that field.
 | `frontend/src/components/RouteForecastSection.tsx` | `route_forecast` report body (agency-wide + per-route views) |
 | `frontend/src/components/InsightPanel.tsx` | Proactive single-suggestion panel |
 | `frontend/src/components/InsightHint.tsx` | `?` hint popover explaining each report type |
-| `frontend/src/routes/legacyRedirects.tsx` | `/reports` to `/analysis`, `/forecast` to `/analysis` redirects |
+| `frontend/src/routes/destinations.ts` | The per-screen report-type lists and `reportHref`, the report-type → screen map every report link goes through |
+| `frontend/src/routes/legacyRedirects.tsx` | `analysis/<segment>`, `reports/:reportType` and `forecast` redirects to the screen hosting the report |
 | `frontend/src/api/hooks.ts` | `useReports`, `useReport`, `useSuggestion`, `useForecastOverview`, `useForecastHeatmap` |
 
 **Backend**
@@ -182,7 +199,11 @@ honoured that field.
 - Frontend: `frontend/src/components/ReportTable.test.tsx`,
   `frontend/src/components/charts/DowBandGrid.test.tsx`,
   `frontend/src/components/RouteForecastSection.test.tsx`,
-  `frontend/src/components/InsightPanel.test.tsx`.
+  `frontend/src/components/InsightPanel.test.tsx`,
+  `frontend/src/tabs/destinationTabs.test.tsx` and
+  `frontend/src/tabs/RoutesIndex.test.tsx` (which screen hosts which
+  report types, and `sort`), `frontend/src/routes/destinations.test.ts`
+  (every report type has exactly one home).
 
 **Manual click-through** (`make serve` + `make frontend-dev`):
 
@@ -190,14 +211,15 @@ honoured that field.
    `make fetch-ingest` (or `ingest_live` + `make load_static`), then
    `make analyze` for the agency - otherwise every report shows the
    no-data empty state.
-2. Click "Analysis" in the sidebar, then the "When" lens -> URL
-   `/agencies/:agencyId/analysis/when`; expect the lens's first report
-   (`trend`) to be selected.
-3. Click each report-type button in the left column, and repeat on the Why,
-   For riders and Compare lenses - expect the URL's `report` param to update
-   and the body to show either a table (with a working CSV download link) or,
-   for `trend`, the daily chart + hourly heatmap + dow-band grid.
-4. On the When lens, click "Route forecast" - expect the agency-wide grid/route list; select
+2. Click "Time" in the rail -> URL `/agencies/:agencyId/time`; expect its
+   first report (`trend`) to be selected.
+3. Click each report-type button in the left column, and repeat on the
+   Routes, Why and Compare rail entries - expect the URL's `report` param to
+   update and the body to show either a table (with a working CSV download
+   link) or, for `trend`, the daily chart + hourly heatmap + dow-band grid.
+   Open `/agencies/:agencyId/routes?sort=on_time` - expect `on_time` to be
+   selected.
+4. On Time, click "Route forecast" - expect the agency-wide grid/route list; select
    exactly one route in the filter bar - expect the view to switch to the
    per-route detail (band-collapsed grid, worst-window sentence).
 5. Change the filter bar's date range / dow / time_band - expect the
@@ -212,7 +234,8 @@ honoured that field.
 - Frontend strings live under the `reports.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
   `npm run lint:i18n`), plus `forecast.*` (dow/band labels shared with
-  `RouteForecastSection`). The lens tabs' labels are the `lens.*` keys.
+  `RouteForecastSection`). The host screens' rail labels are `nav.routes`,
+  `nav.time`, `nav.why` and `nav.compare`.
 - Server-side CSV column headers are hardcoded Japanese in
   `api/routers/reports.py`'s `_REPORT_CSV_COLUMNS` (operator-facing
   downloads, not routed through `_LOCALES` - update this table directly if a

@@ -6,9 +6,9 @@ export type DowFilter = "all" | "weekday" | "weekend" | Weekday | `${Weekday},${
 export type ServiceFilter = "all" | "平日" | "土日祝"; // i18n-ignore: query contract
 export type TimeBand = "all" | "morning" | "forenoon" | "noon" | "afternoon" | "evening" | "night" | "late_night";
 
-/** The shared scope every lens, link, share URL and saved analysis carries.
- *  Lens-local params (`report`, `sub_tab`, `mode`, `at`, and the Where lens's
- *  `compare=1` week-earlier overlay) are not part of it. */
+/** The shared scope every screen, link, share URL and saved analysis carries.
+ *  Screen-local params (`report`, `sort`, `by`, `doc`, `tab`, `sub_tab`, `at`,
+ *  and the route page's `compare=1` week-earlier overlay) are not part of it. */
 export type Scope = {
   from: string; // YYYY-MM-DD
   to: string; // YYYY-MM-DD

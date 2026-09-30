@@ -8,15 +8,25 @@ this doc expands on with file-level detail.
 
 - Route: `/agencies/:agencyId/ask`, registered in `frontend/src/main.tsx`
   (`React.lazy`-loaded). It is **not** the default landing tab — a bare
-  `agencies/:agencyId` navigates to `analysis/overview`
+  `agencies/:agencyId` navigates to `pulse`
   (`frontend/src/main.tsx`), and `frontend/src/components/OnboardingGate.tsx`
   redirects a fresh/remembered agency selection to
-  `/agencies/{id}/analysis/overview`.
-  Reach the Ask tab by clicking "Ask" in the sidebar.
-- Sidebar link: `frontend/src/components/Sidebar.tsx` (`nav.ask` i18n key —
-  "Ask" / "質問"). It is deliberately **not** a `SIDEBAR_NAV_ITEMS` entry: it
-  renders below the uniform nav list as a distinct dashed-border call to
-  action, so it reads as an action rather than a peer tab.
+  `/agencies/{id}/pulse`.
+  Reach the Ask tab from the command palette's "Ask" entry, or with the
+  `g q` chord.
+- Entry points: Ask is deliberately **not** a rail entry —
+  `SIDEBAR_NAV_ITEMS` lists only the seven destinations. The top bar
+  (`frontend/src/components/TopBar.tsx`) above every agency screen carries
+  a search field (`topbar.ask_placeholder`) that opens the command palette
+  (also ⌘K); the palette's "Go to" group lists Ask after the rail
+  destinations (`GO_TO_TARGETS` in
+  `frontend/src/components/paletteNavTargets.ts`, `nav.ask` i18n key —
+  "Ask" / "質問"). That field carries `data-tour="ask-nav"`, the first-run
+  tour's third step (placed "bottom"); the bar's right side shows "Data
+  through <date>" from the agency's `latest_data_date`
+  (`topbar.data_through`). On a phone, Ask is also one of the bottom tabs in
+  `frontend/src/components/Sidebar.tsx`, beside Pulse, Routes, Live and
+  More.
 - Top-level component: `frontend/src/tabs/AskTab.tsx` — owns thread
   selection, the shared filter context (date range / DOW / time-band /
   service / routes), message dispatch, and anon-to-authenticated
@@ -292,10 +302,10 @@ so it is a separate mechanism to build, not a knob to turn on.
    unstamped legacy rows) and logs a one-off "re-index required" warning
    when other-version rows are present, so re-run the same command after
    changing `EMBEDDING_MODEL_ID` or bumping the library's major.
-4. Open the app — the default route lands on the Analysis workspace's
-   Overview lens (`/agencies/{id}/analysis/overview`; a fresh/remembered
-   agency selection redirects there too). Click "Ask" in the sidebar to reach
-   this tab.
+4. Open the app — the default route lands on Pulse
+   (`/agencies/{id}/pulse`; a fresh/remembered agency selection redirects
+   there too). Click the top bar's search field (or press ⌘K), choose "Ask",
+   and expect `/agencies/{id}/ask`; pressing `g` then `q` goes there directly.
 5. On the empty-thread landing view, click an instant card (e.g.
    "🏆 Top-N delays") — expect an immediate assistant bubble with a ranked
    table (deterministic `conversations/{cid}/messages` → `dispatch` path,

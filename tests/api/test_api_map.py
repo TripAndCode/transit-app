@@ -1942,7 +1942,7 @@ async def test_heatmap_agg_path_reads_agg_not_raw(map_app):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["/api/{a}/route-shape?route=R1", "/api/{a}/today/route/R1/trips"])
-async def test_clickhouse_lens_endpoints_declare_scope_applied(map_client_ch, path):
+async def test_clickhouse_screen_endpoints_declare_scope_applied(map_client_ch, path):
     from api.scope_applied import SCOPE_FIELDS
 
     client, agency_id = map_client_ch
