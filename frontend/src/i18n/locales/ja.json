@@ -457,11 +457,7 @@
       "username_label": "ユーザー名",
       "password_label": "パスワード",
       "local_submit": "サインイン",
-      "terms_prefix": "続行することで、",
-      "terms_link": "利用規約",
-      "terms_and": "と",
-      "privacy_link": "プライバシーポリシー",
-      "terms_suffix": "に同意したものとみなされます。"
+      "terms_consent": "続行すると、<terms>利用規約</terms>と<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
     }
   },
   "presets": {

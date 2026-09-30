@@ -48,6 +48,25 @@ describe("LoginPage", () => {
     });
   });
 
+  it("reads the consent line as one sentence, with the two legal links inside it", async () => {
+    await i18n.changeLanguage("en");
+    const { container } = renderLogin();
+    const footer = container.querySelector(".login-card__footer")!;
+    expect(footer.textContent).toBe("By continuing, you agree to the Terms of Service and Privacy Policy.");
+    expect(screen.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "/terms");
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
+    try {
+      await i18n.changeLanguage("ja");
+      await waitFor(() =>
+        expect(container.querySelector(".login-card__footer")!.textContent).toBe(
+          "続行すると、利用規約とプライバシーポリシーに同意したものとみなされます。",
+        ),
+      );
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
   it("renders the SSO-disabled fallback only when neither auth method is available", () => {
     mockConfig = { auth_enabled: false, local_admin_enabled: false };
     renderLogin();

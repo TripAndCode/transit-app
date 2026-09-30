@@ -457,11 +457,7 @@
       "username_label": "Username",
       "password_label": "Password",
       "local_submit": "Sign in",
-      "terms_prefix": "By continuing, you agree to the",
-      "terms_link": "Terms of Service",
-      "terms_and": "and",
-      "privacy_link": "Privacy Policy",
-      "terms_suffix": "."
+      "terms_consent": "By continuing, you agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>."
     }
   },
   "presets": {
