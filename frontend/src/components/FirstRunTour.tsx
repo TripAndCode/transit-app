@@ -12,7 +12,7 @@ type Step = { selector: string; placement: TooltipPlacement; titleKey: string; b
 const STEPS: readonly Step[] = [
   { selector: '[data-tour="filter-bar"]', placement: "bottom", titleKey: "tour.filters.title", bodyKey: "tour.filters.body" },
   { selector: '[data-tour="map-inspect"]', placement: "top", titleKey: "tour.map.title", bodyKey: "tour.map.body" },
-  { selector: '[data-tour="ask-nav"]', placement: "right", titleKey: "tour.ask.title", bodyKey: "tour.ask.body" },
+  { selector: '[data-tour="ask-nav"]', placement: "bottom", titleKey: "tour.ask.title", bodyKey: "tour.ask.body" },
 ];
 
 /** How often to re-check for the current step's target element while it

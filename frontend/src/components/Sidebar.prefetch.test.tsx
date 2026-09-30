@@ -39,23 +39,15 @@ describe("Sidebar chunk prefetch", () => {
     const user = userEvent.setup();
     renderSidebar();
 
-    await user.hover(screen.getByRole("link", { name: /Saved & export/ }));
-    expect(prefetch).toHaveBeenCalledWith("saved");
+    await user.hover(screen.getByRole("link", { name: "Routes" }));
+    expect(prefetch).toHaveBeenCalledWith("routes");
   });
 
   it("warms the chunk on keyboard focus too, not just hover", async () => {
     renderSidebar();
 
-    screen.getByRole("link", { name: /Analysis/ }).focus();
-    expect(prefetch).toHaveBeenCalledWith("analysis");
-  });
-
-  it("warms the Ask chunk from its CTA", async () => {
-    const user = userEvent.setup();
-    renderSidebar();
-
-    await user.hover(screen.getByRole("link", { name: /Ask/ }));
-    expect(prefetch).toHaveBeenCalledWith("ask");
+    screen.getByRole("link", { name: "Reports" }).focus();
+    expect(prefetch).toHaveBeenCalledWith("reports");
   });
 
   it("prefetches nothing until the user reaches for a destination", () => {

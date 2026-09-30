@@ -8,9 +8,12 @@ import {
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
+  Shield,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useSession } from "../api/auth";
+import { useConfig } from "../api/config";
 import { scopeToQueryString, useScope } from "../api/scope";
 import { clearLastAgency } from "../api/lastAgency";
 import { AgencyPicker } from "./AgencyPicker";
@@ -22,21 +25,18 @@ import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
-import { openCommandPalette } from "./commandPaletteEvents";
-
-
 import { SIDEBAR_NAV_ITEMS } from "./sidebarNavItems";
 
 type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
 const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
-/** On a phone the bottom bar holds Live, Analysis and Ask; Saved & export is
- *  reached from the More sheet instead, which keeps each tab's label on one
- *  line at phone widths. */
-const MORE_SHEET_DESTINATIONS: ReadonlySet<string> = new Set(["saved"]);
-const TAB_BAR_ITEMS = ITEMS.filter((item) => !MORE_SHEET_DESTINATIONS.has(item.to));
-const MORE_SHEET_ITEMS = ITEMS.filter((item) => MORE_SHEET_DESTINATIONS.has(item.to));
+/** On a phone the bottom bar holds Pulse, Routes, Live and Ask; the other
+ *  destinations are reached from the More sheet, which keeps each tab's label
+ *  on one line at phone widths. */
+const TAB_BAR_DESTINATIONS: ReadonlySet<string> = new Set(["pulse", "routes", "live"]);
+const TAB_BAR_ITEMS = ITEMS.filter((item) => TAB_BAR_DESTINATIONS.has(item.to));
+const MORE_SHEET_ITEMS = ITEMS.filter((item) => !TAB_BAR_DESTINATIONS.has(item.to));
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
 
@@ -132,10 +132,28 @@ function MoreSheet({
   );
 }
 
+function railLinkStyle(collapsedFlag: boolean) {
+  return ({ isActive }: { isActive: boolean }): CSSProperties => ({
+    display: "flex",
+    alignItems: collapsedFlag ? "center" : "flex-start",
+    justifyContent: collapsedFlag ? "center" : "flex-start",
+    gap: 12,
+    padding: collapsedFlag ? "10px 0" : "10px 22px",
+    color: isActive ? "var(--accent-strong)" : "var(--text-primary)",
+    background: isActive ? "var(--accent-soft)" : "transparent",
+    borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
+    textDecoration: "none",
+    transition: "background var(--transition)",
+  });
+}
+
 export function Sidebar() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
   const navigate = useNavigate();
+  const { data: config } = useConfig();
+  const { data: session } = useSession();
+  const isAdmin = Boolean(config?.auth_enabled && session?.role === "admin");
   // Carry only the filter dimensions across tab switches — building from
   // ctx (not raw location.search) avoids dragging unrelated query keys
   // like ?admin=1 or report-specific params into every other tab.
@@ -172,14 +190,15 @@ export function Sidebar() {
     setMoreOpen(false);
   }
 
-  // Nav links, the Ask CTA, the dev-only prototype section, and the account
-  // menu — everything below the brand block. Shared by the desktop rail
-  // (collapsedFlag reflects the persisted rail preference) and the mobile
-  // "more" sheet (always rendered expanded; onNavigate closes the sheet
-  // after a link is followed, mirroring ThreadSidebar's onSelect-closes-
-  // drawer UX). `inSheet` lists only the destinations the bottom tab bar
-  // leaves out and skips Ask: the rest already live in the bar, and repeating
-  // them here would put the same links twice on screen at once.
+  // The destinations, the Other group, the dev-only prototype section, and
+  // the account menu — everything below the brand block. Shared by the
+  // desktop rail (collapsedFlag reflects the persisted rail preference) and
+  // the mobile "more" sheet (always rendered expanded; onNavigate closes the
+  // sheet after a link is followed, mirroring ThreadSidebar's onSelect-
+  // closes-drawer UX). `inSheet` lists only the destinations the bottom tab
+  // bar leaves out: the rest already live in the bar, and repeating them
+  // here would put the same links twice on screen at once. Ask and the
+  // command palette live in the top bar, not here.
   function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void, inSheet = false) {
     const navItems = inSheet ? MORE_SHEET_ITEMS : ITEMS;
     return (
@@ -190,7 +209,7 @@ export function Sidebar() {
           </div>
         )}
         {navItems.length > 0 && agencyId && (
-          <nav style={{ display: "flex", flexDirection: "column" }}>
+          <nav aria-label={t("nav.destinations_label")} style={{ display: "flex", flexDirection: "column" }}>
             {navItems.map((item) => (
               <RailTooltip key={item.to} collapsed={collapsedFlag} label={t(item.labelKey)}>
                 <NavLink
@@ -199,18 +218,7 @@ export function Sidebar() {
                   onMouseEnter={() => prefetchRouteChunk(item.to)}
                   onFocus={() => prefetchRouteChunk(item.to)}
                   onClick={() => onNavigate?.()}
-                  style={({ isActive }) => ({
-                    display: "flex",
-                    alignItems: collapsedFlag ? "center" : "flex-start",
-                    justifyContent: collapsedFlag ? "center" : "flex-start",
-                    gap: 12,
-                    padding: collapsedFlag ? "12px 0" : "12px 22px",
-                    color: isActive ? "var(--accent-strong)" : "var(--text-primary)",
-                    background: isActive ? "var(--accent-soft)" : "transparent",
-                    borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
-                    textDecoration: "none",
-                    transition: "background var(--transition)",
-                  })}
+                  style={railLinkStyle(collapsedFlag)}
                 >
                   <item.Icon size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
                   {!collapsedFlag && (
@@ -223,42 +231,48 @@ export function Sidebar() {
             ))}
           </nav>
         )}
+        <nav aria-label={t("nav.other")} style={{ display: "flex", flexDirection: "column", marginTop: 16 }}>
+          {!collapsedFlag && (
+            <div
+              style={{
+                padding: "0 22px",
+                marginBottom: 4,
+                fontSize: "var(--text-xs)",
+                color: "var(--text-tertiary)",
+                letterSpacing: "0.04em",
+              }}
+            >
+              {t("nav.other")}
+            </div>
+          )}
+          <RailTooltip collapsed={collapsedFlag} label={t("nav.help")}>
+            <NavLink
+              to="/help"
+              aria-label={collapsedFlag ? t("nav.help") : undefined}
+              onClick={() => onNavigate?.()}
+              style={railLinkStyle(collapsedFlag)}
+            >
+              <HelpCircle size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
+              {!collapsedFlag && <span>{t("nav.help")}</span>}
+            </NavLink>
+          </RailTooltip>
+          {isAdmin && (
+            <RailTooltip collapsed={collapsedFlag} label={t("account.admin_link")}>
+              <NavLink
+                to="/admin"
+                aria-label={collapsedFlag ? t("account.admin_link") : undefined}
+                onClick={() => onNavigate?.()}
+                style={railLinkStyle(collapsedFlag)}
+              >
+                <Shield size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
+                {!collapsedFlag && <span>{t("account.admin_link")}</span>}
+              </NavLink>
+            </RailTooltip>
+          )}
+        </nav>
         <div style={{ flex: 1 }} />
         {!agencyId ? null : (
           <>
-            {/* Distinct CTA below the uniform nav list, matching the artifact
-                mockup's dashed-border Ask button — Ask is deliberately not in the
-                nav loop above so it reads as an action, not a peer tab. Also
-                skipped on the mobile sheet: Ask has its own bottom tab there. */}
-            {!inSheet && (
-            <RailTooltip collapsed={collapsedFlag} label={t("nav.ask")}>
-              <NavLink
-                to={`/agencies/${agencyId}/ask${suffix}`}
-                aria-label={collapsedFlag ? t("nav.ask") : undefined}
-                data-tour="ask-nav"
-                onMouseEnter={() => prefetchRouteChunk("ask")}
-                onFocus={() => prefetchRouteChunk("ask")}
-                onClick={() => onNavigate?.()}
-                style={({ isActive }) => ({
-                  margin: "8px 12px 0",
-                  padding: collapsedFlag ? "10px 0" : "10px 12px",
-                  borderRadius: 7,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: collapsedFlag ? "center" : "flex-start",
-                  gap: 9,
-                  color: isActive ? "var(--accent)" : "var(--text-secondary)",
-                  fontSize: "var(--text-sm)",
-                  border: `1px dashed ${isActive ? "var(--accent)" : "var(--border-soft)"}`,
-                  textDecoration: "none",
-                  transition: "color var(--transition), border-color var(--transition)",
-                })}
-              >
-                <HelpCircle size={16} strokeWidth={1.5} aria-hidden="true" />
-                {!collapsedFlag && t("nav.ask")}
-              </NavLink>
-            </RailTooltip>
-            )}
             {!collapsedFlag && import.meta.env.DEV && (
               <div style={{ marginTop: 12 }}>
                 {/* Visually quarantined from the real account controls below
@@ -321,7 +335,7 @@ export function Sidebar() {
                   {t("nav.prototype_stale_feed")}
                 </NavLink>
                 <NavLink
-                  to={`/agencies/${agencyId}/analysis/overview?from=2030-01-01&to=2030-01-07`}
+                  to={`/agencies/${agencyId}/pulse?from=2030-01-01&to=2030-01-07`}
                   onClick={() => onNavigate?.()}
                   style={{
                     display: "flex",
@@ -343,52 +357,6 @@ export function Sidebar() {
         )}
         {!collapsedFlag && <CompactDataStatus />}
         {!collapsedFlag && <SidebarUserMenu onOpenSettings={openSettings} />}
-        {/* Passive discoverability hint for the ⌘K command palette (mounted
-            once in App.tsx, not here) — clicking it opens the palette via a
-            window event rather than shared state, so this component doesn't
-            need to know the palette's open/closed status. */}
-        {!collapsedFlag && (
-          <button
-            type="button"
-            onClick={() => openCommandPalette()}
-            aria-label={t("palette.hint_aria")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              width: "100%",
-              marginTop: 4,
-              padding: "6px 22px",
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              color: "var(--text-tertiary)",
-              fontSize: "var(--text-xs)",
-            }}
-          >
-            <span>{t("palette.hint")}</span>
-            <span style={{ display: "flex", gap: 3 }}>
-              {["⌘", "K"].map((k) => (
-                <kbd
-                  key={k}
-                  style={{
-                    fontSize: "var(--text-xs)",
-                    border: "1px solid var(--border-subtle)",
-                    borderBottomWidth: 2,
-                    borderRadius: 4,
-                    padding: "0 5px",
-                    background: "var(--bg-soft)",
-                    color: "var(--text-secondary)",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {k}
-                </kbd>
-              ))}
-            </span>
-          </button>
-        )}
       </>
     );
   }

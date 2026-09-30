@@ -14,8 +14,14 @@
     "more_menu_label": "More options",
     "close_menu": "Close menu",
     "live": "Live",
-    "analysis": "Analysis",
-    "saved": "Saved & export"
+    "pulse": "Pulse",
+    "routes": "Routes",
+    "time": "Time",
+    "why": "Why",
+    "compare": "Compare",
+    "reports": "Reports",
+    "destinations_label": "Destinations",
+    "other": "Other"
   },
   "compare": {
     "mode_periods": "Periods and routes",
@@ -127,8 +133,8 @@
       "body": "Every observed trip is listed here — open one to see its live progress."
     },
     "ask": {
-      "title": "Ask a question",
-      "body": "Ask about delays, routes, or on-time performance in plain language, and get an evidenced answer."
+      "title": "Search and ask",
+      "body": "Find routes, reports and screens from here. The same field takes you to Ask, where you can put a question about delays in plain language."
     }
   },
   "forecast": {
@@ -1596,5 +1602,9 @@
   "routesIndex": {
     "open_route": "Open a route",
     "open_route_placeholder": "Choose a route"
+  },
+  "topbar": {
+    "ask_placeholder": "Search routes, reports and screens",
+    "data_through": "Data through {{date}}"
   }
 }
