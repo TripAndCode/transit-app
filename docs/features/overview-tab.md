@@ -28,7 +28,7 @@ map (see `docs/features/map-tab.md`).
   `?from=2030-01-01&to=2030-01-07` no-data window.
 - Top-level component: `frontend/src/tabs/OverviewTab.tsx` — owns which
   module's modal is open (`OpenCard` state) and the peak-hour-breakdown
-  drill-down selection; filtering comes from the shared `useRangeContext`.
+  drill-down selection; filtering comes from the shared `useScope`.
 
 What the user sees/does:
 

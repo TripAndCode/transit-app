@@ -390,7 +390,7 @@ export type TrendPayload = {
 /** Which scope fields the endpoint honoured, keyed by URL param name
  *  (api/scope_applied.py): a condition set in the scope but false here was
  *  not applied by this screen. */
-export type ScopeApplied = Partial<Record<string, boolean>>;
+type ScopeApplied = Partial<Record<string, boolean>>;
 
 type ReportEnvelope<T extends ReportType, Row> = {
   scope_applied?: ScopeApplied;
