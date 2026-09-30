@@ -1,8 +1,9 @@
 import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { FilterCtx } from "../api/types";
-import type { DowFilter } from "../api/rangeContext";
-import { DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
+import type { DowFilter } from "../api/scope";
+import { dowValueLabel } from "../utils/filterValueLabels";
+import { DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/scope";
 import { rangeLabel } from "../utils/rangeLabel";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
@@ -35,9 +36,10 @@ function filterSummary(
   parts.push(rangeLabel(fc, t) ?? t("filters.range.last_30d"));
 
   // Day-of-week
-  if (fc.dow && fc.dow !== "all") {
-    const dowKey = fc.dow === "weekday" ? "ask.filter_bar.dow_weekday" : "ask.filter_bar.dow_weekend";
-    parts.push(t(dowKey));
+  if (fc.dow === "weekday" || fc.dow === "weekend") {
+    parts.push(t(fc.dow === "weekday" ? "ask.filter_bar.dow_weekday" : "ask.filter_bar.dow_weekend"));
+  } else if (fc.dow && fc.dow !== "all") {
+    parts.push(dowValueLabel(fc.dow, t));
   }
 
   // Time band

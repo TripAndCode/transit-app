@@ -4,7 +4,7 @@ import { lensHref, reportHref } from "../routes/analysisRoutes";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
-import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
+import { scopeToQueryString, useScope } from "../api/scope";
 import { useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
@@ -40,7 +40,7 @@ const rankingColumns: CsvColumn<RankingRow>[] = [
 export function ReportsHomeTab() {
   const id = useAgencyId();
   const { t } = useTranslation("design");
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);
   const [view] = useUrlState<"summary" | "saved">("view", "summary");
   const savedTab = view === "saved";
@@ -55,7 +55,7 @@ export function ReportsHomeTab() {
   const trendPayload = trend.data?.report_type === "trend" ? trend.data.rows[0] : undefined;
   const days = (trendPayload?.days ?? []).filter((d) => Number.isFinite(d.avg_min) && d.samples > 0).sort((a, b) => a.date.localeCompare(b.date));
   const rows: RankingRow[] = ranking.data?.report_type === "ranking" ? ranking.data.rows : [];
-  const queryString = ctxToQueryString(ctx);
+  const queryString = scopeToQueryString(ctx);
   const chartWrapRef = useRef<HTMLDivElement>(null);
   // Shared by both the trend and ranking EmptyStates below -- same ctx, same
   // way out either way.

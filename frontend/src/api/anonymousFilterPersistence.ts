@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useSession } from "./auth";
 import { computeAnchorRange } from "./defaultRangeAnchor";
 import { useAgencies } from "./hooks";
-import type { DowFilter, ServiceFilter, TimeBand } from "./rangeContext";
+import type { DowFilter, ServiceFilter, TimeBand } from "./scope";
 
 type StoredFilter = {
   from?: string;

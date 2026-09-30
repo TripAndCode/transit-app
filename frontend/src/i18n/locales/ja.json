@@ -364,6 +364,7 @@
     "rel_minutes_ago": "{{count}}分前",
     "rel_seconds_ago": "{{count}}秒前",
     "range_separator": "〜",
+    "list_separator": "・",
     "language_aria": "言語",
     "language_switch_error": "言語を切り替えられませんでした。接続を確認して再度お試しください。",
     "theme_aria": "外観",

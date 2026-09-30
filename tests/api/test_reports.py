@@ -1905,3 +1905,55 @@ async def test_council_summary_degrades_is_stale_when_clickhouse_freshness_probe
         payload = await compute_council_summary(agency_id, ctx, conn, _BrokenCh())
     assert payload["on_time_pct"] == 100.0
     assert payload["is_stale"] is False
+
+
+@pytest.mark.asyncio
+async def test_report_carries_scope_applied(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/ranking")
+    assert resp.status_code == 200
+    assert resp.json()["scope_applied"]["routes"] is True
+    assert resp.json()["scope_applied"]["late"] is False
+
+
+@pytest.mark.asyncio
+async def test_scope_late_is_ignored_where_a_report_has_no_tolerance(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?late=180")
+    assert resp.status_code == 200
+    assert resp.json()["scope_applied"]["late"] is False
+
+
+@pytest.mark.asyncio
+async def test_scope_late_sets_the_on_time_tolerance(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?late=180&early=30")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["definition"]["late_tolerance_sec"] == 180
+    assert body["definition"]["early_tolerance_sec"] == 30
+    assert body["scope_applied"]["late"] is True
+
+
+@pytest.mark.asyncio
+async def test_scope_late_and_the_explicit_tolerance_together_are_a_400(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?late=180&late_tolerance_sec=60")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_hour_with_time_band_is_a_422(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?hour=7&time_band=morning")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_scope_late_leaves_the_worst_5min_threshold_alone(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/worst_5min?late=60")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["definition"]["late_tolerance_sec"] == 300
+    assert body["scope_applied"]["late"] is False

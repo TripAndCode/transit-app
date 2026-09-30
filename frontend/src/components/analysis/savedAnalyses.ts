@@ -1,4 +1,4 @@
-import { ctxToQueryString, type RangeCtx } from "../../api/rangeContext";
+import { scopeToQueryString, type Scope } from "../../api/scope";
 import { uuid } from "../../utils/uuid";
 
 type SavedAnalysis = { id: string; agencyId: number; title: string; query: string; savedAt: string };
@@ -14,8 +14,8 @@ export function readAnalyses(): SavedAnalysis[] {
 /** Saves an analysis. Returns whether it was persisted -- `false` (rather
  *  than throwing) when localStorage is unavailable, e.g. private browsing
  *  or a full quota. */
-export function saveAnalysis(agencyId: number, title: string, ctx: RangeCtx, compare: boolean): boolean {
-  const params = new URLSearchParams(ctxToQueryString(ctx));
+export function saveAnalysis(agencyId: number, title: string, ctx: Scope, compare: boolean): boolean {
+  const params = new URLSearchParams(scopeToQueryString(ctx));
   if (compare) params.set("compare", "1");
   const query = params.toString();
   const rows = readAnalyses().filter((r) => r.agencyId !== agencyId || r.query !== query);

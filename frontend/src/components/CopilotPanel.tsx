@@ -5,7 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useCopilotEnabled, useCopilotInsight } from "../api/copilot";
 import { apiPost } from "../api/client";
 import { ErrorBanner } from "./ErrorBanner";
-import { useRangeContext } from "../api/rangeContext";
+import { useScope } from "../api/scope";
 import { useIsLlmApproved, useOverviewSummary } from "../api/hooks";
 import type { AskResponse } from "../api/types";
 import "./CopilotPanel.css";
@@ -22,7 +22,7 @@ export function CopilotPanel() {
   const { t } = useTranslation();
   const overviewMatch = useMatch(COPILOT_INSIGHT_ROUTE);
   const agencyId = overviewMatch ? Number(overviewMatch.params.agencyId) : null;
-  const [filters] = useRangeContext();
+  const [filters] = useScope();
   // Anything but an explicit true is treated as off, so an unresolved or
   // failed flag check never reaches the insight POST.
   const enabled = useCopilotEnabled(agencyId).data?.enabled === true;

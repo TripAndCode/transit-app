@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { delayColor } from "../styles/tokens";
-import { useRangeContext } from "../api/rangeContext";
+import { useScope } from "../api/scope";
 import { groupBySeverityBand } from "./routesToCheckBands";
 import type { OverviewTopDelayedRoute } from "../api/types";
 
@@ -10,7 +10,7 @@ type Props = {
 
 export function RoutesToCheckList({ routes }: Props) {
   const { t } = useTranslation();
-  const [, update] = useRangeContext();
+  const [, update] = useScope();
 
   const groups = groupBySeverityBand(routes);
   const maxMin = routes.length > 0 ? Math.max(...routes.map((r) => r.avg_min)) : 0;

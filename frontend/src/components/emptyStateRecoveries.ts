@@ -7,8 +7,8 @@ import {
   translationT as tt,
 } from "../utils/filterValueLabels";
 
-/** The subset of RangeCtx that explains an empty result — kept structural
- *  (not `import type { RangeCtx }`) so this module works for any caller that
+/** The subset of Scope that explains an empty result — kept structural
+ *  (not `import type { Scope }`) so this module works for any caller that
  *  shapes its own filter state the same way. */
 type ReasonCtx = {
   dow?: string;

@@ -4,7 +4,7 @@ import { MemoryRouter, useSearchParams } from "react-router-dom";
 import * as hooks from "./hooks";
 import { latestDataWindow, useDefaultRangeAnchor, useJumpToLatestDataRange } from "./defaultRangeAnchor";
 import { useAnonymousFilterPersistence } from "./anonymousFilterPersistence";
-import { DEFAULT_RANGE_DAYS, isoDaysAgo, isoDaysBefore } from "./rangeContext";
+import { DEFAULT_RANGE_DAYS, isoDaysAgo, isoDaysBefore } from "./scope";
 import type { Agency } from "./types";
 
 const useSessionMock = vi.fn();

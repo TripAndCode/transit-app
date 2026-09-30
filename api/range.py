@@ -13,10 +13,11 @@ the window to 365 days to avoid runaway scans.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, Literal, cast, get_args
+from typing import Annotated, Any, Literal, cast, get_args
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Query
@@ -36,7 +37,6 @@ def jst_today() -> date:
     return datetime.now(_JST).date()
 
 
-DowFilter = Literal["all", "weekday", "weekend"]
 TimeBand = Literal[
     "all",
     "morning",
@@ -48,6 +48,50 @@ TimeBand = Literal[
     "late_night",
 ]
 ServiceType = Literal["all", "平日", "土日祝"]
+
+WEEKDAY_NAMES: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+# ISO weekday sets (1=Monday..7=Sunday) of the legacy dow groups. A weekday
+# list that equals one of these is stored as the group's name, so every
+# reader that branches on "weekday"/"weekend" keeps working unchanged.
+_DOW_GROUPS: dict[str, frozenset[int]] = {
+    "weekday": frozenset(range(1, 6)),
+    "weekend": frozenset({6, 7}),
+    "all": frozenset(range(1, 8)),
+}
+
+_DOW_ERROR = "invalid dow: expected all, weekday, weekend, or a comma list of mon..sun"
+
+
+def canonical_dow(value: object) -> str:
+    """Validate a ``dow`` value into its one canonical spelling.
+
+    A comma list of weekday names is de-duplicated, put in Monday-first
+    order, and folded into ``weekday``/``weekend``/``all`` when it names
+    exactly that group. Anything else is a 422, like the other enums.
+    """
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=_DOW_ERROR)
+    if value in ("all", "weekday", "weekend"):
+        return value
+    names = value.split(",")
+    if any(name not in WEEKDAY_NAMES for name in names):
+        raise HTTPException(status_code=422, detail=_DOW_ERROR)
+    days = frozenset(WEEKDAY_NAMES.index(name) + 1 for name in names)
+    for group, members in _DOW_GROUPS.items():
+        if days == members:
+            return group
+    return ",".join(WEEKDAY_NAMES[day - 1] for day in sorted(days))
+
+
+def dow_isodays(dow: str) -> frozenset[int] | None:
+    """The ISO weekdays a canonical ``dow`` selects; ``None`` means every day."""
+    if dow == "all":
+        return None
+    if dow in _DOW_GROUPS:
+        return _DOW_GROUPS[dow]
+    return frozenset(WEEKDAY_NAMES.index(name) + 1 for name in dow.split(","))
+
 
 # (start_inclusive, end_exclusive) clock times as 'HH:MM' strings. Migration
 # 0011 made `scheduled_time` a TIME column, so `time_band_case_sql` casts both
@@ -73,6 +117,12 @@ MAX_RANGE_DAYS = 365
 # Bounds both the SQL predicate and the JSON envelope; the UI's own route
 # picker surfaces far fewer than this.
 MAX_ROUTE_FILTERS = 100
+# GTFS stop_id is free-form text; this bounds what the scope accepts and echoes.
+MAX_STOP_ID_LEN = 128
+# ASCII digits only: str.isdigit() also accepts superscripts and other
+# scripts' digits, which int() then rejects or reads as a different hour.
+_HOUR_RE = re.compile(r"(\d{1,2})(?:-(\d{1,2}))?", re.ASCII)
+_HOUR_ERROR = "invalid hour: expected 0-23 or an inclusive range a-b"
 
 
 @dataclass(frozen=True)
@@ -81,10 +131,16 @@ class RangeCtx:
 
     from_date: date
     to_date: date
-    dow: DowFilter = "all"
+    # Canonical per canonical_dow: a legacy group or a Monday-first weekday list.
+    dow: str = "all"
     time_band: TimeBand = "all"
     service: ServiceType = "all"
     routes: tuple[str, ...] = ()
+    # Inclusive hour range; mutually exclusive with a time_band other than "all".
+    hour: tuple[int, int] | None = None
+    stop: str | None = None
+    # GTFS direction_id; the URL name is `dir`.
+    direction: int | None = None
 
     @property
     def days(self) -> int:
@@ -103,6 +159,39 @@ def _coerce_enum(value: str, allowed: tuple[str, ...], field: str) -> str:
             detail=f"invalid {field}: expected one of {', '.join(allowed)}",
         )
     return value
+
+
+def _coerce_hour(value: object) -> tuple[int, int] | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=_HOUR_ERROR)
+    match = _HOUR_RE.fullmatch(value)
+    if match is None:
+        raise HTTPException(status_code=422, detail=_HOUR_ERROR)
+    start = int(match.group(1))
+    end = int(match.group(2)) if match.group(2) is not None else start
+    if start > 23 or end > 23 or start > end:
+        raise HTTPException(status_code=422, detail=_HOUR_ERROR)
+    return start, end
+
+
+def _coerce_stop(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value.strip()) > MAX_STOP_ID_LEN:
+        raise HTTPException(
+            status_code=422, detail=f"invalid stop: expected a stop_id of at most {MAX_STOP_ID_LEN} characters"
+        )
+    return value.strip() or None
+
+
+def _coerce_direction(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or value not in ("0", "1", 0, 1):
+        raise HTTPException(status_code=422, detail="invalid dir: expected 0 or 1")
+    return int(value)
 
 
 def _coerce_date(value: str | date | None, field: str) -> date | None:
@@ -140,6 +229,9 @@ def clamp_range_ctx(
     time_band: str = "all",
     service: str = "all",
     routes: Iterable[str] = (),
+    hour: object = None,
+    stop: object = None,
+    direction: object = None,
 ) -> RangeCtx:
     """Validate and clamp raw filter values into a :class:`RangeCtx`.
 
@@ -161,7 +253,12 @@ def clamp_range_ctx(
     * a reversed range is swapped rather than rejected;
     * a window wider than :data:`MAX_RANGE_DAYS` is clamped at the *start*,
       preserving the most recent data;
-    * unknown ``dow``/``time_band``/``service`` values are a 422;
+    * unknown ``dow``/``time_band``/``service`` values are a 422; a weekday
+      list is canonicalised (see :func:`canonical_dow`);
+    * ``hour`` is 0-23 or an inclusive ``a-b`` range and cannot be combined
+      with a ``time_band`` other than ``all``; ``stop`` is a stripped stop_id
+      of at most :data:`MAX_STOP_ID_LEN` characters; ``direction`` is 0 or 1.
+      Each malformed value is a 422;
     * routes are stripped, de-duplicated preserving order, and capped at
       :data:`MAX_ROUTE_FILTERS` to bound the query and the JSON envelope.
     """
@@ -194,13 +291,21 @@ def clamp_range_ctx(
         if len(cleaned) >= MAX_ROUTE_FILTERS:
             break
 
+    resolved_time_band = cast(TimeBand, _coerce_enum(time_band, get_args(TimeBand), "time_band"))
+    resolved_hour = _coerce_hour(hour)
+    if resolved_hour is not None and resolved_time_band != "all":
+        raise HTTPException(status_code=422, detail="hour and time_band are mutually exclusive")
+
     return RangeCtx(
         from_date=from_date,
         to_date=to_date,
-        dow=cast(DowFilter, _coerce_enum(dow, get_args(DowFilter), "dow")),
-        time_band=cast(TimeBand, _coerce_enum(time_band, get_args(TimeBand), "time_band")),
+        dow=canonical_dow(dow),
+        time_band=resolved_time_band,
         service=cast(ServiceType, _coerce_enum(service, get_args(ServiceType), "service")),
         routes=tuple(cleaned),
+        hour=resolved_hour,
+        stop=_coerce_stop(stop),
+        direction=_coerce_direction(direction),
     )
 
 
@@ -221,16 +326,31 @@ def ctx_payload(ctx: RangeCtx) -> dict[str, Any]:
         "time_band": ctx.time_band,
         "service": ctx.service,
         "routes": list(ctx.routes),
+        "hour": hour_param(ctx.hour),
+        "stop": ctx.stop,
+        "dir": ctx.direction,
     }
+
+
+def hour_param(hour: tuple[int, int] | None) -> str | None:
+    """The URL spelling of an hour range: ``"7"`` for one hour, ``"7-9"`` for a range."""
+    if hour is None:
+        return None
+    return str(hour[0]) if hour[0] == hour[1] else f"{hour[0]}-{hour[1]}"
 
 
 def get_range_ctx(
     from_: str | None = Query(default=None, alias="from"),
     to: str | None = Query(default=None),
-    dow: DowFilter = Query(default="all"),
+    dow: str = Query(default="all", description="all, weekday, weekend, or a comma list of mon..sun"),
     time_band: TimeBand = Query(default="all"),
     service: ServiceType = Query(default="all"),
     routes: str | None = Query(default=None, description="Comma-separated route_codes"),
+    # Annotated, so a direct Python call without these arguments gets None
+    # rather than the Query marker object.
+    hour: Annotated[str | None, Query(description="0-23 or an inclusive range a-b; excludes time_band")] = None,
+    stop: Annotated[str | None, Query(description="GTFS stop_id")] = None,
+    dir_: Annotated[str | None, Query(alias="dir", description="GTFS direction_id, 0 or 1")] = None,
 ) -> RangeCtx:
     """FastAPI dependency: parse query params into a :class:`RangeCtx`.
 
@@ -245,6 +365,9 @@ def get_range_ctx(
         time_band=time_band,
         service=service,
         routes=routes.split(",") if routes else (),
+        hour=hour,
+        stop=stop,
+        direction=dir_,
     )
 
 
@@ -288,11 +411,14 @@ def dow_clause(
     next_param: int,
 ) -> tuple[str, list, int]:
     """``column`` is a date/timestamp column from which to derive day-of-week."""
-    if ctx.dow == "all":
+    days = dow_isodays(ctx.dow)
+    if days is None:
         return "TRUE", [], next_param
     if ctx.dow == "weekday":
         return f"EXTRACT(ISODOW FROM {column}::date) BETWEEN 1 AND 5", [], next_param
-    return f"EXTRACT(ISODOW FROM {column}::date) IN (6, 7)", [], next_param
+    # The day numbers come from canonical_dow's closed set, never raw input.
+    listed = ", ".join(str(day) for day in sorted(days))
+    return f"EXTRACT(ISODOW FROM {column}::date) IN ({listed})", [], next_param
 
 
 def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
@@ -320,12 +446,14 @@ def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     1=Monday..7=Sunday — the same ISODOW numbering Postgres's
     ``EXTRACT(ISODOW FROM ...)`` uses, so the weekday/weekend split matches.
     """
-    if ctx.dow == "all":
+    days = dow_isodays(ctx.dow)
+    if days is None:
         return "1", {}
     day_expr = "toDayOfWeek(toDate(captured_at, 'Asia/Tokyo'))"
     if ctx.dow == "weekday":
         return f"{day_expr} BETWEEN 1 AND 5", {}
-    return f"{day_expr} IN (6, 7)", {}
+    listed = ", ".join(str(day) for day in sorted(days))
+    return f"{day_expr} IN ({listed})", {}
 
 
 # ClickHouse expression normalizing `updates.scheduled_time` to a same-day,

@@ -11,6 +11,12 @@ describe("filter value labels", () => {
     expect(dowValueLabel("weekend", t)).toBe("Weekend/Holiday");
   });
 
+  it("names each day of a weekday list, in both languages", () => {
+    expect(dowValueLabel("mon,wed", t)).toBe("Mon, Wed");
+    expect(dowValueLabel("sat", t)).toBe("Sat");
+    expect(dowValueLabel("mon,wed", i18n.getFixedT("ja"))).toBe("月・水");
+  });
+
   it("maps service wire values onto their display copy", () => {
     expect(serviceValueLabel("平日", t)).toBe("Weekday"); // i18n-ignore: query contract
     expect(serviceValueLabel("土日祝", t)).toBe("Weekend/Holiday"); // i18n-ignore: query contract

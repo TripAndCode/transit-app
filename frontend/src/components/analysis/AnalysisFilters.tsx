@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../../api/hooks";
-import { useRangeContext, type TimeBand, type DowFilter } from "../../api/rangeContext";
+import { useScope, type TimeBand, type DowFilter } from "../../api/scope";
 import { ErrorBanner } from "../ErrorBanner";
 import { routeGroups, selectedGroup } from "./routeGroups";
 import { sameCodes } from "../../utils/sameCodes";
@@ -51,7 +51,7 @@ type Draft = { routes: string[]; from: string; to: string; dow: DowFilter; time_
  */
 export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
   const { t } = useTranslation("design");
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
 
   const live: Draft = {
     routes: ctx.routes, from: ctx.from, to: ctx.to, dow: ctx.dow, time_band: ctx.time_band,

@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { TimeBand } from "../../api/rangeContext";
+import type { TimeBand } from "../../api/scope";
 import type { RouteTrip } from "../../api/types";
 import { MOBILE_BREAKPOINT_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { StopRibbon } from "./StopRibbon";

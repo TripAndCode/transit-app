@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
-import { useRangeContext, isoDaysBefore } from "../api/rangeContext";
+import { useScope, isoDaysBefore } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
@@ -47,7 +47,7 @@ const panelId = (sub: SubTab) => `route-analysis-panel-${sub}`;
 export function RouteAnalysisTab() {
   const id = useAgencyId();
   const { t } = useTranslation("design");
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);
   const [params, setParams] = useSearchParams();
   const compare = params.get("compare") === "1";

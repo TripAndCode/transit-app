@@ -17,7 +17,7 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
-import { useRangeContext } from "../api/rangeContext";
+import { useScope } from "../api/scope";
 import { InlineSparkline } from "./InlineSparkline";
 import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
@@ -487,7 +487,7 @@ function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell
 
 export function RouteForecastSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
 
   const [tip, setTip] = useState<Tip>(null);
