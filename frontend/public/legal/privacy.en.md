@@ -8,7 +8,7 @@ Transit Delay App ("the Service") is run by TripAndCode, an individual. This pag
 
 - Name: TripAndCode (run by an individual)
 - Full name and address: provided without delay on request.
-- Contact: [contact form]({{CONTACT_FORM_URL}}). Replies come from an address used only for the Service. Bugs and requests are also welcome on [GitHub Issues](https://github.com/TripAndCode/transit-app/issues), but Issues are public, so please don't include personal information there.
+- Contact: [devyolouis@gmail.com](mailto:devyolouis@gmail.com), an address used only for the Service. Bugs and requests are also welcome on [GitHub Issues](https://github.com/TripAndCode/transit-app/issues), but Issues are public, so please don't include personal information there.
 
 ## What we collect and why
 

@@ -48,4 +48,4 @@ These terms are governed by Japanese law. The district court with jurisdiction o
 
 ## Contact
 
-Use the [contact form]({{CONTACT_FORM_URL}}). Bugs and requests are also welcome on [GitHub Issues](https://github.com/TripAndCode/transit-app/issues), but Issues are public, so please don't include personal information there.
+Email [devyolouis@gmail.com](mailto:devyolouis@gmail.com), an address used only for the Service. Bugs and requests are also welcome on [GitHub Issues](https://github.com/TripAndCode/transit-app/issues), but Issues are public, so please don't include personal information there.

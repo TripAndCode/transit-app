@@ -48,4 +48,4 @@
 
 ## 連絡先
 
-[お問い合わせフォーム]({{CONTACT_FORM_URL}})で受け付けます。バグや要望は [GitHub Issues](https://github.com/TripAndCode/transit-app/issues) でも受け付けますが、Issues は公開されるので、個人情報は書かないでください。
+[devyolouis@gmail.com](mailto:devyolouis@gmail.com)（本サービス専用のメールアドレス）で受け付けます。バグや要望は [GitHub Issues](https://github.com/TripAndCode/transit-app/issues) でも受け付けますが、Issues は公開されるので、個人情報は書かないでください。

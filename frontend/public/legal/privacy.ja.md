@@ -8,7 +8,7 @@ Transit Delay App（以下「本サービス」）は、TripAndCode が個人で
 
 - 名称：TripAndCode（個人による運営）
 - 氏名と住所：求めに応じて、遅滞なくお知らせします。
-- 連絡先：[お問い合わせフォーム]({{CONTACT_FORM_URL}})。返信は本サービス専用のメールアドレスから送ります。バグや要望は [GitHub Issues](https://github.com/TripAndCode/transit-app/issues) でも受け付けますが、Issues は公開されるので、個人情報は書かないでください。
+- 連絡先：[devyolouis@gmail.com](mailto:devyolouis@gmail.com)（本サービス専用のメールアドレス）。バグや要望は [GitHub Issues](https://github.com/TripAndCode/transit-app/issues) でも受け付けますが、Issues は公開されるので、個人情報は書かないでください。
 
 ## 集める情報と使いみち
 
