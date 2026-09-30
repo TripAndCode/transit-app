@@ -1,0 +1,99 @@
+// @vitest-environment node
+import { describe, expect, it } from "vitest";
+import { applyScopePatch, parseScope, presetScopePatch, scopeToQueryString, isoDaysBefore, toJstISO } from "./scope";
+
+const DEFAULTS = { from: "2026-09-01", to: "2026-09-30" };
+const parse = (qs: string) => parseScope(new URLSearchParams(qs), DEFAULTS);
+
+describe("parseScope", () => {
+  it("fills defaults for an empty URL", () => {
+    expect(parse("")).toEqual({
+      from: "2026-09-01", to: "2026-09-30", dow: "all", time_band: "all", service: "all", routes: [],
+      hour: null, stop: null, dir: null, late: null, early: null, compare: null,
+    });
+  });
+
+  it("reads every scope param", () => {
+    const s = parse("from=2026-08-20&to=2026-09-18&dow=mon,wed&service=%E5%B9%B3%E6%97%A5&routes=50,51&hour=7-9&stop=S1&dir=1&late=180&early=30&compare=prev");
+    expect(s).toMatchObject({ dow: "mon,wed", service: "平日", routes: ["50", "51"], hour: [7, 9], stop: "S1", dir: 1, late: 180, early: 30, compare: "prev" });
+  });
+
+  it("canonicalises weekday lists the way the API does", () => {
+    expect(parse("dow=wed,mon").dow).toBe("mon,wed");
+    expect(parse("dow=mon,tue,wed,thu,fri").dow).toBe("weekday");
+    expect(parse("dow=sun,sat").dow).toBe("weekend");
+    expect(parse("dow=mon,tue,wed,thu,fri,sat,sun").dow).toBe("all");
+  });
+
+  it("keeps hour and drops time_band when a link carries both", () => {
+    const s = parse("hour=7&time_band=morning");
+    expect(s.hour).toEqual([7, 7]);
+    expect(s.time_band).toBe("all");
+  });
+
+  it("falls back to the default for a hand-edited invalid value", () => {
+    const s = parse("from=2026-13-40&dow=funday&time_band=brunch&service=x&hour=25&dir=2&late=-5&early=abc&compare=yesterday");
+    expect(s).toMatchObject({ from: "2026-09-01", dow: "all", time_band: "all", service: "all", hour: null, dir: null, late: null, early: null, compare: null });
+  });
+
+  it("accepts a compare range and rejects a reversed one", () => {
+    expect(parse("compare=2026-08-01..2026-08-31").compare).toBe("2026-08-01..2026-08-31");
+    expect(parse("compare=2026-08-31..2026-08-01").compare).toBeNull();
+  });
+});
+
+describe("scopeToQueryString", () => {
+  it("round-trips every param in canonical form and omits defaults", () => {
+    const qs = "from=2026-08-20&to=2026-09-18&dow=mon%2Cwed&routes=50%2C51&hour=7-9&stop=S1&dir=1&late=180&early=30&compare=prev";
+    expect(scopeToQueryString(parse(qs))).toBe(qs);
+    expect(scopeToQueryString(parse(""))).toBe("from=2026-09-01&to=2026-09-30");
+  });
+
+  it("writes a single hour without a range", () => {
+    expect(new URLSearchParams(scopeToQueryString(parse("hour=8-8"))).get("hour")).toBe("8");
+  });
+});
+
+describe("applyScopePatch", () => {
+  it("preserves params it doesn't know", () => {
+    const next = applyScopePatch(new URLSearchParams("report=trend&sub_tab=marey&mode=agencies"), { dow: "sat" });
+    expect(next.get("report")).toBe("trend");
+    expect(next.get("sub_tab")).toBe("marey");
+    expect(next.get("mode")).toBe("agencies");
+    expect(next.get("dow")).toBe("sat");
+  });
+
+  it("clears on null and on a default value", () => {
+    const next = applyScopePatch(new URLSearchParams("dow=sat&stop=S1&routes=1"), { dow: "all", stop: null, routes: [] });
+    expect([...next.keys()]).toEqual([]);
+  });
+
+  it("keeps hour and time_band exclusive", () => {
+    expect(applyScopePatch(new URLSearchParams("time_band=morning"), { hour: [7, 8] }).has("time_band")).toBe(false);
+    expect(applyScopePatch(new URLSearchParams("hour=7"), { time_band: "evening" }).has("hour")).toBe(false);
+  });
+
+  it("drops an invalid value instead of writing it", () => {
+    const next = applyScopePatch(new URLSearchParams(""), { dir: 3 as never, late: 99999, dow: "funday" as never });
+    expect([...next.keys()]).toEqual([]);
+  });
+});
+
+describe("presetScopePatch", () => {
+  it("replaces the whole scope, clearing extras a pre-2.1 preset never stored", () => {
+    const stored = { from: "2026-08-01", to: "2026-08-31", dow: "weekday", time_band: "morning", service: "all", routes: ["50"] };
+    const next = applyScopePatch(new URLSearchParams("hour=7&stop=S1&routes=9&report=trend"), presetScopePatch(stored));
+    expect(next.get("time_band")).toBe("morning");
+    expect(next.get("routes")).toBe("50");
+    expect(next.has("hour")).toBe(false);
+    expect(next.has("stop")).toBe(false);
+    expect(next.get("report")).toBe("trend");
+  });
+});
+
+describe("JST helpers", () => {
+  it("still format and shift dates", () => {
+    expect(toJstISO(new Date("2026-09-29T20:00:00Z"))).toBe("2026-09-30");
+    expect(isoDaysBefore("2026-09-30", 29)).toBe("2026-09-01");
+  });
+});
