@@ -379,6 +379,12 @@
     },
     "route": "Route"
   },
+  "legal": {
+    "privacy": "Privacy Policy",
+    "terms": "Terms of Service",
+    "back": "Back",
+    "nav_label": "Legal"
+  },
   "help": {
     "title": "User Manual",
     "sections_nav": "Manual sections",

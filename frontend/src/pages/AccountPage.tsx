@@ -9,6 +9,7 @@ import { Card } from "../components/ui/Card";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Section } from "../components/ui/Section";
 import { Toolbar } from "../components/ui/Toolbar";
+import { LegalLinks } from "../components/LegalLinks";
 import { Modal } from "../components/Modal";
 
 type SessionRow = {
@@ -236,6 +237,9 @@ export function AccountPage() {
           {t("account.logout_error")}
         </div>
       )}
+      <div style={{ marginTop: 24, fontSize: "var(--text-sm)" }}>
+        <LegalLinks />
+      </div>
     </div>
   );
 }

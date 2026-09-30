@@ -1,6 +1,7 @@
 import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
+import { LegalLinks } from "../components/LegalLinks";
 import { LiveMapHero } from "./landing/LiveMapHero";
 import { ScrollNarrative } from "./landing/ScrollNarrative";
 import "./LandingPage.css";
@@ -44,6 +45,9 @@ export function LandingPage() {
         </div>
       </section>
       <ScrollNarrative />
+      <footer className="landing-footer">
+        <LegalLinks className="landing-footer__links" />
+      </footer>
     </div>
   );
 }

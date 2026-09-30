@@ -379,6 +379,12 @@
     },
     "route": "路線"
   },
+  "legal": {
+    "privacy": "プライバシーポリシー",
+    "terms": "利用規約",
+    "back": "戻る",
+    "nav_label": "規約"
+  },
   "help": {
     "title": "利用マニュアル",
     "sections_nav": "マニュアルの目次",
