@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, ctx_payload, get_range_ctx
+from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
     format_council_summary_text,
@@ -93,6 +94,34 @@ _REPORT_TYPES = (
     "delay_certificate",
 )
 
+_EARLY_TOLERANCE_TYPES = frozenset({"on_time", "council_summary"})
+_LATE_TOLERANCE_TYPES = frozenset({"on_time", "worst_5min", "council_summary"})
+
+# What each report's rows actually filter on. compare_ranking and the dow_*
+# reports fix dow/service themselves; dwell_run cannot split by time band.
+_REPORT_HONOURS: dict[str, tuple[str, ...]] = {
+    "ranking": ALL_SIX,
+    "ranking_best": ALL_SIX,
+    "on_time": ALL_SIX,
+    "worst_5min": ALL_SIX,
+    "trend": ALL_SIX,
+    "compare_ranking": ("from", "to", "time_band", "routes"),
+    "dow_weekend": ("from", "to", "time_band", "routes"),
+    "dow_weekday": ("from", "to", "time_band", "routes"),
+    "dwell_run": ("from", "to", "dow", "service", "routes"),
+    "council_summary": ALL_SIX,
+    "delay_certificate": ALL_SIX,
+}
+
+
+def report_scope_applied(report_type: str) -> dict[str, bool]:
+    honoured = list(_REPORT_HONOURS[report_type])
+    if report_type in _LATE_TOLERANCE_TYPES:
+        honoured.append("late")
+    if report_type in _EARLY_TOLERANCE_TYPES:
+        honoured.append("early")
+    return scope_applied(*honoured)
+
 
 class ReportMeta(BaseModel):
     """Listing entry returned by ``GET /reports``."""
@@ -132,6 +161,7 @@ class ReportResponse(BaseModel):
     # so a caller comparing two responses can check the definition matches
     # instead of assuming it does.
     definition: DefinitionMeta
+    scope_applied: dict[str, bool]
 
 
 def _report_ctx(ctx: RangeCtx) -> ReportCtx:
@@ -697,6 +727,20 @@ async def get_report(
         "on_time/council_summary, 300s for worst_5min). Passing this opts into a query-time "
         "histogram estimate instead of the exact legacy_60s column.",
     ),
+    late: int | None = Query(
+        default=None,
+        ge=0,
+        le=3600,
+        description="The scope's late tolerance in seconds. Applied where the report has one "
+        "(on_time, worst_5min, council_summary); otherwise ignored and reported false in scope_applied.",
+    ),
+    early: int | None = Query(
+        default=None,
+        ge=0,
+        le=3600,
+        description="The scope's early tolerance in seconds. Applied by on_time and council_summary; "
+        "otherwise ignored and reported false in scope_applied.",
+    ),
     threshold_sec: int | None = Query(
         default=None,
         ge=0,
@@ -714,6 +758,15 @@ async def get_report(
     if report_type not in _REPORT_TYPES:
         raise HTTPException(status_code=404, detail=f"Unknown report type '{report_type}'")
 
+    if late is not None and late_tolerance_sec is not None:
+        raise HTTPException(status_code=400, detail="late and late_tolerance_sec set the same tolerance; pass one")
+    if early is not None and early_tolerance_sec is not None:
+        raise HTTPException(status_code=400, detail="early and early_tolerance_sec set the same tolerance; pass one")
+    if late is not None and report_type in _LATE_TOLERANCE_TYPES:
+        late_tolerance_sec = late
+    if early is not None and report_type in _EARLY_TOLERANCE_TYPES:
+        early_tolerance_sec = early
+
     if preset is not None:
         if early_tolerance_sec is not None or late_tolerance_sec is not None:
             raise HTTPException(
@@ -722,11 +775,11 @@ async def get_report(
         if preset not in ON_TIME_PRESETS:
             raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
         early_tolerance_sec, late_tolerance_sec = ON_TIME_PRESETS[preset]
-    if early_tolerance_sec is not None and report_type not in ("on_time", "council_summary"):
+    if early_tolerance_sec is not None and report_type not in _EARLY_TOLERANCE_TYPES:
         raise HTTPException(
             status_code=400, detail="early_tolerance_sec only applies to the on_time/council_summary reports"
         )
-    if late_tolerance_sec is not None and report_type not in ("on_time", "worst_5min", "council_summary"):
+    if late_tolerance_sec is not None and report_type not in _LATE_TOLERANCE_TYPES:
         raise HTTPException(
             status_code=400, detail="late_tolerance_sec only applies to the on_time/worst_5min/council_summary reports"
         )
@@ -802,6 +855,7 @@ async def get_report(
             rows=[{"days": days, "hourly": hourly, "dow_band": dow_band, "revision_boundaries": revision_boundaries}],
             ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "dwell_run":
         payload = await compute_dwell_run_decomposition(agency_id, ctx, conn)
@@ -822,6 +876,7 @@ async def get_report(
             rows=[payload],
             ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "council_summary":
         agency_row = await conn.fetchrow("SELECT agency_name FROM agencies WHERE agency_id = $1", agency_id)
@@ -857,6 +912,7 @@ async def get_report(
             rows=[row],
             ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
@@ -874,6 +930,7 @@ async def get_report(
             rows=rows,
             ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     else:
         raise HTTPException(status_code=500, detail="unreachable")
@@ -889,4 +946,5 @@ async def get_report(
         rows=rows,
         ctx=_report_ctx(ctx),
         definition=definition,
+        scope_applied=report_scope_applied(report_type),
     )
