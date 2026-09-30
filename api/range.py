@@ -36,7 +36,6 @@ def jst_today() -> date:
     return datetime.now(_JST).date()
 
 
-DowFilter = Literal["all", "weekday", "weekend"]
 TimeBand = Literal[
     "all",
     "morning",
@@ -48,6 +47,50 @@ TimeBand = Literal[
     "late_night",
 ]
 ServiceType = Literal["all", "平日", "土日祝"]
+
+WEEKDAY_NAMES: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+# ISO weekday sets (1=Monday..7=Sunday) of the legacy dow groups. A weekday
+# list that equals one of these is stored as the group's name, so every
+# reader that branches on "weekday"/"weekend" keeps working unchanged.
+_DOW_GROUPS: dict[str, frozenset[int]] = {
+    "weekday": frozenset(range(1, 6)),
+    "weekend": frozenset({6, 7}),
+    "all": frozenset(range(1, 8)),
+}
+
+_DOW_ERROR = "invalid dow: expected all, weekday, weekend, or a comma list of mon..sun"
+
+
+def canonical_dow(value: object) -> str:
+    """Validate a ``dow`` value into its one canonical spelling.
+
+    A comma list of weekday names is de-duplicated, put in Monday-first
+    order, and folded into ``weekday``/``weekend``/``all`` when it names
+    exactly that group. Anything else is a 422, like the other enums.
+    """
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=_DOW_ERROR)
+    if value in ("all", "weekday", "weekend"):
+        return value
+    names = value.split(",")
+    if any(name not in WEEKDAY_NAMES for name in names):
+        raise HTTPException(status_code=422, detail=_DOW_ERROR)
+    days = frozenset(WEEKDAY_NAMES.index(name) + 1 for name in names)
+    for group, members in _DOW_GROUPS.items():
+        if days == members:
+            return group
+    return ",".join(WEEKDAY_NAMES[day - 1] for day in sorted(days))
+
+
+def dow_isodays(dow: str) -> frozenset[int] | None:
+    """The ISO weekdays a canonical ``dow`` selects; ``None`` means every day."""
+    if dow == "all":
+        return None
+    if dow in _DOW_GROUPS:
+        return _DOW_GROUPS[dow]
+    return frozenset(WEEKDAY_NAMES.index(name) + 1 for name in dow.split(","))
+
 
 # (start_inclusive, end_exclusive) clock times as 'HH:MM' strings. Migration
 # 0011 made `scheduled_time` a TIME column, so `time_band_case_sql` casts both
@@ -81,7 +124,8 @@ class RangeCtx:
 
     from_date: date
     to_date: date
-    dow: DowFilter = "all"
+    # Canonical per canonical_dow: a legacy group or a Monday-first weekday list.
+    dow: str = "all"
     time_band: TimeBand = "all"
     service: ServiceType = "all"
     routes: tuple[str, ...] = ()
@@ -161,7 +205,8 @@ def clamp_range_ctx(
     * a reversed range is swapped rather than rejected;
     * a window wider than :data:`MAX_RANGE_DAYS` is clamped at the *start*,
       preserving the most recent data;
-    * unknown ``dow``/``time_band``/``service`` values are a 422;
+    * unknown ``dow``/``time_band``/``service`` values are a 422; a weekday
+      list is canonicalised (see :func:`canonical_dow`);
     * routes are stripped, de-duplicated preserving order, and capped at
       :data:`MAX_ROUTE_FILTERS` to bound the query and the JSON envelope.
     """
@@ -197,7 +242,7 @@ def clamp_range_ctx(
     return RangeCtx(
         from_date=from_date,
         to_date=to_date,
-        dow=cast(DowFilter, _coerce_enum(dow, get_args(DowFilter), "dow")),
+        dow=canonical_dow(dow),
         time_band=cast(TimeBand, _coerce_enum(time_band, get_args(TimeBand), "time_band")),
         service=cast(ServiceType, _coerce_enum(service, get_args(ServiceType), "service")),
         routes=tuple(cleaned),
@@ -227,7 +272,7 @@ def ctx_payload(ctx: RangeCtx) -> dict[str, Any]:
 def get_range_ctx(
     from_: str | None = Query(default=None, alias="from"),
     to: str | None = Query(default=None),
-    dow: DowFilter = Query(default="all"),
+    dow: str = Query(default="all", description="all, weekday, weekend, or a comma list of mon..sun"),
     time_band: TimeBand = Query(default="all"),
     service: ServiceType = Query(default="all"),
     routes: str | None = Query(default=None, description="Comma-separated route_codes"),
@@ -288,11 +333,14 @@ def dow_clause(
     next_param: int,
 ) -> tuple[str, list, int]:
     """``column`` is a date/timestamp column from which to derive day-of-week."""
-    if ctx.dow == "all":
+    days = dow_isodays(ctx.dow)
+    if days is None:
         return "TRUE", [], next_param
     if ctx.dow == "weekday":
         return f"EXTRACT(ISODOW FROM {column}::date) BETWEEN 1 AND 5", [], next_param
-    return f"EXTRACT(ISODOW FROM {column}::date) IN (6, 7)", [], next_param
+    # The day numbers come from canonical_dow's closed set, never raw input.
+    listed = ", ".join(str(day) for day in sorted(days))
+    return f"EXTRACT(ISODOW FROM {column}::date) IN ({listed})", [], next_param
 
 
 def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
@@ -320,12 +368,14 @@ def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     1=Monday..7=Sunday — the same ISODOW numbering Postgres's
     ``EXTRACT(ISODOW FROM ...)`` uses, so the weekday/weekend split matches.
     """
-    if ctx.dow == "all":
+    days = dow_isodays(ctx.dow)
+    if days is None:
         return "1", {}
     day_expr = "toDayOfWeek(toDate(captured_at, 'Asia/Tokyo'))"
     if ctx.dow == "weekday":
         return f"{day_expr} BETWEEN 1 AND 5", {}
-    return f"{day_expr} IN (6, 7)", {}
+    listed = ", ".join(str(day) for day in sorted(days))
+    return f"{day_expr} IN ({listed})", {}
 
 
 # ClickHouse expression normalizing `updates.scheduled_time` to a same-day,
