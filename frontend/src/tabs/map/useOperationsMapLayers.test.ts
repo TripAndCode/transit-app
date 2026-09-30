@@ -306,8 +306,8 @@ describe("flowDashArrayAtPhase (pure builder)", () => {
 });
 
 describe("active route line: gradient, casing and the calm flow overlay", () => {
-  const LIGHT_ACCENT = "#187b80";
-  const DARK_ACCENT = "#43c5ba";
+  const LIGHT_ACCENT = "#2750C2";
+  const DARK_ACCENT = "#86A2FF";
 
   afterEach(() => {
     document.documentElement.style.removeProperty("--accent");
@@ -467,8 +467,8 @@ describe("active route line: gradient, casing and the calm flow overlay", () => 
 });
 
 describe("a theme toggle repaints layers whose source already exists", () => {
-  const LIGHT = { "--accent": "#187b80", "--bg-surface": "#ffffff", "--delay-severe": "#A8391F" };
-  const DARK = { "--accent": "#43c5ba", "--bg-surface": "#141726", "--delay-severe": "#F0837A" };
+  const LIGHT = { "--accent": "#2750C2", "--bg-surface": "#ffffff", "--delay-severe": "#A8391F" };
+  const DARK = { "--accent": "#86A2FF", "--bg-surface": "#131B26", "--delay-severe": "#F0837A" };
 
   function paintTokens(tokens: typeof LIGHT) {
     for (const [prop, value] of Object.entries(tokens)) document.documentElement.style.setProperty(prop, value);

@@ -396,7 +396,7 @@ export function Sidebar() {
           <span
             style={{
               fontFamily: "var(--font-display)",
-              fontWeight: 600,
+              fontWeight: 700,
               fontSize: "var(--text-base)",
               letterSpacing: "0.01em",
             }}

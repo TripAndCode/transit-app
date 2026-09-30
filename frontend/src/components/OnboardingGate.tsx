@@ -92,7 +92,7 @@ export function OnboardingGate() {
           <h1
             style={{
               fontFamily: "var(--font-display)",
-              fontWeight: 600,
+              fontWeight: 700,
               fontSize: 22,
               margin: 0,
               letterSpacing: "0.01em",

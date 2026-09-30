@@ -76,7 +76,7 @@
    in the signed-in shell. */
 .landing-hero__brand {
   font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: 700;
   font-size: 18px;
   letter-spacing: 0.02em;
   color: var(--brand);
@@ -93,7 +93,7 @@
 .landing-hero__title {
   margin: 4px 0 0;
   font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: 700;
   font-size: clamp(28px, 3.4vw, 46px);
   line-height: 1.3;
   letter-spacing: 0.01em;

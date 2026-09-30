@@ -29,7 +29,7 @@ function resolvePalette(el: Element): HeroPalette {
     text: color("--text-primary", "#2a2a2a"),
     muted: color("--text-tertiary", "#6e6e6e"),
     rule: color("--border-subtle", "#e2e2e0"),
-    accent: color("--accent", "#187b80"),
+    accent: color("--accent", "#2750C2"),
     delay: {
       ok: DELAY_RAMP.ok,
       mild: DELAY_RAMP.mild,

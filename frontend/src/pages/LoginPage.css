@@ -56,7 +56,7 @@ body:has(.login-shell),
 }
 .login-card__brand-title {
   font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: 700;
   font-size: 18px;
   letter-spacing: 0.01em;
   color: var(--text-primary);

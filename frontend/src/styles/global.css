@@ -1,23 +1,31 @@
 :root {
-  --bg-page: #fafaf8;
-  --bg-surface: #ffffff;
-  --bg-soft: #f5f4f0;
-  --border-soft: #eeeeee;
-  --border-subtle: #e2e2e0;
-  --text-primary: #2a2a2a;
-  --text-secondary: #6a6a6a;
-  /* Was #9a9a9a (2.81:1 vs --bg-surface) -- failed WCAG AA (4.5:1) for normal
-     text. Retuned to clear 4.5:1 against every background this token is
-     actually used on (--bg-surface and the slightly-lighter --bg-soft). */
-  --text-tertiary: #6E6E6E;
-  /* One accent for the whole product, light and dark: the shell teal. It used
-     to be declared here as a blue-purple and then overridden inside
-     `.app-shell`, so signed-in and pre-auth surfaces carried two different
-     brands. Any scoped redefinition of --accent re-opens that split and is
-     asserted against in tokens.test.ts. */
-  --accent: #187b80;
-  --accent-soft: #e1f1f1;
-  --on-accent: #ffffff;
+  /* Cool paper and ink, like transport signage: the ground is a pale blue-grey
+     rather than a warm cream, and every text level clears WCAG AA (4.5:1) on
+     --bg-surface, --bg-soft and --bg-page (asserted in tokens.test.ts). */
+  --bg-page: #F1F4F7;
+  --bg-surface: #FFFFFF;
+  --bg-soft: #E8ECF1;
+  --border-soft: #E5E9EF;
+  --border-subtle: #D6DDE6;
+  --text-primary: #0F1A2A;
+  --text-secondary: #435166;
+  --text-tertiary: #5E6B80;
+  /* One accent for the whole product, light and dark: signage blue, for
+     interaction and selection only -- never for delay magnitude, which has
+     its own ramp (--d0..--d4). Any scoped redefinition of --accent would
+     fork the identity and is asserted against in tokens.test.ts. */
+  --accent: #2750C2;
+  --accent-soft: #E2E9FA;
+  --on-accent: #FFFFFF;
+  /* Delay magnitude, calm to heavy: < 1.5, < 2.5, < 3.5, < 5 and >= 5
+     minutes. Magnitude, never alarm: rust is reserved for the last step.
+     --none fills a cell with no observations. */
+  --d0: #D7EDE7;
+  --d1: #A6D5C7;
+  --d2: #F0CD7A;
+  --d3: #E39556;
+  --d4: #BC523A;
+  --none: #EEF1F5;
   /* The former accent, kept as a separate identity rather than a second one:
      it marks a route (the operations route badge) and the pre-auth wordmark,
      and nothing else. --on-brand is theme-split because the dark brand is
@@ -62,7 +70,7 @@
      text against --bg-surface/--bg-soft, well under WCAG AA. Darkened along
      the same amber hue rather than desaturating to grey. Dark theme reuses
      --color-warning itself -- see the dark declaration. */
-  --color-warning-text: #89691F;
+  --color-warning-text: #81631D;
   /* Reserved for destructive-action buttons only (delete/remove controls) --
      an alarm red the calm-UI rule otherwise rules out. Any other severity
      signal (a stale feed, an error message, a danger-zone heading) uses
@@ -73,7 +81,7 @@
      family as --accent by contract (tokens.test.ts): a different family here
      would give the app two accents again, one per weight. Clears 4.5:1 as
      text on both --bg-surface and --bg-soft. */
-  --accent-strong: #115E62;
+  --accent-strong: #1A378C;
   /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
      distinct from --delay-severe, which stays the map's own per-point
      severity ramp; this is specifically for aggregate counts. */
@@ -126,9 +134,9 @@
      than desaturating to grey. The severe tier needs no text variant: it is
      already per-theme and AA-passing (--delay-severe above). Each theme's
      values are tuned per tier to clear AA on every surface they land on. */
-  --delay-text-ok: #217857;
-  --delay-text-mild: #85661E;
-  --delay-text-moderate: #AC4F22;
+  --delay-text-ok: #207454;
+  --delay-text-mild: #81631D;
+  --delay-text-moderate: #A74D21;
   /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
      ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
@@ -222,34 +230,40 @@
   --z-toast: 600;
   /* Identity moments only: the brand wordmark, the Welcome headline, and a
      single-sentence "story" line. Everything else — body copy, tables,
-     data labels, section headings — uses --font-body. */
-  --font-display: "Noto Serif JP", "Times New Roman", serif;
-  --font-body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
-               "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+     data labels, section headings — uses --font-body. The same universal-
+     design face as the body, set heavier, so identity comes from weight and
+     size rather than a second family. */
+  --font-display: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  --font-body: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo,
+               system-ui, sans-serif;
+  /* Figures in aligned columns (see .num). Condensed so a column of minutes
+     stays narrow; Japanese in the same run falls back to the body face. */
+  --font-num: "Barlow Semi Condensed", "BIZ UDPGothic", system-ui, sans-serif;
   /* Identifiers that are read character by character — a user id, a route
-     code, a hash — where proportional digits and an ambiguous 1/l/I cost the
-     reader a second look. Not for anything with prose in it. */
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+     code, a hash, a clock time — where proportional digits and an ambiguous
+     1/l/I cost the reader a second look. Not for anything with prose in it. */
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root[data-theme="dark"] {
-  --bg-page: #0F1119;
-  --bg-surface: #141726;
-  --bg-soft: #202642;
-  --border-soft: #343B5B;
-  --border-subtle: #414A70;
-  --text-primary: #FAFAFF;
-  --text-secondary: #E5E7F2;
-  /* Was #5A607A (2.87:1 vs --bg-surface, 2.62:1 vs --bg-soft) -- failed WCAG
-     AA (4.5:1) for normal text in both places this token is used against.
-     Retuned to clear 4.5:1 on both while keeping the same purple-blue hue
-     family as --text-primary/--text-secondary (blended toward --text-secondary
-     rather than desaturating to neutral grey). */
-  --text-tertiary: #C9CBDA;
-  /* Dark counterpart of the single teal accent. */
-  --accent: #43c5ba;
-  --accent-soft: #183b3d;
-  --on-accent: #071a16;
+  --bg-page: #0C1219;
+  --bg-surface: #131B26;
+  --bg-soft: #1A2431;
+  --border-soft: #1F2A37;
+  --border-subtle: #283444;
+  --text-primary: #E6ECF4;
+  --text-secondary: #AAB6C7;
+  --text-tertiary: #95A1B3;
+  /* Dark counterpart of the single signage-blue accent. */
+  --accent: #86A2FF;
+  --accent-soft: #1C2847;
+  --on-accent: #0C1219;
+  --d0: #1E3934;
+  --d1: #2C6758;
+  --d2: #8C7331;
+  --d3: #A45E2E;
+  --d4: #B84F3A;
+  --none: #18212D;
   --brand: #7E8CD0;
   /* Dark ink, not white: the dark brand is light enough that white on it
      lands around 3.2:1. */
@@ -279,7 +293,7 @@
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
      --bg-soft -- re-check contrast if this color or those tokens change.
      Stays in --accent's hue family; see the light declaration. */
-  --accent-strong: #6FD8CC;
+  --accent-strong: #BCCBFF;
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
      --bg-soft -- re-check contrast if this color or those tokens change. */
   --delay-flag: #E08A54;
@@ -459,6 +473,7 @@ body {
    in a fixed-width slot — never to a large standalone number, which reads
    better with proportional figures. */
 .num {
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
 }
 
