@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { TimeBand } from "../api/rangeContext";
+import type { TimeBand } from "../api/scope";
 
 /**
  * The 8 time-band filter choices, in display order. Single source of truth

@@ -4,7 +4,8 @@ import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { useReport, useConversations, useConversation, useAppendMessage } from "./hooks";
-import type { RangeCtx } from "./rangeContext";
+import type { Scope } from "./scope";
+import { SCOPE_EXTRAS_NONE } from "./scope";
 import type { AnonThread, Conversation, DefinitionMeta, ReportResponse } from "./types";
 
 void i18n.changeLanguage("en");
@@ -55,8 +56,8 @@ function report(): ReportResponse {
   return { report_type: "trend", rendered_at: "x", text: "", rows: [], definition: DEFINITION };
 }
 
-function baseCtx(): RangeCtx {
-  return { from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all", service: "all", routes: [] };
+function baseCtx(): Scope {
+  return { ...SCOPE_EXTRAS_NONE, from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all", service: "all", routes: [] };
 }
 
 function withProviders(queryClient: QueryClient) {
@@ -100,6 +101,12 @@ describe("ctxKey (observed via useReport's cache identity)", () => {
     ["time_band", { ...baseCtx(), time_band: "morning" as const }],
     ["service", { ...baseCtx(), service: "平日" as const }],
     ["routes", { ...baseCtx(), routes: ["R1"] }],
+    ["hour", { ...baseCtx(), hour: [7, 7] as [number, number] }],
+    ["stop", { ...baseCtx(), stop: "S1" }],
+    ["dir", { ...baseCtx(), dir: 1 as const }],
+    ["late", { ...baseCtx(), late: 180 }],
+    ["early", { ...baseCtx(), early: 30 }],
+    ["compare", { ...baseCtx(), compare: "prev" }],
   ])("treats a ctx differing only in %s as a distinct query", async (_dimension, variant) => {
     mockApiGet.mockResolvedValue(report());
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

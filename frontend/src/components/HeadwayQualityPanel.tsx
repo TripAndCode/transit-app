@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useHeadwayQuality } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
-import type { RangeCtx } from "../api/rangeContext";
+import type { Scope } from "../api/scope";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { SHARED_TABLE, th, td } from "./tableStyles";
@@ -29,7 +29,7 @@ function fmtCov(v: number | null): string {
   return v == null ? "—" : v.toFixed(2);
 }
 
-export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) {
+export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
   const { format: formatRoute } = useRouteNames(aid);
   const { data, isLoading, error, refetch } = useHeadwayQuality(aid, ctx, true);

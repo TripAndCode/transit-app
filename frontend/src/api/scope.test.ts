@@ -1,6 +1,15 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { applyScopePatch, parseScope, presetScopePatch, scopeToQueryString, isoDaysBefore, toJstISO } from "./scope";
+import {
+  applyScopePatch,
+  isoDaysAgo,
+  isoDaysBefore,
+  jstYearMonth,
+  parseScope,
+  presetScopePatch,
+  scopeToQueryString,
+  toJstISO,
+} from "./scope";
 
 const DEFAULTS = { from: "2026-09-01", to: "2026-09-30" };
 const parse = (qs: string) => parseScope(new URLSearchParams(qs), DEFAULTS);
@@ -91,9 +100,38 @@ describe("presetScopePatch", () => {
   });
 });
 
-describe("JST helpers", () => {
-  it("still format and shift dates", () => {
-    expect(toJstISO(new Date("2026-09-29T20:00:00Z"))).toBe("2026-09-30");
-    expect(isoDaysBefore("2026-09-30", 29)).toBe("2026-09-01");
+describe("JST date helpers", () => {
+  it("formats a Date as YYYY-MM-DD in JST", () => {
+    // 2024-03-10T15:30:00Z is 2024-03-11 00:30 JST (UTC+9).
+    expect(toJstISO(new Date("2024-03-10T15:30:00Z"))).toBe("2024-03-11");
+  });
+
+  it("returns a calendar date `days` before today in ISO form", () => {
+    const today = toJstISO(new Date());
+    const sevenAgo = isoDaysAgo(7);
+    expect(sevenAgo).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(sevenAgo < today).toBe(true);
+  });
+
+  it("derives the JST year and 1-based month", () => {
+    // 2023-12-31T16:00:00Z is 2024-01-01 01:00 JST → year rolls over.
+    expect(jstYearMonth(new Date("2023-12-31T16:00:00Z"))).toEqual({
+      year: 2024,
+      month: 1,
+    });
+  });
+});
+
+describe("isoDaysBefore", () => {
+  it("subtracts calendar days from a given ISO date, not from now", () => {
+    expect(isoDaysBefore("2026-06-15", 29)).toBe("2026-05-17");
+  });
+
+  it("handles a month boundary", () => {
+    expect(isoDaysBefore("2026-03-01", 1)).toBe("2026-02-28");
+  });
+
+  it("handles days=0 (returns the same date)", () => {
+    expect(isoDaysBefore("2026-06-15", 0)).toBe("2026-06-15");
   });
 });

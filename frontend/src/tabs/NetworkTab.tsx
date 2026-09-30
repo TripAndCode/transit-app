@@ -1,7 +1,7 @@
 import { useRef, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
-import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
+import { scopeToQueryString, useScope } from "../api/scope";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
 import { AsyncSection } from "../components/AsyncSection";
@@ -197,7 +197,7 @@ export function NetworkTab() {
   const { t, i18n } = useTranslation();
   const { agencyId } = useParams();
   const currentAgencyId = agencyId ? Number(agencyId) : null;
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
   const [ridershipWeightedParam, setRidershipWeightedParam] = useUrlState<"1" | "0">("ridership_weighted", "0");
   const showRidershipWeighted = ridershipWeightedParam === "1";
@@ -210,7 +210,7 @@ export function NetworkTab() {
 
   // Carry the full current range into each agency's Overview, matching how
   // Sidebar/AnalysisTab build agency links (proper encoding; "all" dims omitted).
-  const filterQS = ctxToQueryString(ctx);
+  const filterQS = scopeToQueryString(ctx);
   const suffix = filterQS ? `?${filterQS}` : "";
 
   const ordered = data ? [...data.agencies].sort(byDelayDescending) : [];

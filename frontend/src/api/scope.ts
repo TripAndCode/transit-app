@@ -35,7 +35,7 @@ export const SCOPE_EXTRAS_NONE = { hour: null, stop: null, dir: null, late: null
 const SCOPE_PARAMS = ["from", "to", "dow", "time_band", "service", "routes", "hour", "stop", "dir", "late", "early", "compare"] as const;
 type ScopeParam = (typeof SCOPE_PARAMS)[number];
 
-const WEEKDAYS: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+export const WEEKDAYS: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const TIME_BANDS: readonly string[] = ["all", "morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"];
 const SERVICES: readonly string[] = ["all", "平日", "土日祝"]; // i18n-ignore: query contract
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;

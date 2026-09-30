@@ -10,7 +10,7 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useWeatherDelay } from "../api/hooks";
-import type { RangeCtx } from "../api/rangeContext";
+import type { Scope } from "../api/scope";
 import type { WeatherDelayBucket } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -28,7 +28,7 @@ function fmtDeltaSec(v: number | null, t: TFunction): string {
   return t("common.unit_sec_signed", { sign: v < 0 ? "-" : "+", value: Math.abs(v).toFixed(1) });
 }
 
-export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) {
+export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
   const { data, isLoading, error, refetch } = useWeatherDelay(aid, ctx, true);
 

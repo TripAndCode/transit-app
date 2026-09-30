@@ -364,6 +364,7 @@
     "rel_minutes_ago": "{{count}}m ago",
     "rel_seconds_ago": "{{count}}s ago",
     "range_separator": "–",
+    "list_separator": ", ",
     "language_aria": "Language",
     "language_switch_error": "Couldn't switch the language. Please check your connection and try again.",
     "theme_aria": "Appearance",

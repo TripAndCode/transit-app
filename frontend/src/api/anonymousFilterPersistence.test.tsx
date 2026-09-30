@@ -29,7 +29,7 @@ function renderProbe(agencyId: number | null, initialPath: string) {
 
 // Mirrors AgencyPicker's `selectAgency`, which navigates to the same or a
 // different agency without preserving any filter query params (unlike
-// Sidebar's nav links, which always carry `ctxToQueryString`).
+// Sidebar's nav links, which always carry `scopeToQueryString`).
 function NavigatingProbe({ agencyId }: { agencyId: number }) {
   useAnonymousFilterPersistence(agencyId);
   const navigate = useNavigate();

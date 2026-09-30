@@ -3,7 +3,8 @@ import { screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RoutesToCheckList } from "./RoutesToCheckList";
-import * as rangeContext from "../api/rangeContext";
+import * as scopeModule from "../api/scope";
+import { SCOPE_EXTRAS_NONE } from "../api/scope";
 import type { OverviewTopDelayedRoute } from "../api/types";
 
 function routes(): OverviewTopDelayedRoute[] {
@@ -14,7 +15,7 @@ function routes(): OverviewTopDelayedRoute[] {
   ];
 }
 
-// RoutesToCheckList calls useRangeContext (react-router-dom's useSearchParams
+// RoutesToCheckList calls useScope (react-router-dom's useSearchParams
 // under the hood), so — matching the existing pattern in
 // RouteForecastSection.test.tsx — every render needs a <MemoryRouter>.
 function renderList(rs: OverviewTopDelayedRoute[]) {
@@ -84,8 +85,8 @@ describe("RoutesToCheckList", () => {
 
   it("narrows the shared route filter to the clicked route", () => {
     const update = vi.fn();
-    vi.spyOn(rangeContext, "useRangeContext").mockReturnValue([
-      { from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
+    vi.spyOn(scopeModule, "useScope").mockReturnValue([
+      { ...SCOPE_EXTRAS_NONE, from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
       update,
     ]);
     renderList(routes());
@@ -97,8 +98,8 @@ describe("RoutesToCheckList", () => {
 
   it("narrows the filter on Enter and Space, but not on other keys", () => {
     const update = vi.fn();
-    vi.spyOn(rangeContext, "useRangeContext").mockReturnValue([
-      { from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
+    vi.spyOn(scopeModule, "useScope").mockReturnValue([
+      { ...SCOPE_EXTRAS_NONE, from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
       update,
     ]);
     renderList(routes());

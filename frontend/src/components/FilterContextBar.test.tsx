@@ -29,6 +29,12 @@ describe("FilterContextBar", () => {
     expect(screen.getByText("2026-06-01 – 2026-07-15")).toBeInTheDocument();
   });
 
+  it("names the days of a weekday list instead of calling it the weekend", () => {
+    renderBar({ from_date: "2026-06-01", to_date: "2026-07-15", dow: "mon,wed", time_band: "all", routes: [] });
+    expect(screen.getByText(/Mon, Wed/)).toBeInTheDocument();
+    expect(screen.queryByText(/Weekend/)).toBeNull();
+  });
+
   it("sets both date inputs' lang attribute to the active UI language when editing", () => {
     renderBar({ from_date: "2026-06-01", to_date: "2026-07-15", dow: "all", time_band: "all", routes: [] });
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));

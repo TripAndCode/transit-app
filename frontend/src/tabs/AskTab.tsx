@@ -24,7 +24,7 @@ import {
   useFollowup,
   useFollowupEnabled,
 } from "../api/hooks";
-import { isoDaysBefore, useRangeContext } from "../api/rangeContext";
+import { isoDaysBefore, useScope } from "../api/scope";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { conversationsAnon } from "../api/conversationsAnon";
@@ -46,7 +46,7 @@ export function AskTab() {
   const { t } = useTranslation();
   const id = useAgencyId();
   const navigate = useNavigate();
-  const [rangeCtx] = useRangeContext();
+  const [rangeCtx] = useScope();
   const routeNames = useRouteNames(id);
 
   // ── Thread state ──────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import type { TimeBand } from "./rangeContext";
+import type { DowFilter, TimeBand } from "./scope";
 
 export type Agency = {
   agency_id: number;
@@ -136,6 +136,7 @@ type UnobservedStop = {
 };
 
 export type RouteShapeResponse = {
+  scope_applied?: ScopeApplied;
   route: string;
   /**
    * Real road geometry from GTFS shapes when loaded; null otherwise.
@@ -215,6 +216,7 @@ export type RouteTrip = {
 };
 
 export type RouteTripsResponse = {
+  scope_applied?: ScopeApplied;
   date: string | null;
   time_band: TimeBand;
   /** True when the route ran more trips than the endpoint will return, or its
@@ -385,7 +387,13 @@ export type TrendPayload = {
   revision_boundaries?: RevisionBoundaries;
 };
 
+/** Which scope fields the endpoint honoured, keyed by URL param name
+ *  (api/scope_applied.py): a condition set in the scope but false here was
+ *  not applied by this screen. */
+export type ScopeApplied = Partial<Record<string, boolean>>;
+
 type ReportEnvelope<T extends ReportType, Row> = {
+  scope_applied?: ScopeApplied;
   report_type: T;
   rendered_at: string;
   text: string;
@@ -421,6 +429,7 @@ type HeadwayQualityRow = {
 };
 
 export type HeadwayQualityResponse = {
+  scope_applied?: ScopeApplied;
   rows: HeadwayQualityRow[];
   ctx: ResponseCtx;
 };
@@ -450,6 +459,7 @@ export type PerformanceStandardRow = {
 };
 
 export type PerformanceStandardsResponse = {
+  scope_applied?: ScopeApplied;
   rows: PerformanceStandardRow[];
   ctx: ResponseCtx;
   disclaimer: string;
@@ -504,6 +514,7 @@ export type WeatherDelayBucket = {
  *  backend started populating it, and may also be an empty array; treat
  *  both the same as "nothing to show". */
 export type WeatherDelayResponse = {
+  scope_applied?: ScopeApplied;
   available: boolean;
   station: WeatherStation | null;
   wet_day_threshold_mm: number;
@@ -610,7 +621,7 @@ export type AskResponse = {
 type CacheOutcome = "hit" | "miss" | "bypass";
 
 export type FilterCtx = {
-  dow?: "all" | "weekday" | "weekend";
+  dow?: DowFilter;
   time_band?: string;
   service?: string;
   from_date?: string;
@@ -693,6 +704,7 @@ export interface ForecastHeatmapCell {
 }
 
 export interface ForecastHeatmap {
+  scope_applied?: ScopeApplied;
   route: string;
   cells: ForecastHeatmapCell[]; // always 168 (7×24)
   disclaimer: string;
@@ -751,6 +763,7 @@ export interface ForecastOverviewRoute {
 }
 
 export interface ForecastOverview {
+  scope_applied?: ScopeApplied;
   grid: ForecastOverviewGridCell[]; // always 35 (7×5 bands)
   worst: ForecastOverviewWorst | null;
   routes: ForecastOverviewRoute[];
@@ -828,6 +841,7 @@ export type OverviewServiceSplitDay = {
 };
 
 export type OverviewSummary = {
+  scope_applied?: ScopeApplied;
   headline: OverviewHeadline;
   movers: OverviewMovers;
   concentration: OverviewConcentration;
@@ -882,6 +896,7 @@ export type NetworkAgencyRow = {
 };
 
 export type NetworkSummary = {
+  scope_applied?: ScopeApplied;
   from: string;
   to: string;
   agencies: NetworkAgencyRow[];

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { SCOPE_EXTRAS_NONE } from "../../api/scope";
 import { beforeEach, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -67,7 +68,7 @@ vi.mock("../../api/hooks", () => ({
   useRouteShape: vi.fn(() => ({ data: { route: "101", geometry: null, stops: [{ stop_id: "A", stop_sequence: 1, stop_name: "Station A", lon: 140, lat: 40, avg_min: 2, samples: 5 }] }, isPending: false })),
   useReport: vi.fn((_id, type) => ({ data: type ? { report_type: type, definition: {}, rows: type === "trend" ? [{ days: [{ date: "2026-09-07", avg_min: 2, samples: 4 }] }] : [["101", null, 2, 1, 3, 4]] } : undefined, isPending: false })),
 }));
-const ctx = { from: "2026-09-07", to: "2026-09-12", dow: "weekday" as const, time_band: "morning" as const, service: "all" as const, routes: ["101"] };
+const ctx = { ...SCOPE_EXTRAS_NONE, from: "2026-09-07", to: "2026-09-12", dow: "weekday" as const, time_band: "morning" as const, service: "all" as const, routes: ["101"] };
 // Reports now renders TabFilterBar, whose PresetMenu calls useQueryClient to
 // invalidate saved presets -- so the tree needs a provider even though no test
 // here asserts on a query.
@@ -87,7 +88,7 @@ it("keeps pattern and period in exported observations and saved analysis", async
   await user.click(screen.getByRole("button", { name: "Download CSV" }));
   const rows = vi.mocked(downloadCsv).mock.calls[0][1];
   // Pattern: a per-row column. Period: consolidated into one `buildCsv`
-  // metadata line (`ctxToQueryString`) instead of repeated on every row.
+  // metadata line (`scopeToQueryString`) instead of repeated on every row.
   expect(rows[1]).toEqual(expect.arrayContaining(["101", "Station A", 2, 5]));
   const queryRow = rows.find((r) => r[0] === "query");
   expect(queryRow?.[1]).toContain("from=2026-09-07");

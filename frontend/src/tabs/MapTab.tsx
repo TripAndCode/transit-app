@@ -14,7 +14,7 @@ import maplibregl, { Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useTodayRouteSummary } from "../api/hooks";
-import { useRangeContext } from "../api/rangeContext";
+import { useScope } from "../api/scope";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
 import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
@@ -103,7 +103,7 @@ export function MapTab() {
   const id = useAgencyId();
   const { t, i18n } = useTranslation();
   const { t: td } = useTranslation("design");
-  const [ctx] = useRangeContext();
+  const [ctx] = useScope();
   const [now, setNow] = useState(Date.now);
   // The URL is the source of truth for the *current* view (so copy-link
   // reproduces it), but localStorage stays the source of truth for a fresh

@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
+import { scopeToQueryString, useScope } from "../api/scope";
 import { clearLastAgency } from "../api/lastAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
@@ -139,8 +139,8 @@ export function Sidebar() {
   // Carry only the filter dimensions across tab switches — building from
   // ctx (not raw location.search) avoids dragging unrelated query keys
   // like ?admin=1 or report-specific params into every other tab.
-  const [ctx] = useRangeContext();
-  const filterQS = ctxToQueryString(ctx);
+  const [ctx] = useScope();
+  const filterQS = scopeToQueryString(ctx);
   const suffix = filterQS ? `?${filterQS}` : "";
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
   const [settingsOpen, setSettingsOpen] = useState(false);

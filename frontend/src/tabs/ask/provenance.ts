@@ -64,7 +64,7 @@ export function sampleCount(result: { rows?: unknown[] | null; series?: unknown[
 }
 
 /** Renders a message's persisted dispatch conditions (dow/time_band/service)
- *  for the provenance disclosure -- the historical RangeCtx the dispatch
+ *  for the provenance disclosure -- the historical Scope the dispatch
  *  actually ran under, not the conversation's current, editable filter_ctx.
  *  "All conditions" when every dimension was at its default (or the message
  *  carries none, e.g. an LLM follow-up). */

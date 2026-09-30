@@ -3,11 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { apiGet, apiPost, formatApiError } from "../api/client";
-import type { RangeCtx } from "../api/rangeContext";
+import type { Scope } from "../api/scope";
 import { Tooltip } from "./Tooltip";
 import { Z_INDEX } from "../styles/zIndex";
 
-type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: RangeCtx };
+type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: Scope };
 
 /** Dropdown + save dialog for filter presets; renders a hint when anonymous. */
 export function PresetMenu({
@@ -16,8 +16,8 @@ export function PresetMenu({
   onSelect,
 }: {
   agencyId: number;
-  currentRangeCtx: RangeCtx;
-  onSelect: (rangeCtx: RangeCtx) => void;
+  currentRangeCtx: Scope;
+  onSelect: (rangeCtx: Scope) => void;
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
