@@ -6,7 +6,7 @@ import { useAgencyId } from "../api/useAgencyId";
 import type { Agency } from "../api/types";
 import { onActivateKey } from "../utils/a11y";
 import { Z_INDEX } from "../styles/zIndex";
-import { mergeSearch, screenParams } from "../routes/analysisRoutes";
+import { agencySwitchHref } from "../routes/destinations";
 
 // Module-scope pure function rather than an in-render IIFE — see
 // eslint.config.js's manual-memoization ban comment for why this shape is
@@ -58,8 +58,7 @@ export function AgencyPicker() {
   function selectAgency(id: number) {
     setOpen(false);
     setFilter("");
-    const tab = tabMatch?.params["*"] || "analysis/overview";
-    navigate(`/agencies/${id}/${tab}${mergeSearch("", screenParams(location.search))}`);
+    navigate(agencySwitchHref(id, tabMatch?.params["*"], location.search));
   }
 
   return (

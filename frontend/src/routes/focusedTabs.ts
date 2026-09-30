@@ -1,4 +1,4 @@
-import { SAVED_REPORT_TYPES } from "./analysisRoutes";
+import { SAVED_REPORT_TYPES } from "./destinations";
 
 /** Tabs that own their whole viewport: the banners, HelpHint and CopilotPanel
  *  are hidden on these so nothing competes with the visualization.

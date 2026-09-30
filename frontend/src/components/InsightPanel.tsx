@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { useSuggestion } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { delayColor } from "../styles/tokens";
-import { reportHref } from "../routes/analysisRoutes";
+import { reportHref } from "../routes/destinations";
 
 // Map the backend's binary severity onto the existing delay warm ramp
 // (CLAUDE.md: "Severity uses the existing warm ramp") via representative

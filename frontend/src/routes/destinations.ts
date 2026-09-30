@@ -71,6 +71,13 @@ export function routeHref(agencyId: number | string, code: string, search = "", 
   return `/agencies/${agencyId}/routes/${encodeURIComponent(code)}${mergeSearch(params.toString(), tab ? { tab } : {})}`;
 }
 
+/** The Routes screen for a `routes` selection: one route opens its dossier,
+ *  any other selection the list. */
+export function routesHref(agencyId: number | string, search = "", tab?: RouteTab): string {
+  const routes = (new URLSearchParams(search).get("routes") ?? "").split(",").filter(Boolean);
+  return routes.length === 1 ? routeHref(agencyId, routes[0], search, tab) : destHref(agencyId, "routes", search);
+}
+
 export function reportHref(agencyId: number | string, reportType: string, search = ""): string {
   if (!isReportType(reportType)) return destHref(agencyId, "pulse", search);
   const home = REPORT_HOME[reportType];
@@ -89,4 +96,18 @@ export function agencySwitchHref(
 ): string {
   const dest = !rest ? "pulse" : rest.startsWith("routes/") ? "routes" : rest;
   return `/agencies/${agencyId}/${dest}${mergeSearch(scopeQuery, screenParams(search))}`;
+}
+
+/** Saved & export picked its view by `view`, or an export `report`; Reports
+ *  picks its document by `doc`. */
+export function savedTarget(agencyId: number | string, search: string): string {
+  const params = new URLSearchParams(search);
+  const view = params.get("view");
+  const report = params.get("report");
+  params.delete("view");
+  if (report === "council_summary" || report === "delay_certificate") {
+    return reportHref(agencyId, report, params.toString());
+  }
+  const doc = view === "saved" ? "saved" : view === "reports" ? "council" : null;
+  return destHref(agencyId, "reports", params.toString(), doc ? { doc } : {});
 }

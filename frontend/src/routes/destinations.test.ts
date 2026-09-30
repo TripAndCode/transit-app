@@ -12,6 +12,7 @@ import {
   mergeSearch,
   reportHref,
   routeHref,
+  routesHref,
   screenParams,
 } from "./destinations";
 
@@ -39,6 +40,12 @@ describe("destinations", () => {
   it("puts the route in the dossier's path, not its query", () => {
     expect(routeHref(9, "50", "?routes=50&from=2026-09-01")).toBe("/agencies/9/routes/50?from=2026-09-01");
     expect(routeHref(9, "a/b", "", "stops")).toBe("/agencies/9/routes/a%2Fb?tab=stops");
+  });
+
+  it("opens one selected route's dossier, and the list for any other selection", () => {
+    expect(routesHref(9, "?routes=50&from=2026-09-01", "stops")).toBe("/agencies/9/routes/50?from=2026-09-01&tab=stops");
+    expect(routesHref(9, "?routes=50,51")).toBe("/agencies/9/routes?routes=50%2C51");
+    expect(routesHref(9, "", "stops")).toBe("/agencies/9/routes");
   });
 
   it("sends each report type to the screen that hosts it", () => {

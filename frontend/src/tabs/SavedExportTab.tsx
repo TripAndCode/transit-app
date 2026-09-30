@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { scopeToQueryString, useScope } from "../api/scope";
 import { useAgencyId } from "../api/useAgencyId";
-import { SAVED_REPORT_TYPES, destHref } from "../routes/destinations";
-import { savedTarget } from "../routes/legacyRedirects";
+import { SAVED_REPORT_TYPES, destHref, savedTarget } from "../routes/destinations";
 import { loadAnalysisTab, loadReportsHomeTab } from "../routes/lazyTabs";
 import { SCREEN_STRIP_STYLE, screenStripLinkStyle } from "../components/screenStrip";
 
@@ -37,7 +36,7 @@ export function SavedExportTab() {
   const [ctx] = useScope();
   const id = useAgencyId();
   if (id == null) return null;
-  if (params.has("view")) return <Navigate to={savedTarget(String(id), search)} replace />;
+  if (params.has("view")) return <Navigate to={savedTarget(id, search)} replace />;
   const doc = params.get("doc");
   const view = viewOf(doc, params.get("report"));
   return (

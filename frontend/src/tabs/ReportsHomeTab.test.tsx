@@ -64,31 +64,47 @@ describe("ReportsHomeTab", () => {
     expect(screen.getAllByText("No observations match these filters")).toHaveLength(2);
   });
 
-  it("shows the saved-analyses view and its local-only note from the view param", () => {
+  it("shows the saved-analyses view and its local-only note from the doc param", () => {
     mockReports(trendResponse(), rankingResponse());
-    renderTab("/agencies/1/reports?view=saved");
+    renderTab("/agencies/1/reports?doc=saved");
     expect(
       screen.getByText("Filters saved in this browser. Opening them queries the latest available data."),
     ).toBeInTheDocument();
   });
 
-  it("opens a ranking row and the detailed reports in the workspace lenses", () => {
+  it("opens a ranking row in its route's dossier and the detailed reports on Time", () => {
     mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 4] as unknown as RankingRow]));
     renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07");
     const open = new URL(screen.getByRole("link", { name: "Open analysis →" }).getAttribute("href")!, "http://x");
-    expect(open.pathname).toBe("/agencies/1/analysis/where");
-    expect(open.searchParams.get("routes")).toBe("101");
+    expect(open.pathname).toBe("/agencies/1/routes/101");
+    expect(open.searchParams.has("routes")).toBe(false);
     expect(open.searchParams.get("service")).toBe("平日");
     const detailed = new URL(screen.getByRole("link", { name: "Detailed reports →" }).getAttribute("href")!, "http://x");
-    expect(detailed.pathname).toBe("/agencies/1/analysis/when");
+    expect(detailed.pathname).toBe("/agencies/1/time");
     expect(detailed.searchParams.get("report")).toBe("trend");
     expect(detailed.searchParams.get("from")).toBe("2026-06-01");
   });
 
-  it("points an empty saved view at the Where lens, where analyses are saved", () => {
+  it("points an empty saved view at the route pages, where analyses are saved", () => {
     mockReports(trendResponse(), rankingResponse());
-    renderTab("/agencies/1/reports?view=saved");
-    expect(screen.getByText("Save filters in the Where lens to see them here")).toBeInTheDocument();
+    renderTab("/agencies/1/reports?doc=saved");
+    expect(screen.getByText("Save filters on a route's page to see them here")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["routes=50&from=2026-09-01", "/agencies/1/routes/50", "from=2026-09-01"],
+    ["routes=50,51", "/agencies/1/routes", "routes=50%2C51"],
+  ])("opens a saved analysis %s on its route's page", (query, pathname, search) => {
+    mockReports(trendResponse(), rankingResponse());
+    localStorage.setItem(
+      "transit.savedAnalyses.v1",
+      JSON.stringify([{ id: "a", agencyId: 1, title: "Saved one", query, savedAt: "2026-09-01T00:00:00Z" }]),
+    );
+    renderTab("/agencies/1/reports?doc=saved");
+    const link = new URL(screen.getByRole("link", { name: "Saved one" }).getAttribute("href")!, "http://x");
+    expect(link.pathname).toBe(pathname);
+    expect(link.searchParams.toString()).toBe(search);
+    localStorage.removeItem("transit.savedAnalyses.v1");
   });
 
   it("leaves switching views to the Saved & export strip", () => {

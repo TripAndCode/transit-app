@@ -169,23 +169,25 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("selecting a route sets the routes filter and jumps to the where lens", async () => {
+  it("selecting a route opens its dossier with the active scope", async () => {
     const user = userEvent.setup();
-    renderPalette();
+    renderPalette("/agencies/1/live?from=2026-06-01&to=2026-06-07&routes=7");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "42");
     await user.click(screen.getByText("42 (42)"));
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/analysis/where");
-    expect(screen.getByTestId("search").textContent).toContain("routes=42");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/routes/42");
+    const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(search.get("from")).toBe("2026-06-01");
+    expect(search.has("routes")).toBe(false);
   });
 
-  it("selecting a report opens the lens that hosts it", async () => {
+  it("selecting a report opens the screen that hosts it", async () => {
     const user = userEvent.setup();
     renderPalette("/agencies/1/live?from=2026-06-01&to=2026-06-07");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "Dwell");
     await user.click(screen.getByText("Dwell/running time"));
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/analysis/why");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/why");
     const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
     expect(search.get("report")).toBe("dwell_run");
     expect(search.get("from")).toBe("2026-06-01");
@@ -201,35 +203,46 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("search").textContent).toContain("time_band=morning");
   });
 
-  it("switching agencies keeps the current lens and the active range context", async () => {
+  it("switching agencies keeps the current destination and the active range context", async () => {
     const user = userEvent.setup();
-    renderPalette("/agencies/1/analysis/where?from=2026-06-01&to=2026-06-07");
+    renderPalette("/agencies/1/time?from=2026-06-01&to=2026-06-07");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
     await user.click(screen.getByText("Kaga Bay Bus"));
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/analysis/where");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/time");
     expect(screen.getByTestId("search").textContent).toBe("?from=2026-06-01&to=2026-06-07");
   });
 
   it("switching agencies on the agencies board stays on the board", async () => {
     const user = userEvent.setup();
-    renderPalette("/agencies/1/analysis/compare?mode=agencies&from=2026-06-01&to=2026-06-07");
+    renderPalette("/agencies/1/compare?by=agencies&from=2026-06-01&to=2026-06-07");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
     await user.click(screen.getByText("Kaga Bay Bus"));
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/analysis/compare");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/compare");
     const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
-    expect(search.get("mode")).toBe("agencies");
+    expect(search.get("by")).toBe("agencies");
     expect(search.get("from")).toBe("2026-06-01");
   });
 
-  it("switching agencies falls back to the overview lens, with the active range context, when there is no current tab", async () => {
+  it("switching agencies from a route dossier lands on the Routes list with the active range context", async () => {
+    const user = userEvent.setup();
+    renderPalette("/agencies/1/routes/42?routes=42&from=2026-06-01&to=2026-06-07");
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
+    await user.click(screen.getByText("Kaga Bay Bus"));
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/routes");
+    const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(search.get("from")).toBe("2026-06-01");
+  });
+
+  it("switching agencies falls back to Pulse, with the active range context, when there is no current tab", async () => {
     const user = userEvent.setup();
     renderPalette("/agencies/1?from=2026-06-01&to=2026-06-07");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
     await user.click(screen.getByText("Kaga Bay Bus"));
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/analysis/overview");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/pulse");
     expect(screen.getByTestId("search").textContent).toBe("?from=2026-06-01&to=2026-06-07");
   });
 

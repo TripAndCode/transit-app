@@ -17,16 +17,6 @@
     "analysis": "Analysis",
     "saved": "Saved & export"
   },
-  "lens": {
-    "nav_label": "Analysis views",
-    "overview": "Overview",
-    "when": "When",
-    "where": "Where",
-    "why": "Why",
-    "rider": "For riders",
-    "compare": "Compare",
-    "predict": "Prediction accuracy"
-  },
   "compare": {
     "mode_periods": "Periods and routes",
     "mode_agencies": "Agencies"
