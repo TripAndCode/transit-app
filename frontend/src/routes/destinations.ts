@@ -4,8 +4,8 @@ import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 export const DESTINATIONS = ["pulse", "routes", "time", "why", "compare", "live", "reports"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
-export const ROUTE_TABS = ["summary", "stops", "time", "trips", "reliability", "why"] as const;
-export type RouteTab = (typeof ROUTE_TABS)[number];
+/** The route dossier's tabs, picked by its `tab` param. */
+export type RouteTab = "summary" | "stops" | "time" | "trips" | "reliability" | "why";
 
 type ReportTypeId = (typeof REPORT_TYPE_IDS)[number];
 export const ROUTES_REPORT_TYPES = ["ranking", "ranking_best", "on_time", "worst_5min"] as const satisfies readonly ReportTypeId[];
