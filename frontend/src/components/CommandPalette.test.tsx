@@ -81,12 +81,12 @@ describe("CommandPalette", () => {
     renderPalette();
     openWithCtrlK();
     const input = screen.getByRole("combobox");
-    await user.type(input, "Saved");
-    expect(screen.getByText("Saved & export")).toBeInTheDocument();
+    await user.type(input, "Pulse");
+    expect(screen.getByText("Pulse")).toBeInTheDocument();
     expect(screen.queryByText("Live")).toBeNull();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/saved");
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/pulse");
   });
 
   it("shows no-results copy when nothing matches", async () => {
@@ -120,18 +120,19 @@ describe("CommandPalette", () => {
       expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/live");
     });
 
-    it("navigates to analysis on g then a", () => {
+    it.each([
+      ["p", "pulse"],
+      ["r", "routes"],
+      ["t", "time"],
+      ["w", "why"],
+      ["c", "compare"],
+      ["e", "reports"],
+      ["q", "ask"],
+    ])("navigates on g then %s to %s", (key, dest) => {
       renderPalette();
       fireEvent.keyDown(document, { key: "g" });
-      fireEvent.keyDown(document, { key: "a" });
-      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/analysis");
-    });
-
-    it("navigates to saved & export on g then s", () => {
-      renderPalette();
-      fireEvent.keyDown(document, { key: "g" });
-      fireEvent.keyDown(document, { key: "s" });
-      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/saved");
+      fireEvent.keyDown(document, { key });
+      expect(screen.getByTestId("pathname").textContent).toBe(`/agencies/1/${dest}`);
     });
 
     it("ignores the chord while focus is in a text input", () => {
@@ -150,14 +151,13 @@ describe("CommandPalette", () => {
     });
   });
 
-  it("opens the shortcut sheet on '?' and lists the go-to chords for every sidebar destination plus Ask", () => {
+  it("opens the shortcut sheet on '?' and lists the go-to chords for every destination plus Ask", () => {
     renderPalette();
     fireEvent.keyDown(document, { key: "?" });
     const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
-    expect(within(dialog).getByText("Go to Live")).toBeInTheDocument();
-    expect(within(dialog).getByText("Go to Analysis")).toBeInTheDocument();
-    expect(within(dialog).getByText("Go to Saved & export")).toBeInTheDocument();
-    expect(within(dialog).getByText("Go to Ask")).toBeInTheDocument();
+    for (const name of ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports", "Ask"]) {
+      expect(within(dialog).getByText(`Go to ${name}`)).toBeInTheDocument();
+    }
     expect(within(dialog).getByText("Show this shortcut list")).toBeInTheDocument();
   });
 
@@ -250,11 +250,11 @@ describe("CommandPalette", () => {
     const user = userEvent.setup();
     renderPalette();
     openWithCtrlK();
-    await user.type(screen.getByRole("combobox"), "Saved");
-    await user.click(screen.getByText("Saved & export"));
+    await user.type(screen.getByRole("combobox"), "Pulse");
+    await user.click(screen.getByText("Pulse"));
 
     const stored = JSON.parse(localStorage.getItem("transit.commandPaletteRecents") ?? "[]");
-    expect(stored).toContain("nav:saved");
+    expect(stored).toContain("nav:pulse");
 
     openWithCtrlK();
     expect(screen.getByText("Recent")).toBeInTheDocument();
@@ -268,12 +268,12 @@ describe("CommandPalette", () => {
     );
     renderPalette();
     openWithCtrlK();
-    await user.type(screen.getByRole("combobox"), "Saved");
-    await user.click(screen.getByText("Saved & export"));
+    await user.type(screen.getByRole("combobox"), "Pulse");
+    await user.click(screen.getByText("Pulse"));
 
     const stored: string[] = JSON.parse(localStorage.getItem("transit.commandPaletteRecents") ?? "[]");
     expect(stored.length).toBe(8);
-    expect(stored[0]).toBe("nav:saved");
+    expect(stored[0]).toBe("nav:pulse");
     expect(stored).not.toContain("action:theme");
   });
 
@@ -284,8 +284,8 @@ describe("CommandPalette", () => {
     });
     renderPalette();
     openWithCtrlK();
-    await user.type(screen.getByRole("combobox"), "Saved");
-    await expect(user.click(screen.getByText("Saved & export"))).resolves.not.toThrow();
+    await user.type(screen.getByRole("combobox"), "Pulse");
+    await expect(user.click(screen.getByText("Pulse"))).resolves.not.toThrow();
   });
 
   it("exposes each option's id via aria-activedescendant on the input, tracking arrow-key navigation", () => {

@@ -304,7 +304,7 @@ describe("FirstRunTourOnLive", () => {
 
   it("stays off a screen without the tour's anchors, leaving Tab to the page", async () => {
     const user = userEvent.setup();
-    renderAt("/agencies/1/analysis/overview", false);
+    renderAt("/agencies/1/pulse", false);
     expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
     await user.tab();
     expect(screen.getByRole("button", { name: "page control" })).toHaveFocus();

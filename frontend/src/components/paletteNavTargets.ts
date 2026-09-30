@@ -13,19 +13,32 @@ type NavTo = (typeof SIDEBAR_NAV_ITEMS)[number]["to"] | "ask";
  *  palette and globally (see `handleGlobalKeyDown` in CommandPalette.tsx).
  *  Assigned here, not on `SIDEBAR_NAV_ITEMS`, since the sidebar itself has
  *  no notion of chords. */
-const CHORD_KEYS: Record<NavTo, string> = { live: "l", analysis: "a", saved: "s", ask: "q" };
+const CHORD_KEYS: Record<NavTo, string> = {
+  pulse: "p",
+  routes: "r",
+  time: "t",
+  why: "w",
+  compare: "c",
+  live: "l",
+  reports: "e",
+  ask: "q",
+};
 
-const SUBLABEL_KEYS: Partial<Record<NavTo, string>> = {
+const SUBLABEL_KEYS: Record<NavTo, string> = {
+  pulse: "palette.nav_pulse_sublabel",
+  routes: "palette.nav_routes_sublabel",
+  time: "palette.nav_time_sublabel",
+  why: "palette.nav_why_sublabel",
+  compare: "palette.nav_compare_sublabel",
   live: "design:live",
-  analysis: "palette.nav_analysis_sublabel",
-  saved: "palette.nav_saved_sublabel",
+  reports: "palette.nav_reports_sublabel",
   ask: "palette.nav_ask_sublabel",
 };
 
 /**
  * The palette's "Go to" group and `g`-chord destinations: every sidebar nav
- * item plus Ask (the sidebar renders Ask as a distinct CTA, not a nav item,
- * but it's still a keyboard-reachable destination). Derived from
+ * item plus Ask (reached from the top bar rather than the rail, but still a
+ * keyboard-reachable destination). Derived from
  * `SIDEBAR_NAV_ITEMS` so a new sidebar destination automatically gets a
  * palette entry instead of silently missing one.
  */

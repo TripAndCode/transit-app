@@ -11,8 +11,8 @@ function agency(over: Partial<Agency>): Agency {
 }
 
 function LandingProbe() {
-  const { agencyId, lens } = useParams();
-  return <div>landed:{agencyId}:{lens}</div>;
+  const { agencyId } = useParams();
+  return <div>landed:{agencyId}:pulse</div>;
 }
 
 function renderGate() {
@@ -20,7 +20,7 @@ function renderGate() {
     <MemoryRouter initialEntries={["/"]}>
       <Routes>
         <Route path="/" element={<OnboardingGate />} />
-        <Route path="/agencies/:agencyId/analysis/:lens" element={<LandingProbe />} />
+        <Route path="/agencies/:agencyId/pulse" element={<LandingProbe />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -72,7 +72,7 @@ describe("OnboardingGate", () => {
   it("navigates immediately for a single agency, no overlay", () => {
     mockAgencies([agency({ agency_id: 5, agency_name: "Solo" })]);
     renderGate();
-    expect(screen.getByText("landed:5:overview")).toBeTruthy();
+    expect(screen.getByText("landed:5:pulse")).toBeTruthy();
     expect(screen.queryByText("Solo")).toBeNull();
   });
 
@@ -88,7 +88,7 @@ describe("OnboardingGate", () => {
     localStorage.setItem("transit.lastAgency", "2");
     mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
     renderGate();
-    expect(screen.getByText("landed:2:overview")).toBeTruthy();
+    expect(screen.getByText("landed:2:pulse")).toBeTruthy();
   });
 
   it("falls through to the overlay when the stored preference no longer exists", () => {
@@ -105,11 +105,11 @@ describe("OnboardingGate", () => {
     renderGate();
     fireEvent.click(screen.getByText("Second"));
     expect(localStorage.getItem("transit.lastAgency")).toBe("2");
-    expect(screen.queryByText("landed:2:overview")).toBeNull();
+    expect(screen.queryByText("landed:2:pulse")).toBeNull();
     act(() => {
       vi.advanceTimersByTime(250);
     });
-    expect(screen.getByText("landed:2:overview")).toBeTruthy();
+    expect(screen.getByText("landed:2:pulse")).toBeTruthy();
     vi.useRealTimers();
   });
 

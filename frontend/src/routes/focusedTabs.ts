@@ -3,10 +3,10 @@ import { SAVED_REPORT_TYPES } from "./destinations";
 /** Tabs that own their whole viewport: the banners, HelpHint and CopilotPanel
  *  are hidden on these so nothing competes with the visualization.
  *
- *  No Analysis lens is listed: the workspace is one destination, and hiding
- *  the banners on some lenses would shift the lens strip under the cursor.
+ *  None of the analysis screens is listed: the data notices matter wherever
+ *  delay figures are read.
  *
- *  `operations`, `overview`, `map`, `reports` and the export types'
+ *  `operations`, `overview`, `map`, `saved` and the export types'
  *  `reports/:reportType` stay listed only because they render a redirect
  *  into a focused screen. React-router's declarative
  *  `<Navigate>` fires from an effect after the redirect element renders once,

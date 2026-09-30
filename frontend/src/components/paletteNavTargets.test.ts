@@ -19,11 +19,15 @@ describe("GO_TO_TARGETS", () => {
     }
   });
 
-  it("lists the workspace destinations in sidebar order, then Ask", () => {
-    expect(GO_TO_TARGETS.map((g) => g.to)).toEqual(["live", "analysis", "saved", "ask"]);
+  it("lists the destinations in rail order, then Ask", () => {
+    expect(GO_TO_TARGETS.map((g) => g.to)).toEqual(["pulse", "routes", "time", "why", "compare", "live", "reports", "ask"]);
   });
 
-  it("also includes Ask, which the sidebar renders as a CTA rather than a nav item", () => {
+  it("gives every target a sub-label", () => {
+    for (const target of GO_TO_TARGETS) expect(target.sublabelKey, target.to).toBeTruthy();
+  });
+
+  it("also includes Ask, which lives in the top bar rather than the rail", () => {
     expect(GO_TO_TARGETS.some((t) => t.to === "ask")).toBe(true);
   });
 });
