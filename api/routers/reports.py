@@ -96,6 +96,9 @@ _REPORT_TYPES = (
 
 _EARLY_TOLERANCE_TYPES = frozenset({"on_time", "council_summary"})
 _LATE_TOLERANCE_TYPES = frozenset({"on_time", "worst_5min", "council_summary"})
+# The scope's `late` is the on-time tolerance. worst_5min's late cutoff is its
+# "≥5 min" threshold, so the scope never moves it.
+_SCOPE_LATE_TYPES = frozenset({"on_time", "council_summary"})
 
 # What each report's rows actually filter on. compare_ranking and the dow_*
 # reports fix dow/service themselves; dwell_run cannot split by time band.
@@ -116,7 +119,7 @@ _REPORT_HONOURS: dict[str, tuple[str, ...]] = {
 
 def report_scope_applied(report_type: str) -> dict[str, bool]:
     honoured = list(_REPORT_HONOURS[report_type])
-    if report_type in _LATE_TOLERANCE_TYPES:
+    if report_type in _SCOPE_LATE_TYPES:
         honoured.append("late")
     if report_type in _EARLY_TOLERANCE_TYPES:
         honoured.append("early")
@@ -753,8 +756,9 @@ async def get_report(
         default=None,
         ge=0,
         le=3600,
-        description="The scope's late tolerance in seconds. Applied where the report has one "
-        "(on_time, worst_5min, council_summary); otherwise ignored and reported false in scope_applied.",
+        description="The scope's on-time late tolerance in seconds. Applied by on_time and "
+        "council_summary; otherwise ignored and reported false in scope_applied (worst_5min's "
+        "threshold stays its own late_tolerance_sec).",
     ),
     early: int | None = Query(
         default=None,
@@ -784,7 +788,7 @@ async def get_report(
         raise HTTPException(status_code=400, detail="late and late_tolerance_sec set the same tolerance; pass one")
     if early is not None and early_tolerance_sec is not None:
         raise HTTPException(status_code=400, detail="early and early_tolerance_sec set the same tolerance; pass one")
-    if late is not None and report_type in _LATE_TOLERANCE_TYPES:
+    if late is not None and report_type in _SCOPE_LATE_TYPES:
         late_tolerance_sec = late
     if early is not None and report_type in _EARLY_TOLERANCE_TYPES:
         early_tolerance_sec = early

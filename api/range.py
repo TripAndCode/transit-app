@@ -13,6 +13,7 @@ the window to 365 days to avoid runaway scans.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -116,8 +117,11 @@ MAX_RANGE_DAYS = 365
 # Bounds both the SQL predicate and the JSON envelope; the UI's own route
 # picker surfaces far fewer than this.
 MAX_ROUTE_FILTERS = 100
-# GTFS stop_id is free-form text; this bounds the predicate and the echo.
+# GTFS stop_id is free-form text; this bounds what the scope accepts and echoes.
 MAX_STOP_ID_LEN = 128
+# ASCII digits only: str.isdigit() also accepts superscripts and other
+# scripts' digits, which int() then rejects or reads as a different hour.
+_HOUR_RE = re.compile(r"(\d{1,2})(?:-(\d{1,2}))?", re.ASCII)
 _HOUR_ERROR = "invalid hour: expected 0-23 or an inclusive range a-b"
 
 
@@ -162,10 +166,11 @@ def _coerce_hour(value: object) -> tuple[int, int] | None:
         return None
     if not isinstance(value, str):
         raise HTTPException(status_code=422, detail=_HOUR_ERROR)
-    parts = value.split("-")
-    if len(parts) not in (1, 2) or not all(p.isdigit() and len(p) <= 2 for p in parts):
+    match = _HOUR_RE.fullmatch(value)
+    if match is None:
         raise HTTPException(status_code=422, detail=_HOUR_ERROR)
-    start, end = int(parts[0]), int(parts[-1])
+    start = int(match.group(1))
+    end = int(match.group(2)) if match.group(2) is not None else start
     if start > 23 or end > 23 or start > end:
         raise HTTPException(status_code=422, detail=_HOUR_ERROR)
     return start, end

@@ -106,7 +106,6 @@ describe("ctxKey (observed via useReport's cache identity)", () => {
     ["dir", { ...baseCtx(), dir: 1 as const }],
     ["late", { ...baseCtx(), late: 180 }],
     ["early", { ...baseCtx(), early: 30 }],
-    ["compare", { ...baseCtx(), compare: "prev" }],
   ])("treats a ctx differing only in %s as a distinct query", async (_dimension, variant) => {
     mockApiGet.mockResolvedValue(report());
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

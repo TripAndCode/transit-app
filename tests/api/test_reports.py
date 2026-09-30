@@ -1947,3 +1947,13 @@ async def test_hour_with_time_band_is_a_422(reports_client):
     client, agency_id, _ = reports_client
     resp = await client.get(f"/api/{agency_id}/reports/ranking?hour=7&time_band=morning")
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_scope_late_leaves_the_worst_5min_threshold_alone(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/worst_5min?late=60")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["definition"]["late_tolerance_sec"] == 300
+    assert body["scope_applied"]["late"] is False

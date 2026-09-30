@@ -93,7 +93,6 @@ Every lens reads and writes one shared scope in the URL through
 | `stop` | a GTFS `stop_id` |
 | `dir` | `0` or `1` (`direction_id`) |
 | `late`, `early` | on-time tolerance in seconds, `0`–`3600` |
-| `compare` | `prev`, or `YYYY-MM-DD..YYYY-MM-DD` |
 
 Rules the two sides share:
 
@@ -107,8 +106,8 @@ Rules the two sides share:
   condition's default instead of reaching the API. The API itself answers
   422 for an invalid value, as it does for the older fields.
 - **Unknown params survive.** `scope.ts` writes only its own params, so
-  lens-local ones such as `report`, `sub_tab` and `mode` survive a scope
-  change. Links between lenses carry only the scope.
+  lens-local ones survive a scope change: `report`, `sub_tab`, `mode`, and
+  the Where lens's `compare=1` (the week-earlier overlay). Links between lenses carry only the scope.
 
 Every lens endpoint returns `scope_applied`: one boolean per field in
 `api/scope_applied.py`'s `SCOPE_FIELDS`, saying whether this response
@@ -118,10 +117,10 @@ honoured that field.
   Per-report sets are `_REPORT_HONOURS` in `api/routers/reports.py`, and the
   panel endpoints' sets sit beside those; overview, network and map declare
   theirs in their own routers.
-- **`late`/`early`.** They apply only to the reports that have a tolerance:
-  `late` to `on_time`, `worst_5min` and `council_summary`, and `early` to
-  `on_time` and `council_summary`. Elsewhere they are ignored and reported
-  as `false`.
+- **`late`/`early`.** They are the on-time tolerance, applied by `on_time`
+  and `council_summary`. Elsewhere they are ignored and reported as `false`,
+  including `worst_5min`, whose "≥5 min" threshold stays its own
+  `late_tolerance_sec`.
 - **Not yet honoured.** `hour`, `stop` and `dir` are accepted and validated,
   but no endpoint honours them yet: `hour` waits on `agg_route_hour_daily`,
   and none of today's aggregates carries `direction_id`.

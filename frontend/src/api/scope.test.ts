@@ -18,13 +18,13 @@ describe("parseScope", () => {
   it("fills defaults for an empty URL", () => {
     expect(parse("")).toEqual({
       from: "2026-09-01", to: "2026-09-30", dow: "all", time_band: "all", service: "all", routes: [],
-      hour: null, stop: null, dir: null, late: null, early: null, compare: null,
+      hour: null, stop: null, dir: null, late: null, early: null,
     });
   });
 
   it("reads every scope param", () => {
-    const s = parse("from=2026-08-20&to=2026-09-18&dow=mon,wed&service=%E5%B9%B3%E6%97%A5&routes=50,51&hour=7-9&stop=S1&dir=1&late=180&early=30&compare=prev");
-    expect(s).toMatchObject({ dow: "mon,wed", service: "平日", routes: ["50", "51"], hour: [7, 9], stop: "S1", dir: 1, late: 180, early: 30, compare: "prev" });
+    const s = parse("from=2026-08-20&to=2026-09-18&dow=mon,wed&service=%E5%B9%B3%E6%97%A5&routes=50,51&hour=7-9&stop=S1&dir=1&late=180&early=30");
+    expect(s).toMatchObject({ dow: "mon,wed", service: "平日", routes: ["50", "51"], hour: [7, 9], stop: "S1", dir: 1, late: 180, early: 30 });
   });
 
   it("canonicalises weekday lists the way the API does", () => {
@@ -41,19 +41,20 @@ describe("parseScope", () => {
   });
 
   it("falls back to the default for a hand-edited invalid value", () => {
-    const s = parse("from=2026-13-40&dow=funday&time_band=brunch&service=x&hour=25&dir=2&late=-5&early=abc&compare=yesterday");
-    expect(s).toMatchObject({ from: "2026-09-01", dow: "all", time_band: "all", service: "all", hour: null, dir: null, late: null, early: null, compare: null });
+    const s = parse("from=2026-13-40&dow=funday&time_band=brunch&service=x&hour=25&dir=2&late=-5&early=abc");
+    expect(s).toMatchObject({ from: "2026-09-01", dow: "all", time_band: "all", service: "all", hour: null, dir: null, late: null, early: null });
   });
 
-  it("accepts a compare range and rejects a reversed one", () => {
-    expect(parse("compare=2026-08-01..2026-08-31").compare).toBe("2026-08-01..2026-08-31");
-    expect(parse("compare=2026-08-31..2026-08-01").compare).toBeNull();
+  it("leaves compare to the lens that owns it", () => {
+    expect(parse("compare=1")).not.toHaveProperty("compare");
+    const next = applyScopePatch(new URLSearchParams("compare=1"), presetScopePatch({ dow: "weekday" }));
+    expect(next.get("compare")).toBe("1");
   });
 });
 
 describe("scopeToQueryString", () => {
   it("round-trips every param in canonical form and omits defaults", () => {
-    const qs = "from=2026-08-20&to=2026-09-18&dow=mon%2Cwed&routes=50%2C51&hour=7-9&stop=S1&dir=1&late=180&early=30&compare=prev";
+    const qs = "from=2026-08-20&to=2026-09-18&dow=mon%2Cwed&routes=50%2C51&hour=7-9&stop=S1&dir=1&late=180&early=30";
     expect(scopeToQueryString(parse(qs))).toBe(qs);
     expect(scopeToQueryString(parse(""))).toBe("from=2026-09-01&to=2026-09-30");
   });

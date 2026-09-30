@@ -214,7 +214,7 @@ def test_hour_accepts_one_hour_or_an_inclusive_range(frozen_today, raw, expected
     assert _call(hour=raw).hour == expected
 
 
-@pytest.mark.parametrize("raw", ["24", "-1", "9-7", "7-", "a", "7-9-10", 7, "7.5"])
+@pytest.mark.parametrize("raw", ["24", "-1", "9-7", "7-", "a", "7-9-10", 7, "7.5", "²", "7-¹", "٣", "７"])
 def test_hour_rejects_anything_else_with_422(frozen_today, raw):
     with pytest.raises(HTTPException) as exc:
         _call(hour=raw)

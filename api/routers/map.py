@@ -65,8 +65,9 @@ _JST = ZoneInfo("Asia/Tokyo")
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
 
 _ROUTE_SHAPE_SCOPE = scope_applied(*ALL_SIX)
-# Route trips draws one day, choosing it itself; only the band applies.
-_ROUTE_TRIPS_SCOPE = scope_applied("time_band")
+# Route trips draws one day it chooses itself, for the scope's one selected
+# route; of the rest, only the band applies.
+_ROUTE_TRIPS_SCOPE = scope_applied("time_band", "routes")
 
 
 def _ingest_live_agency(agency_id: int) -> int:

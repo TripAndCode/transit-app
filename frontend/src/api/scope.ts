@@ -7,7 +7,8 @@ export type ServiceFilter = "all" | "平日" | "土日祝"; // i18n-ignore: quer
 export type TimeBand = "all" | "morning" | "forenoon" | "noon" | "afternoon" | "evening" | "night" | "late_night";
 
 /** The shared scope every lens, link, share URL and saved analysis carries.
- *  Lens-local params (`report`, `sub_tab`, `mode`, `at`) are not part of it. */
+ *  Lens-local params (`report`, `sub_tab`, `mode`, `at`, and the Where lens's
+ *  `compare=1` week-earlier overlay) are not part of it. */
 export type Scope = {
   from: string; // YYYY-MM-DD
   to: string; // YYYY-MM-DD
@@ -22,17 +23,15 @@ export type Scope = {
   /** On-time tolerances in seconds. */
   late: number | null;
   early: number | null;
-  /** "prev", or "YYYY-MM-DD..YYYY-MM-DD". */
-  compare: string | null;
 };
 
 /** `null` clears a param (and, for from/to, lets useDefaultRangeAnchor
  *  re-derive the default). */
 export type ScopePatch = { [K in keyof Scope]?: Scope[K] | null };
 
-export const SCOPE_EXTRAS_NONE = { hour: null, stop: null, dir: null, late: null, early: null, compare: null } as const;
+export const SCOPE_EXTRAS_NONE = { hour: null, stop: null, dir: null, late: null, early: null } as const;
 
-const SCOPE_PARAMS = ["from", "to", "dow", "time_band", "service", "routes", "hour", "stop", "dir", "late", "early", "compare"] as const;
+const SCOPE_PARAMS = ["from", "to", "dow", "time_band", "service", "routes", "hour", "stop", "dir", "late", "early"] as const;
 type ScopeParam = (typeof SCOPE_PARAMS)[number];
 
 export const WEEKDAYS: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -100,11 +99,6 @@ function canon(key: ScopeParam, raw: string): string | null {
     case "late":
     case "early":
       return /^\d{1,4}$/.test(raw) && Number(raw) <= MAX_TOLERANCE_SEC ? String(Number(raw)) : null;
-    case "compare": {
-      if (raw === "prev") return raw;
-      const [a, b, ...rest] = raw.split("..");
-      return rest.length === 0 && a && b && isDate(a) && isDate(b) && a <= b ? raw : null;
-    }
   }
 }
 
@@ -138,7 +132,6 @@ export function parseScope(params: URLSearchParams, defaults: { from: string; to
     dir: num("dir") as 0 | 1 | null,
     late: num("late"),
     early: num("early"),
-    compare: get("compare"),
   };
 }
 

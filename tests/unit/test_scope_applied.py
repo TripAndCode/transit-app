@@ -26,7 +26,9 @@ def test_every_report_type_declares_its_scope():
 
 def test_tolerances_are_applied_only_where_the_report_has_them():
     assert report_scope_applied("on_time")["late"] and report_scope_applied("on_time")["early"]
-    assert report_scope_applied("worst_5min")["late"] and not report_scope_applied("worst_5min")["early"]
+    # worst_5min's late cutoff is its "≥5 min" threshold, not the scope's on-time tolerance.
+    assert not report_scope_applied("worst_5min")["late"] and not report_scope_applied("worst_5min")["early"]
+    assert report_scope_applied("council_summary")["late"]
     assert not report_scope_applied("ranking")["late"]
 
 
@@ -36,3 +38,12 @@ def test_reports_that_override_a_field_say_so():
     assert not report_scope_applied("dow_weekday")["dow"]
     assert not report_scope_applied("dwell_run")["time_band"]
     assert report_scope_applied("ranking")["service"]
+
+
+def test_single_route_endpoints_agree_on_routes():
+    from api.routers.map import _ROUTE_TRIPS_SCOPE
+    from api.routers.reports import _FORECAST_HEATMAP_SCOPE
+
+    # Both draw the scope's one selected route.
+    assert _ROUTE_TRIPS_SCOPE["routes"] is True
+    assert _FORECAST_HEATMAP_SCOPE["routes"] is True
