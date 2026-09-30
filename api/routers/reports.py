@@ -123,6 +123,16 @@ def report_scope_applied(report_type: str) -> dict[str, bool]:
     return scope_applied(*honoured)
 
 
+# What each panel endpoint filters on: headway_quality's aggregate carries
+# neither service nor time band; performance_standards reads dates only; the
+# forecast endpoints read all-time aggregates, the heatmap for the scope's one route.
+_HEADWAY_SCOPE = scope_applied("from", "to", "dow", "routes")
+_STANDARDS_SCOPE = scope_applied("from", "to")
+_WEATHER_SCOPE = scope_applied("from", "to", "dow", "service", "routes")
+_FORECAST_HEATMAP_SCOPE = scope_applied("routes")
+_FORECAST_OVERVIEW_SCOPE = scope_applied()
+
+
 class ReportMeta(BaseModel):
     """Listing entry returned by ``GET /reports``."""
 
@@ -209,6 +219,7 @@ class HeadwayQualityResponse(BaseModel):
 
     rows: list[HeadwayQualityRow]
     ctx: ReportCtx
+    scope_applied: dict[str, bool]
 
 
 @router.get("/headway_quality", response_model=HeadwayQualityResponse)
@@ -227,7 +238,9 @@ async def get_headway_quality(
     chose) — a dedicated endpoint, like ``/forecast/overview`` above.
     """
     rows = await compute_headway_quality(agency_id, ctx, conn)
-    return HeadwayQualityResponse(rows=[HeadwayQualityRow(**r) for r in rows], ctx=_report_ctx(ctx))
+    return HeadwayQualityResponse(
+        rows=[HeadwayQualityRow(**r) for r in rows], ctx=_report_ctx(ctx), scope_applied=_HEADWAY_SCOPE
+    )
 
 
 class PerformanceStandardRow(BaseModel):
@@ -268,6 +281,7 @@ class PerformanceStandardsResponse(BaseModel):
     rows: list[PerformanceStandardRow]
     ctx: ReportCtx
     disclaimer: str
+    scope_applied: dict[str, bool]
 
 
 @router.get("/performance_standards", response_model=PerformanceStandardsResponse)
@@ -293,6 +307,7 @@ async def get_performance_standards(
         rows=[PerformanceStandardRow(**r) for r in rows],
         ctx=_report_ctx(ctx),
         disclaimer=simulation_disclaimer(locale),
+        scope_applied=_STANDARDS_SCOPE,
     )
 
 
@@ -366,6 +381,7 @@ class WeatherDelayResponse(BaseModel):
     ctx: ReportCtx
     disclaimer: str
     attribution: str
+    scope_applied: dict[str, bool]
 
 
 @router.get("/weather_delay", response_model=WeatherDelayResponse)
@@ -390,6 +406,7 @@ async def get_weather_delay(
         ctx=_report_ctx(ctx),
         disclaimer=observation_disclaimer(locale),
         attribution=weather_attribution(locale),
+        scope_applied=_WEATHER_SCOPE,
     )
 
 
@@ -461,6 +478,7 @@ class ForecastHeatmapResponse(BaseModel):
     route: str
     cells: list[ForecastHeatmapCell]
     disclaimer: str
+    scope_applied: dict[str, bool]
 
 
 @router.get("/forecast/heatmap", response_model=ForecastHeatmapResponse)
@@ -483,7 +501,7 @@ async def forecast_heatmap(
         agency_id,
         route,
     )
-    return summarize_expected_delay_heatmap(rows, route, locale)
+    return {**summarize_expected_delay_heatmap(rows, route, locale), "scope_applied": _FORECAST_HEATMAP_SCOPE}
 
 
 class ForecastOverviewGridCell(BaseModel):
@@ -527,6 +545,7 @@ class ForecastOverviewResponse(BaseModel):
     worst: ForecastOverviewWorst | None
     routes: list[ForecastOverviewRoute]
     disclaimer: str
+    scope_applied: dict[str, bool]
 
 
 async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> list[asyncpg.Record]:
@@ -601,7 +620,10 @@ async def forecast_overview(
             exc_info=True,
         )
         recent_daily_rows = []
-    return summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale)
+    return {
+        **summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale),
+        "scope_applied": _FORECAST_OVERVIEW_SCOPE,
+    }
 
 
 # Marker for a row's trailing `low_confidence` flag in the "on_time" CSV
