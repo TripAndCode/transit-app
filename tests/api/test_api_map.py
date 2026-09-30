@@ -816,7 +816,9 @@ async def test_route_shape_returns_empty_for_nonexistent_route(map_app):
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/route-shape?route=NOPE&from=2025-01-01&to=2026-12-31")
     assert resp.status_code == 200
-    assert resp.json() == {"route": "NOPE", "geometry": None, "stops": [], "unobserved_stops": []}
+    body = resp.json()
+    body.pop("scope_applied")
+    assert body == {"route": "NOPE", "geometry": None, "stops": [], "unobserved_stops": []}
 
 
 async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
@@ -1281,7 +1283,9 @@ async def test_route_trips_empty_when_no_data(map_client_ch):
     client, agency_id = map_client_ch
     resp = await client.get(f"/api/{agency_id}/today/route/NOPE/trips")
     assert resp.status_code == 200
-    assert resp.json() == {"date": None, "time_band": "all", "truncated": False, "trips": []}
+    body = resp.json()
+    body.pop("scope_applied")
+    assert body == {"date": None, "time_band": "all", "truncated": False, "trips": []}
 
 
 @pytest.mark.asyncio
@@ -1319,7 +1323,9 @@ async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_clie
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/today/route/R_STALE/trips")
     assert resp.status_code == 200
-    assert resp.json() == {"date": None, "time_band": "all", "truncated": False, "trips": []}
+    body = resp.json()
+    body.pop("scope_applied")
+    assert body == {"date": None, "time_band": "all", "truncated": False, "trips": []}
 
 
 @pytest.mark.asyncio
@@ -1932,3 +1938,16 @@ async def test_heatmap_agg_path_reads_agg_not_raw(map_app):
         resp = await client.get(f"/api/{agency_id}/delays/heatmap")
     assert resp.status_code == 200
     assert resp.json()["features"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/{a}/route-shape?route=R1", "/api/{a}/today/route/R1/trips"])
+async def test_clickhouse_lens_endpoints_declare_scope_applied(map_client_ch, path):
+    from api.scope_applied import SCOPE_FIELDS
+
+    client, agency_id = map_client_ch
+    resp = await client.get(path.format(a=agency_id))
+    assert resp.status_code == 200, resp.text
+    applied = resp.json()["scope_applied"]
+    assert set(applied) == set(SCOPE_FIELDS)
+    assert applied["hour"] is False

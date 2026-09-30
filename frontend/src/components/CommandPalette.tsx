@@ -11,7 +11,7 @@ import type { TFunction } from "i18next";
 import { Search } from "lucide-react";
 import { useAgencies, useRoutes } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
-import { ctxToQueryString, useRangeContext, type TimeBand } from "../api/rangeContext";
+import { scopeToQueryString, useScope, type TimeBand } from "../api/scope";
 import { buildTimeBandOptions } from "./timeBandOptions";
 import { REPORT_TYPE_IDS, buildReportTypeLabels } from "../tabs/reportTypes";
 import { useTheme } from "../styles/useTheme";
@@ -150,7 +150,7 @@ export function CommandPalette() {
   const agencyParam = agencyMatch?.params.agencyId;
   const tabRest = agencyMatch?.params["*"];
   const agencyId = agencyParam ? Number(agencyParam) : null;
-  const [ctx] = useRangeContext();
+  const [ctx] = useScope();
   const [theme, setTheme] = useTheme();
 
   const { data: agencies } = useAgencies();
@@ -164,7 +164,7 @@ export function CommandPalette() {
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const ctxQueryString = ctxToQueryString(ctx);
+  const ctxQueryString = scopeToQueryString(ctx);
   const ctxSuffix = ctxQueryString ? `?${ctxQueryString}` : "";
 
   function openPalette() {
@@ -194,7 +194,7 @@ export function CommandPalette() {
 
   function goToRoute(code: string) {
     if (agencyId == null) return;
-    const qs = ctxToQueryString({ ...ctx, routes: [code] });
+    const qs = scopeToQueryString({ ...ctx, routes: [code] });
     navigate(lensHref(agencyId, "where", qs ? `?${qs}` : ""));
   }
 
@@ -204,7 +204,7 @@ export function CommandPalette() {
   }
 
   function goToTimeBand(band: TimeBand) {
-    const qs = ctxToQueryString({ ...ctx, time_band: band });
+    const qs = scopeToQueryString({ ...ctx, time_band: band });
     navigate(`${location.pathname}${qs ? `?${qs}` : ""}`);
   }
 

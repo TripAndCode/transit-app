@@ -51,6 +51,7 @@ from api.range import (
     parse_iso_date,
     time_band_clause_ch_for,
 )
+from api.scope_applied import ALL_SIX, scope_applied
 from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
@@ -62,6 +63,11 @@ _log = logging.getLogger(__name__)
 _JST = ZoneInfo("Asia/Tokyo")
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["map"])
+
+_ROUTE_SHAPE_SCOPE = scope_applied(*ALL_SIX)
+# Route trips draws one day it chooses itself, for the scope's one selected
+# route; of the rest, only the band applies.
+_ROUTE_TRIPS_SCOPE = scope_applied("time_band", "routes")
 
 
 def _ingest_live_agency(agency_id: int) -> int:
@@ -498,7 +504,7 @@ async def route_shape(
     the same fields it shows for the heatmap layer — without them route
     mode would silently drop the pole badge and stop_id footer.
     """
-    return await compute_route_shape(conn, ch, agency_id, str(route), ctx)
+    return {**await compute_route_shape(conn, ch, agency_id, str(route), ctx), "scope_applied": _ROUTE_SHAPE_SCOPE}
 
 
 @router.get("/today/route-summary", response_model=None)
@@ -764,6 +770,7 @@ class RouteTripsResponse(BaseModel):
         )
     )
     trips: list[RouteTripRow]
+    scope_applied: dict[str, bool]
 
 
 def resolve_route_trips_date(requested: CalendarDate | None, latest_observed: CalendarDate) -> CalendarDate | None:
@@ -947,7 +954,9 @@ async def route_trips(
     # window). See `_latest_route_observation` for the full existence-check
     # and bound rationale.
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
-    empty = RouteTripsResponse(date=None, time_band=time_band, truncated=False, trips=[])
+    empty = RouteTripsResponse(
+        date=None, time_band=time_band, truncated=False, trips=[], scope_applied=_ROUTE_TRIPS_SCOPE
+    )
     if latest_ts is None:
         return empty
     # The JST calendar day, not the UTC one: the query buckets captured_at in
@@ -985,6 +994,7 @@ async def route_trips(
         time_band=time_band,
         truncated=truncated,
         trips=trips,
+        scope_applied=_ROUTE_TRIPS_SCOPE,
     )
 
 

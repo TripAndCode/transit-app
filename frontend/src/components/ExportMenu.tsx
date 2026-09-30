@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type R
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { Download, Link2, Printer, Image as ImageIcon } from "lucide-react";
-import type { RangeCtx } from "../api/rangeContext";
+import type { Scope } from "../api/scope";
 import { buildCsv, downloadCsv, triggerBlobDownload, type CsvColumn } from "./analysis/csv";
 import { svgToPngBlob } from "./exportPng";
 import { menuItems, nextMenuItem } from "./menuKeys";
@@ -11,7 +11,7 @@ type CsvExportSpec<T> = {
   filenameBase: string;
   rows: T[];
   columns: CsvColumn<T>[];
-  ctx?: RangeCtx | null;
+  ctx?: Scope | null;
   /** Extra rows appended after the `buildCsv` block -- for a tab whose "one"
    *  export genuinely combines more than one table (e.g. the reports tab's
    *  trend + ranking sections). Build each with `buildCsv` too. */
@@ -32,7 +32,7 @@ type ExportMenuProps<T> = {
 /**
  * One export menu per tab header: PNG (rasterized from the tab's primary
  * SVG), CSV (via the shared `buildCsv` helper), a link to the exact current
- * view (every `useUrlState`/`useRangeContext` key is already in the URL, so
+ * view (every `useUrlState`/`useScope` key is already in the URL, so
  * this is just the current location — no separate query-string assembly to
  * keep in sync, unlike the old per-tab `copyShareLink` functions), and print.
  */

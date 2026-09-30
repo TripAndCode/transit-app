@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { SCOPE_EXTRAS_NONE } from "../api/scope";
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { PresetMenu } from "./PresetMenu";
@@ -10,7 +11,7 @@ describe("PresetMenu (anonymous)", () => {
     renderWithProviders(
       <PresetMenu
         agencyId={1}
-        currentRangeCtx={{ from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all", service: "all", routes: [] }}
+        currentRangeCtx={{ ...SCOPE_EXTRAS_NONE, from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all", service: "all", routes: [] }}
         onSelect={() => {}}
       />,
     );

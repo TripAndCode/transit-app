@@ -35,14 +35,14 @@ export function useUrlPatch(): (patch: UrlPatch) => void {
 
 /**
  * Mirrors a single query-string key as React state, the same way
- * `useRangeContext` mirrors the whole date-range filter set: reading goes
+ * `useScope` mirrors the whole date-range filter set: reading goes
  * through `useSearchParams` (so it survives navigation and is shareable via
  * copy-link), and writing uses `replace: true` (so per-tab selections don't
  * spam browser history the way a normal navigation would).
  *
  * The default value is never written to the URL — setting a key back to its
  * default removes the param instead of writing it explicitly, keeping the
- * URL free of redundant defaults (the same convention `ctxToQueryString`
+ * URL free of redundant defaults (the same convention `scopeToQueryString`
  * follows for `dow`/`time_band`/`service`).
  *
  * Only for a key that moves on its own. Use `useUrlPatch` when one action

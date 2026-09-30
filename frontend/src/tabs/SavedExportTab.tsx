@@ -1,7 +1,7 @@
 import { lazy } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
-import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
+import { scopeToQueryString, useScope } from "../api/scope";
 import { useAgencyId } from "../api/useAgencyId";
 import { SAVED_REPORT_TYPES, mergeSearch } from "../routes/analysisRoutes";
 import { loadAnalysisTab, loadReportsHomeTab } from "../routes/lazyTabs";
@@ -25,7 +25,7 @@ const VIEWS: [View, string][] = [
 export function SavedExportTab() {
   const { t } = useTranslation();
   const [params] = useSearchParams();
-  const [ctx] = useRangeContext();
+  const [ctx] = useScope();
   const id = useAgencyId();
   const report = params.get("report");
   const requested = params.get("view");
@@ -41,7 +41,7 @@ export function SavedExportTab() {
         {VIEWS.map(([v, key]) => (
           <Link
             key={v}
-            to={`/agencies/${id}/saved${mergeSearch(ctxToQueryString(ctx), v === "summary" ? {} : { view: v })}`}
+            to={`/agencies/${id}/saved${mergeSearch(scopeToQueryString(ctx), v === "summary" ? {} : { view: v })}`}
             aria-current={v === view ? "page" : undefined}
             style={screenStripLinkStyle(v === view)}
           >

@@ -17,7 +17,7 @@
 import { useTranslation } from "react-i18next";
 import { usePerformanceStandards } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
-import type { RangeCtx } from "../api/rangeContext";
+import type { Scope } from "../api/scope";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import type { PerformanceStandardRow } from "../api/types";
 import { Skeleton } from "./Skeleton";
@@ -38,7 +38,7 @@ function fmtEstimate(v: number | null): string {
   return `${sign}${Math.abs(v).toFixed(1)}`;
 }
 
-export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) {
+export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
   const { format: formatRoute } = useRouteNames(aid);
   const { data, isLoading, error, refetch } = usePerformanceStandards(aid, ctx, true);

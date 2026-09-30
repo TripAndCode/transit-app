@@ -8,10 +8,14 @@ from pydantic import BaseModel, Field
 from api.deps import get_ch, get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
+from api.scope_applied import scope_applied
 from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
 from pipeline.reports.network import compute_network_summary
 
 router = APIRouter(prefix="/api/network", tags=["network"])
+
+# The board compares whole agencies over a date range only.
+_NETWORK_SCOPE = scope_applied("from", "to")
 
 
 class NetworkAgencyRow(BaseModel):
@@ -65,6 +69,7 @@ class NetworkSummary(BaseModel):
     # comparing this board against a per-agency report's on_time export can
     # see both are using the same definition. See pipeline.reports.definition.
     definition: DefinitionMeta
+    scope_applied: dict[str, bool]
 
 
 @router.get("/summary", response_model=NetworkSummary)
@@ -86,4 +91,5 @@ async def network_summary(
         to=ctx.to_date.isoformat(),
         agencies=[NetworkAgencyRow.model_validate(r) for r in rows],
         definition=resolve_definition_meta("on_time", None, None),
+        scope_applied=_NETWORK_SCOPE,
     )

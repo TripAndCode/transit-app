@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { buildCsv, type CsvColumn } from "./csv";
-import type { RangeCtx } from "../../api/rangeContext";
+import type { Scope } from "../../api/scope";
+import { SCOPE_EXTRAS_NONE } from "../../api/scope";
 
 type Row = { route: string; avg_min: number | null; note: string };
 
@@ -11,8 +12,9 @@ const columns: CsvColumn<Row>[] = [
   { header: "note", value: (r) => r.note },
 ];
 
-function makeCtx(overrides: Partial<RangeCtx> = {}): RangeCtx {
+function makeCtx(overrides: Partial<Scope> = {}): Scope {
   return {
+    ...SCOPE_EXTRAS_NONE,
     from: "2026-01-01",
     to: "2026-01-31",
     dow: "all",
@@ -46,7 +48,7 @@ describe("buildCsv", () => {
     expect(rows).toHaveLength(1);
   });
 
-  it("appends a blank line + a query-string metadata row built from ctxToQueryString when ctx is given", () => {
+  it("appends a blank line + a query-string metadata row built from scopeToQueryString when ctx is given", () => {
     const rows = buildCsv<Row>([], columns, makeCtx({ dow: "weekday", routes: ["A1", "B2"] }));
     // header, blank separator, then the query row
     expect(rows[1]).toEqual([]);

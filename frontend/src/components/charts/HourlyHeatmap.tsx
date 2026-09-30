@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { useRangeContext, type TimeBand } from "../../api/rangeContext";
+import { useScope, type TimeBand } from "../../api/scope";
 import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
 import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
 import { staggerDelay } from "./ChartEnter";
@@ -57,7 +57,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<HourlyCell | null>(null);
   const [showLegend, setShowLegend] = useState(false);
-  const [, setCtx] = useRangeContext();
+  const [, setCtx] = useScope();
   const { focus, setFocus } = useTrendFocus();
   const entered = useEnteredOnMount();
 

@@ -2,12 +2,12 @@ import {
   DEFAULT_RANGE_DAYS,
   isoDaysAgo,
   todayISO,
-  type RangeCtx,
-} from "../../api/rangeContext";
+  type Scope,
+} from "../../api/scope";
 import type { FilterCtx } from "../../api/types";
 
-/** Convert URL-based RangeCtx to FilterCtx for new thread seeding. */
-export function rangeCtxToFilterCtx(ctx: RangeCtx): FilterCtx {
+/** Convert URL-based Scope to FilterCtx for new thread seeding. */
+export function rangeCtxToFilterCtx(ctx: Scope): FilterCtx {
   return {
     from_date: ctx.from,
     to_date: ctx.to,

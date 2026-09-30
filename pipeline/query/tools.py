@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 
 import clickhouse_connect
 
-from api.range import RangeCtx, ServiceType, clamp_range_ctx, jst_today
+from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, jst_today
 from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
@@ -816,6 +816,9 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
         time_band=ctx.time_band,
         service=ctx.service,
         routes=ctx.routes,
+        hour=hour_param(ctx.hour),
+        stop=ctx.stop,
+        direction=ctx.direction,
     )
 
 

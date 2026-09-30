@@ -1,4 +1,4 @@
-import type { TimeBand } from "../../api/rangeContext";
+import type { TimeBand } from "../../api/scope";
 import type { RouteTrip } from "../../api/types";
 import { delayColor } from "../../styles/tokens";
 

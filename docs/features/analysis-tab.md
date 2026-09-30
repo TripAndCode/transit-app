@@ -12,8 +12,10 @@ with a proactive "Insight Panel" suggesting what to look at next.
   the report types it owns (`lensReportTypes` in
   `frontend/src/routes/analysisRoutes.ts`):
   - When — `trend`, `dow_weekday`, `dow_weekend`, `route_forecast`;
-  - Why — `dwell_run`;
-  - For riders — `ranking`, `ranking_best`, `on_time`, `worst_5min`;
+  - Why — `dwell_run`, with the rain (`WeatherDelayPanel`) and long-gap
+    (`HeadwayQualityPanel`) panels beside it;
+  - For riders — `ranking`, `ranking_best`, `on_time`, `worst_5min`, with
+    `HeadwayQualityPanel` and `PerformanceStandardPanel` beside `on_time`;
   - Compare (its default "periods and routes" mode) — `compare_ranking`.
 
   The export-style types, `council_summary` and `delay_certificate`, render
@@ -72,6 +74,56 @@ What the user sees/does:
   `frontend/src/hooks/useMediaQuery.ts`) the three columns stack vertically
   instead of side-by-side — this tab otherwise stays desktop-oriented by
   design (see the inline comment in `AnalysisTab.tsx`).
+
+## Scope
+
+Every lens reads and writes one shared scope in the URL through
+`frontend/src/api/scope.ts` (`useScope`, `parseScope`, `scopeToQueryString`,
+`applyScopePatch`). The backend validates the same parameters in
+`api/range.py`'s `clamp_range_ctx`.
+
+| Param | Values |
+|---|---|
+| `from`, `to` | ISO dates |
+| `dow` | `all`, `weekday`, `weekend`, or a comma list of `mon`…`sun` |
+| `time_band` | the seven bands, or `all` |
+| `hour` | `0`–`23`, or an inclusive range `a-b` |
+| `service` | `all`, `平日`, `土日祝` |
+| `routes` | comma list, at most 100 |
+| `stop` | a GTFS `stop_id` |
+| `dir` | `0` or `1` (`direction_id`) |
+| `late`, `early` | on-time tolerance in seconds, `0`–`3600` |
+
+Rules the two sides share:
+
+- **`dow` is canonical.** A list is de-duplicated and put in Monday-first
+  order. A list that names exactly a legacy group becomes that group:
+  `mon,…,fri` is `weekday`, `sat,sun` is `weekend`, and all seven days are
+  `all`.
+- **`hour` excludes `time_band`.** In the browser, `hour` wins and
+  `time_band` is dropped. The API answers 422 when a request carries both.
+- **Invalid values.** An invalid value in the page URL falls back to that
+  condition's default instead of reaching the API. The API itself answers
+  422 for an invalid value, as it does for the older fields.
+- **Unknown params survive.** `scope.ts` writes only its own params, so
+  lens-local ones survive a scope change: `report`, `sub_tab`, `mode`, and
+  the Where lens's `compare=1` (the week-earlier overlay). Links between lenses carry only the scope.
+
+Every lens endpoint returns `scope_applied`: one boolean per field in
+`api/scope_applied.py`'s `SCOPE_FIELDS`, saying whether this response
+honoured that field.
+
+- **Where it is declared.** The honoured sets sit beside each endpoint.
+  Per-report sets are `_REPORT_HONOURS` in `api/routers/reports.py`, and the
+  panel endpoints' sets sit beside those; overview, network and map declare
+  theirs in their own routers.
+- **`late`/`early`.** They are the on-time tolerance, applied by `on_time`
+  and `council_summary`. Elsewhere they are ignored and reported as `false`,
+  including `worst_5min`, whose "≥5 min" threshold stays its own
+  `late_tolerance_sec`.
+- **Not yet honoured.** `hour`, `stop` and `dir` are accepted and validated,
+  but no endpoint honours them yet: `hour` waits on `agg_route_hour_daily`,
+  and none of today's aggregates carries `direction_id`.
 
 ## Request path
 

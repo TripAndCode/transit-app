@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { Agency } from "./types";
 import { useAgencies } from "./hooks";
-import { DEFAULT_RANGE_DAYS, isoDaysAgo, isoDaysBefore } from "./rangeContext";
+import { DEFAULT_RANGE_DAYS, isoDaysAgo, isoDaysBefore } from "./scope";
 
 /**
  * Pure decision: on a fresh visit (no explicit from/to already in `params`),

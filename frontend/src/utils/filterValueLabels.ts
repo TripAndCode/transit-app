@@ -1,3 +1,5 @@
+import { WEEKDAYS } from "../api/scope";
+
 /** Structural so both i18next's `TFunction` and the narrower `t` shapes that
  *  components thread through helpers are accepted. */
 export type LabelT = (key: string, opts?: Record<string, unknown>) => string;
@@ -21,6 +23,10 @@ export function serviceValueLabel(service: string, t: LabelT): string {
 export function dowValueLabel(dow: string, t: LabelT): string {
   if (dow === "weekday") return translationT(t, "common.service_value.平日"); // i18n-ignore: query contract
   if (dow === "weekend") return translationT(t, "common.service_value.土日祝"); // i18n-ignore: query contract
+  const days = dow.split(",");
+  if (days.every((day) => (WEEKDAYS as readonly string[]).includes(day))) {
+    return days.map((day) => translationT(t, `forecast.dow_${day}`)).join(translationT(t, "common.list_separator"));
+  }
   return dow;
 }
 

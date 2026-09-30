@@ -4,11 +4,12 @@ import { useRoutes } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { routeDisplayName } from "../api/routeDisplayName";
 import {
-  useRangeContext,
+  presetScopePatch,
+  useScope,
   type DowFilter,
   type ServiceFilter,
   type TimeBand,
-} from "../api/rangeContext";
+} from "../api/scope";
 import { Glossary } from "./Glossary";
 import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
@@ -28,7 +29,7 @@ type Draft = {
 
 export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
   const { t } = useTranslation();
-  const [ctx, setCtx] = useRangeContext();
+  const [ctx, setCtx] = useScope();
   const agencyIdNum = useAgencyId();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -209,7 +210,7 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
         <PresetMenu
           agencyId={agencyIdNum}
           currentRangeCtx={ctx}
-          onSelect={(rc) => setCtx(rc)}
+          onSelect={(rc) => setCtx(presetScopePatch(rc))}
         />
       )}
       <button

@@ -7,7 +7,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
-import { ctxToQueryString, type RangeCtx, type TimeBand } from "./rangeContext";
+import { scopeToQueryString, type Scope, type TimeBand } from "./scope";
 import { conversationsAnon } from "./conversationsAnon";
 import type {
   Agency,
@@ -98,21 +98,21 @@ export function useReports(agencyId: number | null): UseQueryResult<ReportMeta[]
   });
 }
 
-function ctxKey(ctx: RangeCtx) {
-  // All filter dimensions must be in the cache key — missing routes/service
-  // here would silently serve stale data when those filters change.
-  return [ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, ctx.routes.join(",")];
+function scopeKey(scope: Scope) {
+  // The serializer names every scope field, so the cache key can never miss
+  // one and serve stale data when that filter changes.
+  return [scopeToQueryString(scope)];
 }
 
 export function useReport(
   agencyId: number | null,
   reportType: string | null,
-  ctx: RangeCtx,
+  ctx: Scope,
 ): UseQueryResult<ReportResponse> {
   return useQuery({
-    queryKey: ["reports", agencyId, reportType, ...ctxKey(ctx)],
+    queryKey: ["reports", agencyId, reportType, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`, { signal }),
+      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && !!reportType,
     // Keep the prior report mounted while a new report type or filter change
     // loads, so callers can gate their skeleton on `isPending` (first load
@@ -122,56 +122,55 @@ export function useReport(
   });
 }
 
-/** High-frequency-only Excess Waiting Time / CoV / long-gap-rate panel data
- *  (item 94) — meant to render alongside the `on_time` report, so callers
- *  gate `enabled` on that report actually being the one in view rather than
- *  fetching this on every report tab. */
+/** High-frequency-only Excess Waiting Time / CoV / long-gap-rate panel data,
+ *  rendered beside the `dwell_run` and `on_time` reports; callers gate
+ *  `enabled` on one of those being the report in view rather than fetching
+ *  this on every report. */
 export function useHeadwayQuality(
   agencyId: number | null,
-  ctx: RangeCtx,
+  ctx: Scope,
   enabled: boolean,
 ): UseQueryResult<HeadwayQualityResponse> {
   return useQuery({
-    queryKey: ["headway-quality", agencyId, ...ctxKey(ctx)],
+    queryKey: ["headway-quality", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<HeadwayQualityResponse>(`/api/${agencyId}/headway_quality?${ctxToQueryString(ctx)}`, { signal }),
+      apiGet<HeadwayQualityResponse>(`/api/${agencyId}/headway_quality?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && enabled,
   });
 }
 
 /** Per-route minimum-performance-standard achievement rate / estimated
- *  bonus-or-deduction panel data (item 104) -- an internal simulation only
- *  (see `PerformanceStandardsResponse.disclaimer`), meant to render
- *  alongside the `on_time` report the same way `useHeadwayQuality` does. */
+ *  bonus-or-deduction panel data -- an internal simulation only (see
+ *  `PerformanceStandardsResponse.disclaimer`), rendered beside the `on_time`
+ *  report. */
 export function usePerformanceStandards(
   agencyId: number | null,
-  ctx: RangeCtx,
+  ctx: Scope,
   enabled: boolean,
 ): UseQueryResult<PerformanceStandardsResponse> {
   return useQuery({
-    queryKey: ["performance-standards", agencyId, ...ctxKey(ctx)],
+    queryKey: ["performance-standards", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<PerformanceStandardsResponse>(`/api/${agencyId}/performance_standards?${ctxToQueryString(ctx)}`, {
+      apiGet<PerformanceStandardsResponse>(`/api/${agencyId}/performance_standards?${scopeToQueryString(ctx)}`, {
         signal,
       }),
     enabled: agencyId != null && enabled,
   });
 }
 
-/** Observed rain-vs-dry delay comparison (item 129) -- meant to render
- *  alongside the `on_time` report the same way `useHeadwayQuality` and
- *  `usePerformanceStandards` do. `routes`/`dow` filters already apply
- *  server-side via `ctxToQueryString`, so no params beyond `ctx` are
+/** Observed rain-vs-dry delay comparison, rendered beside the `dwell_run`
+ *  report. `routes`/`dow` filters already apply
+ *  server-side via `scopeToQueryString`, so no params beyond `ctx` are
  *  needed. */
 export function useWeatherDelay(
   agencyId: number | null,
-  ctx: RangeCtx,
+  ctx: Scope,
   enabled: boolean,
 ): UseQueryResult<WeatherDelayResponse> {
   return useQuery({
-    queryKey: ["weather-delay", agencyId, ...ctxKey(ctx)],
+    queryKey: ["weather-delay", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<WeatherDelayResponse>(`/api/${agencyId}/weather_delay?${ctxToQueryString(ctx)}`, { signal }),
+      apiGet<WeatherDelayResponse>(`/api/${agencyId}/weather_delay?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && enabled,
   });
 }
@@ -197,12 +196,12 @@ export function useSuggestion(
 
 export function useOverviewSummary(
   agencyId: number | null,
-  ctx: RangeCtx,
+  ctx: Scope,
 ): UseQueryResult<OverviewSummary> {
   return useQuery({
-    queryKey: ["overview-summary", agencyId, ...ctxKey(ctx)],
+    queryKey: ["overview-summary", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${ctxToQueryString(ctx)}`, { signal }),
+      apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null,
   });
 }
@@ -226,14 +225,12 @@ export function usePeakHourBreakdown(
   });
 }
 
-export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary> {
+export function useNetworkSummary(ctx: Scope): UseQueryResult<NetworkSummary> {
   return useQuery({
-    // The endpoint itself only reads from/to -- it ignores dow/time_band/
-    // service/routes -- but the key still spreads the full ctxKey(ctx)
-    // rather than hand-picking [ctx.from, ctx.to], so this doesn't silently
-    // drift out of sync with ctxKey if RangeCtx grows a new server-honored
-    // dimension later.
-    queryKey: ["network-summary", ...ctxKey(ctx)],
+    // The endpoint itself only reads from/to, but the key still spreads the
+    // full scopeKey(ctx) rather than hand-picking [ctx.from, ctx.to], so it
+    // stays in step if the endpoint starts honouring another scope field.
+    queryKey: ["network-summary", ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
       apiGet<NetworkSummary>(`/api/network/summary?from=${ctx.from}&to=${ctx.to}`, { signal }),
     staleTime: 60 * 1000,
@@ -246,12 +243,12 @@ export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary>
 export function useRouteShape(
   agencyId: number | null,
   route: string | null,
-  ctx: RangeCtx,
+  ctx: Scope,
 ): UseQueryResult<RouteShapeResponse> {
   return useQuery({
-    queryKey: ["route_shape", agencyId, route, ...ctxKey(ctx)],
+    queryKey: ["route_shape", agencyId, route, ...scopeKey(ctx)],
     queryFn: ({ signal }) => {
-      const qs = new URLSearchParams(ctxToQueryString(ctx));
+      const qs = new URLSearchParams(scopeToQueryString(ctx));
       qs.set("route", route!);
       return apiGet<RouteShapeResponse>(`/api/${agencyId}/route-shape?${qs.toString()}`, { signal });
     },

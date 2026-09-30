@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { isoDaysAgo, jstYearMonth, todayISO, toJstISO, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { isoDaysAgo, jstYearMonth, todayISO, toJstISO, useScope, type Scope } from "../api/scope";
 import { Z_INDEX } from "../styles/zIndex";
 
 type Preset = { key: string; label: string; from: () => string; to: () => string };
@@ -30,13 +30,13 @@ function localizedDate(iso: string, language: string): string {
   return language.startsWith("ja") ? iso.replaceAll("-", "/") : iso;
 }
 
-function isDefault(ctx: RangeCtx): boolean {
+function isDefault(ctx: Scope): boolean {
   return ctx.from === isoDaysAgo(29) && ctx.to === todayISO();
 }
 
 export function RangeBadge() {
   const { t, i18n } = useTranslation();
-  const [ctx, setCtx] = useRangeContext();
+  const [ctx, setCtx] = useScope();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const active = !isDefault(ctx);
@@ -49,7 +49,7 @@ export function RangeBadge() {
     { key: "last_month", label: t("filters.range.last_month"), from: () => firstOfMonth(-1), to: () => lastOfMonth(-1) },
   ];
 
-  function presetLabel(ctx: RangeCtx): string {
+  function presetLabel(ctx: Scope): string {
     for (const p of presets) {
       if (ctx.from === p.from() && ctx.to === p.to()) return p.label;
     }

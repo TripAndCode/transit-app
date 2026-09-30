@@ -1,17 +1,18 @@
 /**
- * Second metric panel shown alongside the `on_time` report (item 94):
+ * Headway panel shown beside the Why lens's `dwell_run` report and the For
+ * riders lens's `on_time` report (see AnalysisTab.tsx):
  * Excess Waiting Time, spacing coefficient of variation, and long-gap rate
  * for this agency's routes classified high-frequency by
  * `agg_route_headway.is_high_frequency` (pipeline/headways.py). Renders
  * nothing extra for a non-high-frequency route -- such routes simply never
  * appear in `rows` (see pipeline/reports/headway_quality.py), and the
- * `on_time` table above this panel is completely unaffected either way.
+ * report above this panel is completely unaffected either way.
  */
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useHeadwayQuality } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
-import type { RangeCtx } from "../api/rangeContext";
+import type { Scope } from "../api/scope";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { SHARED_TABLE, th, td } from "./tableStyles";
@@ -28,7 +29,7 @@ function fmtCov(v: number | null): string {
   return v == null ? "—" : v.toFixed(2);
 }
 
-export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) {
+export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
   const { format: formatRoute } = useRouteNames(aid);
   const { data, isLoading, error, refetch } = useHeadwayQuality(aid, ctx, true);

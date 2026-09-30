@@ -1,6 +1,6 @@
 /**
- * Fourth metric panel shown alongside the `on_time` report (item 130):
- * observed rain-vs-dry average delay from `useWeatherDelay` (item 129).
+ * The Why lens's rain panel, shown beside the `dwell_run` report: observed
+ * rain-vs-dry average delay from `useWeatherDelay`.
  * `available: false` is an expected, common configuration -- most agencies
  * have no representative weather station mapped yet -- so it renders one
  * calm line, never `ErrorBanner`/red styling. The server's own
@@ -10,7 +10,7 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useWeatherDelay } from "../api/hooks";
-import type { RangeCtx } from "../api/rangeContext";
+import type { Scope } from "../api/scope";
 import type { WeatherDelayBucket } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -28,7 +28,7 @@ function fmtDeltaSec(v: number | null, t: TFunction): string {
   return t("common.unit_sec_signed", { sign: v < 0 ? "-" : "+", value: Math.abs(v).toFixed(1) });
 }
 
-export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) {
+export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
   const { data, isLoading, error, refetch } = useWeatherDelay(aid, ctx, true);
 

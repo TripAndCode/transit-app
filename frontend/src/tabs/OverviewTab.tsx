@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
-import { useRangeContext } from "../api/rangeContext";
+import { useScope } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
@@ -27,7 +27,7 @@ type OpenCard = "concentration" | "peak_hour" | "service_split" | null;
 export function OverviewTab() {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(agencyId);
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;

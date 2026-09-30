@@ -29,8 +29,12 @@ export function isLensId(v: string | undefined): v is LensId {
   return v != null && (LENS_IDS as readonly string[]).includes(v);
 }
 
+function isReportType(value: string): value is ReportTypeId {
+  return Object.hasOwn(REPORT_LENS, value);
+}
+
 export function reportDestination(reportType: string): LensId | "saved" {
-  return REPORT_LENS[reportType as ReportTypeId] ?? "overview";
+  return isReportType(reportType) ? REPORT_LENS[reportType] : "overview";
 }
 
 export function lensReportTypes(lens: LensId): readonly string[] {
@@ -66,6 +70,7 @@ export function lensHref(
 }
 
 export function reportHref(agencyId: number | string, reportType: string, search = ""): string {
+  if (!isReportType(reportType)) return lensHref(agencyId, "overview", search);
   const dest = reportDestination(reportType);
   const qs = mergeSearch(search, { report: reportType });
   return dest === "saved" ? `/agencies/${agencyId}/saved${qs}` : `/agencies/${agencyId}/analysis/${dest}${qs}`;

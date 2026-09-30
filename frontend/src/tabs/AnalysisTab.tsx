@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useReport, useReports } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
-import { ctxToQueryString, useRangeContext, type RangeCtx } from "../api/rangeContext";
+import { scopeToQueryString, useScope, type Scope } from "../api/scope";
 import type { DwellRunPayload, TrendPayload } from "../api/types";
 import { TabFilterBar } from "../components/TabFilterBar";
 import { EmptyState } from "../components/EmptyState";
@@ -45,7 +45,7 @@ export function AnalysisTab({ reportTypes }: { reportTypes: readonly string[] })
   const requested = searchParams.get("report");
   const reportType = requested != null && reportTypes.includes(requested) ? requested : (reportTypes[0] ?? null);
   const id = useAgencyId();
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);
   function selectReport(type: string) {
     setSearchParams((prev) => {
@@ -126,15 +126,7 @@ export function AnalysisTab({ reportTypes }: { reportTypes: readonly string[] })
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
               {detail.data.report_type !== "trend" && (
                 <a
-                  href={`/api/${id}/reports/${detail.data.report_type}?${new URLSearchParams({
-                    from: ctx.from,
-                    to: ctx.to,
-                    ...(ctx.dow !== "all" ? { dow: ctx.dow } : {}),
-                    ...(ctx.time_band !== "all" ? { time_band: ctx.time_band } : {}),
-                    ...(ctx.service !== "all" ? { service: ctx.service } : {}),
-                    ...(ctx.routes.length > 0 ? { routes: ctx.routes.join(",") } : {}),
-                    format: "csv",
-                  }).toString()}`}
+                  href={`/api/${id}/reports/${detail.data.report_type}?${scopeToQueryString(ctx)}&format=csv`}
                   download
                   style={{
                     fontSize: 12,
@@ -179,28 +171,23 @@ export function AnalysisTab({ reportTypes }: { reportTypes: readonly string[] })
                 })}
               />
             )}
-            {/* Second, narrower metric panel (item 94) -- high-frequency
-                routes only, rendered alongside (never instead of) the
-                on_time table above. Every other report_type is completely
-                unaffected. */}
-            {detail.data.report_type === "on_time" && id != null && (
-              <HeadwayQualityPanel aid={id} ctx={ctx} />
+            {/* Each lens's evidence panels, rendered alongside (never instead
+                of) the report above: Why pairs dwell vs run with rain and long
+                gaps; For riders pairs on-time with headway quality and the
+                agency's performance targets. The targets panel renders nothing
+                when no standards are configured; the rain panel says so when
+                no weather station is mapped. */}
+            {detail.data.report_type === "dwell_run" && id != null && (
+              <>
+                <WeatherDelayPanel aid={id} ctx={ctx} />
+                <HeadwayQualityPanel aid={id} ctx={ctx} />
+              </>
             )}
-            {/* Third, still-narrower panel (item 104) -- an internal
-                bonus/malus simulation over whichever routes have a
-                configured minimum performance standard, rendered alongside
-                (never instead of) on_time/headway_quality above. Renders
-                nothing itself when this agency has no standards configured. */}
             {detail.data.report_type === "on_time" && id != null && (
-              <PerformanceStandardPanel aid={id} ctx={ctx} />
-            )}
-            {/* Fourth, still-narrower panel (item 130) -- observed rain-vs-
-                dry average delay, rendered alongside (never instead of)
-                on_time/headway_quality/performance_standard above. Renders
-                its own calm "not configured" line rather than nothing when
-                this agency has no weather station mapped. */}
-            {detail.data.report_type === "on_time" && id != null && (
-              <WeatherDelayPanel aid={id} ctx={ctx} />
+              <>
+                <HeadwayQualityPanel aid={id} ctx={ctx} />
+                <PerformanceStandardPanel aid={id} ctx={ctx} />
+              </>
             )}
             {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
               <details
@@ -248,7 +235,7 @@ function TrendBlock({
   ctx,
 }: {
   data: TrendPayload[];
-  ctx: RangeCtx;
+  ctx: Scope;
 }) {
   const payload: TrendPayload = data[0] ?? {
     days: [],
@@ -277,10 +264,10 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { format: formatRoute } = useRouteNames(id);
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   // The agency and filters the report was fetched for identify the list: a
   // refetch under the same ones is the same list, however new its objects are.
-  const cappedRoutes = useCappedList(payload?.routes ?? [], 200, `${id ?? "none"}:${ctxToQueryString(ctx)}`);
+  const cappedRoutes = useCappedList(payload?.routes ?? [], 200, `${id ?? "none"}:${scopeToQueryString(ctx)}`);
   const jumpToLatestData = useJumpToLatestDataRange(id);
 
   if (!payload || !payload.available) {

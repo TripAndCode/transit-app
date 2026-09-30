@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { formatNumber } from "../../utils/format";
-import { useRangeContext } from "../../api/rangeContext";
+import { useScope } from "../../api/scope";
 import { useDrawOn } from "./ChartEnter";
 import { ShadedDays, ThresholdBand, VerticalMarker } from "./annotations";
 import { brushIndices, brushRange } from "./brush";
@@ -28,7 +28,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
   const [rawHover, setHover] = useState<number | null>(null);
   const [rawDrag, setDrag] = useState<Drag | null>(null);
   const [brushed, setBrushed] = useState(false);
-  const [, updateRange] = useRangeContext();
+  const [, updateRange] = useScope();
   const { focus, setFocus } = useTrendFocus();
   const lineRef = useRef<SVGPolylineElement | null>(null);
   useDrawOn(lineRef);

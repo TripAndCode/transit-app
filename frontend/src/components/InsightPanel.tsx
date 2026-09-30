@@ -121,7 +121,7 @@ export function InsightPanel({ className }: { className?: string } = {}) {
     addSeen(id, key);
     setSeen(readSeen(id));
     // Pin from/to to the window this suggestion actually evaluated (rather
-    // than the user's ambient Analysis tab filter, e.g. useRangeContext's
+    // than the user's ambient Analysis tab filter, e.g. useScope's
     // 30-day default) so the click-through lands exactly where the reason
     // text's numbers are visible.
     const qs = new URLSearchParams({

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.range import RangeCtx, ctx_payload, get_range_ctx
+from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
     format_council_summary_text,
@@ -93,6 +94,47 @@ _REPORT_TYPES = (
     "delay_certificate",
 )
 
+_EARLY_TOLERANCE_TYPES = frozenset({"on_time", "council_summary"})
+_LATE_TOLERANCE_TYPES = frozenset({"on_time", "worst_5min", "council_summary"})
+# The scope's `late` is the on-time tolerance. worst_5min's late cutoff is its
+# "≥5 min" threshold, so the scope never moves it.
+_SCOPE_LATE_TYPES = frozenset({"on_time", "council_summary"})
+
+# What each report's rows actually filter on. compare_ranking and the dow_*
+# reports fix dow/service themselves; dwell_run cannot split by time band.
+_REPORT_HONOURS: dict[str, tuple[str, ...]] = {
+    "ranking": ALL_SIX,
+    "ranking_best": ALL_SIX,
+    "on_time": ALL_SIX,
+    "worst_5min": ALL_SIX,
+    "trend": ALL_SIX,
+    "compare_ranking": ("from", "to", "time_band", "routes"),
+    "dow_weekend": ("from", "to", "time_band", "routes"),
+    "dow_weekday": ("from", "to", "time_band", "routes"),
+    "dwell_run": ("from", "to", "dow", "service", "routes"),
+    "council_summary": ALL_SIX,
+    "delay_certificate": ALL_SIX,
+}
+
+
+def report_scope_applied(report_type: str) -> dict[str, bool]:
+    honoured = list(_REPORT_HONOURS[report_type])
+    if report_type in _SCOPE_LATE_TYPES:
+        honoured.append("late")
+    if report_type in _EARLY_TOLERANCE_TYPES:
+        honoured.append("early")
+    return scope_applied(*honoured)
+
+
+# What each panel endpoint filters on: headway_quality's aggregate carries
+# neither service nor time band; performance_standards reads dates only; the
+# forecast endpoints read all-time aggregates, the heatmap for the scope's one route.
+_HEADWAY_SCOPE = scope_applied("from", "to", "dow", "routes")
+_STANDARDS_SCOPE = scope_applied("from", "to")
+_WEATHER_SCOPE = scope_applied("from", "to", "dow", "service", "routes")
+_FORECAST_HEATMAP_SCOPE = scope_applied("routes")
+_FORECAST_OVERVIEW_SCOPE = scope_applied()
+
 
 class ReportMeta(BaseModel):
     """Listing entry returned by ``GET /reports``."""
@@ -111,6 +153,9 @@ class ReportCtx(BaseModel):
     time_band: str
     service: str = "all"
     routes: list[str] = []
+    hour: str | None = None
+    stop: str | None = None
+    dir: int | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -129,6 +174,7 @@ class ReportResponse(BaseModel):
     # so a caller comparing two responses can check the definition matches
     # instead of assuming it does.
     definition: DefinitionMeta
+    scope_applied: dict[str, bool]
 
 
 def _report_ctx(ctx: RangeCtx) -> ReportCtx:
@@ -176,6 +222,7 @@ class HeadwayQualityResponse(BaseModel):
 
     rows: list[HeadwayQualityRow]
     ctx: ReportCtx
+    scope_applied: dict[str, bool]
 
 
 @router.get("/headway_quality", response_model=HeadwayQualityResponse)
@@ -194,7 +241,9 @@ async def get_headway_quality(
     chose) — a dedicated endpoint, like ``/forecast/overview`` above.
     """
     rows = await compute_headway_quality(agency_id, ctx, conn)
-    return HeadwayQualityResponse(rows=[HeadwayQualityRow(**r) for r in rows], ctx=_report_ctx(ctx))
+    return HeadwayQualityResponse(
+        rows=[HeadwayQualityRow(**r) for r in rows], ctx=_report_ctx(ctx), scope_applied=_HEADWAY_SCOPE
+    )
 
 
 class PerformanceStandardRow(BaseModel):
@@ -235,6 +284,7 @@ class PerformanceStandardsResponse(BaseModel):
     rows: list[PerformanceStandardRow]
     ctx: ReportCtx
     disclaimer: str
+    scope_applied: dict[str, bool]
 
 
 @router.get("/performance_standards", response_model=PerformanceStandardsResponse)
@@ -260,6 +310,7 @@ async def get_performance_standards(
         rows=[PerformanceStandardRow(**r) for r in rows],
         ctx=_report_ctx(ctx),
         disclaimer=simulation_disclaimer(locale),
+        scope_applied=_STANDARDS_SCOPE,
     )
 
 
@@ -333,6 +384,7 @@ class WeatherDelayResponse(BaseModel):
     ctx: ReportCtx
     disclaimer: str
     attribution: str
+    scope_applied: dict[str, bool]
 
 
 @router.get("/weather_delay", response_model=WeatherDelayResponse)
@@ -357,6 +409,7 @@ async def get_weather_delay(
         ctx=_report_ctx(ctx),
         disclaimer=observation_disclaimer(locale),
         attribution=weather_attribution(locale),
+        scope_applied=_WEATHER_SCOPE,
     )
 
 
@@ -428,6 +481,7 @@ class ForecastHeatmapResponse(BaseModel):
     route: str
     cells: list[ForecastHeatmapCell]
     disclaimer: str
+    scope_applied: dict[str, bool]
 
 
 @router.get("/forecast/heatmap", response_model=ForecastHeatmapResponse)
@@ -450,7 +504,7 @@ async def forecast_heatmap(
         agency_id,
         route,
     )
-    return summarize_expected_delay_heatmap(rows, route, locale)
+    return {**summarize_expected_delay_heatmap(rows, route, locale), "scope_applied": _FORECAST_HEATMAP_SCOPE}
 
 
 class ForecastOverviewGridCell(BaseModel):
@@ -494,6 +548,7 @@ class ForecastOverviewResponse(BaseModel):
     worst: ForecastOverviewWorst | None
     routes: list[ForecastOverviewRoute]
     disclaimer: str
+    scope_applied: dict[str, bool]
 
 
 async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> list[asyncpg.Record]:
@@ -568,7 +623,10 @@ async def forecast_overview(
             exc_info=True,
         )
         recent_daily_rows = []
-    return summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale)
+    return {
+        **summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale),
+        "scope_applied": _FORECAST_OVERVIEW_SCOPE,
+    }
 
 
 # Marker for a row's trailing `low_confidence` flag in the "on_time" CSV
@@ -694,6 +752,21 @@ async def get_report(
         "on_time/council_summary, 300s for worst_5min). Passing this opts into a query-time "
         "histogram estimate instead of the exact legacy_60s column.",
     ),
+    late: int | None = Query(
+        default=None,
+        ge=0,
+        le=3600,
+        description="The scope's on-time late tolerance in seconds. Applied by on_time and "
+        "council_summary; otherwise ignored and reported false in scope_applied (worst_5min's "
+        "threshold stays its own late_tolerance_sec).",
+    ),
+    early: int | None = Query(
+        default=None,
+        ge=0,
+        le=3600,
+        description="The scope's early tolerance in seconds. Applied by on_time and council_summary; "
+        "otherwise ignored and reported false in scope_applied.",
+    ),
     threshold_sec: int | None = Query(
         default=None,
         ge=0,
@@ -711,6 +784,15 @@ async def get_report(
     if report_type not in _REPORT_TYPES:
         raise HTTPException(status_code=404, detail=f"Unknown report type '{report_type}'")
 
+    if late is not None and late_tolerance_sec is not None:
+        raise HTTPException(status_code=400, detail="late and late_tolerance_sec set the same tolerance; pass one")
+    if early is not None and early_tolerance_sec is not None:
+        raise HTTPException(status_code=400, detail="early and early_tolerance_sec set the same tolerance; pass one")
+    if late is not None and report_type in _SCOPE_LATE_TYPES:
+        late_tolerance_sec = late
+    if early is not None and report_type in _EARLY_TOLERANCE_TYPES:
+        early_tolerance_sec = early
+
     if preset is not None:
         if early_tolerance_sec is not None or late_tolerance_sec is not None:
             raise HTTPException(
@@ -719,11 +801,11 @@ async def get_report(
         if preset not in ON_TIME_PRESETS:
             raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
         early_tolerance_sec, late_tolerance_sec = ON_TIME_PRESETS[preset]
-    if early_tolerance_sec is not None and report_type not in ("on_time", "council_summary"):
+    if early_tolerance_sec is not None and report_type not in _EARLY_TOLERANCE_TYPES:
         raise HTTPException(
             status_code=400, detail="early_tolerance_sec only applies to the on_time/council_summary reports"
         )
-    if late_tolerance_sec is not None and report_type not in ("on_time", "worst_5min", "council_summary"):
+    if late_tolerance_sec is not None and report_type not in _LATE_TOLERANCE_TYPES:
         raise HTTPException(
             status_code=400, detail="late_tolerance_sec only applies to the on_time/worst_5min/council_summary reports"
         )
@@ -799,6 +881,7 @@ async def get_report(
             rows=[{"days": days, "hourly": hourly, "dow_band": dow_band, "revision_boundaries": revision_boundaries}],
             ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "dwell_run":
         payload = await compute_dwell_run_decomposition(agency_id, ctx, conn)
@@ -819,6 +902,7 @@ async def get_report(
             rows=[payload],
             ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "council_summary":
         agency_row = await conn.fetchrow("SELECT agency_name FROM agencies WHERE agency_id = $1", agency_id)
@@ -854,6 +938,7 @@ async def get_report(
             rows=[row],
             ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
@@ -871,6 +956,7 @@ async def get_report(
             rows=rows,
             ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     else:
         raise HTTPException(status_code=500, detail="unreachable")
@@ -886,4 +972,5 @@ async def get_report(
         rows=rows,
         ctx=_report_ctx(ctx),
         definition=definition,
+        scope_applied=report_scope_applied(report_type),
     )

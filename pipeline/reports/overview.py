@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Iterable, Iterator
 
-from api.range import RangeCtx
+from api.range import RangeCtx, dow_isodays
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.reports.filters import _agg_filter, _ch_rows, _dedup_cte_ch, _round2, _time_band_sql_on
@@ -125,12 +125,8 @@ def _dow_matches(d: date, dow: str) -> bool:
     column IS that same ``toDate(captured_at, 'Asia/Tokyo')`` expression, so
     ``date.isoweekday()`` (also 1=Monday..7=Sunday) reproduces it exactly.
     """
-    if dow == "all":
-        return True
-    iso = d.isoweekday()
-    if dow == "weekday":
-        return 1 <= iso <= 5
-    return iso in (6, 7)
+    days = dow_isodays(dow)
+    return days is None or d.isoweekday() in days
 
 
 def _grain_covers(grain: _Grain | None, from_date: date, to_date: date) -> bool:
