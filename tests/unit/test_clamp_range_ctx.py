@@ -205,3 +205,52 @@ def test_a_bare_string_is_not_treated_as_a_route_list():
     with pytest.raises(HTTPException) as exc:
         clamp_range_ctx(from_=None, to=None, routes="R1")
     assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "raw,expected", [("7", (7, 7)), ("0", (0, 0)), ("23", (23, 23)), ("7-9", (7, 9)), ("07-09", (7, 9))]
+)
+def test_hour_accepts_one_hour_or_an_inclusive_range(frozen_today, raw, expected):
+    assert _call(hour=raw).hour == expected
+
+
+@pytest.mark.parametrize("raw", ["24", "-1", "9-7", "7-", "a", "7-9-10", 7, "7.5"])
+def test_hour_rejects_anything_else_with_422(frozen_today, raw):
+    with pytest.raises(HTTPException) as exc:
+        _call(hour=raw)
+    assert exc.value.status_code == 422
+
+
+def test_hour_and_time_band_together_are_a_422(frozen_today):
+    with pytest.raises(HTTPException) as exc:
+        _call(hour="7", time_band="morning")
+    assert exc.value.status_code == 422
+
+
+def test_hour_with_time_band_all_is_fine(frozen_today):
+    assert _call(hour="7", time_band="all").hour == (7, 7)
+
+
+def test_stop_is_stripped_and_bounded(frozen_today):
+    assert _call(stop="  1234_01 ").stop == "1234_01"
+    assert _call(stop="").stop is None
+    with pytest.raises(HTTPException) as exc:
+        _call(stop="x" * 129)
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize("raw,expected", [("0", 0), ("1", 1), (None, None), ("", None)])
+def test_direction_accepts_zero_or_one(frozen_today, raw, expected):
+    assert _call(direction=raw).direction == expected
+
+
+@pytest.mark.parametrize("raw", ["2", "-1", "north", 1.5])
+def test_direction_rejects_anything_else_with_422(frozen_today, raw):
+    with pytest.raises(HTTPException) as exc:
+        _call(direction=raw)
+    assert exc.value.status_code == 422
+
+
+def test_legacy_callers_get_no_extras(frozen_today):
+    ctx = _call()
+    assert (ctx.hour, ctx.stop, ctx.direction) == (None, None, None)

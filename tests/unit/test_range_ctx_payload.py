@@ -6,9 +6,9 @@ this helper, so a single frontend reader can parse the echo from any of them.
 
 from datetime import date
 
-from api.range import RangeCtx, ctx_payload
+from api.range import RangeCtx, clamp_range_ctx, ctx_payload
 
-_CTX_KEYS = {"from", "to", "dow", "time_band", "service", "routes"}
+_CTX_KEYS = {"from", "to", "dow", "time_band", "service", "routes", "hour", "stop", "dir"}
 
 
 def test_ctx_payload_uses_the_client_facing_from_and_to_keys():
@@ -20,6 +20,9 @@ def test_ctx_payload_uses_the_client_facing_from_and_to_keys():
         "time_band": "all",
         "service": "all",
         "routes": [],
+        "hour": None,
+        "stop": None,
+        "dir": None,
     }
 
 
@@ -39,6 +42,9 @@ def test_ctx_payload_echoes_every_filter_dimension():
         "time_band": "morning",
         "service": "平日",
         "routes": ["1021", "5"],
+        "hour": None,
+        "stop": None,
+        "dir": None,
     }
 
 
@@ -78,3 +84,13 @@ def test_no_router_hand_rolls_the_ctx_echo():
     routers = Path(__file__).resolve().parents[2] / "api" / "routers"
     offenders = sorted(p.name for p in routers.glob("*.py") if '"from": ctx.from_date.isoformat()' in p.read_text())
     assert offenders == [], f"These still build the ctx echo by hand: {offenders}"
+
+
+def test_payload_echoes_hour_stop_and_dir():
+    ctx = clamp_range_ctx(from_=None, to=None, hour="7-9", stop="S1", direction="1")
+    payload = ctx_payload(ctx)
+    assert (payload["hour"], payload["stop"], payload["dir"]) == ("7-9", "S1", 1)
+    single = ctx_payload(clamp_range_ctx(from_=None, to=None, hour="8"))
+    assert single["hour"] == "8"
+    legacy = ctx_payload(clamp_range_ctx(from_=None, to=None))
+    assert (legacy["hour"], legacy["stop"], legacy["dir"]) == (None, None, None)

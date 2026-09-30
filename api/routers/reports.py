@@ -111,6 +111,9 @@ class ReportCtx(BaseModel):
     time_band: str
     service: str = "all"
     routes: list[str] = []
+    hour: str | None = None
+    stop: str | None = None
+    dir: int | None = None
 
     model_config = {"populate_by_name": True}
 
