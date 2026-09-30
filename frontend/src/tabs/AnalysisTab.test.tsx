@@ -36,9 +36,18 @@ function mockSupportHooks() {
   vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: null, isLoading: false } as never);
 }
 
-function renderAnalysis(initialPath: string, reportTypes: readonly string[] = ["ranking", "on_time"]) {
+function renderAnalysis(
+  initialPath: string,
+  reportTypes: readonly string[] = ["ranking", "on_time"],
+  defaultReport?: string,
+) {
   const router = createMemoryRouter(
-    [{ path: "/agencies/:agencyId/analysis/:lens", element: <AnalysisTab reportTypes={reportTypes} /> }],
+    [
+      {
+        path: "/agencies/:agencyId/analysis/:lens",
+        element: <AnalysisTab reportTypes={reportTypes} defaultReport={defaultReport} />,
+      },
+    ],
     { initialEntries: [initialPath] },
   );
   renderWithProviders(<RouterProvider router={router} />);
@@ -65,6 +74,22 @@ describe("AnalysisTab", () => {
     expect(screen.getByText("Reports")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Delay ranking/ })).toHaveAttribute("aria-pressed", "true");
     expect(useReport.mock.calls.at(-1)?.[1]).toBe("ranking");
+  });
+
+  it.each([
+    ["on_time", "on_time"],
+    ["trend", "ranking"],
+  ])("opens default report %s as %s when no report is chosen", (defaultReport, opened) => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({
+      data: [reportMeta("ranking"), reportMeta("on_time")],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderAnalysis("/agencies/1/analysis/rider", ["ranking", "on_time"], defaultReport);
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe(opened);
   });
 
   it("lists only the report types it is given", () => {

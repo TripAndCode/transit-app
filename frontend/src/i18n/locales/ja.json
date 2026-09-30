@@ -1602,5 +1602,9 @@
   },
   "glossary": {
     "gtfs": "GTFS：時刻表や位置情報などの運行データをやり取りするための標準フォーマットです。"
+  },
+  "routesIndex": {
+    "open_route": "路線カルテを開く",
+    "open_route_placeholder": "路線を選ぶ"
   }
 }

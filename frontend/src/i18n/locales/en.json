@@ -1602,5 +1602,9 @@
   },
   "glossary": {
     "gtfs": "GTFS: the standard transit-data format for schedules and real-time positions."
+  },
+  "routesIndex": {
+    "open_route": "Open a route",
+    "open_route_placeholder": "Choose a route"
   }
 }
