@@ -46,4 +46,10 @@ describe("analysisRoutes", () => {
     expect(reportHref(9, "dwell_run", "?routes=50")).toBe("/agencies/9/analysis/why?routes=50&report=dwell_run");
     expect(reportHref("9", "delay_certificate", "")).toBe("/agencies/9/saved?report=delay_certificate");
   });
+
+  it("sends an unknown report type to Overview without naming it", () => {
+    expect(reportHref(9, "banana", "?routes=50")).toBe("/agencies/9/analysis/overview?routes=50");
+    expect(reportHref(9, "constructor")).toBe("/agencies/9/analysis/overview");
+    expect(reportDestination("toString")).toBe("overview");
+  });
 });

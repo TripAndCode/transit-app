@@ -7,6 +7,10 @@ import * as hooks from "../api/hooks";
 import { AnalysisTab } from "./AnalysisTab";
 import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType } from "../api/types";
 
+vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () => <div>headway-panel</div> }));
+vi.mock("../components/PerformanceStandardPanel", () => ({ PerformanceStandardPanel: () => <div>standards-panel</div> }));
+vi.mock("../components/WeatherDelayPanel", () => ({ WeatherDelayPanel: () => <div>weather-panel</div> }));
+
 const DEFINITION: DefinitionMeta = {
   preset: "legacy_60s",
   early_tolerance_sec: null,
@@ -295,5 +299,37 @@ describe("AnalysisTab dwell_run route cap", () => {
 
     await user.click(screen.getByRole("button", { name: "switch agency" }));
     expect(routeCells()).toHaveLength(200);
+  });
+});
+
+describe("AnalysisTab lens panels", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function show(path: string, reportType: ReportType, rows: unknown[]) {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta(reportType)], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse(reportType), rows },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderAnalysis(path, [reportType]);
+  }
+
+  it("puts the rain and long-gap panels beside dwell vs run in Why", () => {
+    show("/agencies/1/analysis/why", "dwell_run", [{ available: true, time_band_supported: true, routes: [] }]);
+    expect(screen.getByText("weather-panel")).toBeInTheDocument();
+    expect(screen.getByText("headway-panel")).toBeInTheDocument();
+    expect(screen.queryByText("standards-panel")).toBeNull();
+  });
+
+  it("puts the headway and targets panels beside on-time in For riders, without rain", () => {
+    show("/agencies/1/analysis/rider", "on_time", []);
+    expect(screen.getByText("headway-panel")).toBeInTheDocument();
+    expect(screen.getByText("standards-panel")).toBeInTheDocument();
+    expect(screen.queryByText("weather-panel")).toBeNull();
   });
 });

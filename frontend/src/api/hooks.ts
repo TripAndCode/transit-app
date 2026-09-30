@@ -122,10 +122,10 @@ export function useReport(
   });
 }
 
-/** High-frequency-only Excess Waiting Time / CoV / long-gap-rate panel data
- *  (item 94) — meant to render alongside the `on_time` report, so callers
- *  gate `enabled` on that report actually being the one in view rather than
- *  fetching this on every report tab. */
+/** High-frequency-only Excess Waiting Time / CoV / long-gap-rate panel data,
+ *  rendered beside the `dwell_run` and `on_time` reports; callers gate
+ *  `enabled` on one of those being the report in view rather than fetching
+ *  this on every report. */
 export function useHeadwayQuality(
   agencyId: number | null,
   ctx: RangeCtx,
@@ -140,9 +140,9 @@ export function useHeadwayQuality(
 }
 
 /** Per-route minimum-performance-standard achievement rate / estimated
- *  bonus-or-deduction panel data (item 104) -- an internal simulation only
- *  (see `PerformanceStandardsResponse.disclaimer`), meant to render
- *  alongside the `on_time` report the same way `useHeadwayQuality` does. */
+ *  bonus-or-deduction panel data -- an internal simulation only (see
+ *  `PerformanceStandardsResponse.disclaimer`), rendered beside the `on_time`
+ *  report. */
 export function usePerformanceStandards(
   agencyId: number | null,
   ctx: RangeCtx,
@@ -158,9 +158,8 @@ export function usePerformanceStandards(
   });
 }
 
-/** Observed rain-vs-dry delay comparison (item 129) -- meant to render
- *  alongside the `on_time` report the same way `useHeadwayQuality` and
- *  `usePerformanceStandards` do. `routes`/`dow` filters already apply
+/** Observed rain-vs-dry delay comparison, rendered beside the `dwell_run`
+ *  report. `routes`/`dow` filters already apply
  *  server-side via `ctxToQueryString`, so no params beyond `ctx` are
  *  needed. */
 export function useWeatherDelay(

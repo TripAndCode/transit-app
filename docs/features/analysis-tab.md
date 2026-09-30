@@ -12,8 +12,10 @@ with a proactive "Insight Panel" suggesting what to look at next.
   the report types it owns (`lensReportTypes` in
   `frontend/src/routes/analysisRoutes.ts`):
   - When — `trend`, `dow_weekday`, `dow_weekend`, `route_forecast`;
-  - Why — `dwell_run`;
-  - For riders — `ranking`, `ranking_best`, `on_time`, `worst_5min`;
+  - Why — `dwell_run`, with the rain (`WeatherDelayPanel`) and long-gap
+    (`HeadwayQualityPanel`) panels beside it;
+  - For riders — `ranking`, `ranking_best`, `on_time`, `worst_5min`, with
+    `HeadwayQualityPanel` and `PerformanceStandardPanel` beside `on_time`;
   - Compare (its default "periods and routes" mode) — `compare_ranking`.
 
   The export-style types, `council_summary` and `delay_certificate`, render
