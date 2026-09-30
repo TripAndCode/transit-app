@@ -181,6 +181,16 @@ describe("CommandPalette", () => {
     expect(search.has("routes")).toBe(false);
   });
 
+  it("names the screen a report opens on", async () => {
+    const user = userEvent.setup();
+    renderPalette();
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Dwell");
+    const option = screen.getByText("Dwell/running time").closest('[role="option"]') as HTMLElement;
+    expect(within(option).getByText("Why")).toBeInTheDocument();
+    expect(option.textContent).not.toContain("analysis/");
+  });
+
   it("selecting a report opens the screen that hosts it", async () => {
     const user = userEvent.setup();
     renderPalette("/agencies/1/live?from=2026-06-01&to=2026-06-07");
@@ -234,6 +244,7 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/routes");
     const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
     expect(search.get("from")).toBe("2026-06-01");
+    expect(search.has("routes")).toBe(false);
   });
 
   it("switching agencies falls back to Pulse, with the active range context, when there is no current tab", async () => {

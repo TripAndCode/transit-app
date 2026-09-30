@@ -134,7 +134,7 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/live", element: <MapTab /> },
       { path: "agencies/:agencyId/reports", element: <SavedExportTab /> },
       { path: "agencies/:agencyId/ask", element: <AskTab /> },
-      // Earlier URLs, each replaced by its v2 screen (routes/legacyRedirects).
+      // Legacy URLs, each replaced by the screen that serves it (routes/legacyRedirects).
       { path: "agencies/:agencyId/analysis", element: <RedirectTo dest="pulse" /> },
       { path: "agencies/:agencyId/analysis/:lens", element: <RedirectAnalysisLens /> },
       { path: "agencies/:agencyId/period-overview", element: <RedirectTo dest="pulse" /> },

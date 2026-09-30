@@ -8,18 +8,23 @@ saved-analysis bookmarks — scoped to exactly one selected route.
 
 - Route: the route dossier, `/agencies/:agencyId/routes/:routeCode`,
   rendered by `frontend/src/tabs/RouteDossier.tsx` (`React.lazy`-loaded),
-  which renders `RouteAnalysisTab`. The path's route is mirrored into the
-  scope's `routes` param. Picking one different route inside moves the
-  dossier to that route's path; picking several hands the selection to the
-  Routes list (`/agencies/:agencyId/routes`).
+  which renders `RouteAnalysisTab`. The path's route reaches the screen
+  through `ScopeRouteContext` (`frontend/src/api/scope.ts`): with no
+  `routes` param, `useScope()` inside the dossier scopes to that route, so
+  opening a dossier never writes a route filter that the rail, the palette
+  or another screen would then carry. A `routes` param is a route picker's
+  request: one different route moves the dossier to that route's path
+  (the screen stays mounted, so its sub-tab and map survive), and several
+  hand the selection to the Routes list (`/agencies/:agencyId/routes`).
 - `/agencies/:agencyId/route-analysis` and `/agencies/:agencyId/analysis/where`
   redirect here when their `routes` names exactly one route, to
   `routes/<route_code>?tab=stops` with `routes` dropped and the rest of the
   query (`sub_tab`, `compare`, the filter) kept; any other selection goes to
   the Routes list.
 - Reached from the rail's Routes entry (`nav.routes`) and then the list's
-  route opener (`routesIndex.open_route`, a `<select>` in
-  `frontend/src/tabs/RoutesIndex.tsx`), or from links that open a route
+  route opener (`routesIndex.open_route`, a `<select>` plus an Open button
+  in `frontend/src/tabs/RoutesIndex.tsx`; it leaves only on Open, so the
+  keyboard can browse the list), or from links that open a route
   directly, all built by `routeHref`/`routesHref` in
   `frontend/src/routes/destinations.ts`: the command palette's route items
   (with the active scope), the Live trip panel
@@ -33,9 +38,10 @@ saved-analysis bookmarks — scoped to exactly one selected route.
 What the user sees/does:
 
 - **Route/keito filter** — `frontend/src/components/analysis/AnalysisFilters.tsx`.
-  Inside the dossier the scope always holds the path's one route, since
-  `RouteDossier` re-seeds an empty `routes` from the path and leaves the
-  dossier for any other selection. `RouteAnalysisTab` itself shows an
+  Inside the dossier the scope always holds the path's one route (see
+  `ScopeRouteContext` above), and the empty state offers no "clear the
+  route filter" recovery there, since the route is the page rather than a
+  filter. `RouteAnalysisTab` itself shows an
   `EmptyState` prompting the user to choose one route whenever
   `ctx.routes.length !== 1`, instead of rendering data.
 - **Header actions** — a CSV download button (disabled while loading, on
@@ -78,7 +84,7 @@ What the user sees/does:
 
 | File | Role |
 |---|---|
-| `frontend/src/tabs/RouteDossier.tsx` | Dossier route: mirrors the path's route into `routes`, follows a different single route, hands several to the Routes list |
+| `frontend/src/tabs/RouteDossier.tsx` | Dossier route: provides the path's route through `ScopeRouteContext`, follows a different single route, hands several to the Routes list |
 | `frontend/src/tabs/RouteAnalysisTab.tsx` | Tab shell: compare toggle, stop selection, sub-tab state |
 | `frontend/src/components/analysis/AnalysisFilters.tsx` | Route/keito filter UI |
 | `frontend/src/components/analysis/StopChart.tsx` | Per-stop delay chart (current + optional previous-week overlay) |
@@ -104,8 +110,9 @@ What the user sees/does:
 
 - Frontend: `frontend/src/components/analysis/workflows.test.tsx` (renders
   `RouteAnalysisTab` and `ReportsHomeTab` together on their real routes),
-  `frontend/src/tabs/RouteDossier.test.tsx` (path ↔ `routes` mirroring and
-  the hand-off to the Routes list), `frontend/src/tabs/RoutesIndex.test.tsx`
+  `frontend/src/tabs/RouteDossier.test.tsx` (the path's route without a
+  `routes` param, following a picked route without remounting, and the
+  hand-off to the Routes list), `frontend/src/tabs/RoutesIndex.test.tsx`
   (the route opener),
   `frontend/src/routes/legacyRedirects.test.tsx` (the `route-analysis` and
   `analysis/where` redirects),

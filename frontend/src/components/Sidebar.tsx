@@ -7,6 +7,7 @@ import {
   SquareDashed,
   ChevronLeft,
   ChevronRight,
+  MessageCircleQuestion,
   MoreHorizontal,
   Shield,
   X,
@@ -231,6 +232,37 @@ export function Sidebar() {
               </RailTooltip>
             ))}
           </nav>
+        )}
+        {/* Ask sits apart from the destinations: the top bar's field
+            searches but does not take a question. Skipped on the mobile
+            sheet: Ask has its own bottom tab there. */}
+        {agencyId && !inSheet && (
+          <RailTooltip collapsed={collapsedFlag} label={t("nav.ask")}>
+            <NavLink
+              to={`/agencies/${agencyId}/ask${suffix}`}
+              aria-label={collapsedFlag ? t("nav.ask") : undefined}
+              onMouseEnter={() => prefetchRouteChunk("ask")}
+              onFocus={() => prefetchRouteChunk("ask")}
+              onClick={() => onNavigate?.()}
+              style={({ isActive }) => ({
+                margin: "8px 12px 0",
+                padding: collapsedFlag ? "10px 0" : "10px 12px",
+                borderRadius: 7,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: collapsedFlag ? "center" : "flex-start",
+                gap: 9,
+                color: isActive ? "var(--accent-strong)" : "var(--text-secondary)",
+                fontSize: "var(--text-sm)",
+                border: `1px dashed ${isActive ? "var(--accent)" : "var(--border-subtle)"}`,
+                textDecoration: "none",
+                transition: "color var(--transition), border-color var(--transition)",
+              })}
+            >
+              <MessageCircleQuestion size={16} strokeWidth={1.5} aria-hidden="true" />
+              {!collapsedFlag && t("nav.ask")}
+            </NavLink>
+          </RailTooltip>
         )}
         <nav aria-label={t("nav.other")} style={{ display: "flex", flexDirection: "column", marginTop: 16 }}>
           {!collapsedFlag && (

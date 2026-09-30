@@ -49,10 +49,24 @@ describe("RoutesIndex", () => {
     expect(await screen.findByText(/default:on_time/)).toBeInTheDocument();
   });
 
+  it("waits for Open before leaving, so browsing the list with the keyboard stays on the page", async () => {
+    const router = open("/agencies/9/routes");
+    await screen.findByText(/^analysis-tab/);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Open a route" }), "50");
+    expect(router.state.location.pathname).toBe("/agencies/9/routes");
+  });
+
+  it("keeps Open unavailable until a route is chosen", async () => {
+    open("/agencies/9/routes");
+    await screen.findByText(/^analysis-tab/);
+    expect(screen.getByRole("button", { name: "Open" })).toBeDisabled();
+  });
+
   it("opens a route's dossier with the scope, leaving the routes filter behind", async () => {
     const router = open("/agencies/9/routes?from=2026-09-01&routes=77");
     await screen.findByText(/^analysis-tab/);
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Open a route" }), "50");
+    await userEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(await screen.findByText("dossier")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/agencies/9/routes/50");
     expect(router.state.location.search).toBe("?from=2026-09-01");

@@ -1564,8 +1564,6 @@
     "nav_compare_sublabel": "二つの期間・事業者の違い",
     "nav_reports_sublabel": "人に渡す資料",
     "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
-    "hint": "コマンド",
-    "hint_aria": "コマンドパレットを開く（⌘K）",
     "group": {
       "recent": "最近使った項目",
       "nav": "移動",
@@ -1605,7 +1603,8 @@
   },
   "routesIndex": {
     "open_route": "路線カルテを開く",
-    "open_route_placeholder": "路線を選ぶ"
+    "open_route_placeholder": "路線を選ぶ",
+    "open": "開く"
   },
   "topbar": {
     "ask_placeholder": "路線・レポート・画面を検索",

@@ -10,6 +10,7 @@ import {
   agencySwitchHref,
   destHref,
   mergeSearch,
+  reportDestination,
   reportHref,
   routeHref,
   routesHref,
@@ -48,6 +49,12 @@ describe("destinations", () => {
     expect(routesHref(9, "", "stops")).toBe("/agencies/9/routes");
   });
 
+  it("names the screen each report type opens on", () => {
+    expect(reportDestination("dwell_run")).toBe("why");
+    expect(reportDestination("delay_certificate")).toBe("reports");
+    expect(reportDestination("banana")).toBeNull();
+  });
+
   it("sends each report type to the screen that hosts it", () => {
     expect(reportHref(9, "trend", "?routes=5")).toBe("/agencies/9/time?routes=5&report=trend");
     expect(reportHref(9, "dwell_run")).toBe("/agencies/9/why?report=dwell_run");
@@ -73,6 +80,7 @@ describe("destinations", () => {
     );
     expect(agencySwitchHref(4, "compare", "?by=agencies")).toBe("/agencies/4/compare?by=agencies");
     expect(agencySwitchHref(4, "", "")).toBe("/agencies/4/pulse");
+    expect(agencySwitchHref(4, "time", "", "from=2026-09-01&routes=5&stop=S1")).toBe("/agencies/4/time?from=2026-09-01");
     expect(agencySwitchHref(4, undefined, "")).toBe("/agencies/4/pulse");
   });
 });

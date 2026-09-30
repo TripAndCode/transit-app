@@ -44,12 +44,16 @@ function renderSidebar(path = "/agencies/1/live") {
 }
 
 describe("Sidebar", () => {
-  it("renders the seven destinations in rail order, with Ask and the palette left to the top bar", () => {
+  it("renders the seven destinations in rail order, with the palette left to the top bar", () => {
     renderSidebar();
     const nav = screen.getByRole("navigation", { name: "Destinations" });
     expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(RAIL_ORDER);
-    expect(screen.queryByRole("link", { name: "Ask" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
+  });
+
+  it("keeps a visible Ask entry below the destinations, carrying the filters", () => {
+    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+    expect(screen.getByRole("link", { name: "Ask" })).toHaveAttribute("href", "/agencies/8/ask?from=2026-06-01&to=2026-06-07");
   });
 
   it("points Live at the current agency's live route, preserving the filter query string", () => {

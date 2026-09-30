@@ -9,7 +9,7 @@
   --border-subtle: #D6DDE6;
   --text-primary: #0F1A2A;
   --text-secondary: #435166;
-  --text-tertiary: #5E6B80;
+  --text-tertiary: #5B687D;
   /* One accent for the whole product, light and dark: signage blue, for
      interaction and selection only -- never for delay magnitude, which has
      its own ramp (--d0..--d4). Any scoped redefinition of --accent would

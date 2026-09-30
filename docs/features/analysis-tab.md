@@ -13,7 +13,8 @@ with a proactive "Insight Panel" suggesting what to look at next.
   - Routes (`/agencies/:agencyId/routes`, `frontend/src/tabs/RoutesIndex.tsx`)
     — `ranking`, `ranking_best`, `on_time`, `worst_5min`, with
     `HeadwayQualityPanel` and `PerformanceStandardPanel` beside `on_time`.
-    A route opener `<select>` above the reports opens a route's dossier, and
+    A route opener (a `<select>` and an Open button) above the reports opens
+    a route's dossier, and
     `?sort=<report type>` picks which report opens when no `report` param is
     set;
   - Time (`/agencies/:agencyId/time`, `frontend/src/tabs/TimeTab.tsx`) —

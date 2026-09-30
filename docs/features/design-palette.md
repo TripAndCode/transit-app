@@ -22,9 +22,10 @@ route badge and the pre-auth wordmark) — not a second accent.
 
 The ground is cool paper: `--bg-page` #F1F4F7, `--bg-surface` #FFFFFF and
 `--bg-soft` #E8ECF1. Text is ink in three levels: `--text-primary`
-#0F1A2A, `--text-secondary` #435166 and `--text-tertiary` #5E6B80. The
+#0F1A2A, `--text-secondary` #435166 and `--text-tertiary` #5B687D. The
 dark theme redefines each. Every text level clears WCAG AA (4.5:1) on
-surface, soft and page in both themes, and `tokens.test.ts` asserts every
+surface, soft, page and the selected state (`--accent-soft`) in both themes,
+and `tokens.test.ts` asserts every
 pair.
 
 ## Delay ramp

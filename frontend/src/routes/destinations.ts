@@ -78,6 +78,11 @@ export function routesHref(agencyId: number | string, search = "", tab?: RouteTa
   return routes.length === 1 ? routeHref(agencyId, routes[0], search, tab) : destHref(agencyId, "routes", search);
 }
 
+/** The screen a report type opens on, or null for an unknown type. */
+export function reportDestination(reportType: string): Destination | null {
+  return isReportType(reportType) ? REPORT_HOME[reportType].dest : null;
+}
+
 export function reportHref(agencyId: number | string, reportType: string, search = ""): string {
   if (!isReportType(reportType)) return destHref(agencyId, "pulse", search);
   const home = REPORT_HOME[reportType];
@@ -86,8 +91,9 @@ export function reportHref(agencyId: number | string, reportType: string, search
   return destHref(agencyId, home.dest, params.toString(), home.extra);
 }
 
-/** The same destination for another agency. A route dossier lands on the
- *  Routes list instead: the other agency may have no route by that code. */
+/** The same destination for another agency. Route codes and stop ids
+ *  belong to one agency, so the scope loses them, and a route page lands on
+ *  the Routes list instead. */
 export function agencySwitchHref(
   agencyId: number | string,
   rest: string | undefined,
@@ -95,11 +101,15 @@ export function agencySwitchHref(
   scopeQuery = "",
 ): string {
   const dest = !rest ? "pulse" : rest.startsWith("routes/") ? "routes" : rest;
-  return `/agencies/${agencyId}/${dest}${mergeSearch(scopeQuery, screenParams(search))}`;
+  const scope = new URLSearchParams(scopeQuery);
+  scope.delete("routes");
+  scope.delete("stop");
+  return `/agencies/${agencyId}/${dest}${mergeSearch(scope.toString(), screenParams(search))}`;
 }
 
-/** Saved & export picked its view by `view`, or an export `report`; Reports
- *  picks its document by `doc`. */
+/** Reports picks its document by `doc`. A legacy `view` maps onto it
+ *  (saved → saved, reports → council), and a legacy export `report` opens
+ *  that report's document. */
 export function savedTarget(agencyId: number | string, search: string): string {
   const params = new URLSearchParams(search);
   const view = params.get("view");

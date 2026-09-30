@@ -1,3 +1,4 @@
+import { createContext, useContext } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
@@ -213,9 +214,16 @@ export function jstYearMonth(d: Date): { year: number; month: number } {
   };
 }
 
+/** The route a route page is about. Inside it, a URL with no `routes` param
+ *  still scopes to that route, so opening a route's page never writes a
+ *  route filter the rest of the app would then carry. */
+export const ScopeRouteContext = createContext<string | null>(null);
+
 export function useScope(): [Scope, (patch: ScopePatch) => void] {
   const [params, setParams] = useSearchParams();
-  const scope = parseScope(params, { from: isoDaysAgo(DEFAULT_RANGE_DAYS - 1), to: todayISO() });
+  const pageRoute = useContext(ScopeRouteContext);
+  const parsed = parseScope(params, { from: isoDaysAgo(DEFAULT_RANGE_DAYS - 1), to: todayISO() });
+  const scope = pageRoute != null && parsed.routes.length === 0 ? { ...parsed, routes: [pageRoute] } : parsed;
   function update(patch: ScopePatch) {
     setParams((prev) => applyScopePatch(prev, patch), { replace: true });
   }

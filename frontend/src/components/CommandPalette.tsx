@@ -21,7 +21,7 @@ import { onActivateKey } from "../utils/a11y";
 import { modifierKeyLabel } from "../utils/platform";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
 import { GO_TO_TARGETS } from "./paletteNavTargets";
-import { agencySwitchHref, reportHref, routeHref } from "../routes/destinations";
+import { agencySwitchHref, reportDestination, reportHref, routeHref } from "../routes/destinations";
 import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
 import "./commandPalette.css";
@@ -100,13 +100,16 @@ function buildRouteItems(
 function buildReportItems(t: TFunction, agencyId: number | null, goToReport: (id: string) => void): PaletteItem[] {
   if (agencyId == null) return [];
   const labels = buildReportTypeLabels(t);
-  return REPORT_TYPE_IDS.map((id) => ({
-    id: `report:${id}`,
-    group: "report",
-    label: labels[id],
-    sublabel: `analysis/${id}`,
-    run: () => goToReport(id),
-  }));
+  return REPORT_TYPE_IDS.map((id) => {
+    const dest = reportDestination(id);
+    return {
+      id: `report:${id}`,
+      group: "report",
+      label: labels[id],
+      sublabel: dest ? t(`nav.${dest}`) : undefined,
+      run: () => goToReport(id),
+    };
+  });
 }
 
 type PaletteRun = { group: PaletteGroup; entries: { item: PaletteItem; index: number }[] };

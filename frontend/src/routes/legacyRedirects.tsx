@@ -1,8 +1,9 @@
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { destHref, reportHref, routesHref, savedTarget, type Destination } from "./destinations";
 
-/** Every earlier URL keeps working: each one replaces itself with its v2
- *  screen, carrying the query string so filters and deep links survive. */
+/** Every legacy URL keeps working: each one replaces itself with the screen
+ *  that serves it, carrying the query string so filters and deep links
+ *  survive. */
 
 export function RedirectTo({ dest, extra = {} }: { dest: Destination; extra?: Record<string, string> }) {
   const { agencyId = "" } = useParams();

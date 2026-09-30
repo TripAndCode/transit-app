@@ -1564,8 +1564,6 @@
     "nav_compare_sublabel": "How two periods or agencies differ",
     "nav_reports_sublabel": "Documents to hand to someone",
     "nav_ask_sublabel": "Ask about routes, stops, and time bands",
-    "hint": "Command",
-    "hint_aria": "Open the command palette (⌘K)",
     "group": {
       "recent": "Recent",
       "nav": "Go to",
@@ -1605,7 +1603,8 @@
   },
   "routesIndex": {
     "open_route": "Open a route",
-    "open_route_placeholder": "Choose a route"
+    "open_route_placeholder": "Choose a route",
+    "open": "Open"
   },
   "topbar": {
     "ask_placeholder": "Search routes, reports and screens",

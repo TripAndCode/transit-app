@@ -464,10 +464,10 @@ describe("one accent identity", () => {
   });
 });
 
-describe("the text levels clear AA on both surfaces, in both themes", () => {
+describe("the text levels clear AA on every surface and the selected state, in both themes", () => {
   it.each(
     ["--text-primary", "--text-secondary", "--text-tertiary"].flatMap((prop) =>
-      ["--bg-surface", "--bg-soft", "--bg-page"].flatMap((surface) => [
+      ["--bg-surface", "--bg-soft", "--bg-page", "--accent-soft"].flatMap((surface) => [
         ["light", prop, surface],
         ["dark", prop, surface],
       ]),

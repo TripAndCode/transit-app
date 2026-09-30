@@ -9,8 +9,8 @@ const NetworkTab = lazy(loadNetworkTab);
 
 type Mode = "periods" | "agencies";
 
-/** Compare: `by=agencies` is the agencies board; every other `by` is the
- *  period comparison until each gets its own view. */
+/** Compare: `by=agencies` is the agencies board; every other `by` shows the
+ *  period comparison. */
 export function CompareTab() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();

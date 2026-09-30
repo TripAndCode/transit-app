@@ -12,10 +12,11 @@ this doc expands on with file-level detail.
   (`frontend/src/main.tsx`), and `frontend/src/components/OnboardingGate.tsx`
   redirects a fresh/remembered agency selection to
   `/agencies/{id}/pulse`.
-  Reach the Ask tab from the command palette's "Ask" entry, or with the
-  `g q` chord.
-- Entry points: Ask is deliberately **not** a rail entry —
-  `SIDEBAR_NAV_ITEMS` lists only the seven destinations. The top bar
+  Reach the Ask tab from the rail's Ask link, the command palette's "Ask"
+  entry, or the `g q` chord.
+- Entry points: Ask is not one of the seven destinations in
+  `SIDEBAR_NAV_ITEMS`; the rail shows it as a separate dashed link below
+  them (`frontend/src/components/Sidebar.tsx`). The top bar
   (`frontend/src/components/TopBar.tsx`) above every agency screen carries
   a search field (`topbar.ask_placeholder`) that opens the command palette
   (also ⌘K); the palette's "Go to" group lists Ask after the rail

@@ -50,6 +50,14 @@ describe("Sidebar chunk prefetch", () => {
     expect(prefetch).toHaveBeenCalledWith("reports");
   });
 
+  it("warms the Ask chunk from its rail entry", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    await user.hover(screen.getByRole("link", { name: "Ask" }));
+    expect(prefetch).toHaveBeenCalledWith("ask");
+  });
+
   it("prefetches nothing until the user reaches for a destination", () => {
     renderSidebar();
     expect(prefetch).not.toHaveBeenCalled();
