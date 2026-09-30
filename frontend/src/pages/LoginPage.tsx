@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { loginUrl } from "../api/auth";
 import { useConfig } from "../api/config";
@@ -207,20 +207,19 @@ export function LoginPage() {
           </form>
         )}
 
-        {/*
-          Terms paragraph: the inventory pre-split it into seven keys
-          (prefix / link / and / link / suffix). We assemble those keys
-          back into the sentence here so we don't need <Trans> for now.
-          When we tighten the copy in a follow-up, we can collapse to a
-          single `account.login.terms_paragraph` key with <terms> and
-          <privacy> placeholders.
-        */}
+        {/* One sentence per language, so each locale keeps its own word order
+            and spacing around the two links. */}
         <p className="login-card__footer">
-          {t("account.login.terms_prefix")}
-          <a href="/terms" target="_blank" rel="noreferrer">{t("account.login.terms_link")}</a>
-          {t("account.login.terms_and")}
-          <a href="/privacy" target="_blank" rel="noreferrer">{t("account.login.privacy_link")}</a>
-          {t("account.login.terms_suffix")}
+          <Trans
+            t={t}
+            i18nKey="account.login.terms_consent"
+            components={{
+              // eslint-disable-next-line jsx-a11y/anchor-has-content -- Trans fills the link text from the translation
+              terms: <a href="/terms" target="_blank" rel="noreferrer" />,
+              // eslint-disable-next-line jsx-a11y/anchor-has-content -- Trans fills the link text from the translation
+              privacy: <a href="/privacy" target="_blank" rel="noreferrer" />,
+            }}
+          />
         </p>
       </Card>
     </div>
