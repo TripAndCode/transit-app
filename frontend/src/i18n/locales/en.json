@@ -1637,6 +1637,18 @@
       "tolerance": "Counted on time up to",
       "minutes": "{{n}} min",
       "clear": "Clear"
+    },
+    "pin": "Pin controls",
+    "reset": "Reset conditions",
+    "popover": {
+      "routes": "Routes",
+      "period": "Period",
+      "days": "Days and timetable",
+      "time": "Time of day",
+      "service": "Timetable",
+      "stop": "Stop",
+      "dir": "Direction",
+      "tolerance": "On-time tolerance"
     }
   }
 }
