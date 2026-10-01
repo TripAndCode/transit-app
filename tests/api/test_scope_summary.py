@@ -72,6 +72,14 @@ async def test_days_cover_at_most_the_last_ninety_days(aconn, aagency_id):
     assert len(body["days"]) == 90
     assert body["days"][-1]["date"] == date(2026, 9, 28)
     assert body["earliest"] == date(2026, 6, 1)
+    assert body["window_from"] == date(2026, 7, 1)
+
+
+@pytest.mark.asyncio
+async def test_the_window_starts_at_the_first_data_day_when_data_is_young(seeded):
+    conn, agency_id = seeded
+    body = await compute_scope_summary(agency_id, _ctx(), conn)
+    assert body["window_from"] == date(2026, 9, 1)
 
 
 @pytest.mark.asyncio
@@ -137,7 +145,15 @@ async def test_every_section_honours_the_timetable(seeded):
 @pytest.mark.asyncio
 async def test_an_agency_without_aggregates_answers_empty(aconn, aagency_id):
     body = await compute_scope_summary(aagency_id, _ctx(), aconn)
-    assert body == {"earliest": None, "latest": None, "days": [], "weekdays": [], "routes": [], "tolerance": []}
+    assert body == {
+        "earliest": None,
+        "latest": None,
+        "window_from": None,
+        "days": [],
+        "weekdays": [],
+        "routes": [],
+        "tolerance": [],
+    }
 
 
 @pytest.mark.asyncio
@@ -152,6 +168,8 @@ async def test_the_endpoint_answers_with_the_summary_and_its_scope(client, seede
     assert {w["dow"] for w in body["weekdays"]} >= {"sat", "mon"}
     assert body["tolerance"][2] == {"late_sec": 120, "on_time_pct": 100.0}
     assert body["ctx"]["from"] == "2026-09-20"
+    assert body["ctx"]["dow"] == "weekday"
+    assert body["window_from"] == "2026-09-01"
     applied = body["scope_applied"]
     assert applied["from"] is True and applied["routes"] is True and applied["early"] is True
     assert applied["time_band"] is False and applied["hour"] is False and applied["late"] is False

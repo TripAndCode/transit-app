@@ -1,6 +1,5 @@
 import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { isoDaysBefore } from "../../api/scope";
 import type { ScopeSummary } from "../../api/types";
 import { delayRampVar } from "../../styles/tokens";
 import { calendarDays, dayIndexAt, rangeFrom } from "./brushMath";
@@ -11,8 +10,6 @@ const BAR_H = 44;
 const GAP_H = 4;
 /** Bars saturate here so one bad day does not flatten the rest. */
 const CAP_MIN = 8;
-/** The summary's `days` window (pipeline/reports/scope_summary.py). */
-const WINDOW_DAYS = 90;
 const PAGE_DAYS = 7;
 const RAMP_LEGEND = [
   ["var(--d0)", "legend_d0"],
@@ -49,14 +46,14 @@ function ordered(a: string, b: string): [string, string] {
  *  without data is a short mark, never drawn as zero or as a tall bar. */
 export function PeriodBrush({
   days,
-  earliest,
+  windowFrom,
   latest,
   from,
   to,
   onCommit,
 }: {
   days: ScopeSummary["days"];
-  earliest: string | null;
+  windowFrom: string | null;
   latest: string;
   from: string;
   to: string;
@@ -69,9 +66,7 @@ export function PeriodBrush({
   const [drag, setDrag] = useState<Drag | null>(null);
   if (days.length === 0) return null;
 
-  const windowFloor = isoDaysBefore(latest, WINDOW_DAYS - 1);
-  const first = earliest ?? days[0].date;
-  const calendar = calendarDays(first > windowFloor ? first : windowFloor, latest);
+  const calendar = calendarDays(windowFrom ?? days[0].date, latest);
   const byDate = new Map(days.map((d) => [d.date, d]));
   const n = calendar.length;
   const fromPos = positionOf(calendar, from);
@@ -100,9 +95,16 @@ export function PeriodBrush({
     setDrag({ origin: i, anchor, edge, moved: false });
     e.currentTarget.setPointerCapture?.(e.pointerId);
   }
+  /** The day under the pointer; a dragged handle stops at the other one. */
+  function dragIndex(clientX: number, d: Drag): number {
+    const i = dayAt(clientX);
+    if (d.edge === "start") return Math.min(i, d.anchor);
+    if (d.edge === "end") return Math.max(i, d.anchor);
+    return i;
+  }
   function onPointerMove(e: PointerEvent<HTMLDivElement>) {
     if (!drag) return;
-    const i = dayAt(e.clientX);
+    const i = dragIndex(e.clientX, drag);
     if (!drag.moved && i === drag.origin) return;
     if (!drag.moved) setDrag({ ...drag, moved: true });
     setDraft(rangeFrom(drag.anchor, i));
@@ -110,7 +112,7 @@ export function PeriodBrush({
   function onPointerUp(e: PointerEvent<HTMLDivElement>) {
     if (!drag) return;
     const moved = drag.moved;
-    const i = dayAt(e.clientX);
+    const i = dragIndex(e.clientX, drag);
     setDrag(null);
     setDraft(null);
     if (!moved) return;

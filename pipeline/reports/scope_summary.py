@@ -70,9 +70,18 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
     )
     earliest, latest = span["earliest"], span["latest"]
     if latest is None:
-        return {"earliest": None, "latest": None, "days": [], "weekdays": [], "routes": [], "tolerance": []}
+        return {
+            "earliest": None,
+            "latest": None,
+            "window_from": None,
+            "days": [],
+            "weekdays": [],
+            "routes": [],
+            "tolerance": [],
+        }
 
-    window = replace(ctx, from_date=max(earliest, latest - timedelta(days=DAYS_WINDOW - 1)), to_date=latest, dow="all")
+    window_from = max(earliest, latest - timedelta(days=DAYS_WINDOW - 1))
+    window = replace(ctx, from_date=window_from, to_date=latest, dow="all")
     days = [
         {"date": r["key"], "avg_min": _avg_min(r["sum_delay_sec"], r["samples"]), "samples": int(r["samples"])}
         for r in await _grouped(agency_id, window, conn, "date")
@@ -107,6 +116,7 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
     return {
         "earliest": earliest,
         "latest": latest,
+        "window_from": window_from,
         "days": days,
         "weekdays": weekdays,
         "routes": routes,

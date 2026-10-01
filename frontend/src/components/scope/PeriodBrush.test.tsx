@@ -13,10 +13,10 @@ const DAYS = Array.from({ length: 27 }, (_, i) => ({
 
 const WIDTH = 290; // 29 calendar days (8/31..9/28) at 10px each
 
-function mount({ from = "2026-09-20", to = "2026-09-28", earliest = "2026-08-31" } = {}) {
+function mount({ from = "2026-09-20", to = "2026-09-28", windowFrom = "2026-08-31" } = {}) {
   const onCommit = vi.fn();
   const view = renderWithProviders(
-    <PeriodBrush days={DAYS} earliest={earliest} latest="2026-09-28" from={from} to={to} onCommit={onCommit} />,
+    <PeriodBrush days={DAYS} windowFrom={windowFrom} latest="2026-09-28" from={from} to={to} onCommit={onCommit} />,
   );
   return { onCommit, container: view.container };
 }
@@ -118,6 +118,15 @@ describe("PeriodBrush", () => {
       fireEvent.pointerUp(end, { clientX: xOf(25), pointerId: 1 });
       expect(onCommit).toHaveBeenCalledWith("2026-09-20", "2026-09-25");
     });
+  });
+
+  it("stops a dragged handle at the other one rather than swapping them", () => {
+    const { onCommit } = mount();
+    const end = screen.getByRole("slider", { name: "Period end" });
+    fireEvent.pointerDown(end, { clientX: xOf(28), pointerId: 1, button: 0 });
+    fireEvent.pointerMove(end, { clientX: xOf(10), pointerId: 1 });
+    fireEvent.pointerUp(end, { clientX: xOf(10), pointerId: 1 });
+    expect(onCommit).toHaveBeenCalledWith("2026-09-20", "2026-09-20");
   });
 
   describe("keyboard", () => {

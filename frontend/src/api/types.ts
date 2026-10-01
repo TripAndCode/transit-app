@@ -909,6 +909,8 @@ export type NetworkSummary = {
 export type ScopeSummary = {
   earliest: string | null;
   latest: string | null;
+  /** The first day `days` covers. */
+  window_from: string | null;
   days: { date: string; avg_min: number; samples: number }[];
   weekdays: { dow: string; avg_min: number; samples: number }[];
   routes: { route_code: string; avg_min: number; samples: number }[];

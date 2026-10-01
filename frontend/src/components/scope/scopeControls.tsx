@@ -78,7 +78,7 @@ export function PeriodControl({ scope, update, summary }: ControlProps) {
       {summary && summary.days.length > 0 && (
         <PeriodBrush
           days={summary.days}
-          earliest={summary.earliest}
+          windowFrom={summary.window_from}
           latest={anchor}
           from={scope.from}
           to={scope.to}

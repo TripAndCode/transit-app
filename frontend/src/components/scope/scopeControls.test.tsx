@@ -17,6 +17,7 @@ function Probe() {
 const SUMMARY: ScopeSummary = {
   earliest: "2026-06-01",
   latest: "2026-09-28",
+  window_from: "2026-06-30",
   days: [
     { date: "2026-09-27", avg_min: 1.2, samples: 100 },
     { date: "2026-09-28", avg_min: 2.0, samples: 100 },
