@@ -31,10 +31,11 @@ def _row_to_conv(row: asyncpg.Record) -> dict[str, Any]:
 
 def _json_value(value: Any) -> Any:
     """Tool results carry values straight from asyncpg: NUMERIC arrives as
-    Decimal and DATE/TIMESTAMP as date/datetime. Stored as JSON numbers
-    (FastAPI's jsonable_encoder rule: a whole Decimal stays an int) and ISO
-    strings. The conversation endpoints send back the stored message, so the
-    live answer and a later replay are the same payload."""
+    Decimal and DATE/TIMESTAMP as date/datetime. Stored as JSON numbers by
+    FastAPI's own decimal_encoder (an int when the Decimal has no fractional
+    digits, so Decimal("10") but not Decimal("10.00")) and as ISO strings.
+    The conversation endpoints send back the stored message, so the live
+    answer and a later replay are the same payload."""
     if isinstance(value, Decimal):
         return decimal_encoder(value)
     if isinstance(value, (date, datetime)):

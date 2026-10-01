@@ -409,5 +409,5 @@ async def test_append_message_stores_database_numbers_and_dates_as_json(pool_wit
     assert msg["result"] == {"rows": [["R1", 2.35, "2026-09-28"]]}
     assert msgs[0]["result"] == {"rows": [["R1", 2.35, "2026-09-28"]]}
     assert msgs[0]["args"] == {"n": 10}
-    assert type(msgs[0]["args"]["n"]) is int  # a whole Decimal stays an int, as FastAPI encodes it
+    assert type(msgs[0]["args"]["n"]) is int  # no fractional digits: an int, as FastAPI encodes it
     assert msgs[0]["conditions"] == {"from": "2026-09-01"}
