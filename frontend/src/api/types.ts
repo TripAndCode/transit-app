@@ -915,5 +915,6 @@ export type ScopeSummary = {
   weekdays: { dow: string; avg_min: number; samples: number }[];
   routes: { route_code: string; avg_min: number; samples: number }[];
   tolerance: { late_sec: number; on_time_pct: number }[];
+  ctx: ResponseCtx;
   scope_applied?: ScopeApplied;
 };
