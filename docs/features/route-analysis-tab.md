@@ -20,7 +20,9 @@ saved-analysis bookmarks — scoped to exactly one selected route.
   redirect here when their `routes` names exactly one route, to
   `routes/<route_code>?tab=stops` with `routes` dropped and the rest of the
   query (`sub_tab`, `compare`, the filter) kept; any other selection goes to
-  the Routes list.
+  the Routes list. `tab` names a dossier tab (`RouteTab` in
+  `destinations.ts`) for links; the dossier has one view, so nothing reads
+  it, and `sub_tab` alone picks the panel.
 - Reached from the rail's Routes entry (`nav.routes`) and then the list's
   route opener (`routesIndex.open_route`, a `<select>` plus an Open button
   in `frontend/src/tabs/RoutesIndex.tsx`; it leaves only on Open, so the

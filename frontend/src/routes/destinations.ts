@@ -4,7 +4,9 @@ import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 export const DESTINATIONS = ["pulse", "routes", "time", "why", "compare", "live", "reports"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
-/** The route dossier's tabs, picked by its `tab` param. */
+/** The route dossier's tab names, which links write to its `tab` param.
+ *  RouteDossier does not read it: the dossier has one view, the stop
+ *  analysis, whose own `sub_tab` picks the panel. */
 export type RouteTab = "summary" | "stops" | "time" | "trips" | "reliability" | "why";
 
 type ReportTypeId = (typeof REPORT_TYPE_IDS)[number];
