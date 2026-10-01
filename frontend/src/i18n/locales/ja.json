@@ -1609,5 +1609,21 @@
   "topbar": {
     "ask_placeholder": "路線・レポート・画面を検索",
     "data_through": "データは{{date}}まで"
+  },
+  "scope": {
+    "label": "表示の条件",
+    "sentence": "見ているのは[agency]の[routes]を、[period]・[days]・[time][extras]、定時は[tolerance]として",
+    "routes_all": "全路線",
+    "routes_count": "{{count}}路線",
+    "period": "{{from}}〜{{to}}",
+    "days_all": "すべての曜日",
+    "time_all": "終日",
+    "hours": "{{from}}時〜{{to}}時台",
+    "service": "{{value}}ダイヤ",
+    "stop": "停留所 {{id}}",
+    "dir": "方向 {{dir}}",
+    "tolerance_min": "{{n}}分以内",
+    "tolerance_sec": "{{n}}秒以内",
+    "unapplied": "この画面では使われない条件です"
   }
 }

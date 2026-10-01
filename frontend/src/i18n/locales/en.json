@@ -1609,5 +1609,21 @@
   "topbar": {
     "ask_placeholder": "Search routes, reports and screens",
     "data_through": "Data through {{date}}"
+  },
+  "scope": {
+    "label": "What you're viewing",
+    "sentence": "Viewing [routes] of [agency], [period], [days], [time][extras], counting on-time as [tolerance]",
+    "routes_all": "all routes",
+    "routes_count": "{{count}} routes",
+    "period": "{{from}} – {{to}}",
+    "days_all": "every day",
+    "time_all": "all day",
+    "hours": "{{from}}:00–{{to}}:59",
+    "service": "{{value}} timetable",
+    "stop": "stop {{id}}",
+    "dir": "direction {{dir}}",
+    "tolerance_min": "within {{n}} min",
+    "tolerance_sec": "within {{n}} s",
+    "unapplied": "This screen doesn't use this condition"
   }
 }
