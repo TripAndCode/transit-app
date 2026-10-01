@@ -16,25 +16,27 @@ def _hist(bucket: int, n: int) -> list[int]:
     return h
 
 
-async def _seed(aconn, agency_id, route_code, day, samples, sum_delay_sec, hist, service="平日"):
+async def _seed(aconn, agency_id, route_code, day, samples, sum_delay_sec, hist, service="平日", on_time=0):
     await aconn.execute(
         "INSERT INTO agg_route_daily_dist (agency_id, date, route_code, service_type, "
-        "samples, sum_delay_sec, on_time_count, late5_count, hist) VALUES ($1,$2,$3,$4,$5,$6,0,0,$7)",
+        "samples, sum_delay_sec, on_time_count, late5_count, hist) VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8)",
         agency_id,
         day,
         route_code,
         service,
         samples,
         sum_delay_sec,
+        on_time,
         hist,
     )
 
 
 @pytest.fixture
 async def seeded(aconn, aagency_id):
-    # R1: every day 9/1..9/28 at 1.0 min, all of it in the [60, 120) bucket.
+    # R1: every day 9/1..9/28 at 1.0 min, all of it in the [60, 120) bucket,
+    # 40 of each day's 100 departures at exactly one minute (on time).
     for i in range(28):
-        await _seed(aconn, aagency_id, "R1", date(2026, 9, 1) + timedelta(days=i), 100, 6000, _hist(7, 100))
+        await _seed(aconn, aagency_id, "R1", date(2026, 9, 1) + timedelta(days=i), 100, 6000, _hist(7, 100), on_time=40)
     # R2: one Saturday at 5.0 min, in the [300, 360) bucket.
     await _seed(aconn, aagency_id, "R2", date(2026, 9, 26), 50, 15000, _hist(11, 50))
     return aconn, aagency_id
@@ -98,16 +100,38 @@ async def test_tolerance_shares_follow_the_whole_scope(seeded):
     shares = {t["late_sec"]: t["on_time_pct"] for t in body["tolerance"]}
     assert sorted(shares) == list(range(0, 601, 60))
     assert shares[0] == 0.0
-    assert shares[60] == 1.7
     assert shares[120] == 100.0
+
+
+@pytest.mark.asyncio
+async def test_the_one_minute_share_is_the_exact_on_time_figure(seeded):
+    # Feeds report many delays as whole minutes, which sit on a histogram
+    # bucket's lower edge; the one-minute step reads the exact count instead,
+    # so it matches the on-time figure the screens show.
+    conn, agency_id = seeded
+    body = await compute_scope_summary(agency_id, _ctx(dow="weekday"), conn)
+    assert {t["late_sec"]: t["on_time_pct"] for t in body["tolerance"]}[60] == 40.0
 
 
 @pytest.mark.asyncio
 async def test_tolerance_honours_an_early_bound(seeded):
     conn, agency_id = seeded
-    body = await compute_scope_summary(agency_id, _ctx(), conn, early_sec=0)
-    # Every delay seeded is late, so an early bound of zero changes nothing.
-    assert {t["late_sec"]: t["on_time_pct"] for t in body["tolerance"]}[600] == 100.0
+    # R3 runs two to three minutes early, which only an early bound excludes.
+    await _seed(conn, agency_id, "R3", date(2026, 9, 21), 50, -7500, _hist(3, 50))
+    unbounded = await compute_scope_summary(agency_id, _ctx(), conn)
+    bounded = await compute_scope_summary(agency_id, _ctx(), conn, early_sec=120)
+    assert {t["late_sec"]: t["on_time_pct"] for t in unbounded["tolerance"]}[600] == 100.0
+    assert {t["late_sec"]: t["on_time_pct"] for t in bounded["tolerance"]}[600] < 100.0
+    assert {t["late_sec"]: t["on_time_pct"] for t in bounded["tolerance"]}[60] < 100.0
+
+
+@pytest.mark.asyncio
+async def test_every_section_honours_the_timetable(seeded):
+    conn, agency_id = seeded
+    await _seed(conn, agency_id, "R9", date(2026, 9, 27), 80, 48000, _hist(11, 80), service="土日祝")
+    body = await compute_scope_summary(agency_id, _ctx(service="平日"), conn)
+    assert "R9" not in {r["route_code"] for r in body["routes"]}
+    assert {d["date"]: d for d in body["days"]}[date(2026, 9, 27)]["samples"] == 100
 
 
 @pytest.mark.asyncio
@@ -129,7 +153,7 @@ async def test_the_endpoint_answers_with_the_summary_and_its_scope(client, seede
     assert body["tolerance"][2] == {"late_sec": 120, "on_time_pct": 100.0}
     assert body["ctx"]["from"] == "2026-09-20"
     applied = body["scope_applied"]
-    assert applied["from"] is True and applied["routes"] is True
+    assert applied["from"] is True and applied["routes"] is True and applied["early"] is True
     assert applied["time_band"] is False and applied["hour"] is False and applied["late"] is False
 
 

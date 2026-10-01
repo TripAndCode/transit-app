@@ -22,9 +22,9 @@ from pipeline.reports.scope_summary import compute_scope_summary
 router = APIRouter(prefix="/api/{agency_id}", tags=["scope"])
 
 # The aggregate holds (date, route, service) rows, so the hour of day, the
-# stop and the direction are not representable; the tolerance curve is the
-# answer to `late`, not filtered by it.
-_SCOPE_SUMMARY_SCOPE = scope_applied("from", "to", "dow", "service", "routes")
+# stop and the direction are not representable. The tolerance curve answers
+# `late` rather than being filtered by it; `early` bounds the curve.
+_SCOPE_SUMMARY_SCOPE = scope_applied("from", "to", "dow", "service", "routes", "early")
 
 
 class ScopeDay(BaseModel):
