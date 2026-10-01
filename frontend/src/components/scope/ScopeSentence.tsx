@@ -1,8 +1,9 @@
 import { useId, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useAgencies } from "../../api/hooks";
+import { useAgencies, useScopeSummary } from "../../api/hooks";
 import { SCOPE_EXTRAS_NONE, presetScopePatch, useScope, type Scope, type ScopePatch } from "../../api/scope";
 import { useAgencyId } from "../../api/useAgencyId";
+import type { ScopeSummary } from "../../api/types";
 import { useRouteNames } from "../../api/useRouteNames";
 import { PresetMenu } from "../PresetMenu";
 import { CONTROLS } from "./controlForToken";
@@ -28,6 +29,9 @@ const RESET: ScopePatch = {
 /** The conditions the template places by name; every other token is an
  *  optional one and goes into `[extras]`, in the order scopeTokens gives. */
 const PLACED_KEYS: ReadonlySet<TokenKey> = new Set(["agency", "routes", "period", "days", "time", "tolerance"]);
+
+/** The controls that draw the summary's figures; the others never fetch it. */
+const DATA_KEYS: ReadonlySet<TokenKey> = new Set(["routes", "period", "days", "service", "tolerance"]);
 
 /** Punctuation that must not start a line: it stays with the token before it. */
 const TRAILING_PUNCT = /^[、。・，,]+/; // i18n-ignore: punctuation set, not copy
@@ -82,6 +86,7 @@ function Token({
   onClose,
   scope,
   update,
+  summary,
 }: {
   token: ScopeToken & { key: ConditionKey };
   off: boolean;
@@ -91,6 +96,7 @@ function Token({
   onClose: () => void;
   scope: Scope;
   update: (patch: ScopePatch) => void;
+  summary: ScopeSummary | undefined;
 }) {
   const { t } = useTranslation();
   const ref = useRef<HTMLButtonElement>(null);
@@ -120,7 +126,7 @@ function Token({
       </button>
       {open && (
         <ScopePopover label={t(`scope.popover.${token.key}`)} onClose={onClose} returnFocusTo={ref}>
-          <Control scope={scope} update={update} />
+          <Control scope={scope} update={update} summary={summary} />
         </ScopePopover>
       )}
     </span>
@@ -151,6 +157,7 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
   const byKey = new Map(tokens.map((tok) => [tok.key, tok]));
   // A condition that was cleared from elsewhere has no popover to show.
   const open = openKey != null && byKey.has(openKey) ? openKey : null;
+  const { data: summary } = useScopeSummary(id, scope, pinned || (open != null && DATA_KEYS.has(open)));
   const separator = t("common.list_separator");
 
   const isOff = (tok: ScopeToken & { key: ConditionKey }) =>
@@ -192,6 +199,7 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
           onClose={() => setOpenKey(null)}
           scope={scope}
           update={apply}
+          summary={summary}
         />
         {trailing}
       </span>
@@ -269,7 +277,7 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
                 >
                   {t(`scope.popover.${tok.key}`)}
                 </div>
-                <Control scope={scope} update={apply} />
+                <Control scope={scope} update={apply} summary={summary} />
               </div>
             );
           })}

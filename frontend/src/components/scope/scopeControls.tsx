@@ -1,16 +1,25 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../../api/hooks";
+import { delayRampVar } from "../../styles/tokens";
 import { WEEKDAYS, isoDaysBefore, todayISO, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
+import type { ScopeSummary } from "../../api/types";
 import { useAgencyId } from "../../api/useAgencyId";
 import { RoutesPicker } from "../RoutesPicker";
 import { buildTimeBandOptions } from "../timeBandOptions";
+import { sinceStart } from "./brushMath";
+import { PeriodBrush } from "./PeriodBrush";
 import { toleranceLabel } from "./scopePhrases";
 import "./scope.css";
 
-export type ControlProps = { scope: Scope; update: (patch: ScopePatch) => void };
+export type ControlProps = {
+  scope: Scope;
+  update: (patch: ScopePatch) => void;
+  /** The controls' data, while it is loaded; every control works without it. */
+  summary?: ScopeSummary;
+};
 
-const PERIOD_PRESETS = [7, 30, 90] as const;
+const PERIOD_PRESETS = [7, 14, 30] as const;
 const TOLERANCE_PRESETS_MIN = [1, 3, 5] as const;
 const DEFAULT_LATE_SEC = 60;
 const MAX_LATE_SEC = 600;
@@ -23,13 +32,25 @@ function Pill({ pressed, onClick, children }: { pressed: boolean; onClick: () =>
   );
 }
 
+/** A small bar coloured by the delay ramp, with the mean beside it. */
+function DelayBar({ minutes }: { minutes: number }) {
+  const { t } = useTranslation();
+  return (
+    <span className="scope-delay">
+      <span className="scope-mini-bar" style={{ background: delayRampVar(minutes) }} aria-hidden="true" />
+      {t("scope.control.mean_min", { n: minutes.toFixed(1) })}
+    </span>
+  );
+}
+
 /** Presets end on the agency's latest data day, so "last 7 days" is the last
  *  seven days that have data rather than a week that may not have arrived. */
-export function PeriodControl({ scope, update }: ControlProps) {
+export function PeriodControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { data: agencies } = useAgencies();
-  const anchor = agencies?.find((a) => a.agency_id === id)?.latest_data_date ?? todayISO();
+  const anchor = summary?.latest ?? agencies?.find((a) => a.agency_id === id)?.latest_data_date ?? todayISO();
+  const collectionStart = summary?.earliest ? sinceStart(summary.earliest, anchor) : null;
   function setDate(edge: "from" | "to", value: string) {
     const next = { from: scope.from, to: scope.to, [edge]: value };
     if (value && next.from <= next.to) update({ [edge]: value });
@@ -45,7 +66,26 @@ export function PeriodControl({ scope, update }: ControlProps) {
             </Pill>
           );
         })}
+        {collectionStart && (
+          <Pill
+            pressed={scope.from === collectionStart && scope.to === anchor}
+            onClick={() => update({ from: collectionStart, to: anchor })}
+          >
+            {t("scope.control.since_start")}
+          </Pill>
+        )}
       </div>
+      {summary && summary.days.length > 0 && (
+        <PeriodBrush
+          days={summary.days}
+          windowFrom={summary.window_from}
+          latest={anchor}
+          from={scope.from}
+          to={scope.to}
+          onCommit={(from, to) => update({ from, to })}
+        />
+      )}
+      <WholeDayNote scope={scope} update={update} summary={summary} />
       <div className="scope-dates">
         <label>
           {t("scope.control.from")}
@@ -67,10 +107,11 @@ function selectedDays(dow: Scope["dow"]): Set<Weekday> {
   return new Set(dow.split(",") as Weekday[]);
 }
 
-export function DaysControl({ scope, update }: ControlProps) {
+export function DaysControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
   const serviceId = useId();
   const on = selectedDays(scope.dow);
+  const weekdayMeans = new Map(summary?.weekdays.map((w) => [w.dow, w.avg_min]) ?? []);
   function toggle(day: Weekday) {
     const next = new Set(on);
     if (next.has(day)) next.delete(day);
@@ -88,11 +129,20 @@ export function DaysControl({ scope, update }: ControlProps) {
         ))}
       </div>
       <div className="scope-pills">
-        {WEEKDAYS.map((day) => (
-          <Pill key={day} pressed={on.has(day)} onClick={() => toggle(day)}>
-            {t(`forecast.dow_${day}`)}
-          </Pill>
-        ))}
+        {WEEKDAYS.map((day) => {
+          const mean = weekdayMeans.get(day);
+          return (
+            <button key={day} type="button" className="scope-pill" aria-pressed={on.has(day)} onClick={() => toggle(day)}>
+              {t(`forecast.dow_${day}`)}
+              {mean != null && (
+                <>
+                  {" "}
+                  <DelayBar minutes={mean} />
+                </>
+              )}
+            </button>
+          );
+        })}
       </div>
       <label htmlFor={serviceId} className="scope-field">
         {t("scope.control.service")}
@@ -102,6 +152,7 @@ export function DaysControl({ scope, update }: ControlProps) {
         <option value="平日">{t("common.service_value.平日")}</option>{/* i18n-ignore: query contract */}
         <option value="土日祝">{t("common.service_value.土日祝")}</option>{/* i18n-ignore: query contract */}
       </select>
+      <WholeDayNote scope={scope} update={update} summary={summary} />
     </div>
   );
 }
@@ -126,17 +177,58 @@ export function TimeControl({ scope, update }: ControlProps) {
   );
 }
 
-export function RoutesControl({ scope, update }: ControlProps) {
+export function RoutesControl({ scope, update, summary }: ControlProps) {
+  const delays = summary ? new Map(summary.routes.map((r) => [r.route_code, r])) : undefined;
   return (
     <div className="scope-control">
-      <RoutesPicker selected={scope.routes} onChange={(routes) => update({ routes: routes.length > 0 ? routes : null })} />
+      <RoutesPicker
+        selected={scope.routes}
+        onChange={(routes) => update({ routes: routes.length > 0 ? routes : null })}
+        delays={delays}
+        renderDelay={(minutes) => <DelayBar minutes={minutes} />}
+      />
+      <WholeDayNote scope={scope} update={update} summary={summary} />
     </div>
   );
 }
 
+/** The summary comes from daily aggregates, which have no hour of day; say
+ *  so wherever its figures sit beside a time condition they do not reflect. */
+function WholeDayNote({ scope, summary }: ControlProps) {
+  const { t } = useTranslation();
+  const hasFigures =
+    summary != null &&
+    (summary.days.length > 0 || summary.weekdays.length > 0 || summary.routes.length > 0 || summary.tolerance.length > 0);
+  const placeSet = scope.stop != null || scope.dir != null;
+  if (!hasFigures || (!placeSet && scope.time_band === "all" && scope.hour == null)) return null;
+  return <p className="scope-note">{t(placeSet ? "scope.control.whole_day_place" : "scope.control.whole_day")}</p>;
+}
+
+const CURVE_W = 240;
+const CURVE_H = 56;
+
+function curveX(lateSec: number): number {
+  return (lateSec / MAX_LATE_SEC) * CURVE_W;
+}
+
+function curveY(pct: number): number {
+  return CURVE_H - (pct / 100) * CURVE_H;
+}
+
+/** The share at `sec`, interpolated between the summary's steps. */
+function shareAt(points: ScopeSummary["tolerance"], sec: number): number | null {
+  if (points.length === 0) return null;
+  const after = points.findIndex((p) => p.late_sec >= sec);
+  if (after === -1) return points[points.length - 1].on_time_pct;
+  if (after === 0 || points[after].late_sec === sec) return points[after].on_time_pct;
+  const a = points[after - 1];
+  const b = points[after];
+  return a.on_time_pct + ((b.on_time_pct - a.on_time_pct) * (sec - a.late_sec)) / (b.late_sec - a.late_sec);
+}
+
 /** The slider writes when the drag ends, not on every step, so dragging
  *  across the range does not refetch the screen at each stop. */
-export function ToleranceControl({ scope, update }: ControlProps) {
+export function ToleranceControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<number | null>(null);
   const current = scope.late ?? DEFAULT_LATE_SEC;
@@ -152,12 +244,64 @@ export function ToleranceControl({ scope, update }: ControlProps) {
   return (
     <div className="scope-control">
       <div className="scope-pills">
-        {TOLERANCE_PRESETS_MIN.map((min) => (
-          <Pill key={min} pressed={current === min * 60} onClick={() => write(min * 60)}>
-            {t("scope.control.minutes", { n: min })}
-          </Pill>
-        ))}
+        {TOLERANCE_PRESETS_MIN.map((min) => {
+          const share = summary?.tolerance.find((p) => p.late_sec === min * 60)?.on_time_pct;
+          return (
+            <button
+              key={min}
+              type="button"
+              className="scope-pill"
+              aria-pressed={current === min * 60}
+              onClick={() => write(min * 60)}
+            >
+              {t("scope.control.minutes", { n: min })}
+              {share != null && (
+                <>
+                  {" "}
+                  <span className="scope-share">{t("scope.control.share", { pct: Math.round(share) })}</span>
+                </>
+              )}
+            </button>
+          );
+        })}
       </div>
+      {summary && summary.tolerance.length > 0 && (
+        <>
+          {/* Stretched to the slider's full width, so the marker sits above
+              the thumb. */}
+          <svg
+            role="img"
+            aria-label={t("scope.control.curve_label")}
+            className="scope-curve"
+            viewBox={`0 0 ${CURVE_W} ${CURVE_H}`}
+            preserveAspectRatio="none"
+            width="100%"
+            height={CURVE_H}
+          >
+            <polyline
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+              points={summary.tolerance.map((p) => `${curveX(p.late_sec)},${curveY(p.on_time_pct)}`).join(" ")}
+            />
+            <circle
+              className="scope-curve__marker"
+              cx={curveX(Math.min(value, MAX_LATE_SEC))}
+              cy={curveY(shareAt(summary.tolerance, value) ?? 0)}
+              r={3.5}
+              fill="var(--accent-strong)"
+            />
+          </svg>
+          <p className="scope-readout">
+            {t("scope.control.readout", {
+              n: Math.round((value / 60) * 10) / 10,
+              pct: Math.round(shareAt(summary.tolerance, value) ?? 0),
+            })}
+          </p>
+        </>
+      )}
+      <WholeDayNote scope={scope} update={update} summary={summary} />
       <input
         type="range"
         min={0}

@@ -31,6 +31,7 @@ def _assert_declares_scope(body: dict) -> None:
         "/api/network/summary",
         "/api/{a}/forecast/overview",
         "/api/{a}/forecast/heatmap?route=R1",
+        "/api/{a}/scope/summary",
     ],
 )
 async def test_screen_endpoint_declares_scope_applied(reports_client, path):  # noqa: F811

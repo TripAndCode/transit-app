@@ -164,6 +164,28 @@ describe("ScopeSentence", () => {
     }
   });
 
+  it("fetches the controls' data only once a popover opens", async () => {
+    const summary = vi.spyOn(hooks, "useScopeSummary");
+    mount();
+    expect(summary.mock.calls.every((call) => call[2] === false)).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "every day" }));
+    expect(summary.mock.calls.at(-1)?.[2]).toBe(true);
+  });
+
+  it("does not fetch for a control that draws no data", async () => {
+    const summary = vi.spyOn(hooks, "useScopeSummary");
+    mount();
+    await userEvent.click(screen.getByRole("button", { name: "all day" }));
+    expect(summary.mock.calls.at(-1)?.[2]).toBe(false);
+  });
+
+  it("fetches while the strip is pinned", async () => {
+    const summary = vi.spyOn(hooks, "useScopeSummary");
+    mount();
+    await userEvent.click(screen.getByRole("button", { name: "Pin controls" }));
+    expect(summary.mock.calls.at(-1)?.[2]).toBe(true);
+  });
+
   it("closes on a click outside", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: "every day" }));

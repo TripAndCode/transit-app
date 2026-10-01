@@ -9,8 +9,10 @@ import {
 import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
 import { scopeToQueryString, type Scope, type TimeBand } from "./scope";
 import { conversationsAnon } from "./conversationsAnon";
+import { scopeSummaryQuery } from "./scopeSummaryQuery";
 import type {
   Agency,
+  ScopeSummary,
   AnonThread,
   AppendMessageResult,
   AskResponse,
@@ -102,6 +104,27 @@ function scopeKey(scope: Scope) {
   // The serializer names every scope field, so the cache key can never miss
   // one and serve stale data when that filter changes.
   return [scopeToQueryString(scope)];
+}
+
+/** The scope controls' data. `enabled` stays false until a control is on
+ *  screen, so a page load never pays for visuals nobody opened. The
+ *  aggregates behind it rebuild on the analyze schedule, not per minute, so
+ *  reopening a popover reuses a recent answer. */
+const SCOPE_SUMMARY_STALE_MS = 5 * 60_000;
+
+export function useScopeSummary(
+  agencyId: number | null,
+  scope: Scope,
+  enabled: boolean,
+): UseQueryResult<ScopeSummary> {
+  return useQuery({
+    queryKey: ["scope-summary", agencyId, scopeSummaryQuery(scope)],
+    queryFn: ({ signal }) =>
+      apiGet<ScopeSummary>(`/api/${agencyId}/scope/summary?${scopeSummaryQuery(scope)}`, { signal }),
+    enabled: enabled && agencyId != null,
+    staleTime: SCOPE_SUMMARY_STALE_MS,
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useReport(

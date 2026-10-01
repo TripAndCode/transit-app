@@ -166,8 +166,9 @@ the scope as one sentence above their content
   Escape instead. A click outside, or Tab walking off its last control,
   also closes it. It is positioned against the sentence's section and slid
   left to fit, so it never runs off a phone screen. The controls are in `scopeControls.tsx`:
-  - Period: last 7/30/90 days ending on the agency's latest data day, and
-    from/to dates (a start after the end is ignored).
+  - Period: presets ending on the agency's latest data day (see the
+    controls' data below), and from/to dates (a start after the end is
+    ignored).
   - Days: all, weekdays or weekend, seven weekday toggles that never
     remove the last day, and the timetable select.
   - Time: the seven bands and all day. Hour-by-hour filtering is shown as
@@ -175,6 +176,35 @@ the scope as one sentence above their content
   - Routes: the grouped route picker.
   - On-time tolerance: 1/3/5 minutes and a slider that writes when the drag
     ends.
+- **The controls' data.** Once a popover opens or the strip is pinned,
+  `useScopeSummary` reads `GET /api/{agency_id}/scope/summary`
+  (`api/routers/scope_summary.py`, computed by
+  `pipeline/reports/scope_summary.py` from `agg_route_daily_dist` alone):
+  - the period control draws the last 90 days of data as bars coloured by
+    the delay ramp (`delayRampVar`, `--d0`…`--d4`) with a legend, each bar
+    naming its date and mean, and days without data drawn as short marks.
+    The period is outlined and the days outside it dimmed. A brush over the
+    bars (`PeriodBrush.tsx`) selects a range by dragging across them, or
+    moves one edge by dragging its handle; from the keyboard each handle
+    moves a day at a time (Home/End, Page keys for a week). It writes when
+    the drag, the key or the focus ends, and only the edge that moved, so an
+    edge outside the window keeps its date. A tap, a cancelled drag or a
+    non-primary button writes nothing. Presets are the last 7, 14 and 30 days and
+    「収集開始から」 (from the earliest data day, at most 365 days back);
+  - each weekday toggle shows that weekday's mean delay over the period;
+  - each line in the route picker shows its mean delay over the period;
+  - the tolerance control draws the on-time share at each late tolerance
+    (0–10 min) with a marker and readout at the current one, and names the
+    share on each preset. The one-minute step is the exact on-time count,
+    matching the screens; the other steps are histogram estimates.
+
+  The bars ignore the period and the weekday filter, the weekday means
+  ignore the weekday filter, and the route means ignore the routes filter,
+  since each exists to choose that condition. The aggregate has no hour of
+  day, stop or direction, so with one of those set the controls say their
+  figures cover the whole day (and every stop and direction). The request
+  carries only the fields the summary answers to (`scopeSummaryQuery`), and
+  only the controls that draw its figures fetch it.
 - **Live apply.** Every change writes the URL at once with `replace`;
   there is no Apply button.
 - **Greying.** Each screen passes its main response's `scope_applied`. A
@@ -195,6 +225,7 @@ the scope as one sentence above their content
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
+| `useScopeSummary(agencyId, scope, enabled)` | `GET /api/{agency_id}/scope/summary` (`api/routers/scope_summary.py: scope_summary`) | `pipeline/reports/scope_summary.py: compute_scope_summary()` — four reads of `agg_route_daily_dist` (span, daily, per-weekday, per-route) plus one merged histogram for the tolerance curve; no ClickHouse. |
 | `useReports(agencyId)` | `GET /api/{agency_id}/reports` (`api/routers/reports.py: list_reports`) | Static metadata only — the fixed `_REPORT_TYPES` tuple, no DB read. |
 | `useReport(agencyId, reportType, ctx)` | `GET /api/{agency_id}/reports/{report_type}` (`api/routers/reports.py: get_report`) | Computed live per request from `pipeline/reports/rankings.py`'s `compute_ranking` / `compute_dow_ranking` / `compute_on_time` / `compute_worst_5min` / `compute_trend_series` / `compute_compare_ranking` / `compute_hourly_heatmap` — each follows the repo-wide pattern of a precomputed-`agg_*` fast path with a live ClickHouse fallback for a `time_band`-narrowed request (see `CLAUDE.md` and the `ask-tab.md` doc's "ranking family" note — these are the same functions the Ask tab's `top_n`/`on_time`/`trend`/`cmp_service` tools call). `dwell_run` instead reads `pipeline/reports/dwell_run.py`'s `compute_dwell_run_decomposition` from `agg_route_daily_dwell_run` — no live fallback (a time-band filter gets an explicit `time_band_supported: false` instead). `council_summary` (`pipeline/reports/council.py: compute_council_summary`) pools the on-time/service-delivered rate into one whole-agency row, footnoted from `pipeline/reports/definition.py`'s `DefinitionMeta` via `format_definition_footnotes`. `delay_certificate` (same module's `compute_delay_certificate`) always live-scans ClickHouse for individual over-threshold departures — no `agg_*` fast path exists at that granularity. `?format=csv` streams the same rows as a UTF-8-BOM CSV via `_csv_response`. |
 | `useSuggestion(agencyId, exclude)` (drives `InsightPanel`) | `GET /api/{agency_id}/reports/suggest` (`api/routers/reports.py: get_suggestion`) | `pipeline/reports/suggest.py: compute_suggestion()` — a rule-based pick (anomaly over a 1-day window, or trend-shift/on-time over a 7-day window) mirroring `api/routers/map.py`'s `today_route_summary` anchor date; polled every 5 minutes. |

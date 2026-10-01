@@ -902,3 +902,19 @@ export type NetworkSummary = {
   agencies: NetworkAgencyRow[];
   definition: DefinitionMeta;
 };
+
+/** GET /:agency/scope/summary: the data the scope controls draw. `days`
+ *  spans the last 90 days of data whatever the period; `weekdays` and
+ *  `routes` cover the period but ignore their own filter. */
+export type ScopeSummary = {
+  earliest: string | null;
+  latest: string | null;
+  /** The first day `days` covers. */
+  window_from: string | null;
+  days: { date: string; avg_min: number; samples: number }[];
+  weekdays: { dow: string; avg_min: number; samples: number }[];
+  routes: { route_code: string; avg_min: number; samples: number }[];
+  tolerance: { late_sec: number; on_time_pct: number }[];
+  ctx: ResponseCtx;
+  scope_applied?: ScopeApplied;
+};
