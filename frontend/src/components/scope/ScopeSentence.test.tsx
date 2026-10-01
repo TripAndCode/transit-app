@@ -164,6 +164,14 @@ describe("ScopeSentence", () => {
     }
   });
 
+  it("fetches the controls' data only once a popover opens", async () => {
+    const summary = vi.spyOn(hooks, "useScopeSummary");
+    mount();
+    expect(summary.mock.calls.every((call) => call[2] === false)).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "every day" }));
+    expect(summary.mock.calls.at(-1)?.[2]).toBe(true);
+  });
+
   it("closes on a click outside", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: "every day" }));

@@ -11,6 +11,7 @@ import { scopeToQueryString, type Scope, type TimeBand } from "./scope";
 import { conversationsAnon } from "./conversationsAnon";
 import type {
   Agency,
+  ScopeSummary,
   AnonThread,
   AppendMessageResult,
   AskResponse,
@@ -102,6 +103,22 @@ function scopeKey(scope: Scope) {
   // The serializer names every scope field, so the cache key can never miss
   // one and serve stale data when that filter changes.
   return [scopeToQueryString(scope)];
+}
+
+/** The scope controls' data. `enabled` stays false until a control is on
+ *  screen, so a page load never pays for visuals nobody opened. */
+export function useScopeSummary(
+  agencyId: number | null,
+  scope: Scope,
+  enabled: boolean,
+): UseQueryResult<ScopeSummary> {
+  return useQuery({
+    queryKey: ["scope-summary", agencyId, ...scopeKey(scope)],
+    queryFn: ({ signal }) =>
+      apiGet<ScopeSummary>(`/api/${agencyId}/scope/summary?${scopeToQueryString(scope)}`, { signal }),
+    enabled: enabled && agencyId != null,
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useReport(

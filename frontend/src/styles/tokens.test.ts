@@ -5,6 +5,7 @@ import {
   DELAY_RAMP,
   DELAY_RAMP_TEXT,
   accentColorResolved,
+  delayRampVar,
   contrastRatio,
   delayColor,
   delayColorResolved,
@@ -816,5 +817,21 @@ describe("accentColorResolved()", () => {
 
   it("falls back to the light theme's surface the same way", () => {
     expect(surfaceColorResolved().toLowerCase()).toBe(decl(rootBlock, "--bg-surface")!.toLowerCase());
+  });
+});
+
+describe("delayRampVar()", () => {
+  it.each([
+    [0, "var(--d0)"],
+    [1.49, "var(--d0)"],
+    [1.5, "var(--d1)"],
+    [2.49, "var(--d1)"],
+    [2.5, "var(--d2)"],
+    [3.5, "var(--d3)"],
+    [4.99, "var(--d3)"],
+    [5, "var(--d4)"],
+    [12, "var(--d4)"],
+  ])("colours %s minutes as %s", (minutes, token) => {
+    expect(delayRampVar(minutes)).toBe(token);
   });
 });

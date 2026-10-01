@@ -253,3 +253,14 @@ export function relativeDelayColor(value: number, min: number, max: number): str
   if (max <= min) return rampColor(0.5);
   return rampColor((value - min) / (max - min));
 }
+
+/** The v2 delay ramp (`--d0`…`--d4` in global.css) for a mean delay in
+ *  minutes: magnitude, never alarm, with rust reserved for five minutes or
+ *  more. */
+export function delayRampVar(minutes: number): string {
+  if (minutes < 1.5) return "var(--d0)";
+  if (minutes < 2.5) return "var(--d1)";
+  if (minutes < 3.5) return "var(--d2)";
+  if (minutes < 5) return "var(--d3)";
+  return "var(--d4)";
+}

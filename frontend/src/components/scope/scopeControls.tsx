@@ -2,13 +2,19 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../../api/hooks";
 import { WEEKDAYS, isoDaysBefore, todayISO, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
+import type { ScopeSummary } from "../../api/types";
 import { useAgencyId } from "../../api/useAgencyId";
 import { RoutesPicker } from "../RoutesPicker";
 import { buildTimeBandOptions } from "../timeBandOptions";
 import { toleranceLabel } from "./scopePhrases";
 import "./scope.css";
 
-export type ControlProps = { scope: Scope; update: (patch: ScopePatch) => void };
+export type ControlProps = {
+  scope: Scope;
+  update: (patch: ScopePatch) => void;
+  /** The controls' data, while it is loaded; every control works without it. */
+  summary?: ScopeSummary;
+};
 
 const PERIOD_PRESETS = [7, 30, 90] as const;
 const TOLERANCE_PRESETS_MIN = [1, 3, 5] as const;
