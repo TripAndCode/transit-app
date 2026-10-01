@@ -464,19 +464,12 @@
     "name_placeholder": "Preset name"
   },
   "filters": {
-    "title": "Filters",
-    "clear_all": "Clear all",
-    "chip_remove_suffix": "Remove",
     "range": {
       "last_7d": "Last 7 days",
       "last_30d": "Last 30 days",
-      "last_90d": "Last 90 days",
-      "this_month": "This month",
-      "last_month": "Last month",
-      "custom": "Custom"
+      "last_90d": "Last 90 days"
     },
     "dow": {
-      "all": "All days",
       "label": "Day"
     },
     "service": {

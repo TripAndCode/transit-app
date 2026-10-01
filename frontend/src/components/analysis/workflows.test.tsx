@@ -48,7 +48,7 @@ vi.mock("./csv", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./csv")>()),
   downloadCsv: vi.fn(),
 }));
-// TabFilterBar renders PresetMenu, which calls useSession -> a real
+// The scope sentence renders PresetMenu, which calls useSession -> a real
 // apiGet("/api/me"). Unstubbed that fetch stays pending past the end of this
 // file and destabilises whichever file vitest runs next, so it is settled
 // here. Partial mock: everything else in api/auth stays real.
@@ -69,7 +69,7 @@ vi.mock("../../api/hooks", () => ({
   useReport: vi.fn((_id, type) => ({ data: type ? { report_type: type, definition: {}, rows: type === "trend" ? [{ days: [{ date: "2026-09-07", avg_min: 2, samples: 4 }] }] : [["101", null, 2, 1, 3, 4]] } : undefined, isPending: false })),
 }));
 const ctx = { ...SCOPE_EXTRAS_NONE, from: "2026-09-07", to: "2026-09-12", dow: "weekday" as const, time_band: "morning" as const, service: "all" as const, routes: ["101"] };
-// Reports now renders TabFilterBar, whose PresetMenu calls useQueryClient to
+// Reports renders the scope sentence, whose PresetMenu calls useQueryClient to
 // invalidate saved presets -- so the tree needs a provider even though no test
 // here asserts on a query.
 function show(tab: "routes/101" | "reports", search = "") {
@@ -100,23 +100,21 @@ it("keeps pattern and period in exported observations and saved analysis", async
   expect(readAnalyses()[0].query).toContain("time_band=morning");
 });
 it("changing keito scopes both report queries and CSV to the selected code", async () => {
-  // Same guarantee as before, driven through the deferred-commit filter bar
-  // this page now shares with Overview: pick inside the popover, then apply.
-  // The pick alone must not reach the queries -- that is the point of the
-  // pattern -- so it is asserted before the apply as well as after.
+  // Driven through the scope sentence: the routes condition opens the route
+  // picker, and each pick applies at once.
   show("reports");
   const user = setupUser();
-  await user.click(screen.getByRole("button", { name: /Filters/ }));
+  await user.click(screen.getByRole("button", { name: /\(101\)/ }));
   // The picker labels routes by display name, not code: "1 Coast" is 101 and
   // "9 Coast" is 999 (short name + long name, per routeDisplayName). The
   // space is optional because dom-accessibility-api trims each inline
   // element's own text, dropping the space that opens the long-name span,
   // where browsers keep it.
   await user.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));   // drop the initial 101
+  expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual([]);
   await user.click(screen.getByRole("button", { name: /^9 ?Coast$/ }));
-  expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["101"]);
-  await user.click(screen.getByRole("button", { name: /Apply/ }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["999"]);
+  await user.keyboard("{Escape}");
   await user.click(screen.getAllByRole("button", { name: "Download CSV" })[0]);
   // The mocked ranking data itself never changes (it's a fixed fixture), so
   // "999" can only appear via the `buildCsv` query-string metadata line,

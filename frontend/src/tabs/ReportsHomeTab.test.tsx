@@ -51,6 +51,13 @@ describe("ReportsHomeTab", () => {
     vi.restoreAllMocks();
   });
 
+  it("states its scope as a sentence, greying what the trend did not use", () => {
+    mockReports({ ...trendResponse(), scope_applied: { from: true, to: true, time_band: false } } as ReportResponse, rankingResponse());
+    renderTab();
+    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "all day" })).toHaveClass("scope-token--off");
+  });
+
   it("renders the report heading and description", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();

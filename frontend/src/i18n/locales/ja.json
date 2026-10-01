@@ -464,19 +464,12 @@
     "name_placeholder": "プリセット名"
   },
   "filters": {
-    "title": "フィルタ",
-    "clear_all": "全てクリア",
-    "chip_remove_suffix": "を解除",
     "range": {
       "last_7d": "直近7日",
       "last_30d": "直近30日",
-      "last_90d": "直近90日",
-      "this_month": "今月",
-      "last_month": "先月",
-      "custom": "カスタム"
+      "last_90d": "直近90日"
     },
     "dow": {
-      "all": "全曜日",
       "label": "曜日"
     },
     "service": {

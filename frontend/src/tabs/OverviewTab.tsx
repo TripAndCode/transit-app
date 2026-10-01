@@ -18,7 +18,7 @@ import { RevealSection } from "../components/overview/RevealSection";
 import { RoutesToCheckList } from "../components/RoutesToCheckList";
 import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
-import { TabFilterBar } from "../components/TabFilterBar";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
 
 import "../styles/overview.css";
 
@@ -80,7 +80,7 @@ export function OverviewTab() {
 
   return (
     <>
-      <TabFilterBar />
+      <ScopeSentence applied={query.data?.scope_applied} />
       <div className="ov-page">
         <AsyncSection
           loading={isPending}

@@ -7,9 +7,7 @@ const PADDING: Record<PillSize, string> = {
   md: "5px 12px",
 };
 
-/** Shared toggle-pill style used by the filter bars. `size` covers the one
- *  padding difference between TabFilterBar's (md) and FilterContextBar's
- *  (sm) pills. */
+/** Toggle-pill style for Ask's filter bar. `size` picks the padding. */
 export function pill(active: boolean, size: PillSize = "md"): CSSProperties {
   return {
     background: active ? "var(--accent-soft)" : "var(--bg-surface)",

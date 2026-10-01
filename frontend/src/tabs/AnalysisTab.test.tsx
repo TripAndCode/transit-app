@@ -92,6 +92,21 @@ describe("AnalysisTab", () => {
     expect(useReport.mock.calls.at(-1)?.[1]).toBe(opened);
   });
 
+  it("greys the scope conditions the open report did not use", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, service: false } },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderAnalysis("/agencies/1/analysis/when?report=dow_weekday", ["dow_weekday"]);
+    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "every day" })).toHaveClass("scope-token--off");
+    expect(screen.getByRole("button", { name: "all routes" })).not.toHaveClass("scope-token--off");
+  });
+
   it("lists only the report types it is given", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({

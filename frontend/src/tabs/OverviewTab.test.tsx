@@ -55,6 +55,12 @@ describe("OverviewTab", () => {
     expect(screen.getByText("No observations in this range. Try a wider window.")).toBeInTheDocument();
   });
 
+  it("states its scope as a sentence, greying what the summary did not use", () => {
+    renderOverview({ ...summary({}), scope_applied: { from: true, to: true, dow: false } } as OverviewSummary);
+    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "every day" })).toHaveClass("scope-token--off");
+  });
+
   it("shows real content when the headline has samples", () => {
     renderOverview(summary({ headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" } }));
     expect(screen.queryByText("No observations in this range. Try a wider window.")).not.toBeInTheDocument();

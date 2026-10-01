@@ -5,7 +5,7 @@ import { useReport, useReports } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
 import { scopeToQueryString, useScope, type Scope } from "../api/scope";
 import type { DwellRunPayload, TrendPayload } from "../api/types";
-import { TabFilterBar } from "../components/TabFilterBar";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -74,7 +74,7 @@ export function AnalysisTab({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <TabFilterBar />
+      <ScopeSentence applied={detail.data?.scope_applied} />
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>

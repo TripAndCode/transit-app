@@ -3,9 +3,9 @@ import type { TimeBand } from "../api/scope";
 
 /**
  * The 8 time-band filter choices, in display order. Single source of truth
- * for FilterContextBar.tsx and TabFilterBar.tsx, which both render this same
- * picker — kept as one function (mirroring askCardTemplates.ts's
- * buildCardTemplates() pattern) so the two pickers can't silently diverge.
+ * for every band picker (Ask's FilterContextBar, the scope sentence's time
+ * control, the command palette), kept as one function so they can't
+ * silently diverge.
  */
 export function buildTimeBandOptions(t: TFunction): { value: TimeBand; label: string }[] {
   return [

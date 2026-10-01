@@ -11,7 +11,8 @@ import { readScopePinned, writeScopePinned } from "./scopePin";
 import { scopeTokens, sentenceParts, type ScopeField, type ScopeToken, type TokenKey } from "./scopePhrases";
 import "./scope.css";
 
-type Applied = Partial<Record<ScopeField, boolean>> | null | undefined;
+/** Keyed by URL param name, as the API reports it (api/scope_applied.py). */
+type Applied = Partial<Record<ScopeField | (string & {}), boolean>> | null | undefined;
 
 const RESET: ScopePatch = {
   ...SCOPE_EXTRAS_NONE,
