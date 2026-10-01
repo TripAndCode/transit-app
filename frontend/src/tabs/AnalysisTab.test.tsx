@@ -101,10 +101,49 @@ describe("AnalysisTab", () => {
       error: null,
       refetch: vi.fn(),
     } as never);
-    renderAnalysis("/agencies/1/analysis/when?report=dow_weekday", ["dow_weekday"]);
+    renderAnalysis("/agencies/1/analysis/when?report=dow_weekday&dow=weekday&routes=R1", ["dow_weekday"]);
     expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "every day" })).toHaveClass("scope-token--off");
-    expect(screen.getByRole("button", { name: "all routes" })).not.toHaveClass("scope-token--off");
+    expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--off");
+    expect(screen.getByRole("button", { name: /R1/ })).not.toHaveClass("scope-token--off");
+  });
+
+  it("greys by the forecast's own scope on the route forecast, not the last report's", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, time_band: true } },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({
+      data: {
+        grid: [],
+        worst: null,
+        routes: [],
+        disclaimer: "",
+        scope_applied: { from: false, to: false, dow: false, time_band: false, routes: false },
+      },
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: undefined, isPending: false, error: null, refetch: vi.fn() } as never);
+    renderAnalysis("/agencies/1/analysis/when?report=route_forecast&time_band=morning", ["dow_weekday", "route_forecast"]);
+    expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
+  });
+
+  it("greys nothing while a different report's response is still on screen", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("trend"), reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false } },
+      isFetching: true,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderAnalysis("/agencies/1/analysis/when?report=trend&dow=weekday", ["trend", "dow_weekday"]);
+    expect(screen.getByRole("button", { name: "weekdays" })).not.toHaveClass("scope-token--off");
   });
 
   it("lists only the report types it is given", () => {

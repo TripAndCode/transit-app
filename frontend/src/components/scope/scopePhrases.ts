@@ -5,7 +5,13 @@ import { dowValueLabel, serviceValueLabel, timeBandValueLabel, translationT, typ
 export type ScopeField = "from" | "to" | "dow" | "time_band" | "hour" | "service" | "routes" | "stop" | "dir" | "late" | "early";
 export type TokenKey = "agency" | "routes" | "period" | "days" | "time" | "service" | "stop" | "dir" | "tolerance";
 export type ScopeToken = { key: TokenKey; label: string; field: ScopeField | null };
-type PhraseCtx = { t: LabelT; agencyName: string; routeLabel: (code: string) => string };
+type PhraseCtx = {
+  t: LabelT;
+  agencyName: string;
+  routeLabel: (code: string) => string;
+  /** The line a route code belongs to, as the route picker groups them. */
+  routeGroup?: (code: string) => string | undefined;
+};
 
 /** The on-time tolerance the server applies when `late` is unset. */
 const DEFAULT_LATE_SEC = 60;
@@ -15,22 +21,40 @@ function dateLabel(iso: string, withYear: boolean): string {
   return withYear ? `${y}/${m}/${d}` : `${m}/${d}`;
 }
 
-function toleranceLabel(sec: number, t: LabelT): string {
+export function toleranceLabel(sec: number, t: LabelT): string {
   if (sec < 60) return translationT(t, "scope.tolerance_sec", { n: sec });
   return translationT(t, "scope.tolerance_min", { n: Math.round((sec / 60) * 10) / 10 });
 }
 
 /** The scope as words, one token per condition, in sentence order. Each
  *  token names the `scope_applied` field that says whether a screen used it. */
-export function scopeTokens(scope: Scope, { t, agencyName, routeLabel }: PhraseCtx): ScopeToken[] {
+function routesLabel(routes: string[], { t, routeLabel, routeGroup }: PhraseCtx): string {
+  if (routes.length === 0) return translationT(t, "scope.routes_all");
+  if (routes.length === 1) return routeLabel(routes[0]);
+  // A line picked by name selects every variant of it; say the line.
+  const group = routeGroup?.(routes[0]);
+  if (group && routes.every((code) => routeGroup?.(code) === group)) {
+    return `${group} ${translationT(t, "filters.routes.variant_count", { count: routes.length })}`;
+  }
+  return translationT(t, "scope.routes_count", { count: routes.length });
+}
+
+function daysLabel(dow: Scope["dow"], t: LabelT): string {
+  if (dow === "all") return translationT(t, "scope.days_all");
+  if (dow === "weekday") return translationT(t, "scope.days_weekday");
+  if (dow === "weekend") return translationT(t, "scope.days_weekend");
+  return dowValueLabel(dow, t);
+}
+
+function hoursLabel([from, to]: [number, number], t: LabelT): string {
+  return from === to ? translationT(t, "scope.hour_single", { h: from }) : translationT(t, "scope.hours", { from, to });
+}
+
+export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
+  const { t, agencyName } = ctx;
   const tr = (key: string, opts?: Record<string, unknown>) => translationT(t, key, opts);
   const crossesYear = scope.from.slice(0, 4) !== scope.to.slice(0, 4);
-  const routes =
-    scope.routes.length === 0
-      ? tr("scope.routes_all")
-      : scope.routes.length === 1
-        ? routeLabel(scope.routes[0])
-        : tr("scope.routes_count", { count: scope.routes.length });
+  const routes = routesLabel(scope.routes, ctx);
   const tokens: ScopeToken[] = [
     { key: "agency", label: agencyName, field: null },
     { key: "routes", label: routes, field: "routes" },
@@ -39,9 +63,9 @@ export function scopeTokens(scope: Scope, { t, agencyName, routeLabel }: PhraseC
       label: tr("scope.period", { from: dateLabel(scope.from, crossesYear), to: dateLabel(scope.to, crossesYear) }),
       field: "from",
     },
-    { key: "days", label: scope.dow === "all" ? tr("scope.days_all") : dowValueLabel(scope.dow, t), field: "dow" },
+    { key: "days", label: daysLabel(scope.dow, t), field: "dow" },
     scope.hour
-      ? { key: "time", label: tr("scope.hours", { from: scope.hour[0], to: scope.hour[1] }), field: "hour" }
+      ? { key: "time", label: hoursLabel(scope.hour, t), field: "hour" }
       : {
           key: "time",
           label: scope.time_band === "all" ? tr("scope.time_all") : timeBandValueLabel(scope.time_band, t),

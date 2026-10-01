@@ -56,9 +56,12 @@ describe("OverviewTab", () => {
   });
 
   it("states its scope as a sentence, greying what the summary did not use", () => {
-    renderOverview({ ...summary({}), scope_applied: { from: true, to: true, dow: false } } as OverviewSummary);
+    renderOverview(
+      { ...summary({}), scope_applied: { from: true, to: true, dow: false } } as OverviewSummary,
+      "/agencies/8/overview?from=2030-01-01&to=2030-01-07&dow=weekday",
+    );
     expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "every day" })).toHaveClass("scope-token--off");
+    expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--off");
   });
 
   it("shows real content when the headline has samples", () => {

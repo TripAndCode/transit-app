@@ -13,9 +13,14 @@ const base: Scope = {
   routes: [],
 };
 
+const GROUPS: Record<string, string> = { "61": "K37 観光通り線", "62": "K37 観光通り線", "63": "K37 観光通り線", "70": "A1 国道線" };
+
 function tokens(lng: "ja" | "en", scope: Partial<Scope> = {}) {
   const t = i18n.getFixedT(lng);
-  return scopeTokens({ ...base, ...scope }, { t, agencyName: "青森市バス", routeLabel: (c) => `R${c}` });
+  return scopeTokens(
+    { ...base, ...scope },
+    { t, agencyName: "青森市バス", routeLabel: (c) => `R${c}`, routeGroup: (c) => GROUPS[c] },
+  );
 }
 const labels = (lng: "ja" | "en", scope: Partial<Scope> = {}) => tokens(lng, scope).map((tok) => `${tok.key}=${tok.label}`);
 
@@ -43,6 +48,23 @@ describe("scopeTokens", () => {
     expect(labels("ja", { routes: ["50"] })).toContain("routes=R50");
     expect(labels("en", { routes: ["50", "51"] })).toContain("routes=2 routes");
     expect(labels("ja", { dow: "mon,wed" })).toContain("days=月・水");
+  });
+
+  it("names a line picked by name rather than counting its variants", () => {
+    expect(labels("ja", { routes: ["61", "62", "63"] })).toContain("routes=K37 観光通り線 (3路線)");
+    expect(labels("en", { routes: ["61", "62", "63"] })).toContain("routes=K37 観光通り線 (3 routes)");
+    expect(labels("ja", { routes: ["61", "70"] })).toContain("routes=2路線");
+  });
+
+  it("says weekdays and weekends as days, not as timetables", () => {
+    expect(labels("ja", { dow: "weekend" })).toContain("days=土日");
+    expect(labels("en", { dow: "weekend" })).toContain("days=weekends");
+    expect(labels("ja", { dow: "weekday" })).toContain("days=平日");
+    expect(labels("en", { dow: "weekday" })).toContain("days=weekdays");
+  });
+
+  it("says a single hour as that hour", () => {
+    expect(labels("ja", { hour: [7, 7] })).toContain("time=7時台");
   });
 
   it("shows an hour range in place of the band, mapped to the hour field", () => {

@@ -1,9 +1,12 @@
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import * as hooks from "../../api/hooks";
+import i18n from "../../i18n";
+import { useTopmostEscape } from "../../hooks/useFocusTrap";
 import { ScopeSentence } from "./ScopeSentence";
 import type { ScopeField } from "./scopePhrases";
 
@@ -70,6 +73,82 @@ describe("ScopeSentence", () => {
     expect(screen.getByRole("dialog", { name: "Time of day" }).closest("p")).toBeNull();
   });
 
+  it("closes when Tab walks focus out of the popover", async () => {
+    mount();
+    await userEvent.click(screen.getByRole("button", { name: "within 1 min" }));
+    screen.getByRole("slider").focus();
+    await userEvent.tab();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "within 1 min" })).not.toHaveFocus();
+  });
+
+  it("leaves an Escape to an overlay opened over it", async () => {
+    const onTop = vi.fn();
+    function Overlay() {
+      useTopmostEscape(true, onTop);
+      return null;
+    }
+    function WithOverlay() {
+      const [shown, setShown] = useState(false);
+      return (
+        <>
+          <ScopeSentence />
+          <button type="button" onClick={() => setShown(true)}>
+            open-overlay
+          </button>
+          {shown && <Overlay />}
+        </>
+      );
+    }
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isLoading: false } as never);
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isPending: false, isLoading: false } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/time"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/time" element={<WithOverlay />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "all day" }));
+    fireEvent.click(screen.getByRole("button", { name: "open-overlay" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onTop).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog", { name: "Time of day" })).toBeInTheDocument();
+  });
+
+  it("keeps focus in the section when a condition clears itself", async () => {
+    mount("?from=2026-09-01&to=2026-09-28&stop=S1");
+    await userEvent.click(screen.getByRole("button", { name: "stop S1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(params().has("stop")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(region()).toHaveFocus();
+  });
+
+  it("keeps focus in the section after a reset", async () => {
+    mount("?from=2026-09-01&to=2026-09-28&dow=weekday");
+    await userEvent.click(screen.getByRole("button", { name: "Reset conditions" }));
+    expect(region()).toHaveFocus();
+  });
+
+  it("keeps a token's trailing punctuation on the same line", () => {
+    mount();
+    const token = screen.getByRole("button", { name: "every day" });
+    expect(token.closest(".scope-nowrap")?.textContent).toBe("every day,");
+  });
+
+  it("reads as Japanese grammar in Japanese", async () => {
+    await i18n.changeLanguage("ja");
+    try {
+      mount();
+      expect(screen.getByRole("region", { name: "表示の条件" }).textContent).toContain(
+        "Aomoriの全路線を、9/1〜9/28のすべての曜日・終日で、定時は1分以内として見る",
+      );
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
   it("closes on a click outside", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: "every day" }));
@@ -83,16 +162,27 @@ describe("ScopeSentence", () => {
     await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
     expect(params().get("dow")).toBe("weekday");
     expect(screen.getByRole("dialog", { name: "Days and timetable" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Weekday" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "weekdays" })).toBeInTheDocument();
   });
 
-  it("greys the conditions the screen's data did not use", () => {
-    mount(undefined, { dow: false, from: true });
-    const days = screen.getByRole("button", { name: "every day" });
+  it("greys the set conditions the screen's data did not use", () => {
+    mount("?from=2026-09-01&to=2026-09-28&dow=weekday", { dow: false, from: true });
+    const days = screen.getByRole("button", { name: "weekdays" });
     expect(days).toHaveClass("scope-token--off");
     expect(days).toHaveAttribute("title", "This screen doesn't use this condition");
     expect(days).toHaveAccessibleDescription("This screen doesn't use this condition");
     expect(screen.getByRole("button", { name: "9/1 – 9/28" })).not.toHaveClass("scope-token--off");
+  });
+
+  it("leaves a condition at its default ungreyed, since it filters nothing", () => {
+    const { container } = mount(undefined, { dow: false, late: false, routes: false, time_band: false });
+    expect(container.querySelector(".scope-token--off")).toBeNull();
+  });
+
+  it("greys a pinned control the same way", async () => {
+    mount("?from=2026-09-01&to=2026-09-28&dow=weekday", { dow: false });
+    await userEvent.click(screen.getByRole("button", { name: "Pin controls" }));
+    expect(screen.getByText("Days and timetable")).toHaveClass("scope-strip__label--off");
   });
 
   it("greys nothing when the screen says nothing", () => {

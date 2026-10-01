@@ -5,6 +5,7 @@ import { WEEKDAYS, isoDaysBefore, todayISO, type Scope, type ScopePatch, type We
 import { useAgencyId } from "../../api/useAgencyId";
 import { RoutesPicker } from "../RoutesPicker";
 import { buildTimeBandOptions } from "../timeBandOptions";
+import { toleranceLabel } from "./scopePhrases";
 import "./scope.css";
 
 export type ControlProps = { scope: Scope; update: (patch: ScopePatch) => void };
@@ -164,7 +165,7 @@ export function ToleranceControl({ scope, update }: ControlProps) {
         step={30}
         value={value}
         aria-label={t("scope.control.tolerance")}
-        aria-valuetext={t("scope.tolerance_min", { n: Math.round((value / 60) * 10) / 10 })}
+        aria-valuetext={toleranceLabel(value, t)}
         onChange={(e) => setDraft(Number(e.target.value))}
         onPointerUp={commit}
         onKeyUp={commit}

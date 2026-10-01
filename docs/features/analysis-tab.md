@@ -149,18 +149,23 @@ response honoured that field.
 Pulse, Routes, Time, Why, Compare by periods and the Reports summary state
 the scope as one sentence above their content
 (`frontend/src/components/scope/ScopeSentence.tsx`), for example
-「見ているのは青森市バスの全路線を、9/1〜9/28・すべての曜日・終日、定時は1分以内として」.
+「青森市バスの全路線を、9/1〜9/28のすべての曜日・終日で、定時は1分以内として見る」.
 
 - **Words.** `scopeTokens` in `components/scope/scopePhrases.ts` turns a
   scope into one labelled token per condition, in sentence order, and names
   the `scope_applied` field each maps to. The locale template
   `scope.sentence` places them with `[slot]` placeholders. Timetable, stop
-  and direction appear only when set. `scopeTitle` reuses the same words
-  for saved-analysis titles.
+  and direction appear only when set. A line picked by name reads as that
+  line with its variant count, not as a route count. `scopeTitle` reuses
+  the same words for saved-analysis titles. Punctuation after a token stays
+  on its line.
 - **Popovers.** Every condition but the agency is a button that opens its
   own control in a `role="dialog"` popover (`ScopePopover.tsx`). Focus moves
-  in; Escape or a click outside closes it, and Escape returns focus to the
-  button. The controls are in `scopeControls.tsx`:
+  in. Escape closes it and returns focus to the button, through the shared
+  Escape stack (`useTopmostEscape`), so an overlay opened over it takes the
+  Escape instead. A click outside, or Tab walking off its last control,
+  also closes it. It is positioned against the sentence's section and slid
+  left to fit, so it never runs off a phone screen. The controls are in `scopeControls.tsx`:
   - Period: last 7/30/90 days ending on the agency's latest data day, and
     from/to dates (a start after the end is ignored).
   - Days: all, weekdays or weekend, seven weekday toggles that never
@@ -173,9 +178,13 @@ the scope as one sentence above their content
 - **Live apply.** Every change writes the URL at once with `replace`;
   there is no Apply button.
 - **Greying.** Each screen passes its main response's `scope_applied`. A
-  condition whose field is `false` renders struck through with
-  「この画面では使われない条件です」 as its title and accessible
-  description. A screen that passes nothing greys nothing.
+  set condition whose field is `false` renders struck through, in the
+  sentence and in the pinned strip, with 「この画面では使われない条件です」
+  as its title and accessible description. A condition at its default
+  filters nothing and is never greyed. A screen that passes nothing greys
+  nothing. AnalysisTab uses the forecast overview's map for
+  `route_forecast`, and a report's map only once that report's response is
+  the one on screen.
 - **Pinned strip.** 「帯を固定」 shows every control inline under the
   sentence; the choice is kept in localStorage `transit.scopePinned`.
 - **Presets and reset.** Signed-in users save and load presets beside the
