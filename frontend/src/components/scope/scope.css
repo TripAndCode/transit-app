@@ -1,0 +1,48 @@
+.scope-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.scope-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.scope-pill {
+  padding: 3px 10px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.scope-pill[aria-pressed="true"] {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.scope-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.scope-dates label,
+.scope-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.scope-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}

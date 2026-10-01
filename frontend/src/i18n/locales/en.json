@@ -1624,6 +1624,19 @@
     "dir": "direction {{dir}}",
     "tolerance_min": "within {{n}} min",
     "tolerance_sec": "within {{n}} s",
-    "unapplied": "This screen doesn't use this condition"
+    "unapplied": "This screen doesn't use this condition",
+    "control": {
+      "last_days": "Last {{count}} days",
+      "from": "From",
+      "to": "To",
+      "days_all": "All",
+      "weekday": "Weekdays",
+      "weekend": "Weekend",
+      "service": "Timetable",
+      "hour_pending": "Hour-by-hour filtering arrives with the hourly aggregate",
+      "tolerance": "Counted on time up to",
+      "minutes": "{{n}} min",
+      "clear": "Clear"
+    }
   }
 }
