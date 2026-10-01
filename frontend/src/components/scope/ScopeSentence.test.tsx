@@ -64,6 +64,12 @@ describe("ScopeSentence", () => {
     expect(token).toHaveFocus();
   });
 
+  it("keeps the popover out of any paragraph, since it holds block content", async () => {
+    mount();
+    await userEvent.click(screen.getByRole("button", { name: "all day" }));
+    expect(screen.getByRole("dialog", { name: "Time of day" }).closest("p")).toBeNull();
+  });
+
   it("closes on a click outside", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: "every day" }));

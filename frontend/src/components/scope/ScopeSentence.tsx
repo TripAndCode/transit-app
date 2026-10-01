@@ -132,7 +132,8 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
   return (
     <section aria-label={t("scope.label")} className="scope">
       <div className="scope-row">
-        <p className="scope-sentence">
+        {/* A div, not a <p>: each token's popover holds block content. */}
+        <div className="scope-sentence">
           {sentenceParts(t("scope.sentence")).map((part, i) => {
             if ("text" in part) return <span key={`t${i}`}>{part.text}</span>;
             if (part.slot === "extras") {
@@ -144,7 +145,7 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
             const tok = byKey.get(part.slot as TokenKey);
             return tok ? renderToken(tok) : null;
           })}
-        </p>
+        </div>
         <span id={unappliedId} className="scope-sr-only">
           {t("scope.unapplied")}
         </span>
