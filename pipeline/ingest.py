@@ -19,7 +19,7 @@ from pipeline.clickhouse import distinct_file_names, insert_updates, recent_file
 from pipeline.strategies import get_ingest_strategy
 
 # ── Re-exports for back-compat (existing tests import these) ──────────────────
-from pipeline.strategies._pb import _dec, _fields, _read_ld, _read_varint, _ts  # noqa: F401
+from pipeline.strategies._pb import _dec, _fields, _read_ld, _read_varint, _ts, archive_captured_at  # noqa: F401
 from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
@@ -430,11 +430,11 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                         # above for the crash-safety invariant this preserves.
                         try:
                             with _savepoint(cur, "tar_member"):
-                                ts = _ts(d, pb_name)
                                 fobj = tf.extractfile(member)
                                 if fobj is None:  # non-file member (dir/special)
                                     continue
                                 raw = fobj.read()
+                                ts = archive_captured_at(raw, d, pb_name)
                                 rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
                         except Exception as e:
                             logger.error(f"  [ERROR] {pb_name}: {e}")
@@ -464,7 +464,6 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
             logger.info(f"\n{len(new_pb)} loose .pb files")
             for j, path in enumerate(new_pb, 1):
                 d = _date_dir(path.parent.name)
-                ts = _ts(d, path.name)
                 # _savepoint isolates one bad file's Postgres-side work from
                 # every good file already inserted since the last commit
                 # boundary in this batch (see _savepoint's docstring for why
@@ -475,7 +474,9 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                 # with the tarball loop above (Task 8.9).
                 try:
                     with _savepoint(cur, "pb_file"):
-                        rows = strategy.parse_feed(path.read_bytes(), ts, f"{d}/{path.name}", agency_id, conn)
+                        raw = path.read_bytes()
+                        ts = archive_captured_at(raw, d, path.name)
+                        rows = strategy.parse_feed(raw, ts, f"{d}/{path.name}", agency_id, conn)
                 except Exception as e:
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1

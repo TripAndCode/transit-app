@@ -1,6 +1,7 @@
-"""_ts() must derive a JST-anchored instant regardless of host timezone.
+"""Archive captured_at derivation: the feed header's instant when plausible
+for the name, else _ts(), which reads the name as a JST wall-clock time and
+must derive the same instant regardless of host timezone.
 
-The archive filename's date+time is a JST wall-clock reading.
 clickhouse-connect resolves naive datetimes via the *process-local* timezone
 when writing DateTime64 columns, so a naive ISO string would land every
 archive row 9 hours late on a UTC host (Railway/Docker/CI). _ts() must
@@ -15,7 +16,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from pipeline.strategies._pb import _ts
+from pipeline.strategies._pb import _ts, archive_captured_at
+from tests.fixtures.gtfs_rt import header_only_feed
 
 
 def _instant(iso_str: str) -> datetime:
@@ -62,3 +64,43 @@ def test_ts_date_only_fallback_is_jst_aware():
     offset = dt.utcoffset()
     assert offset is not None
     assert offset.total_seconds() == 9 * 3600
+
+
+def test_archive_captured_at_is_the_feeds_own_instant_whatever_clock_named_the_file():
+    """rt-poller.sh names archive members by UTC wall clock; read as JST that
+    name lands 9h early. The header timestamp is an absolute instant, so it
+    wins over the name."""
+    instant = datetime(2026, 9, 15, 0, 0, 11, tzinfo=timezone.utc)
+    iso = archive_captured_at(header_only_feed(int(instant.timestamp())), "20260915", "TripUpdate_000011.pb")
+    assert _instant(iso) == instant
+
+
+def _epoch(*args: int) -> int:
+    return int(datetime(*args, tzinfo=timezone.utc).timestamp())
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        header_only_feed(None),
+        header_only_feed(0),
+        b"\x00",
+        # A frozen feed's header from two days before the name's date: taking
+        # it would stamp the rows below the skip-list bound _archive_since
+        # derives from the names, so a re-run would ingest the file twice.
+        header_only_feed(_epoch(2026, 9, 13, 0, 0, 11)),
+        # Further ahead than any zone could put the name.
+        header_only_feed(_epoch(2026, 9, 20, 0, 0, 11)),
+    ],
+    ids=["no-timestamp", "zero", "undecodable", "before-the-names-day", "days-after-the-names-day"],
+)
+def test_archive_captured_at_falls_back_to_the_name_without_a_usable_header_timestamp(raw):
+    iso = archive_captured_at(raw, "20260915", "TripUpdate_000011.pb")
+    assert _instant(iso) == _instant(_ts("20260915", "TripUpdate_000011.pb"))
+
+
+def test_archive_captured_at_takes_a_header_from_the_jst_day_after_the_names_day():
+    """A UTC name from late in its day is already the next JST day."""
+    instant = datetime(2026, 9, 15, 22, 30, 0, tzinfo=timezone.utc)
+    iso = archive_captured_at(header_only_feed(int(instant.timestamp())), "20260915", "TripUpdate_223000.pb")
+    assert _instant(iso) == instant
