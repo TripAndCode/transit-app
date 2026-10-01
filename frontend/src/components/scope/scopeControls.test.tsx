@@ -92,6 +92,14 @@ describe("scope controls", () => {
       expect(params().get("service")).toBe("平日");
     });
 
+    it("shows each weekday's mean delay once the data is in", () => {
+      mount(DaysControl, "", SUMMARY);
+      const mon = screen.getByRole("button", { name: "Mon 2.3 min" });
+      expect(mon.querySelector(".scope-mini-bar")).toHaveStyle({ background: "var(--d1)" });
+      expect(screen.getByRole("button", { name: "Sat 5.1 min" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Tue" })).toBeInTheDocument();
+    });
+
     it("marks the selected days", () => {
       mount(DaysControl, "?dow=weekend");
       expect(screen.getByRole("button", { name: "Sat" })).toHaveAttribute("aria-pressed", "true");
@@ -166,6 +174,18 @@ describe("scope controls", () => {
       expect(params().has("late")).toBe(false);
       fireEvent.pointerUp(slider);
       expect(params().get("late")).toBe("240");
+    });
+  });
+
+  describe("routes with data", () => {
+    it("shows a route's mean delay beside it", () => {
+      mount(RoutesControl, "", SUMMARY);
+      expect(screen.getByText("1.0 min")).toBeInTheDocument();
+    });
+
+    it("shows nothing beside a route without the data", () => {
+      mount(RoutesControl);
+      expect(screen.queryByText("1.0 min")).toBeNull();
     });
   });
 

@@ -204,3 +204,19 @@
   font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
+
+.scope-delay {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-num);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.scope-mini-bar {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}

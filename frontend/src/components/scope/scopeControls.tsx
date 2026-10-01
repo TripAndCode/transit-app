@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../../api/hooks";
+import { delayRampVar } from "../../styles/tokens";
 import { WEEKDAYS, isoDaysBefore, todayISO, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
 import type { ScopeSummary } from "../../api/types";
 import { useAgencyId } from "../../api/useAgencyId";
@@ -28,6 +29,17 @@ function Pill({ pressed, onClick, children }: { pressed: boolean; onClick: () =>
     <button type="button" className="scope-pill" aria-pressed={pressed} onClick={onClick}>
       {children}
     </button>
+  );
+}
+
+/** A small bar coloured by the delay ramp, with the mean beside it. */
+export function DelayBar({ minutes }: { minutes: number }) {
+  const { t } = useTranslation();
+  return (
+    <span className="scope-delay">
+      <span className="scope-mini-bar" style={{ background: delayRampVar(minutes) }} aria-hidden="true" />
+      {t("scope.control.mean_min", { n: minutes.toFixed(1) })}
+    </span>
   );
 }
 
@@ -93,10 +105,11 @@ function selectedDays(dow: Scope["dow"]): Set<Weekday> {
   return new Set(dow.split(",") as Weekday[]);
 }
 
-export function DaysControl({ scope, update }: ControlProps) {
+export function DaysControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
   const serviceId = useId();
   const on = selectedDays(scope.dow);
+  const weekdayMeans = new Map(summary?.weekdays.map((w) => [w.dow, w.avg_min]) ?? []);
   function toggle(day: Weekday) {
     const next = new Set(on);
     if (next.has(day)) next.delete(day);
@@ -114,11 +127,20 @@ export function DaysControl({ scope, update }: ControlProps) {
         ))}
       </div>
       <div className="scope-pills">
-        {WEEKDAYS.map((day) => (
-          <Pill key={day} pressed={on.has(day)} onClick={() => toggle(day)}>
-            {t(`forecast.dow_${day}`)}
-          </Pill>
-        ))}
+        {WEEKDAYS.map((day) => {
+          const mean = weekdayMeans.get(day);
+          return (
+            <button key={day} type="button" className="scope-pill" aria-pressed={on.has(day)} onClick={() => toggle(day)}>
+              {t(`forecast.dow_${day}`)}
+              {mean != null && (
+                <>
+                  {" "}
+                  <DelayBar minutes={mean} />
+                </>
+              )}
+            </button>
+          );
+        })}
       </div>
       <label htmlFor={serviceId} className="scope-field">
         {t("scope.control.service")}
@@ -152,10 +174,16 @@ export function TimeControl({ scope, update }: ControlProps) {
   );
 }
 
-export function RoutesControl({ scope, update }: ControlProps) {
+export function RoutesControl({ scope, update, summary }: ControlProps) {
+  const delays = summary ? new Map(summary.routes.map((r) => [r.route_code, r])) : undefined;
   return (
     <div className="scope-control">
-      <RoutesPicker selected={scope.routes} onChange={(routes) => update({ routes: routes.length > 0 ? routes : null })} />
+      <RoutesPicker
+        selected={scope.routes}
+        onChange={(routes) => update({ routes: routes.length > 0 ? routes : null })}
+        delays={delays}
+        renderDelay={(minutes) => <DelayBar minutes={minutes} />}
+      />
     </div>
   );
 }

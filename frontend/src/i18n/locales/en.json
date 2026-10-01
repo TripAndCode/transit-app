@@ -1638,7 +1638,8 @@
       "brush_label": "Daily mean delay",
       "brush_start": "Start",
       "brush_end": "End",
-      "since_start": "Since collection began"
+      "since_start": "Since collection began",
+      "mean_min": "{{n}} min"
     },
     "pin": "Pin controls",
     "reset": "Reset conditions",

@@ -1638,7 +1638,8 @@
       "brush_label": "日別の平均遅延",
       "brush_start": "開始",
       "brush_end": "終了",
-      "since_start": "収集開始から"
+      "since_start": "収集開始から",
+      "mean_min": "{{n}}分"
     },
     "pin": "帯を固定",
     "reset": "条件をリセット",
