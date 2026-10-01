@@ -124,8 +124,8 @@ export function LoginPage() {
       <Card as="main" padded={false} className="login-card">
         <div className="login-card__brand">
           <Link to="/welcome" className="login-card__brand-title">
-              {t("header.app_title")}
-            </Link>
+            {t("header.app_title")}
+          </Link>
           <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
         </div>
 
