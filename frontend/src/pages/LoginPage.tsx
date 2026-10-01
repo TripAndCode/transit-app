@@ -89,7 +89,9 @@ export function LoginPage() {
         <div className="login-shell__grid" aria-hidden="true" />
         <Card as="main" padded={false} className="login-card">
           <div className="login-card__brand">
-            <span className="login-card__brand-title">{t("header.app_title")}</span>
+            <Link to="/welcome" className="login-card__brand-title">
+              {t("header.app_title")}
+            </Link>
             <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
           </div>
           <h1 className="login-card__h1">
@@ -121,7 +123,9 @@ export function LoginPage() {
       <div className="login-shell__grid" aria-hidden="true" />
       <Card as="main" padded={false} className="login-card">
         <div className="login-card__brand">
-          <span className="login-card__brand-title">{t("header.app_title")}</span>
+          <Link to="/welcome" className="login-card__brand-title">
+              {t("header.app_title")}
+            </Link>
           <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
         </div>
 

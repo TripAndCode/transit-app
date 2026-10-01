@@ -5,6 +5,7 @@
     "expand_sidebar": "サイドバーを開く",
     "account_menu": "アカウントメニュー",
     "help": "ヘルプ",
+    "about": "このアプリについて",
     "prototype_section_label": "プロトタイプ",
     "prototype_onboarding": "初回ログイン画面",
     "prototype_stale_feed": "フィード遅延状態",
@@ -44,7 +45,8 @@
     "hero": {
       "title_now": "今すぐ何が起きているか。",
       "title_where": "どこで起きているか。",
-      "subtitle": "各事業者の最新報告停留所、現在の遅延、履歴分析、事業者間の比較をまとめて確認できます。"
+      "subtitle": "各事業者の最新報告停留所、現在の遅延、履歴分析、事業者間の比較をまとめて確認できます。",
+      "open_dashboard": "ダッシュボードを開く"
     },
     "hero_map": {
       "screens": {

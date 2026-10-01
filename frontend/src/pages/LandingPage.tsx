@@ -1,4 +1,4 @@
-import { Link, Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { LegalLinks } from "../components/LegalLinks";
@@ -9,16 +9,16 @@ import "./LandingPage.css";
 /** Pre-authentication marketing/landing page -- a cinematic first
  *  impression kept deliberately separate from the calm, data-dense signed-
  *  in dashboard (CLAUDE.md's "keep UI calm" rule governs the working
- *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). The hero
- *  (animated live-map scene + headline + the sign-in CTA, the only way into
- *  the app) is the entry point; below it, `ScrollNarrative` mounts three real, working
+ *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). It stays
+ *  reachable after sign-in, so its one CTA is sign-in for a visitor and the
+ *  dashboard for a signed-in user. The hero (animated live-map scene +
+ *  headline + that CTA) is the entry point; below it, `ScrollNarrative` mounts three real, working
  *  chart components (fed by static fixtures, not live data) telling the
  *  product's story, rather than the retired `DashboardPreview` mocked
  *  sidebar shell. */
 export function LandingPage() {
   const { t } = useTranslation();
   const { data: session } = useSession();
-  if (session) return <Navigate to="/" replace />;
   return (
     <div className="landing-shell">
       <section className="landing-hero">
@@ -39,8 +39,8 @@ export function LandingPage() {
             <span className="landing-hero__title-line">{t("landing.hero.title_where")}</span>
           </h1>
           <p className="landing-hero__subtitle">{t("landing.hero.subtitle")}</p>
-          <Link to="/login" className="landing-hero__cta">
-            {t("common.login")}
+          <Link to={session ? "/" : "/login"} className="landing-hero__cta">
+            {session ? t("landing.hero.open_dashboard") : t("common.login")}
           </Link>
         </div>
       </section>

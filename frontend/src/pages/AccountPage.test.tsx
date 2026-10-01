@@ -56,6 +56,21 @@ describe("AccountPage logout", () => {
     expect(mockMutate).toHaveBeenCalled();
   });
 
+  it("returns to the welcome page once signed out", async () => {
+    const original = window.location;
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", { value: { ...original, assign }, writable: true });
+    mockMutate.mockImplementation((_vars: unknown, opts?: { onSuccess?: () => void }) => opts?.onSuccess?.());
+    try {
+      const user = userEvent.setup();
+      renderAccount();
+      await user.click(screen.getByRole("button", { name: "Sign out" }));
+      expect(assign).toHaveBeenCalledWith("/welcome");
+    } finally {
+      Object.defineProperty(window, "location", { value: original, writable: true });
+    }
+  });
+
   it("shows an inline error message when the logout mutation fails — the button previously failed completely silently", () => {
     mockLogoutState = { isPending: false, isError: true };
     renderAccount();

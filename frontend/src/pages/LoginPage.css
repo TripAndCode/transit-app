@@ -60,6 +60,11 @@ body:has(.login-shell),
   font-size: 18px;
   letter-spacing: 0.01em;
   color: var(--text-primary);
+  text-decoration: none;
+}
+.login-card__brand-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .login-card__brand-tag {
   margin-top: 4px;

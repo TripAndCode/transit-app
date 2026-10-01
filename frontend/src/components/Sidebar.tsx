@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type ReactElement, type ReactNode } from 
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   HelpCircle,
+  Info,
   Clock,
   CircleSlash,
   SquareDashed,
@@ -287,6 +288,17 @@ export function Sidebar() {
             >
               <HelpCircle size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
               {!collapsedFlag && <span>{t("nav.help")}</span>}
+            </NavLink>
+          </RailTooltip>
+          <RailTooltip collapsed={collapsedFlag} label={t("nav.about")}>
+            <NavLink
+              to="/welcome"
+              aria-label={collapsedFlag ? t("nav.about") : undefined}
+              onClick={() => onNavigate?.()}
+              style={railLinkStyle(collapsedFlag)}
+            >
+              <Info size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
+              {!collapsedFlag && <span>{t("nav.about")}</span>}
             </NavLink>
           </RailTooltip>
           {isAdmin && (
