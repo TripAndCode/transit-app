@@ -1639,7 +1639,10 @@
       "brush_start": "Start",
       "brush_end": "End",
       "since_start": "Since collection began",
-      "mean_min": "{{n}} min"
+      "mean_min": "{{n}} min",
+      "share": "{{pct}}%",
+      "curve_label": "On-time share by tolerance",
+      "whole_day": "These figures cover the whole day"
     },
     "pin": "Pin controls",
     "reset": "Reset conditions",

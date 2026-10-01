@@ -1639,7 +1639,10 @@
       "brush_start": "開始",
       "brush_end": "終了",
       "since_start": "収集開始から",
-      "mean_min": "{{n}}分"
+      "mean_min": "{{n}}分",
+      "share": "{{pct}}%",
+      "curve_label": "許容幅ごとの定時率",
+      "whole_day": "この数値は時間帯の条件を含みません"
     },
     "pin": "帯を固定",
     "reset": "条件をリセット",

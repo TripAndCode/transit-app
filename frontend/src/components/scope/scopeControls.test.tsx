@@ -167,6 +167,29 @@ describe("scope controls", () => {
       expect(params().has("late")).toBe(false);
     });
 
+    it("names each preset's on-time share once the data is in", () => {
+      mount(ToleranceControl, "", SUMMARY);
+      expect(screen.getByRole("button", { name: "1 min 34%" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "3 min 60%" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "5 min 75%" })).toBeInTheDocument();
+    });
+
+    it("draws the on-time curve with a marker at the current tolerance", () => {
+      mount(ToleranceControl, "?late=180", SUMMARY);
+      const curve = screen.getByRole("img", { name: "On-time share by tolerance" });
+      expect(curve.querySelector(".scope-curve__marker")?.getAttribute("cx")).toBe("72");
+    });
+
+    it("says the figures cover the whole day when a time band is set", () => {
+      mount(ToleranceControl, "?time_band=morning", SUMMARY);
+      expect(screen.getByText("These figures cover the whole day")).toBeInTheDocument();
+    });
+
+    it("draws no curve without the data", () => {
+      mount(ToleranceControl);
+      expect(screen.queryByRole("img", { name: "On-time share by tolerance" })).toBeNull();
+    });
+
     it("writes the slider only when the drag ends", () => {
       mount(ToleranceControl);
       const slider = screen.getByRole("slider", { name: "Counted on time up to" });

@@ -84,6 +84,7 @@ export function PeriodControl({ scope, update, summary }: ControlProps) {
           onCommit={(from, to) => update({ from, to })}
         />
       )}
+      <WholeDayNote scope={scope} update={update} summary={summary} />
       <div className="scope-dates">
         <label>
           {t("scope.control.from")}
@@ -150,6 +151,7 @@ export function DaysControl({ scope, update, summary }: ControlProps) {
         <option value="平日">{t("common.service_value.平日")}</option>{/* i18n-ignore: query contract */}
         <option value="土日祝">{t("common.service_value.土日祝")}</option>{/* i18n-ignore: query contract */}
       </select>
+      <WholeDayNote scope={scope} update={update} summary={summary} />
     </div>
   );
 }
@@ -184,13 +186,44 @@ export function RoutesControl({ scope, update, summary }: ControlProps) {
         delays={delays}
         renderDelay={(minutes) => <DelayBar minutes={minutes} />}
       />
+      <WholeDayNote scope={scope} update={update} summary={summary} />
     </div>
   );
 }
 
+/** The summary comes from daily aggregates, which have no hour of day; say
+ *  so wherever its figures sit beside a time condition they do not reflect. */
+function WholeDayNote({ scope, summary }: ControlProps) {
+  const { t } = useTranslation();
+  if (!summary || (scope.time_band === "all" && scope.hour == null)) return null;
+  return <p className="scope-note">{t("scope.control.whole_day")}</p>;
+}
+
+const CURVE_W = 240;
+const CURVE_H = 56;
+
+function curveX(lateSec: number): number {
+  return (lateSec / MAX_LATE_SEC) * CURVE_W;
+}
+
+function curveY(pct: number): number {
+  return CURVE_H - (pct / 100) * CURVE_H;
+}
+
+/** The share at `sec`, interpolated between the summary's steps. */
+function shareAt(points: ScopeSummary["tolerance"], sec: number): number | null {
+  if (points.length === 0) return null;
+  const after = points.findIndex((p) => p.late_sec >= sec);
+  if (after === -1) return points[points.length - 1].on_time_pct;
+  if (after === 0 || points[after].late_sec === sec) return points[after].on_time_pct;
+  const a = points[after - 1];
+  const b = points[after];
+  return a.on_time_pct + ((b.on_time_pct - a.on_time_pct) * (sec - a.late_sec)) / (b.late_sec - a.late_sec);
+}
+
 /** The slider writes when the drag ends, not on every step, so dragging
  *  across the range does not refetch the screen at each stop. */
-export function ToleranceControl({ scope, update }: ControlProps) {
+export function ToleranceControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<number | null>(null);
   const current = scope.late ?? DEFAULT_LATE_SEC;
@@ -206,12 +239,52 @@ export function ToleranceControl({ scope, update }: ControlProps) {
   return (
     <div className="scope-control">
       <div className="scope-pills">
-        {TOLERANCE_PRESETS_MIN.map((min) => (
-          <Pill key={min} pressed={current === min * 60} onClick={() => write(min * 60)}>
-            {t("scope.control.minutes", { n: min })}
-          </Pill>
-        ))}
+        {TOLERANCE_PRESETS_MIN.map((min) => {
+          const share = summary?.tolerance.find((p) => p.late_sec === min * 60)?.on_time_pct;
+          return (
+            <button
+              key={min}
+              type="button"
+              className="scope-pill"
+              aria-pressed={current === min * 60}
+              onClick={() => write(min * 60)}
+            >
+              {t("scope.control.minutes", { n: min })}
+              {share != null && (
+                <>
+                  {" "}
+                  <span className="scope-share">{t("scope.control.share", { pct: Math.round(share) })}</span>
+                </>
+              )}
+            </button>
+          );
+        })}
       </div>
+      {summary && summary.tolerance.length > 0 && (
+        <svg
+          role="img"
+          aria-label={t("scope.control.curve_label")}
+          className="scope-curve"
+          viewBox={`0 0 ${CURVE_W} ${CURVE_H}`}
+          width="100%"
+          height={CURVE_H}
+        >
+          <polyline
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth={1.5}
+            points={summary.tolerance.map((p) => `${curveX(p.late_sec)},${curveY(p.on_time_pct)}`).join(" ")}
+          />
+          <circle
+            className="scope-curve__marker"
+            cx={curveX(value)}
+            cy={curveY(shareAt(summary.tolerance, value) ?? 0)}
+            r={3.5}
+            fill="var(--accent-strong)"
+          />
+        </svg>
+      )}
+      <WholeDayNote scope={scope} update={update} summary={summary} />
       <input
         type="range"
         min={0}
