@@ -33,7 +33,7 @@ function Pill({ pressed, onClick, children }: { pressed: boolean; onClick: () =>
 }
 
 /** A small bar coloured by the delay ramp, with the mean beside it. */
-export function DelayBar({ minutes }: { minutes: number }) {
+function DelayBar({ minutes }: { minutes: number }) {
   const { t } = useTranslation();
   return (
     <span className="scope-delay">

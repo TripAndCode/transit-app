@@ -66,6 +66,7 @@ vi.mock("../../api/hooks", () => ({
   // so an omitted hook is `undefined` at call time rather than the real one.
   useRouteTrips: vi.fn(() => ({ data: { date: "2026-09-12", time_band: "morning", truncated: false, trips: [] }, isPending: false })),
   useRouteShape: vi.fn(() => ({ data: { route: "101", geometry: null, stops: [{ stop_id: "A", stop_sequence: 1, stop_name: "Station A", lon: 140, lat: 40, avg_min: 2, samples: 5 }] }, isPending: false })),
+  useScopeSummary: vi.fn(() => ({ data: undefined })),
   useReport: vi.fn((_id, type) => ({ data: type ? { report_type: type, definition: {}, rows: type === "trend" ? [{ days: [{ date: "2026-09-07", avg_min: 2, samples: 4 }] }] : [["101", null, 2, 1, 3, 4]] } : undefined, isPending: false })),
 }));
 const ctx = { ...SCOPE_EXTRAS_NONE, from: "2026-09-07", to: "2026-09-12", dow: "weekday" as const, time_band: "morning" as const, service: "all" as const, routes: ["101"] };
