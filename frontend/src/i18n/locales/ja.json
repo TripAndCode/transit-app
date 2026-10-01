@@ -1620,6 +1620,8 @@
     "dir": "方向 {{dir}}",
     "tolerance_min": "{{n}}分以内",
     "tolerance_sec": "{{n}}秒以内",
+    "early_min": "早発は{{n}}分まで",
+    "early_sec": "早発は{{n}}秒まで",
     "unapplied": "この画面では使われない条件です",
     "control": {
       "last_days": "直近{{count}}日",
@@ -1644,6 +1646,7 @@
       "service": "ダイヤ",
       "stop": "停留所",
       "dir": "方向",
+      "early": "早発の幅",
       "tolerance": "定時の幅"
     }
   }

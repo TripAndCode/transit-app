@@ -25,7 +25,9 @@ const RESET: ScopePatch = {
   routes: null,
 };
 
-const EXTRA_KEYS: readonly TokenKey[] = ["service", "stop", "dir"];
+/** The conditions the template places by name; every other token is an
+ *  optional one and goes into `[extras]`, in the order scopeTokens gives. */
+const PLACED_KEYS: ReadonlySet<TokenKey> = new Set(["agency", "routes", "period", "days", "time", "tolerance"]);
 
 /** Punctuation that must not start a line: it stays with the token before it. */
 const TRAILING_PUNCT = /^[、。・，,]+/; // i18n-ignore: punctuation set, not copy
@@ -66,6 +68,7 @@ function isSet(key: ConditionKey, scope: Scope): boolean {
 function removesOpen(open: ConditionKey | null, patch: ScopePatch): boolean {
   if (open === "stop") return "stop" in patch && patch.stop == null;
   if (open === "dir") return "dir" in patch && patch.dir == null;
+  if (open === "early") return "early" in patch && patch.early == null;
   if (open === "service") return "service" in patch && (patch.service == null || patch.service === "all");
   return false;
 }
@@ -202,10 +205,7 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
   for (const part of sentenceParts(t("scope.sentence"))) {
     if ("text" in part) runs.push({ text: part.text });
     else if (part.slot === "extras") {
-      for (const key of EXTRA_KEYS) {
-        const tok = byKey.get(key);
-        if (tok) runs.push({ text: separator }, { token: tok });
-      }
+      for (const tok of tokens) if (!PLACED_KEYS.has(tok.key)) runs.push({ text: separator }, { token: tok });
     } else {
       const tok = byKey.get(part.slot as TokenKey);
       if (tok) runs.push({ token: tok });

@@ -3,7 +3,7 @@ import { dowValueLabel, serviceValueLabel, timeBandValueLabel, translationT, typ
 
 /** The `scope_applied` keys an endpoint reports, one per URL scope param. */
 export type ScopeField = "from" | "to" | "dow" | "time_band" | "hour" | "service" | "routes" | "stop" | "dir" | "late" | "early";
-export type TokenKey = "agency" | "routes" | "period" | "days" | "time" | "service" | "stop" | "dir" | "tolerance";
+export type TokenKey = "agency" | "routes" | "period" | "days" | "time" | "service" | "stop" | "dir" | "early" | "tolerance";
 export type ScopeToken = { key: TokenKey; label: string; field: ScopeField | null };
 type PhraseCtx = {
   t: LabelT;
@@ -21,9 +21,13 @@ function dateLabel(iso: string, withYear: boolean): string {
   return withYear ? `${y}/${m}/${d}` : `${m}/${d}`;
 }
 
+function secondsLabel(sec: number, t: LabelT, minKey: string, secKey: string): string {
+  if (sec < 60) return translationT(t, secKey, { n: sec });
+  return translationT(t, minKey, { n: Math.round((sec / 60) * 10) / 10 });
+}
+
 export function toleranceLabel(sec: number, t: LabelT): string {
-  if (sec < 60) return translationT(t, "scope.tolerance_sec", { n: sec });
-  return translationT(t, "scope.tolerance_min", { n: Math.round((sec / 60) * 10) / 10 });
+  return secondsLabel(sec, t, "scope.tolerance_min", "scope.tolerance_sec");
 }
 
 /** The scope as words, one token per condition, in sentence order. Each
@@ -77,6 +81,9 @@ export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   }
   if (scope.stop) tokens.push({ key: "stop", label: tr("scope.stop", { id: scope.stop }), field: "stop" });
   if (scope.dir != null) tokens.push({ key: "dir", label: tr("scope.dir", { dir: scope.dir }), field: "dir" });
+  if (scope.early != null) {
+    tokens.push({ key: "early", label: secondsLabel(scope.early, t, "scope.early_min", "scope.early_sec"), field: "early" });
+  }
   tokens.push({ key: "tolerance", label: toleranceLabel(scope.late ?? DEFAULT_LATE_SEC, t), field: "late" });
   return tokens;
 }

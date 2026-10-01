@@ -1620,6 +1620,8 @@
     "dir": "direction {{dir}}",
     "tolerance_min": "within {{n}} min",
     "tolerance_sec": "within {{n}} s",
+    "early_min": "early by up to {{n}} min",
+    "early_sec": "early by up to {{n}} s",
     "unapplied": "This screen doesn't use this condition",
     "control": {
       "last_days": "Last {{count}} days",
@@ -1644,6 +1646,7 @@
       "service": "Timetable",
       "stop": "Stop",
       "dir": "Direction",
+      "early": "Early tolerance",
       "tolerance": "On-time tolerance"
     }
   }

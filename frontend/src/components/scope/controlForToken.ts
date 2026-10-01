@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import {
   DaysControl,
   DirControl,
+  EarlyControl,
   PeriodControl,
   RoutesControl,
   StopControl,
@@ -21,5 +22,6 @@ export const CONTROLS: Record<Exclude<TokenKey, "agency">, ComponentType<Control
   service: DaysControl,
   stop: StopControl,
   dir: DirControl,
+  early: EarlyControl,
   tolerance: ToleranceControl,
 };

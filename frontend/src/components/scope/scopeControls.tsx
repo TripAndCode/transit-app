@@ -191,6 +191,10 @@ export function StopControl({ scope, update }: ControlProps) {
   return <ClearValue value={scope.stop ?? ""} onClear={() => update({ stop: null })} />;
 }
 
+export function EarlyControl({ scope, update }: ControlProps) {
+  return <ClearValue value={scope.early == null ? "" : String(scope.early)} onClear={() => update({ early: null })} />;
+}
+
 export function DirControl({ scope, update }: ControlProps) {
   return <ClearValue value={scope.dir == null ? "" : String(scope.dir)} onClear={() => update({ dir: null })} />;
 }

@@ -81,6 +81,14 @@ describe("scopeTokens", () => {
     ]);
   });
 
+  it("adds the early tolerance only when set, after direction and before the late tolerance", () => {
+    expect(tokens("ja").map((tok) => tok.key)).not.toContain("early");
+    const ja = tokens("ja", { dir: 1, early: 120 });
+    expect(ja.map((tok) => tok.key).slice(-3)).toEqual(["dir", "early", "tolerance"]);
+    expect(ja.find((tok) => tok.key === "early")).toEqual({ key: "early", label: "早発は2分まで", field: "early" });
+    expect(labels("en", { early: 30 })).toContain("early=early by up to 30 s");
+  });
+
   it("states the tolerance in minutes or seconds", () => {
     expect(labels("ja", { late: 180 })).toContain("tolerance=3分以内");
     expect(labels("en", { late: 90 })).toContain("tolerance=within 1.5 min");

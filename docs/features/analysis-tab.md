@@ -154,8 +154,8 @@ the scope as one sentence above their content
 - **Words.** `scopeTokens` in `components/scope/scopePhrases.ts` turns a
   scope into one labelled token per condition, in sentence order, and names
   the `scope_applied` field each maps to. The locale template
-  `scope.sentence` places them with `[slot]` placeholders. Timetable, stop
-  and direction appear only when set. A line picked by name reads as that
+  `scope.sentence` places them with `[slot]` placeholders. Timetable, stop,
+  direction and the early tolerance appear only when set, in `[extras]`. A line picked by name reads as that
   line with its variant count, not as a route count. `scopeTitle` reuses
   the same words for saved-analysis titles. Punctuation after a token stays
   on its line.
