@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 import asyncpg
@@ -24,6 +26,22 @@ def _row_to_conv(row: asyncpg.Record) -> dict[str, Any]:
     fc.pop("_client_id", None)
     d["filter_ctx"] = fc
     return d
+
+
+def _json_value(value: Any) -> Any:
+    """Tool results carry values straight from asyncpg: NUMERIC arrives as
+    Decimal and DATE/TIMESTAMP as date/datetime. Stored as the JSON numbers
+    and ISO strings the API already sends for the same answer, so a replayed
+    message reads exactly like the live one."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _to_json(value: Any) -> str | None:
+    return None if value is None else json.dumps(value, default=_json_value)
 
 
 async def create_conversation(
@@ -165,11 +183,11 @@ async def append_message(
         role,
         chip_id,
         tool,
-        json.dumps(args) if args is not None else None,
+        _to_json(args),
         signature_hash,
-        json.dumps(result) if result is not None else None,
+        _to_json(result),
         rendered_summary,
-        json.dumps(conditions) if conditions is not None else None,
+        _to_json(conditions),
     )
     await conn.execute(
         "UPDATE ask_conversations SET updated_at = now() WHERE conversation_id = $1",
