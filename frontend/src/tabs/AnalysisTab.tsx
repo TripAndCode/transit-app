@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useReport, useReports } from "../api/hooks";
+import { useForecastOverview, useReport, useReports } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
 import { scopeToQueryString, useScope, type Scope } from "../api/scope";
 import type { DwellRunPayload, TrendPayload } from "../api/types";
-import { TabFilterBar } from "../components/TabFilterBar";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -64,6 +64,16 @@ export function AnalysisTab({
   const list = useReports(id);
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
+  // route_forecast is served by the forecast endpoint, so its own map
+  // applies; a report's map counts only once that report's response is the
+  // one on screen, not the previous report kept as placeholder data.
+  const forecast = useForecastOverview(reportType === "route_forecast" ? id : null);
+  const scopeApplied =
+    reportType === "route_forecast"
+      ? forecast.data?.scope_applied
+      : detail.data?.report_type === reportType
+        ? detail.data.scope_applied
+        : undefined;
 
   // `route_forecast` is served by its own endpoint, so the reports list never
   // returns it -- it is appended here as list data rather than re-rendered as
@@ -74,7 +84,7 @@ export function AnalysisTab({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <TabFilterBar />
+      <ScopeSentence applied={scopeApplied} />
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>

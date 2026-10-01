@@ -9,7 +9,7 @@ import { useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import type { RankingRow, TrendDay } from "../api/types";
-import { TabFilterBar } from "../components/TabFilterBar";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { ExportMenu } from "../components/ExportMenu";
 import { deleteAnalysis, readAnalyses } from "../components/analysis/savedAnalyses";
@@ -89,7 +89,7 @@ export function ReportsHomeTab() {
         <button aria-label={`${t("remove")}: ${s.title}`} onClick={() => { if (deleteAnalysis(s.id)) setSaved(readAnalyses()); else setNotice(t("saveFailed")); }}>{t("remove")}</button>
       </li>)}</ul>
     </section> : <>
-      <TabFilterBar />
+      <ScopeSentence applied={trend.data?.scope_applied} />
       <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name}{FILTER_SEPARATOR}{ctx.from} – {ctx.to}</h2>
       <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
         ["definition", JSON.stringify(trend.data?.definition)], [], ...buildCsv(days, daysColumns, ctx),

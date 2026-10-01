@@ -439,12 +439,6 @@ html, body, #root { height: 100%; margin: 0; }
      content-box padding would grow main taller than that stretch target
      instead of eating into it, pushing the whole shell past the viewport. */
   .app-main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); box-sizing: border-box; }
-  /* TabFilterBar's shared filter row (Overview/Analysis/Reports): wrapping
-     at this width pushes the preset menu and chips onto several lines
-     before the tab content even starts. A single scrollable row keeps every
-     control one thumb-swipe away instead. */
-  .tab-filter-bar-row { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .tab-filter-bar-row > * { flex-shrink: 0; }
 }
 
 body {

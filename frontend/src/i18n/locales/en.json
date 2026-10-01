@@ -464,19 +464,12 @@
     "name_placeholder": "Preset name"
   },
   "filters": {
-    "title": "Filters",
-    "clear_all": "Clear all",
-    "chip_remove_suffix": "Remove",
     "range": {
       "last_7d": "Last 7 days",
       "last_30d": "Last 30 days",
-      "last_90d": "Last 90 days",
-      "this_month": "This month",
-      "last_month": "Last month",
-      "custom": "Custom"
+      "last_90d": "Last 90 days"
     },
     "dow": {
-      "all": "All days",
       "label": "Day"
     },
     "service": {
@@ -1609,5 +1602,52 @@
   "topbar": {
     "ask_placeholder": "Search routes, reports and screens",
     "data_through": "Data through {{date}}"
+  },
+  "scope": {
+    "label": "What you're viewing",
+    "sentence": "Viewing [routes] of [agency], [period], [days], [time][extras], counting on-time as [tolerance]",
+    "routes_all": "all routes",
+    "routes_count": "{{count}} routes",
+    "period": "{{from}} – {{to}}",
+    "days_all": "every day",
+    "days_weekday": "weekdays",
+    "days_weekend": "weekends",
+    "time_all": "all day",
+    "hours": "{{from}}:00–{{to}}:59",
+    "hour_single": "{{h}}:00–{{h}}:59",
+    "service": "{{value}} timetable",
+    "stop": "stop {{id}}",
+    "dir": "direction {{dir}}",
+    "tolerance_min": "within {{n}} min",
+    "tolerance_sec": "within {{n}} s",
+    "early_min": "early by up to {{n}} min",
+    "early_sec": "early by up to {{n}} s",
+    "unapplied": "This screen doesn't use this condition",
+    "control": {
+      "last_days": "Last {{count}} days",
+      "from": "From",
+      "to": "To",
+      "days_all": "All",
+      "weekday": "Weekdays",
+      "weekend": "Weekend",
+      "service": "Timetable",
+      "hour_pending": "Hour-by-hour filtering arrives with the hourly aggregate",
+      "tolerance": "Counted on time up to",
+      "minutes": "{{n}} min",
+      "clear": "Clear"
+    },
+    "pin": "Pin controls",
+    "reset": "Reset conditions",
+    "popover": {
+      "routes": "Routes",
+      "period": "Period",
+      "days": "Days and timetable",
+      "time": "Time of day",
+      "service": "Timetable",
+      "stop": "Stop",
+      "dir": "Direction",
+      "early": "Early tolerance",
+      "tolerance": "On-time tolerance"
+    }
   }
 }

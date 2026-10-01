@@ -464,19 +464,12 @@
     "name_placeholder": "プリセット名"
   },
   "filters": {
-    "title": "フィルタ",
-    "clear_all": "全てクリア",
-    "chip_remove_suffix": "を解除",
     "range": {
       "last_7d": "直近7日",
       "last_30d": "直近30日",
-      "last_90d": "直近90日",
-      "this_month": "今月",
-      "last_month": "先月",
-      "custom": "カスタム"
+      "last_90d": "直近90日"
     },
     "dow": {
-      "all": "全曜日",
       "label": "曜日"
     },
     "service": {
@@ -1609,5 +1602,52 @@
   "topbar": {
     "ask_placeholder": "路線・レポート・画面を検索",
     "data_through": "データは{{date}}まで"
+  },
+  "scope": {
+    "label": "表示の条件",
+    "sentence": "[agency]の[routes]を、[period]の[days]・[time][extras]で、定時は[tolerance]として見る",
+    "routes_all": "全路線",
+    "routes_count": "{{count}}路線",
+    "period": "{{from}}〜{{to}}",
+    "days_all": "すべての曜日",
+    "days_weekday": "平日",
+    "days_weekend": "土日",
+    "time_all": "終日",
+    "hours": "{{from}}時〜{{to}}時台",
+    "hour_single": "{{h}}時台",
+    "service": "{{value}}ダイヤ",
+    "stop": "停留所 {{id}}",
+    "dir": "方向 {{dir}}",
+    "tolerance_min": "{{n}}分以内",
+    "tolerance_sec": "{{n}}秒以内",
+    "early_min": "早発は{{n}}分まで",
+    "early_sec": "早発は{{n}}秒まで",
+    "unapplied": "この画面では使われない条件です",
+    "control": {
+      "last_days": "直近{{count}}日",
+      "from": "開始日",
+      "to": "終了日",
+      "days_all": "すべて",
+      "weekday": "平日",
+      "weekend": "土日",
+      "service": "ダイヤ",
+      "hour_pending": "1時間単位の絞り込みは、時間別の集計が入ると使えます",
+      "tolerance": "定時とみなす遅れ",
+      "minutes": "{{n}}分",
+      "clear": "解除"
+    },
+    "pin": "帯を固定",
+    "reset": "条件をリセット",
+    "popover": {
+      "routes": "対象の路線",
+      "period": "期間",
+      "days": "曜日とダイヤ",
+      "time": "時間帯",
+      "service": "ダイヤ",
+      "stop": "停留所",
+      "dir": "方向",
+      "early": "早発の幅",
+      "tolerance": "定時の幅"
+    }
   }
 }

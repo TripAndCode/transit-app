@@ -37,7 +37,8 @@ plus a link out to Time for deeper reports.
 What the user sees/does:
 
 - **Summary view** (default):
-  - **Filter bar** — `frontend/src/components/TabFilterBar.tsx`.
+  - **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`,
+    greying what the trend report's `scope_applied` did not use.
   - **Trend section** — a daily mean-delay line chart
     (`frontend/src/components/analysis/PeriodChart.tsx`) with a CSV download.
   - **Routes-to-check section** — a ranked pattern table (route, days,
@@ -89,7 +90,7 @@ issuing their own requests.
 | `frontend/src/components/analysis/savedAnalyses.ts` | Browser-local saved-analysis read/write/delete |
 | `frontend/src/components/analysis/csv.ts` | `downloadCsv()` shared by every analysis/report screen |
 | `frontend/src/components/DefinitionMetaBlock.tsx` | Renders the on-time/late definition metadata block |
-| `frontend/src/components/TabFilterBar.tsx` | Shared dow/service/time_band/route filter UI |
+| `frontend/src/components/scope/ScopeSentence.tsx` | The scope sentence, its popovers and pinned strip |
 | `frontend/src/api/hooks.ts` | `useReport`, `useAgencies` |
 
 **Backend**

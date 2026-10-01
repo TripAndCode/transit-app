@@ -54,7 +54,9 @@ with a proactive "Insight Panel" suggesting what to look at next.
 
 What the user sees/does:
 
-- **Filter bar** — `frontend/src/components/TabFilterBar.tsx`.
+- **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`
+  (see Scope below), greying what the open report's `scope_applied` did not
+  use.
 - **Report list** (left column) — one button per report type the hosting
   screen owns; clicking sets `report={reportType}` on the current URL, keeping
   the filter query string. A `?` hint icon (`frontend/src/components/InsightHint.tsx`)
@@ -141,6 +143,53 @@ response honoured that field.
 - **Not yet honoured.** `hour`, `stop` and `dir` are accepted and validated,
   but no endpoint honours them yet: `hour` waits on `agg_route_hour_daily`,
   and none of today's aggregates carries `direction_id`.
+
+### The scope sentence
+
+Pulse, Routes, Time, Why, Compare by periods and the Reports summary state
+the scope as one sentence above their content
+(`frontend/src/components/scope/ScopeSentence.tsx`), for example
+「青森市バスの全路線を、9/1〜9/28のすべての曜日・終日で、定時は1分以内として見る」.
+
+- **Words.** `scopeTokens` in `components/scope/scopePhrases.ts` turns a
+  scope into one labelled token per condition, in sentence order, and names
+  the `scope_applied` field each maps to. The locale template
+  `scope.sentence` places them with `[slot]` placeholders. Timetable, stop,
+  direction and the early tolerance appear only when set, in `[extras]`. A line picked by name reads as that
+  line with its variant count, not as a route count. `scopeTitle` reuses
+  the same words for saved-analysis titles. Punctuation after a token stays
+  on its line.
+- **Popovers.** Every condition but the agency is a button that opens its
+  own control in a `role="dialog"` popover (`ScopePopover.tsx`). Focus moves
+  in. Escape closes it and returns focus to the button, through the shared
+  Escape stack (`useTopmostEscape`), so an overlay opened over it takes the
+  Escape instead. A click outside, or Tab walking off its last control,
+  also closes it. It is positioned against the sentence's section and slid
+  left to fit, so it never runs off a phone screen. The controls are in `scopeControls.tsx`:
+  - Period: last 7/30/90 days ending on the agency's latest data day, and
+    from/to dates (a start after the end is ignored).
+  - Days: all, weekdays or weekend, seven weekday toggles that never
+    remove the last day, and the timetable select.
+  - Time: the seven bands and all day. Hour-by-hour filtering is shown as
+    pending until `agg_route_hour_daily` exists.
+  - Routes: the grouped route picker.
+  - On-time tolerance: 1/3/5 minutes and a slider that writes when the drag
+    ends.
+- **Live apply.** Every change writes the URL at once with `replace`;
+  there is no Apply button.
+- **Greying.** Each screen passes its main response's `scope_applied`. A
+  set condition whose field is `false` renders struck through, in the
+  sentence and in the pinned strip, with 「この画面では使われない条件です」
+  as its title and accessible description. A condition at its default
+  filters nothing and is never greyed. A screen that passes nothing greys
+  nothing. AnalysisTab uses the forecast overview's map for
+  `route_forecast`, and a report's map only once that report's response is
+  the one on screen.
+- **Pinned strip.** 「帯を固定」 shows every control inline under the
+  sentence; the choice is kept in localStorage `transit.scopePinned`.
+- **Presets and reset.** Signed-in users save and load presets beside the
+  sentence (`PresetMenu`). 「条件をリセット」 appears once any non-date
+  condition differs from the default, and resets the dates too.
 
 ## Request path
 

@@ -46,8 +46,7 @@ type Draft = { routes: string[]; from: string; to: string; dow: DowFilter; time_
  *
  * Draft state is seeded from the live context and re-seeded whenever the
  * context changes underneath — a preset, a drilldown link, a browser Back —
- * using the render-adjust pattern rather than an effect, matching
- * `TabFilterBar`.
+ * using the render-adjust pattern rather than an effect.
  */
 export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
   const { t } = useTranslation("design");

@@ -32,8 +32,9 @@ rail's first destination, while the rail's Live entry opens the realtime map
 
 What the user sees/does:
 
-- **Filter bar** — `frontend/src/components/TabFilterBar.tsx`, the same
-  shared dow/service/time_band/route filter used by every tab.
+- **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`
+  states the shared scope as one sentence (see `analysis-tab.md` ▸ Scope),
+  greying the conditions `useOverviewSummary`'s `scope_applied` did not apply.
 - **Empty state** — `frontend/src/components/EmptyState.tsx` when the agency
   has zero samples, zero concentration routes, and an empty service split for
   the current range (`hasAnyData` in `OverviewTab.tsx`; `movers` and
@@ -78,7 +79,7 @@ What the user sees/does:
 | `frontend/src/components/PeakHourModal.tsx` | Per-hour (optionally per-DOW) top-routes drill-down |
 | `frontend/src/components/ServiceSplit.tsx` | Weekday vs. weekend split (card/modal variants) |
 | `frontend/src/components/OverviewModal.tsx` | Shared modal chrome each expandable card opens into |
-| `frontend/src/components/TabFilterBar.tsx` | Shared dow/service/time_band/route filter UI |
+| `frontend/src/components/scope/ScopeSentence.tsx` | The scope sentence, its popovers and pinned strip |
 | `frontend/src/api/hooks.ts` | `useOverviewSummary`, `usePeakHourBreakdown` |
 | `frontend/src/styles/overview.css` | Overview-specific layout/spacing |
 
@@ -129,7 +130,7 @@ alone for single-origin):
 - Frontend strings live under the `overview.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
   `npm run lint:i18n`), plus `nav.pulse` for the rail entry, and the shared
-  `filters.*` namespace used by `TabFilterBar`.
+  `scope.*` namespace used by the scope sentence.
 - No server-side `_LOCALES` strings for this tab — `overview_summary`'s
   `locale` parameter is reserved for future qualitative labels
   (`api/routers/overview.py`'s docstring); today's payload is numeric/string

@@ -17,7 +17,7 @@ compares to the whole network at a glance.
   `frontend/src/routes/networkRedirect.tsx: RedirectNetworkToAgencyNetwork`
   (to the last-used agency, or to `/` when none is remembered).
 - Top-level component: `frontend/src/tabs/NetworkTab.tsx`. Unlike every other
-  tab, it does **not** use the shared `TabFilterBar`/`useScope`
+  tab, it does **not** show the scope sentence or use the shared
   dow/service/time_band/route filters — only a plain `from`/`to` date-range
   pair (whole-agency comparison, per the endpoint's own docstring).
 
