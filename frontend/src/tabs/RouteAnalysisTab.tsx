@@ -14,6 +14,7 @@ import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries
 import { MareyDiagram } from "../components/charts/MareyDiagram";
 import { SkeletonChart } from "../components/Skeleton";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
+import { scopeTitle } from "../components/scope/scopePhrases";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
@@ -125,7 +126,7 @@ export function RouteAnalysisTab() {
         ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
-      <button disabled={!query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id, `${names.format(route)} · ${ctx.from} – ${ctx.to}`, ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
+      <button disabled={!query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id, scopeTitle(ctx, { t, agencyName: "", routeLabel: names.format }), ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
     </div></header>
     {notice && <span role="status">{notice}</span>}
     <AnalysisFilters agencyId={id} />

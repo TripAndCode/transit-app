@@ -8,6 +8,7 @@ import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
 import { ScopeRouteContext } from "../api/scope";
 import { RouteAnalysisTab } from "./RouteAnalysisTab";
+import { readAnalyses } from "../components/analysis/savedAnalyses";
 import type { RouteShapeResponse } from "../api/types";
 
 vi.mock("../components/analysis/AnalysisMap", () => ({
@@ -90,6 +91,20 @@ describe("RouteAnalysisTab", () => {
     renderTab("/agencies/1/route-analysis?routes=R1");
     expect(screen.getByRole("heading", { name: "Where does delay build up?" })).toBeInTheDocument();
     expect(screen.getByText("Delay by stop")).toBeInTheDocument();
+  });
+
+  it("titles a saved analysis with its scope in words", () => {
+    localStorage.clear();
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: shape([{ stop_sequence: 1, stop_name: "Stop A", lon: 140.7, lat: 40.8, avg_min: 2.4, samples: 10 }]),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1&from=2026-09-01&to=2026-09-28");
+    fireEvent.click(screen.getByRole("button", { name: "Save analysis" }));
+    expect(readAnalyses()[0].title).toBe("R1, 9/1 – 9/28, every day, all day, within 1 min");
   });
 });
 
