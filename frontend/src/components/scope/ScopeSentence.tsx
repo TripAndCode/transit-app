@@ -30,6 +30,9 @@ const RESET: ScopePatch = {
  *  optional one and goes into `[extras]`, in the order scopeTokens gives. */
 const PLACED_KEYS: ReadonlySet<TokenKey> = new Set(["agency", "routes", "period", "days", "time", "tolerance"]);
 
+/** The controls that draw the summary's figures; the others never fetch it. */
+const DATA_KEYS: ReadonlySet<TokenKey> = new Set(["routes", "period", "days", "service", "tolerance"]);
+
 /** Punctuation that must not start a line: it stays with the token before it. */
 const TRAILING_PUNCT = /^[、。・，,]+/; // i18n-ignore: punctuation set, not copy
 
@@ -154,7 +157,7 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
   const byKey = new Map(tokens.map((tok) => [tok.key, tok]));
   // A condition that was cleared from elsewhere has no popover to show.
   const open = openKey != null && byKey.has(openKey) ? openKey : null;
-  const { data: summary } = useScopeSummary(id, scope, open != null || pinned);
+  const { data: summary } = useScopeSummary(id, scope, pinned || (open != null && DATA_KEYS.has(open)));
   const separator = t("common.list_separator");
 
   const isOff = (tok: ScopeToken & { key: ConditionKey }) =>

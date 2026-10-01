@@ -166,8 +166,9 @@ the scope as one sentence above their content
   Escape instead. A click outside, or Tab walking off its last control,
   also closes it. It is positioned against the sentence's section and slid
   left to fit, so it never runs off a phone screen. The controls are in `scopeControls.tsx`:
-  - Period: last 7/30/90 days ending on the agency's latest data day, and
-    from/to dates (a start after the end is ignored).
+  - Period: presets ending on the agency's latest data day (see the
+    controls' data below), and from/to dates (a start after the end is
+    ignored).
   - Days: all, weekdays or weekend, seven weekday toggles that never
     remove the last day, and the timetable select.
   - Time: the seven bands and all day. Hour-by-hour filtering is shown as
@@ -180,21 +181,30 @@ the scope as one sentence above their content
   (`api/routers/scope_summary.py`, computed by
   `pipeline/reports/scope_summary.py` from `agg_route_daily_dist` alone):
   - the period control draws the last 90 days of data as bars coloured by
-    the delay ramp (`delayRampVar`, `--d0`…`--d4`), with days without data
-    hatched, and a brush over them (`PeriodBrush.tsx`): drag to select, or
-    move either handle a day at a time with the arrow keys; it writes when
-    the drag or key ends. Presets are the last 7, 14 and 30 days and
+    the delay ramp (`delayRampVar`, `--d0`…`--d4`) with a legend, each bar
+    naming its date and mean, and days without data drawn as short marks.
+    The period is outlined and the days outside it dimmed. A brush over the
+    bars (`PeriodBrush.tsx`) selects a range by dragging across them, or
+    moves one edge by dragging its handle; from the keyboard each handle
+    moves a day at a time (Home/End, Page keys for a week). It writes when
+    the drag, the key or the focus ends, and only the edge that moved, so an
+    edge outside the window keeps its date. A tap, a cancelled drag or a
+    non-primary button writes nothing. Presets are the last 7, 14 and 30 days and
     「収集開始から」 (from the earliest data day, at most 365 days back);
   - each weekday toggle shows that weekday's mean delay over the period;
   - each line in the route picker shows its mean delay over the period;
   - the tolerance control draws the on-time share at each late tolerance
-    (0–10 min, a histogram estimate) and names the share on each preset.
+    (0–10 min) with a marker and readout at the current one, and names the
+    share on each preset. The one-minute step is the exact on-time count,
+    matching the screens; the other steps are histogram estimates.
 
   The bars ignore the period and the weekday filter, the weekday means
   ignore the weekday filter, and the route means ignore the routes filter,
   since each exists to choose that condition. The aggregate has no hour of
-  day, so with a time condition set the controls say their figures cover
-  the whole day.
+  day, stop or direction, so with one of those set the controls say their
+  figures cover the whole day (and every stop and direction). The request
+  carries only the fields the summary answers to (`scopeSummaryQuery`), and
+  only the controls that draw its figures fetch it.
 - **Live apply.** Every change writes the URL at once with `replace`;
   there is no Apply button.
 - **Greying.** Each screen passes its main response's `scope_applied`. A

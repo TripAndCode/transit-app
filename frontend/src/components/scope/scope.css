@@ -167,12 +167,21 @@
 
 .scope-brush {
   position: relative;
+  user-select: none;
+}
+
+.scope-brush__track {
+  position: relative;
+  touch-action: pan-y;
+  cursor: crosshair;
 }
 
 .scope-brush svg {
   display: block;
-  touch-action: none;
-  cursor: crosshair;
+}
+
+.scope-brush__bar--out {
+  opacity: 0.35;
 }
 
 .scope-brush__handle {
@@ -219,6 +228,7 @@
   width: 10px;
   height: 10px;
   border-radius: 2px;
+  outline: 1px solid var(--border-subtle);
 }
 
 .scope-share {
@@ -230,4 +240,39 @@
   display: block;
   background: var(--bg-soft);
   border-radius: var(--radius);
+}
+
+.scope-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.scope-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scope-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  outline: 1px solid var(--border-subtle);
+}
+
+.scope-legend i.scope-legend__gap {
+  height: 3px;
+  background: var(--border-subtle);
+}
+
+.scope-readout {
+  margin: 0;
+  font-family: var(--font-num);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
 }

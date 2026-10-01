@@ -78,6 +78,7 @@ export function PeriodControl({ scope, update, summary }: ControlProps) {
       {summary && summary.days.length > 0 && (
         <PeriodBrush
           days={summary.days}
+          earliest={summary.earliest}
           latest={anchor}
           from={scope.from}
           to={scope.to}
@@ -195,8 +196,12 @@ export function RoutesControl({ scope, update, summary }: ControlProps) {
  *  so wherever its figures sit beside a time condition they do not reflect. */
 function WholeDayNote({ scope, summary }: ControlProps) {
   const { t } = useTranslation();
-  if (!summary || (scope.time_band === "all" && scope.hour == null)) return null;
-  return <p className="scope-note">{t("scope.control.whole_day")}</p>;
+  const hasFigures =
+    summary != null &&
+    (summary.days.length > 0 || summary.weekdays.length > 0 || summary.routes.length > 0 || summary.tolerance.length > 0);
+  const placeSet = scope.stop != null || scope.dir != null;
+  if (!hasFigures || (!placeSet && scope.time_band === "all" && scope.hour == null)) return null;
+  return <p className="scope-note">{t(placeSet ? "scope.control.whole_day_place" : "scope.control.whole_day")}</p>;
 }
 
 const CURVE_W = 240;
@@ -261,28 +266,40 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
         })}
       </div>
       {summary && summary.tolerance.length > 0 && (
-        <svg
-          role="img"
-          aria-label={t("scope.control.curve_label")}
-          className="scope-curve"
-          viewBox={`0 0 ${CURVE_W} ${CURVE_H}`}
-          width="100%"
-          height={CURVE_H}
-        >
-          <polyline
-            fill="none"
-            stroke="var(--accent)"
-            strokeWidth={1.5}
-            points={summary.tolerance.map((p) => `${curveX(p.late_sec)},${curveY(p.on_time_pct)}`).join(" ")}
-          />
-          <circle
-            className="scope-curve__marker"
-            cx={curveX(value)}
-            cy={curveY(shareAt(summary.tolerance, value) ?? 0)}
-            r={3.5}
-            fill="var(--accent-strong)"
-          />
-        </svg>
+        <>
+          {/* Stretched to the slider's full width, so the marker sits above
+              the thumb. */}
+          <svg
+            role="img"
+            aria-label={t("scope.control.curve_label")}
+            className="scope-curve"
+            viewBox={`0 0 ${CURVE_W} ${CURVE_H}`}
+            preserveAspectRatio="none"
+            width="100%"
+            height={CURVE_H}
+          >
+            <polyline
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+              points={summary.tolerance.map((p) => `${curveX(p.late_sec)},${curveY(p.on_time_pct)}`).join(" ")}
+            />
+            <circle
+              className="scope-curve__marker"
+              cx={curveX(Math.min(value, MAX_LATE_SEC))}
+              cy={curveY(shareAt(summary.tolerance, value) ?? 0)}
+              r={3.5}
+              fill="var(--accent-strong)"
+            />
+          </svg>
+          <p className="scope-readout">
+            {t("scope.control.readout", {
+              n: Math.round((value / 60) * 10) / 10,
+              pct: Math.round(shareAt(summary.tolerance, value) ?? 0),
+            })}
+          </p>
+        </>
       )}
       <WholeDayNote scope={scope} update={update} summary={summary} />
       <input

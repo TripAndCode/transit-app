@@ -185,6 +185,29 @@ describe("scope controls", () => {
       expect(screen.getByText("These figures cover the whole day")).toBeInTheDocument();
     });
 
+    it("stretches the curve to the slider's width and keeps the marker on it", () => {
+      mount(ToleranceControl, "?late=900", SUMMARY);
+      const curve = screen.getByRole("img", { name: "On-time share by tolerance" });
+      expect(curve.getAttribute("preserveAspectRatio")).toBe("none");
+      expect(curve.querySelector(".scope-curve__marker")?.getAttribute("cx")).toBe("240");
+    });
+
+    it("reads out the share at the current tolerance", () => {
+      mount(ToleranceControl, "?late=180", SUMMARY);
+      expect(screen.getByText("3 min: 60%")).toBeInTheDocument();
+    });
+
+    it("leaves out the whole-day note when there are no figures", () => {
+      const empty: ScopeSummary = { ...SUMMARY, days: [], weekdays: [], routes: [], tolerance: [] };
+      mount(ToleranceControl, "?time_band=morning", empty);
+      expect(screen.queryByText("These figures cover the whole day")).toBeNull();
+    });
+
+    it("says the figures cover every stop when a stop is set", () => {
+      mount(ToleranceControl, "?stop=S1", SUMMARY);
+      expect(screen.getByText("These figures cover the whole day, every stop and both directions")).toBeInTheDocument();
+    });
+
     it("draws no curve without the data", () => {
       mount(ToleranceControl);
       expect(screen.queryByRole("img", { name: "On-time share by tolerance" })).toBeNull();
