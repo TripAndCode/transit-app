@@ -114,3 +114,34 @@ async def test_tolerance_honours_an_early_bound(seeded):
 async def test_an_agency_without_aggregates_answers_empty(aconn, aagency_id):
     body = await compute_scope_summary(aagency_id, _ctx(), aconn)
     assert body == {"earliest": None, "latest": None, "days": [], "weekdays": [], "routes": [], "tolerance": []}
+
+
+@pytest.mark.asyncio
+async def test_the_endpoint_answers_with_the_summary_and_its_scope(client, seeded):
+    _, agency_id = seeded
+    resp = await client.get(f"/api/{agency_id}/scope/summary?from=2026-09-20&to=2026-09-28&dow=weekday")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["earliest"] == "2026-09-01"
+    assert body["latest"] == "2026-09-28"
+    assert len(body["days"]) == 28
+    assert {w["dow"] for w in body["weekdays"]} >= {"sat", "mon"}
+    assert body["tolerance"][2] == {"late_sec": 120, "on_time_pct": 100.0}
+    assert body["ctx"]["from"] == "2026-09-20"
+    applied = body["scope_applied"]
+    assert applied["from"] is True and applied["routes"] is True
+    assert applied["time_band"] is False and applied["hour"] is False and applied["late"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("early", "status"), [(0, 200), (3600, 200), (3601, 422), (-1, 422)])
+async def test_the_endpoint_bounds_the_early_tolerance(client, seeded, early, status):
+    _, agency_id = seeded
+    resp = await client.get(f"/api/{agency_id}/scope/summary?from=2026-09-20&to=2026-09-28&early={early}")
+    assert resp.status_code == status, resp.text
+
+
+@pytest.mark.asyncio
+async def test_the_endpoint_404s_an_unknown_agency(client, aconn):
+    resp = await client.get("/api/999999/scope/summary")
+    assert resp.status_code == 404
