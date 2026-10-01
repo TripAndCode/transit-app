@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import asyncpg
+from fastapi.encoders import decimal_encoder
 
 _MAX_TITLE = 200
 _CONV_COLS = "conversation_id, user_id, agency_id, title, filter_ctx, pinned, created_at, updated_at"
@@ -30,11 +31,12 @@ def _row_to_conv(row: asyncpg.Record) -> dict[str, Any]:
 
 def _json_value(value: Any) -> Any:
     """Tool results carry values straight from asyncpg: NUMERIC arrives as
-    Decimal and DATE/TIMESTAMP as date/datetime. Stored as the JSON numbers
-    and ISO strings the API already sends for the same answer, so a replayed
-    message reads exactly like the live one."""
+    Decimal and DATE/TIMESTAMP as date/datetime. Stored as JSON numbers
+    (FastAPI's jsonable_encoder rule: a whole Decimal stays an int) and ISO
+    strings. The conversation endpoints send back the stored message, so the
+    live answer and a later replay are the same payload."""
     if isinstance(value, Decimal):
-        return float(value)
+        return decimal_encoder(value)
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")

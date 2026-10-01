@@ -386,7 +386,7 @@ async def test_title_truncated_to_200(pool_with_users):
 async def test_append_message_stores_database_numbers_and_dates_as_json(pool_with_users):
     """A tool's result carries values straight from asyncpg (NUMERIC as
     Decimal, DATE as date); storing the answer must not fail on them, and they
-    come back as the JSON numbers and ISO strings the API sends."""
+    come back as JSON numbers and ISO strings."""
     from datetime import date
     from decimal import Decimal
 
@@ -408,5 +408,6 @@ async def test_append_message_stores_database_numbers_and_dates_as_json(pool_wit
         msgs = await list_messages(c, conv["conversation_id"], user_id=u1, agency_id=agency)
     assert msg["result"] == {"rows": [["R1", 2.35, "2026-09-28"]]}
     assert msgs[0]["result"] == {"rows": [["R1", 2.35, "2026-09-28"]]}
-    assert msgs[0]["args"] == {"n": 10.0}
+    assert msgs[0]["args"] == {"n": 10}
+    assert type(msgs[0]["args"]["n"]) is int  # a whole Decimal stays an int, as FastAPI encodes it
     assert msgs[0]["conditions"] == {"from": "2026-09-01"}
