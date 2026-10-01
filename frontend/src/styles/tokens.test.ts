@@ -4,6 +4,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   DELAY_RAMP,
   DELAY_RAMP_TEXT,
+  accentColorResolved,
   contrastRatio,
   delayColor,
   delayColorResolved,
@@ -274,9 +275,21 @@ describe("Japanese body typography", () => {
 });
 
 describe(".num — the single place tabular figures are turned on", () => {
-  it("applies tabular-nums", () => {
+  it("applies tabular-nums in the numeral face", () => {
     const numBlock = ruleBody(globalCss, ".num {");
     expect(decl(numBlock, "font-variant-numeric")).toBe("tabular-nums");
+    expect(decl(numBlock, "font-family")).toBe("var(--font-num)");
+  });
+});
+
+describe("the type families", () => {
+  it.each([
+    ["--font-body", '"BIZ UDPGothic"'],
+    ["--font-display", '"BIZ UDPGothic"'],
+    ["--font-num", '"Barlow Semi Condensed"'],
+    ["--font-mono", '"IBM Plex Mono"'],
+  ])("%s leads with %s", (prop, face) => {
+    expect(decl(rootBlock, prop)?.startsWith(face)).toBe(true);
   });
 });
 
@@ -292,9 +305,9 @@ describe("--font-display policy", () => {
   // A weight index.html does not request is synthesized by the browser, which
   // smears kanji strokes. Only an explicitly declared weight can be checked
   // statically; an inherited one is out of reach here.
-  it("is only set at a weight index.html loads for Noto Serif JP", () => {
+  it("is only set at a weight index.html loads for BIZ UDPGothic", () => {
     const loaded = new Set(
-      indexHtml.match(/<link href="[^"]*Noto\+Serif\+JP:wght@([\d;]+)[^"]*" rel="stylesheet">/)?.[1].split(";"),
+      indexHtml.match(/<link href="[^"]*BIZ\+UDPGothic:wght@([\d;]+)[^"]*" rel="stylesheet">/)?.[1].split(";"),
     );
     const keywordWeights: Record<string, string> = { normal: "400", bold: "700" };
     const sites: { where: string; weight: string | null }[] = [];
@@ -344,10 +357,10 @@ describe("hero KPI values use proportional figures, not tabular-nums", () => {
   });
 });
 
-describe("index.html Noto font loading", () => {
+describe("index.html font loading", () => {
   it("preloads the Google Fonts stylesheet", () => {
     expect(indexHtml).toMatch(
-      /<link rel="preload" as="style" href="https:\/\/fonts\.googleapis\.com\/css2\?family=Noto\+Sans\+JP[^"]*">/,
+      /<link rel="preload" as="style" href="https:\/\/fonts\.googleapis\.com\/css2\?family=BIZ\+UDPGothic[^"]*">/,
     );
   });
 
@@ -355,9 +368,11 @@ describe("index.html Noto font loading", () => {
     expect(indexHtml).toMatch(/<link rel="preconnect" href="https:\/\/fonts\.gstatic\.com" crossorigin>/);
   });
 
-  it("requests only the font weights actually used in the app", () => {
-    expect(indexHtml).toMatch(/Noto\+Sans\+JP:wght@400;500;600;700;800/);
-    expect(indexHtml).toMatch(/Noto\+Serif\+JP:wght@400;600/);
+  it("requests only the font weights the type scale uses", () => {
+    expect(indexHtml).toMatch(/BIZ\+UDPGothic:wght@400;700/);
+    expect(indexHtml).toMatch(/Barlow\+Semi\+Condensed:wght@500;600;700/);
+    expect(indexHtml).toMatch(/IBM\+Plex\+Mono:wght@400;500/);
+    expect(indexHtml).not.toMatch(/Noto\+S(ans|erif)\+JP/);
   });
 });
 
@@ -389,11 +404,11 @@ function rgb(hex: string): [number, number, number] {
 
 describe("one accent identity", () => {
   it.each([
-    [rootBlock, "--accent", "#187b80"],
-    [rootBlock, "--accent-soft", "#e1f1f1"],
-    [darkBlock, "--accent", "#43c5ba"],
-    [darkBlock, "--accent-soft", "#183b3d"],
-  ])("declares the teal accent", (block, prop, value) => {
+    [rootBlock, "--accent", "#2750C2"],
+    [rootBlock, "--accent-soft", "#E2E9FA"],
+    [darkBlock, "--accent", "#86A2FF"],
+    [darkBlock, "--accent-soft", "#1C2847"],
+  ])("declares the signage-blue accent", (block, prop, value) => {
     expect(decl(block, prop)).toBe(value);
   });
 
@@ -419,10 +434,10 @@ describe("one accent identity", () => {
     for (const block of [rootBlock, darkBlock]) {
       const [ar, ag, ab] = rgb(decl(block, "--accent")!);
       const [sr, sg, sb] = rgb(decl(block, "--accent-strong")!);
-      // Teal: green and blue both dominate red, in the accent and its
-      // deepened sibling alike.
-      expect(Math.min(ag, ab)).toBeGreaterThan(ar);
-      expect(Math.min(sg, sb)).toBeGreaterThan(sr);
+      // Blue dominates red and green, in the accent and its deepened
+      // sibling alike.
+      expect(ab).toBeGreaterThan(Math.max(ar, ag));
+      expect(sb).toBeGreaterThan(Math.max(sr, sg));
     }
   });
 
@@ -445,6 +460,39 @@ describe("one accent identity", () => {
       expect(contrastRatio(decl(block, "--accent-strong")!, decl(block, "--accent-soft")!)).toBeGreaterThanOrEqual(
         4.5,
       );
+    }
+  });
+});
+
+describe("the text levels clear AA on every surface and the selected state, in both themes", () => {
+  it.each(
+    ["--text-primary", "--text-secondary", "--text-tertiary"].flatMap((prop) =>
+      ["--bg-surface", "--bg-soft", "--bg-page", "--accent-soft"].flatMap((surface) => [
+        ["light", prop, surface],
+        ["dark", prop, surface],
+      ]),
+    ),
+  )("%s %s on %s", (theme, prop, surface) => {
+    const block = theme === "light" ? rootBlock : darkBlock;
+    expect(contrastRatio(decl(block, prop)!, decl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("the delay ramp", () => {
+  it("fills magnitude in five steps on the light theme", () => {
+    expect(["--d0", "--d1", "--d2", "--d3", "--d4"].map((prop) => decl(rootBlock, prop))).toEqual([
+      "#D7EDE7",
+      "#A6D5C7",
+      "#F0CD7A",
+      "#E39556",
+      "#BC523A",
+    ]);
+  });
+
+  it("has a dark counterpart for every step, and a no-data fill in both themes", () => {
+    for (const prop of ["--d0", "--d1", "--d2", "--d3", "--d4", "--none"]) {
+      expect(decl(rootBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      expect(decl(darkBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
     }
   });
 });
@@ -758,5 +806,15 @@ describe("bottom sheet peek height", () => {
     expect(fromCss, "the .ops-playback mobile offset rule was not found").toBeDefined();
 
     expect(fromCss).toBe(fromTs);
+  });
+});
+
+describe("accentColorResolved()", () => {
+  it("falls back to the light theme's --accent when it is unresolved (jsdom)", () => {
+    expect(accentColorResolved().toLowerCase()).toBe(decl(rootBlock, "--accent")!.toLowerCase());
+  });
+
+  it("falls back to the light theme's surface the same way", () => {
+    expect(surfaceColorResolved().toLowerCase()).toBe(decl(rootBlock, "--bg-surface")!.toLowerCase());
   });
 });

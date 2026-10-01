@@ -31,7 +31,7 @@ const SEVERE_VAR = "var(--delay-severe)";
 // mirrored in the other by hand. tokens.test.ts holds them to it.
 const SEVERE_FALLBACK = "#A8391F";
 const SURFACE_FALLBACK = "#ffffff";
-const ACCENT_FALLBACK = "#187b80";
+const ACCENT_FALLBACK = "#2750C2";
 
 /** Resolve a CSS custom property to a concrete color for callers that need a
  *  real, parseable string -- MapLibre paint expressions, which can't consume

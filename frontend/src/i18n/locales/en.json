@@ -14,25 +14,21 @@
     "more_menu_label": "More options",
     "close_menu": "Close menu",
     "live": "Live",
-    "analysis": "Analysis",
-    "saved": "Saved & export"
-  },
-  "lens": {
-    "nav_label": "Analysis views",
-    "overview": "Overview",
-    "when": "When",
-    "where": "Where",
+    "pulse": "Pulse",
+    "routes": "Routes",
+    "time": "Time",
     "why": "Why",
-    "rider": "For riders",
     "compare": "Compare",
-    "predict": "Prediction accuracy"
+    "reports": "Reports",
+    "destinations_label": "Destinations",
+    "other": "Other"
   },
   "compare": {
     "mode_periods": "Periods and routes",
     "mode_agencies": "Agencies"
   },
   "saved": {
-    "title": "Saved & export",
+    "title": "Reports",
     "view_summary": "Period summary",
     "view_saved": "Saved analyses",
     "view_reports": "Council summary & delay reference"
@@ -110,7 +106,7 @@
     "narrative": {
       "route": {
         "title": "Delay builds along a route",
-        "body": "The same stop-by-stop chart from Analysis, with example data — watch how a route's delay compounds stop after stop against a calmer week-earlier comparison."
+        "body": "The same stop-by-stop chart as each route's page, with example data — watch how a route's delay compounds stop after stop against a calmer week-earlier comparison."
       },
       "trend": {
         "title": "Every day, compared",
@@ -137,8 +133,8 @@
       "body": "Every observed trip is listed here — open one to see its live progress."
     },
     "ask": {
-      "title": "Ask a question",
-      "body": "Ask about delays, routes, or on-time performance in plain language, and get an evidenced answer."
+      "title": "Search and ask",
+      "body": "Find routes, reports and screens from here. The same field takes you to Ask, where you can put a question about delays in plain language."
     }
   },
   "forecast": {
@@ -1239,7 +1235,7 @@
       "age_hours": "{{h}} h ago",
       "age_minutes": "{{m}} min ago",
       "unknown": "Unknown",
-      "network_link": "To compare delay across agencies, open Analysis → Compare."
+      "network_link": "To compare delay across agencies, open Compare and choose Agencies."
     },
     "agencies": {
       "title": "Agencies",
@@ -1561,11 +1557,13 @@
     "placeholder": "Search agencies, routes, reports, time bands, actions…",
     "aria_label": "Command palette",
     "no_results": "No matching items",
+    "nav_pulse_sublabel": "How service is running, and what changed",
+    "nav_routes_sublabel": "Which routes, at which hours",
+    "nav_time_sublabel": "When delay happens across the network",
+    "nav_why_sublabel": "What the data can and can't explain",
+    "nav_compare_sublabel": "How two periods or agencies differ",
+    "nav_reports_sublabel": "Documents to hand to someone",
     "nav_ask_sublabel": "Ask about routes, stops, and time bands",
-    "nav_analysis_sublabel": "When, where and why delay happens",
-    "nav_saved_sublabel": "Saved analyses and exports",
-    "hint": "Command",
-    "hint_aria": "Open the command palette (⌘K)",
     "group": {
       "recent": "Recent",
       "nav": "Go to",
@@ -1602,5 +1600,14 @@
   },
   "glossary": {
     "gtfs": "GTFS: the standard transit-data format for schedules and real-time positions."
+  },
+  "routesIndex": {
+    "open_route": "Open a route",
+    "open_route_placeholder": "Choose a route",
+    "open": "Open"
+  },
+  "topbar": {
+    "ask_placeholder": "Search routes, reports and screens",
+    "data_through": "Data through {{date}}"
   }
 }

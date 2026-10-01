@@ -1,3 +1,4 @@
+import { createContext, useContext } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
@@ -6,9 +7,9 @@ export type DowFilter = "all" | "weekday" | "weekend" | Weekday | `${Weekday},${
 export type ServiceFilter = "all" | "平日" | "土日祝"; // i18n-ignore: query contract
 export type TimeBand = "all" | "morning" | "forenoon" | "noon" | "afternoon" | "evening" | "night" | "late_night";
 
-/** The shared scope every lens, link, share URL and saved analysis carries.
- *  Lens-local params (`report`, `sub_tab`, `mode`, `at`, and the Where lens's
- *  `compare=1` week-earlier overlay) are not part of it. */
+/** The shared scope every screen, link, share URL and saved analysis carries.
+ *  Screen-local params (`report`, `sort`, `by`, `doc`, `tab`, `sub_tab`, `at`,
+ *  and the route page's `compare=1` week-earlier overlay) are not part of it. */
 export type Scope = {
   from: string; // YYYY-MM-DD
   to: string; // YYYY-MM-DD
@@ -213,9 +214,16 @@ export function jstYearMonth(d: Date): { year: number; month: number } {
   };
 }
 
+/** The route a route page is about. Inside it, a URL with no `routes` param
+ *  still scopes to that route, so opening a route's page never writes a
+ *  route filter the rest of the app would then carry. */
+export const ScopeRouteContext = createContext<string | null>(null);
+
 export function useScope(): [Scope, (patch: ScopePatch) => void] {
   const [params, setParams] = useSearchParams();
-  const scope = parseScope(params, { from: isoDaysAgo(DEFAULT_RANGE_DAYS - 1), to: todayISO() });
+  const pageRoute = useContext(ScopeRouteContext);
+  const parsed = parseScope(params, { from: isoDaysAgo(DEFAULT_RANGE_DAYS - 1), to: todayISO() });
+  const scope = pageRoute != null && parsed.routes.length === 0 ? { ...parsed, routes: [pageRoute] } : parsed;
   function update(patch: ScopePatch) {
     setParams((prev) => applyScopePatch(prev, patch), { replace: true });
   }

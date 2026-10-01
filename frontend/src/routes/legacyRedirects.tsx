@@ -1,35 +1,59 @@
 import { Navigate, useLocation, useParams } from "react-router-dom";
-import { lensHref, mergeSearch, reportHref, type LensId } from "./analysisRoutes";
+import { destHref, reportHref, routesHref, savedTarget, type Destination } from "./destinations";
 
-/** Every pre-workspace URL keeps working: each one replaces itself with its
- *  new home, carrying the query string so filters and deep links survive. */
+/** Every legacy URL keeps working: each one replaces itself with the screen
+ *  that serves it, carrying the query string so filters and deep links
+ *  survive. */
 
-export function RedirectToLive() {
-  const { agencyId } = useParams();
+export function RedirectTo({ dest, extra = {} }: { dest: Destination; extra?: Record<string, string> }) {
+  const { agencyId = "" } = useParams();
   const { search } = useLocation();
-  return <Navigate to={`/agencies/${agencyId}/live${search}`} replace />;
+  return <Navigate to={destHref(agencyId, dest, search, extra)} replace />;
 }
 
-export function RedirectToLens({ lens, extra = {} }: { lens: LensId; extra?: Record<string, string> }) {
-  const { agencyId } = useParams();
+export function RedirectWhere() {
+  const { agencyId = "" } = useParams();
   const { search } = useLocation();
-  return <Navigate to={lensHref(agencyId ?? "", lens, search, extra)} replace />;
+  return <Navigate to={routesHref(agencyId, search, "stops")} replace />;
 }
 
-export function RedirectReportsToSaved() {
-  const { agencyId } = useParams();
-  const { search } = useLocation();
-  return <Navigate to={`/agencies/${agencyId}/saved${mergeSearch(search, {})}`} replace />;
+const LENS_DEST: Record<string, Destination> = { overview: "pulse", when: "time", why: "why", predict: "pulse" };
+
+function lensTarget(agencyId: string, lens: string, search: string): string {
+  if (lens === "where") return routesHref(agencyId, search, "stops");
+  if (lens === "rider") return destHref(agencyId, "routes", search, { sort: "on_time" });
+  if (lens === "compare") {
+    const params = new URLSearchParams(search);
+    const by = params.get("mode") === "agencies" ? "agencies" : "periods";
+    params.delete("mode");
+    return destHref(agencyId, "compare", params.toString(), { by });
+  }
+  if (Object.hasOwn(LENS_DEST, lens)) return destHref(agencyId, LENS_DEST[lens], search);
+  // A report type in this segment opens the screen hosting it; reportHref
+  // sends any other segment to Pulse.
+  return reportHref(agencyId, lens, search);
 }
 
-export function RedirectReportTypeToLens() {
-  const { agencyId, reportType } = useParams();
+export function RedirectAnalysisLens() {
+  const { agencyId = "", lens = "" } = useParams();
   const { search } = useLocation();
-  return <Navigate to={reportHref(agencyId ?? "", reportType ?? "", search)} replace />;
+  return <Navigate to={lensTarget(agencyId, lens, search)} replace />;
 }
 
-export function RedirectForecastToWhen() {
-  const { agencyId } = useParams();
+export function RedirectReportType() {
+  const { agencyId = "", reportType = "" } = useParams();
   const { search } = useLocation();
-  return <Navigate to={reportHref(agencyId ?? "", "route_forecast", search)} replace />;
+  return <Navigate to={reportHref(agencyId, reportType, search)} replace />;
+}
+
+export function RedirectSaved() {
+  const { agencyId = "" } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={savedTarget(agencyId, search)} replace />;
+}
+
+export function RedirectForecast() {
+  const { agencyId = "" } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={reportHref(agencyId, "route_forecast", search)} replace />;
 }

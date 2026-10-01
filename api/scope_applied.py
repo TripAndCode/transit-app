@@ -1,9 +1,9 @@
-"""Which scope fields a lens endpoint honoured.
+"""Which scope fields a screen's endpoint honoured.
 
-Every lens endpoint answers with ``scope_applied``: one boolean per field of
-the shared URL scope, so the scope bar can grey a condition the screen did
-not use instead of the endpoint ignoring it silently. The field names are
-the URL parameter names.
+Every endpoint behind an analysis screen answers with ``scope_applied``: one
+boolean per field of the shared URL scope, so the scope bar can grey a
+condition the screen did not use instead of the endpoint ignoring it silently.
+The field names are the URL parameter names.
 """
 
 from __future__ import annotations

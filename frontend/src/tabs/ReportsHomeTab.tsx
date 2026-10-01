@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { lensHref, reportHref } from "../routes/analysisRoutes";
+import { reportHref, routeHref, routesHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
@@ -42,8 +42,8 @@ export function ReportsHomeTab() {
   const { t } = useTranslation("design");
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);
-  const [view] = useUrlState<"summary" | "saved">("view", "summary");
-  const savedTab = view === "saved";
+  const [doc] = useUrlState<string>("doc", "");
+  const savedTab = doc === "saved";
   const trend = useReport(id, savedTab ? null : "trend", ctx);
   const ranking = useReport(id, savedTab ? null : "ranking", ctx);
   const agencies = useAgencies();
@@ -85,7 +85,7 @@ export function ReportsHomeTab() {
     {savedTab ? <section><p className="focus-muted">{t("localOnly")}</p>
       {!saved.some((s) => s.agencyId === id) && <EmptyState title={t("noSaved")} />}
       <ul className="focus-saved">{saved.filter((s) => s.agencyId === id).map((s) => <li key={s.id}>
-        <Link to={lensHref(String(id), "where", `?${new URLSearchParams(s.query)}`)}>{s.title}</Link>
+        <Link to={routesHref(String(id), `?${s.query}`)}>{s.title}</Link>
         <button aria-label={`${t("remove")}: ${s.title}`} onClick={() => { if (deleteAnalysis(s.id)) setSaved(readAnalyses()); else setNotice(t("saveFailed")); }}>{t("remove")}</button>
       </li>)}</ul>
     </section> : <>
@@ -103,7 +103,7 @@ export function ReportsHomeTab() {
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
         {() => <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("days")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th><th style={th()} /></tr></thead><tbody>
           {rows.map((row, i) => <tr key={`${row[0]}-${row[1]}-${i}`}><td style={td()}>{names.format(String(row[0]))}</td><td style={td()}>{String(row[1] ?? "—")}</td><td style={td()}>{row[2] == null ? "—" : Number(row[2]).toFixed(1)}</td><td style={td()}>{String(row[5] ?? "—")}</td><td style={td()}>
-            <Link to={lensHref(String(id), "where", `?${(() => { const next = new URLSearchParams(queryString); next.set("routes", String(row[0])); if (row[1] === "平日" || row[1] === "土日祝") next.set("service", row[1]); return next.toString(); })()}`)}>{t("open")}</Link>{/* i18n-ignore: query contract */}
+            <Link to={routeHref(String(id), String(row[0]), `?${(() => { const next = new URLSearchParams(queryString); if (row[1] === "平日" || row[1] === "土日祝") next.set("service", row[1]); return next.toString(); })()}`)}>{t("open")}</Link>{/* i18n-ignore: query contract */}
           </td></tr>)}
         </tbody></table></div>}
       </AsyncSection></section>

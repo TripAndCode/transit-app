@@ -43,27 +43,16 @@ afterEach(() => {
 });
 
 describe("AgencyPicker", () => {
-  it("keeps the current lens when switching agency, dropping the query", async () => {
+  it.each([
+    ["/agencies/1/time?routes=50", "/agencies/9/time"],
+    ["/agencies/1/reports?doc=council&from=2026-08-01", "/agencies/9/reports?doc=council"],
+    ["/agencies/1/compare?by=agencies&from=2026-08-01", "/agencies/9/compare?by=agencies"],
+    ["/agencies/1/routes/50?tab=stops&routes=50", "/agencies/9/routes"],
+  ])("switches agency from %s onto %s, dropping the filters", async (from, to) => {
     const user = userEvent.setup();
-    renderPicker("/agencies/1/analysis/when?routes=50");
+    renderPicker(from);
     await user.click(screen.getByRole("button", { name: /Aomori City Bus/ }));
     await user.click(screen.getByRole("option", { name: "Hiroshima Bus" }));
-    expect(screen.getByTestId("location").textContent).toBe("/agencies/9/analysis/when");
-  });
-
-  it("keeps the Saved & export view when switching agency on it", async () => {
-    const user = userEvent.setup();
-    renderPicker("/agencies/1/saved?view=reports&from=2026-08-01");
-    await user.click(screen.getByRole("button", { name: /Aomori City Bus/ }));
-    await user.click(screen.getByRole("option", { name: "Hiroshima Bus" }));
-    expect(screen.getByTestId("location").textContent).toBe("/agencies/9/saved?view=reports");
-  });
-
-  it("keeps the agencies board when switching agency on it", async () => {
-    const user = userEvent.setup();
-    renderPicker("/agencies/1/analysis/compare?mode=agencies&from=2026-08-01");
-    await user.click(screen.getByRole("button", { name: /Aomori City Bus/ }));
-    await user.click(screen.getByRole("option", { name: "Hiroshima Bus" }));
-    expect(screen.getByTestId("location").textContent).toBe("/agencies/9/analysis/compare?mode=agencies");
+    expect(screen.getByTestId("location").textContent).toBe(to);
   });
 });

@@ -36,9 +36,18 @@ function mockSupportHooks() {
   vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: null, isLoading: false } as never);
 }
 
-function renderAnalysis(initialPath: string, reportTypes: readonly string[] = ["ranking", "on_time"]) {
+function renderAnalysis(
+  initialPath: string,
+  reportTypes: readonly string[] = ["ranking", "on_time"],
+  defaultReport?: string,
+) {
   const router = createMemoryRouter(
-    [{ path: "/agencies/:agencyId/analysis/:lens", element: <AnalysisTab reportTypes={reportTypes} /> }],
+    [
+      {
+        path: "/agencies/:agencyId/analysis/:lens",
+        element: <AnalysisTab reportTypes={reportTypes} defaultReport={defaultReport} />,
+      },
+    ],
     { initialEntries: [initialPath] },
   );
   renderWithProviders(<RouterProvider router={router} />);
@@ -67,6 +76,22 @@ describe("AnalysisTab", () => {
     expect(useReport.mock.calls.at(-1)?.[1]).toBe("ranking");
   });
 
+  it.each([
+    ["on_time", "on_time"],
+    ["trend", "ranking"],
+  ])("opens default report %s as %s when no report is chosen", (defaultReport, opened) => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({
+      data: [reportMeta("ranking"), reportMeta("on_time")],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderAnalysis("/agencies/1/analysis/rider", ["ranking", "on_time"], defaultReport);
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe(opened);
+  });
+
   it("lists only the report types it is given", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({
@@ -83,7 +108,7 @@ describe("AnalysisTab", () => {
     expect(screen.queryByRole("button", { name: /^Delay ranking/ })).toBeNull();
   });
 
-  it("falls back to its first report when the report param belongs to another lens", () => {
+  it("falls back to its first report when the report param belongs to another screen", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({
       data: [reportMeta("trend"), reportMeta("dwell_run")],
@@ -302,7 +327,7 @@ describe("AnalysisTab dwell_run route cap", () => {
   });
 });
 
-describe("AnalysisTab lens panels", () => {
+describe("AnalysisTab evidence panels", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -326,7 +351,7 @@ describe("AnalysisTab lens panels", () => {
     expect(screen.queryByText("standards-panel")).toBeNull();
   });
 
-  it("puts the headway and targets panels beside on-time in For riders, without rain", () => {
+  it("puts the headway and targets panels beside on-time, without rain", () => {
     show("/agencies/1/analysis/rider", "on_time", []);
     expect(screen.getByText("headway-panel")).toBeInTheDocument();
     expect(screen.getByText("standards-panel")).toBeInTheDocument();

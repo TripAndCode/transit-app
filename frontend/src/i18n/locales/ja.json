@@ -14,25 +14,21 @@
     "more_menu_label": "その他のメニュー",
     "close_menu": "メニューを閉じる",
     "live": "ライブ",
-    "analysis": "分析",
-    "saved": "保存と出力"
-  },
-  "lens": {
-    "nav_label": "分析の角度",
-    "overview": "概要",
-    "when": "いつ",
-    "where": "どこ",
-    "why": "なぜ",
-    "rider": "乗る人にとって",
-    "compare": "比べる",
-    "predict": "予測の精度"
+    "pulse": "概況",
+    "routes": "路線",
+    "time": "時間",
+    "why": "要因",
+    "compare": "比較",
+    "reports": "レポート",
+    "destinations_label": "画面",
+    "other": "そのほか"
   },
   "compare": {
     "mode_periods": "期間・路線どうし",
     "mode_agencies": "事業者どうし"
   },
   "saved": {
-    "title": "保存と出力",
+    "title": "レポート",
     "view_summary": "期間のまとめ",
     "view_saved": "保存した分析",
     "view_reports": "協議会向けまとめ・遅延の参考資料"
@@ -110,7 +106,7 @@
     "narrative": {
       "route": {
         "title": "路線に沿って遅延が積み重なる",
-        "body": "分析画面と同じ停留所ごとのチャートを、サンプルデータで — 停留所を進むごとに遅延が積み重なる様子を、落ち着いた前週比較と並べて確認できます。"
+        "body": "路線のページと同じ停留所ごとのチャートを、サンプルデータで — 停留所を進むごとに遅延が積み重なる様子を、落ち着いた前週比較と並べて確認できます。"
       },
       "trend": {
         "title": "日ごとに比べる",
@@ -137,8 +133,8 @@
       "body": "観測されたすべての便がここに一覧表示されます — 選ぶとリアルタイムの進行状況を確認できます。"
     },
     "ask": {
-      "title": "質問する",
-      "body": "遅延・路線・定時運行率について自然な言葉で質問すると、根拠付きの回答が返ってきます。"
+      "title": "探す・質問する",
+      "body": "路線・レポート・画面をここから探せます。同じ欄から「質問」へ進むと、遅延について自然な言葉で質問できます。"
     }
   },
   "forecast": {
@@ -1239,7 +1235,7 @@
       "age_hours": "{{h}} 時間前",
       "age_minutes": "{{m}} 分前",
       "unknown": "不明",
-      "network_link": "事業者どうしの遅延比較は「分析」→「比べる」で確認できます。"
+      "network_link": "事業者どうしの遅延比較は「比較」→「事業者どうし」で確認できます。"
     },
     "agencies": {
       "title": "事業者管理",
@@ -1561,11 +1557,13 @@
     "placeholder": "事業者・系統・レポート・時間帯・操作を検索…",
     "aria_label": "コマンドパレット",
     "no_results": "一致する項目がありません",
+    "nav_pulse_sublabel": "運行の今と、変わったこと",
+    "nav_routes_sublabel": "どの路線が、どの時間帯に",
+    "nav_time_sublabel": "ネットワーク全体で、いつ遅れるか",
+    "nav_why_sublabel": "データで説明できること・できないこと",
+    "nav_compare_sublabel": "二つの期間・事業者の違い",
+    "nav_reports_sublabel": "人に渡す資料",
     "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
-    "nav_analysis_sublabel": "いつ・どこ・なぜ遅れるか",
-    "nav_saved_sublabel": "保存した分析と出力",
-    "hint": "コマンド",
-    "hint_aria": "コマンドパレットを開く（⌘K）",
     "group": {
       "recent": "最近使った項目",
       "nav": "移動",
@@ -1602,5 +1600,14 @@
   },
   "glossary": {
     "gtfs": "GTFS：時刻表や位置情報などの運行データをやり取りするための標準フォーマットです。"
+  },
+  "routesIndex": {
+    "open_route": "路線カルテを開く",
+    "open_route_placeholder": "路線を選ぶ",
+    "open": "開く"
+  },
+  "topbar": {
+    "ask_placeholder": "路線・レポート・画面を検索",
+    "data_through": "データは{{date}}まで"
   }
 }

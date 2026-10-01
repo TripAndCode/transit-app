@@ -6,6 +6,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
+import { ScopeRouteContext } from "../api/scope";
 import { RouteAnalysisTab } from "./RouteAnalysisTab";
 import type { RouteShapeResponse } from "../api/types";
 
@@ -53,6 +54,27 @@ describe("RouteAnalysisTab", () => {
     vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
     renderTab("/agencies/1/route-analysis?routes=R1");
     expect(screen.getByText("No observations match these filters")).toBeInTheDocument();
+  });
+
+  it("offers no route-clearing recovery on a route's own page, where the route is the page", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/routes/R1"]}>
+        <Routes>
+          <Route
+            path="/agencies/:agencyId/routes/:routeCode"
+            element={
+              <ScopeRouteContext value="R1">
+                <RouteAnalysisTab />
+              </ScopeRouteContext>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("No observations match these filters")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear the route filter" })).toBeNull();
   });
 
   it("renders the investigate heading and stop-delay content once a route has data", () => {

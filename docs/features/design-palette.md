@@ -7,17 +7,41 @@ copy to keep in sync by hand.
 
 ## One accent
 
-The whole product — pre-auth and signed-in — uses a single accent, the
-shell teal (`--accent`, with `--accent-strong` as its deepened variant for
-button/active weight). Both stay in the same hue family in both themes;
-`tokens.test.ts` asserts this so a themed page can't quietly reintroduce a
-second brand color the way `.app-shell`'s old scoped override once did.
+The whole product — pre-auth and signed-in — uses a single accent,
+signage blue: `--accent` (#2750C2, dark #86A2FF), with `--accent-soft`
+(#E2E9FA, dark #1C2847) as its tint and `--accent-strong` (#1A378C, dark
+#BCCBFF) as its deepened variant for button/active weight. It is for
+interaction and selection only, never for delay magnitude, which has its
+own ramp. `tokens.test.ts` asserts that `--accent` is declared only on the
+two theme roots, so no scoped redefinition can fork the identity, and that
+`--accent-strong` stays in the accent's hue family in both themes.
 `--brand`/`--on-brand` are a separate, narrower identity (the operations
 route badge and the pre-auth wordmark) — not a second accent.
 
+## Ground and text
+
+The ground is cool paper: `--bg-page` #F1F4F7, `--bg-surface` #FFFFFF and
+`--bg-soft` #E8ECF1. Text is ink in three levels: `--text-primary`
+#0F1A2A, `--text-secondary` #435166 and `--text-tertiary` #5B687D. The
+dark theme redefines each. Every text level clears WCAG AA (4.5:1) on
+surface, soft, page and the selected state (`--accent-soft`) in both themes,
+and `tokens.test.ts` asserts every
+pair.
+
+## Delay ramp
+
+`--d0`…`--d4` fill delay magnitude in five steps, calm to heavy — #D7EDE7,
+#A6D5C7, #F0CD7A, #E39556 and #BC523A in the light theme — for < 1.5,
+< 2.5, < 3.5, < 5 and ≥ 5 minutes. Each step has a dark counterpart, and
+`--none` fills a cell with no observations. `tokens.test.ts` asserts the
+five light values and that every step and `--none` exists in both themes.
+Charts, tables and the map color delay through the `--delay-*` ramp
+(`DELAY_RAMP` / `delayColor()` in `tokens.ts`), not these tokens, until
+each is redesigned onto them.
+
 ## Per-theme severe
 
-`--delay-severe` (the deep end of the delay-color ramp, `DELAY_RAMP.severe`
+`--delay-severe` (the deep end of the `--delay-*` ramp, `DELAY_RAMP.severe`
 / `delayColor(>=5)`) is deliberately not the alarm-red `--color-danger`: it
 is the loudest color in the product and still has to sit in a calm
 interface. It is split per theme because no single hex clears WCAG AA
@@ -42,3 +66,17 @@ and MapLibre style-expression consumers resolve the same source of truth.
   the type scale. `--text-xs` (12px) is the floor for any DOM text — below
   it, CJK glyphs stop being legible, so nothing in the product renders
   smaller.
+
+## Type families
+
+- `--font-body` and `--font-display` are both BIZ UDPGothic; display is the
+  same family set at 700, so identity comes from weight and size rather
+  than a second face.
+- `--font-num` is Barlow Semi Condensed, which `.num` applies (with tabular
+  figures) to aligned columns of numbers.
+- `--font-mono` is IBM Plex Mono, for identifiers read character by
+  character.
+- `frontend/index.html` loads BIZ UDPGothic 400/700, Barlow Semi Condensed
+  500/600/700 and IBM Plex Mono 400/500. `tokens.test.ts` asserts those
+  weights and that `--font-display` is only set at a weight index.html
+  loads.

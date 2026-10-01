@@ -13,6 +13,7 @@ import { FirstRunTourOnLive } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import { RouteTransition } from "./components/RouteTransition";
 import { Sidebar } from "./components/Sidebar";
+import { TopBar } from "./components/TopBar";
 import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
 import { CommandPalette } from "./components/CommandPalette";
 
@@ -44,6 +45,7 @@ export default function App() {
       <CommandPalette />
       <Sidebar />
       <main className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+        {agencyIdNum != null && <TopBar />}
         {/* Scoped to the content area, not the whole app shell — these are
             notices about the agency data being viewed, not app-wide chrome,
             so they shouldn't span above the sidebar (a full-height nav rail

@@ -10,13 +10,13 @@ import { useIsLlmApproved, useOverviewSummary } from "../api/hooks";
 import type { AskResponse } from "../api/types";
 import "./CopilotPanel.css";
 
-/** The route whose data this panel summarizes. It is the overview lens,
+/** The route whose data this panel summarizes. It is Pulse,
  *  not the realtime Live map: the payload comes from
  *  `useOverviewSummary` and the follow-up carries `panel_ctx.tab = "overview"`.
  *  Must stay outside `FOCUSED_TAB_SEGMENTS` — App renders this panel only when
  *  the route is unfocused, so a focused route here means it can never appear.
  */
-export const COPILOT_INSIGHT_ROUTE = "/agencies/:agencyId/analysis/overview";
+export const COPILOT_INSIGHT_ROUTE = "/agencies/:agencyId/pulse";
 
 export function CopilotPanel() {
   const { t } = useTranslation();
@@ -46,9 +46,9 @@ export function CopilotPanel() {
   // shell — a disabled feature should be invisible, not broken-looking.
   if (!enabled) return null;
 
-  // Every other route (Live, the other lenses, Saved & export, Account,
+  // Every other route (Live, the other destinations, Reports, Account,
   // Admin, root redirect, ...) has nothing for this panel to show — it only
-  // ever has content on the Overview lens (the proactive insight). Placed after every
+  // ever has content on Pulse (the proactive insight). Placed after every
   // hook call above so the hook count stays identical across renders of this
   // always-mounted instance.
   if (!overviewMatch) return null;

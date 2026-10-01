@@ -8,6 +8,10 @@ import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
 import { ToastProvider } from "./ui/Toast";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
+import * as auth from "../api/auth";
+import * as config from "../api/config";
+
+const RAIL_ORDER = ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports"];
 
 function mockMatchMedia(matches: boolean) {
   vi.spyOn(window, "matchMedia").mockReturnValue({
@@ -40,14 +44,16 @@ function renderSidebar(path = "/agencies/1/live") {
 }
 
 describe("Sidebar", () => {
-  it("renders the three nav destinations and the Ask CTA", () => {
+  it("renders the seven destinations in rail order, with the palette left to the top bar", () => {
     renderSidebar();
-    expect(screen.getByRole("link", { name: "Live" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Analysis" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Saved & export" })).toBeTruthy();
-    expect(screen.getByText("Ask")).toBeTruthy();
-    expect(screen.queryByText("Period overview")).toBeNull();
-    expect(screen.queryByText("Compare agencies")).toBeNull();
+    const nav = screen.getByRole("navigation", { name: "Destinations" });
+    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(RAIL_ORDER);
+    expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
+  });
+
+  it("keeps a visible Ask entry below the destinations, carrying the filters", () => {
+    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+    expect(screen.getByRole("link", { name: "Ask" })).toHaveAttribute("href", "/agencies/8/ask?from=2026-06-01&to=2026-06-07");
   });
 
   it("points Live at the current agency's live route, preserving the filter query string", () => {
@@ -56,15 +62,40 @@ describe("Sidebar", () => {
     expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
   });
 
-  it("points Analysis at the agency's analysis route, preserving the filter query string", () => {
+  it.each([
+    ["Routes", "routes"],
+    ["Time", "time"],
+    ["Reports", "reports"],
+  ])("points %s at the agency's %s screen, preserving the filter query string", (name, dest) => {
     renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: "Analysis" });
-    expect(link).toHaveAttribute("href", "/agencies/8/analysis?from=2026-06-01&to=2026-06-07");
+    expect(screen.getByRole("link", { name })).toHaveAttribute("href", `/agencies/8/${dest}?from=2026-06-01&to=2026-06-07`);
   });
 
-  it("marks Analysis active on any lens", () => {
-    renderSidebar("/agencies/8/analysis/when");
-    expect(screen.getByRole("link", { name: "Analysis" }).getAttribute("aria-current")).toBe("page");
+  it("marks Routes active on a route dossier", () => {
+    renderSidebar("/agencies/8/routes/50?routes=50");
+    expect(screen.getByRole("link", { name: "Routes" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("lists Help under Other, without Admin for a visitor who is not an admin", () => {
+    renderSidebar();
+    const other = screen.getByRole("navigation", { name: "Other" });
+    expect(within(other).getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
+    expect(within(other).queryByRole("link", { name: "Admin" })).toBeNull();
+  });
+
+  describe("with an admin session", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("lists Admin under Other", () => {
+      vi.spyOn(config, "useConfig").mockReturnValue({ data: { auth_enabled: true }, isLoading: false } as never);
+      vi.spyOn(auth, "useSession").mockReturnValue({
+        data: { email: "admin@example.test", name: "", role: "admin" },
+        isLoading: false,
+      } as never);
+      renderSidebar();
+      const other = screen.getByRole("navigation", { name: "Other" });
+      expect(within(other).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+    });
   });
 
   it("does not render Live outside any agency context", () => {
@@ -86,27 +117,6 @@ describe("Sidebar", () => {
     renderSidebar("/agencies/1/live");
     const mapLink = screen.getByRole("link", { name: "Live" });
     expect(mapLink.getAttribute("aria-current")).toBe("page");
-  });
-
-  it("renders a command-palette hint in the footer that opens the palette", async () => {
-    const user = userEvent.setup();
-    const onOpen = vi.fn();
-    window.addEventListener("command-palette:open", onOpen);
-    renderSidebar();
-    await user.click(screen.getByRole("button", { name: /Open the command palette/ }));
-    expect(onOpen).toHaveBeenCalledTimes(1);
-    window.removeEventListener("command-palette:open", onOpen);
-  });
-
-  it("hides the command-palette hint while collapsed", async () => {
-    const user = userEvent.setup();
-    renderSidebar();
-    await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-    expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
-    // Collapsing persists the preference to localStorage (see the "collapse"
-    // describe block below); reset it so later tests in this file don't
-    // inherit a collapsed sidebar.
-    localStorage.clear();
   });
 
   it("renders the brand block above the nav items", () => {
@@ -151,7 +161,7 @@ describe("Sidebar", () => {
   it("points the no-data prototype link at a far-future date range on the current agency", () => {
     renderSidebar("/agencies/8/live");
     const link = screen.getByRole("link", { name: "No-data state" });
-    expect(link).toHaveAttribute("href", "/agencies/8/analysis/overview?from=2030-01-01&to=2030-01-07");
+    expect(link).toHaveAttribute("href", "/agencies/8/pulse?from=2030-01-01&to=2030-01-07");
   });
 
   it("points the feed-stale prototype link at the current agency's live view, preserving the active filter", () => {
@@ -242,13 +252,10 @@ describe("Sidebar", () => {
       vi.restoreAllMocks();
     });
 
-    it("renders Live, Analysis and Ask as tabs, leaving Saved & export to the More sheet", () => {
+    it("renders Pulse, Routes, Live and Ask as tabs, leaving the rest to the More sheet", () => {
       renderSidebar();
       const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-      expect(within(nav).getByRole("link", { name: /Live/ })).toBeTruthy();
-      expect(within(nav).getByRole("link", { name: /Analysis/ })).toBeTruthy();
-      expect(within(nav).getByRole("link", { name: /Ask/ })).toBeTruthy();
-      expect(within(nav).queryByRole("link", { name: /Saved & export/ })).toBeNull();
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Pulse", "Routes", "Live", "Ask"]);
     });
 
     it("marks the active tab", () => {
@@ -314,12 +321,18 @@ describe("Sidebar", () => {
       expect(within(dialog).queryByRole("link", { name: /Live/ })).toBeNull();
     });
 
-    it("carries Saved & export, which has no tab of its own on a phone", async () => {
+    it("carries the destinations that have no tab of its own on a phone, and Help", async () => {
       const user = userEvent.setup();
       renderSidebar("/agencies/1/live?from=2026-06-01&to=2026-06-07");
       await user.click(screen.getByRole("button", { name: "More" }));
-      const link = within(screen.getByRole("dialog")).getByRole("link", { name: "Saved & export" });
-      expect(link).toHaveAttribute("href", "/agencies/1/saved?from=2026-06-01&to=2026-06-07");
+      const dialog = screen.getByRole("dialog");
+      const nav = within(dialog).getByRole("navigation", { name: "Destinations" });
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Time", "Why", "Compare", "Reports"]);
+      expect(within(nav).getByRole("link", { name: "Reports" })).toHaveAttribute(
+        "href",
+        "/agencies/1/reports?from=2026-06-01&to=2026-06-07",
+      );
+      expect(within(dialog).getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
     });
 
     it("closes when the close button inside it is clicked", async () => {

@@ -3,7 +3,7 @@ import type { ComponentType } from "react";
 /**
  * The one place the routed tabs are dynamically imported.
  *
- * `main.tsx` and the workspace screens build their `React.lazy` components
+ * `main.tsx` and the destination screens build their `React.lazy` components
  * from these loaders, and the sidebar prefetches through the same ones on
  * hover/focus. That shared identity is the
  * point: the bundler keys a chunk by the import expression, so a prefetch
@@ -27,10 +27,16 @@ export const loadReportsHomeTab: TabLoader = () =>
   import("../tabs/ReportsHomeTab").then((m) => ({ default: m.ReportsHomeTab }));
 export const loadNetworkTab: TabLoader = () =>
   import("../tabs/NetworkTab").then((m) => ({ default: m.NetworkTab }));
-export const loadAnalysisWorkspace: TabLoader = () =>
-  import("../tabs/AnalysisWorkspace").then((m) => ({ default: m.AnalysisWorkspace }));
 export const loadSavedExportTab: TabLoader = () =>
   import("../tabs/SavedExportTab").then((m) => ({ default: m.SavedExportTab }));
+export const loadRoutesIndex: TabLoader = () =>
+  import("../tabs/RoutesIndex").then((m) => ({ default: m.RoutesIndex }));
+export const loadRouteDossier: TabLoader = () =>
+  import("../tabs/RouteDossier").then((m) => ({ default: m.RouteDossier }));
+export const loadTimeTab: TabLoader = () => import("../tabs/TimeTab").then((m) => ({ default: m.TimeTab }));
+export const loadWhyTab: TabLoader = () => import("../tabs/WhyTab").then((m) => ({ default: m.WhyTab }));
+export const loadCompareTab: TabLoader = () =>
+  import("../tabs/CompareTab").then((m) => ({ default: m.CompareTab }));
 
 /**
  * Agency-relative route segment → the chunk that segment renders. Keyed by the
@@ -38,10 +44,14 @@ export const loadSavedExportTab: TabLoader = () =>
  * about its own destination before the router has resolved it.
  */
 export const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
+  pulse: loadOverviewTab,
+  // A thin destination only hosts a report screen, which is a chunk of its own.
+  routes: () => Promise.all([loadRoutesIndex(), loadAnalysisTab()]),
+  time: () => Promise.all([loadTimeTab(), loadAnalysisTab()]),
+  why: () => Promise.all([loadWhyTab(), loadAnalysisTab()]),
+  compare: () => Promise.all([loadCompareTab(), loadAnalysisTab()]),
   live: loadMapTab,
-  // The Analysis link lands on the Overview lens, a chunk of its own.
-  analysis: () => Promise.all([loadAnalysisWorkspace(), loadOverviewTab()]),
-  saved: loadSavedExportTab,
+  reports: loadSavedExportTab,
   ask: loadAskTab,
 };
 

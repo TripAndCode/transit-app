@@ -4,27 +4,27 @@ Magazine-style "how's the agency doing" landing page: one round-trip returns
 a headline delta, a concentration/movers module, a peak-hour ribbon, and a
 weekday-vs-weekend split, each expandable into a bigger modal view.
 
-This is the period-summary view, not the realtime one: it is the Analysis
-workspace's Overview lens, while the sidebar's Live entry opens the realtime
-map (see `docs/features/map-tab.md`).
+This is the period-summary view, not the realtime one: it is Pulse, the
+rail's first destination, while the rail's Live entry opens the realtime map
+(see `docs/features/map-tab.md`).
 
 ## How a user reaches it
 
-- Route: the Analysis workspace's Overview lens,
-  `/agencies/:agencyId/analysis/overview`, rendered by
-  `frontend/src/tabs/AnalysisWorkspace.tsx` (both `React.lazy`-loaded through
-  `frontend/src/routes/lazyTabs.ts`). It is the default landing: a bare
-  `agencies/:agencyId` (`frontend/src/main.tsx`'s
-  `<Navigate to="analysis/overview" replace />`) and a fresh/remembered agency
-  selection (`frontend/src/components/OnboardingGate.tsx`) both land here. The
-  old `/agencies/:agencyId/period-overview` URL redirects here.
-- Sidebar nav link: the Analysis entry in
+- Route: Pulse, `/agencies/:agencyId/pulse`, which renders `OverviewTab`
+  directly (`React.lazy`-loaded through `frontend/src/routes/lazyTabs.ts`).
+  It is the default landing: a bare `agencies/:agencyId`
+  (`frontend/src/main.tsx`'s `<Navigate to="pulse" replace />`) and a
+  fresh/remembered agency selection
+  (`frontend/src/components/OnboardingGate.tsx`) both land here. The
+  `/agencies/:agencyId/analysis`, `analysis/overview`, `analysis/predict` and
+  `period-overview` URLs redirect here, keeping their query string
+  (`frontend/src/routes/legacyRedirects.tsx`).
+- Rail nav link: the Pulse entry, first in
   `frontend/src/components/sidebarNavItems.ts`'s `SIDEBAR_NAV_ITEMS`
-  (`nav.analysis` — "Analysis" / "分析"); the workspace's lens strip
-  (`frontend/src/components/LensTabs.tsx`) lists Overview first.
-- In development builds the sidebar also carries a dev-only prototype-preview
+  (`nav.pulse` — "Pulse" / "概況"). On a phone, Pulse is the first bottom tab.
+- In development builds the rail also carries a dev-only prototype-preview
   link (`t("nav.prototype_no_data")`, rendered only under
-  `import.meta.env.DEV`) that opens this lens with a fixed
+  `import.meta.env.DEV`) that opens Pulse with a fixed
   `?from=2030-01-01&to=2030-01-07` no-data window.
 - Top-level component: `frontend/src/tabs/OverviewTab.tsx` — owns which
   module's modal is open (`OpenCard` state) and the peak-hour-breakdown
@@ -110,8 +110,8 @@ alone for single-origin):
    `make fetch-ingest` (or `ingest_live` + `make load_static`), then
    `make analyze` for the agency.
 2. Open the app — a fresh/remembered agency selection and a bare
-   `/agencies/{id}` both land on this lens (`/agencies/{id}/analysis/overview`);
-   from elsewhere, click "Analysis" in the sidebar.
+   `/agencies/{id}` both land on Pulse (`/agencies/{id}/pulse`); from
+   elsewhere, click "Pulse" in the rail.
 3. Expect the hero row (headline delta + sparkline) and a "Routes to check"
    list once data exists; with no data yet, expect the empty state instead.
 4. Click the details `<summary>` toggle — expect the concentration bar, peak
@@ -128,9 +128,8 @@ alone for single-origin):
 
 - Frontend strings live under the `overview.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
-  `npm run lint:i18n`), plus `nav.analysis` and `lens.overview` for the
-  sidebar entry and lens tab, and the shared `filters.*` namespace used by
-  `TabFilterBar`.
+  `npm run lint:i18n`), plus `nav.pulse` for the rail entry, and the shared
+  `filters.*` namespace used by `TabFilterBar`.
 - No server-side `_LOCALES` strings for this tab — `overview_summary`'s
   `locale` parameter is reserved for future qualitative labels
   (`api/routers/overview.py`'s docstring); today's payload is numeric/string

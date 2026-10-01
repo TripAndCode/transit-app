@@ -68,8 +68,8 @@ vi.mock("maplibre-gl", () => {
   };
 });
 
-const LIGHT_ACCENT = "#187b80";
-const DARK_ACCENT = "#4fd1c5";
+const LIGHT_ACCENT = "#2750C2";
+const DARK_ACCENT = "#86A2FF";
 
 function shape(): RouteShapeResponse {
   return {

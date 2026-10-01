@@ -11,8 +11,9 @@ transportation operators. It answers four questions on one screen:
 A day-playback mode (below) replays how delay moved across the whole service
 day on this same map, so a look back at "how did today unfold" never needs a
 second map screen. Deeper historical analysis — trend lines, route
-comparisons, forecasts — stays in Analysis; a delayed trip's row in the
-attention panel links straight to that route's Where lens.
+comparisons, forecasts — stays on the Time, Routes and Compare screens; a
+delayed trip's row in the attention panel links straight to that route's
+dossier.
 
 ## Location semantics
 
@@ -40,17 +41,17 @@ but are not plotted.
 
 ## User flow
 
-- The sidebar's Live entry (`SIDEBAR_NAV_ITEMS` in
+- The rail's Live entry (`SIDEBAR_NAV_ITEMS` in
   `frontend/src/components/sidebarNavItems.ts`, labeled from the `nav.live`
-  i18n key) opens `/agencies/:agencyId/live`, the single mount point for this
-  tab.
+  i18n key — "Live" / "ライブ") opens `/agencies/:agencyId/live`, the single
+  mount point for this tab. On a phone, Live is one of the bottom tabs.
 - `/agencies/:agencyId/operations`, `/agencies/:agencyId/overview` and
   `/agencies/:agencyId/map` all redirect here, preserving the agency and
   query string. They render a redirect only — this component is mounted once,
   so navigating between those URLs never tears down and rebuilds MapLibre's GL
   context.
-- The period summary is the Analysis workspace's Overview lens at
-  `/agencies/:agencyId/analysis/overview` — see `docs/features/overview-tab.md`.
+- The period summary is Pulse at `/agencies/:agencyId/pulse` — see
+  `docs/features/overview-tab.md`.
 - With all routes selected, the right panel lists routes from the latest
   observation by maximum delay instead of leaving the panel empty.
 - Selecting a route groups simultaneous trips by GTFS `direction_id`, falling
@@ -67,8 +68,9 @@ but are not plotted.
   environments without that transport use the agency's live feed URL as a
   fallback, then the client reads the newly persisted data.
 - A delayed trip's row in the attention panel links to
-  `/agencies/:agencyId/analysis/where?routes=<route_code>`, the one deep link
-  from this tab into a historical view.
+  `/agencies/:agencyId/routes/<route_code>?tab=stops`, that route's dossier
+  (built by `routeHref` in `frontend/src/routes/destinations.ts`), the one
+  deep link from this tab into a historical view.
 
 ## Day playback
 
@@ -161,7 +163,8 @@ Automated coverage:
 
 Manual checks:
 
-1. Open Operations for an agency with a recent TripUpdate feed.
+1. For an agency with a recent TripUpdate feed, click "Live" in the rail →
+   URL `/agencies/:agencyId/live`.
 2. Confirm the freshness timestamp advances after collection and refresh.
 3. Compare marker stop names with the latest TripUpdate and static GTFS stop
    coordinates; do not compare them as GPS positions.

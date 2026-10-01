@@ -125,14 +125,6 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                 <span>{t("common.login")}</span>
               </Link>
             ))}
-          {config?.auth_enabled && session?.role === "admin" && (
-            <Link role="menuitem" to="/admin" onClick={() => setOpen(false)} style={popItemStyle}>
-              <span>{t("account.admin_link")}</span>
-            </Link>
-          )}
-          <Link role="menuitem" to="/help" onClick={() => setOpen(false)} style={popItemStyle}>
-            <span>{t("nav.help")}</span>
-          </Link>
           {/* aria-disabled rather than disabled: disabling the focused
               button would drop keyboard focus out of the open menu. */}
           <button

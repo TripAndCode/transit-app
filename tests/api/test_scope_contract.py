@@ -1,4 +1,4 @@
-"""Every lens endpoint declares the scope it honoured (spec §2)."""
+"""Every analysis-screen endpoint declares the scope it honoured (spec §2)."""
 
 import pytest
 
@@ -33,7 +33,7 @@ def _assert_declares_scope(body: dict) -> None:
         "/api/{a}/forecast/heatmap?route=R1",
     ],
 )
-async def test_lens_endpoint_declares_scope_applied(reports_client, path):  # noqa: F811
+async def test_screen_endpoint_declares_scope_applied(reports_client, path):  # noqa: F811
     client, agency_id, _ = reports_client
     resp = await client.get(path.format(a=agency_id))
     assert resp.status_code == 200, resp.text

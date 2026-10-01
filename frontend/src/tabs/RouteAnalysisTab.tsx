@@ -1,9 +1,9 @@
-import { Suspense, lazy, useRef, useState, type KeyboardEvent } from "react";
+import { Suspense, lazy, use, useRef, useState, type KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
-import { useScope, isoDaysBefore } from "../api/scope";
+import { ScopeRouteContext, useScope, isoDaysBefore } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
@@ -48,6 +48,8 @@ export function RouteAnalysisTab() {
   const id = useAgencyId();
   const { t } = useTranslation("design");
   const [ctx, update] = useScope();
+  // On a route's own page the route is the page, not a filter to clear.
+  const pageRoute = use(ScopeRouteContext);
   const jumpToLatestData = useJumpToLatestDataRange(id);
   const [params, setParams] = useSearchParams();
   const compare = params.get("compare") === "1";
@@ -130,7 +132,7 @@ export function RouteAnalysisTab() {
     {!route ? <EmptyState title={t("choose")} hint={t("filterNote")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
       reasons={buildFilterCtxReasons(ctx, t)}
       recoveries={buildFilterCtxRecoveries({
-        ctx,
+        ctx: pageRoute == null ? ctx : { ...ctx, routes: [] },
         onClearRoutes: () => update({ routes: null }),
         onResetService: () => update({ service: "all" }),
         jumpToLatestData,

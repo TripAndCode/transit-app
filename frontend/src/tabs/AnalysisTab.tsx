@@ -35,15 +35,22 @@ import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
 
-/** One lens's reports: the list shows only `reportTypes`, and the open report
- *  is the `report` search param when it belongs to them, else the first one,
- *  so a stale link from another lens never opens a report this lens doesn't
- *  host. */
-export function AnalysisTab({ reportTypes }: { reportTypes: readonly string[] }) {
+/** One screen's reports: the list shows only `reportTypes`, and the open
+ *  report is the `report` search param when it belongs to them, else
+ *  `defaultReport` when it does, else the first one, so a stale link from
+ *  another screen never opens a report this screen doesn't host. */
+export function AnalysisTab({
+  reportTypes,
+  defaultReport,
+}: {
+  reportTypes: readonly string[];
+  defaultReport?: string | null;
+}) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("report");
-  const reportType = requested != null && reportTypes.includes(requested) ? requested : (reportTypes[0] ?? null);
+  const fallback = defaultReport != null && reportTypes.includes(defaultReport) ? defaultReport : (reportTypes[0] ?? null);
+  const reportType = requested != null && reportTypes.includes(requested) ? requested : fallback;
   const id = useAgencyId();
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);
@@ -171,10 +178,10 @@ export function AnalysisTab({ reportTypes }: { reportTypes: readonly string[] })
                 })}
               />
             )}
-            {/* Each lens's evidence panels, rendered alongside (never instead
-                of) the report above: Why pairs dwell vs run with rain and long
-                gaps; For riders pairs on-time with headway quality and the
-                agency's performance targets. The targets panel renders nothing
+            {/* Evidence panels, rendered alongside (never instead of) the
+                report above: dwell vs run pairs with rain and long gaps;
+                on-time pairs with headway quality and the agency's
+                performance targets. The targets panel renders nothing
                 when no standards are configured; the rain panel says so when
                 no weather station is mapped. */}
             {detail.data.report_type === "dwell_run" && id != null && (

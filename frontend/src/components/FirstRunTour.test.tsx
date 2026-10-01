@@ -60,7 +60,7 @@ describe("FirstRunTour", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText("Inspect what's running now")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText("Ask a question")).toBeTruthy();
+    expect(screen.getByText("Search and ask")).toBeTruthy();
 
     expect(readTourSeen()).toBe("unseen");
     await user.click(screen.getByRole("button", { name: "Got it" }));
@@ -304,7 +304,7 @@ describe("FirstRunTourOnLive", () => {
 
   it("stays off a screen without the tour's anchors, leaving Tab to the page", async () => {
     const user = userEvent.setup();
-    renderAt("/agencies/1/analysis/overview", false);
+    renderAt("/agencies/1/pulse", false);
     expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
     await user.tab();
     expect(screen.getByRole("button", { name: "page control" })).toHaveFocus();
