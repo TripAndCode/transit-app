@@ -164,3 +164,43 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.scope-brush {
+  position: relative;
+}
+
+.scope-brush svg {
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.scope-brush__handle {
+  position: absolute;
+  top: 0;
+  width: 14px;
+  height: 48px;
+  padding: 0;
+  transform: translateX(-50%);
+  background: transparent;
+  border: 0;
+  cursor: ew-resize;
+}
+
+.scope-brush__handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 2px;
+  background: var(--accent);
+}
+
+.scope-brush__axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-num);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}

@@ -6,6 +6,8 @@ import type { ScopeSummary } from "../../api/types";
 import { useAgencyId } from "../../api/useAgencyId";
 import { RoutesPicker } from "../RoutesPicker";
 import { buildTimeBandOptions } from "../timeBandOptions";
+import { sinceStart } from "./brushMath";
+import { PeriodBrush } from "./PeriodBrush";
 import { toleranceLabel } from "./scopePhrases";
 import "./scope.css";
 
@@ -16,7 +18,7 @@ export type ControlProps = {
   summary?: ScopeSummary;
 };
 
-const PERIOD_PRESETS = [7, 30, 90] as const;
+const PERIOD_PRESETS = [7, 14, 30] as const;
 const TOLERANCE_PRESETS_MIN = [1, 3, 5] as const;
 const DEFAULT_LATE_SEC = 60;
 const MAX_LATE_SEC = 600;
@@ -31,11 +33,12 @@ function Pill({ pressed, onClick, children }: { pressed: boolean; onClick: () =>
 
 /** Presets end on the agency's latest data day, so "last 7 days" is the last
  *  seven days that have data rather than a week that may not have arrived. */
-export function PeriodControl({ scope, update }: ControlProps) {
+export function PeriodControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { data: agencies } = useAgencies();
-  const anchor = agencies?.find((a) => a.agency_id === id)?.latest_data_date ?? todayISO();
+  const anchor = summary?.latest ?? agencies?.find((a) => a.agency_id === id)?.latest_data_date ?? todayISO();
+  const collectionStart = summary?.earliest ? sinceStart(summary.earliest, anchor) : null;
   function setDate(edge: "from" | "to", value: string) {
     const next = { from: scope.from, to: scope.to, [edge]: value };
     if (value && next.from <= next.to) update({ [edge]: value });
@@ -51,7 +54,24 @@ export function PeriodControl({ scope, update }: ControlProps) {
             </Pill>
           );
         })}
+        {collectionStart && (
+          <Pill
+            pressed={scope.from === collectionStart && scope.to === anchor}
+            onClick={() => update({ from: collectionStart, to: anchor })}
+          >
+            {t("scope.control.since_start")}
+          </Pill>
+        )}
       </div>
+      {summary && summary.days.length > 0 && (
+        <PeriodBrush
+          days={summary.days}
+          latest={anchor}
+          from={scope.from}
+          to={scope.to}
+          onCommit={(from, to) => update({ from, to })}
+        />
+      )}
       <div className="scope-dates">
         <label>
           {t("scope.control.from")}

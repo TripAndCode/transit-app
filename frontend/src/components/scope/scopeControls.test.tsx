@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import * as hooks from "../../api/hooks";
 import { useScope } from "../../api/scope";
+import type { ScopeSummary } from "../../api/types";
 import { DaysControl, PeriodControl, RoutesControl, TimeControl, ToleranceControl, type ControlProps } from "./scopeControls";
 
 function Probe() {
@@ -13,12 +14,33 @@ function Probe() {
   return <div data-testid="params">{params.toString()}</div>;
 }
 
-function Harness({ C }: { C: ComponentType<ControlProps> }) {
+const SUMMARY: ScopeSummary = {
+  earliest: "2026-06-01",
+  latest: "2026-09-28",
+  days: [
+    { date: "2026-09-27", avg_min: 1.2, samples: 100 },
+    { date: "2026-09-28", avg_min: 2.0, samples: 100 },
+  ],
+  weekdays: [
+    { dow: "mon", avg_min: 2.3, samples: 200 },
+    { dow: "sat", avg_min: 5.1, samples: 50 },
+  ],
+  routes: [{ route_code: "101", avg_min: 1.0, samples: 300 }],
+  tolerance: [
+    { late_sec: 0, on_time_pct: 10 },
+    { late_sec: 60, on_time_pct: 34 },
+    { late_sec: 180, on_time_pct: 60 },
+    { late_sec: 300, on_time_pct: 75 },
+    { late_sec: 600, on_time_pct: 92 },
+  ],
+};
+
+function Harness({ C, summary }: { C: ComponentType<ControlProps>; summary?: ScopeSummary }) {
   const [scope, update] = useScope();
-  return <C scope={scope} update={update} />;
+  return <C scope={scope} update={update} summary={summary} />;
 }
 
-function mount(C: ComponentType<ControlProps>, search = "") {
+function mount(C: ComponentType<ControlProps>, search = "", summary?: ScopeSummary) {
   vi.spyOn(hooks, "useAgencies").mockReturnValue({
     data: [{ agency_id: 1, agency_name: "Aomori", feed_url: "", static_url: null, latest_data_date: "2026-09-28" }],
     isLoading: false,
@@ -34,7 +56,7 @@ function mount(C: ComponentType<ControlProps>, search = "") {
           path="/agencies/:agencyId/time"
           element={
             <>
-              <Harness C={C} />
+              <Harness C={C} summary={summary} />
               <Probe />
             </>
           }
@@ -97,6 +119,26 @@ describe("scope controls", () => {
       await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
       expect(params().get("from")).toBe("2026-09-22");
       expect(params().get("to")).toBe("2026-09-28");
+    });
+
+    it("offers two weeks and the whole collection once the data is in", async () => {
+      mount(PeriodControl, "", SUMMARY);
+      await userEvent.click(screen.getByRole("button", { name: "Last 14 days" }));
+      expect(params().get("from")).toBe("2026-09-15");
+      await userEvent.click(screen.getByRole("button", { name: "Since collection began" }));
+      expect(params().get("from")).toBe("2026-06-01");
+      expect(params().get("to")).toBe("2026-09-28");
+    });
+
+    it("draws the daily bars once the data is in, and nothing without it", () => {
+      mount(PeriodControl, "", SUMMARY);
+      expect(screen.getByRole("img", { name: "Daily mean delay" })).toBeInTheDocument();
+    });
+
+    it("leaves out the bars and the collection preset without data", () => {
+      mount(PeriodControl);
+      expect(screen.queryByRole("img", { name: "Daily mean delay" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Since collection began" })).toBeNull();
     });
 
     it("ignores a start after the end", () => {

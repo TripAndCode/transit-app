@@ -1634,7 +1634,11 @@
       "hour_pending": "Hour-by-hour filtering arrives with the hourly aggregate",
       "tolerance": "Counted on time up to",
       "minutes": "{{n}} min",
-      "clear": "Clear"
+      "clear": "Clear",
+      "brush_label": "Daily mean delay",
+      "brush_start": "Start",
+      "brush_end": "End",
+      "since_start": "Since collection began"
     },
     "pin": "Pin controls",
     "reset": "Reset conditions",
