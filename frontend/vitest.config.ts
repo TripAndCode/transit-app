@@ -35,10 +35,11 @@ export default defineConfig({
     // or force one absent; without this those replacements outlive the test
     // and the next one silently inherits them.
     unstubGlobals: true,
-    // Provided by the `@vitest/coverage-v8` dev dependency (see
-    // package.json), matching this repo's vitest ^4.1.8. CI's frontend job
-    // runs the suite as `test:coverage`, so these thresholds gate every pull
-    // request. With no `include`, only files some test loads are measured: a
+    // Provided by the `@vitest/coverage-v8` dev dependency, which must stay
+    // on vitest's exact version: across a major the two disagree on the
+    // coverage payload and every test file errors at collection, which is
+    // why `.github/dependabot.yml` groups them. CI's frontend job runs the
+    // suite as `test:coverage`, so these thresholds gate every pull request. With no `include`, only files some test loads are measured: a
     // module no test imports lowers nothing.
     coverage: {
       provider: "v8",
