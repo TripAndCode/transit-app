@@ -13,11 +13,10 @@ type CopilotParams = {
   viewPayload: unknown;
 };
 
-/** The insight is a function of the payload alone, so the key carries no
- *  filters: the payload already reflects them. */
-/** The server writes the insight in the request's language (Accept-Language),
- *  so the language is part of what identifies one: a switch asks again
- *  instead of keeping the old language's text. */
+/** The insight is a function of the payload and the language the server
+ *  writes it in (the request's Accept-Language). So the key carries the
+ *  language, and a switch asks again rather than keeping the old language's
+ *  text, but no filters: the payload already reflects them. */
 function buildKey(agencyId: number | null, tab: string | null, viewPayload: unknown, language: string): string | null {
   return agencyId == null || tab == null || !viewPayload
     ? null

@@ -242,7 +242,7 @@ export function ReportTable({ reportType, rows }: Props) {
                             <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
                           </>
                         )}
-                        <span>{c.service ? <ServiceName value={String(row[c.index])} /> : text}</span>
+                        <span>{c.service && row[c.index] != null ? <ServiceName value={String(row[c.index])} /> : text}</span>
                       </span>
                     );
                   })}

@@ -218,6 +218,13 @@ describe("ReportTable on a phone", () => {
     expect(within(wide).getByText("wide range")).toBeInTheDocument();
   });
 
+  it("shows a missing service as a dash, not as the word null", () => {
+    renderTable([["39061", null, 5.2, 3.1, 8.4, 120]]);
+    const [item] = screen.getAllByRole("listitem");
+    expect(item).not.toHaveTextContent(/null/);
+    expect(within(item).getByText("—")).toBeInTheDocument();
+  });
+
   it("shows 25 rows first and the rest on request", async () => {
     const rows = Array.from({ length: 30 }, (_, i) => ["39061", "平日", 5 - i / 10, 3, 8, 100 + i]);
     renderTable(rows);
