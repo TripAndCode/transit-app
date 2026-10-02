@@ -68,6 +68,21 @@ ON_TIME_FALLBACK_FETCH_LIMIT = 5000
 ExcludeSet = frozenset[tuple[str, str]]
 
 
+# The same name order as the routes endpoint (routeDisplayName on the
+# frontend); route_code is not a column, so it is read off route_id.
+_ROUTE_NAME_SQL = (
+    "SELECT COALESCE(NULLIF(route_short_name, ''), NULLIF(route_long_name, '')) FROM static_routes "
+    "WHERE agency_id = $1 AND regexp_replace(route_id, '.*\\((\\d+)\\)$', '\\1') = $2 "
+    "ORDER BY route_short_name LIMIT 1"
+)
+
+
+async def _route_name(agency_id: int, conn, route_code: str, locale: str) -> str:
+    """What the reason text calls a route: its name, never a bare GTFS code."""
+    name = await conn.fetchval(_ROUTE_NAME_SQL, agency_id, route_code)
+    return name or _summary("route_code_fallback", lang=locale, code=route_code)
+
+
 async def _latest_analyzed_date(agency_id: int, conn):
     """Latest date with computed route aggregates for this agency.
 
@@ -244,7 +259,12 @@ async def _anomaly_today(agency_id, conn, ch, today_ctx, baseline_ctx, exclude, 
     return {
         "report_type": "trend",
         "route_code": route_code,
-        "reason_text": _summary("suggest_reason_anomaly", lang=locale, route=route_code, avg_min=f"{today_avg:.1f}"),
+        "reason_text": _summary(
+            "suggest_reason_anomaly",
+            lang=locale,
+            route=await _route_name(agency_id, conn, route_code, locale),
+            avg_min=f"{today_avg:.1f}",
+        ),
         "severity": "notable",
         "from_date": today_ctx.from_date.isoformat(),
         "to_date": today_ctx.to_date.isoformat(),
@@ -283,7 +303,10 @@ async def _trend_shift_this_week(agency_id, conn, ch, week_ctx, baseline_ctx, ex
         "report_type": "trend",
         "route_code": route_code,
         "reason_text": _summary(
-            "suggest_reason_trend_shift", lang=locale, route=route_code, delta_min=f"{delta_min:+.1f}"
+            "suggest_reason_trend_shift",
+            lang=locale,
+            route=await _route_name(agency_id, conn, route_code, locale),
+            delta_min=f"{delta_min:+.1f}",
         ),
         "severity": "notable",
         "from_date": week_ctx.from_date.isoformat(),
@@ -313,7 +336,10 @@ async def _on_time_fallback(agency_id, conn, ch, week_ctx, exclude, locale) -> d
             "report_type": "on_time",
             "route_code": route_code,
             "reason_text": _summary(
-                "suggest_reason_on_time_fallback", lang=locale, route=route_code, pct=f"{stats['on_time_pct']:.0f}"
+                "suggest_reason_on_time_fallback",
+                lang=locale,
+                route=await _route_name(agency_id, conn, route_code, locale),
+                pct=f"{stats['on_time_pct']:.0f}",
             ),
             "severity": "normal",
             "from_date": week_ctx.from_date.isoformat(),

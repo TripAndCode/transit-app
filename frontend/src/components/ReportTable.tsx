@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { delayColor, delayTextColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
+import { RouteLabel } from "./RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
@@ -34,12 +35,13 @@ type Schema = {
    * "平日" / "土日祝") but should display in the active locale. // i18n-ignore: JSDoc
    */
   valueKey?: string;
+  /** The cell holds a route_code, shown as the route's label. */
+  route?: true;
 };
 
-// Sentinel reference for the route column. The render path uses reference
-// equality (`c === ROUTE_COL`) to swap in route-name formatting, so every
-// schema below must reuse this exact instance.
-const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left" };
+// The route column of every per-route report. Kept in view while a wide table
+// scrolls sideways, which only works for a first column.
+const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left", route: true };
 
 // ranking + ranking_best share columns; only the API sort order differs.
 const RANKING_COLS: Schema[] = [
@@ -113,11 +115,9 @@ const SCHEMAS: Record<string, Schema[]> = {
   // (agency_name, route_code, service_type, date, scheduled_time,
   // actual_time, dep_delay_sec) -- one row per over-threshold departure
   // observation (see pipeline.reports.council.compute_delay_certificate).
-  // No route-name lookup here (route is index 1, not 0 -- ROUTE_COL's
-  // useRouteNames formatting is keyed to index 0 by reference equality).
   delay_certificate: [
     { index: 0, labelKey: "reports.col.agency_name", align: "left" },
-    { index: 1, labelKey: "common.route", align: "left" },
+    { index: 1, labelKey: "common.route", align: "left", route: true },
     { index: 2, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
     { index: 3, labelKey: "reports.col.date", align: "left" },
     { index: 4, labelKey: "reports.col.scheduled_time", align: "left" },
@@ -176,7 +176,7 @@ type Props = {
 export function ReportTable({ reportType, rows }: Props) {
   const { t } = useTranslation();
   const id = useAgencyId();
-  const { format: formatRoute } = useRouteNames(id);
+  const names = useRouteNames(id);
   const schema = SCHEMAS[reportType];
 
   const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
@@ -200,10 +200,9 @@ export function ReportTable({ reportType, rows }: Props) {
   if (compact) {
     // Seven columns can't share a phone's width without characters stacking,
     // so each row becomes one item: rank, route and the barred figure on top,
-    // every other column on a wrapping line beneath. The route column is
-    // found by its label, since not every report has it at index 0, and a
-    // report without one has no title.
-    const titleCol = schema.find((c) => c.labelKey === ROUTE_COL.labelKey);
+    // every other column on a wrapping line beneath. A report without a
+    // route column has no title.
+    const titleCol = schema.find((c) => c.route);
     const headline = schema.find((c) => c.bar);
     return (
       <div>
@@ -214,9 +213,7 @@ export function ReportTable({ reportType, rows }: Props) {
                 <span className="report-cards__rank">{i + 1}</span>
                 {titleCol && (
                   <span className="report-cards__route">
-                    {titleCol === ROUTE_COL
-                      ? formatRoute(String(row[titleCol.index] ?? ""))
-                      : cellText(titleCol, row[titleCol.index], t)}
+                    <RouteLabel code={String(row[titleCol.index] ?? "")} names={names} />
                   </span>
                 )}
                 {headline && (
@@ -276,11 +273,15 @@ export function ReportTable({ reportType, rows }: Props) {
             <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
               {schema.map((c) => {
-                if (c === ROUTE_COL) {
-                  const code = String(row[c.index] ?? "");
+                if (c.route) {
                   return (
-                    <td key={c.labelKey} style={{ ...td(), ...STICKY_CELL, fontWeight: 500, wordBreak: "keep-all" }}>
-                      {formatRoute(code)}
+                    <td
+                      key={c.labelKey}
+                      // A label names the line and where it goes; below this
+                      // width it breaks onto a third line.
+                      style={{ ...td(), ...(c === ROUTE_COL ? STICKY_CELL : null), minWidth: "16em", fontWeight: 500, wordBreak: "keep-all" }}
+                    >
+                      <RouteLabel code={String(row[c.index] ?? "")} names={names} />
                     </td>
                   );
                 }

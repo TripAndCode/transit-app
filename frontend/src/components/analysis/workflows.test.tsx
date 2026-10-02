@@ -105,7 +105,7 @@ it("changing keito scopes both report queries and CSV to the selected code", asy
   // picker, and each pick applies at once.
   show("reports");
   const user = setupUser();
-  await user.click(screen.getByRole("button", { name: /\(101\)/ }));
+  await user.click(screen.getByRole("button", { name: "1" }));
   // The picker labels routes by display name, not code: "1 Coast" is 101 and
   // "9 Coast" is 999 (short name + long name, per routeDisplayName). The
   // space is optional because dom-accessibility-api trims each inline

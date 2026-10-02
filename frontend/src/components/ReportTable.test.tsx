@@ -31,7 +31,9 @@ describe("ReportTable route column", () => {
       { route_id: "T50線(39061)", route_short_name: "T50", route_long_name: "石江・新城線", route_code: "39061", trip_headsigns: [] },
     ]);
     renderTable([["39061", "平日", 5.2, 3.1, 8.4, 120]]);
-    expect(screen.getByText("T50 (39061)")).toBeInTheDocument();
+    // Variants of a line can share a label, so the code follows it, muted.
+    expect(screen.getByText("T50")).toBeInTheDocument();
+    expect(screen.getByText("39061")).toHaveClass("route-label__code");
   });
 
   it("falls back to the bare route_code when no static route matches (data gap, not a crash)", () => {
@@ -147,7 +149,7 @@ describe("ReportTable on a phone", () => {
     renderTable([["39061", "平日", 5.2, 3.1, 8.4, 120]]);
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     const [item] = screen.getAllByRole("listitem");
-    for (const text of ["1", "T50 (39061)", "Avg", "5.2 min", "Weekday", "Median", "3.1 min", "p90", "8.4 min", "Samples", "120"]) {
+    for (const text of ["1", "T50", "39061", "Avg", "5.2 min", "Weekday", "Median", "3.1 min", "p90", "8.4 min", "Samples", "120"]) {
       expect(within(item).getByText(text)).toBeInTheDocument();
     }
   });

@@ -186,7 +186,7 @@ describe("CommandPalette", () => {
     renderPalette("/agencies/1/live?from=2026-06-01&to=2026-06-07");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "42");
-    await user.click(screen.getByText("42 (42)"));
+    await user.click(screen.getByRole("option", { name: /^42/ }));
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/routes/42");
     const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
     expect(search.get("dow")).toBe("weekend");

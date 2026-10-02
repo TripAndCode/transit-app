@@ -128,10 +128,6 @@
   font-weight: 400;
   color: var(--text-tertiary);
 }
-.ov-check-name-code {
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
-}
 .ov-check-row {
   display: flex;
   align-items: center;

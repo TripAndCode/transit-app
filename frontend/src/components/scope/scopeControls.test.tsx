@@ -238,6 +238,11 @@ describe("scope controls", () => {
   });
 
   describe("routes", () => {
+    it("names its search box for assistive technology, not by placeholder alone", () => {
+      mount(RoutesControl);
+      expect(screen.getByRole("textbox", { name: "Search routes" })).toBeInTheDocument();
+    });
+
     it("adds a route and clears the filter with the last one", async () => {
       mount(RoutesControl);
       await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));

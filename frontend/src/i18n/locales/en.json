@@ -373,7 +373,10 @@
       "平日": "Weekday",
       "土日祝": "Weekend/Holiday"
     },
-    "route": "Route"
+    "route": "Route",
+    "route_label": "{{name}} · {{heading}}",
+    "route_heading_to": "for {{to}}",
+    "route_heading_from_to": "{{from}} → {{to}}"
   },
   "legal": {
     "privacy": "Privacy Policy",
@@ -490,11 +493,12 @@
     "routes": {
       "label": "Route",
       "search_placeholder": "Search (name / code)",
-      "variant_count_one": "({{count}} route)",
-      "variant_count_other": "({{count}} routes)",
+      "variant_count_one": "({{count}} variant)",
+      "variant_count_other": "({{count}} variants)",
       "show_more": "Show more ({{count}} remaining)",
       "empty_title": "No routes registered yet.",
-      "empty_hint": "If the initial ingest is still running, try again in a few minutes."
+      "empty_hint": "If the initial ingest is still running, try again in a few minutes.",
+      "search_label": "Search routes"
     }
   },
   "operations": {
@@ -1542,7 +1546,7 @@
     "followup_submit": "Ask"
   },
   "palette": {
-    "placeholder": "Search agencies, routes, reports, time bands, actions…",
+    "placeholder": "Search or jump to…",
     "aria_label": "Command palette",
     "no_results": "No matching items",
     "nav_pulse_sublabel": "How service is running, and what changed",
