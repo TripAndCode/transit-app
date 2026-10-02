@@ -16,7 +16,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { useConfig } from "../api/config";
-import { scopeToQueryString, useScope } from "../api/scope";
+import { useScreenQuery, withQuery } from "../api/screenScope";
 import { clearLastAgency } from "../api/lastAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
@@ -156,12 +156,10 @@ export function Sidebar() {
   const { data: config } = useConfig();
   const { data: session } = useSession();
   const isAdmin = Boolean(config?.auth_enabled && session?.role === "admin");
-  // Carry only the filter dimensions across tab switches — building from
-  // ctx (not raw location.search) avoids dragging unrelated query keys
-  // like ?admin=1 or report-specific params into every other tab.
-  const [ctx] = useScope();
-  const filterQS = scopeToQueryString(ctx);
-  const suffix = filterQS ? `?${filterQS}` : "";
+  // Each screen opens with its own last filters (see api/screenScope), so
+  // nothing set on the screen being left follows the visitor elsewhere.
+  const screenQuery = useScreenQuery();
+  const screenHref = (screen: string) => withQuery(`/agencies/${agencyId}/${screen}`, agencyId ? screenQuery(agencyId, screen) : "");
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Below 640px (the shared MOBILE_BREAKPOINT_QUERY) the desktop rail's
@@ -216,7 +214,7 @@ export function Sidebar() {
             {navItems.map((item) => (
               <RailTooltip key={item.to} collapsed={collapsedFlag} label={t(item.labelKey)}>
                 <NavLink
-                  to={`/agencies/${agencyId}/${item.to}${suffix}`}
+                  to={screenHref(item.to)}
                   aria-label={collapsedFlag ? t(item.labelKey) : undefined}
                   onMouseEnter={() => prefetchRouteChunk(item.to)}
                   onFocus={() => prefetchRouteChunk(item.to)}
@@ -240,7 +238,7 @@ export function Sidebar() {
         {agencyId && !inSheet && (
           <RailTooltip collapsed={collapsedFlag} label={t("nav.ask")}>
             <NavLink
-              to={`/agencies/${agencyId}/ask${suffix}`}
+              to={screenHref("ask")}
               aria-label={collapsedFlag ? t("nav.ask") : undefined}
               onMouseEnter={() => prefetchRouteChunk("ask")}
               onFocus={() => prefetchRouteChunk("ask")}
@@ -364,7 +362,7 @@ export function Sidebar() {
                   {t("nav.prototype_onboarding")}
                 </button>
                 <NavLink
-                  to={`/agencies/${agencyId}/live${suffix}`}
+                  to={screenHref("live")}
                   onClick={() => onNavigate?.()}
                   style={{
                     display: "flex",
@@ -513,7 +511,7 @@ export function Sidebar() {
             TAB_BAR_ITEMS.map((item) => (
               <NavLink
                 key={item.to}
-                to={`/agencies/${agencyId}/${item.to}${suffix}`}
+                to={screenHref(item.to)}
                 onMouseEnter={() => prefetchRouteChunk(item.to)}
                 onFocus={() => prefetchRouteChunk(item.to)}
                 style={tabItemStyle}
@@ -524,7 +522,7 @@ export function Sidebar() {
             ))}
           {agencyId && (
             <NavLink
-              to={`/agencies/${agencyId}/ask${suffix}`}
+              to={screenHref("ask")}
               onMouseEnter={() => prefetchRouteChunk("ask")}
               onFocus={() => prefetchRouteChunk("ask")}
               style={tabItemStyle}

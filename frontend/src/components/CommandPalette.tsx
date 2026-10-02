@@ -12,6 +12,7 @@ import { Search } from "lucide-react";
 import { useAgencies, useRoutes } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
 import { scopeToQueryString, useScope, type TimeBand } from "../api/scope";
+import { useScreenQuery, withQuery } from "../api/screenScope";
 import { buildTimeBandOptions } from "./timeBandOptions";
 import { REPORT_TYPE_IDS, buildReportTypeLabels } from "../tabs/reportTypes";
 import { useTheme } from "../styles/useTheme";
@@ -168,7 +169,9 @@ export function CommandPalette() {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const ctxQueryString = scopeToQueryString(ctx);
-  const ctxSuffix = ctxQueryString ? `?${ctxQueryString}` : "";
+  // Destinations open with their own last filters (see api/screenScope); only
+  // an agency switch, which stays on this screen, keeps the current scope.
+  const screenQuery = useScreenQuery();
 
   function openPalette() {
     setRecentIds(readRecentIds());
@@ -188,7 +191,7 @@ export function CommandPalette() {
 
   function goToNav(to: string) {
     if (agencyId == null) return;
-    navigate(`/agencies/${agencyId}/${to}${ctxSuffix}`);
+    navigate(withQuery(`/agencies/${agencyId}/${to}`, screenQuery(agencyId, to)));
   }
 
   function goToAgency(id: number) {
@@ -197,12 +200,13 @@ export function CommandPalette() {
 
   function goToRoute(code: string) {
     if (agencyId == null) return;
-    navigate(routeHref(agencyId, code, ctxQueryString));
+    navigate(routeHref(agencyId, code, screenQuery(agencyId, "routes")));
   }
 
   function goToReport(reportType: string) {
     if (agencyId == null) return;
-    navigate(reportHref(agencyId, reportType, ctxSuffix));
+    const dest = reportDestination(reportType);
+    navigate(reportHref(agencyId, reportType, dest ? screenQuery(agencyId, dest) : ""));
   }
 
   function goToTimeBand(band: TimeBand) {

@@ -136,15 +136,31 @@ export function parseScope(params: URLSearchParams, defaults: { from: string; to
   };
 }
 
-export function scopeToQueryString(scope: Scope): string {
+/** Canonical query for whatever `rawFor` yields per param. A valid `hour`
+ *  takes the place of `time_band`, so only one of them is ever written. */
+function canonicalQuery(rawFor: (key: ScopeParam) => string | null): string {
+  const hourRaw = rawFor("hour");
+  const hasHour = hourRaw !== null && canon("hour", hourRaw) !== null;
   const out = new URLSearchParams();
   for (const key of SCOPE_PARAMS) {
-    if (key === "time_band" && scope.hour) continue;
-    const raw = rawOf(key, scope[key]);
+    if (key === "time_band" && hasHour) continue;
+    const raw = rawFor(key);
     const text = raw === null ? null : canon(key, raw);
     if (text !== null) out.set(key, text);
   }
   return out.toString();
+}
+
+export function scopeToQueryString(scope: Scope): string {
+  return canonicalQuery((key) => rawOf(key, scope[key]));
+}
+
+/** The scope a URL states outright, canonical, without the default period
+ *  filled in. A remembered scope then keeps following the rolling default
+ *  window instead of freezing the dates it was recorded on. */
+export function explicitScopeQuery(search: string): string {
+  const params = new URLSearchParams(search);
+  return canonicalQuery((key) => params.get(key));
 }
 
 export function applyScopePatch(prev: URLSearchParams, patch: ScopePatch): URLSearchParams {

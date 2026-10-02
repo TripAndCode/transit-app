@@ -6,6 +6,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { CommandPalette } from "./CommandPalette";
 import * as hooks from "../api/hooks";
 import type { Agency, Route as ApiRoute } from "../api/types";
+import { rememberScreenScope } from "../api/screenScope";
 
 const agencies: Agency[] = [
   { agency_id: 1, agency_name: "Hokuriku Transit", feed_url: "", static_url: null, latest_data_date: null },
@@ -44,6 +45,7 @@ function openWithCtrlK() {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -113,6 +115,15 @@ describe("CommandPalette", () => {
   });
 
   describe("go-to chords", () => {
+    it("opens the destination with its own filters, not the current screen's", () => {
+      rememberScreenScope("1", "time", "dow=sat,sun");
+      renderPalette("/agencies/1/live?from=2026-06-01&to=2026-06-07");
+      fireEvent.keyDown(document, { key: "g" });
+      fireEvent.keyDown(document, { key: "t" });
+      expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/time");
+      expect(screen.getByTestId("search").textContent).toBe("?dow=sat,sun");
+    });
+
     it("navigates to live on g then l when nothing is focused in a text field", () => {
       renderPalette();
       fireEvent.keyDown(document, { key: "g" });
@@ -169,15 +180,17 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("selecting a route opens its dossier with the active scope", async () => {
+  it("selecting a route opens its dossier with the Routes screen's own filters, not the current screen's", async () => {
+    rememberScreenScope("1", "routes", "routes=7&dow=weekend");
     const user = userEvent.setup();
-    renderPalette("/agencies/1/live?from=2026-06-01&to=2026-06-07&routes=7");
+    renderPalette("/agencies/1/live?from=2026-06-01&to=2026-06-07");
     openWithCtrlK();
     await user.type(screen.getByRole("combobox"), "42");
     await user.click(screen.getByText("42 (42)"));
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/routes/42");
     const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
-    expect(search.get("from")).toBe("2026-06-01");
+    expect(search.get("dow")).toBe("weekend");
+    expect(search.has("from")).toBe(false);
     expect(search.has("routes")).toBe(false);
   });
 
@@ -200,7 +213,7 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/why");
     const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
     expect(search.get("report")).toBe("dwell_run");
-    expect(search.get("from")).toBe("2026-06-01");
+    expect(search.has("from")).toBe(false);
   });
 
   it("selecting a time band updates the current page's query string", async () => {
