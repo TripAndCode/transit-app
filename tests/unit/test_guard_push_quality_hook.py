@@ -261,14 +261,30 @@ def _hook_entry_timeout() -> int:
     return int(found[0]["timeout"])
 
 
+def _ceilings(hook_text: str) -> list[int]:
+    return [int(n) for n in re.findall(r"run_with_timeout (\d+)", hook_text)]
+
+
 def test_the_step_ceilings_fit_inside_the_hooks_own_timeout():
     """The harness kills the hook at its settings.json `timeout`, and whether
     a killed hook blocks the push is outside the script's control -- the one
     outcome its fail-closed design cannot guarantee. Every per-step ceiling
     together, the deadcode re-run included, must therefore stay under it."""
-    ceilings = [int(n) for n in re.findall(r"run_with_timeout (\d+)", HOOK_PATH.read_text())]
+    ceilings = _ceilings(HOOK_PATH.read_text())
     assert ceilings, "no run_with_timeout ceilings found in the hook"
     assert sum(ceilings) < _hook_entry_timeout()
+
+
+def test_the_ceiling_check_sees_a_ceiling_raised_past_the_hooks_timeout():
+    """Positive control for the check above: the same reading of the hook,
+    with only the backend ceiling raised by the whole harness timeout, must
+    exceed it. A parser that stopped seeing a ceiling would pass the check
+    above vacuously and fail here."""
+    timeout = _hook_entry_timeout()
+    text = HOOK_PATH.read_text()
+    assert "run_with_timeout 1200 " in text
+    raised = text.replace("run_with_timeout 1200 ", f"run_with_timeout {1200 + timeout} ", 1)
+    assert sum(_ceilings(raised)) >= timeout
 
 
 def _function_source(name: str) -> str:
