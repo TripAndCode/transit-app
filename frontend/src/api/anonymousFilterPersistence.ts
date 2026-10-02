@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useSession } from "./auth";
 import { computeAnchorRange } from "./defaultRangeAnchor";
 import { useAgencies } from "./hooks";
 import type { DowFilter, ServiceFilter, TimeBand } from "./scope";
+import { screenOf } from "./screenScope";
 
 type StoredFilter = {
   from?: string;
@@ -22,13 +23,13 @@ const SCALAR_FILTER_KEYS = ["from", "to", "dow", "time_band", "service"] as cons
 
 const KEY_PREFIX = "transit.lastFilter.";
 
-function storageKey(agencyId: number): string {
-  return `${KEY_PREFIX}${agencyId}`;
+function storageKey(agencyId: number, screen: string): string {
+  return `${KEY_PREFIX}${agencyId}.${screen}`;
 }
 
-function readStored(agencyId: number): StoredFilter | null {
+function readStored(key: string): StoredFilter | null {
   try {
-    const raw = localStorage.getItem(storageKey(agencyId));
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     return JSON.parse(raw) as StoredFilter;
   } catch {
@@ -36,9 +37,9 @@ function readStored(agencyId: number): StoredFilter | null {
   }
 }
 
-function writeStored(agencyId: number, value: StoredFilter): void {
+function writeStored(key: string, value: StoredFilter): void {
   try {
-    localStorage.setItem(storageKey(agencyId), JSON.stringify(value));
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {
     /* localStorage unavailable (private browsing, quota) — fail open, same
      * as Sidebar.tsx's readCollapsedPref/writeCollapsedPref. */
@@ -47,8 +48,11 @@ function writeStored(agencyId: number, value: StoredFilter): void {
 
 /**
  * Anonymous-only convenience: remember the last-used date range/DOW/
- * time-band/routes filter per agency in localStorage, and restore it on a
- * fresh visit that has no explicit filter params in the URL. This targets a
+ * time-band/routes filter per agency and screen in localStorage, and restore
+ * it on a fresh visit to that screen that has no explicit filter params in
+ * the URL. Keyed by screen for the same reason the rail is (see
+ * screenScope.ts): a filter set on one screen never reappears on another.
+ * A page under a screen, such as a route dossier, is left alone. This targets a
  * distinct, smaller friction than PresetMenu's login-gated named presets
  * (`/api/me/presets`): a single "remember what I was just looking at" slot
  * rather than durable, named, multi-slot filter sets —
@@ -79,13 +83,15 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
   const { data: session, isLoading } = useSession();
   const [params, setParams] = useSearchParams();
   const { data: agencies, isPending: agenciesPending } = useAgencies();
-  // Tracks which agency we've already attempted a restore for, so an
-  // explicit in-session reset (which clears every filter param) doesn't
+  const screenName = screenOf(useLocation().pathname)?.screen ?? null;
+  // Tracks which agency and screen we've already attempted a restore for, so
+  // an explicit in-session reset (which clears every filter param) doesn't
   // immediately get overwritten by a re-restore of the old stored value.
-  const restoredFor = useRef<number | null>(null);
+  const restoredFor = useRef<string | null>(null);
 
   useEffect(() => {
-    if (isLoading || session || agencyId == null) return;
+    if (isLoading || session || agencyId == null || screenName == null) return;
+    const key = storageKey(agencyId, screenName);
     // computeAnchorRange returns null both when no anchor rewrite is needed
     // AND when `agencies` hasn't loaded yet (it can't tell those apart from
     // its own return value alone) -- on a cold page load (fresh tab/reload/
@@ -104,12 +110,12 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
       SCALAR_FILTER_KEYS.some((key) => params.get(key)) || params.get("routes"),
     );
     // Captured before either branch below mutates the ref: true only on the
-    // very first time this hook processes this agency in the session.
-    const isFirstAttemptForAgency = restoredFor.current !== agencyId;
+    // very first time this hook processes this agency's screen in the session.
+    const isFirstAttemptForScreen = restoredFor.current !== key;
 
-    if (!hasAnyFilterParam && isFirstAttemptForAgency) {
-      restoredFor.current = agencyId;
-      const stored = readStored(agencyId);
+    if (!hasAnyFilterParam && isFirstAttemptForScreen) {
+      restoredFor.current = key;
+      const stored = readStored(key);
       // An all-undefined `{}` can legitimately be what a filterless visit
       // persisted (see below) — only treat it as restorable if it actually
       // has a value to restore, otherwise this branch would fire a no-op
@@ -134,7 +140,7 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     // Persist whatever's currently in the URL, including an explicitly
     // cleared state — a later visit should remember the most recent choice,
     // not stubbornly reapply the first one ever made.
-    restoredFor.current = agencyId;
+    restoredFor.current = key;
     const routesStr = params.get("routes");
     const nextStored: StoredFilter = {};
     for (const key of SCALAR_FILTER_KEYS) {
@@ -145,17 +151,16 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
       const routes = routesStr.split(",").filter(Boolean);
       if (routes.length > 0) nextStored.routes = routes;
     }
-    if (Object.keys(nextStored).length === 0 && !isFirstAttemptForAgency) {
-      // A bare "no filter params" URL for an agency we've already processed
+    if (Object.keys(nextStored).length === 0 && !isFirstAttemptForScreen) {
+      // A bare "no filter params" URL for a screen we've already processed
       // this session is ambiguous — it can mean an explicit in-session
       // clear-all, but it's also exactly what a same-agency re-navigation
       // with a dropped query string (e.g. AgencyPicker's `selectAgency`,
-      // which doesn't preserve filter params the way Sidebar's nav links
-      // do) looks like. Since we can't tell those apart, never let this
+      // which doesn't preserve filter params) looks like. Since we can't tell those apart, never let this
       // ambiguous case silently overwrite an already-stored non-empty
-      // filter; only an agency's genuine first attempt (or storage that was
+      // filter; only a screen's genuine first attempt (or storage that was
       // already empty) can persist an empty object.
-      const existing = readStored(agencyId);
+      const existing = readStored(key);
       if (existing && Object.keys(existing).length > 0) return;
     }
     // A field missing from the CURRENT params (e.g. dow/time_band/service/
@@ -169,19 +174,19 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     // would reintroduce exactly the guaranteed-empty-view problem
     // useDefaultRangeAnchor exists to prevent.
     //
-    // Gated to `isFirstAttemptForAgency`, same as the ambiguity guard just
+    // Gated to `isFirstAttemptForScreen`, same as the ambiguity guard just
     // above and for the identical reason: the anchor-handoff scenario this
-    // merge exists for can ONLY happen on an agency's first effect run this
+    // merge exists for can ONLY happen on a screen's first effect run this
     // session (computeAnchorRange only ever fires before any filter
     // interaction, so by construction this hook can defer to it — see this
     // hook's computeAnchorRange early-return above — at most once per
-    // agency, on that very first render).
+    // screen, on that very first render).
     // Beyond the first attempt, a field absent from `nextStored` reflects a
     // real, later, in-session change (e.g. the user explicitly clearing just
     // `dow` while `from`/`to`/`time_band` stay put) that must be allowed to
     // stick, not be silently undone by resurrecting the old stored value.
-    if (isFirstAttemptForAgency) {
-      const existingForMerge = readStored(agencyId);
+    if (isFirstAttemptForScreen) {
+      const existingForMerge = readStored(key);
       if (existingForMerge) {
         for (const key of ["dow", "time_band", "service"] as const) {
           if (nextStored[key] === undefined && existingForMerge[key] !== undefined) {
@@ -193,10 +198,10 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
         }
       }
     }
-    writeStored(agencyId, nextStored);
+    writeStored(key, nextStored);
     // `params` (not a derived string key) is the dependency, matching
     // useDefaultRangeAnchor's pattern: react-router memoizes useSearchParams'
     // return value on `location.search`, so this only re-runs when the URL's
     // query string actually changes, not on every unrelated render.
-  }, [agencyId, isLoading, session, params, setParams, agencies, agenciesPending]);
+  }, [agencyId, screenName, isLoading, session, params, setParams, agencies, agenciesPending]);
 }

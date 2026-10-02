@@ -102,7 +102,7 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
       isPending: false,
     } as never);
     localStorage.setItem(
-      "transit.lastFilter.1",
+      "transit.lastFilter.1.overview",
       JSON.stringify({ from: "2020-01-01", to: "2020-01-07" }),
     );
     render(
@@ -121,7 +121,7 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
       isPending: false,
     } as never);
     localStorage.setItem(
-      "transit.lastFilter.1",
+      "transit.lastFilter.1.overview",
       JSON.stringify({ dow: "weekend", time_band: "evening" }),
     );
     render(
@@ -140,7 +140,7 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
       isPending: false,
     } as never);
     localStorage.setItem(
-      "transit.lastFilter.1",
+      "transit.lastFilter.1.overview",
       JSON.stringify({ dow: "weekend", time_band: "evening" }),
     );
     render(
@@ -158,7 +158,7 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
     // drop dow/time_band just because this particular render's URL only
     // carries the anchor's own from/to -- those fields never conflicted
     // with anything the anchor did.
-    const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
+    const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1.overview") ?? "{}");
     expect(stored.dow).toBe("weekend");
     expect(stored.time_band).toBe("evening");
   });

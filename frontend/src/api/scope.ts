@@ -147,6 +147,21 @@ export function scopeToQueryString(scope: Scope): string {
   return out.toString();
 }
 
+/** The scope a URL states outright, canonical, without the default period
+ *  filled in. A remembered scope then keeps following the rolling default
+ *  window instead of freezing the dates it was recorded on. */
+export function explicitScopeQuery(search: string): string {
+  const params = new URLSearchParams(search);
+  const out = new URLSearchParams();
+  for (const key of SCOPE_PARAMS) {
+    if (key === "time_band" && params.get("hour")) continue;
+    const raw = params.get(key);
+    const text = raw === null ? null : canon(key, raw);
+    if (text !== null) out.set(key, text);
+  }
+  return out.toString();
+}
+
 export function applyScopePatch(prev: URLSearchParams, patch: ScopePatch): URLSearchParams {
   const next = new URLSearchParams(prev);
   for (const key of SCOPE_PARAMS) {

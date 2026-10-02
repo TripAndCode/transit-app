@@ -40,7 +40,7 @@ describe("useAnonymousFilterPersistence defers to computeAnchorRange", () => {
       data: [agency({ latest_data_date: "2026-05-01" })],
       isPending: false,
     } as never);
-    localStorage.setItem("transit.lastFilter.1", JSON.stringify({ dow: "weekend" }));
+    localStorage.setItem("transit.lastFilter.1.overview", JSON.stringify({ dow: "weekend" }));
     render(
       <MemoryRouter initialEntries={["/agencies/1/overview"]}>
         <Probe agencyId={1} />
@@ -63,7 +63,7 @@ describe("useAnonymousFilterPersistence defers to computeAnchorRange", () => {
     const agenciesSpy = vi.spyOn(hooks, "useAgencies");
     agenciesSpy.mockReturnValue({ data: undefined, isPending: true } as never);
     localStorage.setItem(
-      "transit.lastFilter.1",
+      "transit.lastFilter.1.overview",
       JSON.stringify({ from: "2020-01-01", to: "2020-01-07" }),
     );
     const { rerender } = render(
