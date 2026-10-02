@@ -1291,7 +1291,7 @@ class BoardAlertOut(BaseModel):
 
 class PipelineRunOut(BaseModel):
     run_id: int
-    kind: str  # ingest | analyze | weather | static
+    kind: str  # ingest | promote | analyze | weather | static
     agency_id: int | None
     #: None for a fleet-wide run, and for one displaced before it resolved
     #: which agency it was for.

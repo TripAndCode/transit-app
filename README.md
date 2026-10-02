@@ -68,23 +68,23 @@ poetry run python gtfs_pipeline.py add_agency \
 GTFS-RT feeds
     |
     v
-Oracle collector -- dense archives --> Cloudflare R2
-                                           |
-                                           v
-                              Railway ingest job
-                              ingest -> analyze
-                                |             |
-                                v             v
-                         ClickHouse raw    Postgres aggregates
-                                \             /
-                                 v           v
-                              FastAPI + React SPA
+Oracle collector -- daily archives --> Cloudflare R2 (backfill only)
+    |
+    | pushed polls
+    v
+ClickHouse updates_live (today) --cron: promote closed JST days--> updates (history)
+    |                                                                  |
+    |                                                    analyze --> Postgres agg_*
+    v                                                                  |
+FastAPI + React SPA  <-------------------------------------------------+
 ```
 
-- Oracle is the production collector and R2 is the archive handoff.
-- Railway's scheduled ingest job reads R2, writes raw events, and rebuilds
-  aggregates.
-- `ingest_live` is the lower-fidelity fallback when archives are unavailable.
+- Oracle is the production collector. It pushes polls to the API, which keeps
+  them in `updates_live`, and it uploads daily archives to R2.
+- A daily cron poke promotes each closed JST day into `updates` (history) and
+  rebuilds aggregates. The R2 archive job backfills only days the live path
+  never promoted.
+- Without collector streaming, `ingest_live` takes one live sample per poke.
 - The API normally reads precomputed `agg_*` tables; narrow time-band queries
   may read ClickHouse directly.
 - The Ask tab uses deterministic SQL tools first. Only the long-tail fallback
