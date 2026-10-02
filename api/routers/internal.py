@@ -1,12 +1,13 @@
 """Internal endpoints for scheduled cron jobs.
 
-This is the **fallback** ingest path. Production normally ingests the dense
-Oracle archives via a daily Railway scheduled job (see
-``docs/deploy-railway.md``); when object storage isn't wired, an external
-scheduler can instead poke ``POST /internal/cron/ingest`` to run the
-lower-fidelity ``ingest_live`` + ``analyze``. Every endpoint is gated by
-:envvar:`CRON_SECRET` passed via the ``X-Cron-Secret`` header — anything
-without the matching header gets 401.
+``POST /internal/cron/ingest`` is the daily history path as well as a live
+fallback. Per agency it fetches the feed into ``updates_live`` (``ingest_live``),
+promotes every closed JST day from ``updates_live`` into ``updates``
+(:mod:`pipeline.promote`), then runs ``analyze``. Nothing else promotes, so a
+deployment must poke it at least once a day after JST midnight;
+``updates_live``'s TTL drops a day that is never promoted. Every endpoint is
+gated by :envvar:`CRON_SECRET` passed via the ``X-Cron-Secret`` header —
+anything without the matching header gets 401.
 
 The actual ingest + analyze work runs as a FastAPI ``BackgroundTask`` so
 the cron caller gets a fast 202 and doesn't block on the multi-minute
@@ -219,13 +220,17 @@ def _ingest_and_analyze_sweep(
     run_weather: bool = True,
     run_id: int | None = None,
 ) -> str:
-    """Pull live GTFS-RT for every agency, then refresh aggregations.
+    """Pull live GTFS-RT for every agency, promote closed days, then refresh
+    aggregations.
 
     Uses the existing sync CLI helpers via psycopg2 — keeps this module
-    thin. Failures inside the loop are logged but don't abort the whole
-    run, so one broken agency doesn't starve the others. Returns the outcome
-    the umbrella row should record: ``skipped`` when the advisory lock turned
-    this sweep away, ``ok`` otherwise.
+    thin. Per agency, an ``ingest`` sweep runs three stages in order --
+    ``ingest_live`` into `updates_live`, `pipeline.promote.promote_closed_days`
+    out of it into `updates`, then `analyze` -- each recorded as its own
+    `pipeline_runs` row. Failures inside the loop are logged but don't abort
+    the whole run, so one broken agency or stage doesn't starve the others.
+    Returns the outcome the umbrella row should record: ``skipped`` when the
+    advisory lock turned this sweep away, ``ok`` otherwise.
 
     ``kind="analyze"`` re-aggregates what is already stored without fetching —
     the one case where skipping the feed pull and the weather pass is what was
@@ -255,6 +260,7 @@ def _ingest_and_analyze_sweep(
     from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
     from pipeline.ingest import ingest_live
+    from pipeline.promote import promote_closed_days
 
     # Kept apart from the resolved roster below: the caller's scope decides
     # whether the weather pass runs, and the roster is overwritten with the
@@ -323,6 +329,11 @@ def _ingest_and_analyze_sweep(
                         run.rows = ingest_live(aid, conn, ch_client)
                 except Exception:
                     _log.exception("cron: ingest_live failed for agency %s", aid)
+                try:
+                    with pipeline_runs.record_run(conn, "promote", agency_id=aid, requested_by=requested_by) as run:
+                        run.rows = promote_closed_days(aid, conn, ch_client)
+                except Exception:
+                    _log.exception("cron: promotion failed for agency %s", aid)
             try:
                 with pipeline_runs.record_run(conn, "analyze", agency_id=aid, requested_by=requested_by):
                     analyze(aid, conn, ch_client)
@@ -439,7 +450,8 @@ def _run_weather_ingest(db_url: str) -> None:
 
 @router.post("/ingest", status_code=202)
 async def cron_ingest(request: Request, background_tasks: BackgroundTasks) -> dict:
-    """Kick off ingest_live + analyze for every agency in the background.
+    """Kick off ingest_live + promote_closed_days + analyze for every agency
+    in the background.
 
     Returns immediately with ``{"status": "started"}``. The actual work
     runs after the response is sent so the cron caller doesn't time out.

@@ -26,6 +26,7 @@ import pipeline.analyze
 import pipeline.clickhouse
 import pipeline.freshness
 import pipeline.ingest
+import pipeline.promote
 from api.routers import internal
 from pipeline import runs as pipeline_runs
 
@@ -101,6 +102,7 @@ def sweep(monkeypatch) -> _Env:
     monkeypatch.setattr(pipeline.clickhouse, "get_client", _ChClient)
     monkeypatch.setattr(internal, "try_lock_ingest_analyze_timed", lambda _conn: (env.got_lock, 4))
     monkeypatch.setattr(pipeline.ingest, "ingest_live", lambda *_a, **_k: 0)
+    monkeypatch.setattr(pipeline.promote, "promote_closed_days", lambda *_a, **_k: 0)
     monkeypatch.setattr(pipeline.analyze, "analyze", lambda *_a, **_k: None)
     monkeypatch.setattr(pipeline.freshness, "check_agg_freshness", lambda *_a, **_k: [])
     monkeypatch.setattr(internal, "_run_weather_ingest", lambda db_url: env.weather.append(db_url))
@@ -133,6 +135,26 @@ def test_a_displaced_sweep_with_a_caller_row_does_not_open_a_second_one(sweep):
     sweep.got_lock = False
     assert internal._ingest_and_analyze_sweep(_DB_URL, run_id=77) == "skipped"
     assert sweep.started == []
+
+
+def test_an_ingest_sweep_promotes_closed_days_between_ingest_and_analyze(sweep, monkeypatch):
+    monkeypatch.setattr(pipeline.promote, "promote_closed_days", lambda *_a, **_k: 3)
+    assert internal._ingest_and_analyze_sweep(_DB_URL) == "ok"
+    assert sweep.recorded == [("ingest", 1), ("promote", 1), ("analyze", 1)]
+
+
+def test_an_analyze_only_sweep_does_not_promote(sweep):
+    internal._ingest_and_analyze_sweep(_DB_URL, kind="analyze")
+    assert sweep.recorded == [("analyze", 1)]
+
+
+def test_a_failed_promotion_still_analyzes(sweep, monkeypatch):
+    def _boom(*_a, **_k):
+        raise RuntimeError("clickhouse down")
+
+    monkeypatch.setattr(pipeline.promote, "promote_closed_days", _boom)
+    assert internal._ingest_and_analyze_sweep(_DB_URL) == "ok"
+    assert ("analyze", 1) in sweep.recorded
 
 
 def test_the_scheduled_sweep_still_drives_the_fleet_weather_pass(sweep):
