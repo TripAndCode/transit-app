@@ -1,4 +1,4 @@
--- Headway QUALITY metrics (item 94, depends on item 93's agg_route_headway /
+-- Headway QUALITY metrics (built on agg_route_headway /
 -- agg_route_headway_daily): Excess Waiting Time, coefficient of variation,
 -- and long-gap rate for routes `agg_route_headway.is_high_frequency`
 -- classifies as high-frequency. See `pipeline.headways` for the shared

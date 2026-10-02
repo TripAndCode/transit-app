@@ -1,7 +1,7 @@
 /**
- * Per-route "minimum performance standard" bonus/malus simulation panel
- * (item 104, depends on item 94's Excess Waiting Time and item 98's
- * vehicle-km-delivered rate). Renders nothing when this agency has zero
+ * Per-route "minimum performance standard" bonus/malus simulation panel,
+ * comparing each configured threshold against the Excess Waiting Time or
+ * vehicle-km-delivered rate. Renders nothing when this agency has zero
  * configured `route_performance_standards` rows (see
  * pipeline/reports/performance_standard.py) -- there is no ingestion
  * pipeline or admin UI for this table, so an agency with no rows simply has

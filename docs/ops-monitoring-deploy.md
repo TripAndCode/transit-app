@@ -40,7 +40,7 @@ Nothing else on the VPS side needed a new or broadened credential:
 - **Oracle** (`scripts/collect_oracle_status.py`): reads a heartbeat
   relayed through GitHub Actions run logs. The VPS never holds an Oracle
   credential of any kind, and specifically never the Oracle SSH private key
-  (see item 119's design) — a compromised VPS gains nothing toward Oracle.
+  — a compromised VPS gains nothing toward Oracle.
 - **R2** (`scripts/collect_r2_status.py`): same relay pattern as Oracle —
   storage metrics are aggregated on Oracle (where the R2 credentials
   already live) and only the aggregated numbers are relayed through GitHub.
@@ -169,18 +169,11 @@ reinstalling unless the rollback target predates this doc.
 
 ## 8. CI on an ops-monitoring PR
 
-Nothing here is special: this hub follows the repo-wide rule in `CLAUDE.md`'s
-"Git and pull requests" section. Commits carry `[skip ci]` so intermediate
-pushes do not each queue a run, and the last push before the PR is readied
-must have a tip whose message omits it — otherwise no run exists, and the
-merge gate, which requires a green one, can never be satisfied.
+Nothing here is special: this hub follows the repo-wide CI rule in
+`CLAUDE.md`'s "Git and pull requests" section, and `transit-app-gotchas`'s
+"Git" section owns how a push decides whether CI runs.
 
 ```bash
 # What the gate reads. An EMPTY rollup means no run was triggered, not a pass.
 gh pr view <number> --json statusCheckRollup
 ```
-
-`transit-app-gotchas`'s "Git" section owns the trailer's mechanics, including
-the case worth knowing here: a merge commit made while resolving a `main`
-conflict carries no trailer of its own, so it triggers a run whether or not
-that was intended.
