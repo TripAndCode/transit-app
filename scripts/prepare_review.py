@@ -191,7 +191,7 @@ def suggested_tier(paths: list[str]) -> str:
         return "trivial"
     # A non-Markdown process-doc path (e.g. .claude/settings.json) mixed with
     # an ordinary Markdown doc falls through to here rather than process-doc:
-    # that mix isn't "only .claude/**/CLAUDE.md" per this tier's own
+    # that mix isn't "only .claude/**, CLAUDE.md or AGENTS.md" per this tier's own
     # definition, and "standard" dispatches strictly more review than
     # process-doc, so this never under-reviews -- deliberate, not a gap.
     return "standard"

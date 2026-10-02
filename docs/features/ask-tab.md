@@ -274,7 +274,7 @@ so it is a separate mechanism to build, not a knob to turn on.
   These are two different JSONL files with two different jobs — don't
   conflate them.
 - Most of these need both throwaway Postgres (`:5544`) and throwaway
-  ClickHouse (`:8124`) — see `CLAUDE.md` ▸ Database safety for the
+  ClickHouse (`:8124`) — see `AGENTS.md` ▸ Tests for the
   `RUN_CH_INTEGRATION=1` block; omitting it silently skips
   ClickHouse-gated tests instead of failing.
 

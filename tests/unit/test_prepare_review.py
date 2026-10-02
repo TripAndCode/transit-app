@@ -188,6 +188,21 @@ def test_agents_md_is_an_executable_process_doc(repository: Path, tmp_path: Path
     assert manifest["suggested_tier"] == "process-doc"
 
 
+def test_agents_md_mixed_with_an_ordinary_markdown_file_stays_a_process_doc(repository: Path, tmp_path: Path):
+    git(repository, "switch", "-c", "feature")
+    (repository / "AGENTS.md").write_text("# rules\n", encoding="utf-8")
+    docs = repository / "docs" / "features"
+    docs.mkdir(parents=True)
+    (docs / "foo.md").write_text("feature notes\n", encoding="utf-8")
+    git(repository, "add", "AGENTS.md", "docs/features/foo.md")
+    git(repository, "commit", "-m", "mix agent rules with ordinary doc")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == ["AGENTS.md", "docs/features/foo.md"]
+    assert manifest["suggested_tier"] == "process-doc"
+
+
 def test_process_doc_wins_when_a_claude_markdown_file_mixes_with_an_ordinary_markdown_file(
     repository: Path, tmp_path: Path
 ):

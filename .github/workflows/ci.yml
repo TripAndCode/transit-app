@@ -99,7 +99,7 @@ jobs:
         run: npm run check:css-tokens
 
       # Typecheck already ran above (tsc -b), so this build step skips it
-      # (build:bundle = vite build only) and just enforces CLAUDE.md's
+      # (build:bundle = vite build only) and just enforces AGENTS.md's
       # "keep MapLibre out of the entry chunk" rule against the real bundle.
       - name: Build + entry-chunk check
         run: |

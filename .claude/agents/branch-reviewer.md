@@ -80,7 +80,7 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
 - The changed-file list is not a read boundary. Follow callers, consumers, tests, or
   configuration when the assigned dimension requires it, but stay in the named
   worktree.
-- Repository invariants a finding is measured against, from `CLAUDE.md`: React
+- Repository invariants a finding is measured against, from `AGENTS.md`: React
   Compiler is enabled, so never report a missing `useMemo`/`useCallback`/`React.memo`
   as a perf fix and never accept a ref written during render; prefer derived state to
   a synchronization effect; every visible string goes through `t()` with keys in both

@@ -12,7 +12,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   production readers.
   `agg_*`/OLTP/PostGIS/pgvector stay on Postgres.
 - Dev Postgres read-only rule, and which port actually holds the data (read
-  `DATABASE_URL`; it need not be `compose.yml`'s `:5433`): canonical in `CLAUDE.md`.
+  `DATABASE_URL`; it need not be `compose.yml`'s `:5433`): canonical in `AGENTS.md`.
   Too big to clone whole. `analyze` reads `updates` from ClickHouse, so a real-data
   demo needs a read-only `SELECT` of one agency + a few days from dev ClickHouse
   loaded into a throwaway ClickHouse, plus the Postgres rows that agency needs
@@ -77,13 +77,13 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `frontend/src/i18n/locales/{ja,en}.json` (key parity is CI-linted).
 - Kana in `.ts/.tsx` source fails `lint:i18n-strings`; suppress intentional cases
   with `i18n-ignore`.
-- The full pre-PR check list is canonical in `CLAUDE.md`'s Verification
+- The full pre-PR check list is canonical in `AGENTS.md`'s Verification
   commands section — run it before opening a PR.
 
 ## Git
 - Default branch is `main`, not master. Diff and PR against `main`. Merge/PR
   policy (squash merge, Conventional Commit subjects, stacked-PR retargeting)
-  is canonical in `CLAUDE.md`'s "Git and pull requests" section — mechanically,
+  is canonical in `AGENTS.md`'s "Git and pull requests" section — mechanically,
   retarget the next PR to `main` before `--delete-branch`, else GitHub closes
   (not retargets) the dependent PR.
 - Poetry resolves its virtualenv by cwd identity, not by file arguments:
@@ -126,7 +126,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   trailer is the whole mechanism). The match is a plain substring anywhere
   in the message, quoting included, so a message that merely mentions the
   trailer suppresses itself.
-  Root `CLAUDE.md` owns the policy this serves — when CI has to run and
+  Root `AGENTS.md` owns the policy this serves — when CI has to run and
   when it must be green. This entry is only the mechanism, which is easy to
   get wrong in either direction.
   Under that policy branch commits carry no trailer, so the usual direction

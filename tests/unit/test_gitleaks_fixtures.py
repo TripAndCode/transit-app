@@ -51,7 +51,7 @@ POSITIVE_SECRET = (FIXTURES_DIR / "positive_control_credential.txt").read_text()
 
 pytestmark = pytest.mark.skipif(
     shutil.which("gitleaks") is None,
-    reason="gitleaks not installed; run scripts/setup_git_hooks.sh or see CLAUDE.md",
+    reason="gitleaks not installed; run scripts/setup_git_hooks.sh or see AGENTS.md",
 )
 
 

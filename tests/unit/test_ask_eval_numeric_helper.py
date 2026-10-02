@@ -9,7 +9,7 @@ autouse ``apply_schema`` fixture runs for every test collected under
 an unreachable Postgres made these ERROR at fixture setup while they lived
 under ``tests/ask_eval/``, not skip or pass. ``tests/unit/conftest.py``
 overrides that fixture specifically so tests here bypass it, matching
-CLAUDE.md's "Put pure logic tests under tests/unit/" convention.
+AGENTS.md's "Put pure logic tests under tests/unit/" convention.
 
 Proves the numeric check itself isn't vacuous — accepts a correct number,
 rejects a wrong number, rejects a wrong tool call — independent of whether

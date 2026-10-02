@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Enforces CLAUDE.md's "keep MapLibre out of the entry chunk" rule. Run
+// Enforces AGENTS.md's "keep MapLibre out of the entry chunk" rule. Run
 // after `npm run build` / `npm run build:bundle` (needs build.manifest:
 // true in vite.config.ts).
 //

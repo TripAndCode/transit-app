@@ -2,7 +2,7 @@
 .gitattributes, and the local-only trees .gitignore has to keep out.
 
 Filesystem and `git` only, no DB, so this belongs under `tests/unit/` per
-CLAUDE.md's convention.
+AGENTS.md's convention.
 """
 
 from __future__ import annotations

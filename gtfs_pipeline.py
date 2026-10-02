@@ -188,7 +188,7 @@ def _lock_or_exit(conn, cmd: str, kind: str) -> None:
     after -- not inside -- the per-agency `ingest` loop), so the abort-risk
     that justifies skipping in _lock_or_skip_agency doesn't apply here. Both
     are documented as fail-loud ("partial run can't pass silently" --
-    CLAUDE.md); a silent no-op would violate that contract for no benefit.
+    AGENTS.md); a silent no-op would violate that contract for no benefit.
     """
     got, lock_wait_ms = try_lock_ingest_analyze_timed(conn)
     if got:

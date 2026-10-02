@@ -143,7 +143,7 @@ different thread.
    together). DB SAFETY: if a fix touches DB code, tests point at the throwaway
    Postgres (`DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test`)
    and the throwaway ClickHouse on :8124 — never the dev Postgres or dev ClickHouse
-   (`docker compose exec clickhouse`). See CLAUDE.md / transit-app-gotchas.
+   (`docker compose exec clickhouse`). See AGENTS.md / transit-app-gotchas.
 2. **Run `/review-branch`** on the result using its proportional routing and
    fix-triggered retry policy. This is mandatory whenever code changed. "Green"
    means: no findings ranked Major or higher remain, and any Minor findings are
@@ -179,7 +179,7 @@ Write replies in plain English — the reviewer reads them without this session'
   approval prompt. Reporting them is the only output.
 - Read-only until the user approves each item in Phase 2. No code edits, no posted
   comments before that.
-- Do not commit or push without an explicit go from the user (per CLAUDE.md).
+- Do not commit or push without an explicit go from the user (per AGENTS.md).
 - If work is in a git worktree, run git via `git -C <worktree-abs-path>` and confirm
   commits land on the feature branch, not `main`.
 - **Never call the resolve mutation, on any thread.** Resolving your own PR's

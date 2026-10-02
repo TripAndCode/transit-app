@@ -250,7 +250,7 @@ def gather_stale_branches(
     per branch would turn one bounded call into an unbounded one as branch count grows.
     A branch is treated as protected if GitHub reports it so, or if its name is in
     `protected_names` (this repo does not currently configure branch protection at all,
-    so the latter is the operative check in practice -- see `CLAUDE.md`). When
+    so the latter is the operative check in practice -- see `AGENTS.md`). When
     `remote_protection` is `None` (the branch-protection fetch failed entirely this
     tick), every branch not in `protected_names` has unknown status and is excluded
     from the stale-branches list rather than assumed unprotected. A branch name absent

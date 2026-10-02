@@ -11,7 +11,7 @@ Two-tier degrade on a miss:
   failure's exit(1), so the shell loop can skip just this agency this run
   instead of aborting everything after it under `set -euo pipefail`.
 - analyze_all/ingest_live (whole-fleet; nothing shell-loops over these) exit
-  1, matching their own documented fail-loud contract (CLAUDE.md:
+  1, matching their own documented fail-loud contract (AGENTS.md:
   "partial run can't pass silently").
 
 DB-free: psycopg2 connection is mocked; try_lock_ingest_analyze itself is

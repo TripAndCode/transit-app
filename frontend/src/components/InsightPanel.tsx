@@ -8,10 +8,9 @@ import { useAgencyId } from "../api/useAgencyId";
 import { delayColor } from "../styles/tokens";
 import { reportHref } from "../routes/destinations";
 
-// Map the backend's binary severity onto the existing delay warm ramp
-// (CLAUDE.md: "Severity uses the existing warm ramp") via representative
-// minute values landing in delayBand()'s "severe" vs "ok" tiers, rather
-// than inventing new colors just for this panel.
+// Map the backend's binary severity onto the existing delay warm ramp via
+// representative minute values landing in delayBand()'s "severe" vs "ok"
+// tiers, rather than inventing new colors just for this panel.
 function severityColor(severity: "notable" | "normal"): string {
   return delayColor(severity === "notable" ? 6 : 0);
 }
