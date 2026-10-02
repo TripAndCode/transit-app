@@ -190,9 +190,9 @@ and tells you about them — no manual digging required.
 
 ![Worth a look panel (initial state)](./04-analysis-landing.en.png)
 
-For example, it might show something like "Route 3968526772's delay pattern shifted
-partway through this week," along with the route to watch and the size of the change
-(e.g. +4.2 min).
+For example, it might show something like "The delay pattern on W54 沖舘・新田線
+shifted partway through this week (+4.2 min change)," naming the route to watch and
+the size of the change.
 
 Clicking "View" inside the panel automatically jumps to a Trend screen focused on that
 route and period.

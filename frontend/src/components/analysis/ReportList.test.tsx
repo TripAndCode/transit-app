@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n from "../../i18n";
@@ -47,5 +47,41 @@ describe("ReportList", () => {
     render(<ReportList types={["brand_new"]} active={null} onSelect={vi.fn()} />);
     expect(screen.getByRole("group", { name: "Other" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /brand_new/ })).toBeInTheDocument();
+  });
+});
+
+describe("ReportList on a phone", () => {
+  beforeEach(() => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      matches: true,
+      media: "(max-width: 640px)",
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    } as unknown as MediaQueryList);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("is one grouped select, so the report itself starts above the fold", async () => {
+    const onSelect = vi.fn();
+    render(<ReportList types={["ranking", "on_time", "trend"]} active="ranking" onSelect={onSelect} />);
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    const select = screen.getByRole("combobox", { name: "Reports" });
+    expect(select).toHaveValue("ranking");
+    expect(within(select).getAllByRole("group").map((g) => g.getAttribute("label"))).toEqual([
+      "Rankings",
+      "Punctuality",
+      "Patterns over time",
+    ]);
+    await userEvent.selectOptions(select, "on_time");
+    expect(onSelect).toHaveBeenCalledWith("on_time");
+  });
+
+  it("prompts for a choice before any report is picked", () => {
+    render(<ReportList types={["ranking"]} active={null} onSelect={vi.fn()} />);
+    expect(screen.getByRole("combobox", { name: "Reports" })).toHaveDisplayValue("Select a report");
   });
 });

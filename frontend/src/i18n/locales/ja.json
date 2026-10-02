@@ -373,7 +373,10 @@
       "平日": "平日",
       "土日祝": "土日祝"
     },
-    "route": "路線"
+    "route": "路線",
+    "route_label": "{{name}} · {{heading}}",
+    "route_heading_to": "{{to}}行き",
+    "route_heading_from_to": "{{from}}→{{to}}"
   },
   "legal": {
     "privacy": "プライバシーポリシー",
@@ -490,11 +493,12 @@
     "routes": {
       "label": "路線",
       "search_placeholder": "検索 (名前 / コード)",
-      "variant_count_one": "({{count}}路線)",
-      "variant_count_other": "({{count}}路線)",
+      "variant_count_one": "({{count}}系統)",
+      "variant_count_other": "({{count}}系統)",
       "show_more": "さらに表示 (残り{{count}}件)",
       "empty_title": "ルートが登録されていません。",
-      "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。"
+      "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。",
+      "search_label": "路線を検索"
     }
   },
   "operations": {
@@ -1048,13 +1052,19 @@
       "route_forecast": "指定日の系統別の遅れを予測します。",
       "council_summary": "議会・取締役会向けの期間まとめです。",
       "delay_certificate": "特定の遅延便を証明する書類です。"
+    },
+    "card": {
+      "value_with_unit": "{{value}}{{unit}}"
+    },
+    "trend": {
+      "single_day": "推移を見るには2日以上の期間が必要です。期間を広げると、日ごとの遅延の動きが分かります。"
     }
   },
   "insight_panel": {
     "title": "注目ポイント",
     "no_signal": "今は特に注目すべき動きはありません。",
     "load_error": "読み込みに失敗しました。",
-    "view_button": "見る",
+    "view_button": "路線の詳細を開く",
     "collapse_aria": "注目ポイントパネルを閉じる",
     "expand_aria": "注目ポイントパネルを開く"
   },
@@ -1539,7 +1549,7 @@
     "followup_submit": "質問する"
   },
   "palette": {
-    "placeholder": "事業者・系統・レポート・時間帯・操作を検索…",
+    "placeholder": "検索・移動…",
     "aria_label": "コマンドパレット",
     "no_results": "一致する項目がありません",
     "nav_pulse_sublabel": "運行の今と、変わったこと",
@@ -1582,11 +1592,6 @@
       "reset_service": "運行種別をすべてに戻す",
       "jump_latest_data": "最新のデータに移動する"
     }
-  },
-  "routesIndex": {
-    "open_route": "路線カルテを開く",
-    "open_route_placeholder": "路線を選ぶ",
-    "open": "開く"
   },
   "topbar": {
     "ask_placeholder": "路線・レポート・画面を検索",

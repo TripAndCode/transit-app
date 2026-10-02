@@ -141,6 +141,7 @@ export function RoutesPicker({
       <input
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
+        aria-label={t("filters.routes.search_label")}
         placeholder={t("filters.routes.search_placeholder")}
         style={{ width: "100%", marginBottom: 6, fontSize: 13 }}
       />

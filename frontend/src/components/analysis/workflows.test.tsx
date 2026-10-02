@@ -105,7 +105,7 @@ it("changing keito scopes both report queries and CSV to the selected code", asy
   // picker, and each pick applies at once.
   show("reports");
   const user = setupUser();
-  await user.click(screen.getByRole("button", { name: /\(101\)/ }));
+  await user.click(screen.getByRole("button", { name: "1" }));
   // The picker labels routes by display name, not code: "1 Coast" is 101 and
   // "9 Coast" is 999 (short name + long name, per routeDisplayName). The
   // space is optional because dom-accessibility-api trims each inline
@@ -180,7 +180,7 @@ it("keeps the route map mounted across tab switches instead of recreating its We
   await waitFor(() => expect(mapMounts).toHaveBeenCalledTimes(1));
   expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
 
-  await user.click(screen.getByRole("tab", { name: "Delay trend" }));
+  await user.click(screen.getByRole("tab", { name: "Along the route" }));
   expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
 
   await user.click(screen.getByRole("tab", { name: "Map" }));

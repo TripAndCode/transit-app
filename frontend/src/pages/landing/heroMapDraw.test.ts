@@ -117,6 +117,16 @@ describe("drawHeroFrame", () => {
       expect(texts).not.toContain("network-avg");
     }
   });
+
+  it("drops the numbered screen captions on a narrow canvas, which has no panel for them to name", () => {
+    const captions = ["cap-live", "cap-trip", "cap-play", "cap-overview"];
+    const wide = [LOOP_START, 7.3, 10.4, 15.2].flatMap((t) => textsAt(t));
+    expect(captions.some((c) => wide.includes(c))).toBe(true);
+    for (const t of [LOOP_START, 7.3, 10.4, 15.2]) {
+      const texts = textsAt(t, 390, 700);
+      for (const c of captions) expect(texts).not.toContain(c);
+    }
+  });
 });
 
 describe("layoutFor", () => {

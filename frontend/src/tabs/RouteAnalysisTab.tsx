@@ -1,5 +1,5 @@
 import { Suspense, lazy, use, useRef, useState, type KeyboardEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
@@ -7,6 +7,7 @@ import { ScopeRouteContext, useScope, isoDaysBefore } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
+import { useScreenQuery, withQuery } from "../api/screenScope";
 import type { RouteShapeStop } from "../api/types";
 import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { StopChart } from "../components/analysis/StopChart";
@@ -48,6 +49,7 @@ const panelId = (sub: SubTab) => `route-analysis-panel-${sub}`;
 export function RouteAnalysisTab() {
   const id = useAgencyId();
   const { t } = useTranslation("design");
+  const screenQuery = useScreenQuery();
   const [ctx, update] = useScope();
   // On a route's own page the route is the page, not a filter to clear.
   const pageRoute = use(ScopeRouteContext);
@@ -121,7 +123,17 @@ export function RouteAnalysisTab() {
     { header: "comparison_mean_minutes", value: (s) => matchedPrevious(s, prevStops) },
   ];
   return <div className="focus-page">
-    <header className="focus-header"><h1>{t("investigate")}</h1><div className="focus-actions">
+    {route && <nav className="focus-breadcrumb" aria-label={t("breadcrumb")}>
+      <Link to={withQuery(`/agencies/${id}/routes`, screenQuery(String(id), "routes"))}>{t("routesCrumb")}</Link>
+      <span aria-hidden="true"> / </span>
+      <span aria-current="page">{names.format(route)}</span>
+    </nav>}
+    <header className="focus-header"><div>
+      {/* A route's page is named by its route; the question it answers sits
+          beneath. Without a route the question is all there is to say. */}
+      <h1>{route ? names.format(route) : t("investigate")}</h1>
+      {route && <p className="focus-muted focus-subtitle">{t("investigate")}</p>}
+    </div><div className="focus-actions">
       <button className="btn-ghost" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
         ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
@@ -141,7 +153,7 @@ export function RouteAnalysisTab() {
       })}
     />}>
       {() => <>
-        <div className="focus-header"><div><h2>{t("stopDelay")}</h2><span className="focus-muted">{names.format(route)} · {t("mean")}</span></div>
+        <div className="focus-header"><div><h2>{t("stopDelay")}</h2><span className="focus-muted">{t("mean")}</span></div>
           <label><input type="checkbox" checked={compare} onChange={(e) => setParams((old) => { const next = new URLSearchParams(old); if (e.target.checked) next.set("compare", "1"); else next.delete("compare"); return next; })} /> {t("compare")}</label>
         </div>
         {compare && previous.error && <ErrorBanner error={previous.error} onRetry={() => void previous.refetch()} />}

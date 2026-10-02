@@ -66,10 +66,11 @@ export function destHref(
 }
 
 /** A route dossier's route lives in its path; a `routes` param would only
- *  contradict it. */
+ *  contradict it. The params that picked another screen's report or document
+ *  (`report`, `sort`, `doc`, `by`) mean nothing on a route's page either. */
 export function routeHref(agencyId: number | string, code: string, search = "", tab?: RouteTab): string {
   const params = new URLSearchParams(search);
-  params.delete("routes");
+  for (const key of ["routes", "report", "sort", "doc", "by"]) params.delete(key);
   return `/agencies/${agencyId}/routes/${encodeURIComponent(code)}${mergeSearch(params.toString(), tab ? { tab } : {})}`;
 }
 

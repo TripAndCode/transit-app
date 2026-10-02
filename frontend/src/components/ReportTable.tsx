@@ -1,14 +1,22 @@
 import { useTranslation } from "react-i18next";
+import { Link, useLocation } from "react-router-dom";
 import type { TFunction } from "i18next";
 import { delayColor, delayTextColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
+import { RouteLabel } from "./RouteLabel";
+import { routeHref } from "../routes/destinations";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
+import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, fmtPct } from "../utils/format";
+import "./ReportTable.css";
 
 const ROWS_CAP = 200;
+// A phone list item is several times a table row's height, so the first
+// screenful is shorter.
+const PHONE_ROWS_CAP = 25;
 
 type Schema = {
   /** Column index in the row tuple */
@@ -29,12 +37,13 @@ type Schema = {
    * "平日" / "土日祝") but should display in the active locale. // i18n-ignore: JSDoc
    */
   valueKey?: string;
+  /** The cell holds a route_code, shown as the route's label. */
+  route?: true;
 };
 
-// Sentinel reference for the route column. The render path uses reference
-// equality (`c === ROUTE_COL`) to swap in route-name formatting, so every
-// schema below must reuse this exact instance.
-const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left" };
+// The route column of every per-route report. Kept in view while a wide table
+// scrolls sideways, which only works for a first column.
+const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left", route: true };
 
 // ranking + ranking_best share columns; only the API sort order differs.
 const RANKING_COLS: Schema[] = [
@@ -108,11 +117,9 @@ const SCHEMAS: Record<string, Schema[]> = {
   // (agency_name, route_code, service_type, date, scheduled_time,
   // actual_time, dep_delay_sec) -- one row per over-threshold departure
   // observation (see pipeline.reports.council.compute_delay_certificate).
-  // No route-name lookup here (route is index 1, not 0 -- ROUTE_COL's
-  // useRouteNames formatting is keyed to index 0 by reference equality).
   delay_certificate: [
     { index: 0, labelKey: "reports.col.agency_name", align: "left" },
-    { index: 1, labelKey: "common.route", align: "left" },
+    { index: 1, labelKey: "common.route", align: "left", route: true },
     { index: 2, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
     { index: 3, labelKey: "reports.col.date", align: "left" },
     { index: 4, labelKey: "reports.col.scheduled_time", align: "left" },
@@ -171,17 +178,86 @@ type Props = {
 export function ReportTable({ reportType, rows }: Props) {
   const { t } = useTranslation();
   const id = useAgencyId();
-  const { format: formatRoute } = useRouteNames(id);
+  const names = useRouteNames(id);
+  const { search } = useLocation();
   const schema = SCHEMAS[reportType];
 
-  const maxes = computeColumnMaxes(schema, rows);
-  const cappedRows = useCappedList(rows, ROWS_CAP, reportType);
+  const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+  const cappedRows = useCappedList(
+    rows,
+    compact ? PHONE_ROWS_CAP : ROWS_CAP,
+    `${reportType}:${compact ? "phone" : "wide"}`,
+  );
 
   if (!schema) {
-    // Unknown type — fall back to raw key/value table
+    // Unknown type: render nothing.
     return null;
   }
 
+  const showMore = cappedRows.remaining > 0 && (
+    <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
+      {t("common.show_more", { count: cappedRows.remaining })}
+    </button>
+  );
+
+  if (compact) {
+    // Seven columns can't share a phone's width without characters stacking,
+    // so each row becomes one item: rank, route and the barred figure on top,
+    // every other column on a wrapping line beneath. A report without a
+    // route column has no title.
+    const titleCol = schema.find((c) => c.route);
+    const headline = schema.find((c) => c.bar);
+    return (
+      <div>
+        <ol className="report-cards">
+          {cappedRows.visible.map((row, i) => (
+            <li key={i} className="report-cards__item">
+              <div className="report-cards__head">
+                <span className="report-cards__rank">{i + 1}</span>
+                {titleCol && (
+                  <span className="report-cards__route">
+                    <RouteCell agencyId={id} code={String(row[titleCol.index] ?? "")} names={names} search={search} />
+                  </span>
+                )}
+                {headline && (
+                  <span
+                    className="report-cards__headline"
+                    style={headline.bar === "delay" ? { color: delayTextColor(Number(row[headline.index])) } : undefined}
+                  >
+                    <span className="report-cards__label">{t(headline.labelKey)}</span>{" "}
+                    <span>{cardValue(headline, row[headline.index], t)}</span>
+                  </span>
+                )}
+              </div>
+              <p className="report-cards__meta">
+                {schema
+                  .filter((c) => c !== titleCol && c !== headline)
+                  .map((c) => {
+                    // A blank table cell reads as nothing under its header;
+                    // on a card the label would stand alone.
+                    const text = cardValue(c, row[c.index], t);
+                    if (text === "") return null;
+                    return (
+                      <span key={c.labelKey} className="report-cards__field">
+                        {c.valueKey == null && (
+                          <>
+                            <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
+                          </>
+                        )}
+                        <span>{text}</span>
+                      </span>
+                    );
+                  })}
+              </p>
+            </li>
+          ))}
+        </ol>
+        {showMore}
+      </div>
+    );
+  }
+
+  const maxes = computeColumnMaxes(schema, rows);
   return (
     <div className="table-scroll" style={{ width: "100%", overflowX: "auto" }}>
       <table style={SHARED_TABLE}>
@@ -197,27 +273,27 @@ export function ReportTable({ reportType, rows }: Props) {
         </thead>
         <tbody>
           {cappedRows.visible.map((row, i) => (
-            <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
+            <tr
+              key={i}
+              className={schema.some((c) => c.route) ? "report-row--link" : undefined}
+              style={{ borderTop: "1px solid var(--border-soft)" }}
+            >
               <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
               {schema.map((c) => {
-                if (c === ROUTE_COL) {
-                  const code = String(row[c.index] ?? "");
+                if (c.route) {
                   return (
-                    <td key={c.labelKey} style={{ ...td(), ...STICKY_CELL, fontWeight: 500, wordBreak: "keep-all" }}>
-                      {formatRoute(code)}
+                    <td
+                      key={c.labelKey}
+                      // A label names the line and where it goes; below this
+                      // width it breaks onto a third line.
+                      style={{ ...td(), ...(c === ROUTE_COL ? STICKY_CELL : null), minWidth: "16em", fontWeight: 500, wordBreak: "keep-all" }}
+                    >
+                      <RouteCell agencyId={id} code={String(row[c.index] ?? "")} names={names} search={search} />
                     </td>
                   );
                 }
                 const raw = row[c.index];
-                let text: string;
-                if (c.format) {
-                  text = c.format(raw, t);
-                } else if (c.valueKey != null && raw != null) {
-                  const rawStr = String(raw);
-                  text = t(`${c.valueKey}.${rawStr}`, { defaultValue: rawStr });
-                } else {
-                  text = String(raw ?? "—");
-                }
+                const text = cellText(c, raw, t);
                 if (c.bar) {
                   const max = maxes.get(c.index) ?? 1;
                   const v = Number(raw);
@@ -243,13 +319,49 @@ export function ReportTable({ reportType, rows }: Props) {
           ))}
         </tbody>
       </table>
-      {cappedRows.remaining > 0 && (
-        <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
-          {t("common.show_more", { count: cappedRows.remaining })}
-        </button>
-      )}
+      {showMore}
     </div>
   );
+}
+
+/** A row's route, as a link to its page: rows are where a route is found,
+ *  so they are how it is opened. The scope carries over; routeHref drops what
+ *  only chose this screen's report. */
+function RouteCell({
+  agencyId,
+  code,
+  names,
+  search,
+}: {
+  agencyId: number | null;
+  code: string;
+  names: ReturnType<typeof useRouteNames>;
+  search: string;
+}) {
+  if (agencyId == null || !code) return <RouteLabel code={code} names={names} />;
+  return (
+    <Link className="report-route-link" to={routeHref(agencyId, code, search)}>
+      <RouteLabel code={code} names={names} />
+      <span className="report-route-link__chevron" aria-hidden="true">
+        {" ›"}
+      </span>
+    </Link>
+  );
+}
+
+function cellText(c: Schema, raw: unknown, t: TFunction): string {
+  if (c.format) return c.format(raw, t);
+  if (c.valueKey != null && raw != null) {
+    const rawStr = String(raw);
+    return t(`${c.valueKey}.${rawStr}`, { defaultValue: rawStr });
+  }
+  return String(raw ?? "—");
+}
+
+/** A card has no column header to carry the unit, so the value does. */
+function cardValue(c: Schema, raw: unknown, t: TFunction): string {
+  const text = cellText(c, raw, t);
+  return c.unit && raw != null ? t("reports.card.value_with_unit", { value: text, unit: t("common.unit_min") }) : text;
 }
 
 function BarCell({

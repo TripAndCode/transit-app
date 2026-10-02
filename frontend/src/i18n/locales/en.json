@@ -373,7 +373,10 @@
       "平日": "Weekday",
       "土日祝": "Weekend/Holiday"
     },
-    "route": "Route"
+    "route": "Route",
+    "route_label": "{{name}} · {{heading}}",
+    "route_heading_to": "for {{to}}",
+    "route_heading_from_to": "{{from}} → {{to}}"
   },
   "legal": {
     "privacy": "Privacy Policy",
@@ -490,11 +493,12 @@
     "routes": {
       "label": "Route",
       "search_placeholder": "Search (name / code)",
-      "variant_count_one": "({{count}} route)",
-      "variant_count_other": "({{count}} routes)",
+      "variant_count_one": "({{count}} variant)",
+      "variant_count_other": "({{count}} variants)",
       "show_more": "Show more ({{count}} remaining)",
       "empty_title": "No routes registered yet.",
-      "empty_hint": "If the initial ingest is still running, try again in a few minutes."
+      "empty_hint": "If the initial ingest is still running, try again in a few minutes.",
+      "search_label": "Search routes"
     }
   },
   "operations": {
@@ -1048,13 +1052,19 @@
       "route_forecast": "Expected delay for a route on an upcoming day.",
       "council_summary": "A period summary written for a council or board.",
       "delay_certificate": "Proof of a specific late departure, for a passenger."
+    },
+    "card": {
+      "value_with_unit": "{{value}} {{unit}}"
+    },
+    "trend": {
+      "single_day": "A trend needs more than one day. Pick a longer period to see how delay moved from day to day."
     }
   },
   "insight_panel": {
     "title": "Worth a look",
     "no_signal": "No notable signal right now.",
     "load_error": "Couldn't load insight right now.",
-    "view_button": "View",
+    "view_button": "Open route detail",
     "collapse_aria": "Collapse insight panel",
     "expand_aria": "Expand insight panel"
   },
@@ -1539,7 +1549,7 @@
     "followup_submit": "Ask"
   },
   "palette": {
-    "placeholder": "Search agencies, routes, reports, time bands, actions…",
+    "placeholder": "Search or jump to…",
     "aria_label": "Command palette",
     "no_results": "No matching items",
     "nav_pulse_sublabel": "How service is running, and what changed",
@@ -1582,11 +1592,6 @@
       "reset_service": "Reset service type to all",
       "jump_latest_data": "Jump to the latest data"
     }
-  },
-  "routesIndex": {
-    "open_route": "Open a route",
-    "open_route_placeholder": "Choose a route",
-    "open": "Open"
   },
   "topbar": {
     "ask_placeholder": "Search routes, reports and screens",

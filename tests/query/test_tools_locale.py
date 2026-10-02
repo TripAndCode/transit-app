@@ -53,35 +53,40 @@ def test_summary_suggest_reason_anomaly_exact_strings():
     substring check (e.g. `"0%" in text`) would miss a wording regression
     or the ja/en templates drifting out of sync in content."""
     assert (
-        _summary("suggest_reason_anomaly", lang="ja", route="16012", avg_min="6.5")
-        == "路線16012の本日の平均遅延が普段より大幅に悪化しています（平均6.5分）。"
+        _summary("suggest_reason_anomaly", lang="ja", route="W54 沖舘・新田線", avg_min="6.5")
+        == "W54 沖舘・新田線の本日の平均遅延が普段より大幅に悪化しています（平均6.5分）。"
     )
     assert (
-        _summary("suggest_reason_anomaly", lang="en", route="16012", avg_min="6.5")
-        == "Route 16012's average delay today is much worse than usual (avg 6.5 min)."
+        _summary("suggest_reason_anomaly", lang="en", route="W54 沖舘・新田線", avg_min="6.5")
+        == "Average delay on W54 沖舘・新田線 today is much worse than usual (avg 6.5 min)."
     )
 
 
 def test_summary_suggest_reason_trend_shift_exact_strings():
     assert (
-        _summary("suggest_reason_trend_shift", lang="ja", route="R2", delta_min="+4.0")
+        _summary("suggest_reason_trend_shift", lang="ja", route="路線R2", delta_min="+4.0")
         == "路線R2の遅延が今週の途中から悪化しています（+4.0分の変化）。"
     )
     assert (
-        _summary("suggest_reason_trend_shift", lang="en", route="R2", delta_min="+4.0")
-        == "Route R2's delay pattern shifted partway through this week (+4.0 min change)."
+        _summary("suggest_reason_trend_shift", lang="en", route="Route R2", delta_min="+4.0")
+        == "The delay pattern on Route R2 shifted partway through this week (+4.0 min change)."
     )
 
 
 def test_summary_suggest_reason_on_time_fallback_exact_strings():
     assert (
-        _summary("suggest_reason_on_time_fallback", lang="ja", route="R4", pct="21")
+        _summary("suggest_reason_on_time_fallback", lang="ja", route="路線R4", pct="21")
         == "路線R4が今週最も定時率が低い路線です（定時率21%）。"
     )
     assert (
-        _summary("suggest_reason_on_time_fallback", lang="en", route="R4", pct="21")
+        _summary("suggest_reason_on_time_fallback", lang="en", route="Route R4", pct="21")
         == "Route R4 has the worst on-time rate this week (21% on time)."
     )
+
+
+def test_summary_route_code_fallback_exact_strings():
+    assert _summary("route_code_fallback", lang="ja", code="16012") == "路線16012"
+    assert _summary("route_code_fallback", lang="en", code="16012") == "Route 16012"
 
 
 def test_summary_schedule_realism_padding_exact_strings():

@@ -82,6 +82,31 @@ async def test_anomaly_today_wins_when_present(suggest_agency, ch_client):
     assert result["report_type"] == "trend"
     assert result["route_code"] == "R1"
     assert result["severity"] == "notable"
+    # No static route for R1: the text names it the way the app does.
+    assert result["reason_text"].startswith("路線R1の")
+
+
+@pytest.mark.asyncio
+async def test_reason_text_names_the_route_rather_than_its_code(suggest_agency, ch_client):
+    pool, agency_id = suggest_agency
+    today = jst_today()
+    await _seed(pool, agency_id, "47011", (today - timedelta(days=3)).isoformat(), [60] * 30)
+    await _seed(pool, agency_id, "47011", today.isoformat(), [300] * 30)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, $2, $3)",
+            agency_id,
+            "沖舘・新田線(47011)",
+            "W54 沖舘・新田線",
+        )
+    _run_analyze(agency_id, ch_client)
+
+    async with pool.acquire() as conn:
+        result = await compute_suggestion(agency_id, conn, ch_client, locale="en")
+
+    assert result is not None and result["route_code"] == "47011"
+    assert result["reason_text"].startswith("Average delay on W54 沖舘・新田線 today")
+    assert "47011" not in result["reason_text"]
 
 
 @pytest.mark.asyncio

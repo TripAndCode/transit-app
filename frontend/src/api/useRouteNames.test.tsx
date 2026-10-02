@@ -36,7 +36,7 @@ describe("useRouteNames", () => {
       { route_id: "T50線(39061)", route_short_name: "T50", route_long_name: "石江・新城線", route_code: "39061", trip_headsigns: [] },
     ]);
     const { result } = setupHook();
-    expect(result.current.format("39061")).toBe("T50 (39061)");
+    expect(result.current.format("39061")).toBe("T50");
   });
 
   it("falls back to route_long_name when route_short_name is blank", () => {
@@ -48,7 +48,7 @@ describe("useRouteNames", () => {
       { route_id: "国道・古川線(1021)", route_short_name: "", route_long_name: "国道・古川線", route_code: "1021", trip_headsigns: [] },
     ]);
     const { result } = setupHook();
-    expect(result.current.format("1021")).toBe("国道・古川線 (1021)");
+    expect(result.current.format("1021")).toBe("国道・古川線");
   });
 
   it("falls back to route_id when both name fields are blank", () => {
@@ -56,7 +56,7 @@ describe("useRouteNames", () => {
       { route_id: "国道・古川線(1021)", route_short_name: "", route_long_name: "", route_code: "1021", trip_headsigns: [] },
     ]);
     const { result } = setupHook();
-    expect(result.current.format("1021")).toBe("国道・古川線(1021) (1021)");
+    expect(result.current.format("1021")).toBe("国道・古川線(1021)");
   });
 
   it("shows the bare-code fallback when no static route matches", () => {
@@ -68,6 +68,30 @@ describe("useRouteNames", () => {
     ]);
     const { result } = setupHook();
     expect(result.current.format("53011")).toBe("Route 53011");
+  });
+
+  it("names a route by where it goes, so variants of one line read apart", () => {
+    mockRoutes([
+      { route_id: "国道・古川線(10012)", route_short_name: "A1 国道・古川線", route_long_name: "", route_code: "10012", trip_headsigns: ["A1明の星→青森駅（国道・古川線）"] },
+      { route_id: "国道・古川線(12212)", route_short_name: "A1 国道・古川線", route_long_name: "", route_code: "12212", trip_headsigns: ["A1中央大橋→青森駅（国道・古川線）"] },
+      { route_id: "中央大橋線(12211)", route_short_name: "L21 中央大橋線", route_long_name: "", route_code: "12211", trip_headsigns: ["L21戸山団地（中央大橋線）"] },
+    ]);
+    const { result } = setupHook();
+    expect(result.current.format("10012")).toBe("A1 国道・古川線 · 明の星 → 青森駅");
+    expect(result.current.format("12212")).toBe("A1 国道・古川線 · 中央大橋 → 青森駅");
+    expect(result.current.format("12211")).toBe("L21 中央大橋線 · for 戸山団地");
+  });
+
+  it("names the direction in Japanese word order", async () => {
+    await i18n.changeLanguage("ja");
+    mockRoutes([
+      { route_id: "国道・古川線(10012)", route_short_name: "A1 国道・古川線", route_long_name: "", route_code: "10012", trip_headsigns: ["A1明の星→青森駅（国道・古川線）"] },
+      { route_id: "中央大橋線(12211)", route_short_name: "L21 中央大橋線", route_long_name: "", route_code: "12211", trip_headsigns: ["L21戸山団地（中央大橋線）"] },
+    ]);
+    const { result } = setupHook();
+    expect(result.current.format("10012")).toBe("A1 国道・古川線 · 明の星→青森駅");
+    expect(result.current.format("12211")).toBe("L21 中央大橋線 · 戸山団地行き");
+    await i18n.changeLanguage("en");
   });
 
   it("returns an em dash for a null/undefined route_code", () => {
@@ -120,6 +144,6 @@ describe("useRouteNames (JSX consumer)", () => {
       { route_id: "国道・古川線(1021)", route_short_name: "国道", route_long_name: "国道・古川線", route_code: "1021", trip_headsigns: [] },
     ]);
     setup();
-    expect(screen.getByTestId("probe")).toHaveTextContent("T50 (39061)|2");
+    expect(screen.getByTestId("probe")).toHaveTextContent("T50|2");
   });
 });

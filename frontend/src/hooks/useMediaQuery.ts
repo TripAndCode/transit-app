@@ -9,6 +9,9 @@ import { BP } from "../styles/breakpoints";
  *  JS-driven layout switch with it. */
 export const MOBILE_BREAKPOINT_PX: number = BP.sm;
 export const MOBILE_BREAKPOINT_QUERY = `(max-width: ${MOBILE_BREAKPOINT_PX}px)`;
+/** A touch screen as the primary pointer: keyboard shortcut hints mean
+ *  nothing there. */
+export const COARSE_POINTER_QUERY = "(pointer: coarse)";
 
 /**
  * Tracks a media query's match state so desktop/mobile component variants
