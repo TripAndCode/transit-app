@@ -179,7 +179,7 @@ Write replies in plain English — the reviewer reads them without this session'
   approval prompt. Reporting them is the only output.
 - Read-only until the user approves each item in Phase 2. No code edits, no posted
   comments before that.
-- Do not commit or push without an explicit go from the user (per AGENTS.md).
+- Do not commit or push without an explicit go from the user in this workflow.
 - If work is in a git worktree, run git via `git -C <worktree-abs-path>` and confirm
   commits land on the feature branch, not `main`.
 - **Never call the resolve mutation, on any thread.** Resolving your own PR's
