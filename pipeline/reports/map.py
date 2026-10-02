@@ -24,16 +24,18 @@ async def route_exists(conn, agency_id: int, route_code: str) -> bool:
     Checks ``agg_route_daily``, not ``agg_route_stats``: agg_route_stats is
     built with ``WHERE service_type IS NOT NULL`` (pipeline/analyze.py), so
     it's a LOSSY existence oracle — a real, legitimately-observed route with
-    an all-NULL service_type is invisible to it even though
-    today_route_summary's route list (built from agg_route_daily, no such
-    filter) would show it with bucket="no_baseline". Checking agg_route_daily
-    instead matches the grain of the table that actually populates the route
-    list users click through from. No secondary index on route_code
-    (agg_route_daily's PK leads with (agency_id, date)), but the table holds
-    per-agency route×day×service rows, not raw `updates`, so this stays cheap
-    regardless of agency size, for both a fabricated and a real route_code.
-    Accepted trade-off: a route first seen today reads as not found on the
-    drill-downs until its first day is promoted and analyzed.
+    an all-NULL service_type is invisible to it even though agg_route_daily
+    (no such filter) holds a row for it with no baseline. Checking
+    agg_route_daily instead matches the grain of the range-scoped,
+    historical route lists this existence check gates (route-shape, route
+    trips, stop profile) — today's live route list (today_route_summary)
+    reads `updates_live` directly and is not built from this table at all.
+    No secondary index on route_code (agg_route_daily's PK leads with
+    (agency_id, date)), but the table holds per-agency route×day×service
+    rows, not raw `updates`, so this stays cheap regardless of agency size,
+    for both a fabricated and a real route_code. Accepted trade-off: a route
+    first seen today reads as not found on these drill-downs until its
+    first day is promoted and analyzed.
     """
     return (
         await conn.fetchval(

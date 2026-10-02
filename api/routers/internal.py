@@ -77,7 +77,11 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
             if cur.fetchone() is None:
                 raise ValueError(f"Unknown or deleted agency_id={agency_id}")
         # No advisory lock: a push writes updates_live, which analyze never
-        # reads (pipeline/locks.py).
+        # reads (pipeline/locks.py). ingest_live_payload's check-then-insert
+        # over the last 10 minutes of captured_at absorbs a sequential
+        # second arrival of the same file_name within that window; two
+        # pushes that overlap in flight can both insert, and analyze's
+        # argMax dedup on captured_at absorbs the duplicate from there.
         ch_client = get_client()
         return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
     finally:
@@ -137,8 +141,6 @@ async def collector_update(agency_id: int, request: Request) -> dict:
             captured.astimezone(timezone.utc).isoformat(),
             file_name,
         )
-    except HTTPException:
-        raise
     except Exception as exc:
         _log.exception("collector ingest failed for agency %s", agency_id)
         raise HTTPException(status_code=502, detail="Collector payload could not be ingested") from exc

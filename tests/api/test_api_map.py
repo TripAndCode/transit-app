@@ -752,17 +752,19 @@ async def test_route_shape_shape_vote_ignores_null_delay_only_trips(map_app_ch, 
         # T1/T2: real dep_delay data (shape S1). T3: NULL dep_delay on every
         # row (arrival-only StopTimeUpdates, no departure delay ever
         # reported) -- shape S2's only trip, so S2 gets zero vote weight.
+        # captured_at sits on a closed day: the default range is the last 30
+        # CLOSED JST days, which excludes today.
         await conn.execute(
             "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
             "file_name, service_type, scheduled_time) VALUES "
-            "($1, 'T1', 'R1', 1, 30, NOW(), 'f1.pb', 'weekday', '09:00:00'), "
-            "($1, 'T1', 'R1', 2, 60, NOW(), 'f1.pb', 'weekday', '09:05:00'), "
-            "($1, 'T1', 'R1', 3, 90, NOW(), 'f1.pb', 'weekday', '09:10:00'), "
-            "($1, 'T2', 'R1', 1, 40, NOW(), 'f2.pb', 'weekday', '10:00:00'), "
-            "($1, 'T2', 'R1', 2, 70, NOW(), 'f2.pb', 'weekday', '10:05:00'), "
-            "($1, 'T2', 'R1', 3, 100, NOW(), 'f2.pb', 'weekday', '10:10:00'), "
-            "($1, 'T3', 'R1', 1, NULL, NOW(), 'f3.pb', 'weekday', '11:00:00'), "
-            "($1, 'T3', 'R1', 2, NULL, NOW(), 'f3.pb', 'weekday', '11:05:00')",
+            "($1, 'T1', 'R1', 1, 30, NOW() - INTERVAL '1 day', 'f1.pb', 'weekday', '09:00:00'), "
+            "($1, 'T1', 'R1', 2, 60, NOW() - INTERVAL '1 day', 'f1.pb', 'weekday', '09:05:00'), "
+            "($1, 'T1', 'R1', 3, 90, NOW() - INTERVAL '1 day', 'f1.pb', 'weekday', '09:10:00'), "
+            "($1, 'T2', 'R1', 1, 40, NOW() - INTERVAL '1 day', 'f2.pb', 'weekday', '10:00:00'), "
+            "($1, 'T2', 'R1', 2, 70, NOW() - INTERVAL '1 day', 'f2.pb', 'weekday', '10:05:00'), "
+            "($1, 'T2', 'R1', 3, 100, NOW() - INTERVAL '1 day', 'f2.pb', 'weekday', '10:10:00'), "
+            "($1, 'T3', 'R1', 1, NULL, NOW() - INTERVAL '1 day', 'f3.pb', 'weekday', '11:00:00'), "
+            "($1, 'T3', 'R1', 2, NULL, NOW() - INTERVAL '1 day', 'f3.pb', 'weekday', '11:05:00')",
             agency_id,
         )
         await conn.execute(
@@ -880,28 +882,25 @@ async def test_route_shape_returns_empty_for_nonexistent_route(map_app):
 
 async def _seed_route(pool, agency_id, route_code, service_type, day_rows, baseline=None, ch_client=None):
     """day_rows: list of (trip_id, stop_sequence, dep_delay_sec, scheduled_time).
-    baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats.
-    Always inserts an agg_route_stats row for (agency_id, route_code,
-    service_type), even when baseline is None (NULL avg_min/p90_min/samples
-    in that case) — needed for route-summary's baseline-lookup tests, not for
-    existence: route_trips/route_stop_profile/route_shape's existence
-    precheck (map.py's anonymous-scan hardening) checks agg_route_daily, not
-    agg_route_stats (the latter is a lossy existence oracle — see
-    _seed_route_existence's docstring) — which the unconditional
-    agg_route_daily insert below already covers for any route seeded via
-    this helper.
+    baseline: optional (avg_min, p90_min, samples) -> inserted into agg_route_stats,
+    for tests that need a baseline row present even though these drilldowns
+    never read it themselves.
+    Always inserts an agg_route_daily row for (agency_id, route_code,
+    service_type): route_trips/route_stop_profile/route_shape's existence
+    precheck (map.py's anonymous-scan hardening, `route_exists`) checks
+    agg_route_daily, not agg_route_stats (the latter is a lossy existence
+    oracle — see _seed_route_existence's docstring).
     ch_client: optional sync ClickHouse client — when given, the raw rows
     seeded into Postgres `updates` below are ALSO mirrored into ClickHouse
     (via tests.conftest.mirror_updates_to_ch) since the trips/stop-profile
-    drilldowns and route-summary's freshness header read live `updates`
-    from ClickHouse, not Postgres.
+    drilldowns read live `updates` from ClickHouse, not Postgres.
 
     Seeds raw `updates` (for the trips/stop-profile drilldowns, which read
     them from ClickHouse when `ch_client` is given) AND the precomputed
-    `agg_route_daily` row the route-summary endpoint reads — computed
-    here from day_rows rather than via a full analyze(), so the hand-set
-    baseline in agg_route_stats isn't clobbered. analyze()'s own builder
-    is covered separately by test_analyze_builds_agg_route_daily."""
+    `agg_route_daily` row `route_exists` checks — computed here from
+    day_rows rather than via a full analyze(), so the hand-set baseline in
+    agg_route_stats isn't clobbered. analyze()'s own builder is covered
+    separately by test_analyze_builds_agg_route_daily."""
     from datetime import datetime, time, timezone
 
     seeded_at = datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc)
@@ -1593,11 +1592,13 @@ async def test_route_shape_returns_null_geometry_when_no_shapes_loaded(map_app_c
             "       ($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00')",
             agency_id,
         )
+        # captured_at sits on a closed day: the default range is the last 30
+        # CLOSED JST days, which excludes today.
         await conn.execute(
             "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
             "file_name, service_type, scheduled_time) "
-            "VALUES ($1, 'T1', 'R1', 1, 60, NOW(), 'test.pb', 'weekday', '09:00:00'), "
-            "       ($1, 'T1', 'R1', 2, 90, NOW(), 'test.pb', 'weekday', '09:05:00')",
+            "VALUES ($1, 'T1', 'R1', 1, 60, NOW() - INTERVAL '1 day', 'test.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', 'R1', 2, 90, NOW() - INTERVAL '1 day', 'test.pb', 'weekday', '09:05:00')",
             agency_id,
         )
     from tests.conftest import mirror_updates_to_ch
@@ -1642,11 +1643,13 @@ async def test_route_shape_returns_stops_when_no_trip_has_a_shape_id(map_app_ch,
             "       ($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00')",
             agency_id,
         )
+        # captured_at sits on a closed day: the default range is the last 30
+        # CLOSED JST days, which excludes today.
         await conn.execute(
             "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
             "file_name, service_type, scheduled_time) "
-            "VALUES ($1, 'T1', 'R1', 1, 60, NOW(), 'test.pb', 'weekday', '09:00:00'), "
-            "       ($1, 'T1', 'R1', 2, 90, NOW(), 'test.pb', 'weekday', '09:05:00')",
+            "VALUES ($1, 'T1', 'R1', 1, 60, NOW() - INTERVAL '1 day', 'test.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', 'R1', 2, 90, NOW() - INTERVAL '1 day', 'test.pb', 'weekday', '09:05:00')",
             agency_id,
         )
     from tests.conftest import mirror_updates_to_ch
@@ -1811,11 +1814,12 @@ async def test_analyze_builds_agg_route_daily(map_app, ch_client, ch_async_clien
 
 @pytest.mark.asyncio
 async def test_route_summary_freshness_probe_fails_degrades_only_the_header(map_app_ch, ch_client):
-    """ClickHouse backs ONLY the informational
-    ``latest_captured_at`` freshness header here — every actual route row
-    comes from ``updates_live`` via the main query. A hiccup on the separate
-    freshness probe must degrade to ``latest_captured_at: null``, not 500 the
-    whole endpoint."""
+    """Both the main per-route query and the informational
+    ``latest_captured_at`` freshness probe read ClickHouse, but as two
+    separate queries. A hiccup on the freshness probe alone must degrade
+    only ``latest_captured_at`` to null, not 500 the whole endpoint — the
+    main query's own route rows, also read live from ``updates_live``, must
+    still come back."""
 
     class _FreshnessProbeDown:
         def __init__(self, inner):
@@ -1846,6 +1850,44 @@ async def test_route_summary_freshness_probe_fails_degrades_only_the_header(map_
     r1 = next(r for r in body["routes"] if r["route_code"] == "R1")
     assert r1["avg_delay_sec"] == 300
     assert r1["samples"] == 25
+
+
+@pytest.mark.asyncio
+async def test_route_summary_latest_captured_at_prefers_live_over_history(map_app_ch, ch_client):
+    """`latest_captured_at` is the newest `updates_live` poll when the agency
+    has one, even though an older `updates` row also exists for it."""
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    live_at = now - timedelta(minutes=1)
+    hist_at = now - timedelta(days=2)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [("live.pb", live_at, "T1", "平日", "10:00", "R1", 1, 300)],
+        table=LIVE_TABLE,
+    )
+    insert_updates(ch_client, agency_id, [("19990101/h.pb", hist_at, "T2", "平日", "10:00", "R1", 1, 300)])
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    assert resp.status_code == 200
+    assert resp.json()["latest_captured_at"] == live_at.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_route_summary_latest_captured_at_falls_back_to_history_when_live_is_empty(map_app_ch, ch_client):
+    """`updates_live` holding nothing for the agency falls back to the newest
+    `updates` row rather than leaving the freshness header null."""
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    hist_at = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=2)
+    insert_updates(ch_client, agency_id, [("19990101/h.pb", hist_at, "T2", "平日", "10:00", "R1", 1, 300)])
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/today/route-summary")
+    assert resp.status_code == 200
+    assert resp.json()["latest_captured_at"] == hist_at.isoformat()
 
 
 @pytest.mark.asyncio

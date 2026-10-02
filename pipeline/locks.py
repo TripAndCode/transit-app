@@ -20,11 +20,11 @@ Two lock domains, distinguished by what the caller is about to write:
    `updates_live` into `updates`, and by analyze() for the whole of its own
    run. The realtime writers (collector push, `ingest_live`) write
    `updates_live`, which analyze never reads, and take no per-agency key.
-   Two *different* agencies never contend here: promotion's copy for one
-   touches no row and no agg_* table the other reads, so a single global key
-   serializing disjoint work would turn every concurrent fleet-wide
-   promotion or analyze into needless blocking; the per-agency key keeps
-   that contention scoped to genuine same-agency overlap.
+   This is analyze's own exclusion against promotion's copy landing
+   mid-run, independent of whether a caller also holds domain 1. Current
+   callers hold both: the cron sweep takes domain 1 once around its whole
+   per-agency loop, and promotion/analyze each still take domain 2 per
+   agency inside it -- domain 1 alone cannot stand in for domain 2.
 
 Domain 2 covers analyze() as well as promotion's copy precisely BECAUSE
 Postgres keeps single-argument and two-argument advisory locks in separate
@@ -40,9 +40,11 @@ other incremental tables stay permanently short those rows. Per-agency
 exclusion, not the ledger, is what makes this safe; the ledger cannot detect
 the one case that would need it to.
 
-Do not narrow domain 2 back to promotion's copy alone, and do not move that
-copy into domain 1: the first reopens the skew above, the second restores the
-cross-agency serialization the split exists to remove.
+Do not narrow domain 2 back to promotion's copy alone: that reopens the skew
+above by removing analyze's own exclusion. Do not rely on domain 1 alone to
+provide it either, even for a caller that already holds domain 1 for its own
+reasons: the two locks occupy separate advisory-lock spaces, so holding one
+never grants the other's exclusion.
 
 Best-effort, not job-level atomicity: production (scripts/fetch_and_ingest.sh,
 docs/deploy-railway.md's Railway sketch) invokes ingest/load_static/analyze
@@ -143,8 +145,8 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
     result would be an agency that goes unanalyzed for a reason invisible in
     its output), and one long-lived connection analyzes every agency in turn,
     so a lock left to connection teardown would still be held for agency N
-    while N+1..last are processed -- blocking that agency's promotion for the
-    whole fleet's run, which is the contention this key exists to avoid.
+    while N+1..last are processed, well past the point this key's exclusion
+    is still needed for agency N.
 
     Waiting cannot deadlock: every holder (promotion, analyze) takes this key
     while holding at most INGEST_ANALYZE_LOCK_KEY's single-argument lock,

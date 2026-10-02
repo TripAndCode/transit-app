@@ -41,9 +41,6 @@ class FakeConn:
     def __init__(self, *, agency_exists=True, raise_on_close=False):
         self.executed: list[tuple[str, tuple | None]] = []
         self.autocommit = None
-        self.autocommit_history: list[bool] = []
-        self.committed = False
-        self.rolled_back = False
         self.closed = False
         self.agency_exists = agency_exists
         self.raise_on_close = raise_on_close
@@ -51,12 +48,6 @@ class FakeConn:
 
     def cursor(self):
         return FakeCursor(self)
-
-    def commit(self):
-        self.committed = True
-
-    def rollback(self):
-        self.rolled_back = True
 
     def close(self):
         self.closed = True

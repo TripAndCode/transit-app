@@ -1,6 +1,8 @@
 """/delays/refresh's collector path stores the poll as a live payload, under
-the same name the collector's own push gives it, so whichever arrives second
-is absorbed by the live path's file-level dedup."""
+the same name the collector's own push gives it, so a sequential second
+arrival within ingest_live_payload's 10-minute captured_at window is absorbed
+there; an overlapping push can still insert alongside it, left to analyze's
+argMax dedup."""
 
 import subprocess
 from unittest.mock import MagicMock, patch

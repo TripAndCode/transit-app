@@ -136,8 +136,11 @@ def _ingest_live_agency(agency_id: int) -> int:
                 timeout=15,
             ).stdout
             # The collector's own push names this poll `oracle/<day>/<file>` from
-            # the same on-disk path, so the live path's file-level dedup absorbs
-            # whichever of the two arrives second.
+            # the same on-disk path, so ingest_live_payload's check-then-insert
+            # over the last 10 minutes of captured_at absorbs a sequential
+            # second arrival of the same file_name. If this SSH pull and the
+            # collector's own push overlap in flight, both can still insert;
+            # analyze's argMax dedup on captured_at absorbs that duplicate.
             return ingest_live_payload(
                 agency_id,
                 raw,
@@ -677,10 +680,13 @@ async def today_route_summary(
     baseline itself (``agg_route_stats`` no longer drops thin route/service
     groups at insert time) — the client decides its own low-confidence
     treatment for a thin baseline from this field. The client groups by
-    bucket, so the SQL ``ORDER BY`` is only a sensible default.
+    bucket, so :func:`build_today_routes`'s worst-first sort is only a
+    sensible default.
 
-    Today's figures are computed live from `updates_live`, and the baseline
-    comes from `agg_route_stats`, which holds closed days only.
+    Today's figures are computed live from `updates_live`; `agg_route_daily`
+    plays no part here (it feeds ``route_exists`` and the historical range
+    endpoints). The baseline comes from `agg_route_stats`, which holds
+    closed days only.
     """
     today = jst_today()
     result = await ch.query(
