@@ -1,15 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // A stylesheet reaches the page only through a module's side-effect import, and
 // nothing else notices when that import is missing: knip scans TS only, vitest
 // stubs CSS, and the class names in the markup still read as styled. Every
 // stylesheet under src must be imported by some non-test module.
 
-// `process.cwd()` is the `frontend/` package root under vitest; the module
-// URL is not a file: URL after vite's transform, so it cannot be used here.
-const root = path.resolve(process.cwd(), "src");
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
