@@ -41,14 +41,14 @@ async def compute_supply_metrics_by_agency(
     reused rather than recomputed so this metric never disagrees with the
     executed/planned trip ratio shown alongside it.
 
-    ``vehicle_km_delivered_pct`` is the "vehicle-km delivered" rate: item
-    92's executed/planned trip ratio applied to this version's planned
+    ``vehicle_km_delivered_pct`` is the "vehicle-km delivered" rate: the
+    executed/planned trip ratio applied to this version's planned
     vehicle-km (there is no per-trip executed/canceled distance breakdown to
     do better than assuming a canceled trip's distance is representative of
     the agency's average). It falls back to ``None`` — a trip-count-only
     headline, via ``planned_trip_count`` alone — whenever either input isn't
     available: this agency has no ``shapes.txt`` loaded
-    (``planned_vehicle_km`` is ``None``), or item 92's ratio isn't computable
+    (``planned_vehicle_km`` is ``None``), or that ratio isn't computable
     for it (``service_delivered_pct`` is ``None``).
     """
     if not agency_ids:

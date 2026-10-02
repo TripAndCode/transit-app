@@ -218,7 +218,7 @@ class HeadwayQualityRow(BaseModel):
 class HeadwayQualityResponse(BaseModel):
     """Payload for ``GET /headway_quality`` — a second, narrower metric
     panel restricted to high-frequency routes, meant to render alongside
-    (not instead of) the ``on_time`` report for the same range (item 94)."""
+    (not instead of) the ``on_time`` report for the same range."""
 
     rows: list[HeadwayQualityRow]
     ctx: ReportCtx
@@ -247,7 +247,7 @@ async def get_headway_quality(
 
 
 class PerformanceStandardRow(BaseModel):
-    """One configured `route_performance_standards` row (item 104), joined
+    """One configured `route_performance_standards` row, joined
     against the current actual value of its `metric_type` and the resulting
     achievement rate / estimated bonus-or-deduction -- see
     `pipeline.reports.performance_standard.compute_performance_standards`
@@ -863,13 +863,14 @@ async def get_report(
         days = series["days"]
         if format == "csv":
             return _csv_response(report_type, days, ctx, definition)
-        # Schedule-revision boundary dates (item 98) — dates within this
+        # Schedule-revision boundary dates — dates within this
         # range where the static feed version running that day changed —
         # so the Trend chart can mark a timetable revision instead of
         # letting a metric shift there be misread as a service-quality
         # change. Empty (not missing) when this agency has no
         # agg_schedule_revision_daily coverage at all (its ingest strategy
-        # never joins static data, or no reload has happened since item 88).
+        # never joins static data, or its RT rows carry no static_version_id
+        # yet).
         # Skipped entirely for the CSV export above, which has no chart to
         # annotate.
         revision_boundaries = await get_schedule_revision_boundaries(conn, agency_id, ctx.from_date, ctx.to_date)

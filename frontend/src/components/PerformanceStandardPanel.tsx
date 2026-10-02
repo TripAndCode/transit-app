@@ -1,7 +1,7 @@
 /**
- * Per-route "minimum performance standard" bonus/malus simulation panel
- * (item 104, depends on item 94's Excess Waiting Time and item 98's
- * vehicle-km-delivered rate). Renders nothing when this agency has zero
+ * Per-route "minimum performance standard" bonus/malus simulation panel,
+ * comparing each configured threshold against the Excess Waiting Time or
+ * vehicle-km-delivered rate. Renders nothing when this agency has zero
  * configured `route_performance_standards` rows (see
  * pipeline/reports/performance_standard.py) -- there is no ingestion
  * pipeline or admin UI for this table, so an agency with no rows simply has
@@ -93,10 +93,10 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope
                       </span>
                     )}
                   </td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtMetricValue(r.threshold_value, r.metric_type)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtMetricValue(r.actual_value, r.metric_type)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtAchievementRate(r.achievement_rate)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtEstimate(r.estimated_bonus_deduction)}</td>
+                  <td style={td({ align: "right" })}>{fmtMetricValue(r.threshold_value, r.metric_type)}</td>
+                  <td style={td({ align: "right" })}>{fmtMetricValue(r.actual_value, r.metric_type)}</td>
+                  <td style={td({ align: "right" })}>{fmtAchievementRate(r.achievement_rate)}</td>
+                  <td style={td({ align: "right" })}>{fmtEstimate(r.estimated_bonus_deduction)}</td>
                 </tr>
               ))}
             </tbody>

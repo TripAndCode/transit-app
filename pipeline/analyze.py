@@ -1433,7 +1433,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                            PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec,
                            COUNT(*) AS scheduled_samples,
                            -- E[H^2] / (2*E[H]) over this route's scheduled headway
-                           -- distribution -- item 94's mean-wait-time formula
+                           -- distribution -- the mean-wait-time formula
                            -- (pipeline.headways.mean_wait_from_moments), computed
                            -- here in SQL instead of pulling every raw headway_sec
                            -- back into Python. NULLIF guards the (already
@@ -1819,7 +1819,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     pooled[(route_code, svc_date)].extend(g for g in reconstruct_headways(times) if g > 0)
             # Scheduled median per route, read back from agg_route_headway
             # (already INSERTed earlier in this SAME transaction, above) --
-            # used only to threshold "long" gaps (item 94). A route with no
+            # used only to threshold "long" gaps. A route with no
             # resolvable scheduled median (never classified/high-frequency)
             # gets long_gap_count=0 via count_long_gaps' own None handling;
             # such a route is never surfaced by the query-time report
@@ -1910,8 +1910,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # NULL static_version_id, and MAX(...) over an all-NULL column is
             # NULL — there is no version key to upsert a row under, so this
             # agency simply gets no row here yet, same "not available until a
-            # real value exists" convention as every other nullable column
-            # added by item 88.
+            # real value exists" convention as every other nullable
+            # static_version_id column.
             if static_version_id is not None:
                 with _step("agg_static_version_summary: upsert"), conn.cursor() as cur:
                     cur.execute(

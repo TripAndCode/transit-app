@@ -1,12 +1,11 @@
 """Schedule-revision boundary dates: the day a static GTFS feed reload
-becomes visible in the RT `updates` stream, keyed off `static_version_id`
-(item 88).
+becomes visible in the RT `updates` stream, keyed off `static_version_id`.
 
 `agg_schedule_revision_daily` (built by `pipeline.analyze.analyze()`) stores
 one row per (agency_id, date) holding that day's DOMINANT static_version_id.
 A day with no non-NULL static_version_id anywhere in `updates` (e.g. Aomori,
-whose ingest strategy never joins static data, or any day predating item
-88's rollout) has NO ROW at all, never a NULL-version row.
+whose ingest strategy never joins static data, or any day before RT rows were
+stamped with static_version_id) has NO ROW at all, never a NULL-version row.
 
 A "boundary" is the first day, within a caller-given range, whose dominant
 version differs from the immediately preceding CALENDAR day's — computed

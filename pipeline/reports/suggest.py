@@ -9,9 +9,7 @@ baseline-relative classifier the 最新観測 tab uses, ``api.triage.classify_ro
 (2) failing that, a route whose delay pattern shifted partway through the
 trailing week, (3) failing that, the single worst on-time-rate route this
 week. No LLM; every branch is a composition of existing report primitives
-(compute_ranking / route_trend_shift / compute_on_time) -- see
-docs/superpowers/specs/2026-08-22-proactive-insight-panel-design.md for the
-rationale behind this shape over a scored-blend or no-ranking rotation.
+(compute_ranking / route_trend_shift / compute_on_time).
 
 compute_suggestion() returns None when the agency has no analyzed data at
 all, or when all remaining candidates at a rule level are excluded via the

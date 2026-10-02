@@ -1125,12 +1125,12 @@ async def list_admin_audit(
 
 # ── Architecture docs (developer/internal) endpoints ─────────────────────
 #
-# Backs `/admin/architecture` (item 25): a developer-only page rendering
+# Backs `/admin/architecture`: a developer-only page rendering
 # CLAUDE.md's "Architecture pointers" as a Mermaid diagram plus a
 # sidebar-navigable index of `docs/features/*.md`. Filesystem-only (no DB
 # connection needed) -- gated on `require_admin` the same way every other
-# `/api/admin/*` route is, per the item's explicit decision to reuse the
-# existing `admin` role rather than add a new "internal/developer" flag.
+# `/api/admin/*` route is; developer pages reuse the `admin` role rather
+# than a separate "internal/developer" flag.
 _FEATURE_DOCS_DIR = Path(__file__).resolve().parents[2] / "docs" / "features"
 
 _DOC_H1_RE = re.compile(r"^#\s+(.+?)\s*$")

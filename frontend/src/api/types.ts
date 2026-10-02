@@ -417,7 +417,7 @@ export type ReportResponse =
   | ReportEnvelope<"delay_certificate", DelayCertificateRow>;
 
 /** One high-frequency route's pooled Excess Waiting Time / coefficient of
- *  variation / long-gap rate over the request's range (item 94) -- see
+ *  variation / long-gap rate over the request's range -- see
  *  pipeline/reports/headway_quality.py's compute_headway_quality. A
  *  non-high-frequency route never appears in this list at all. */
 type HeadwayQualityRow = {
@@ -434,7 +434,7 @@ export type HeadwayQualityResponse = {
   ctx: ResponseCtx;
 };
 
-/** One configured per-route "minimum performance standard" (item 104),
+/** One configured per-route "minimum performance standard",
  *  joined against the current actual value of its `metric_type` -- see
  *  pipeline/reports/performance_standard.py's compute_performance_standards
  *  for the achievement-rate / bonus-or-deduction formula. This is an
@@ -498,7 +498,7 @@ export type WeatherDelayBucket = {
   avg_delay_sec: number | null;
 };
 
-/** Observed rainfall matched to service days (item 129) -- see
+/** Observed rainfall matched to service days -- see
  *  pipeline/reports/weather.py's compute_rain_delay. This is a historical
  *  observation, NOT a weather forecast and NOT a causal claim; `disclaimer`
  *  must be surfaced verbatim wherever these figures are rendered, and

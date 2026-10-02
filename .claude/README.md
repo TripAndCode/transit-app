@@ -121,7 +121,8 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   VPS, which can run noticeably slower than a typical dev machine; that
   script's own `.claude/settings.json` entry bounds the sum of every ceiling
   in it, and `tests/unit/test_guard_push_quality_hook.py` fails once they no
-  longer fit. A blocked push names any step that ran out of time. A timeout
+  longer fit. A blocked push names each step that failed, with that step's own
+  output, and any step that ran out of time. A timeout
   with no test failure is an infrastructure limitation, not evidence that
   tests failed; resolve it before weakening the gate.
 - An hourly crontab entry (`15 * * * *`, JST — the VPS's system timezone; see

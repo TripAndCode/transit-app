@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // CJK glyphs need more vertical room than Latin to stay legible: below 12px
 // Japanese labels lose stroke separation entirely. 12px (`--text-xs`) is the
@@ -13,9 +14,7 @@ import path from "node:path";
 // deliberately exempt.
 const MIN_PX = 12;
 
-// `process.cwd()` is the `frontend/` package root under vitest; the module
-// URL is not a file: URL after vite's transform, so it cannot be used here.
-const root = path.resolve(process.cwd(), "src");
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {

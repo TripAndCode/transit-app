@@ -5,6 +5,7 @@ import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
+import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, fmtPct } from "../utils/format";
 
 const ROWS_CAP = 200;
@@ -17,6 +18,9 @@ type Schema = {
   align?: "left" | "right";
   /** When set, draws an inline bar; ``barColor`` is in delay-min space. */
   bar?: "delay" | "pct" | "raw";
+  /** A minutes column: the header names the unit once, and each cell holds
+   *  the bare figure. */
+  unit?: "min";
   format?: (v: unknown, t: TFunction) => string;
   /**
    * When set, the raw cell value is treated as a translation-key suffix:
@@ -36,9 +40,9 @@ const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left" };
 const RANKING_COLS: Schema[] = [
   ROUTE_COL,
   { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
-  { index: 2, labelKey: "reports.col.avg", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
-  { index: 3, labelKey: "reports.col.median", align: "right", format: (v, t) => fmtMin(v, t) },
-  { index: 4, labelKey: "reports.col.p90", align: "right", format: (v, t) => fmtMin(v, t) },
+  { index: 2, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
+  { index: 3, labelKey: "reports.col.median", align: "right", unit: "min", format: fmtMinutes },
+  { index: 4, labelKey: "reports.col.p90", align: "right", unit: "min", format: fmtMinutes },
   { index: 5, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
 ];
 
@@ -47,7 +51,7 @@ const DOW_COLS: Schema[] = [
   ROUTE_COL,
   { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
   { index: 2, labelKey: "reports.col.dow", align: "left" },
-  { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
+  { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
   { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
 ];
 
@@ -58,7 +62,7 @@ const SCHEMAS: Record<string, Schema[]> = {
     ROUTE_COL,
     { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
     { index: 2, labelKey: "reports.col.on_time_pct", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t) },
-    { index: 3, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 3, labelKey: "reports.col.avg", align: "right", unit: "min", format: fmtMinutes },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
     // 95% Wilson interval too wide to trust the percentage (see
     // pipeline/stats.py) — a caveat marker, not a plain value, so it's
@@ -69,14 +73,14 @@ const SCHEMAS: Record<string, Schema[]> = {
     ROUTE_COL,
     { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
     { index: 2, labelKey: "reports.col.over_5min_count", align: "right", bar: "raw", format: (v, t) => fmtNum(v, t) },
-    { index: 3, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 3, labelKey: "reports.col.avg", align: "right", unit: "min", format: fmtMinutes },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
   ],
   compare_ranking: [
     ROUTE_COL,
-    { index: 1, labelKey: "common.service_value.平日", align: "right", format: (v, t) => fmtMin(v, t) }, // i18n-ignore: query contract
-    { index: 2, labelKey: "common.service_value.土日祝", align: "right", format: (v, t) => fmtMin(v, t) }, // i18n-ignore: query contract
-    { index: 3, labelKey: "reports.col.diff", align: "right", bar: "delay", format: (v, t) => fmtMin(v, t) },
+    { index: 1, labelKey: "common.service_value.平日", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: query contract
+    { index: 2, labelKey: "common.service_value.土日祝", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: query contract
+    { index: 3, labelKey: "reports.col.diff", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
     {
       index: 4,
       labelKey: "reports.col.direction",
@@ -95,7 +99,7 @@ const SCHEMAS: Record<string, Schema[]> = {
   // per-route ranking (see pipeline.reports.council.compute_council_summary).
   council_summary: [
     { index: 0, labelKey: "reports.col.on_time_pct", align: "right", format: (v, t) => fmtPct(v, t) },
-    { index: 1, labelKey: "reports.col.avg", align: "right", format: (v, t) => fmtMin(v, t) },
+    { index: 1, labelKey: "reports.col.avg", align: "right", unit: "min", format: fmtMinutes },
     { index: 2, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
     { index: 3, labelKey: "reports.col.planned_trips", align: "right", format: (v, t) => fmtNum(v, t) },
     { index: 4, labelKey: "reports.col.executed_trips", align: "right", format: (v, t) => fmtNum(v, t) },
@@ -117,11 +121,11 @@ const SCHEMAS: Record<string, Schema[]> = {
   ],
 };
 
-function fmtMin(v: unknown, t: TFunction): string {
+function fmtMinutes(v: unknown): string {
   if (v == null) return "—";
   const n = Number(v);
   if (!isFinite(n)) return "—";
-  return `${n.toFixed(1)}${t("common.unit_min")}`;
+  return n.toFixed(1);
 }
 
 function fmtNum(v: unknown, _t: TFunction): string {
@@ -153,6 +157,12 @@ function computeColumnMaxes(schema: Schema[] | undefined, rows: unknown[][]): Ma
   return m;
 }
 
+// The route column stays in view while a table wider than its panel
+// scrolls sideways. It needs an opaque background for rows to pass under:
+// the page's, since the table sits directly on it.
+const STICKY_CELL = { position: "sticky", left: 0, zIndex: Z_INDEX.raised, background: "var(--bg-page)" } as const;
+const STICKY_HEAD = { position: "sticky", left: 0, zIndex: Z_INDEX.raised, background: "var(--bg-soft)" } as const;
+
 type Props = {
   reportType: string;
   rows: unknown[][];
@@ -173,14 +183,14 @@ export function ReportTable({ reportType, rows }: Props) {
   }
 
   return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
+    <div className="table-scroll" style={{ width: "100%", overflowX: "auto" }}>
       <table style={SHARED_TABLE}>
         <thead>
           <tr style={{ background: "var(--bg-soft)" }}>
             <th style={th({ width: 40 })}>#</th>
             {schema.map((c) => (
-              <th key={c.labelKey} style={{ ...th(), textAlign: c.align ?? "left" }}>
-                {t(c.labelKey)}
+              <th key={c.labelKey} style={{ ...th(), textAlign: c.align ?? "left", ...(c === ROUTE_COL ? STICKY_HEAD : null) }}>
+                {c.unit ? t("reports.col.with_unit", { label: t(c.labelKey), unit: t("common.unit_min") }) : t(c.labelKey)}
               </th>
             ))}
           </tr>
@@ -188,12 +198,12 @@ export function ReportTable({ reportType, rows }: Props) {
         <tbody>
           {cappedRows.visible.map((row, i) => (
             <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
-              <td style={{ ...td(), color: "var(--text-tertiary)", textAlign: "right" }}>{i + 1}</td>
+              <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
               {schema.map((c) => {
                 if (c === ROUTE_COL) {
                   const code = String(row[c.index] ?? "");
                   return (
-                    <td key={c.labelKey} style={{ ...td(), fontWeight: 500 }}>
+                    <td key={c.labelKey} style={{ ...td(), ...STICKY_CELL, fontWeight: 500, wordBreak: "keep-all" }}>
                       {formatRoute(code)}
                     </td>
                   );
@@ -218,13 +228,13 @@ export function ReportTable({ reportType, rows }: Props) {
                   const color = c.bar === "delay" ? delayColor(v) : "var(--accent)";
                   const textColor = c.bar === "delay" ? delayTextColor(v) : "var(--accent)";
                   return (
-                    <td key={c.labelKey} style={{ ...td(), textAlign: c.align ?? "right", minWidth: 110 }}>
+                    <td key={c.labelKey} style={td({ align: c.align ?? "right" })}>
                       <BarCell text={text} ratio={ratio} color={color} textColor={textColor} />
                     </td>
                   );
                 }
                 return (
-                  <td key={c.labelKey} style={{ ...td(), textAlign: c.align ?? "left" }}>
+                  <td key={c.labelKey} style={td({ align: c.align ?? "left" })}>
                     {text}
                   </td>
                 );
@@ -254,22 +264,17 @@ function BarCell({
   textColor: string;
 }) {
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+    // The bar has its own track beside the figure: drawn under the text, it
+    // read as a strike-through.
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
       <div
-        style={{
-          position: "absolute",
-          right: 0,
-          top: "50%",
-          transform: "translateY(-50%)",
-          height: 6,
-          width: `${ratio * 100}%`,
-          background: color,
-          opacity: 0.18,
-          borderRadius: 3,
-          pointerEvents: "none",
-        }}
-      />
-      <span style={{ position: "relative", color: textColor }}>{text}</span>
+        data-testid="bar-track"
+        aria-hidden="true"
+        style={{ width: 40, height: 6, flex: "none", borderRadius: 3, background: "var(--surface-2)", overflow: "hidden" }}
+      >
+        <div style={{ width: `${ratio * 100}%`, height: "100%", borderRadius: 3, background: color, opacity: 0.6 }} />
+      </div>
+      <span style={{ color: textColor }}>{text}</span>
     </div>
   );
 }

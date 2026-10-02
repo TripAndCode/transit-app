@@ -5,8 +5,7 @@
 # and `make hooks`; both fail the whole target if this script fails, since a
 # workstation or VPS clone that silently skipped hook install would have no
 # local secret-scanning gate at all -- CI's secrets-scan.yml is the only
-# remaining backstop, and it only runs on pushes CI actually processes (this
-# repo's [skip ci] convention means most local commits never reach it).
+# remaining backstop, and it sees a secret only after it has been pushed.
 #
 # `git worktree`s share one .git/hooks directory (it lives in the common git
 # dir, not per-worktree), so a single run of this script against any

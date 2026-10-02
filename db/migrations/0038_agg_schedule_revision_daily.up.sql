@@ -11,10 +11,10 @@
 --
 -- A day with no non-NULL `static_version_id` anywhere in `updates` (e.g.
 -- Aomori, whose ingest strategy never joins static data at all, or any day
--- predating item 88's rollout) has NO ROW here at all, never a NULL-version
--- row -- the read path (`pipeline.reports.schedule_revision`) treats a
--- missing day as "unknown", and deliberately does not report a boundary
--- against an unknown neighbor.
+-- before RT rows were stamped with static_version_id) has NO ROW here at all,
+-- never a NULL-version row -- the read path
+-- (`pipeline.reports.schedule_revision`) treats a missing day as "unknown",
+-- and deliberately does not report a boundary against an unknown neighbor.
 CREATE TABLE IF NOT EXISTS agg_schedule_revision_daily (
     agency_id         INTEGER NOT NULL REFERENCES agencies(agency_id),
     date              DATE    NOT NULL,

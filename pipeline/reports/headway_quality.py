@@ -1,6 +1,6 @@
 """Excess Waiting Time / coefficient of variation / long-gap rate for
-high-frequency routes (item 94, depends on item 93's `agg_route_headway` /
-`agg_route_headway_daily`).
+high-frequency routes, built on `agg_route_headway` /
+`agg_route_headway_daily`.
 
 Restricted to routes `agg_route_headway.is_high_frequency` classifies
 high-frequency -- a route this repo hasn't classified as frequent has

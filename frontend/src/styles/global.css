@@ -462,10 +462,28 @@ body {
   text-spacing-trim: space-first;
 }
 
-/* The single place tabular figures are turned on. Apply to columns of
-   numbers that must align vertically — table cells, chart axes, counters
-   in a fixed-width slot — never to a large standalone number, which reads
-   better with proportional figures. */
+/* `anywhere` also lowers an element's min-content width, which a table's
+   auto layout reads when it narrows columns: cells shrank until headers,
+   words and numbers split mid-token. `break-word` still breaks a token that
+   would overflow, without offering those breaks to column sizing. */
+table {
+  overflow-wrap: break-word;
+}
+
+/* A table wider than its panel scrolls sideways; a soft shadow on the right
+   edge says there are more columns. The `local` layer covers the shadow once
+   the last column is reached. Only the right edge gets one: the route column
+   is pinned on the left and would paint over a left-edge shadow. */
+.table-scroll {
+  background:
+    linear-gradient(to left, var(--bg-page) 30%, transparent) right / 40px 100% no-repeat local,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--text-primary) 22%, transparent), transparent) right / 16px 100% no-repeat scroll;
+}
+
+/* Tabular figures for numbers that must align vertically outside a table —
+   chart axes, counters in a fixed-width slot — never a large standalone
+   number, which reads better with proportional figures. A table's numeric
+   cells get them from tableStyles' td({ align: "right" }). */
 .num {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
@@ -546,20 +564,6 @@ summary:focus-visible,
   white-space: pre-line;
   box-shadow: var(--el-2);
   pointer-events: none;
-}
-/* `Glossary` (components/Glossary.tsx). Inline trigger for a technical term
-   kept visible on an operator-facing page; the tooltip carries the plain-
-   language explanation. Reset to plain text rather than button chrome, with
-   a dotted underline as the only affordance that it's interactive. */
-.glossary-term {
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  cursor: help;
-  border-bottom: 1px dotted var(--text-secondary);
 }
 
 /* `ThreadSidebar`'s conversation context menu (components/ThreadSidebar.tsx).
