@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Literal
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import clickhouse_connect
@@ -60,9 +60,6 @@ from pipeline.reports import (
 )
 from pipeline.reports.rankings import _weighted_avg_min
 from pipeline.stats import annotate_on_time_pct_confidence
-
-TopNMetric = Literal["avg_delay", "on_time_rate", "worst_5min"]
-
 
 _JST = ZoneInfo("Asia/Tokyo")
 

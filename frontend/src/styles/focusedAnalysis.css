@@ -49,11 +49,6 @@
 .focus-tabs button[aria-pressed="true"], .focus-tabs button[aria-selected="true"] { border-color: var(--accent); font-weight: 700; }
 .focus-saved { list-style: none; padding: 0; }
 .focus-saved li { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; gap: 20px; border-bottom: 1px solid var(--border-soft); }
-/* Closing footer so the report page never ends flush against the last
-   line of body text -- adds real breathing room plus one more concrete
-   next action (CSV / share link) instead of trailing off after the
-   definitions accordion. */
-.focus-report-footer { margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; padding-bottom: 28px; }
 /* BP.md */
 @media (max-width: 900px) { .focus-split { grid-template-columns: 1fr; } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
 /* Print rules for `.focus-page` and the app shell live in the shared print

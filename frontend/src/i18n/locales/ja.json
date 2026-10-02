@@ -332,7 +332,6 @@
     "settings_api_key_hint": "通常利用には不要です。Pro プラン（レート制限 60 → 600 req/min）が必要な場合のみ設定してください。"
   },
   "common": {
-    "apply": "適用",
     "cancel": "キャンセル",
     "close": "閉じる",
     "details": "詳細",
@@ -345,7 +344,6 @@
     "no_match": "該当なし",
     "optional_paren": "(オプション)",
     "reload": "再読み込み",
-    "reset": "リセット",
     "retry": "再試行",
     "route_code_fallback": "路線{{code}}",
     "save": "保存",
@@ -594,15 +592,6 @@
       "photo": "航空写真",
       "layers": "レイヤー",
       "dim_label": "地図の暗さ"
-    },
-    "heatmapMode": {
-      "avg": "平均遅延",
-      "p90": "90パーセンタイル"
-    },
-    "route_mode": {
-      "trend": "実績トレンド",
-      "hourly": "時間帯別",
-      "aria_label": "表示モード切替"
     }
   },
   "ask": {
@@ -1457,7 +1446,6 @@
       "sparkline_label": "直近 24 時間のうち {{ok}} 時間で稼働を確認",
       "freshness_title": "集計の鮮度 · 事業者 × 直近 14 日",
       "freshness_empty": "事業者が登録されていません。",
-      "agency_column": "事業者",
       "legend_fresh": "集計済み",
       "legend_stale": "遅れ",
       "legend_missing": "欠測",
@@ -1593,9 +1581,6 @@
       "reset_service": "運行種別をすべてに戻す",
       "jump_latest_data": "最新のデータに移動する"
     }
-  },
-  "glossary": {
-    "gtfs": "GTFS：時刻表や位置情報などの運行データをやり取りするための標準フォーマットです。"
   },
   "routesIndex": {
     "open_route": "路線カルテを開く",

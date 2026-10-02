@@ -332,7 +332,6 @@
     "settings_api_key_hint": "Not needed for typical use. Only set this if you need the Pro tier (rate limit 60 → 600 req/min)."
   },
   "common": {
-    "apply": "Apply",
     "cancel": "Cancel",
     "close": "Close",
     "details": "Details",
@@ -345,7 +344,6 @@
     "no_match": "No matches",
     "optional_paren": "(optional)",
     "reload": "Reload",
-    "reset": "Reset",
     "retry": "Retry",
     "route_code_fallback": "Route {{code}}",
     "save": "Save",
@@ -594,15 +592,6 @@
       "photo": "Satellite",
       "layers": "Layers",
       "dim_label": "Basemap dim"
-    },
-    "heatmapMode": {
-      "avg": "Avg delay",
-      "p90": "90th percentile"
-    },
-    "route_mode": {
-      "trend": "Historical trend",
-      "hourly": "By hour",
-      "aria_label": "Display mode"
     }
   },
   "ask": {
@@ -1457,7 +1446,6 @@
       "sparkline_label": "Confirmed running for {{ok}} of the last 24 hours",
       "freshness_title": "Aggregate freshness — agency x last 14 days",
       "freshness_empty": "No agencies registered.",
-      "agency_column": "Agency",
       "legend_fresh": "Aggregated",
       "legend_stale": "Behind",
       "legend_missing": "No data",
@@ -1593,9 +1581,6 @@
       "reset_service": "Reset service type to all",
       "jump_latest_data": "Jump to the latest data"
     }
-  },
-  "glossary": {
-    "gtfs": "GTFS: the standard transit-data format for schedules and real-time positions."
   },
   "routesIndex": {
     "open_route": "Open a route",
