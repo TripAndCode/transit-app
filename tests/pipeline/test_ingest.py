@@ -731,3 +731,40 @@ def test_ingest_flush_non_dataerror_falls_back_to_whole_batch_discard_no_per_fil
         ("20260401/q_ok2.pb", 3),
         ("20260401/z_ok3.pb", 1),
     ]
+
+
+@pytest.mark.parametrize("layout", ["tarball", "loose"])
+def test_ingest_leaves_a_member_on_an_unclosed_jst_day_for_a_later_run(pg_conn, ch_client, agency_id, tmp_path, layout):
+    """An archive named for a UTC day ends 09:00 JST the next day, so its last
+    members can land on a JST day that has not closed yet. Archive ingest
+    writes closed days only: such a member is skipped without being marked
+    done, and the same folder ingests it once its day has closed."""
+    header_instant = datetime(2026, 4, 1, 23, 0, 0, tzinfo=timezone.utc)  # 2026-04-02 08:00 JST
+    pb_data = header_only_feed(int(header_instant.timestamp()))
+    if layout == "tarball":
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo(name="20260401/TripUpdate_230000.pb")
+            info.size = len(pb_data)
+            tf.addfile(info, io.BytesIO(pb_data))
+        (tmp_path / "20260401.tar.gz").write_bytes(buf.getvalue())
+    else:
+        (tmp_path / "20260401").mkdir()
+        (tmp_path / "20260401" / "TripUpdate_230000.pb").write_bytes(pb_data)
+
+    def one_row(raw, ts, file_name, aid, conn):
+        return [(file_name, ts, "平日_11時37分_系統44372", "平日", "11:37", "44372", 1, 120)]
+
+    same_day = datetime(2026, 4, 2, 1, 0, tzinfo=timezone.utc)  # 2026-04-02 10:00 JST
+    next_day = datetime(2026, 4, 2, 15, 30, tzinfo=timezone.utc)  # 2026-04-03 00:30 JST
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=one_row):
+        assert ingest(str(tmp_path), agency_id, pg_conn, ch_client, now=same_day) == 0
+        assert _ch_route_codes(ch_client, agency_id) == []
+        assert ingest(str(tmp_path), agency_id, pg_conn, ch_client, now=next_day) == 1
+    names = {
+        r[0]
+        for r in ch_client.query(
+            "SELECT file_name FROM updates WHERE agency_id = {a:UInt16}", parameters={"a": agency_id}
+        ).result_rows
+    }
+    assert names == {"20260401/TripUpdate_230000.pb"}

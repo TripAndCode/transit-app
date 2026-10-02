@@ -21,6 +21,7 @@ from pipeline.clickhouse import (
     days_with_source,
     distinct_file_names,
     insert_updates,
+    jst_date,
     recent_file_name_exists,
 )
 from pipeline.strategies import get_ingest_strategy
@@ -228,12 +229,17 @@ def parse_pb(
     return rows
 
 
-def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
+def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None = None) -> int:
     """Ingest all .pb files from tarballs and loose files in folder.
 
     Dispatches to the agency's ingest strategy. Returns the number of rows
     actually written to ClickHouse (post intra-batch dedup; a failed batch
     contributes 0).
+
+    Writes closed JST days only, as of *now*. A collector names and tars its
+    archives by UTC day, so one archive runs to 09:00 JST the next day and
+    its last members can land on a day that has not ended yet; those are
+    left unmarked for a later run, which reads them once their day closes.
     """
     root = pathlib.Path(folder)
     n_errors = 0
@@ -293,20 +299,27 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
 
-    # A day in `updates` has one source. A day already holding rows promoted
-    # from the live path is refused whole rather than stored a second time
-    # under the archive's file names. Promotion refuses the mirror case.
+    today = jst_date(now or datetime.now(timezone.utc))
+    unclosed: set[date] = set()
     promoted: dict[date, bool] = {}
 
-    def _promoted_days(days: set[date]) -> set[date]:
-        unknown = days - promoted.keys()
-        if unknown:
-            hit = days_with_source(ch_client, agency_id, unknown, live_sourced=True)
-            for day in sorted(unknown):
-                promoted[day] = day in hit
-                if promoted[day]:
-                    logger.warning(f"  {day} already holds promoted live rows; its archive files are skipped")
-        return {d for d in days if promoted[d]}
+    # A member is refused, and left unmarked, when its rows would land on a
+    # JST day that has not closed, or on a day already holding rows promoted
+    # from the live path: a day in `updates` has one source, so it is not
+    # stored a second time under the archive's file names. Promotion refuses
+    # the mirror case.
+    def _refused(stamp: str) -> bool:
+        day = _jst_day(stamp)
+        if day >= today:
+            if day not in unclosed:
+                unclosed.add(day)
+                logger.info(f"  {day} has not closed yet; its archive files wait for a later run")
+            return True
+        if day not in promoted:
+            promoted[day] = bool(days_with_source(ch_client, agency_id, {day}, live_sourced=True))
+            if promoted[day]:
+                logger.warning(f"  {day} already holds promoted live rows; its archive files are skipped")
+        return promoted[day]
 
     # Rows accumulate here across BOTH the tarball loop and the loose-.pb
     # loop below (shared, not reset between them) and are flushed to
@@ -466,7 +479,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                                     continue
                                 raw = fobj.read()
                                 ts = archive_captured_at(raw, d, pb_name)
-                                if _promoted_days({_jst_day(ts)}):
+                                if _refused(ts):
                                     continue
                                 rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
                         except Exception as e:
@@ -510,7 +523,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                     with _savepoint(cur, "pb_file"):
                         raw = path.read_bytes()
                         ts = archive_captured_at(raw, d, path.name)
-                        if _promoted_days({_jst_day(ts)}):
+                        if _refused(ts):
                             continue
                         rows = strategy.parse_feed(raw, ts, f"{d}/{path.name}", agency_id, conn)
                 except Exception as e:

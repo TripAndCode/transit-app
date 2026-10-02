@@ -307,13 +307,15 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
    creds, and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
 
-> **Do not target a day the live path already promoted.** A day in `updates`
-> has one source: if the live-table promotion cron (below) has already
-> copied a day's rows into `updates`, this job's `ingest` call for that same
-> day is refused whole, and its archive files are skipped rather than
-> inserted under a second source. Keep this job's date window ahead of
-> whatever the promotion cron has already closed out, or disable this job
-> once the live path is the agency's history source for that range.
+> **This job writes closed JST days only, and never a day the live path
+> already promoted.** An archive is named for a UTC day, so it runs to 09:00
+> JST the next day. `ingest` skips any file whose rows would land on a JST
+> day that has not ended yet, and reads it on a later run once that day has
+> closed. So pull a two-day window, not just one day's folder. A day in
+> `updates` also has one source: once the live-table promotion cron (below)
+> has copied a day's rows into `updates`, this job skips that day's archive
+> files rather than store them under a second source. Disable this job for
+> any range where the live path is the agency's history source.
 
 > **Lock contention in the sketch above is not free to ignore.** `ingest`
 > exits `EX_TEMPFAIL` (75) if another ingest/analyze process holds
