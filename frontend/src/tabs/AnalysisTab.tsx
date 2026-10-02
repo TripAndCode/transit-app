@@ -337,14 +337,14 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
               <td style={{ ...td(), color: "var(--text-tertiary)", textAlign: "right" }}>{i + 1}</td>
               <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
               <td style={td()}>{r.service_type ? serviceValueLabel(r.service_type, t) : "—"}</td>
-              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_avg_sec)}</td>
-              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_p50_sec)}</td>
-              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.dwell_p90_sec)}</td>
-              <td style={{ ...td(), textAlign: "right" }}>{fmtSamples(r.dwell_samples)}</td>
-              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.run_avg_sec)}</td>
-              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.run_p50_sec)}</td>
-              <td style={{ ...td(), textAlign: "right" }}>{fmtSec(r.run_p90_sec)}</td>
-              <td style={{ ...td(), textAlign: "right" }}>{fmtSamples(r.run_samples)}</td>
+              <td style={td({ align: "right" })}>{fmtSec(r.dwell_avg_sec)}</td>
+              <td style={td({ align: "right" })}>{fmtSec(r.dwell_p50_sec)}</td>
+              <td style={td({ align: "right" })}>{fmtSec(r.dwell_p90_sec)}</td>
+              <td style={td({ align: "right" })}>{fmtSamples(r.dwell_samples)}</td>
+              <td style={td({ align: "right" })}>{fmtSec(r.run_avg_sec)}</td>
+              <td style={td({ align: "right" })}>{fmtSec(r.run_p50_sec)}</td>
+              <td style={td({ align: "right" })}>{fmtSec(r.run_p90_sec)}</td>
+              <td style={td({ align: "right" })}>{fmtSamples(r.run_samples)}</td>
             </tr>
           ))}
         </tbody>

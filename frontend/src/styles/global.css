@@ -470,14 +470,13 @@ table {
   overflow-wrap: break-word;
 }
 
-/* A table wider than its panel scrolls sideways; a soft shadow on the edge
-   that has more columns says so. The `local` layers cover the shadows once
-   that edge is reached. */
+/* A table wider than its panel scrolls sideways; a soft shadow on the right
+   edge says there are more columns. The `local` layer covers the shadow once
+   the last column is reached. Only the right edge gets one: the route column
+   is pinned on the left and would paint over a left-edge shadow. */
 .table-scroll {
   background:
-    linear-gradient(to right, var(--bg-page) 30%, transparent) left / 40px 100% no-repeat local,
     linear-gradient(to left, var(--bg-page) 30%, transparent) right / 40px 100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--text-primary) 22%, transparent), transparent) left / 16px 100% no-repeat scroll,
     radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--text-primary) 22%, transparent), transparent) right / 16px 100% no-repeat scroll;
 }
 
