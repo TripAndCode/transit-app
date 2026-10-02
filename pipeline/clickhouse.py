@@ -8,7 +8,8 @@ lives in.
 """
 
 import os
-from datetime import date, datetime, time, timezone
+from collections.abc import Iterable
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import clickhouse_connect
@@ -193,6 +194,40 @@ def distinct_file_names(client, agency_id: int, since: date | None = None) -> se
         where += " AND captured_at >= {since:DateTime64}"
         parameters["since"] = jst_midnight_utc(since)
     result = client.query(f"SELECT DISTINCT file_name FROM updates WHERE {where}", parameters=parameters)
+    return {row[0] for row in result.result_rows}
+
+
+# Each live writer stamps `file_name` in its own namespace: the collector's
+# durable `oracle/<YYYYMMDD>/<member>` and ingest_live's generated
+# `live_<timestamp>`. Promotion copies those names into `updates` unchanged,
+# while archive ingest writes `<YYYYMMDD>/<member>`. The prefix is therefore
+# the source of a row in `updates`.
+_LIVE_SOURCED = "(startsWith(file_name, 'oracle/') OR startsWith(file_name, 'live_'))"
+
+
+def days_with_source(client, agency_id: int, days: Iterable[date], *, live_sourced: bool) -> set[date]:
+    """The JST days among *days* on which `updates` already holds rows from the
+    live path (*live_sourced*) or from archive ingest (not *live_sourced*).
+
+    Bounded to the span of *days*, so the scan is served off the
+    `(agency_id, captured_at, ...)` sort key.
+    """
+    wanted = sorted(set(days))
+    if not wanted:
+        return set()
+    predicate = _LIVE_SOURCED if live_sourced else f"NOT {_LIVE_SOURCED}"
+    result = client.query(
+        "SELECT DISTINCT toDate(captured_at, 'Asia/Tokyo') AS day FROM updates "
+        "WHERE agency_id = {agency_id:UInt16} "
+        "AND captured_at >= {lo:DateTime64} AND captured_at < {hi:DateTime64} "
+        f"AND {predicate} AND has({{days:Array(Date)}}, toDate(captured_at, 'Asia/Tokyo'))",
+        parameters={
+            "agency_id": agency_id,
+            "lo": jst_midnight_utc(wanted[0]),
+            "hi": jst_midnight_utc(wanted[-1] + timedelta(days=1)),
+            "days": wanted,
+        },
+    )
     return {row[0] for row in result.result_rows}
 
 

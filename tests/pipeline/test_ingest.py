@@ -81,6 +81,128 @@ def test_ingest_creates_rows(pg_conn, ch_client, agency_id, tmp_path):
     assert rows[0][0] == "44372"
     assert rows[0][1] == 120
     assert rows[0][2] == agency_id
+    assert ch_client.query("SELECT count() FROM updates_live").result_rows == [(0,)]
+
+
+def test_ingest_refuses_a_day_that_already_holds_promoted_rows(pg_conn, ch_client, agency_id, tmp_path):
+    """A day in `updates` has one source. Promotion already stored 2026-04-01
+    under the collector's names, so the archive's copy of that day is refused
+    while another day in the same folder is ingested."""
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            (
+                "oracle/20260401/TripUpdate_030000.pb",
+                datetime(2026, 4, 1, 3, 0, tzinfo=timezone.utc),
+                "T0",
+                "平日",
+                "12:00",
+                "44372",
+                1,
+                60,
+            )
+        ],
+    )
+    for day in ("20260401", "20260402"):
+        (tmp_path / day).mkdir()
+        (tmp_path / day / "TripUpdate_113700.pb").write_bytes(b"\x00")
+
+    def one_row(raw, ts, file_name, aid, conn):
+        return [(file_name, ts, "平日_11時37分_系統44372", "平日", "11:37", "44372", 1, 120)]
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=one_row):
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert count == 1
+    names = {
+        r[0]
+        for r in ch_client.query(
+            "SELECT file_name FROM updates WHERE agency_id = {a:UInt16}", parameters={"a": agency_id}
+        ).result_rows
+    }
+    assert names == {"oracle/20260401/TripUpdate_030000.pb", "20260402/TripUpdate_113700.pb"}
+
+
+def test_ingest_refuses_a_tarball_member_whose_header_lands_on_a_promoted_day(pg_conn, ch_client, agency_id, tmp_path):
+    """A member named for 2026-04-01 but whose feed header timestamp falls on
+    2026-04-02 JST is judged by the day its rows actually get (the header's
+    day), not the name's day: refused when 2026-04-02 already holds promoted
+    rows, ingested when only 2026-04-01 does."""
+    header_instant = datetime(2026, 4, 1, 23, 0, 0, tzinfo=timezone.utc)  # 2026-04-02 08:00 JST
+    pb_data = header_only_feed(int(header_instant.timestamp()))
+
+    def _make_tarball():
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo(name="20260401/TripUpdate_230000.pb")
+            info.size = len(pb_data)
+            tf.addfile(info, io.BytesIO(pb_data))
+        return buf.getvalue()
+
+    def one_row(raw, ts, file_name, aid, conn):
+        return [(file_name, ts, "平日_11時37分_系統44372", "平日", "11:37", "44372", 1, 120)]
+
+    # 2026-04-02 already holds a promoted (live-sourced) row: the member's
+    # header-derived day is refused even though its name says 2026-04-01.
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            (
+                "oracle/20260402/TripUpdate_000000.pb",
+                datetime(2026, 4, 1, 15, 0, tzinfo=timezone.utc),  # 2026-04-02 00:00 JST
+                "T0",
+                "平日",
+                "12:00",
+                "44372",
+                1,
+                60,
+            )
+        ],
+    )
+    (tmp_path / "20260401.tar.gz").write_bytes(_make_tarball())
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=one_row):
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+    assert count == 0
+    names = {
+        r[0]
+        for r in ch_client.query(
+            "SELECT file_name FROM updates WHERE agency_id = {a:UInt16}", parameters={"a": agency_id}
+        ).result_rows
+    }
+    assert names == {"oracle/20260402/TripUpdate_000000.pb"}
+
+    # Only 2026-04-01 holds promoted rows: the same member is ingested,
+    # because its rows land on 2026-04-02, not the refused day.
+    ch_client.command("TRUNCATE TABLE updates")
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            (
+                "oracle/20260401/TripUpdate_000000.pb",
+                datetime(2026, 4, 1, 3, 0, tzinfo=timezone.utc),  # 2026-04-01 12:00 JST
+                "T0",
+                "平日",
+                "12:00",
+                "44372",
+                1,
+                60,
+            )
+        ],
+    )
+    (tmp_path / "20260401.tar.gz").write_bytes(_make_tarball())
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=one_row):
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+    assert count == 1
+    names = {
+        r[0]
+        for r in ch_client.query(
+            "SELECT file_name FROM updates WHERE agency_id = {a:UInt16}", parameters={"a": agency_id}
+        ).result_rows
+    }
+    assert names == {"oracle/20260401/TripUpdate_000000.pb", "20260401/TripUpdate_230000.pb"}
 
 
 @pytest.mark.parametrize("layout", ["tarball", "loose"])

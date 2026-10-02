@@ -1,10 +1,11 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
 from pipeline.clickhouse import (
     LIVE_TABLE,
+    days_with_source,
     distinct_file_names,
     insert_updates,
     max_captured_at,
@@ -138,3 +139,45 @@ def test_recent_file_name_exists_reads_the_table_it_is_given(ch_client):
     since = now - timedelta(minutes=10)
     assert recent_file_name_exists(ch_client, 1, "live_x", since, table=LIVE_TABLE) is True
     assert recent_file_name_exists(ch_client, 1, "live_x", since) is False
+
+
+def test_days_with_source_tells_promoted_days_from_archive_days(ch_client):
+    utc = timezone.utc
+    insert_updates(
+        ch_client,
+        agency_id=3,
+        rows=[
+            (
+                "oracle/20260401/TripUpdate_030000.pb",
+                datetime(2026, 4, 1, 3, 0, tzinfo=utc),
+                "T1",
+                None,
+                None,
+                "R1",
+                1,
+                30,
+            ),
+            ("live_20260402T030000Z", datetime(2026, 4, 2, 3, 0, tzinfo=utc), "T1", None, None, "R1", 1, 30),
+            ("20260403/TripUpdate_120000.pb", datetime(2026, 4, 3, 3, 0, tzinfo=utc), "T1", None, None, "R1", 1, 30),
+            # 15:30 UTC on 04-03 is 00:30 JST on 04-04: bucketed by its JST day.
+            (
+                "oracle/20260403/TripUpdate_153000.pb",
+                datetime(2026, 4, 3, 15, 30, tzinfo=utc),
+                "T1",
+                None,
+                None,
+                "R1",
+                1,
+                30,
+            ),
+        ],
+    )
+    days = [date(2026, 4, d) for d in range(1, 6)]
+    assert days_with_source(ch_client, 3, days, live_sourced=True) == {
+        date(2026, 4, 1),
+        date(2026, 4, 2),
+        date(2026, 4, 4),
+    }
+    assert days_with_source(ch_client, 3, days, live_sourced=False) == {date(2026, 4, 3)}
+    assert days_with_source(ch_client, 4, days, live_sourced=True) == set()
+    assert days_with_source(ch_client, 3, [], live_sourced=True) == set()
