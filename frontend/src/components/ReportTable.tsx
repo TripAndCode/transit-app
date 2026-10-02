@@ -232,16 +232,22 @@ export function ReportTable({ reportType, rows }: Props) {
               <p className="report-cards__meta">
                 {schema
                   .filter((c) => c !== titleCol && c !== headline)
-                  .map((c) => (
-                    <span key={c.labelKey} className="report-cards__field">
-                      {c.valueKey == null && (
-                        <>
-                          <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
-                        </>
-                      )}
-                      <span>{cardValue(c, row[c.index], t)}</span>
-                    </span>
-                  ))}
+                  .map((c) => {
+                    // A blank table cell reads as nothing under its header;
+                    // on a card the label would stand alone.
+                    const text = cardValue(c, row[c.index], t);
+                    if (text === "") return null;
+                    return (
+                      <span key={c.labelKey} className="report-cards__field">
+                        {c.valueKey == null && (
+                          <>
+                            <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
+                          </>
+                        )}
+                        <span>{text}</span>
+                      </span>
+                    );
+                  })}
               </p>
             </li>
           ))}

@@ -168,6 +168,20 @@ describe("ReportTable on a phone", () => {
     expect(within(item).getAllByText("39061")).toHaveLength(1);
   });
 
+  it("leaves out a field with nothing to show, rather than a bare label", () => {
+    renderTable(
+      [
+        ["39061", "平日", 0.92, 1.2, 300, false],
+        ["39061", "平日", 0.5, 4.0, 8, true],
+      ],
+      "on_time",
+    );
+    const [confident, wide] = screen.getAllByRole("listitem");
+    expect(within(confident).queryByText("Confidence")).not.toBeInTheDocument();
+    expect(within(wide).getByText("Confidence")).toBeInTheDocument();
+    expect(within(wide).getByText("wide range")).toBeInTheDocument();
+  });
+
   it("shows 25 rows first and the rest on request", async () => {
     const rows = Array.from({ length: 30 }, (_, i) => ["39061", "平日", 5 - i / 10, 3, 8, 100 + i]);
     renderTable(rows);
