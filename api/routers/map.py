@@ -137,9 +137,10 @@ def _ingest_live_agency(agency_id: int) -> int:
             ).stdout
             with tempfile.TemporaryDirectory(prefix="transit-live-") as temp_dir:
                 # Oracle's rt-poller names files with UTC (`date -u`), while
-                # the archive ingest convention treats names as JST. Rename
-                # the temporary copy into the equivalent JST path so
-                # pipeline.ingest writes the actual UTC instant to CH.
+                # archive ingest reads a name as JST whenever the feed's own
+                # header timestamp can't be used. Rename the temporary copy
+                # into the equivalent JST path so that fallback also writes
+                # the actual instant to CH.
                 live_dir = pathlib.Path(temp_dir) / captured_at.strftime("%Y%m%d")
                 live_dir.mkdir()
                 live_file = live_dir / f"TripUpdate_{captured_at.strftime('%H%M%S')}.pb"
