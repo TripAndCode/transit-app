@@ -36,7 +36,8 @@ export function th({
   };
 }
 
-/** The single body-cell style for every table in the app. */
+/** The single body-cell style for every table in the app. A right-aligned
+ *  cell holds a figure: it stays on one line with aligned digits. */
 export function td({ align }: { align?: Align } = {}): CSSProperties {
   return {
     padding: "8px 10px",
@@ -44,5 +45,6 @@ export function td({ align }: { align?: Align } = {}): CSSProperties {
     textAlign: align,
     borderBottom: "1px solid var(--surface-2)",
     verticalAlign: "middle",
+    ...(align === "right" ? { whiteSpace: "nowrap" as const, fontVariantNumeric: "tabular-nums" } : null),
   };
 }
