@@ -16,7 +16,13 @@ from zoneinfo import ZoneInfo
 
 from clickhouse_connect.driver.exceptions import DataError
 
-from pipeline.clickhouse import days_with_source, distinct_file_names, insert_updates, recent_file_name_exists
+from pipeline.clickhouse import (
+    LIVE_TABLE,
+    days_with_source,
+    distinct_file_names,
+    insert_updates,
+    recent_file_name_exists,
+)
 from pipeline.strategies import get_ingest_strategy
 
 # archive_captured_at is used below; the private helpers are back-compat
@@ -572,6 +578,10 @@ def ingest_live_payload(
 ) -> int:
     """Decode and store one already-fetched GTFS-RT payload.
 
+    Writes `updates_live`: every realtime path (collector push, `ingest_live`,
+    `/delays/refresh`) lands here and nowhere else, and `updates` receives the
+    day from promotion once it closes.
+
     This common path is used by direct-feed pulls and the Oracle collector
     push path. ``file_name`` is the collector's durable source identity, so a
     retry after a network timeout is idempotent within a short lookup window.
@@ -583,12 +593,12 @@ def ingest_live_payload(
         strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
     since = datetime.now(timezone.utc) - timedelta(minutes=10)
-    if recent_file_name_exists(ch_client, agency_id, file_name, since):
+    if recent_file_name_exists(ch_client, agency_id, file_name, since, table=LIVE_TABLE):
         logger.info("Skipping duplicate live payload: %s", file_name)
         return 0
 
     rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
-    n_inserted = insert_updates(ch_client, agency_id, rows)
+    n_inserted = insert_updates(ch_client, agency_id, rows, table=LIVE_TABLE)
     conn.commit()
     logger.info("Done: %s rows inserted (live payload)", n_inserted)
     return n_inserted
