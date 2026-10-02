@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
+import { DESTINATIONS } from "../routes/destinations";
 import { explicitScopeQuery } from "./scope";
 
 /** Each screen keeps its own filters. The rail, the phone tab bar and the
@@ -7,9 +8,10 @@ import { explicitScopeQuery } from "./scope";
  *  agency, never the scope of the screen being left. Remembered per browser
  *  tab (sessionStorage), so a new tab opens every screen on its defaults.
  *  Links whose job is to carry the current scope to another screen (Worth a
- *  look, "Open in Time") build their own query and are not routed here. */
+ *  look, saved views) build their own query and are not routed here. */
 const STORAGE_KEY = "transit.screenScope";
 const SCREEN_PATH = /^\/agencies\/([^/]+)\/([^/]+)\/?$/;
+const SCREENS: ReadonlySet<string> = new Set([...DESTINATIONS, "ask"]);
 
 type Scopes = Readonly<Record<string, string>>;
 
@@ -68,10 +70,11 @@ export function rememberScreenScope(agencyId: string, screen: string, query: str
 }
 
 /** The screen a path shows, when the path is that screen's own page. A
- *  route dossier sits under Routes but is not the Routes screen. */
+ *  route dossier sits under Routes but is not the Routes screen, and a legacy
+ *  path is only a redirect, still in the URL for its first render. */
 export function screenOf(pathname: string): { agencyId: string; screen: string } | null {
   const match = SCREEN_PATH.exec(pathname);
-  return match ? { agencyId: match[1], screen: match[2] } : null;
+  return match && SCREENS.has(match[2]) ? { agencyId: match[1], screen: match[2] } : null;
 }
 
 /** A screen's query string: the screen on show uses its live URL, every

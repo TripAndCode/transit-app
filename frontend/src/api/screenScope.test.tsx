@@ -32,7 +32,11 @@ describe("screenOf", () => {
   it("names a screen's own page and nothing under it", () => {
     expect(screenOf("/agencies/1/routes")).toEqual({ agencyId: "1", screen: "routes" });
     expect(screenOf("/agencies/1/time/")).toEqual({ agencyId: "1", screen: "time" });
+    expect(screenOf("/agencies/1/ask")).toEqual({ agencyId: "1", screen: "ask" });
     expect(screenOf("/agencies/1/routes/42")).toBeNull();
+    // A legacy path redirects on its first render; it is not a screen of its own.
+    expect(screenOf("/agencies/1/network")).toBeNull();
+    expect(screenOf("/agencies/1/overview")).toBeNull();
     expect(screenOf("/agencies/1")).toBeNull();
     expect(screenOf("/welcome")).toBeNull();
   });
