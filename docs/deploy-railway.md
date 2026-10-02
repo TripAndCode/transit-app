@@ -307,6 +307,14 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
    creds, and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
 
+> **Do not target a day the live path already promoted.** A day in `updates`
+> has one source: if the live-table promotion cron (below) has already
+> copied a day's rows into `updates`, this job's `ingest` call for that same
+> day is refused whole, and its archive files are skipped rather than
+> inserted under a second source. Keep this job's date window ahead of
+> whatever the promotion cron has already closed out, or disable this job
+> once the live path is the agency's history source for that range.
+
 > **Lock contention in the sketch above is not free to ignore.** `ingest`
 > exits `EX_TEMPFAIL` (75) if another ingest/analyze process holds
 > `pipeline.locks`' advisory lock (e.g. this job overlapping a manual
@@ -333,10 +341,28 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > done
 > ```
 
-> **Fallback path.** If object storage isn't wired yet, the app also exposes
-> `POST /internal/cron/ingest` (gated by `CRON_SECRET`), which runs
-> `ingest_live` + `analyze` in a background task — poke it from any external
-> scheduler. It's the lower-fidelity live-sample path, not the primary one.
+> **Required: the live-table promotion cron.** `updates_live` (today's and
+> future observations) is never copied into `updates` (history, `agg_*`'s
+> source) except by `POST /internal/cron/ingest`, and ClickHouse's TTL drops
+> each day out of `updates_live` 3 days after capture. If nothing pokes this
+> endpoint, a day silently never becomes history. **Before deploying, confirm
+> an external scheduler actually calls it** — this is not configured by the
+> app itself. Poke it at least once daily after JST midnight, in addition to
+> whatever cadence it already runs on as the fallback RT-ingest path below;
+> add a poke at 00:05 JST (`15:05` UTC) specifically to close the midnight
+> gap promptly rather than waiting for the next regularly scheduled one.
+> Each call is gated by `CRON_SECRET` via the `X-Cron-Secret` header and runs
+> `ingest_live` → `promote_closed_days` → `analyze` per agency:
+> ```bash
+> curl -X POST "https://<api-host>/internal/cron/ingest" \
+>   -H "X-Cron-Secret: $CRON_SECRET"
+> ```
+> Cron expression for the 00:05 JST poke: `5 15 * * *` (UTC).
+>
+> **Fallback path.** If object storage isn't wired yet, this same endpoint is
+> also how RT data reaches `updates_live` at all — poke it from any external
+> scheduler on a shorter interval. It's the lower-fidelity live-sample path,
+> not the primary one, and the promotion requirement above still applies.
 
 > **Continuous freshness (optional, replaces the daily batch's RT lag).**
 > Everything above lands RT data once a day. If the Oracle collector VM is

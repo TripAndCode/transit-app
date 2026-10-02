@@ -64,9 +64,10 @@ but are not plotted.
   largest delay growth/recovery insight for the selected trip.
 - The client refetches current reports and selected-trip progress every 30
   seconds. Manual refresh first pulls the Oracle collector's newest loose
-  protobuf into ClickHouse when the local-dev SSH transport is configured;
+  protobuf into `updates_live` when the local-dev SSH transport is configured;
   environments without that transport use the agency's live feed URL as a
-  fallback, then the client reads the newly persisted data.
+  fallback, writing to `updates_live` as well, then the client reads the
+  newly persisted data.
 - A delayed trip's row in the attention panel links to
   `/agencies/:agencyId/routes/<route_code>?tab=stops`, that route's dossier
   (built by `routeHref` in `frontend/src/routes/destinations.ts`), the one
@@ -105,7 +106,7 @@ observations to a replay of one whole service day, one hour at a time
 |---|---|---|
 | `useLiveTrips` | `GET /api/{agency_id}/delays/live` | One latest report per trip from the feed's rolling five-minute window, enriched with static stop coordinates and headsign |
 | `useLiveTripProgress` | `GET /api/{agency_id}/delays/live-progress?trip_id=...` | Nearest reported stop per source snapshot for one trip, compacted to one report per sequence |
-| `useTodayRouteSummary` | `GET /api/{agency_id}/today/route-summary` | Historical route average and p90 baseline used to classify current route delay as normal, watch, or anomaly |
+| `useTodayRouteSummary` | `GET /api/{agency_id}/today/route-summary` | Today's per-route figures computed live from `updates_live` against `agg_route_stats` closed-day baselines |
 | `useRouteShape` | `GET /api/{agency_id}/route-shape` | Static GTFS geometry for the selected route |
 | `useTimeline` | `GET /api/{agency_id}/delays/timeline` | One service day's worth of per-stop delay frames, backing day playback |
 
@@ -114,6 +115,13 @@ agency's latest stored observation to one row per trip and returns at most 500
 rows. This remains useful for replayed or delayed feeds, so the UI always shows
 the observation age and calls the count "trips in latest observation" rather
 than claiming stale rows are physically operating now.
+
+Observations split across two ClickHouse tables: `updates_live` holds today
+and any later day, `updates` holds every closed day.
+`pipeline.clickhouse.live_table_for` is the one place a reader picks between
+them, so endpoints that can be asked about either today or a past day (day
+playback, route trips, stop profiles) resolve the table through it rather
+than hardcoding `updates`.
 
 ## Key files
 

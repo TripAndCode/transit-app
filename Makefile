@@ -155,9 +155,9 @@ oracle-tests:
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
-# Keeps dev's `updates` fresh without an Oracle collector or a manual refresh
-# click: re-runs `ingest_live` (all configured agencies) on a fixed interval,
-# backgrounded alongside uvicorn and killed with it. Opt IN per-run with
+# Keeps dev's `updates_live` fresh without an Oracle collector or a manual
+# refresh click: re-runs `ingest_live` (all configured agencies) on a fixed
+# interval, backgrounded alongside uvicorn and killed with it. Opt IN per-run with
 # `LOCAL_RT_POLL=1 make serve` — default off, since `ingest_live` with no
 # `--agency-id` fetches every configured agency's real feed_url every
 # interval, and this is a plain dev convenience, not something that should
