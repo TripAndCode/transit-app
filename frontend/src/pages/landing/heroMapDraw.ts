@@ -318,7 +318,7 @@ function drawRefreshChip(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, lay
 /** Numbered caption naming the screen being shown, revealed through a mask. */
 function drawCaption(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, layout: HeroLayout, frame: HeroFrame, height: number): void {
   const c = frame.caption;
-  if (!c) return;
+  if (!c || !layout.caption) return;
   const k = expoOut(c.enter);
   const out = expoIn(c.exit);
   const px = Math.min(24, height * 0.032);

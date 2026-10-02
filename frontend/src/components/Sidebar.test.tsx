@@ -297,6 +297,13 @@ describe("Sidebar", () => {
       expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
     });
 
+    it("sets the More label in the same type as the other tab labels", () => {
+      renderSidebar();
+      const more = screen.getByRole("button", { name: "More" });
+      const pulse = screen.getByRole("link", { name: "Pulse" });
+      expect(more.style.fontSize).toBe(pulse.style.fontSize);
+    });
+
     it("renders a More trigger that does not mount the agency picker until opened", () => {
       renderSidebar();
       expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
@@ -336,6 +343,24 @@ describe("Sidebar", () => {
       // The nav destinations already live in the tab bar underneath; the
       // sheet must not repeat them.
       expect(within(dialog).queryByRole("link", { name: /Live/ })).toBeNull();
+    });
+
+    it("puts the account menu above the destinations, on the sheet's first screen", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const dialog = screen.getByRole("dialog");
+      const account = await within(dialog).findByRole("button", { name: "Account menu" });
+      const nav = within(dialog).getByRole("navigation", { name: "Destinations" });
+      expect(account.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("keeps its close button pinned while the sheet scrolls", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const close = within(screen.getByRole("dialog")).getByRole("button", { name: "Close menu" });
+      expect(close.parentElement?.style.position).toBe("sticky");
     });
 
     it("carries the destinations that have no tab of its own on a phone, and Help", async () => {

@@ -29,8 +29,8 @@ import {
 } from "./heroMapScene";
 import type { HeroFrame, PanelSection } from "./heroMapTimeline";
 
-/** Below this width the headline spans the canvas: no panel, no morphs,
- *  and the map drops below the headline. Mirrors LandingPage.css. */
+/** Below this width the map is a strip of its own under the headline
+ *  (LandingPage.css mirrors this breakpoint): no panel and no morphs. */
 export const WIDE_LAYOUT_MIN_WIDTH = 900;
 const PANEL_BASE_W = 374;
 const PANEL_BASE_H = 440;
@@ -44,7 +44,9 @@ export type HeroLayout = {
   focusY: number;
   panel: PanelGeom | null;
   rail: { x: number; y: number; w: number };
-  caption: { x: number; y: number };
+  /** None on a narrow canvas: each caption names a panel screen, and a
+   *  narrow canvas draws no panel. */
+  caption: { x: number; y: number } | null;
 };
 
 /** The panel keeps its designed proportions and scales as one piece; the
@@ -58,7 +60,7 @@ export function layoutFor(width: number, height: number): HeroLayout {
       focusY: height * 0.7,
       panel: null,
       rail: { x: width * 0.06, y: height - RAIL_H - 20, w: width * 0.88 },
-      caption: { x: width * 0.06, y: height * 0.6 },
+      caption: null,
     };
   }
   const s = Math.min(Math.min(400, Math.max(300, width * 0.26)) / PANEL_BASE_W, (height * 0.8) / PANEL_BASE_H);

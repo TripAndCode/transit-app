@@ -28,3 +28,4 @@
 .report-list__entry[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .report-list__name { display: block; font-size: var(--text-sm); font-weight: 500; }
 .report-list__desc { display: block; margin-top: 2px; font-size: var(--text-xs); line-height: 1.45; color: var(--text-tertiary); }
+.report-list__select { width: 100%; min-height: 44px; font: inherit; font-size: var(--text-md); }
