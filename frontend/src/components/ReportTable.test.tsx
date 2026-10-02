@@ -83,3 +83,43 @@ describe("ReportTable council_summary/delay_certificate schemas", () => {
     expect(screen.getByText("400")).toBeInTheDocument();
   });
 });
+
+describe("ReportTable inline bars", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("draws the bar in its own track beside the value, never under the number", () => {
+    mockRoutes([]);
+    renderTable([["33101", "平日", 6.0, 5.5, 9.8, 436]]);
+    const value = screen.getByText("6.0");
+    const track = screen.getByTestId("bar-track");
+    expect(track).not.toContainElement(value);
+    expect(track.style.position).not.toBe("absolute");
+    expect(value.closest("td")).toContainElement(track);
+  });
+});
+
+describe("ReportTable units and route names", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("names the unit once in the header and leaves the cells to the figures", () => {
+    mockRoutes([]);
+    renderTable([["33101", "平日", 6.0, 5.5, 9.8, 436]]);
+    expect(screen.getByRole("columnheader", { name: "Avg (min)" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Median (min)" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Samples" })).toBeInTheDocument();
+    expect(screen.getByText("5.5")).toBeInTheDocument();
+    expect(screen.queryByText(/\d\s?min$/)).toBeNull();
+  });
+
+  it("keeps the route column readable when the table scrolls sideways", () => {
+    mockRoutes([]);
+    renderTable([["33101", "平日", 6.0, 5.5, 9.8, 436]]);
+    const cell = screen.getByText("Route 33101").closest("td") as HTMLElement;
+    expect(cell.style.position).toBe("sticky");
+    expect(cell.style.wordBreak).toBe("keep-all");
+  });
+});

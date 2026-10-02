@@ -909,7 +909,8 @@
       "date": "日付",
       "scheduled_time": "定刻",
       "actual_time": "実績時刻",
-      "delay_sec": "遅延(秒)"
+      "delay_sec": "遅延(秒)",
+      "with_unit": "{{label}}（{{unit}}）"
     },
     "confidence_low_mark": "幅あり",
     "direction": {
