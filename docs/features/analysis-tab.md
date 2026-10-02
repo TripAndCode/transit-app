@@ -125,8 +125,17 @@ Rules the two sides share:
 - **Unknown params survive.** `scope.ts` writes only its own params, so
   screen-local ones survive a scope change: `report`, `sort`, `by`, `doc`,
   `sub_tab`, and the route dossier's `compare=1` (the week-earlier overlay).
-  Rail links carry only the scope. An agency switch keeps the destination
-  plus `by` and `doc` (`agencySwitchHref` in `destinations.ts`).
+  An agency switch keeps the destination plus `by` and `doc`
+  (`agencySwitchHref` in `destinations.ts`).
+- **Each screen keeps its own scope.** The rail, the phone tab bar, the More
+  sheet and the palette open a screen with the scope that screen last showed
+  for the agency, never the scope of the screen being left
+  (`frontend/src/api/screenScope.ts`). The record lives in sessionStorage, so
+  a new tab opens every screen on its defaults, and it holds only the params
+  a URL states outright, so the default period keeps rolling. Links whose
+  job is to carry the current scope elsewhere (Worth a look, saved views)
+  build their own query. The signed-out restore on a fresh visit
+  (`anonymousFilterPersistence.ts`) is keyed per screen the same way.
 
 Every endpoint behind these screens returns `scope_applied`: one boolean per
 field in `api/scope_applied.py`'s `SCOPE_FIELDS`, saying whether this
