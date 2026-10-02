@@ -288,3 +288,10 @@ def test_delay_ceiling_is_single_source_of_truth():
     import pipeline.db as db
 
     assert analyze.MAX_PLAUSIBLE_DELAY_SEC is db.MAX_PLAUSIBLE_DELAY_SEC
+
+
+def test_dedup_reads_the_table_it_is_given():
+    assert "FROM updates AS u" in build_dedup_ch_sql()
+    assert "FROM updates_live AS u" in build_dedup_ch_sql(table="updates_live")
+    with pytest.raises(ValueError):
+        build_dedup_ch_sql(table="agg_route_daily")

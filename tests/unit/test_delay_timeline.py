@@ -247,3 +247,8 @@ def test_frame_mean_is_sample_weighted_not_a_mean_of_means():
     frames = build_frames(folded, _GEO, 60)
     # 6000 sec over 104 samples = 0.96 min, not (1.0 + 0.0) / 2.
     assert frames[0]["mean_delay_min"] == 0.96
+
+
+def test_timeline_sql_reads_the_table_it_is_given():
+    sql, _ = build_timeline_ch_sql(_ctx(), 60, table="updates_live")
+    assert "FROM updates_live AS u" in sql

@@ -1416,6 +1416,7 @@
       "run_lane_all": "{{kind}} · all agencies",
       "run_kind": {
         "ingest": "Ingest",
+        "promote": "Promote",
         "analyze": "Analyze",
         "weather": "Weather",
         "static": "Static"

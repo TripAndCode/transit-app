@@ -1,11 +1,13 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyScopePatch,
+  defaultPeriod,
   explicitScopeQuery,
   isoDaysAgo,
   isoDaysBefore,
   jstYearMonth,
+  lastClosedDayISO,
   parseScope,
   presetScopePatch,
   scopeToQueryString,
@@ -147,5 +149,23 @@ describe("isoDaysBefore", () => {
 
   it("handles days=0 (returns the same date)", () => {
     expect(isoDaysBefore("2026-06-15", 0)).toBe("2026-06-15");
+  });
+});
+
+describe("defaultPeriod", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("ends on the last closed JST day, through the last second of today", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-02T14:59:59Z")); // 2026-10-02 23:59:59 JST
+    expect(lastClosedDayISO()).toBe("2026-10-01");
+    expect(defaultPeriod()).toEqual({ from: "2026-09-02", to: "2026-10-01" });
+  });
+
+  it("moves to the day that just closed at JST midnight", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-02T15:00:00Z")); // 2026-10-03 00:00 JST
+    expect(lastClosedDayISO()).toBe("2026-10-02");
+    expect(defaultPeriod()).toEqual({ from: "2026-09-03", to: "2026-10-02" });
   });
 });

@@ -10,7 +10,9 @@ Aggregation tables produced:
 - agg_route_hour       — delay by scheduled departure time
 - agg_route_hour_dow   — delay by day-of-week × scheduled hour (Forecast heatmap)
 - agg_daily_trend      — per-day delay averages for trend queries
-- agg_route_daily      — per-route, per-day summary (powers today/route-summary)
+- agg_route_daily      — per-route, per-day summary (backs route_exists and
+  latest_data_date; range-scoped reports). today/route-summary's own figures
+  come live from `updates_live`, not from this table.
 - agg_route_daily_dist — per-day delay distribution (powers range-scoped reports)
 - agg_hour_daily       — per-day, per-hour-of-day delay (Overview peak-hour-by-DOW)
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
@@ -1035,10 +1037,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             conn,
         )
 
-        # ── agg_route_daily (per-route, per-day; powers the fast today/route-summary) ──
-        # Mirrors the route-summary endpoint's aggregation but precomputed for
-        # every day, so the endpoint reads one tiny row-set for the latest date
-        # instead of scanning raw `updates` (which the planner mis-estimates).
+        # ── agg_route_daily (per-route, per-day; backs route_exists, latest_data_date,
+        # and range-scoped reports) ──
+        # today/route-summary no longer reads this table: its own figures are
+        # computed live from `updates_live`, against `agg_route_stats` baselines.
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped)
             SELECT

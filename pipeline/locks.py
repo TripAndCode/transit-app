@@ -12,45 +12,39 @@ Two lock domains, distinguished by what the caller is about to write:
    protect within one process's own batch, not across two processes racing
    the same feed).
 
-2. One agency's `updates` rows (``lock_agency_ingest_or_timeout`` for the
-   collector push endpoint's writer, ``agency_ingest_lock`` for a reader that
-   must see a stable set, and ``try_lock_agency_ingest`` for a caller that
-   wants the same key with no wait at all -- a sibling of the first, not a
-   layer beneath it; each issues its own acquire). Held by the collector push endpoint around
-   its append, and by analyze() for the whole of its own run. Two
-   *different* agencies never contend here: an append for one touches no
-   row and no agg_* table the other reads, so a single global key serialized
-   disjoint work would have turned every concurrent arrival on the
-   collector's dense per-agency polling into a dropped poll; the per-agency
-   key keeps that contention scoped to genuine same-agency overlap, which
-   the push endpoint now waits out (see ``lock_agency_ingest_or_timeout``)
-   instead of dropping.
+2. One agency's `updates` rows (``agency_ingest_lock`` for a holder that
+   blocks for the duration of its work, and ``try_lock_agency_ingest`` for a
+   caller that wants the same key with no wait at all -- a sibling, not a
+   layer beneath it; each issues its own acquire).
+   Held by promotion (pipeline/promote.py) around its copy from
+   `updates_live` into `updates`, and by analyze() for the whole of its own
+   run. The realtime writers (collector push, `ingest_live`) write
+   `updates_live`, which analyze never reads, and take no per-agency key.
+   This is analyze's own exclusion against promotion's copy landing
+   mid-run, independent of whether a caller also holds domain 1. Current
+   callers hold both: the cron sweep takes domain 1 once around its whole
+   per-agency loop, and promotion/analyze each still take domain 2 per
+   agency inside it -- domain 1 alone cannot stand in for domain 2.
 
-   The collector's own pushes and the cron sweep's ``ingest_live`` can also
-   both be mid-flight for the same agency, serialized by this same key --
-   but even before either acquires it, the two write disjoint file-name
-   spaces (the collector's durable ``oracle/...`` source path vs.
-   ``ingest_live``'s generated ``live_...`` timestamp), so
-   ``recent_file_name_exists``'s dedup guard never mistakes one producer's
-   row for the other's and drops it as a false-duplicate poll.
+Domain 2 covers analyze() as well as promotion's copy precisely BECAUSE
+Postgres keeps single-argument and two-argument advisory locks in separate
+spaces: holding domain 1 does not exclude a domain-2 write, so analyze() has
+to take the agency's domain-2 key itself to get that exclusion back. It needs
+it. analyze() reads `updates` from ClickHouse more than once per run at
+different times -- the deduped fact slice is loaded into a TEMP TABLE early,
+while agg_feed_health's raw per-date counts are a separate, later query -- and
+promotion's copy landing between those two reads writes a ledger that is NEWER
+than the aggregates it certifies. _dates_needing_rebuild compares that ledger
+against the live count, finds them equal, and never re-lists the date, so the
+other incremental tables stay permanently short those rows. Per-agency
+exclusion, not the ledger, is what makes this safe; the ledger cannot detect
+the one case that would need it to.
 
-Domain 2 covers analyze() as well as the append precisely BECAUSE Postgres
-keeps single-argument and two-argument advisory locks in separate spaces:
-holding domain 1 does not exclude a domain-2 append, so analyze() has to take
-the agency's domain-2 key itself to get that exclusion back. It needs it.
-analyze() reads `updates` from ClickHouse more than once per run at different
-times -- the deduped fact slice is loaded into a TEMP TABLE early, while
-agg_feed_health's raw per-date counts are a separate, later query -- and an
-append landing between those two reads writes a ledger that is NEWER than the
-aggregates it certifies. _dates_needing_rebuild compares that ledger against
-the live count, finds them equal, and never re-lists the date, so the other
-incremental tables stay permanently short those rows. Per-agency exclusion,
-not the ledger, is what makes this safe; the ledger cannot detect the one case
-that would need it to.
-
-Do not narrow domain 2 back to the append alone, and do not move the append
-into domain 1: the first reopens the skew above, the second restores the
-cross-agency serialization the split exists to remove.
+Do not narrow domain 2 back to promotion's copy alone: that reopens the skew
+above by removing analyze's own exclusion. Do not rely on domain 1 alone to
+provide it either, even for a caller that already holds domain 1 for its own
+reasons: the two locks occupy separate advisory-lock spaces, so holding one
+never grants the other's exclusion.
 
 Best-effort, not job-level atomicity: production (scripts/fetch_and_ingest.sh,
 docs/deploy-railway.md's Railway sketch) invokes ingest/load_static/analyze
@@ -78,8 +72,6 @@ not table corruption.
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-
-import psycopg2.errors
 
 # Arbitrary, fixed -- only needs to be distinct from any other advisory
 # lock this codebase takes, and there are none as of this writing. Reused as
@@ -129,8 +121,7 @@ def try_lock_agency_ingest(conn, agency_id: int) -> bool:
 
     An instant answer with no wait at all, for a caller that can afford to
     walk away from the work outright rather than wait any bounded amount for
-    it. `lock_agency_ingest_or_timeout` is the bounded-wait sibling, not a
-    wrapper around this -- it issues its own acquire. No production caller
+    it; the blocking form is `agency_ingest_lock`. No production caller
     takes this form today; `tests/pipeline/test_locks.py` uses it to pin the
     per-agency key's semantics, which is what keeps it honest.
     Same session-level semantics and release-by-closing-`conn` contract as
@@ -144,63 +135,22 @@ def try_lock_agency_ingest(conn, agency_id: int) -> bool:
         return cur.fetchone()[0]
 
 
-def lock_agency_ingest_or_timeout(conn, agency_id: int, timeout_seconds: int) -> bool:
-    """Blocking acquire of one agency's `updates` lock, bounded by a wait.
-
-    For the collector push endpoint: a poll that arrives while another push
-    or analyze() run holds this agency's key should wait out that overlap --
-    the collector re-polls on its own interval, so dropping every poll that
-    lands mid-overlap to an instant 409 (the non-blocking
-    try_lock_agency_ingest's behavior) discarded work that a short wait would
-    have delivered. The wait is bounded by `SET LOCAL lock_timeout`, applied
-    only to the transaction that contains the acquire attempt, so it cannot
-    also cap unrelated statements a caller runs on `conn` afterward; `conn`
-    must not be in autocommit mode when this is called, or `SET LOCAL` would
-    apply to a one-statement implicit transaction of its own and have no
-    effect on the SELECT that follows it. Returns False, without raising, if
-    `timeout_seconds` elapses first -- the caller answers 409 in that case,
-    same as it did for the old non-blocking miss.
-
-    Same session-level semantics and release-by-closing-`conn` contract as
-    try_lock_ingest_analyze; unlike that function's non-blocking counterpart,
-    a timed-out attempt here rolls back the wrapping transaction (clean up
-    after the timeout error) but does not affect the advisory lock itself,
-    which was never acquired.
-    """
-    with conn.cursor() as cur:
-        cur.execute("SET LOCAL lock_timeout = %s", (f"{timeout_seconds}s",))
-        try:
-            cur.execute(
-                "SELECT pg_advisory_lock(%s, %s)",
-                (INGEST_ANALYZE_LOCK_KEY, agency_id),
-            )
-        except psycopg2.errors.LockNotAvailable:
-            conn.rollback()
-            return False
-    conn.commit()
-    return True
-
-
 @contextmanager
 def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
     """Hold one agency's `updates` lock for the duration of the block.
 
     Blocking, unlike try_lock_agency_ingest, and released on the way out
     rather than at connection close -- both because of who calls it.
-    analyze() cannot skip an agency just because a push is mid-flight (the
+    analyze() cannot skip an agency just because promotion is mid-flight (the
     result would be an agency that goes unanalyzed for a reason invisible in
     its output), and one long-lived connection analyzes every agency in turn,
     so a lock left to connection teardown would still be held for agency N
-    while N+1..last are processed -- blocking that agency's pushes for the
-    whole fleet's run, which is the contention this key exists to avoid.
+    while N+1..last are processed, well past the point this key's exclusion
+    is still needed for agency N.
 
-    Waiting cannot deadlock against the append path, even though that path
-    now waits too: it takes this one key and no other, so it has nothing to
-    hold while waiting and a cycle needs at least two resources. Callers of
-    this one may hold INGEST_ANALYZE_LOCK_KEY's single-argument lock at the
-    same time (the cron and CLI entrypoints do) without forming a cycle for
-    the same reason -- the append path never takes that key. What bounds the
-    append path's wait is its own `lock_timeout`, not the shape of the graph.
+    Waiting cannot deadlock: every holder (promotion, analyze) takes this key
+    while holding at most INGEST_ANALYZE_LOCK_KEY's single-argument lock,
+    which no holder of this key waits on.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_lock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))

@@ -5,10 +5,10 @@ which FastAPI resolves to a :class:`RangeCtx` via the :func:`get_range_ctx`
 dependency. SQL helpers in this module turn the context into ``WHERE`` clause
 fragments + parameter lists ready to splice into asyncpg queries.
 
-Defaults: last 30 days inclusive, all DOW, all time bands. Every entry
-point — query params, request body, a conversation's stored filters — goes
-through :func:`clamp_range_ctx`, which clamps both boundaries to today and
-the window to 365 days to avoid runaway scans.
+Defaults: the last 30 closed JST days inclusive, all DOW, all time bands.
+Every entry point — query params, request body, a conversation's stored
+filters — goes through :func:`clamp_range_ctx`, which clamps both
+boundaries to today and the window to 365 days to avoid runaway scans.
 """
 
 from __future__ import annotations
@@ -35,6 +35,15 @@ def jst_today() -> date:
     for the request-side default date-range window.
     """
     return datetime.now(_JST).date()
+
+
+def last_closed_jst_day() -> date:
+    """The newest JST day history can hold: yesterday.
+
+    `updates` and every aggregate receive a day only once it has closed
+    (pipeline/promote.py), so this, not today, ends the default report period.
+    """
+    return jst_today() - timedelta(days=1)
 
 
 TimeBand = Literal[
@@ -244,12 +253,17 @@ def clamp_range_ctx(
 
     Rules, in order:
 
-    * absent dates default to a trailing :data:`DEFAULT_RANGE_DAYS` window;
+    * absent dates default to a trailing :data:`DEFAULT_RANGE_DAYS` window
+      ending on :func:`last_closed_jst_day`; a start given alone ends there
+      too, or on itself when it is later, so it is never swapped into a
+      window it did not ask for;
       a malformed non-empty date is a 422;
-    * neither boundary may exceed :func:`jst_today` — no aggregate holds a
-      future date, so a future bound can only widen the scan. Both ends are
-      clamped *before* the reversed-range swap, so the swap can't reopen a
-      future ``to_date``;
+    * neither boundary may exceed :func:`jst_today` — nothing holds a future
+      date, so a future bound can only widen the scan. Today itself passes
+      through as asked, rather than being relabelled as the last closed day:
+      history and every aggregate hold closed days only, so a window through
+      today simply has no rows for it. Both ends are clamped *before* the
+      reversed-range swap, so the swap can't reopen a future ``to_date``;
     * a reversed range is swapped rather than rejected;
     * a window wider than :data:`MAX_RANGE_DAYS` is clamped at the *start*,
       preserving the most recent data;
@@ -264,9 +278,11 @@ def clamp_range_ctx(
     """
     today = jst_today()
 
-    to_date = _coerce_date(to, "to") or today
+    explicit_to = _coerce_date(to, "to")
+    explicit_from = _coerce_date(from_, "from")
+    to_date = explicit_to or max(last_closed_jst_day(), explicit_from or date.min)
     to_date = min(to_date, today)
-    from_date = _coerce_date(from_, "from") or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
+    from_date = explicit_from or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
     from_date = min(from_date, today)
 
     if from_date > to_date:

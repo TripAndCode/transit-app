@@ -23,9 +23,8 @@ import os
 import pathlib
 import re
 import subprocess
-import tempfile
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date as CalendarDate
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -54,7 +53,8 @@ from api.range import (
 from api.scope_applied import ALL_SIX, scope_applied
 from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
+from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, jst_midnight_utc, live_table_for
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
 
@@ -71,7 +71,7 @@ _ROUTE_TRIPS_SCOPE = scope_applied("time_band", "routes")
 
 
 def _ingest_live_agency(agency_id: int) -> int:
-    """Fetch one agency's current GTFS-RT data and write it to ClickHouse.
+    """Fetch one agency's current GTFS-RT data and write it to `updates_live`.
 
     This runs in a worker thread because both the feed fetch and the pipeline
     clients are synchronous. The Postgres advisory lock prevents a manual
@@ -82,7 +82,7 @@ def _ingest_live_agency(agency_id: int) -> int:
     import psycopg2
 
     from pipeline.clickhouse import get_client
-    from pipeline.ingest import ingest, ingest_live
+    from pipeline.ingest import ingest_live, ingest_live_payload
     from pipeline.locks import try_lock_ingest_analyze
 
     db_url = os.environ.get("DATABASE_URL")
@@ -123,7 +123,7 @@ def _ingest_live_agency(agency_id: int) -> int:
             ).stdout.strip()
             try:
                 mtime_text, latest = latest_record.split(" ", 1)
-                captured_at = datetime.fromtimestamp(float(mtime_text), timezone.utc).astimezone(_JST)
+                captured_at = datetime.fromtimestamp(float(mtime_text), timezone.utc)
             except (ValueError, TypeError, OverflowError) as exc:
                 raise RuntimeError("Oracle collector returned an invalid live-file timestamp") from exc
             match = re.fullmatch(r".*/(\d{8})/(TripUpdate_\d{6}\.pb)", latest)
@@ -135,17 +135,20 @@ def _ingest_live_agency(agency_id: int) -> int:
                 capture_output=True,
                 timeout=15,
             ).stdout
-            with tempfile.TemporaryDirectory(prefix="transit-live-") as temp_dir:
-                # Oracle's rt-poller names files with UTC (`date -u`), while
-                # archive ingest reads a name as JST whenever the feed's own
-                # header timestamp can't be used. Rename the temporary copy
-                # into the equivalent JST path so that fallback also writes
-                # the actual instant to CH.
-                live_dir = pathlib.Path(temp_dir) / captured_at.strftime("%Y%m%d")
-                live_dir.mkdir()
-                live_file = live_dir / f"TripUpdate_{captured_at.strftime('%H%M%S')}.pb"
-                live_file.write_bytes(raw)
-                return ingest(temp_dir, agency_id, conn, ch_client)
+            # The collector's own push names this poll `oracle/<day>/<file>` from
+            # the same on-disk path, so ingest_live_payload's check-then-insert
+            # over the last 10 minutes of captured_at absorbs a sequential
+            # second arrival of the same file_name. If this SSH pull and the
+            # collector's own push overlap in flight, both can still insert;
+            # analyze's argMax dedup on captured_at absorbs that duplicate.
+            return ingest_live_payload(
+                agency_id,
+                raw,
+                captured_at.isoformat(),
+                f"oracle/{match.group(1)}/{match.group(2)}",
+                conn,
+                ch_client,
+            )
         return ingest_live(agency_id, conn, ch_client)
     finally:
         if conn is not None:
@@ -192,21 +195,27 @@ async def _latest_route_observation(
     it's meaningful against replayed/old data too — a route with zero
     observations in that window still correctly resolves to None, even if
     it was active further in the past).
+
+    Probes `updates_live` first, so a route running today answers from
+    today, then `updates`, so one that is not answers from its latest
+    closed day.
     """
     if not await route_exists(conn, agency_id, route_code):
         return None
-    agency_latest = await max_captured_at(ch, agency_id)
-    if agency_latest is None:
-        return None
-    route_probe_bound = agency_latest - timedelta(days=30)
-    latest_result = await ch.query(
-        "SELECT captured_at FROM updates "
-        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-        "  AND captured_at >= {bound:DateTime64} "
-        "ORDER BY captured_at DESC LIMIT 1",
-        parameters={"agency_id": agency_id, "route": route_code, "bound": route_probe_bound},
-    )
-    return _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
+    for table in (LIVE_TABLE, UPDATES_TABLE):
+        agency_latest = await max_captured_at(ch, agency_id, table=table)
+        if agency_latest is None:
+            continue
+        result = await ch.query(
+            f"SELECT captured_at FROM {table} "
+            "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+            "  AND captured_at >= {bound:DateTime64} "
+            "ORDER BY captured_at DESC LIMIT 1",
+            parameters={"agency_id": agency_id, "route": route_code, "bound": agency_latest - timedelta(days=30)},
+        )
+        if result.result_rows:
+            return _as_utc(result.result_rows[0][0])
+    return None
 
 
 # A poll can report several future stops for one trip. The lowest sequence in
@@ -232,7 +241,7 @@ _LIVE_DELAYS_DEDUP_SQL = f"""
                 (u.captured_at, u.file_name, -toInt32(u.stop_sequence))
             ) AS winner,
             max(u.captured_at) AS captured_at
-        FROM updates AS u
+        FROM updates_live AS u
         WHERE u.agency_id = {{agency_id:UInt16}}
           AND u.dep_delay IS NOT NULL
           AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
@@ -254,7 +263,7 @@ async def live_delays(
     limit: int = Query(default=500, ge=1, le=500),
 ) -> dict[str, Any]:
     """Latest reported stop and delay for trips in the current feed window."""
-    latest_ts = await max_captured_at(ch, agency_id)
+    latest_ts = await max_captured_at(ch, agency_id, table=LIVE_TABLE)
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": []}
 
@@ -374,7 +383,7 @@ async def live_trip_progress(
     newest report for each sequence. This is a report trail, not a GPS trace
     or proof that the vehicle physically crossed the stop.
     """
-    latest_ts = await max_captured_at(ch, agency_id)
+    latest_ts = await max_captured_at(ch, agency_id, table=LIVE_TABLE)
     empty: dict[str, Any] = {
         "trip_id": trip_id,
         "route_code": None,
@@ -391,7 +400,7 @@ async def live_trip_progress(
     # trip IDs from triggering a wider history scan.
     active_result = await ch.query(
         "SELECT argMax(route_code, (captured_at, file_name)) AS route_code "
-        "FROM updates WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String} "
+        "FROM updates_live WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String} "
         "AND dep_delay IS NOT NULL AND captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE",
         parameters={"agency_id": agency_id, "trip_id": trip_id, "latest_ts": latest_ts},
     )
@@ -409,7 +418,7 @@ async def live_trip_progress(
                        tuple(stop_sequence, stop_id, scheduled_time, dep_delay),
                        toInt32(stop_sequence)
                    ) AS winner
-            FROM updates
+            FROM updates_live
             WHERE agency_id = {{agency_id:UInt16}} AND trip_id = {{trip_id:String}}
               AND dep_delay IS NOT NULL
               AND dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
@@ -508,6 +517,148 @@ async def route_shape(
     return {**await compute_route_shape(conn, ch, agency_id, str(route), ctx), "scope_applied": _ROUTE_SHAPE_SCOPE}
 
 
+# Today's figures per (route, service): one observation per stop event via the
+# shared dedup, read from `updates_live` alone. `updates` and every aggregate
+# hold closed days only, so a day in progress exists nowhere else. NULL and ''
+# service_type fold into one '' key, as agg_route_daily's builder folds them.
+_TODAY_ROUTES_SQL = (
+    "SELECT route_code, ifNull(service_type, '') AS service_key, "
+    "sum(dep_delay) AS sum_delay_sec, max(dep_delay) AS worst_delay_sec, "
+    "uniqExact(trip_id) AS trips_observed, count() AS samples, "
+    "max(last_captured_at) AS last_seen_at FROM ("
+    + build_dedup_ch_sql(
+        table=LIVE_TABLE,
+        include_captured_at=True,
+        extra_where="u.captured_at >= {day_start:DateTime64} AND u.captured_at < {day_end:DateTime64}",
+    )
+    + ") AS deduped WHERE route_code IS NOT NULL GROUP BY route_code, service_key"
+)
+
+_TODAY_BASELINE_SQL = """
+    WITH today AS (
+        SELECT * FROM unnest($2::text[], $3::text[]) AS t(route_code, service_type)
+    ),
+    rb AS (
+        -- Route-grain baseline (across service_types), so a NULL-service daily
+        -- row (stored as '') still finds a baseline even though agg_route_stats
+        -- has no '' row. Mirrors the digest's route-grain baseline
+        -- (pipeline/digest/build.py's _ROUTE_BASELINE_SQL) for both columns.
+        -- base_avg_min is FILTERed the same way as base_p90_min below:
+        -- sum_delay_sec is nullable (unlike samples, unlike AVG()-backed
+        -- avg_min), so a pre-backfill NULL row's samples must not count in
+        -- the denominator without also contributing to the numerator, or
+        -- base_avg_min would be biased toward zero whenever any
+        -- contributing service_type hasn't been backfilled yet.
+        -- base_p90_min's numerator/denominator are both FILTERed to the same
+        -- p90_min IS NOT NULL rows: `analyze()`'s own SQL can no longer
+        -- produce a null p90_min alongside a non-null avg_min/samples for a
+        -- live group (dep_delay is filtered non-null upstream, and analyze()
+        -- wipes and rebuilds each agency's rows from scratch every run), but
+        -- this FILTER stays as defense-in-depth against a stale pre-rebuild
+        -- row or a non-analyze() writer (e.g. a test fixture) inserting one
+        -- directly -- SUM() silently
+        -- skips a null numerator term but NOT its row's sample count in the
+        -- denominator, which would otherwise bias base_p90_min down whenever
+        -- any contributing service_type's row is null this way.
+        -- base_p90_min itself is a samples-weighted average of each
+        -- service_type's already-computed p90_min, not a percentile
+        -- recomputed over the pooled raw delay observations across
+        -- service_types -- agg_route_stats stores only a per-group p90
+        -- and sample count, never the raw distribution, so an exact
+        -- pooled percentile isn't computable from it. Same defensible-
+        -- approximation shape as the heatmap's p90_delay_min elsewhere
+        -- in this file.
+        SELECT route_code,
+               SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
+                   / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS base_avg_min,
+               SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
+                   / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min,
+               SUM(samples) AS base_samples
+        FROM agg_route_stats
+        WHERE agency_id = $1 AND samples IS NOT NULL AND route_code = ANY($2)
+        GROUP BY route_code
+    )
+    SELECT t.route_code, t.service_type,
+        -- All three baseline columns are picked from the SAME source
+        -- (b or rb) via one shared condition, never coalesced
+        -- independently per column -- b.avg_min IS NOT NULL is the
+        -- correct "does b have a matching row" test (AVG() over a real
+        -- joined row is never null). `analyze()`'s own SQL can no longer
+        -- produce a null b.p90_min alongside a non-null b.avg_min for a
+        -- live (route, service_type) group (dep_delay is filtered
+        -- non-null upstream, and analyze() wipes and rebuilds every row
+        -- each run), but a stale pre-rebuild row or a non-analyze()
+        -- writer could still leave one, so this guard stays; independently
+        -- coalescing each column would then silently mix b's exact-match
+        -- avg with rb's pooled-across-service_types p90 -- two different
+        -- statistical populations reported as one baseline. Picking all
+        -- three from the same side means baseline_p90_min can be null
+        -- even when baseline_avg_min isn't (classify_route already
+        -- treats any null baseline input as "no_baseline"), which is
+        -- correct: a missing same-source p90 must not be papered over
+        -- with a different population's figure.
+        CASE WHEN b.avg_min IS NOT NULL THEN b.avg_min ELSE rb.base_avg_min END AS baseline_avg_min,
+        CASE WHEN b.avg_min IS NOT NULL THEN b.p90_min ELSE rb.base_p90_min END AS baseline_p90_min,
+        -- baseline_samples backs whichever source above was actually used,
+        -- so the client can flag a thin baseline -- not folded into
+        -- classify_route/low_confidence, which judges TODAY's sample count.
+        CASE WHEN b.avg_min IS NOT NULL THEN b.samples ELSE rb.base_samples END AS baseline_samples,
+        b.late5_pct
+    FROM today t
+    LEFT JOIN agg_route_stats b
+      ON b.agency_id = $1 AND b.route_code = t.route_code AND b.service_type = t.service_type
+    LEFT JOIN rb ON rb.route_code = t.route_code
+"""
+
+
+def build_today_routes(
+    today_rows: Sequence[Mapping[str, Any]],
+    baselines: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Classify today's live per-route figures against their closed-day baselines.
+
+    avg_delay_sec rounds half away from zero, like agg_route_daily's
+    ROUND(AVG()), so a day reads the same live as it will once promoted and
+    analyzed. Worst route first; the client groups by bucket.
+    """
+    routes = []
+    for r in today_rows:
+        b = baselines.get((r["route_code"], r["service_key"]), {})
+        avg_delay_sec = _round_half_up_int(r["sum_delay_sec"] / r["samples"])
+        baseline_avg_sec = round(b["baseline_avg_min"] * 60) if b.get("baseline_avg_min") is not None else None
+        baseline_p90_sec = round(b["baseline_p90_min"] * 60) if b.get("baseline_p90_min") is not None else None
+        bucket, deviation_sec, low_confidence = classify_route(
+            avg_delay_sec, baseline_avg_sec, baseline_p90_sec, r["samples"]
+        )
+        last_seen = _as_utc(r["last_seen_at"])
+        routes.append(
+            {
+                "route_code": r["route_code"],
+                "service_type": r["service_key"] or None,
+                "avg_delay_sec": avg_delay_sec,
+                "worst_delay_sec": r["worst_delay_sec"],
+                "trips_observed": r["trips_observed"],
+                "samples": r["samples"],
+                "last_seen_at": last_seen.isoformat() if last_seen else None,
+                "baseline_avg_sec": baseline_avg_sec,
+                "baseline_p90_sec": baseline_p90_sec,
+                "baseline_samples": b.get("baseline_samples"),
+                "deviation_sec": deviation_sec,
+                "bucket": bucket,
+                "low_confidence": low_confidence,
+                # bucket=="no_baseline" whenever classify_route treats any of
+                # avg/p90 as missing -- has_baseline must track that exactly
+                # (not just baseline_avg_sec) so a thin group with a real avg
+                # but a null p90 doesn't render as both "no baseline yet" and
+                # a concrete today-vs-baseline comparison at once.
+                "has_baseline": bucket != "no_baseline",
+                "late5_pct": b.get("late5_pct"),
+            }
+        )
+    routes.sort(key=lambda x: (-x["worst_delay_sec"], x["route_code"]))
+    return routes
+
+
 @router.get("/today/route-summary", response_model=None)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def today_route_summary(
@@ -516,9 +667,9 @@ async def today_route_summary(
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
 ) -> dict[str, Any]:
-    """Per-route triage summary for the most recent analyzed date.
+    """Per-route triage summary for today.
 
-    Powers the 最新観測 tab. Each row carries the latest analyzed day's figures
+    Powers the 最新観測 tab. Each row carries today's figures
     (``avg_delay_sec``, ``worst_delay_sec``, ``trips_observed``, ``samples``,
     ``last_seen_at``, ``service_type``) joined to the historical baseline in
     ``agg_route_stats`` (``baseline_avg_sec``, ``baseline_p90_sec``). A pure
@@ -529,175 +680,56 @@ async def today_route_summary(
     baseline itself (``agg_route_stats`` no longer drops thin route/service
     groups at insert time) — the client decides its own low-confidence
     treatment for a thin baseline from this field. The client groups by
-    bucket, so the SQL ``ORDER BY`` is only a sensible default.
+    bucket, so :func:`build_today_routes`'s worst-first sort is only a
+    sensible default.
 
-    Reads the precomputed ``agg_route_daily`` (built by ``analyze``) for the
-    latest date instead of scanning raw ``updates`` — a small indexed read
-    regardless of agency size; "today" therefore means "as of the last analyze".
+    Today's figures are computed live from `updates_live`; `agg_route_daily`
+    plays no part here (it feeds ``route_exists`` and the historical range
+    endpoints). The baseline comes from `agg_route_stats`, which holds
+    closed days only.
     """
-    latest_date = await conn.fetchval(
-        "SELECT MAX(date) FROM agg_route_daily WHERE agency_id=$1",
-        agency_id,
+    today = jst_today()
+    result = await ch.query(
+        _TODAY_ROUTES_SQL,
+        parameters={
+            "agency_id": agency_id,
+            "day_start": jst_midnight_utc(today),
+            "day_end": jst_midnight_utc(today + timedelta(days=1)),
+        },
     )
-    if latest_date is None:
-        # Agency ingested but not yet analyzed (or brand-new): no agg rows yet.
-        # Return empty rather than falling back to a raw `updates` scan — the
-        # window is one cron cycle (ingest+analyze run together), and the live
-        # scan is exactly the cost this endpoint exists to avoid.
-        return {"latest_captured_at": None, "date": None, "routes": [], "raw_samples": 0, "clamp_count": 0}
-
-    rows = await conn.fetch(
-        """
-        WITH rb AS (
-            -- Route-grain baseline (across service_types), so a NULL-service daily
-            -- row (stored as '') still finds a baseline even though agg_route_stats
-            -- has no '' row. Mirrors the digest's route-grain baseline
-            -- (pipeline/digest/build.py's _ROUTE_BASELINE_SQL) for both columns.
-            -- base_avg_min is FILTERed the same way as base_p90_min below:
-            -- sum_delay_sec is nullable (unlike samples, unlike AVG()-backed
-            -- avg_min), so a pre-backfill NULL row's samples must not count in
-            -- the denominator without also contributing to the numerator, or
-            -- base_avg_min would be biased toward zero whenever any
-            -- contributing service_type hasn't been backfilled yet.
-            -- base_p90_min's numerator/denominator are both FILTERed to the same
-            -- p90_min IS NOT NULL rows: `analyze()`'s own SQL can no longer
-            -- produce a null p90_min alongside a non-null avg_min/samples for a
-            -- live group (dep_delay is filtered non-null upstream, and analyze()
-            -- wipes and rebuilds each agency's rows from scratch every run), but
-            -- this FILTER stays as defense-in-depth against a stale pre-rebuild
-            -- row or a non-analyze() writer (e.g. a test fixture) inserting one
-            -- directly -- SUM() silently
-            -- skips a null numerator term but NOT its row's sample count in the
-            -- denominator, which would otherwise bias base_p90_min down whenever
-            -- any contributing service_type's row is null this way.
-            -- base_p90_min itself is a samples-weighted average of each
-            -- service_type's already-computed p90_min, not a percentile
-            -- recomputed over the pooled raw delay observations across
-            -- service_types -- agg_route_stats stores only a per-group p90
-            -- and sample count, never the raw distribution, so an exact
-            -- pooled percentile isn't computable from it. Same defensible-
-            -- approximation shape as the heatmap's p90_delay_min elsewhere
-            -- in this file.
-            SELECT route_code,
-                   SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
-                       / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0 AS base_avg_min,
-                   SUM(p90_min * samples) FILTER (WHERE p90_min IS NOT NULL)
-                       / NULLIF(SUM(samples) FILTER (WHERE p90_min IS NOT NULL), 0) AS base_p90_min,
-                   SUM(samples) AS base_samples
-            FROM agg_route_stats
-            WHERE agency_id = $1 AND samples IS NOT NULL
-            GROUP BY route_code
+    today_rows = [dict(zip(result.column_names, r, strict=True)) for r in result.result_rows]
+    baselines: dict[tuple[str, str], dict[str, Any]] = {}
+    if today_rows:
+        rows = await conn.fetch(
+            _TODAY_BASELINE_SQL,
+            agency_id,
+            [r["route_code"] for r in today_rows],
+            [r["service_key"] for r in today_rows],
         )
-        SELECT
-            d.route_code, d.service_type, d.avg_delay_sec, d.worst_delay_sec,
-            d.trips_observed, d.samples, d.last_seen_at,
-            -- All three baseline columns are picked from the SAME source
-            -- (b or rb) via one shared condition, never coalesced
-            -- independently per column -- b.avg_min IS NOT NULL is the
-            -- correct "does b have a matching row" test (AVG() over a real
-            -- joined row is never null). `analyze()`'s own SQL can no longer
-            -- produce a null b.p90_min alongside a non-null b.avg_min for a
-            -- live (route, service_type) group (dep_delay is filtered
-            -- non-null upstream, and analyze() wipes and rebuilds every row
-            -- each run), but a stale pre-rebuild row or a non-analyze()
-            -- writer could still leave one, so this guard stays; independently
-            -- coalescing each column would then silently mix b's exact-match
-            -- avg with rb's pooled-across-service_types p90 -- two different
-            -- statistical populations reported as one baseline. Picking all
-            -- three from the same side means baseline_p90_min can be null
-            -- even when baseline_avg_min isn't (classify_route already
-            -- treats any null baseline input as "no_baseline"), which is
-            -- correct: a missing same-source p90 must not be papered over
-            -- with a different population's figure.
-            CASE WHEN b.avg_min IS NOT NULL THEN b.avg_min ELSE rb.base_avg_min END AS baseline_avg_min,
-            CASE WHEN b.avg_min IS NOT NULL THEN b.p90_min ELSE rb.base_p90_min END AS baseline_p90_min,
-            -- baseline_samples backs whichever source above was actually used,
-            -- so the client can flag a thin baseline -- not folded into
-            -- classify_route/low_confidence, which judges TODAY's sample count.
-            CASE WHEN b.avg_min IS NOT NULL THEN b.samples ELSE rb.base_samples END AS baseline_samples,
-            b.late5_pct
-        FROM agg_route_daily d
-        LEFT JOIN agg_route_stats b
-          ON b.agency_id = $1
-         AND b.route_code = d.route_code
-         AND b.service_type = d.service_type
-        LEFT JOIN rb ON rb.route_code = d.route_code
-        WHERE d.agency_id = $1 AND d.date = $2
-        ORDER BY d.worst_delay_sec DESC, d.route_code
-        """,
-        agency_id,
-        latest_date,
-    )
+        baselines = {(r["route_code"], r["service_type"]): dict(r) for r in rows}
+    routes = build_today_routes(today_rows, baselines)
 
-    # Freshness header reflects INGEST recency (what DataStalenessBanner means),
-    # not analyze recency — a cheap probe, independent of the agg. ORDER BY
-    # captured_at DESC LIMIT 1 (not maxOrNull) is served off the sort index
-    # instead of a full per-agency scan — see live_delays above / the
-    # pipeline/clickhouse.py::max_captured_at docstring.
-    #
-    # Purely informational: every substantive row below comes from Postgres
-    # agg_* tables, so a ClickHouse hiccup on this one freshness lookup must
-    # not 500 the whole endpoint — degrade to latest_captured_at=None instead
-    # (same "one non-critical sub-check shouldn't sink an otherwise-fine
-    # response" shape as pipeline.health.aggregate_freshness's degrade on
-    # agg_feed_health / api.routers.admin.admin_ops's per-sub-check try/except).
+    # Freshness header: the newest live poll, else the newest history row. When
+    # updates_live holds nothing (its TTL dropped a stalled feed's days, or a
+    # local setup never polled) the staleness banner still has an age to show.
+    # Informational: a ClickHouse hiccup here degrades to null.
     latest_ts = None
     try:
-        latest_result = await ch.query(
-            "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
-            parameters={"agency_id": agency_id},
-        )
-        latest_ts = _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
+        latest_ts = await max_captured_at(ch, agency_id, table=LIVE_TABLE) or await max_captured_at(ch, agency_id)
     except Exception:
         _log.warning("ClickHouse freshness probe failed for agency %s — degrading to null", agency_id, exc_info=True)
 
-    # Feed-health over the last 7 analyzed days (not just the latest): frozen/stale
-    # feeds recur across days, so a single clean latest day must not hide a feed
-    # that froze earlier in the window. Powers FeedHealthBanner; small indexed read,
-    # defaults to 0 when no rows (pre-migration / not re-analyzed).
+    # Feed health over the 7 newest analyzed days, so a feed that froze earlier
+    # in the window is not hidden by one clean day.
     fh = await conn.fetchrow(
-        "SELECT COALESCE(SUM(raw_samples), 0) AS raw_samples, "
-        "       COALESCE(SUM(clamp_count), 0) AS clamp_count "
-        "FROM agg_feed_health WHERE agency_id=$1 AND date >= $2::date - 6",
+        "SELECT COALESCE(SUM(raw_samples), 0) AS raw_samples, COALESCE(SUM(clamp_count), 0) AS clamp_count "
+        "FROM agg_feed_health WHERE agency_id = $1 "
+        "AND date >= (SELECT MAX(date) FROM agg_feed_health WHERE agency_id = $1) - 6",
         agency_id,
-        latest_date,
     )
-
-    routes = []
-    for r in rows:
-        baseline_avg_sec = round(r["baseline_avg_min"] * 60) if r["baseline_avg_min"] is not None else None
-        baseline_p90_sec = round(r["baseline_p90_min"] * 60) if r["baseline_p90_min"] is not None else None
-        bucket, deviation_sec, low_confidence = classify_route(
-            r["avg_delay_sec"], baseline_avg_sec, baseline_p90_sec, r["samples"]
-        )
-        routes.append(
-            {
-                "route_code": r["route_code"],
-                # '' is the NULL-service sentinel from agg_route_daily — map back.
-                "service_type": r["service_type"] or None,
-                "avg_delay_sec": r["avg_delay_sec"],
-                "worst_delay_sec": r["worst_delay_sec"],
-                "trips_observed": r["trips_observed"],
-                "samples": r["samples"],
-                "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
-                "baseline_avg_sec": baseline_avg_sec,
-                "baseline_p90_sec": baseline_p90_sec,
-                "baseline_samples": r["baseline_samples"],
-                "deviation_sec": deviation_sec,
-                "bucket": bucket,
-                "low_confidence": low_confidence,
-                # bucket=="no_baseline" whenever classify_route treats any of
-                # avg/p90 as missing -- has_baseline must track that exactly
-                # (not just baseline_avg_sec) so a thin group with a real avg
-                # but a null p90 doesn't render as both "no baseline yet" and
-                # a concrete today-vs-baseline comparison at once.
-                "has_baseline": bucket != "no_baseline",
-                "late5_pct": r["late5_pct"],
-            }
-        )
     return {
         "latest_captured_at": latest_ts.isoformat() if latest_ts else None,
-        "date": latest_date.isoformat(),
+        "date": today.isoformat() if routes else None,
         "routes": routes,
         "raw_samples": fh["raw_samples"] if fh else 0,
         "clamp_count": fh["clamp_count"] if fh else 0,
@@ -789,7 +821,9 @@ def resolve_route_trips_date(requested: CalendarDate | None, latest_observed: Ca
     return requested
 
 
-def build_route_trips_sql(time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS) -> tuple[str, dict]:
+def build_route_trips_sql(
+    time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS, *, table: str = UPDATES_TABLE
+) -> tuple[str, dict]:
     """Rendered per-stop dedup query for one route on one JST day, plus its params.
 
     argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring).
@@ -805,6 +839,7 @@ def build_route_trips_sql(time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS) -> 
     the cap is selected so the caller can still tell that a tail existed
     without counting the whole day.
     """
+    table = checked_table(table)
     band_frag, band_params = time_band_clause_ch_for(time_band)
     band_clause = "" if band_frag == "1" else f"\n              AND {band_frag}"
     sql = f"""
@@ -812,7 +847,7 @@ def build_route_trips_sql(time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS) -> 
             SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
                 argMax(tuple(u.scheduled_time, u.dep_delay, u.stop_id, u.scheduled_sec),
                     (u.captured_at, u.file_name)) AS winner
-            FROM updates AS u
+            FROM {table} AS u
             WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
               AND u.dep_delay IS NOT NULL
               AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
@@ -967,7 +1002,7 @@ async def route_trips(
     if target_date is None:
         return empty
 
-    sql, band_params = build_route_trips_sql(time_band)
+    sql, band_params = build_route_trips_sql(time_band, table=live_table_for(target_date))
     dedup_result = await ch.query(
         sql,
         parameters={
@@ -1037,19 +1072,22 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
     }
 
 
-# argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
-# only one non-key column (dep_delay) is read off the winning row, so a single
-# argMax suffices. Module level (see `_LIVE_DELAYS_DEDUP_SQL` above) so its
-# shape, including the plausibility clamp, is unit-testable without
-# ClickHouse.
-_ROUTE_STOP_PROFILE_DEDUP_SQL = f"""
+def build_route_stop_profile_sql(table: str) -> str:
+    """Latest delay per (trip, stop) for one route on one JST day, read from
+    *table* (`pipeline.clickhouse.live_table_for` picks it from the day).
+
+    argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring);
+    one non-key column is read off the winning row, so one argMax suffices.
+    """
+    table = checked_table(table)
+    return f"""
     SELECT u.trip_id, u.stop_sequence,
         argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
-    FROM updates AS u
+    FROM {table} AS u
     WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
       AND u.dep_delay IS NOT NULL
       AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-      AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({{latest_ts:DateTime64}}, 'Asia/Tokyo')
+      AND toDate(u.captured_at, 'Asia/Tokyo') = {{day:Date}}
     GROUP BY u.trip_id, u.stop_sequence
 """
 
@@ -1076,10 +1114,13 @@ async def route_stop_profile(
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
     if latest_ts is None:
         return {"date": None, "stops": []}
+    # The JST day of the latest observation: the query buckets in JST, and
+    # the day picks the table.
+    day = latest_ts.astimezone(_JST).date()
 
     dedup_result = await ch.query(
-        _ROUTE_STOP_PROFILE_DEDUP_SQL,
-        parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
+        build_route_stop_profile_sql(live_table_for(day)),
+        parameters={"agency_id": agency_id, "route": route_code, "day": day},
     )
     dedup_rows = list(dedup_result.result_rows)
 
@@ -1122,7 +1163,7 @@ async def route_stop_profile(
     stop_ids = [r["stop_id"] for r in rows if r["stop_id"] is not None]
     cohort_by_stop: dict[str, dict] = {}
     if stop_ids:
-        date_from = latest_ts.date() - timedelta(days=30)
+        date_from = day - timedelta(days=30)
         cohort_rows = await conn.fetch(
             """
             SELECT
@@ -1145,7 +1186,7 @@ async def route_stop_profile(
         cohort_by_stop = {cr["stop_id"]: dict(cr) for cr in cohort_rows}
 
     return {
-        "date": latest_ts.date().isoformat(),
+        "date": day.isoformat(),
         "stops": [
             {
                 "stop_sequence": r["stop_sequence"],
@@ -1423,17 +1464,18 @@ async def delay_timeline(
     :func:`timeline_day_in_range`'s window is a 422, not a silently-served
     (and cache-evicting) query -- see that function's docstring.
 
-    Read-only, and served from ClickHouse `updates` joined against the static
-    schedule for positions — not from the `agg_*` tables, whose finest
-    time grain is the seven-band `time_band` column, far coarser than the
-    hour (or quarter hour) the rail steps through.
+    Read-only, served from `updates_live` for today and `updates` for a
+    closed day (`pipeline.clickhouse.live_table_for`), joined against the
+    static schedule for positions — not from the `agg_*` tables, whose
+    finest time grain is the seven-band `time_band` column, far coarser than
+    the hour (or quarter hour) the rail steps through.
     """
     if step not in ALLOWED_STEP_MINUTES:
         raise HTTPException(status_code=400, detail=f"step must be one of {list(ALLOWED_STEP_MINUTES)}")
 
     if date_ is None:
-        latest = await max_captured_at(ch, agency_id)
-        day = playback_day_for(latest.astimezone(ZoneInfo("Asia/Tokyo"))) if latest is not None else jst_today()
+        latest = await max_captured_at(ch, agency_id, table=LIVE_TABLE) or await max_captured_at(ch, agency_id)
+        day = playback_day_for(latest.astimezone(_JST)) if latest is not None else jst_today()
     else:
         parsed = parse_iso_date(date_)
         if parsed is None:
@@ -1446,5 +1488,5 @@ async def delay_timeline(
             detail=f"date must be within the last {MAX_RANGE_DAYS} days and not in the future",
         )
 
-    frames = await compute_delay_timeline(agency_id, day, step, conn, ch)
+    frames = await compute_delay_timeline(agency_id, day, step, conn, ch, table=live_table_for(day))
     return DelayTimelineResponse(date=day.isoformat(), step_minutes=step, frames=frames)

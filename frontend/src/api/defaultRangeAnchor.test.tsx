@@ -63,6 +63,15 @@ describe("useDefaultRangeAnchor", () => {
     expect(screen.getByTestId("params")).toHaveTextContent("");
   });
 
+  it("treats a latest day 30 days back as inside the 30 closed days the default covers", () => {
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [agency({ latest_data_date: isoDaysAgo(30) })],
+      isPending: false,
+    } as never);
+    renderAnchor(1, "/agencies/1/pulse");
+    expect(screen.getByTestId("params")).toHaveTextContent("");
+  });
+
   it("rewrites from/to when latest_data_date is outside the default window", () => {
     vi.spyOn(hooks, "useAgencies").mockReturnValue({
       data: [agency({ latest_data_date: "2026-05-01" })],

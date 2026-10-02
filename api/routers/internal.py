@@ -1,12 +1,13 @@
 """Internal endpoints for scheduled cron jobs.
 
-This is the **fallback** ingest path. Production normally ingests the dense
-Oracle archives via a daily Railway scheduled job (see
-``docs/deploy-railway.md``); when object storage isn't wired, an external
-scheduler can instead poke ``POST /internal/cron/ingest`` to run the
-lower-fidelity ``ingest_live`` + ``analyze``. Every endpoint is gated by
-:envvar:`CRON_SECRET` passed via the ``X-Cron-Secret`` header — anything
-without the matching header gets 401.
+``POST /internal/cron/ingest`` is the daily history path as well as a live
+fallback. Per agency it fetches the feed into ``updates_live`` (``ingest_live``),
+promotes every closed JST day from ``updates_live`` into ``updates``
+(:mod:`pipeline.promote`), then runs ``analyze``. Nothing else promotes, so a
+deployment must poke it at least once a day after JST midnight;
+``updates_live``'s TTL drops a day that is never promoted. Every endpoint is
+gated by :envvar:`CRON_SECRET` passed via the ``X-Cron-Secret`` header —
+anything without the matching header gets 401.
 
 The actual ingest + analyze work runs as a FastAPI ``BackgroundTask`` so
 the cron caller gets a fast 202 and doesn't block on the multi-minute
@@ -33,12 +34,6 @@ _log = logging.getLogger(__name__)
 _SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
 _MAX_COLLECTOR_PAYLOAD = 10 * 1024 * 1024
 
-# How long a push waits for another push or analyze() run to release this
-# agency's lock before giving up and answering 409, same as an instant miss
-# used to. Well under the collector's own re-poll interval (300s), so a push
-# that still times out and gets retried costs at most one extra poll cycle.
-COLLECTOR_LOCK_WAIT_SECONDS = 20
-
 
 def _check_secret(request: Request) -> None:
     expected = os.environ.get("CRON_SECRET")
@@ -64,7 +59,6 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
 
     from pipeline.clickhouse import get_client
     from pipeline.ingest import ingest_live_payload
-    from pipeline.locks import lock_agency_ingest_or_timeout
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -82,13 +76,12 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
             )
             if cur.fetchone() is None:
                 raise ValueError(f"Unknown or deleted agency_id={agency_id}")
-        # Off before the lock attempt: lock_agency_ingest_or_timeout's `SET
-        # LOCAL lock_timeout` needs an explicit transaction to bound anything
-        # -- under autocommit, each statement is its own implicit
-        # transaction and the setting would expire before the next one runs.
-        conn.autocommit = False
-        if not lock_agency_ingest_or_timeout(conn, agency_id, COLLECTOR_LOCK_WAIT_SECONDS):
-            raise HTTPException(status_code=409, detail="A data ingest is already in progress for this agency")
+        # No advisory lock: a push writes updates_live, which analyze never
+        # reads (pipeline/locks.py). ingest_live_payload's check-then-insert
+        # over the last 10 minutes of captured_at absorbs a sequential
+        # second arrival of the same file_name within that window; two
+        # pushes that overlap in flight can both insert, and analyze's
+        # argMax dedup on captured_at absorbs the duplicate from there.
         ch_client = get_client()
         return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
     finally:
@@ -148,8 +141,6 @@ async def collector_update(agency_id: int, request: Request) -> dict:
             captured.astimezone(timezone.utc).isoformat(),
             file_name,
         )
-    except HTTPException:
-        raise
     except Exception as exc:
         _log.exception("collector ingest failed for agency %s", agency_id)
         raise HTTPException(status_code=502, detail="Collector payload could not be ingested") from exc
@@ -231,13 +222,17 @@ def _ingest_and_analyze_sweep(
     run_weather: bool = True,
     run_id: int | None = None,
 ) -> str:
-    """Pull live GTFS-RT for every agency, then refresh aggregations.
+    """Pull live GTFS-RT for every agency, promote closed days, then refresh
+    aggregations.
 
     Uses the existing sync CLI helpers via psycopg2 — keeps this module
-    thin. Failures inside the loop are logged but don't abort the whole
-    run, so one broken agency doesn't starve the others. Returns the outcome
-    the umbrella row should record: ``skipped`` when the advisory lock turned
-    this sweep away, ``ok`` otherwise.
+    thin. Per agency, an ``ingest`` sweep runs three stages in order --
+    ``ingest_live`` into `updates_live`, `pipeline.promote.promote_closed_days`
+    out of it into `updates`, then `analyze` -- each recorded as its own
+    `pipeline_runs` row. Failures inside the loop are logged but don't abort
+    the whole run, so one broken agency or stage doesn't starve the others.
+    Returns the outcome the umbrella row should record: ``skipped`` when the
+    advisory lock turned this sweep away, ``ok`` otherwise.
 
     ``kind="analyze"`` re-aggregates what is already stored without fetching —
     the one case where skipping the feed pull and the weather pass is what was
@@ -267,6 +262,7 @@ def _ingest_and_analyze_sweep(
     from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness
     from pipeline.ingest import ingest_live
+    from pipeline.promote import promote_closed_days
 
     # Kept apart from the resolved roster below: the caller's scope decides
     # whether the weather pass runs, and the roster is overwritten with the
@@ -335,6 +331,11 @@ def _ingest_and_analyze_sweep(
                         run.rows = ingest_live(aid, conn, ch_client)
                 except Exception:
                     _log.exception("cron: ingest_live failed for agency %s", aid)
+                try:
+                    with pipeline_runs.record_run(conn, "promote", agency_id=aid, requested_by=requested_by) as run:
+                        run.rows = promote_closed_days(aid, conn, ch_client)
+                except Exception:
+                    _log.exception("cron: promotion failed for agency %s", aid)
             try:
                 with pipeline_runs.record_run(conn, "analyze", agency_id=aid, requested_by=requested_by):
                     analyze(aid, conn, ch_client)
@@ -451,7 +452,8 @@ def _run_weather_ingest(db_url: str) -> None:
 
 @router.post("/ingest", status_code=202)
 async def cron_ingest(request: Request, background_tasks: BackgroundTasks) -> dict:
-    """Kick off ingest_live + analyze for every agency in the background.
+    """Kick off ingest_live + promote_closed_days + analyze for every agency
+    in the background.
 
     Returns immediately with ``{"status": "started"}``. The actual work
     runs after the response is sent so the cron caller doesn't time out.

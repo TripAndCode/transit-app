@@ -38,17 +38,17 @@ def _call(**over):
     return clamp_range_ctx(**kwargs)
 
 
-def test_defaults_to_trailing_window_ending_today(frozen_today):
+def test_defaults_to_trailing_window_ending_on_the_last_closed_day(frozen_today):
     ctx = _call()
-    assert ctx.to_date == frozen_today
-    assert ctx.from_date == frozen_today - timedelta(days=DEFAULT_RANGE_DAYS - 1)
+    assert ctx.to_date == frozen_today - timedelta(days=1)
+    assert ctx.from_date == ctx.to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1)
     assert ctx.days == DEFAULT_RANGE_DAYS
 
 
 def test_empty_strings_are_treated_as_absent(frozen_today):
     ctx = _call(from_="", to="")
-    assert ctx.to_date == frozen_today
-    assert ctx.from_date == frozen_today - timedelta(days=DEFAULT_RANGE_DAYS - 1)
+    assert ctx.to_date == frozen_today - timedelta(days=1)
+    assert ctx.from_date == ctx.to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1)
 
 
 def test_accepts_date_objects_as_well_as_iso_strings(frozen_today):
@@ -72,6 +72,23 @@ def test_future_from_date_is_clamped_to_today_and_not_swapped_back(frozen_today)
     ctx = _call(from_="2099-01-01", to="2099-02-01")
     assert ctx.to_date == frozen_today
     assert ctx.from_date == frozen_today
+
+
+def test_a_start_alone_ends_on_the_last_closed_day_or_on_itself_if_later(frozen_today):
+    """Only a start: the end defaults to the last closed day unless the start
+    is later, so a start of today is never swapped into [yesterday, today]."""
+    ctx = _call(from_="2025-12-01")
+    assert (ctx.from_date, ctx.to_date) == (date(2025, 12, 1), frozen_today - timedelta(days=1))
+    for start in (frozen_today.isoformat(), "2099-01-01"):
+        ctx = _call(from_=start)
+        assert (ctx.from_date, ctx.to_date) == (frozen_today, frozen_today), start
+
+
+def test_tool_date_overrides_with_only_a_start_of_today_stay_on_today(frozen_today):
+    from pipeline.query.tools import _apply_date_overrides
+
+    ctx = _apply_date_overrides(_call(), {"from": frozen_today.isoformat()})
+    assert (ctx.from_date, ctx.to_date) == (frozen_today, frozen_today)
 
 
 def test_overwide_range_is_clamped_at_the_start(frozen_today):
@@ -174,7 +191,7 @@ def test_tool_date_overrides_still_tolerate_an_unparseable_date():
 
     base = range_mod.clamp_range_ctx(from_=None, to=None)
     ctx = _apply_date_overrides(base, {"from": "not-a-date"})
-    assert ctx.to_date == range_mod.jst_today()
+    assert ctx.to_date == range_mod.last_closed_jst_day()
 
 
 @pytest.mark.parametrize(

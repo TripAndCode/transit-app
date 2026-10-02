@@ -32,8 +32,8 @@ def frozen_today(monkeypatch):
 
 def test_missing_filter_ctx_falls_back_to_the_default_window(frozen_today):
     ctx = _ctx_from_stored_filters(None)
-    assert ctx.to_date == frozen_today
-    assert ctx.from_date == frozen_today - timedelta(days=DEFAULT_RANGE_DAYS - 1)
+    assert ctx.to_date == frozen_today - timedelta(days=1)
+    assert ctx.from_date == ctx.to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1)
 
 
 def test_stored_filters_are_applied(frozen_today):

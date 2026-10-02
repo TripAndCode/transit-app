@@ -9,6 +9,8 @@ endpoint, and the LLM tool helpers can't drift apart on the definition of
 
 import psycopg2
 
+from pipeline.clickhouse import UPDATES_TABLE, checked_table
+
 # ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause and
 # agg_route_hour_dow.dow (SMALLINT).
 _DOW_JP_TO_ISO = {"月": 1, "火": 2, "水": 3, "木": 4, "金": 5, "土": 6, "日": 7}
@@ -53,8 +55,12 @@ def build_dedup_ch_sql(
     include_captured_at: bool = False,
     include_arr_delay: bool = False,
     include_scheduled_sec: bool = False,
+    table: str = UPDATES_TABLE,
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
+
+    `table` is `updates` for a closed day or `updates_live` for today
+    (`pipeline.clickhouse.live_table_for`); both carry the same columns.
 
     GTFS-RT feeds publish refining `dep_delay` estimates as the trip nears
     each stop. The latest observation is what passengers actually
@@ -194,7 +200,7 @@ def build_dedup_ch_sql(
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
         f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{arr} "
-        "FROM updates AS u "
+        f"FROM {checked_table(table)} AS u "
         "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "

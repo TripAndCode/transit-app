@@ -11,6 +11,7 @@ from api.range import (
     build_updates_filter_ch,
     dow_clause,
 )
+from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
 
 # 2-dp minutes, matching the live ROUND(..., 2). Shared by every reports
@@ -29,7 +30,11 @@ def _round2(x: float) -> Decimal:
 
 
 def _dedup_cte_ch(
-    ctx: RangeCtx, *, include_arr_delay: bool = False, include_scheduled_sec: bool = False
+    ctx: RangeCtx,
+    *,
+    include_arr_delay: bool = False,
+    include_scheduled_sec: bool = False,
+    table: str = UPDATES_TABLE,
 ) -> tuple[str, dict]:
     """ClickHouse-dialect dedup CTE builder.
 
@@ -63,6 +68,7 @@ def _dedup_cte_ch(
         include_captured_at=False,
         include_arr_delay=include_arr_delay,
         include_scheduled_sec=include_scheduled_sec,
+        table=table,
     )
     cte_sql = f"deduped AS ({body})"
     return cte_sql, params

@@ -1416,6 +1416,7 @@
       "run_lane_all": "{{kind}} · 全事業者",
       "run_kind": {
         "ingest": "取り込み",
+        "promote": "履歴へ移行",
         "analyze": "集計",
         "weather": "気象",
         "static": "静的データ"

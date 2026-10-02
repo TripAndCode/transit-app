@@ -12,10 +12,18 @@ import tarfile
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
+from zoneinfo import ZoneInfo
 
 from clickhouse_connect.driver.exceptions import DataError
 
-from pipeline.clickhouse import distinct_file_names, insert_updates, recent_file_name_exists
+from pipeline.clickhouse import (
+    LIVE_TABLE,
+    days_with_source,
+    distinct_file_names,
+    insert_updates,
+    jst_date,
+    recent_file_name_exists,
+)
 from pipeline.strategies import get_ingest_strategy
 
 # archive_captured_at is used below; the private helpers are back-compat
@@ -28,6 +36,8 @@ from pipeline.strategies.aomori_regex import (
 from pipeline.url_guard import _redact_url, safe_urlopen
 
 logger = logging.getLogger(__name__)
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 # Flush a ClickHouse insert after accumulating this many rows across files —
 # large enough that per-insert's fixed overhead is amortized across
@@ -45,6 +55,12 @@ _DATE_DIR_RE = re.compile(r"\d{8}")
 def _date_dir(name: str) -> str:
     """Return *name* if it is a YYYYMMDD token, otherwise ``""``."""
     return name if _DATE_DIR_RE.fullmatch(name) else ""
+
+
+def _jst_day(stamp: str) -> date:
+    """The JST day a captured_at ISO stamp falls on: the day its rows will
+    occupy in `updates`."""
+    return datetime.fromisoformat(stamp).astimezone(_JST).date()
 
 
 def _archive_since(tarballs: list[pathlib.Path], pb_loose: list[pathlib.Path]) -> date | None:
@@ -213,12 +229,17 @@ def parse_pb(
     return rows
 
 
-def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
+def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None = None) -> int:
     """Ingest all .pb files from tarballs and loose files in folder.
 
     Dispatches to the agency's ingest strategy. Returns the number of rows
     actually written to ClickHouse (post intra-batch dedup; a failed batch
     contributes 0).
+
+    Writes closed JST days only, as of *now*. A collector names and tars its
+    archives by UTC day, so one archive runs to 09:00 JST the next day and
+    its last members can land on a day that has not ended yet; those are
+    left unmarked for a later run, which reads them once their day closes.
     """
     root = pathlib.Path(folder)
     n_errors = 0
@@ -277,6 +298,28 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
 
     strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
+
+    today = jst_date(now or datetime.now(timezone.utc))
+    unclosed: set[date] = set()
+    promoted: dict[date, bool] = {}
+
+    # A member is refused, and left unmarked, when its rows would land on a
+    # JST day that has not closed, or on a day already holding rows promoted
+    # from the live path: a day in `updates` has one source, so it is not
+    # stored a second time under the archive's file names. Promotion refuses
+    # the mirror case.
+    def _refused(stamp: str) -> bool:
+        day = _jst_day(stamp)
+        if day >= today:
+            if day not in unclosed:
+                unclosed.add(day)
+                logger.info(f"  {day} has not closed yet; its archive files wait for a later run")
+            return True
+        if day not in promoted:
+            promoted[day] = bool(days_with_source(ch_client, agency_id, {day}, live_sourced=True))
+            if promoted[day]:
+                logger.warning(f"  {day} already holds promoted live rows; its archive files are skipped")
+        return promoted[day]
 
     # Rows accumulate here across BOTH the tarball loop and the loose-.pb
     # loop below (shared, not reset between them) and are flushed to
@@ -436,6 +479,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                                     continue
                                 raw = fobj.read()
                                 ts = archive_captured_at(raw, d, pb_name)
+                                if _refused(ts):
+                                    continue
                                 rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
                         except Exception as e:
                             logger.error(f"  [ERROR] {pb_name}: {e}")
@@ -478,6 +523,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                     with _savepoint(cur, "pb_file"):
                         raw = path.read_bytes()
                         ts = archive_captured_at(raw, d, path.name)
+                        if _refused(ts):
+                            continue
                         rows = strategy.parse_feed(raw, ts, f"{d}/{path.name}", agency_id, conn)
                 except Exception as e:
                     logger.error(f"  [ERROR] {path.name}: {e}")
@@ -544,6 +591,10 @@ def ingest_live_payload(
 ) -> int:
     """Decode and store one already-fetched GTFS-RT payload.
 
+    Writes `updates_live`: every realtime path (collector push, `ingest_live`,
+    `/delays/refresh`) lands here and nowhere else, and `updates` receives the
+    day from promotion once it closes.
+
     This common path is used by direct-feed pulls and the Oracle collector
     push path. ``file_name`` is the collector's durable source identity, so a
     retry after a network timeout is idempotent within a short lookup window.
@@ -555,12 +606,12 @@ def ingest_live_payload(
         strategy_name = _resolve_strategy_name(agency_id, conn)
     strategy = get_ingest_strategy(strategy_name)
     since = datetime.now(timezone.utc) - timedelta(minutes=10)
-    if recent_file_name_exists(ch_client, agency_id, file_name, since):
+    if recent_file_name_exists(ch_client, agency_id, file_name, since, table=LIVE_TABLE):
         logger.info("Skipping duplicate live payload: %s", file_name)
         return 0
 
     rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
-    n_inserted = insert_updates(ch_client, agency_id, rows)
+    n_inserted = insert_updates(ch_client, agency_id, rows, table=LIVE_TABLE)
     conn.commit()
     logger.info("Done: %s rows inserted (live payload)", n_inserted)
     return n_inserted

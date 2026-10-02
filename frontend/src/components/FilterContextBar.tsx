@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { FilterCtx } from "../api/types";
 import type { DowFilter } from "../api/scope";
 import { dowValueLabel } from "../utils/filterValueLabels";
-import { DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/scope";
+import { defaultPeriod } from "../api/scope";
 import { rangeLabel } from "../utils/rangeLabel";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
@@ -107,8 +107,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
   const [editing, setEditing] = useState(false);
 
   // Draft uses explicit date defaults when value has no dates
-  const defaultFrom = isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
-  const defaultTo = todayISO();
+  const { from: defaultFrom, to: defaultTo } = defaultPeriod();
 
   const [draft, setDraft] = useState<FilterCtx>(() => ({
     ...value,

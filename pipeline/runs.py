@@ -1,6 +1,6 @@
 """One row per pipeline job, so the control board can show what actually ran.
 
-``pipeline_runs`` records ingest, analyze, weather and static-load jobs from
+``pipeline_runs`` records ingest, promotion, analyze, weather and static-load jobs from
 both entry points -- the CLI (``gtfs_pipeline.py``) and the cron fallback
 endpoint -- including the jobs that never did any work because another
 process held the ingest/analyze advisory lock. A run that was skipped is the
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 #: Mirrors the ``kind`` CHECK constraint. Validated before the statement is
 #: built so a typo fails here, where the caller's stack still says which job
 #: it was, rather than as a constraint violation swallowed by the guard below.
-RUN_KINDS: tuple[str, ...] = ("ingest", "analyze", "weather", "static")
+RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static")
 
 #: Mirrors the ``status`` CHECK constraint.
 RUN_STATUSES: tuple[str, ...] = ("running", "ok", "skipped", "error")

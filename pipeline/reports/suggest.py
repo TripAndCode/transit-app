@@ -71,12 +71,11 @@ ExcludeSet = frozenset[tuple[str, str]]
 async def _latest_analyzed_date(agency_id: int, conn):
     """Latest date with computed route aggregates for this agency.
 
-    Mirrors ``api/routers/map.py``'s ``today_route_summary`` anchor: "today"
-    means "as of the last analyze", not the wall clock, which normally lags
-    it by at least a day. Anchoring the rule chain's "today"/baseline/week
-    windows here (instead of ``jst_today()``) is what makes rule 1 ever see
-    non-empty data in normal operation. Returns None for an agency with zero
-    analyzed rows.
+    "Today" here means "as of the last analyze", not the wall clock, which
+    normally lags it by at least a day. Anchoring the rule chain's
+    "today"/baseline/week windows here (instead of ``jst_today()``) is what
+    makes rule 1 ever see non-empty data in normal operation. Returns None
+    for an agency with zero analyzed rows.
     """
     return await conn.fetchval(
         "SELECT MAX(date) FROM agg_route_daily_dist WHERE agency_id = $1",

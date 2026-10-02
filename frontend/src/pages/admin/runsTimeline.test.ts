@@ -57,6 +57,19 @@ describe("runsToBars", () => {
     expect(lanes.map((l) => l.key)).toEqual(["ingest:all", "ingest:2", "analyze:2", "weather:all"]);
   });
 
+  it("draws promotion between the ingest and analyze stages it runs between", () => {
+    const lanes = runsToBars(
+      [
+        run({ run_id: 1, kind: "analyze" }),
+        run({ run_id: 2, kind: "promote" }),
+        run({ run_id: 3, kind: "ingest" }),
+      ],
+      DAY_START,
+      DAY_START,
+    );
+    expect(lanes.map((l) => l.kind)).toEqual(["ingest", "promote", "analyze"]);
+  });
+
   it("draws an unfinished run up to now rather than leaving it zero-width", () => {
     const now = new Date("2026-09-20T20:00:00Z"); // 05:00 JST
     const [lane] = runsToBars([run({ run_id: 1, finished_at: null, status: "running" })], DAY_START, now);

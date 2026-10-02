@@ -321,7 +321,7 @@ async def test_append_message_default_window_uses_jst_today(conv_app, monkeypatc
         )
         assert r.status_code == 200, r.text
 
-    assert captured["ctx"].to_date == date(2026, 1, 2)
+    assert captured["ctx"].to_date == date(2026, 1, 1)
 
 
 @pytest.mark.asyncio

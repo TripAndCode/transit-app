@@ -1,19 +1,18 @@
 """Unit tests for api.routers.internal._ingest_collector_payload.
 
+Covers cleanup (the ClickHouse client must close even if closing the Postgres
+connection raises) and that a push waits on no lock.
+
 DB-free: a fake psycopg2 connection/cursor records the SQL issued instead of
 talking to Postgres; pipeline.clickhouse.get_client and
-pipeline.ingest.ingest_live_payload are mocked. Covers two collector-push
-findings: the lock wait (bounded, not an instant 409) and cleanup (the
-ClickHouse client must close even if closing the Postgres connection raises).
+pipeline.ingest.ingest_live_payload are mocked.
 """
 
 from unittest.mock import MagicMock, patch
 
-import psycopg2.errors
 import pytest
-from fastapi import HTTPException
 
-from api.routers.internal import COLLECTOR_LOCK_WAIT_SECONDS, _ingest_collector_payload
+from api.routers.internal import _ingest_collector_payload
 
 
 class FakeCursor:
@@ -25,10 +24,6 @@ class FakeCursor:
         normalized = " ".join(sql.split()).lower()
         if normalized.startswith("select 1 from agencies"):
             self._conn._last_fetchone = (1,) if self._conn.agency_exists else None
-        elif "pg_advisory_lock" in normalized:
-            if self._conn.raise_lock_timeout:
-                raise psycopg2.errors.LockNotAvailable("canceling statement due to lock timeout")
-            self._conn._last_fetchone = (True,)
         else:
             self._conn._last_fetchone = None
 
@@ -43,26 +38,16 @@ class FakeCursor:
 
 
 class FakeConn:
-    def __init__(self, *, agency_exists=True, raise_lock_timeout=False, raise_on_close=False):
+    def __init__(self, *, agency_exists=True, raise_on_close=False):
         self.executed: list[tuple[str, tuple | None]] = []
         self.autocommit = None
-        self.autocommit_history: list[bool] = []
-        self.committed = False
-        self.rolled_back = False
         self.closed = False
         self.agency_exists = agency_exists
-        self.raise_lock_timeout = raise_lock_timeout
         self.raise_on_close = raise_on_close
         self._last_fetchone = None
 
     def cursor(self):
         return FakeCursor(self)
-
-    def commit(self):
-        self.committed = True
-
-    def rollback(self):
-        self.rolled_back = True
 
     def close(self):
         self.closed = True
@@ -78,39 +63,16 @@ def _patched(conn, ch_client, ingest_return=42):
     )
 
 
-def test_lock_wait_uses_bounded_timeout_and_the_blocking_sql(monkeypatch):
+def test_a_push_takes_no_advisory_lock(monkeypatch):
+    """A push writes updates_live, which analyze never reads, so it cannot skew
+    analyze's per-date ledger and has nothing to wait for."""
     monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
     conn = FakeConn()
-    ch_client = MagicMock()
-    p1, p2, p3 = _patched(conn, ch_client)
-    with p1, p2, p3:
-        result = _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", "oracle/x")
-
-    assert result == 42
-    statements = [sql for sql, _ in conn.executed]
-    timeout_stmt = next(s for s in statements if "lock_timeout" in s.lower())
-    lock_stmt = next(s for s in statements if "advisory_lock" in s.lower())
-    assert statements.index(timeout_stmt) < statements.index(lock_stmt)
-    assert "pg_try_advisory_lock" not in lock_stmt
-    assert "pg_advisory_lock" in lock_stmt
-
-    timeout_params = next(p for s, p in conn.executed if "lock_timeout" in s.lower())
-    assert timeout_params == (f"{COLLECTOR_LOCK_WAIT_SECONDS}s",)
-
-
-def test_lock_wait_timeout_returns_409_same_as_the_old_instant_miss(monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
-    conn = FakeConn(raise_lock_timeout=True)
-    ch_client = MagicMock()
-    p1, p2, p3 = _patched(conn, ch_client)
+    p1, p2, p3 = _patched(conn, MagicMock())
     with p1, p2, p3 as mock_ingest:
-        with pytest.raises(HTTPException) as exc_info:
-            _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", "oracle/x")
-
-    assert exc_info.value.status_code == 409
-    mock_ingest.assert_not_called()
-    assert conn.rolled_back is True
-    assert conn.closed is True
+        assert _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", "oracle/x") == 42
+    mock_ingest.assert_called_once()
+    assert not any("advisory_lock" in s.lower() or "lock_timeout" in s.lower() for s, _ in conn.executed)
 
 
 def test_ch_client_still_closed_when_postgres_close_raises(monkeypatch):
