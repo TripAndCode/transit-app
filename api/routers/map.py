@@ -23,7 +23,6 @@ import os
 import pathlib
 import re
 import subprocess
-import tempfile
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from datetime import date as CalendarDate
@@ -71,7 +70,7 @@ _ROUTE_TRIPS_SCOPE = scope_applied("time_band", "routes")
 
 
 def _ingest_live_agency(agency_id: int) -> int:
-    """Fetch one agency's current GTFS-RT data and write it to ClickHouse.
+    """Fetch one agency's current GTFS-RT data and write it to `updates_live`.
 
     This runs in a worker thread because both the feed fetch and the pipeline
     clients are synchronous. The Postgres advisory lock prevents a manual
@@ -82,7 +81,7 @@ def _ingest_live_agency(agency_id: int) -> int:
     import psycopg2
 
     from pipeline.clickhouse import get_client
-    from pipeline.ingest import ingest, ingest_live
+    from pipeline.ingest import ingest_live, ingest_live_payload
     from pipeline.locks import try_lock_ingest_analyze
 
     db_url = os.environ.get("DATABASE_URL")
@@ -123,7 +122,7 @@ def _ingest_live_agency(agency_id: int) -> int:
             ).stdout.strip()
             try:
                 mtime_text, latest = latest_record.split(" ", 1)
-                captured_at = datetime.fromtimestamp(float(mtime_text), timezone.utc).astimezone(_JST)
+                captured_at = datetime.fromtimestamp(float(mtime_text), timezone.utc)
             except (ValueError, TypeError, OverflowError) as exc:
                 raise RuntimeError("Oracle collector returned an invalid live-file timestamp") from exc
             match = re.fullmatch(r".*/(\d{8})/(TripUpdate_\d{6}\.pb)", latest)
@@ -135,17 +134,17 @@ def _ingest_live_agency(agency_id: int) -> int:
                 capture_output=True,
                 timeout=15,
             ).stdout
-            with tempfile.TemporaryDirectory(prefix="transit-live-") as temp_dir:
-                # Oracle's rt-poller names files with UTC (`date -u`), while
-                # archive ingest reads a name as JST whenever the feed's own
-                # header timestamp can't be used. Rename the temporary copy
-                # into the equivalent JST path so that fallback also writes
-                # the actual instant to CH.
-                live_dir = pathlib.Path(temp_dir) / captured_at.strftime("%Y%m%d")
-                live_dir.mkdir()
-                live_file = live_dir / f"TripUpdate_{captured_at.strftime('%H%M%S')}.pb"
-                live_file.write_bytes(raw)
-                return ingest(temp_dir, agency_id, conn, ch_client)
+            # The collector's own push names this poll `oracle/<day>/<file>` from
+            # the same on-disk path, so the live path's file-level dedup absorbs
+            # whichever of the two arrives second.
+            return ingest_live_payload(
+                agency_id,
+                raw,
+                captured_at.isoformat(),
+                f"oracle/{match.group(1)}/{match.group(2)}",
+                conn,
+                ch_client,
+            )
         return ingest_live(agency_id, conn, ch_client)
     finally:
         if conn is not None:
