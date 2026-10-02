@@ -32,9 +32,8 @@ async def route_exists(conn, agency_id: int, route_code: str) -> bool:
     (agg_route_daily's PK leads with (agency_id, date)), but the table holds
     per-agency route×day×service rows, not raw `updates`, so this stays cheap
     regardless of agency size, for both a fabricated and a real route_code.
-    Accepted trade-off: a brand-new route that's been ingested
-    but not yet analyzed (no agg_route_daily row yet) reads as "not found"
-    (or renders with no shape, for route_shape) for one cron cycle.
+    Accepted trade-off: a route first seen today reads as not found on the
+    drill-downs until its first day is promoted and analyzed.
     """
     return (
         await conn.fetchval(

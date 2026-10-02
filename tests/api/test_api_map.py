@@ -1385,6 +1385,45 @@ async def test_route_trips_excludes_stale_route_beyond_bound(map_app_ch, ch_clie
     assert body == {"date": None, "time_band": "all", "truncated": False, "trips": []}
 
 
+def _jst_noon_utc(day):
+    from datetime import datetime, time
+    from zoneinfo import ZoneInfo
+
+    return datetime.combine(day, time(12), tzinfo=ZoneInfo("Asia/Tokyo")).astimezone(timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_route_trips_reads_today_from_updates_live_and_a_past_day_from_updates(map_app_ch, ch_client):
+    from api.range import jst_today
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    today = jst_today()
+    yday = today - timedelta(days=1)
+    async with app.state.pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R_SPLIT")
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            ("oracle/t/1.pb", _jst_noon_utc(today), "LIVE_TODAY", "平日", "12:00", "R_SPLIT", 1, 300),
+            # Yesterday's live copy, not yet promoted: a past day never reads it.
+            ("oracle/y/1.pb", _jst_noon_utc(yday), "LIVE_YDAY", "平日", "12:00", "R_SPLIT", 1, 900),
+        ],
+        table=LIVE_TABLE,
+    )
+    insert_updates(
+        ch_client, agency_id, [("19990101/a.pb", _jst_noon_utc(yday), "HIST_YDAY", "平日", "12:00", "R_SPLIT", 1, 60)]
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        default = (await client.get(f"/api/{agency_id}/today/route/R_SPLIT/trips")).json()
+        past = (await client.get(f"/api/{agency_id}/today/route/R_SPLIT/trips?date={yday.isoformat()}")).json()
+    assert default["date"] == today.isoformat()
+    assert [t["trip_id"] for t in default["trips"]] == ["LIVE_TODAY"]
+    assert past["date"] == yday.isoformat()
+    assert [t["trip_id"] for t in past["trips"]] == ["HIST_YDAY"]
+
+
 @pytest.mark.asyncio
 async def test_route_stop_profile_empty_when_no_data(map_client_ch):
     """A fabricated/never-observed route_code resolves to the empty response.
@@ -1464,6 +1503,32 @@ async def test_route_stop_profile_drilldown(map_app_ch, ch_client):
     assert stops[0]["avg_delay_sec"] == 90
     assert stops[1]["stop_name"] == "中央病院前"
     assert stops[1]["avg_delay_sec"] == 600
+
+
+@pytest.mark.asyncio
+async def test_route_stop_profile_reads_today_from_updates_live(map_app_ch, ch_client):
+    from api.range import jst_today
+    from pipeline.clickhouse import insert_updates
+
+    app, agency_id = map_app_ch
+    today = jst_today()
+    async with app.state.pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R_PROF_LIVE")
+    insert_updates(
+        ch_client,
+        agency_id,
+        [("oracle/t/1.pb", _jst_noon_utc(today), "A", "平日", "12:00", "R_PROF_LIVE", 1, 300)],
+        table=LIVE_TABLE,
+    )
+    insert_updates(
+        ch_client,
+        agency_id,
+        [("x/1.pb", _jst_noon_utc(today - timedelta(days=1)), "B", "平日", "12:00", "R_PROF_LIVE", 1, 60)],
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        body = (await client.get(f"/api/{agency_id}/today/route/R_PROF_LIVE/stop-profile")).json()
+    assert body["date"] == today.isoformat()
+    assert [(s["stop_sequence"], s["avg_delay_sec"]) for s in body["stops"]] == [(1, 300)]
 
 
 @pytest.mark.asyncio

@@ -53,7 +53,7 @@ from api.range import (
 from api.scope_applied import ALL_SIX, scope_applied
 from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
-from pipeline.clickhouse import LIVE_TABLE
+from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, live_table_for
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
@@ -192,21 +192,27 @@ async def _latest_route_observation(
     it's meaningful against replayed/old data too — a route with zero
     observations in that window still correctly resolves to None, even if
     it was active further in the past).
+
+    Probes `updates_live` first, so a route running today answers from
+    today, then `updates`, so one that is not answers from its latest
+    closed day.
     """
     if not await route_exists(conn, agency_id, route_code):
         return None
-    agency_latest = await max_captured_at(ch, agency_id)
-    if agency_latest is None:
-        return None
-    route_probe_bound = agency_latest - timedelta(days=30)
-    latest_result = await ch.query(
-        "SELECT captured_at FROM updates "
-        "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-        "  AND captured_at >= {bound:DateTime64} "
-        "ORDER BY captured_at DESC LIMIT 1",
-        parameters={"agency_id": agency_id, "route": route_code, "bound": route_probe_bound},
-    )
-    return _as_utc(latest_result.result_rows[0][0] if latest_result.result_rows else None)
+    for table in (LIVE_TABLE, UPDATES_TABLE):
+        agency_latest = await max_captured_at(ch, agency_id, table=table)
+        if agency_latest is None:
+            continue
+        result = await ch.query(
+            f"SELECT captured_at FROM {table} "
+            "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+            "  AND captured_at >= {bound:DateTime64} "
+            "ORDER BY captured_at DESC LIMIT 1",
+            parameters={"agency_id": agency_id, "route": route_code, "bound": agency_latest - timedelta(days=30)},
+        )
+        if result.result_rows:
+            return _as_utc(result.result_rows[0][0])
+    return None
 
 
 # A poll can report several future stops for one trip. The lowest sequence in
@@ -789,7 +795,9 @@ def resolve_route_trips_date(requested: CalendarDate | None, latest_observed: Ca
     return requested
 
 
-def build_route_trips_sql(time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS) -> tuple[str, dict]:
+def build_route_trips_sql(
+    time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS, *, table: str = UPDATES_TABLE
+) -> tuple[str, dict]:
     """Rendered per-stop dedup query for one route on one JST day, plus its params.
 
     argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring).
@@ -805,6 +813,7 @@ def build_route_trips_sql(time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS) -> 
     the cap is selected so the caller can still tell that a tail existed
     without counting the whole day.
     """
+    table = checked_table(table)
     band_frag, band_params = time_band_clause_ch_for(time_band)
     band_clause = "" if band_frag == "1" else f"\n              AND {band_frag}"
     sql = f"""
@@ -812,7 +821,7 @@ def build_route_trips_sql(time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS) -> 
             SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
                 argMax(tuple(u.scheduled_time, u.dep_delay, u.stop_id, u.scheduled_sec),
                     (u.captured_at, u.file_name)) AS winner
-            FROM updates AS u
+            FROM {table} AS u
             WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
               AND u.dep_delay IS NOT NULL
               AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
@@ -967,7 +976,7 @@ async def route_trips(
     if target_date is None:
         return empty
 
-    sql, band_params = build_route_trips_sql(time_band)
+    sql, band_params = build_route_trips_sql(time_band, table=live_table_for(target_date))
     dedup_result = await ch.query(
         sql,
         parameters={
@@ -1037,19 +1046,22 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
     }
 
 
-# argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
-# only one non-key column (dep_delay) is read off the winning row, so a single
-# argMax suffices. Module level (see `_LIVE_DELAYS_DEDUP_SQL` above) so its
-# shape, including the plausibility clamp, is unit-testable without
-# ClickHouse.
-_ROUTE_STOP_PROFILE_DEDUP_SQL = f"""
+def build_route_stop_profile_sql(table: str) -> str:
+    """Latest delay per (trip, stop) for one route on one JST day, read from
+    *table* (`pipeline.clickhouse.live_table_for` picks it from the day).
+
+    argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring);
+    one non-key column is read off the winning row, so one argMax suffices.
+    """
+    table = checked_table(table)
+    return f"""
     SELECT u.trip_id, u.stop_sequence,
         argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
-    FROM updates AS u
+    FROM {table} AS u
     WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
       AND u.dep_delay IS NOT NULL
       AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-      AND toDate(u.captured_at, 'Asia/Tokyo') = toDate({{latest_ts:DateTime64}}, 'Asia/Tokyo')
+      AND toDate(u.captured_at, 'Asia/Tokyo') = {{day:Date}}
     GROUP BY u.trip_id, u.stop_sequence
 """
 
@@ -1076,10 +1088,13 @@ async def route_stop_profile(
     latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
     if latest_ts is None:
         return {"date": None, "stops": []}
+    # The JST day of the latest observation: the query buckets in JST, and
+    # the day picks the table.
+    day = latest_ts.astimezone(_JST).date()
 
     dedup_result = await ch.query(
-        _ROUTE_STOP_PROFILE_DEDUP_SQL,
-        parameters={"agency_id": agency_id, "route": route_code, "latest_ts": latest_ts},
+        build_route_stop_profile_sql(live_table_for(day)),
+        parameters={"agency_id": agency_id, "route": route_code, "day": day},
     )
     dedup_rows = list(dedup_result.result_rows)
 
@@ -1122,7 +1137,7 @@ async def route_stop_profile(
     stop_ids = [r["stop_id"] for r in rows if r["stop_id"] is not None]
     cohort_by_stop: dict[str, dict] = {}
     if stop_ids:
-        date_from = latest_ts.date() - timedelta(days=30)
+        date_from = day - timedelta(days=30)
         cohort_rows = await conn.fetch(
             """
             SELECT
@@ -1145,7 +1160,7 @@ async def route_stop_profile(
         cohort_by_stop = {cr["stop_id"]: dict(cr) for cr in cohort_rows}
 
     return {
-        "date": latest_ts.date().isoformat(),
+        "date": day.isoformat(),
         "stops": [
             {
                 "stop_sequence": r["stop_sequence"],
@@ -1423,17 +1438,18 @@ async def delay_timeline(
     :func:`timeline_day_in_range`'s window is a 422, not a silently-served
     (and cache-evicting) query -- see that function's docstring.
 
-    Read-only, and served from ClickHouse `updates` joined against the static
-    schedule for positions — not from the `agg_*` tables, whose finest
-    time grain is the seven-band `time_band` column, far coarser than the
-    hour (or quarter hour) the rail steps through.
+    Read-only, served from `updates_live` for today and `updates` for a
+    closed day (`pipeline.clickhouse.live_table_for`), joined against the
+    static schedule for positions — not from the `agg_*` tables, whose
+    finest time grain is the seven-band `time_band` column, far coarser than
+    the hour (or quarter hour) the rail steps through.
     """
     if step not in ALLOWED_STEP_MINUTES:
         raise HTTPException(status_code=400, detail=f"step must be one of {list(ALLOWED_STEP_MINUTES)}")
 
     if date_ is None:
-        latest = await max_captured_at(ch, agency_id)
-        day = playback_day_for(latest.astimezone(ZoneInfo("Asia/Tokyo"))) if latest is not None else jst_today()
+        latest = await max_captured_at(ch, agency_id, table=LIVE_TABLE) or await max_captured_at(ch, agency_id)
+        day = playback_day_for(latest.astimezone(_JST)) if latest is not None else jst_today()
     else:
         parsed = parse_iso_date(date_)
         if parsed is None:
@@ -1446,5 +1462,5 @@ async def delay_timeline(
             detail=f"date must be within the last {MAX_RANGE_DAYS} days and not in the future",
         )
 
-    frames = await compute_delay_timeline(agency_id, day, step, conn, ch)
+    frames = await compute_delay_timeline(agency_id, day, step, conn, ch, table=live_table_for(day))
     return DelayTimelineResponse(date=day.isoformat(), step_minutes=step, frames=frames)

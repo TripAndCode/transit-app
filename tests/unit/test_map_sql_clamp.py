@@ -10,7 +10,7 @@ on plausibility.
 import pathlib
 
 from api.routers import map as api_map
-from api.routers.map import _LIVE_DELAYS_DEDUP_SQL, _ROUTE_STOP_PROFILE_DEDUP_SQL, build_route_trips_sql
+from api.routers.map import _LIVE_DELAYS_DEDUP_SQL, build_route_stop_profile_sql, build_route_trips_sql
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.reports import map as reports_map
 from pipeline.reports.map import _route_shape_stats_dedup_sql, _route_shape_vote_dedup_sql
@@ -23,7 +23,7 @@ def test_live_delays_dedup_clamps_dep_delay():
 
 
 def test_route_stop_profile_dedup_clamps_dep_delay():
-    assert _CLAMP in _ROUTE_STOP_PROFILE_DEDUP_SQL
+    assert _CLAMP in build_route_stop_profile_sql("updates")
 
 
 def test_route_trips_dedup_clamps_dep_delay():
@@ -53,11 +53,13 @@ def _sql_literals(source: str) -> list[str]:
 
     Read as text rather than by importing and inspecting objects, because a
     new query can arrive as a module constant, a function-local string or an
-    f-string, and only the text form catches all three.
+    f-string, and only the text form catches all three. The fact table
+    arrives literally (``updates``) or as the ``{table}`` placeholder
+    `live_table_for` fills, so either spelling counts as a match.
     """
     literals: list[str] = []
     for chunk in source.split('"""')[1::2]:
-        if "updates" in chunk and "dep_delay" in chunk:
+        if ("updates" in chunk or "{table}" in chunk) and "dep_delay" in chunk:
             literals.append(chunk)
     return literals
 

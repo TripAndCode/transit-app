@@ -6,6 +6,8 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.range import jst_today
+from pipeline.clickhouse import LIVE_TABLE
 from tests.conftest import _test_pool
 
 
@@ -195,7 +197,7 @@ async def stop_profile_client(apply_schema, ch_client, ch_async_client):
         aid,
     )
     # Raw updates for today (K31 with big delay at S1)
-    today = date.today()
+    today = jst_today()
     jst = timezone(timedelta(hours=9))
     ts = datetime(today.year, today.month, today.day, 9, 0, 0, tzinfo=jst)
     await pool.execute(
@@ -258,7 +260,7 @@ async def stop_profile_client(apply_schema, ch_client, ch_async_client):
     )
     from tests.conftest import mirror_updates_to_ch
 
-    mirror_updates_to_ch(ch_client, aid)
+    mirror_updates_to_ch(ch_client, aid, table=LIVE_TABLE)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, aid
@@ -349,7 +351,7 @@ async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
         "VALUES ($1, CURRENT_DATE, 'R_W', '平日', 0, 0, 1, 1, NOW(), 0)",
         aid,
     )
-    today = date.today()
+    today = jst_today()
     jst = timezone(timedelta(hours=9))
     ts = datetime(today.year, today.month, today.day, 9, 0, 0, tzinfo=jst)
     await pool.execute(
@@ -387,7 +389,7 @@ async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
         )
     from tests.conftest import mirror_updates_to_ch
 
-    mirror_updates_to_ch(ch_client, aid)
+    mirror_updates_to_ch(ch_client, aid, table=LIVE_TABLE)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, aid
