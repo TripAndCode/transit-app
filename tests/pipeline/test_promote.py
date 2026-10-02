@@ -125,3 +125,37 @@ def test_a_copy_that_falls_short_is_raised_not_skipped(pg_conn, ch_client, agenc
     insert_updates(ch_client, agency_id, [_row("oracle/y/a.pb", _at(yday, 12))], table=LIVE_TABLE)
     with pytest.raises(PromotionIncomplete):
         promote_closed_days(agency_id, pg_conn, _DropsInserts(ch_client))
+    # Nothing landed, so the next real run copies the file in full rather than
+    # treating the untouched file as already done.
+    assert promote_closed_days(agency_id, pg_conn, ch_client) == 1
+
+
+def test_a_partial_copy_keeps_raising_until_the_missing_rows_are_repaired(pg_conn, ch_client, agency_id):
+    class _PartialCopy:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def command(self, sql, *a, **k):
+            return self._inner.command(sql + " LIMIT 1", *a, **k)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    yday = jst_today() - timedelta(days=1)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [_row("oracle/y/a.pb", _at(yday, 12), "A", 1), _row("oracle/y/a.pb", _at(yday, 12), "A", 2)],
+        table=LIVE_TABLE,
+    )
+
+    with pytest.raises(PromotionIncomplete):
+        promote_closed_days(agency_id, pg_conn, _PartialCopy(ch_client))
+    assert _count(ch_client, "updates", agency_id) == 1  # one row landed before the shortfall surfaced
+
+    # The file is now present in `updates` but short of what `updates_live`
+    # holds for it -- a plain file-name presence check would call this done
+    # and silently skip the missing row forever. It must keep raising.
+    with pytest.raises(PromotionIncomplete):
+        promote_closed_days(agency_id, pg_conn, ch_client)
+    assert _count(ch_client, "updates", agency_id) == 1  # still short, nothing further copied
