@@ -11,13 +11,11 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-# Archive filenames/date-dirs encode local Japan time (same assumption the
-# whole app makes about `updates.captured_at`). _ts() must attach this
-# explicitly rather than returning a naive string: clickhouse-connect
-# resolves naive datetimes via the *process-local* host timezone when
-# writing DateTime64 columns, so a naive string is only correct by accident
-# on a JST-timezone host and silently wrong (9h off) on a UTC host such as
-# Railway/Docker/CI. See _ts()'s docstring.
+# Every captured_at this module returns is timezone-aware, never naive:
+# clickhouse-connect resolves naive datetimes via the *process-local* host
+# timezone when writing DateTime64 columns, so a naive string is only
+# correct by accident on a JST-timezone host and silently wrong (9h off) on
+# a UTC host such as Railway/Docker/CI.
 _JST = ZoneInfo("Asia/Tokyo")
 
 # ── varint protobuf decoder (no external dependencies) ────────────────────────
@@ -105,18 +103,46 @@ def decode_feed_timestamp(pb_bytes: bytes):
 # ── captured_at derivation ────────────────────────────────────────────────────
 
 
+def archive_captured_at(pb_bytes: bytes, date_str: str, pb_name: str) -> str:
+    """captured_at for an archived feed file: the feed's own FeedHeader
+    timestamp when it is plausible for the file's name, else the name via
+    _ts().
+
+    The header is an absolute POSIX instant. An archive name is a wall-clock
+    reading in whatever zone its collector used -- rt-poller.sh names in
+    UTC, while _ts() reads names as JST -- so the header wins whenever it
+    falls on the name's JST day or the next one, the two days a UTC or JST
+    reading of that name can land on. Outside that window (a frozen feed's
+    old header, a producer clock far off) the name stands, which also keeps
+    every stamp at or after JST midnight of the name's day: the bound
+    pipeline.ingest._archive_since gives the already-ingested skip-list.
+    """
+    feed_ts = decode_feed_timestamp(pb_bytes)
+    if isinstance(feed_ts, int) and feed_ts > 0:
+        try:
+            stamped = datetime.fromtimestamp(feed_ts, tz=_JST)
+        except (OverflowError, OSError, ValueError):
+            return _ts(date_str, pb_name)
+        if not date_str:
+            # No date in the name means no skip-list bound to keep
+            # (_archive_since gives up on the whole folder).
+            return stamped.isoformat()
+        try:
+            name_day = datetime.strptime(date_str, "%Y%m%d").date()
+        except ValueError:
+            return _ts(date_str, pb_name)
+        if 0 <= (stamped.date() - name_day).days <= 1:
+            return stamped.isoformat()
+    return _ts(date_str, pb_name)
+
+
 def _ts(date_str: str, pb_name: str) -> str:
-    """Combine archive date dir + pb filename into a JST-aware ISO timestamp.
+    """Read archive date dir + pb filename as a JST wall-clock time.
 
-    Same semantics as the original pipeline.ingest._ts: looks for
-    `_HHMMSS.pb` in the filename and pairs it with date_str (YYYYMMDD).
-    Falls back to plain date or 'now' if the format doesn't match.
-
-    The returned string is always timezone-aware (Asia/Tokyo), never naive:
-    archive filenames encode local Japan time, and clickhouse-connect
-    resolves a naive datetime using the *host process's* local timezone
-    when writing it, not JST — so a naive string here would silently shift
-    every archive-ingested row by the host/JST offset (9h on a UTC host).
+    Looks for `_HHMMSS.pb` in the filename and pairs it with date_str
+    (YYYYMMDD). Falls back to plain date or 'now' if the format doesn't
+    match. Prefer archive_captured_at(), which falls back to this only when
+    the feed's header timestamp is missing or unusable for the name.
     """
     m = re.search(r"_(\d{6})\.pb$", pb_name, re.IGNORECASE)
     if m and len(date_str) == 8:

@@ -1,11 +1,14 @@
 import io
 import tarfile
+from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
 from clickhouse_connect.driver.exceptions import DataError, OperationalError
 
 from pipeline.clickhouse import insert_updates
 from pipeline.ingest import ingest, parse_trip_id
+from tests.fixtures.gtfs_rt import header_only_feed
 
 _FAKE_ROW = (
     "20260401/ok.pb",
@@ -78,6 +81,35 @@ def test_ingest_creates_rows(pg_conn, ch_client, agency_id, tmp_path):
     assert rows[0][0] == "44372"
     assert rows[0][1] == 120
     assert rows[0][2] == agency_id
+
+
+@pytest.mark.parametrize("layout", ["tarball", "loose"])
+def test_ingest_stamps_archived_feeds_with_their_header_instant(layout, pg_conn, ch_client, agency_id, tmp_path):
+    """The member is named by UTC wall clock (00:00:11 UTC on 2026-09-15), as
+    rt-poller.sh writes it; its captured_at must be that instant, not the
+    name read as JST nine hours earlier."""
+    instant = datetime(2026, 9, 15, 0, 0, 11, tzinfo=timezone.utc)
+    pb_data = header_only_feed(int(instant.timestamp()))
+    if layout == "tarball":
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo(name="20260915/TripUpdate_000011.pb")
+            info.size = len(pb_data)
+            tf.addfile(info, io.BytesIO(pb_data))
+        (tmp_path / "20260915.tar.gz").write_bytes(buf.getvalue())
+    else:
+        (tmp_path / "20260915").mkdir()
+        (tmp_path / "20260915" / "TripUpdate_000011.pb").write_bytes(pb_data)
+    stamps: list[str] = []
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        stamps.append(ts)
+        return []
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert [datetime.fromisoformat(ts).astimezone(timezone.utc) for ts in stamps] == [instant]
 
 
 def test_ingest_tarball_member_failure_does_not_wipe_an_earlier_good_members_insert(
