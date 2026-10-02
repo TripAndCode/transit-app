@@ -130,7 +130,7 @@ def test_a_copy_that_falls_short_is_raised_not_skipped(pg_conn, ch_client, agenc
     assert promote_closed_days(agency_id, pg_conn, ch_client) == 1
 
 
-def test_a_partial_copy_keeps_raising_until_the_missing_rows_are_repaired(pg_conn, ch_client, agency_id):
+def test_a_partial_copy_is_raised_then_repaired_on_the_next_run(pg_conn, ch_client, agency_id):
     class _PartialCopy:
         def __init__(self, inner):
             self._inner = inner
@@ -155,7 +155,48 @@ def test_a_partial_copy_keeps_raising_until_the_missing_rows_are_repaired(pg_con
 
     # The file is now present in `updates` but short of what `updates_live`
     # holds for it -- a plain file-name presence check would call this done
-    # and silently skip the missing row forever. It must keep raising.
-    with pytest.raises(PromotionIncomplete):
-        promote_closed_days(agency_id, pg_conn, ch_client)
-    assert _count(ch_client, "updates", agency_id) == 1  # still short, nothing further copied
+    # and silently skip the missing row forever. The next run copies exactly
+    # the missing row.
+    assert promote_closed_days(agency_id, pg_conn, ch_client) == 1
+    assert _count(ch_client, "updates", agency_id) == 2
+    assert promote_closed_days(agency_id, pg_conn, ch_client) == 0
+
+
+def test_a_stuck_day_does_not_hold_back_later_days(pg_conn, ch_client, agency_id):
+    today = jst_today()
+    stuck, yday = today - timedelta(days=2), today - timedelta(days=1)
+
+    class _DropsInsertsFor:
+        def __init__(self, inner, day):
+            self._inner, self._lo = inner, _at(day, 0)
+
+        def command(self, sql, *a, parameters=None, **k):
+            if parameters and parameters.get("lo") == self._lo:
+                return None
+            return self._inner.command(sql, *a, parameters=parameters, **k)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    insert_updates(
+        ch_client,
+        agency_id,
+        [_row("oracle/s/a.pb", _at(stuck, 12), "S"), _row("oracle/y/b.pb", _at(yday, 12), "Y")],
+        table=LIVE_TABLE,
+    )
+    with pytest.raises(PromotionIncomplete, match=str(stuck)):
+        promote_closed_days(agency_id, pg_conn, _DropsInsertsFor(ch_client, stuck))
+    assert _files(ch_client, "updates", agency_id) == ["oracle/y/b.pb"]
+
+
+def test_a_duplicate_live_insert_is_promoted_once_and_never_reads_as_short(pg_conn, ch_client, agency_id):
+    """Two overlapping pushes of one poll can both insert it into updates_live,
+    before or after its day is promoted; history holds each row once either way."""
+    yday = jst_today() - timedelta(days=1)
+    rows = [_row("oracle/y/a.pb", _at(yday, 12), "A", 1), _row("oracle/y/a.pb", _at(yday, 12), "A", 2)]
+    insert_updates(ch_client, agency_id, rows, table=LIVE_TABLE)
+    insert_updates(ch_client, agency_id, rows, table=LIVE_TABLE)
+    assert promote_closed_days(agency_id, pg_conn, ch_client) == 2
+    insert_updates(ch_client, agency_id, rows, table=LIVE_TABLE)
+    assert promote_closed_days(agency_id, pg_conn, ch_client) == 0
+    assert _count(ch_client, "updates", agency_id) == 2

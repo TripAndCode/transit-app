@@ -3,21 +3,17 @@
 `updates` and every aggregate hold closed JST days only. A day reaches history
 once it has ended, by this copy, as exactly the polls the live path collected.
 
-Idempotent per file. A `file_name` is done, and not copied again, only once its
-row count in `updates` equals its row count in `updates_live` for that day --
-checked by count, not by mere presence, because `INSERT ... SELECT` into a
-MergeTree table commits in blocks: a run that fails partway through a file can
-leave some of its rows in `updates` without all of them. Presence alone would
-then read as done and the gap would go uncopied forever once `updates_live`'s
-TTL drops the source rows. A file present in `updates` but short of its live
-count instead raises PromotionIncomplete, every run, until the missing rows
-are repaired -- that keeps the shortfall visible rather than silently
-resolving itself into permanent data loss. A rerun, a poll landing after its
-day was promoted, and rows `updates` already held for a day before the split
-all reconcile normally on the next run, since each starts with an equal
-count. A day has one source: a day for which `updates` holds archive rows is
-not promoted (and is logged), the mirror of archive ingest refusing a day
-that holds promoted rows.
+Idempotent and self-repairing per file. Files are compared by distinct rows,
+since two overlapping pushes of one poll can both land in `updates_live`, and
+a file is copied again whenever `updates` holds fewer of its distinct rows
+than `updates_live` does: only the rows `updates` lacks are inserted. An
+`INSERT ... SELECT` into a MergeTree table commits in blocks, so a run that
+fails partway through a file leaves some of its rows in `updates`; the next
+run fills the gap rather than reading the file as done. A copy that still
+falls short raises PromotionIncomplete for that day, after every other day
+has been tried, so one stuck day never holds back the rest. A day has one
+source: a day for which `updates` holds archive rows is not promoted (and is
+logged), the mirror of archive ingest refusing a day that holds promoted rows.
 
 A day never promoted is lost once `updates_live`'s TTL drops it, so a failure
 here raises for the caller to record, and every run retries it.
@@ -46,18 +42,28 @@ _LIVE_DAYS_SQL = (
     f"SELECT DISTINCT toDate(captured_at, 'Asia/Tokyo') AS day FROM {LIVE_TABLE} "
     "WHERE agency_id = {agency_id:UInt16} AND captured_at < {cutoff:DateTime64} ORDER BY day"
 )
-_LIVE_FILES_SQL = f"SELECT file_name, count() AS n FROM {LIVE_TABLE} " + _WINDOW + "GROUP BY file_name"
-_DONE_FILES_SQL = f"SELECT file_name, count() AS n FROM {UPDATES_TABLE} " + _WINDOW + "GROUP BY file_name"
+_ROW = f"tuple({_COLUMNS})"
+_LIVE_FILES_SQL = f"SELECT file_name, uniqExact({_ROW}) AS n FROM {LIVE_TABLE} " + _WINDOW + "GROUP BY file_name"
+_DONE_FILES_SQL = f"SELECT file_name, uniqExact({_ROW}) AS n FROM {UPDATES_TABLE} " + _WINDOW + "GROUP BY file_name"
+_IN_FILES = "AND has({files:Array(String)}, file_name) "
+# transform_null_in makes NULL match NULL in the NOT IN below; most columns
+# are Nullable, and without it a row holding a NULL would never count as
+# already copied.
+_COPY_SETTINGS = {"transform_null_in": 1}
 _COPY_SQL = (
-    f"INSERT INTO {UPDATES_TABLE} ({_COLUMNS}) SELECT {_COLUMNS} FROM {LIVE_TABLE} "
+    f"INSERT INTO {UPDATES_TABLE} ({_COLUMNS}) SELECT DISTINCT {_COLUMNS} FROM {LIVE_TABLE} "
     + _WINDOW
-    + "AND has({files:Array(String)}, file_name)"
+    + _IN_FILES
+    + f"AND {_ROW} NOT IN (SELECT {_ROW} FROM {UPDATES_TABLE} "
+    + _WINDOW
+    + _IN_FILES
+    + ")"
 )
-_COPIED_ROWS_SQL = f"SELECT count() FROM {UPDATES_TABLE} " + _WINDOW + "AND has({files:Array(String)}, file_name)"
 
 
 class PromotionIncomplete(RuntimeError):
-    """Fewer rows reached `updates` than `updates_live` held for the files copied."""
+    """`updates` still holds fewer distinct rows than `updates_live` for some
+    file of a closed day after its copy."""
 
 
 def promote_closed_days(agency_id: int, conn, ch_client, *, now: datetime | None = None) -> int:
@@ -82,31 +88,35 @@ def promote_closed_days(agency_id: int, conn, ch_client, *, now: datetime | None
         archived = days_with_source(ch_client, agency_id, days, live_sourced=False)
         for day in sorted(archived):
             logger.warning("promote: agency %s %s already holds archive rows in updates; not promoted", agency_id, day)
-        todo = [d for d in days if d not in archived]
-        return sum(_promote_day(ch_client, agency_id, day, today) for day in todo)
+        copied, stuck = 0, []
+        for day in (d for d in days if d not in archived):
+            try:
+                copied += _promote_day(ch_client, agency_id, day, today)
+            except PromotionIncomplete as exc:
+                stuck.append(str(exc))
+        if stuck:
+            raise PromotionIncomplete("; ".join(stuck))
+        return copied
 
 
 def _promote_day(ch_client, agency_id: int, day: date, today: date) -> int:
     window = {"agency_id": agency_id, "lo": jst_midnight_utc(day), "hi": jst_midnight_utc(day + timedelta(days=1))}
-    live = {name: n for name, n in ch_client.query(_LIVE_FILES_SQL, parameters=window).result_rows}
-    done = {name: n for name, n in ch_client.query(_DONE_FILES_SQL, parameters=window).result_rows}
-    short = sorted(name for name, n in live.items() if name in done and done[name] != n)
-    if short:
-        raise PromotionIncomplete(
-            f"agency {agency_id} {day}: short in updates, fewer rows than updates_live holds: {', '.join(short)}"
-        )
-    new = sorted(name for name in live if name not in done)
-    if not new:
+    live = dict(ch_client.query(_LIVE_FILES_SQL, parameters=window).result_rows)
+    done = dict(ch_client.query(_DONE_FILES_SQL, parameters=window).result_rows)
+    pending = sorted(name for name, n in live.items() if done.get(name, 0) < n)
+    if not pending:
         return 0
     if day < today - timedelta(days=1):
         logger.warning(
             "promote: agency %s %s promoted late; updates_live drops a day 3 days after capture", agency_id, day
         )
-    params = {**window, "files": new}
-    ch_client.command(_COPY_SQL, parameters=params)
-    copied = ch_client.query(_COPIED_ROWS_SQL, parameters=params).result_rows[0][0]
-    expected = sum(live[name] for name in new)
-    if copied < expected:
-        raise PromotionIncomplete(f"agency {agency_id} {day}: {copied} of {expected} live rows reached updates")
-    logger.info("promote: agency %s %s: %d file(s), %d row(s)", agency_id, day, len(new), copied)
+    ch_client.command(_COPY_SQL, parameters={**window, "files": pending}, settings=_COPY_SETTINGS)
+    after = dict(ch_client.query(_DONE_FILES_SQL, parameters=window).result_rows)
+    short = [name for name in pending if after.get(name, 0) < live[name]]
+    if short:
+        raise PromotionIncomplete(
+            f"agency {agency_id} {day}: updates holds fewer distinct rows than updates_live for {', '.join(short)}"
+        )
+    copied = sum(after[name] - done.get(name, 0) for name in pending)
+    logger.info("promote: agency %s %s: %d file(s), %d row(s)", agency_id, day, len(pending), copied)
     return copied
