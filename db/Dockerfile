@@ -3,7 +3,7 @@
 # alongside amd64, so an arm64 host runs this natively. `postgis/postgis`
 # publishes amd64 only, for every tag, and cannot: it needs an emulated
 # platform, which taxes every query.
-FROM postgres:14
+FROM postgres:18
 
 # PostGIS and pgvector come from PGDG, which the official image already
 # configures.
