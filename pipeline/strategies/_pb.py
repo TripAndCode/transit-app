@@ -123,10 +123,14 @@ def archive_captured_at(pb_bytes: bytes, date_str: str, pb_name: str) -> str:
             stamped = datetime.fromtimestamp(feed_ts, tz=_JST)
         except (OverflowError, OSError, ValueError):
             return _ts(date_str, pb_name)
+        if not date_str:
+            # No date in the name means no skip-list bound to keep
+            # (_archive_since gives up on the whole folder).
+            return stamped.isoformat()
         try:
             name_day = datetime.strptime(date_str, "%Y%m%d").date()
         except ValueError:
-            return stamped.isoformat()
+            return _ts(date_str, pb_name)
         if 0 <= (stamped.date() - name_day).days <= 1:
             return stamped.isoformat()
     return _ts(date_str, pb_name)
@@ -137,8 +141,8 @@ def _ts(date_str: str, pb_name: str) -> str:
 
     Looks for `_HHMMSS.pb` in the filename and pairs it with date_str
     (YYYYMMDD). Falls back to plain date or 'now' if the format doesn't
-    match. Prefer archive_captured_at(), which only falls back to this when
-    the feed has no header timestamp.
+    match. Prefer archive_captured_at(), which falls back to this only when
+    the feed's header timestamp is missing or unusable for the name.
     """
     m = re.search(r"_(\d{6})\.pb$", pb_name, re.IGNORECASE)
     if m and len(date_str) == 8:

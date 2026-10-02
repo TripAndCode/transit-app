@@ -115,3 +115,23 @@ def test_archive_captured_at_takes_a_header_from_the_jst_day_after_the_names_day
     instant = datetime(2026, 9, 15, 22, 30, 0, tzinfo=timezone.utc)
     iso = archive_captured_at(header_only_feed(int(instant.timestamp())), "20260915", "TripUpdate_223000.pb")
     assert _instant(iso) == instant
+
+
+def test_archive_captured_at_reads_the_name_when_its_date_is_not_a_date(monkeypatch):
+    """Eight digits that are not a calendar date give no day to bound the
+    header by, so the header cannot be checked against the skip-list bound
+    and the name reading stands."""
+    from pipeline.strategies import _pb
+
+    monkeypatch.setattr(_pb, "_ts", lambda date_str, pb_name: f"name:{date_str}/{pb_name}")
+    instant = datetime(2026, 9, 15, 0, 0, 11, tzinfo=timezone.utc)
+    raw = header_only_feed(int(instant.timestamp()))
+    assert archive_captured_at(raw, "99999913", "TripUpdate_000011.pb") == "name:99999913/TripUpdate_000011.pb"
+
+
+def test_archive_captured_at_takes_the_header_when_there_is_no_date_to_bound_it():
+    """A loose file with no date directory has no skip-list bound at all
+    (_archive_since returns None), so the header is safe to use."""
+    instant = datetime(2026, 9, 15, 0, 0, 11, tzinfo=timezone.utc)
+    iso = archive_captured_at(header_only_feed(int(instant.timestamp())), "", "TripUpdate_000011.pb")
+    assert _instant(iso) == instant
