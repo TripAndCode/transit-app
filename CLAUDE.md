@@ -15,6 +15,8 @@ same source. This section only maps them onto Claude Code tooling.
     enforcement, high-risk paths, or material fixes.
   - Human prose outside the process docs may use its direct trivial path.
 - `/cleanup-merged` is the post-merge cleanup.
-- `.claude/hooks/guard_dev_db.py` and `.claude/hooks/guard-push-quality.sh`, wired
-  in `.claude/settings.json`, enforce the dev-database and pre-push verification
-  rules for Claude Code sessions.
+- `.claude/settings.json` wires two hooks that enforce rules for Claude Code
+  sessions:
+  - `.claude/hooks/guard-dev-db.sh`, a wrapper around `guard_dev_db.py`, enforces
+    the dev-database rule.
+  - `.claude/hooks/guard-push-quality.sh` enforces the pre-push verification rule.
