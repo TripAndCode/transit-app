@@ -20,12 +20,14 @@ deliberately stays out of.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 HOOK_PATH = ROOT / ".claude" / "hooks" / "guard-push-quality.sh"
+SETTINGS_PATH = ROOT / ".claude" / "settings.json"
 
 _START_MARKER = "python3 -c '\nimport json, shlex, sys"
 _END_MARKER = "\n' 2>/dev/null\n)\""
@@ -171,7 +173,7 @@ def _frontend_gate_block() -> str:
     ]` gate."""
     text = HOOK_PATH.read_text()
     start = text.index('if [ "$RUN_FRONTEND" -eq 1 ]; then')
-    end = text.index('if [ "$FAIL" -ne 0 ]; then\n  echo "BLOCKED: git push — quality gate failed', start)
+    end = text.index('if [ "$FAIL" -ne 0 ]; then\n  block_with_log "quality gate failed"', start)
     return text[start:end]
 
 
@@ -239,3 +241,80 @@ def test_a_deadcode_check_that_never_finished_still_blocks():
 
 def test_a_clean_knip_run_blocks_nothing():
     assert _deadcode_verdict(0, '{"issues":[]}') == 0
+
+
+def _hook_entry_timeout() -> int:
+    """The harness `timeout` on this hook's own `.claude/settings.json` entry."""
+
+    def entries(node):
+        if isinstance(node, dict):
+            if "guard-push-quality.sh" in str(node.get("command", "")):
+                yield node
+            for value in node.values():
+                yield from entries(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from entries(value)
+
+    found = list(entries(json.loads(SETTINGS_PATH.read_text())))
+    assert len(found) == 1, "guard-push-quality.sh must be registered exactly once in .claude/settings.json"
+    return int(found[0]["timeout"])
+
+
+def _ceilings(hook_text: str) -> list[int]:
+    return [int(n) for n in re.findall(r"run_with_timeout (\d+)", hook_text)]
+
+
+def test_the_step_ceilings_fit_inside_the_hooks_own_timeout():
+    """The harness kills the hook at its settings.json `timeout`, and whether
+    a killed hook blocks the push is outside the script's control -- the one
+    outcome its fail-closed design cannot guarantee. Every per-step ceiling
+    together, the deadcode re-run included, must therefore stay under it."""
+    ceilings = _ceilings(HOOK_PATH.read_text())
+    assert ceilings, "no run_with_timeout ceilings found in the hook"
+    assert sum(ceilings) < _hook_entry_timeout()
+
+
+def test_the_ceiling_check_sees_a_ceiling_raised_past_the_hooks_timeout():
+    """Positive control for the check above: the same reading of the hook,
+    with only the backend ceiling raised by the whole harness timeout, must
+    exceed it. A parser that stopped seeing a ceiling would pass the check
+    above vacuously and fail here."""
+    timeout = _hook_entry_timeout()
+    text = HOOK_PATH.read_text()
+    assert "run_with_timeout 1200 " in text
+    raised = text.replace("run_with_timeout 1200 ", f"run_with_timeout {1200 + timeout} ", 1)
+    assert sum(_ceilings(raised)) >= timeout
+
+
+def _function_source(name: str) -> str:
+    text = HOOK_PATH.read_text()
+    start = text.index(f"{name}() {{")
+    return text[start : text.index("\n}\n", start) + len("\n}\n")]
+
+
+def _final_gate_source() -> str:
+    text = HOOK_PATH.read_text()
+    start = text.rindex('if [ "$FAIL" -ne 0 ]; then')
+    return text[start : text.index("\nexit 0", start)]
+
+
+def test_a_step_that_runs_out_of_time_is_named_when_the_push_is_blocked():
+    """A timeout prints no error of its own, and the BLOCKED tail is whatever
+    a later step printed last (usually the build's chunk table), so the step
+    that actually ran out of time has to be named outright."""
+    script = (
+        'LOG="$(mktemp)"\n'
+        'TIMED_OUT="$(mktemp)"\n'
+        "MARKER_FILES=()\n"
+        "FAIL=0\n"
+        + _function_source("_run_with_watchdog")
+        + _function_source("run_with_timeout")
+        + _function_source("block_with_log")
+        + "run_with_timeout 1 sleep 10 || FAIL=1\n"
+        + 'echo "a later step that passed" >>"$LOG"\n'
+        + _final_gate_source()
+    )
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 2
+    assert "TIMED OUT after 1s: sleep 10" in result.stderr

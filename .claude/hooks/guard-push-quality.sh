@@ -326,6 +326,11 @@ case "$tip_msg" in
 esac
 
 LOG="$(mktemp)"
+# One line per step that hit its ceiling. Kept apart from $LOG because a
+# timeout prints no error of its own and the BLOCKED tail of $LOG is
+# whatever a later step printed last, so the gate would otherwise block
+# without naming the step that actually ran out of time.
+TIMED_OUT="$(mktemp)"
 # run_with_timeout's fallback path (below) creates a marker temp file per
 # call; if this script's process receives a catchable termination (an
 # external harness timeout, SIGTERM, or a normal early exit) after a marker
@@ -342,27 +347,19 @@ MARKER_FILES=()
 # statement) isn't affected -- it's the second statement that would abort
 # with a stray stderr message, leaving that call's marker file unswept.
 # Bash >=4.4 doesn't need this guard, but 3.2 does, so guard for both.
-trap 'rm -f "$LOG"; [ "${#MARKER_FILES[@]}" -eq 0 ] || rm -f "${MARKER_FILES[@]}"' EXIT
+trap 'rm -f "$LOG" "$TIMED_OUT"; [ "${#MARKER_FILES[@]}" -eq 0 ] || rm -f "${MARKER_FILES[@]}"' EXIT
 FAIL=0
 
-run_with_timeout() {
+# Neither GNU timeout nor gtimeout is on PATH (e.g. macOS without Homebrew
+# coreutils). Running unbounded there would silently defeat this script's
+# documented fail-closed contract, so run_with_timeout enforces the budget
+# with this background watchdog instead. Every real call site is a compound
+# command (bash -c "... && ..."), so job control (`set -m`) is required to
+# put it in its own process group — otherwise TERM/KILL only hits the
+# wrapper shell and leaves its child process tree (npm/vite/pytest workers)
+# running as an orphan.
+_run_with_watchdog() {
   local secs="$1"; shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$secs" "$@"
-    return $?
-  elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$secs" "$@"
-    return $?
-  fi
-
-  # Neither GNU timeout nor gtimeout is on PATH (e.g. macOS without Homebrew
-  # coreutils). Running unbounded here would silently defeat this script's
-  # documented fail-closed contract, so enforce the budget with a background
-  # watchdog instead. Every real call site is a compound command (bash -c
-  # "... && ..."), so job control (`set -m`) is required to put it in its
-  # own process group — otherwise TERM/KILL only hits the wrapper shell and
-  # leaves its child process tree (npm/vite/pytest workers) running as an
-  # orphan.
   local marker; marker="$(mktemp)"
   rm -f "$marker"
   MARKER_FILES+=("$marker")
@@ -386,6 +383,35 @@ run_with_timeout() {
     status=124
   fi
   return "$status"
+}
+
+run_with_timeout() {
+  local secs="$1"; shift
+  local status
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+    status=$?
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+    status=$?
+  else
+    _run_with_watchdog "$secs" "$@"
+    status=$?
+  fi
+  if [ "$status" -eq 124 ]; then
+    printf 'TIMED OUT after %ss: %s\n' "$secs" "$*" >>"$TIMED_OUT"
+  fi
+  return "$status"
+}
+
+block_with_log() {
+  echo "BLOCKED: git push — $1. Last 80 lines:" >&2
+  tail -80 "$LOG" >&2
+  if [ -s "$TIMED_OUT" ]; then
+    echo "Ran out of time (the step's ceiling in this script, not a check failure):" >&2
+    cat "$TIMED_OUT" >&2
+  fi
+  exit 2
 }
 
 # SCOPE_OK=0 means we couldn't determine what changed (no resolvable base
@@ -508,9 +534,7 @@ fi
 # Fail fast on the cheap checks before paying for the full backend + frontend
 # suites — a one-line format nit shouldn't cost a multi-minute double run.
 if [ "$FAIL" -ne 0 ]; then
-  echo "BLOCKED: git push — ruff format/lint or mypy failed (skipping tests). Last 80 lines:" >&2
-  tail -80 "$LOG" >&2
-  exit 2
+  block_with_log "ruff format/lint or mypy failed (skipping tests)"
 fi
 
 RUN_BACKEND=0
@@ -563,7 +587,11 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
     echo "== npm run typecheck (whole project — tsc project refs can't be file-scoped) =="
     run_with_timeout 90 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run typecheck" || FAIL=1
     echo "== npm run test =="
-    run_with_timeout 120 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test" || FAIL=1
+    # Whole-project vitest saturates every core and grows with each test
+    # file, so like the backend ceiling above it needs headroom over the
+    # suite's real wall-clock on a loaded host, not a figure that only a
+    # quiet machine clears.
+    run_with_timeout 300 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test" || FAIL=1
     echo "== npm run lint (whole project — matches CI, a file-scoped eslint call can miss project config) =="
     run_with_timeout 60 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint" || FAIL=1
     echo "== npm run lint:i18n =="
@@ -634,9 +662,7 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
 fi
 
 if [ "$FAIL" -ne 0 ]; then
-  echo "BLOCKED: git push — quality gate failed. Last 80 lines:" >&2
-  tail -80 "$LOG" >&2
-  exit 2
+  block_with_log "quality gate failed"
 fi
 
 exit 0
