@@ -5,6 +5,7 @@ import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
+import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, fmtPct } from "../utils/format";
 
 const ROWS_CAP = 200;
@@ -159,8 +160,8 @@ function computeColumnMaxes(schema: Schema[] | undefined, rows: unknown[][]): Ma
 // The route column stays in view while a table wider than its panel
 // scrolls sideways. It needs an opaque background for rows to pass under:
 // the page's, since the table sits directly on it.
-const STICKY_CELL = { position: "sticky", left: 0, zIndex: 1, background: "var(--bg-page)" } as const;
-const STICKY_HEAD = { position: "sticky", left: 0, zIndex: 1, background: "var(--bg-soft)" } as const;
+const STICKY_CELL = { position: "sticky", left: 0, zIndex: Z_INDEX.raised, background: "var(--bg-page)" } as const;
+const STICKY_HEAD = { position: "sticky", left: 0, zIndex: Z_INDEX.raised, background: "var(--bg-soft)" } as const;
 
 type Props = {
   reportType: string;
