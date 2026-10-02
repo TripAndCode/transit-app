@@ -93,10 +93,10 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope
                       </span>
                     )}
                   </td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtMetricValue(r.threshold_value, r.metric_type)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtMetricValue(r.actual_value, r.metric_type)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtAchievementRate(r.achievement_rate)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtEstimate(r.estimated_bonus_deduction)}</td>
+                  <td style={td({ align: "right" })}>{fmtMetricValue(r.threshold_value, r.metric_type)}</td>
+                  <td style={td({ align: "right" })}>{fmtMetricValue(r.actual_value, r.metric_type)}</td>
+                  <td style={td({ align: "right" })}>{fmtAchievementRate(r.achievement_rate)}</td>
+                  <td style={td({ align: "right" })}>{fmtEstimate(r.estimated_bonus_deduction)}</td>
                 </tr>
               ))}
             </tbody>

@@ -83,15 +83,15 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
               <tbody>
                 <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.wet")}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtDelaySec(data.wet.avg_delay_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.wet.days)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.wet.samples)}</td>
+                  <td style={td({ align: "right" })}>{fmtDelaySec(data.wet.avg_delay_sec, t)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(data.wet.days)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(data.wet.samples)}</td>
                 </tr>
                 <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.dry")}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtDelaySec(data.dry.avg_delay_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.dry.days)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(data.dry.samples)}</td>
+                  <td style={td({ align: "right" })}>{fmtDelaySec(data.dry.avg_delay_sec, t)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(data.dry.days)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(data.dry.samples)}</td>
                 </tr>
               </tbody>
             </table>

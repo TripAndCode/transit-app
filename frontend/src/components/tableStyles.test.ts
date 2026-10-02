@@ -45,4 +45,13 @@ describe("td", () => {
   it("applies an explicit alignment", () => {
     expect(td({ align: "right" }).textAlign).toBe("right");
   });
+
+  it("keeps a right-aligned (numeric) cell on one line with aligned figures", () => {
+    expect(td({ align: "right" })).toMatchObject({ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" });
+  });
+
+  it("lets a text cell wrap", () => {
+    expect(td().whiteSpace).toBeUndefined();
+    expect(td({ align: "left" }).whiteSpace).toBeUndefined();
+  });
 });
