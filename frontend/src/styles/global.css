@@ -480,10 +480,10 @@ table {
     radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--text-primary) 22%, transparent), transparent) right / 16px 100% no-repeat scroll;
 }
 
-/* The single place tabular figures are turned on. Apply to columns of
-   numbers that must align vertically — table cells, chart axes, counters
-   in a fixed-width slot — never to a large standalone number, which reads
-   better with proportional figures. */
+/* Tabular figures for numbers that must align vertically outside a table —
+   chart axes, counters in a fixed-width slot — never a large standalone
+   number, which reads better with proportional figures. A table's numeric
+   cells get them from tableStyles' td({ align: "right" }). */
 .num {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
