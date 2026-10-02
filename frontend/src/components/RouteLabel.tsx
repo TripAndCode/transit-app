@@ -18,6 +18,8 @@ export function RouteLabel({
 }) {
   const label = names.data.get(code) ?? (fallbackName || null);
   if (label == null) return <>{names.format(code)}</>;
+  // A route with no name is labelled by its route_id, which embeds the code.
+  if (label.includes(`(${code})`)) return <>{label}</>;
   return (
     <>
       {label} <span className="route-label__code">{code}</span>

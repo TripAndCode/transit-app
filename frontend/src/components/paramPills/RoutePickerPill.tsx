@@ -165,7 +165,8 @@ export function RoutePickerPill({
                   }}
                 >
                   <span className="rp-opt-name">{name}</span>
-                  {code && name !== code ? <span className="rp-opt-code">{code}</span> : <span />}
+                  {/* An unnamed route is labelled by its route_id, which embeds the code. */}
+                  {code && !name.includes(code) ? <span className="rp-opt-code">{code}</span> : <span />}
                   {delay != null ? (
                     <span className="rp-opt-delay">
                       <span className="rp-delay-dot" style={{ background: delayColor(delay) }} />
