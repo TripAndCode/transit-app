@@ -255,6 +255,7 @@ function TrendBlock({
   data: TrendPayload[];
   ctx: Scope;
 }) {
+  const { t } = useTranslation();
   const payload: TrendPayload = data[0] ?? {
     days: [],
     hourly: [],
@@ -270,8 +271,16 @@ function TrendBlock({
   return (
     <TrendFocusProvider>
       <div>
-        <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
-        <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
+        {/* Over one day the weekday bands and the daily line each hold a
+            single point; the hourly heatmap still reads. */}
+        {rangeDays < 2 ? (
+          <p className="trend-single-day">{t("reports.trend.single_day")}</p>
+        ) : (
+          <>
+            <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
+            <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
+          </>
+        )}
         <HourlyHeatmap cells={payload.hourly} />
       </div>
     </TrendFocusProvider>

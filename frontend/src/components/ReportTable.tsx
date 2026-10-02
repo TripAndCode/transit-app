@@ -1,8 +1,10 @@
 import { useTranslation } from "react-i18next";
+import { Link, useLocation } from "react-router-dom";
 import type { TFunction } from "i18next";
 import { delayColor, delayTextColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "./RouteLabel";
+import { routeHref } from "../routes/destinations";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
@@ -177,6 +179,7 @@ export function ReportTable({ reportType, rows }: Props) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const names = useRouteNames(id);
+  const { search } = useLocation();
   const schema = SCHEMAS[reportType];
 
   const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
@@ -213,7 +216,7 @@ export function ReportTable({ reportType, rows }: Props) {
                 <span className="report-cards__rank">{i + 1}</span>
                 {titleCol && (
                   <span className="report-cards__route">
-                    <RouteLabel code={String(row[titleCol.index] ?? "")} names={names} />
+                    <RouteCell agencyId={id} code={String(row[titleCol.index] ?? "")} names={names} search={search} />
                   </span>
                 )}
                 {headline && (
@@ -270,7 +273,11 @@ export function ReportTable({ reportType, rows }: Props) {
         </thead>
         <tbody>
           {cappedRows.visible.map((row, i) => (
-            <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
+            <tr
+              key={i}
+              className={schema.some((c) => c.route) ? "report-row--link" : undefined}
+              style={{ borderTop: "1px solid var(--border-soft)" }}
+            >
               <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
               {schema.map((c) => {
                 if (c.route) {
@@ -281,7 +288,7 @@ export function ReportTable({ reportType, rows }: Props) {
                       // width it breaks onto a third line.
                       style={{ ...td(), ...(c === ROUTE_COL ? STICKY_CELL : null), minWidth: "16em", fontWeight: 500, wordBreak: "keep-all" }}
                     >
-                      <RouteLabel code={String(row[c.index] ?? "")} names={names} />
+                      <RouteCell agencyId={id} code={String(row[c.index] ?? "")} names={names} search={search} />
                     </td>
                   );
                 }
@@ -314,6 +321,31 @@ export function ReportTable({ reportType, rows }: Props) {
       </table>
       {showMore}
     </div>
+  );
+}
+
+/** A row's route, as a link to its page: rows are where a route is found,
+ *  so they are how it is opened. The scope carries over; routeHref drops what
+ *  only chose this screen's report. */
+function RouteCell({
+  agencyId,
+  code,
+  names,
+  search,
+}: {
+  agencyId: number | null;
+  code: string;
+  names: ReturnType<typeof useRouteNames>;
+  search: string;
+}) {
+  if (agencyId == null || !code) return <RouteLabel code={code} names={names} />;
+  return (
+    <Link className="report-route-link" to={routeHref(agencyId, code, search)}>
+      <RouteLabel code={code} names={names} />
+      <span className="report-route-link__chevron" aria-hidden="true">
+        {" ›"}
+      </span>
+    </Link>
   );
 }
 
