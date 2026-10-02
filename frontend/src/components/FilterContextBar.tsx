@@ -9,6 +9,7 @@ import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
 import { pill, groupLabel } from "./pillStyles";
 import { FILTER_SEPARATOR } from "../utils/format";
+import "./FilterContextBar.css";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
