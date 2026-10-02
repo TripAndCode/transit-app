@@ -2,8 +2,16 @@
 
 Public landing page, rendered outside `<App />` and outside `RequireAuth`
 (`frontend/src/main.tsx`) so a signed-out visitor can reach it. Its hero
-offers one way in, "Sign in", which links to `/login`. A signed-in visitor
-who opens `/welcome` is sent to `/`.
+has one CTA: "Sign in" (`/login`) for a signed-out visitor, "Open the
+dashboard" (`/`) for a signed-in one. Signed-in users still reach the page.
+
+## Ways back to it
+
+- **Signing out** (`AccountPage`) reloads onto `/welcome`, whether or not
+  sign-in is required.
+- **The rail's Other section** (and the mobile More sheet, which shares it)
+  links "About this app" to `/welcome`.
+- **The login card's wordmark** links to `/welcome`.
 
 ## Who gets sent here
 
@@ -38,7 +46,7 @@ visitor.
 
 | File | Role |
 |---|---|
-| `frontend/src/pages/LandingPage.tsx` | Hero: headline and the sign-in CTA |
+| `frontend/src/pages/LandingPage.tsx` | Hero: headline and the sign-in or dashboard CTA |
 | `frontend/src/pages/LandingPage.css` | Hero and CTA styling |
 | `frontend/src/pages/landing/LiveMapHero.tsx` | Animated backdrop behind the hero: the operations map with trip dots and the app's right-hand panel, on a fictional city. Scene data in `heroMapScene.ts`, script in `heroMapTimeline.ts`, map layers in `heroMapDraw.ts`, panel in `heroPanelDraw.ts`, driven by `useHeroMapAnimation.ts` |
 | `frontend/src/pages/landing/ScrollNarrative.tsx` | Post-hero scroll narrative on fixture data |
@@ -51,7 +59,8 @@ visitor.
 Hero strings live under `landing.hero.*`
 (`frontend/src/i18n/locales/{ja,en}.json`): `title_now` and `title_where`
 (the headline's two lines, rendered as separate spans so it never breaks
-mid-phrase) and `subtitle`. The sign-in CTA reuses `common.login`. Text drawn
+mid-phrase), `subtitle`, and `open_dashboard` (the signed-in CTA). The
+sign-in CTA reuses `common.login`; the rail link is `nav.about`. Text drawn
 on the hero canvas lives under `landing.hero_map.*`; the narrative's
 heading/body pairs under `landing.narrative.{route,trend,ask}.{title,body}`.
 
@@ -61,7 +70,12 @@ heading/body pairs under `landing.narrative.{route,trend,ask}.{title,body}`.
    expect `/welcome` with a single "Sign in" button.
 2. Open a deep link such as `/agencies/1/analysis/ranking?route=12` —
    expect `/login?next=…`; sign in and expect to land on that exact URL.
-3. Sign in, then open `/welcome` — expect `/`.
-4. Automated coverage: `frontend/src/pages/LandingPage.test.tsx`,
+3. Sign in, then choose "About this app" in the rail — expect `/welcome`
+   with "Open the dashboard" in place of "Sign in".
+4. Sign out from the account page — expect `/welcome`.
+5. Automated coverage: `frontend/src/pages/LandingPage.test.tsx`,
+   `frontend/src/pages/AccountPage.test.tsx`,
+   `frontend/src/pages/LoginPage.test.tsx`,
+   `frontend/src/components/Sidebar.test.tsx`,
    `frontend/src/components/RequireAuth.test.tsx`,
    `frontend/src/api/authExpiry.test.ts`.

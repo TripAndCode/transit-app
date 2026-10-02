@@ -83,6 +83,12 @@ describe("Sidebar", () => {
     expect(within(other).queryByRole("link", { name: "Admin" })).toBeNull();
   });
 
+  it("links the welcome page under Other, for signed-in and signed-out visitors alike", () => {
+    renderSidebar();
+    const other = screen.getByRole("navigation", { name: "Other" });
+    expect(within(other).getByRole("link", { name: "About this app" })).toHaveAttribute("href", "/welcome");
+  });
+
   describe("with an admin session", () => {
     afterEach(() => vi.restoreAllMocks());
 

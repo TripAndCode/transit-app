@@ -225,7 +225,7 @@ export function AccountPage() {
       </Section>
       <DataSection email={session.email} />
       <button
-        onClick={() => logout.mutate(undefined, { onSuccess: () => (window.location.href = "/") })}
+        onClick={() => logout.mutate(undefined, { onSuccess: () => window.location.assign("/welcome") })}
         disabled={logout.isPending}
         style={{ padding: "8px 16px", background: "var(--surface-2)", color: "var(--text-primary)", border: "none", borderRadius: 4 }}
       >
