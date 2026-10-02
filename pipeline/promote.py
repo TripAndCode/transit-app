@@ -65,7 +65,11 @@ def promote_closed_days(agency_id: int, conn, ch_client, *, now: datetime | None
     `updates`, and return the rows copied.
 
     Holds the agency's `updates` lock for the whole run, as analyze() does, so
-    a copy never lands between analyze's reads (pipeline/locks.py).
+    a copy never lands between analyze's reads (pipeline/locks.py). Callers
+    must also hold INGEST_ANALYZE_LOCK_KEY's single-argument ingest/analyze
+    lock, as the cron sweep does around its per-agency loop, so archive
+    ingest cannot interleave its own one-source-per-day check between this
+    function's check and its write.
     """
     today = jst_date(now or datetime.now(timezone.utc))
     with agency_ingest_lock(conn, agency_id):
