@@ -373,7 +373,10 @@
       "平日": "平日",
       "土日祝": "土日祝"
     },
-    "route": "路線"
+    "route": "路線",
+    "route_label": "{{name}} · {{heading}}",
+    "route_heading_to": "{{to}}行き",
+    "route_heading_from_to": "{{from}}→{{to}}"
   },
   "legal": {
     "privacy": "プライバシーポリシー",
@@ -490,11 +493,12 @@
     "routes": {
       "label": "路線",
       "search_placeholder": "検索 (名前 / コード)",
-      "variant_count_one": "({{count}}路線)",
-      "variant_count_other": "({{count}}路線)",
+      "variant_count_one": "({{count}}系統)",
+      "variant_count_other": "({{count}}系統)",
       "show_more": "さらに表示 (残り{{count}}件)",
       "empty_title": "ルートが登録されていません。",
-      "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。"
+      "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。",
+      "search_label": "路線を検索"
     }
   },
   "operations": {
@@ -1542,7 +1546,7 @@
     "followup_submit": "質問する"
   },
   "palette": {
-    "placeholder": "事業者・系統・レポート・時間帯・操作を検索…",
+    "placeholder": "検索・移動…",
     "aria_label": "コマンドパレット",
     "no_results": "一致する項目がありません",
     "nav_pulse_sublabel": "運行の今と、変わったこと",

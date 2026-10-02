@@ -17,6 +17,7 @@
 import { useTranslation } from "react-i18next";
 import { usePerformanceStandards } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
+import { RouteLabel } from "./RouteLabel";
 import type { Scope } from "../api/scope";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import type { PerformanceStandardRow } from "../api/types";
@@ -40,7 +41,7 @@ function fmtEstimate(v: number | null): string {
 
 export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
-  const { format: formatRoute } = useRouteNames(aid);
+  const routeNames = useRouteNames(aid);
   const { data, isLoading, error, refetch } = usePerformanceStandards(aid, ctx, true);
 
   if (data && data.rows.length === 0) return null;
@@ -84,7 +85,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope
             <tbody>
               {data.rows.map((r) => (
                 <tr key={`${r.route_code}-${r.metric_type}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
-                  <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
+                  <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} /></td>
                   <td style={td()}>
                     {t(`reports.performance_standard.metric_label.${r.metric_type}`)}
                     {r.metric_scope === "agency" && (

@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useHeadwayQuality } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
+import { RouteLabel } from "./RouteLabel";
 import type { Scope } from "../api/scope";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -31,7 +32,7 @@ function fmtCov(v: number | null): string {
 
 export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
-  const { format: formatRoute } = useRouteNames(aid);
+  const routeNames = useRouteNames(aid);
   const { data, isLoading, error, refetch } = useHeadwayQuality(aid, ctx, true);
 
   return (
@@ -58,7 +59,7 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
             <tbody>
               {data.rows.map((r) => (
                 <tr key={r.route_code} style={{ borderTop: "1px solid var(--border-soft)" }}>
-                  <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
+                  <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} /></td>
                   <td style={td({ align: "right" })}>{fmtSignedMin(r.ewt_sec, t)}</td>
                   <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>
                   <td style={td({ align: "right" })}>{fmtRatioPct(r.long_gap_rate)}</td>

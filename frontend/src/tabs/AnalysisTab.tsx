@@ -29,6 +29,7 @@ import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
+import { RouteLabel } from "../components/RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "../components/tableStyles";
 import { ReportList } from "../components/analysis/ReportList";
@@ -280,7 +281,7 @@ function TrendBlock({
 function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   const { t } = useTranslation();
   const id = useAgencyId();
-  const { format: formatRoute } = useRouteNames(id);
+  const routeNames = useRouteNames(id);
   const [ctx, update] = useScope();
   // The agency and filters the report was fetched for identify the list: a
   // refetch under the same ones is the same list, however new its objects are.
@@ -335,7 +336,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           {cappedRoutes.visible.map((r, i) => (
             <tr key={`${r.route_code}-${r.service_type ?? ""}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
-              <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
+              <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} /></td>
               <td style={td()}>{r.service_type ? serviceValueLabel(r.service_type, t) : "—"}</td>
               <td style={td({ align: "right" })}>{fmtSec(r.dwell_avg_sec)}</td>
               <td style={td({ align: "right" })}>{fmtSec(r.dwell_p50_sec)}</td>

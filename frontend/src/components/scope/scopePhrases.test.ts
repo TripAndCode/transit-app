@@ -51,8 +51,8 @@ describe("scopeTokens", () => {
   });
 
   it("names a line picked by name rather than counting its variants", () => {
-    expect(labels("ja", { routes: ["61", "62", "63"] })).toContain("routes=K37 観光通り線 (3路線)");
-    expect(labels("en", { routes: ["61", "62", "63"] })).toContain("routes=K37 観光通り線 (3 routes)");
+    expect(labels("ja", { routes: ["61", "62", "63"] })).toContain("routes=K37 観光通り線 (3系統)");
+    expect(labels("en", { routes: ["61", "62", "63"] })).toContain("routes=K37 観光通り線 (3 variants)");
     expect(labels("ja", { routes: ["61", "70"] })).toContain("routes=2路線");
   });
 
