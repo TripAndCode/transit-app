@@ -5,6 +5,7 @@
     "expand_sidebar": "Expand sidebar",
     "account_menu": "Account menu",
     "help": "Help",
+    "about": "About this app",
     "prototype_section_label": "PROTOTYPE",
     "prototype_onboarding": "First-time login screen",
     "prototype_stale_feed": "Feed-stale state",
@@ -44,7 +45,8 @@
     "hero": {
       "title_now": "What's happening right now —",
       "title_where": "and where it's happening.",
-      "subtitle": "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track."
+      "subtitle": "Latest reported stops, current delays, historical analysis, and network comparisons for every agency you track.",
+      "open_dashboard": "Open the dashboard"
     },
     "hero_map": {
       "screens": {

@@ -67,6 +67,11 @@ describe("LoginPage", () => {
     }
   });
 
+  it("links the brand back to the welcome page", () => {
+    renderLogin();
+    expect(screen.getByRole("link", { name: "Delay Dashboard" })).toHaveAttribute("href", "/welcome");
+  });
+
   it("renders the SSO-disabled fallback only when neither auth method is available", () => {
     mockConfig = { auth_enabled: false, local_admin_enabled: false };
     renderLogin();

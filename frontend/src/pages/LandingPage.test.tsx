@@ -19,7 +19,6 @@ function renderLanding() {
         <MemoryRouter initialEntries={["/welcome"]}>
           <Routes>
             <Route path="/welcome" element={<LandingPage />} />
-            <Route path="/" element={<div>dashboard</div>} />
           </Routes>
         </MemoryRouter>
       </I18nextProvider>
@@ -56,10 +55,12 @@ describe("LandingPage", () => {
     expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
   });
 
-  it("sends a signed-in visitor straight to the dashboard", () => {
+  it("stays open to a signed-in visitor and offers the dashboard in place of sign-in", () => {
     mockUseSession.mockReturnValue({ data: { user_id: 1 }, isLoading: false });
     renderLanding();
-    expect(screen.getByText("dashboard")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open the dashboard" })).toHaveAttribute("href", "/");
+    expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
   });
 
   it("renders the scroll narrative's real chart sections below the hero, not the retired DashboardPreview mock", () => {
