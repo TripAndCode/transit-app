@@ -173,9 +173,9 @@ def build_diff(
 
 
 def _is_process_doc_path(path: str) -> bool:
-    """CLAUDE.md and everything under .claude/** are executable process docs,
-    not ordinary prose -- see CLAUDE.md's own "Git and pull requests" section."""
-    return path == "CLAUDE.md" or path.startswith(".claude/")
+    """AGENTS.md, CLAUDE.md and everything under .claude/** are executable
+    process docs, not ordinary prose -- see AGENTS.md's "Git and pull requests"."""
+    return path in ("AGENTS.md", "CLAUDE.md") or path.startswith(".claude/")
 
 
 def suggested_tier(paths: list[str]) -> str:

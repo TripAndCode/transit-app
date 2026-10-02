@@ -173,6 +173,21 @@ def test_process_doc_wins_when_mixed_with_an_ordinary_markdown_file(repository: 
     assert manifest["suggested_tier"] == "process-doc"
 
 
+def test_agents_md_is_an_executable_process_doc(repository: Path, tmp_path: Path):
+    """AGENTS.md holds the rules CLAUDE.md imports, so a change to it alone must
+    route like CLAUDE.md rather than as ordinary prose."""
+
+    git(repository, "switch", "-c", "feature")
+    (repository / "AGENTS.md").write_text("# rules\n", encoding="utf-8")
+    git(repository, "add", "AGENTS.md")
+    git(repository, "commit", "-m", "touch agent rules")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == ["AGENTS.md"]
+    assert manifest["suggested_tier"] == "process-doc"
+
+
 def test_process_doc_wins_when_a_claude_markdown_file_mixes_with_an_ordinary_markdown_file(
     repository: Path, tmp_path: Path
 ):
