@@ -1,7 +1,10 @@
-"""Sync ClickHouse client + shared helpers for the `updates` table, used by
-the ingest/analyze CLI paths (pipeline/ingest.py, pipeline/analyze.py,
-pipeline/freshness.py). Mirrors pipeline/db.py's role for the Postgres side:
-one place for the raw-`updates` SQL shape, so ingest and analyze can't drift.
+"""Sync ClickHouse client + shared helpers for the two observation tables
+(`updates`, `updates_live`), used by the ingest/analyze CLI paths
+(pipeline/ingest.py, pipeline/analyze.py, pipeline/freshness.py). Mirrors
+pipeline/db.py's role for the Postgres side: one place for the raw-observation
+SQL shape, so ingest and analyze can't drift. `checked_table`/`live_table_for`
+here are the one place every reader and writer learns which table a JST day
+lives in.
 """
 
 import os
@@ -11,6 +14,45 @@ from zoneinfo import ZoneInfo
 import clickhouse_connect
 
 _JST = ZoneInfo("Asia/Tokyo")
+
+UPDATES_TABLE = "updates"
+LIVE_TABLE = "updates_live"
+_OBSERVATION_TABLES = frozenset({UPDATES_TABLE, LIVE_TABLE})
+
+
+def checked_table(table: str) -> str:
+    """*table*, if it names one of the two observation tables.
+
+    Table names are interpolated into SQL text (ClickHouse binds values, not
+    identifiers), so only these two literals may ever reach a query.
+    """
+    if table not in _OBSERVATION_TABLES:
+        raise ValueError(f"not an observation table: {table!r}")
+    return table
+
+
+def jst_date(instant: datetime) -> date:
+    """The JST calendar day a tz-aware *instant* falls on."""
+    return instant.astimezone(_JST).date()
+
+
+def jst_midnight_utc(day: date) -> datetime:
+    """The UTC instant JST *day* begins. `captured_at` is stored in UTC, so a
+    JST-day bound on it is this value, never UTC midnight."""
+    return datetime.combine(day, time.min, tzinfo=_JST).astimezone(timezone.utc)
+
+
+def live_table_for(day: date, *, now: datetime | None = None) -> str:
+    """The table that holds JST *day*'s observations.
+
+    Today and any later day are `updates_live`; every closed day is `updates`.
+    A closed day reads `updates` even before promotion has copied it there, so
+    a reader asking for yesterday between JST midnight and the first promotion
+    run gets nothing yet.
+    """
+    today = jst_date(now or datetime.now(timezone.utc))
+    return LIVE_TABLE if day >= today else UPDATES_TABLE
+
 
 # Column order matches every ingest strategy's row-tuple shape (see
 # pipeline/strategies/*.py parse_feed docstrings), minus agency_id which
@@ -83,8 +125,8 @@ def get_client():
     return clickhouse_connect.get_client(**ch_conn_kwargs())
 
 
-def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
-    """Prepend `agency_id` to each row and bulk-insert into `updates`.
+def insert_updates(client, agency_id: int, rows: list[tuple], *, table: str = UPDATES_TABLE) -> int:
+    """Prepend `agency_id` to each row and bulk-insert into *table*.
 
     No ON CONFLICT equivalent at the database level — see the design doc's
     dedup/idempotency section. File-level idempotency (distinct_file_names,
@@ -106,6 +148,7 @@ def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
     instead of every call site having to grow its tuple in lockstep with
     UPDATE_COLUMNS.
     """
+    target = checked_table(table)
     n_cols = len(UPDATE_COLUMNS) - 1  # excluding agency_id, which is prepended below
     seen: set[tuple] = set()
     ch_rows = []
@@ -119,7 +162,7 @@ def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
         ch_rows.append((agency_id, *r))
     if not ch_rows:
         return 0
-    summary = client.insert("updates", ch_rows, column_names=UPDATE_COLUMNS)
+    summary = client.insert(target, ch_rows, column_names=UPDATE_COLUMNS)
     return summary.written_rows
 
 
@@ -148,12 +191,14 @@ def distinct_file_names(client, agency_id: int, since: date | None = None) -> se
     parameters: dict = {"agency_id": agency_id}
     if since is not None:
         where += " AND captured_at >= {since:DateTime64}"
-        parameters["since"] = datetime.combine(since, time.min, tzinfo=_JST).astimezone(timezone.utc)
+        parameters["since"] = jst_midnight_utc(since)
     result = client.query(f"SELECT DISTINCT file_name FROM updates WHERE {where}", parameters=parameters)
     return {row[0] for row in result.result_rows}
 
 
-def recent_file_name_exists(client, agency_id: int, file_name: str, since: datetime) -> bool:
+def recent_file_name_exists(
+    client, agency_id: int, file_name: str, since: datetime, *, table: str = UPDATES_TABLE
+) -> bool:
     """Bounded existence check for one specific `file_name` — for callers
     (ingest_live) that only ever need to ask about a file just constructed
     from `now()`, where distinct_file_names' unbounded per-agency scan would
@@ -162,7 +207,7 @@ def recent_file_name_exists(client, agency_id: int, file_name: str, since: datet
     full-partition scan for the `file_name` predicate alone.
     """
     result = client.query(
-        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} "
+        f"SELECT 1 FROM {checked_table(table)} WHERE agency_id = {{agency_id:UInt16}} "
         "AND captured_at >= {since:DateTime64} AND file_name = {file_name:String} LIMIT 1",
         parameters={"agency_id": agency_id, "since": since, "file_name": file_name},
     )

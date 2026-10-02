@@ -305,7 +305,7 @@ async def ch_async_client(ch_client):
     await client.close()
 
 
-def mirror_updates_to_ch(ch_client, agency_id) -> None:
+def mirror_updates_to_ch(ch_client, agency_id, *, table: str = "updates") -> None:
     """Copy *agency_id*'s Postgres `updates` rows into ClickHouse.
 
     analyze() now reads ALL of its `updates` access from ClickHouse (dedup
@@ -348,7 +348,7 @@ def mirror_updates_to_ch(ch_client, agency_id) -> None:
                 dep_delay,
             )
         )
-    insert_updates(ch_client, agency_id, ch_rows)
+    insert_updates(ch_client, agency_id, ch_rows, table=table)
 
 
 @pytest.fixture(autouse=True)

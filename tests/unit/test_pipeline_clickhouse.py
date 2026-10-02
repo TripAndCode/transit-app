@@ -1,9 +1,15 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pipeline.clickhouse import distinct_file_names, insert_updates, max_captured_at, recent_file_name_exists
+from pipeline.clickhouse import (
+    LIVE_TABLE,
+    distinct_file_names,
+    insert_updates,
+    max_captured_at,
+    recent_file_name_exists,
+)
 
 pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 
@@ -106,3 +112,29 @@ def test_max_captured_at_returns_latest(ch_client):
     )
     result = max_captured_at(ch_client, agency_id=1)
     assert result == datetime(2026, 1, 2, 10, 0, 0, tzinfo=timezone.utc)
+
+
+def test_insert_updates_writes_the_table_it_is_given(ch_client):
+    now = datetime.now(timezone.utc)
+    rows = [("oracle/x/TripUpdate_000000.pb", now, "T1", "平日", "12:15", "R1", 1, 30)]
+    assert insert_updates(ch_client, agency_id=7, rows=rows, table=LIVE_TABLE) == 1
+    assert ch_client.query("SELECT count() FROM updates_live").result_rows == [(1,)]
+    assert ch_client.query("SELECT count() FROM updates").result_rows == [(0,)]
+
+
+def test_insert_updates_refuses_a_table_that_is_not_an_observation_table(ch_client):
+    with pytest.raises(ValueError):
+        insert_updates(
+            ch_client,
+            agency_id=7,
+            rows=[("a.pb", datetime.now(timezone.utc), "T1", None, None, "R1", 1, 30)],
+            table="agg_route_daily",
+        )
+
+
+def test_recent_file_name_exists_reads_the_table_it_is_given(ch_client):
+    now = datetime.now(timezone.utc)
+    insert_updates(ch_client, agency_id=1, rows=[("live_x", now, "T1", None, None, "R1", 1, 30)], table=LIVE_TABLE)
+    since = now - timedelta(minutes=10)
+    assert recent_file_name_exists(ch_client, 1, "live_x", since, table=LIVE_TABLE) is True
+    assert recent_file_name_exists(ch_client, 1, "live_x", since) is False
