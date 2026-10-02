@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import i18n from "../i18n";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useCopilotEnabled, useCopilotInsight, DEBOUNCE_MS } from "./copilot";
@@ -91,6 +92,22 @@ describe("useCopilotInsight", () => {
       { tab: "overview", view_payload: { headline: "y" } },
       expect.anything(),
     );
+  });
+
+  it("asks again after a language switch, rather than keeping the insight in the old language", async () => {
+    mockApiPost.mockResolvedValue({ text: "x", cite: "c", low_confidence: false });
+    await i18n.changeLanguage("en");
+    const { result } = setup(() => useCopilotInsight(1, "overview", { some: "payload" }));
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 50);
+    await vi.waitFor(() => expect(result.current.insight).not.toBeNull());
+    expect(mockApiPost).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await i18n.changeLanguage("ja");
+    });
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 50);
+    await vi.waitFor(() => expect(mockApiPost).toHaveBeenCalledTimes(2));
+    await i18n.changeLanguage("en");
   });
 
   it("never fetches when there is no agency, tab, or view payload yet", async () => {

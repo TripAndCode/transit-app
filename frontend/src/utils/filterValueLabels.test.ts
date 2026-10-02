@@ -22,9 +22,15 @@ describe("filter value labels", () => {
     expect(serviceValueLabel("土日祝", t)).toBe("Weekend/Holiday"); // i18n-ignore: query contract
   });
 
+  it("translates the calendar names agencies commonly give their services", () => {
+    expect(serviceValueLabel("秋彼岸", t)).toBe("Autumn equinox (Higan)"); // i18n-ignore: GTFS service name
+    expect(serviceValueLabel("祝日", t)).toBe("Holiday"); // i18n-ignore: GTFS service name
+    expect(serviceValueLabel("秋彼岸", i18n.getFixedT("ja"))).toBe("秋彼岸"); // i18n-ignore: GTFS service name
+  });
+
   it("renders unknown values raw instead of guessing a known label", () => {
     expect(dowValueLabel("holiday", t)).toBe("holiday");
-    expect(serviceValueLabel("祝日", t)).toBe("祝日"); // i18n-ignore: query contract
+    expect(serviceValueLabel("お盆臨時　20日", t)).toBe("お盆臨時　20日"); // i18n-ignore: an operator's own service name
     expect(timeBandValueLabel("dawn", t)).toBe("dawn");
   });
 

@@ -26,6 +26,8 @@
 
 .copilot-panel p {
   margin: 0 0 10px;
+  word-break: auto-phrase;
+  text-wrap: pretty;
 }
 
 .copilot-cite {

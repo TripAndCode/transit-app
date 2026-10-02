@@ -4,6 +4,8 @@ import type { TFunction } from "i18next";
 import { delayColor, delayTextColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "./RouteLabel";
+import { ServiceName } from "./ServiceName";
+import { serviceValueLabel } from "../utils/filterValueLabels";
 import { routeHref } from "../routes/destinations";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
@@ -30,13 +32,9 @@ type Schema = {
    *  the bare figure. */
   unit?: "min";
   format?: (v: unknown, t: TFunction) => string;
-  /**
-   * When set, the raw cell value is treated as a translation-key suffix:
-   * the rendered text is `t(\`${valueKey}.${raw}\`, { defaultValue: raw })`.
-   * Use this for columns whose DB values are wire contracts (e.g. service_type
-   * "平日" / "土日祝") but should display in the active locale. // i18n-ignore: JSDoc
-   */
-  valueKey?: string;
+  /** The cell holds a service (an agency's calendar name, or a weekday or
+   *  weekend group), shown in the UI's language where it has copy. */
+  service?: true;
   /** The cell holds a route_code, shown as the route's label. */
   route?: true;
 };
@@ -48,7 +46,7 @@ const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left", r
 // ranking + ranking_best share columns; only the API sort order differs.
 const RANKING_COLS: Schema[] = [
   ROUTE_COL,
-  { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
+  { index: 1, labelKey: "reports.col.service", align: "left", service: true },
   { index: 2, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
   { index: 3, labelKey: "reports.col.median", align: "right", unit: "min", format: fmtMinutes },
   { index: 4, labelKey: "reports.col.p90", align: "right", unit: "min", format: fmtMinutes },
@@ -58,8 +56,8 @@ const RANKING_COLS: Schema[] = [
 // dow_weekend + dow_weekday share columns; the API splits the rows by DOW group.
 const DOW_COLS: Schema[] = [
   ROUTE_COL,
-  { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
-  { index: 2, labelKey: "reports.col.dow", align: "left" },
+  { index: 1, labelKey: "reports.col.service", align: "left", service: true },
+  { index: 2, labelKey: "reports.col.dow", align: "left", service: true },
   { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
   { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
 ];
@@ -69,7 +67,7 @@ const SCHEMAS: Record<string, Schema[]> = {
   ranking_best: RANKING_COLS,
   on_time: [
     ROUTE_COL,
-    { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
+    { index: 1, labelKey: "reports.col.service", align: "left", service: true },
     { index: 2, labelKey: "reports.col.on_time_pct", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t) },
     { index: 3, labelKey: "reports.col.avg", align: "right", unit: "min", format: fmtMinutes },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
@@ -80,7 +78,7 @@ const SCHEMAS: Record<string, Schema[]> = {
   ],
   worst_5min: [
     ROUTE_COL,
-    { index: 1, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
+    { index: 1, labelKey: "reports.col.service", align: "left", service: true },
     { index: 2, labelKey: "reports.col.over_5min_count", align: "right", bar: "raw", format: (v, t) => fmtNum(v, t) },
     { index: 3, labelKey: "reports.col.avg", align: "right", unit: "min", format: fmtMinutes },
     { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
@@ -120,7 +118,7 @@ const SCHEMAS: Record<string, Schema[]> = {
   delay_certificate: [
     { index: 0, labelKey: "reports.col.agency_name", align: "left" },
     { index: 1, labelKey: "common.route", align: "left", route: true },
-    { index: 2, labelKey: "reports.col.service", align: "left", valueKey: "common.service_value" },
+    { index: 2, labelKey: "reports.col.service", align: "left", service: true },
     { index: 3, labelKey: "reports.col.date", align: "left" },
     { index: 4, labelKey: "reports.col.scheduled_time", align: "left" },
     { index: 5, labelKey: "reports.col.actual_time", align: "left" },
@@ -239,12 +237,12 @@ export function ReportTable({ reportType, rows }: Props) {
                     if (text === "") return null;
                     return (
                       <span key={c.labelKey} className="report-cards__field">
-                        {c.valueKey == null && (
+                        {!c.service && (
                           <>
                             <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
                           </>
                         )}
-                        <span>{text}</span>
+                        <span>{c.service && row[c.index] != null ? <ServiceName value={String(row[c.index])} /> : text}</span>
                       </span>
                     );
                   })}
@@ -311,7 +309,7 @@ export function ReportTable({ reportType, rows }: Props) {
                 }
                 return (
                   <td key={c.labelKey} style={td({ align: c.align ?? "left" })}>
-                    {text}
+                    {c.service && raw != null ? <ServiceName value={String(raw)} /> : text}
                   </td>
                 );
               })}
@@ -351,10 +349,7 @@ function RouteCell({
 
 function cellText(c: Schema, raw: unknown, t: TFunction): string {
   if (c.format) return c.format(raw, t);
-  if (c.valueKey != null && raw != null) {
-    const rawStr = String(raw);
-    return t(`${c.valueKey}.${rawStr}`, { defaultValue: rawStr });
-  }
+  if (c.service && raw != null) return serviceValueLabel(String(raw), t);
   return String(raw ?? "—");
 }
 
