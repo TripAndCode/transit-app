@@ -204,6 +204,9 @@ export function Sidebar() {
     const navItems = inSheet ? MORE_SHEET_ITEMS : ITEMS;
     return (
       <>
+        {/* On the phone sheet the account row leads: at the end it sat below
+            the sheet's first screen. */}
+        {inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
         {!collapsedFlag && (
           <div style={{ padding: "0 22px 16px" }}>
             <AgencyPicker />
@@ -399,7 +402,7 @@ export function Sidebar() {
           </>
         )}
         {!collapsedFlag && <CompactDataStatus />}
-        {!collapsedFlag && <SidebarUserMenu onOpenSettings={openSettings} />}
+        {!collapsedFlag && !inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
       </>
     );
   }
@@ -533,7 +536,9 @@ export function Sidebar() {
           )}
           <button
             type="button"
-            style={{ ...tabItemStyle({ isActive: false }), background: "transparent", border: "none", cursor: "pointer", font: "inherit" }}
+            // `font` first: the shorthand would otherwise reset the label's
+            // size back to the button's inherited one.
+            style={{ font: "inherit", ...tabItemStyle({ isActive: false }), background: "transparent", border: "none", cursor: "pointer" }}
             aria-haspopup="dialog"
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen(true)}
@@ -545,13 +550,20 @@ export function Sidebar() {
 
         {moreOpen && (
           <MoreSheet onClose={() => setMoreOpen(false)} title={t("nav.more_menu_label")}>
+            {/* Pinned, so the way out stays in reach however far the sheet
+                scrolls. */}
             <div
               style={{
+                position: "sticky",
+                top: -16,
+                zIndex: Z_INDEX.raised,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 4,
-                padding: "0 12px 16px 22px",
+                margin: "-16px 0 0",
+                padding: "16px 12px 16px 22px",
+                background: "var(--bg-surface)",
               }}
             >
               {brandBlock(false)}

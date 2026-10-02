@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../../hooks/useMediaQuery";
 import { groupReports, reportDescriptionKey, reportLabel } from "./reportGroups";
 import "./ReportList.css";
 
@@ -19,6 +20,34 @@ export function ReportList({
   onSelect: (reportType: string) => void;
 }) {
   const { t } = useTranslation();
+  const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+  if (compact) {
+    // On a phone the button index runs several screens long and pushes the
+    // report itself below the fold; one grouped select keeps it at the top.
+    return (
+      <select
+        className="report-list__select"
+        aria-label={t("reports.list_title")}
+        value={active ?? ""}
+        onChange={(e) => onSelect(e.target.value)}
+      >
+        {active == null && (
+          <option value="" disabled>
+            {t("reports.select_prompt")}
+          </option>
+        )}
+        {groupReports(types).map((group) => (
+          <optgroup key={group.key} label={t(`reports.group.${group.key}`)}>
+            {group.types.map((type) => (
+              <option key={type} value={type}>
+                {reportLabel(t, type)}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    );
+  }
   return (
     <div className="report-list">
       {groupReports(types).map((group) => {

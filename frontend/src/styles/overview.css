@@ -3,7 +3,11 @@
    Calm-UI compliant: no alarm reds, no tilts/parallax, animations
    ≤800 ms behind reduced-motion. */
 
+/* Auto side margins on an item of the shell's column flexbox size it to its
+   content rather than its parent; width: 100% keeps a long headline from
+   widening the page past a phone screen. */
 .ov-page {
+  width: 100%;
   max-width: 880px;
   margin: 0 auto;
   padding: 40px 24px 80px;
@@ -392,7 +396,6 @@
 @media (max-width: 640px) {
   .ov-page { padding: 24px 16px 60px; }
   .ov-card { padding: 22px; }
-  .ov-hero { grid-template-columns: 1fr; }
   .ov-pareto-row { grid-template-columns: 1fr 2fr 50px; gap: 6px; font-size: 12px; }
   .ov-pareto-label { white-space: normal; }
   .ov-modal {
@@ -495,4 +498,13 @@
   font-size: var(--text-md);
   color: var(--text-primary);
   font-weight: 700;
+}
+
+/* BP.sm. Kept after the hero's base rules: an override of equal specificity
+   placed earlier in the file loses to them at every width. */
+@media (max-width: 640px) {
+  .ov-hero { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .ov-hero-figure { min-height: 150px; }
+  .ov-hero-story { font-size: var(--text-lg); line-height: 1.45; }
+  .ov-hero-sub-value { white-space: nowrap; }
 }

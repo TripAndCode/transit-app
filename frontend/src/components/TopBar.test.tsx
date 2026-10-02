@@ -43,6 +43,26 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: /Search routes, reports and screens/ })).toHaveAttribute("data-tour", "ask-nav");
   });
 
+  it("shows the ⌘K shortcut where there is a keyboard", () => {
+    renderBar();
+    expect(screen.getByText("K")).toBeInTheDocument();
+  });
+
+  it("drops the ⌘K shortcut on a touch screen, where it cannot be pressed", () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query === "(pointer: coarse)",
+          media: query,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        }) as unknown as MediaQueryList,
+    );
+    renderBar();
+    expect(screen.queryByText("K")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Search routes, reports and screens/ })).toBeInTheDocument();
+  });
+
   it("states how recent the current agency's data is", () => {
     renderBar();
     expect(screen.getByText("Data through 2026-09-29")).toBeInTheDocument();

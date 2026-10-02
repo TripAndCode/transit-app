@@ -1048,6 +1048,9 @@
       "route_forecast": "指定日の系統別の遅れを予測します。",
       "council_summary": "議会・取締役会向けの期間まとめです。",
       "delay_certificate": "特定の遅延便を証明する書類です。"
+    },
+    "card": {
+      "value_with_unit": "{{value}}{{unit}}"
     }
   },
   "insight_panel": {

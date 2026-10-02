@@ -5,10 +5,15 @@ import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
+import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, fmtPct } from "../utils/format";
+import "./ReportTable.css";
 
 const ROWS_CAP = 200;
+// A phone list item is several times a table row's height, so the first
+// screenful is shorter.
+const PHONE_ROWS_CAP = 25;
 
 type Schema = {
   /** Column index in the row tuple */
@@ -174,12 +179,68 @@ export function ReportTable({ reportType, rows }: Props) {
   const { format: formatRoute } = useRouteNames(id);
   const schema = SCHEMAS[reportType];
 
+  const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const maxes = computeColumnMaxes(schema, rows);
-  const cappedRows = useCappedList(rows, ROWS_CAP, reportType);
+  const cappedRows = useCappedList(
+    rows,
+    compact ? PHONE_ROWS_CAP : ROWS_CAP,
+    `${reportType}:${compact ? "phone" : "wide"}`,
+  );
 
   if (!schema) {
     // Unknown type — fall back to raw key/value table
     return null;
+  }
+
+  const showMore = cappedRows.remaining > 0 && (
+    <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
+      {t("common.show_more", { count: cappedRows.remaining })}
+    </button>
+  );
+
+  if (compact) {
+    // Seven columns can't share a phone's width without characters stacking,
+    // so each row becomes one item: rank, route and the barred figure on top,
+    // every other column on a wrapping line beneath.
+    const headline = schema.find((c) => c.bar);
+    return (
+      <div>
+        <ol className="report-cards">
+          {cappedRows.visible.map((row, i) => (
+            <li key={i} className="report-cards__item">
+              <div className="report-cards__head">
+                <span className="report-cards__rank">{i + 1}</span>
+                <span className="report-cards__route">{formatRoute(String(row[ROUTE_COL.index] ?? ""))}</span>
+                {headline && (
+                  <span
+                    className="report-cards__headline"
+                    style={headline.bar === "delay" ? { color: delayTextColor(Number(row[headline.index])) } : undefined}
+                  >
+                    <span className="report-cards__label">{t(headline.labelKey)}</span>{" "}
+                    <span>{cardValue(headline, row[headline.index], t)}</span>
+                  </span>
+                )}
+              </div>
+              <p className="report-cards__meta">
+                {schema
+                  .filter((c) => c !== ROUTE_COL && c !== headline)
+                  .map((c) => (
+                    <span key={c.labelKey} className="report-cards__field">
+                      {c.valueKey == null && (
+                        <>
+                          <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
+                        </>
+                      )}
+                      <span>{cardValue(c, row[c.index], t)}</span>
+                    </span>
+                  ))}
+              </p>
+            </li>
+          ))}
+        </ol>
+        {showMore}
+      </div>
+    );
   }
 
   return (
@@ -209,15 +270,7 @@ export function ReportTable({ reportType, rows }: Props) {
                   );
                 }
                 const raw = row[c.index];
-                let text: string;
-                if (c.format) {
-                  text = c.format(raw, t);
-                } else if (c.valueKey != null && raw != null) {
-                  const rawStr = String(raw);
-                  text = t(`${c.valueKey}.${rawStr}`, { defaultValue: rawStr });
-                } else {
-                  text = String(raw ?? "—");
-                }
+                const text = cellText(c, raw, t);
                 if (c.bar) {
                   const max = maxes.get(c.index) ?? 1;
                   const v = Number(raw);
@@ -243,13 +296,24 @@ export function ReportTable({ reportType, rows }: Props) {
           ))}
         </tbody>
       </table>
-      {cappedRows.remaining > 0 && (
-        <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
-          {t("common.show_more", { count: cappedRows.remaining })}
-        </button>
-      )}
+      {showMore}
     </div>
   );
+}
+
+function cellText(c: Schema, raw: unknown, t: TFunction): string {
+  if (c.format) return c.format(raw, t);
+  if (c.valueKey != null && raw != null) {
+    const rawStr = String(raw);
+    return t(`${c.valueKey}.${rawStr}`, { defaultValue: rawStr });
+  }
+  return String(raw ?? "—");
+}
+
+/** A card has no column header to carry the unit, so the value does. */
+function cardValue(c: Schema, raw: unknown, t: TFunction): string {
+  const text = cellText(c, raw, t);
+  return c.unit && raw != null ? t("reports.card.value_with_unit", { value: text, unit: t("common.unit_min") }) : text;
 }
 
 function BarCell({

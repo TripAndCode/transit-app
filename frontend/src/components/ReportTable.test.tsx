@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ReportTable } from "./ReportTable";
@@ -121,5 +122,41 @@ describe("ReportTable units and route names", () => {
     const cell = screen.getByText("Route 33101").closest("td") as HTMLElement;
     expect(cell.style.position).toBe("sticky");
     expect(cell.style.wordBreak).toBe("keep-all");
+  });
+});
+
+describe("ReportTable on a phone", () => {
+  beforeEach(() => {
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      matches: true,
+      media: "(max-width: 640px)",
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    } as unknown as MediaQueryList);
+    mockRoutes([
+      { route_id: "T50線(39061)", route_short_name: "T50", route_long_name: "石江・新城線", route_code: "39061", trip_headsigns: [] },
+    ]);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("lists each row as one readable item instead of a seven-column table", () => {
+    renderTable([["39061", "平日", 5.2, 3.1, 8.4, 120]]);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    const [item] = screen.getAllByRole("listitem");
+    for (const text of ["1", "T50 (39061)", "Avg", "5.2 min", "Weekday", "Median", "3.1 min", "p90", "8.4 min", "Samples", "120"]) {
+      expect(within(item).getByText(text)).toBeInTheDocument();
+    }
+  });
+
+  it("shows 25 rows first and the rest on request", async () => {
+    const rows = Array.from({ length: 30 }, (_, i) => ["39061", "平日", 5 - i / 10, 3, 8, 100 + i]);
+    renderTable(rows);
+    expect(screen.getAllByRole("listitem")).toHaveLength(25);
+    await userEvent.click(screen.getByRole("button", { name: "Show 5 more" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(30);
   });
 });

@@ -2,12 +2,14 @@ import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
+import { useMediaQuery, COARSE_POINTER_QUERY } from "../hooks/useMediaQuery";
 import { openCommandPalette } from "./commandPaletteEvents";
 
 /** The bar above every agency screen: one search-and-ask field that opens
  *  the command palette, and how recent the agency's data is. */
 export function TopBar() {
   const { t } = useTranslation();
+  const coarsePointer = useMediaQuery(COARSE_POINTER_QUERY);
   const id = useAgencyId();
   const { data: agencies } = useAgencies();
   const through = agencies?.find((a) => a.agency_id === id)?.latest_data_date ?? null;
@@ -51,6 +53,7 @@ export function TopBar() {
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {t("topbar.ask_placeholder")}
         </span>
+        {!coarsePointer && (
         <span aria-hidden="true" style={{ display: "flex", gap: 3 }}>
           {["⌘", "K"].map((k) => (
             <kbd
@@ -69,6 +72,7 @@ export function TopBar() {
             </kbd>
           ))}
         </span>
+        )}
       </button>
       {through && (
         <span style={{ marginLeft: "auto", fontSize: "var(--text-xs)", color: "var(--text-secondary)", fontFamily: "var(--font-num)" }}>
