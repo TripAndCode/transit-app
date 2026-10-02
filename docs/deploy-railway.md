@@ -288,7 +288,9 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
    client; the image needs an S3 client + `postgresql-client` added to the
    Dockerfile for this service):
    ```bash
-   aws s3 sync "s3://$OBJECT_STORE_BUCKET/$(date -u +%F)" /tmp/zips --endpoint-url "$OBJECT_STORE_ENDPOINT"
+   for day in "$(date -u -d yesterday +%F)" "$(date -u +%F)"; do
+     aws s3 sync "s3://$OBJECT_STORE_BUCKET/$day" /tmp/zips --endpoint-url "$OBJECT_STORE_ENDPOINT"
+   done
    for id in $AGENCY_IDS; do
      python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id"
    done
