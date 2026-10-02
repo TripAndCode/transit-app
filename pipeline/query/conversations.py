@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 import asyncpg
+from fastapi.encoders import decimal_encoder
 
 _MAX_TITLE = 200
 _CONV_COLS = "conversation_id, user_id, agency_id, title, filter_ctx, pinned, created_at, updated_at"
@@ -24,6 +27,24 @@ def _row_to_conv(row: asyncpg.Record) -> dict[str, Any]:
     fc.pop("_client_id", None)
     d["filter_ctx"] = fc
     return d
+
+
+def _json_value(value: Any) -> Any:
+    """Tool results carry values straight from asyncpg: NUMERIC arrives as
+    Decimal and DATE/TIMESTAMP as date/datetime. Stored as JSON numbers by
+    FastAPI's own decimal_encoder (an int when the Decimal has no fractional
+    digits, so Decimal("10") but not Decimal("10.00")) and as ISO strings.
+    The conversation endpoints send back the stored message, so the live
+    answer and a later replay are the same payload."""
+    if isinstance(value, Decimal):
+        return decimal_encoder(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _to_json(value: Any) -> str | None:
+    return None if value is None else json.dumps(value, default=_json_value)
 
 
 async def create_conversation(
@@ -165,11 +186,11 @@ async def append_message(
         role,
         chip_id,
         tool,
-        json.dumps(args) if args is not None else None,
+        _to_json(args),
         signature_hash,
-        json.dumps(result) if result is not None else None,
+        _to_json(result),
         rendered_summary,
-        json.dumps(conditions) if conditions is not None else None,
+        _to_json(conditions),
     )
     await conn.execute(
         "UPDATE ask_conversations SET updated_at = now() WHERE conversation_id = $1",
