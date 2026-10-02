@@ -147,6 +147,20 @@ describe("ReportTable route links", () => {
   });
 });
 
+describe("ReportTable service column", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("names services in the UI's language, and marks an untranslated one as Japanese", () => {
+    mockRoutes([]);
+    renderTable([
+      ["39061", "秋彼岸", 5.2, 3.1, 8.4, 120], // i18n-ignore: GTFS service name
+      ["39061", "お盆臨時　20日", 4.0, 3.0, 7.0, 90], // i18n-ignore: GTFS service name
+    ]);
+    expect(screen.getByText("Autumn equinox (Higan)")).toBeInTheDocument();
+    expect(screen.getByText("お盆臨時 20日")).toHaveAttribute("lang", "ja"); // i18n-ignore: GTFS service name
+  });
+});
+
 describe("ReportTable on a phone", () => {
   beforeEach(() => {
     vi.spyOn(window, "matchMedia").mockReturnValue({

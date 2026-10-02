@@ -65,6 +65,12 @@ export function CopilotPanel() {
           {insight.lowConfidence && <p className="copilot-low-confidence">{t("copilot.low_confidence")}</p>}
         </div>
       )}
+      {/* The insight is drawn from the Pulse summary; with none to draw from
+          (an agency with no data yet) the panel says so rather than standing
+          empty under its heading. */}
+      {!overviewQuery.isPending && overviewQuery.data == null && !insight && (
+        <p className="copilot-empty">{t("copilot.no_insight")}</p>
+      )}
       {/* The insight needs no approval; the follow-up goes to /ask, whose
           free-text stage answers only an admin-approved caller. */}
       {agencyId != null && tab != null && llmApproved && (

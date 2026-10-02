@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
+import { useTranslation } from "react-i18next";
 
 type CopilotInsight = { text: string; cite: string; lowConfidence: boolean };
 
@@ -14,10 +15,13 @@ type CopilotParams = {
 
 /** The insight is a function of the payload alone, so the key carries no
  *  filters: the payload already reflects them. */
-function buildKey(agencyId: number | null, tab: string | null, viewPayload: unknown): string | null {
+/** The server writes the insight in the request's language (Accept-Language),
+ *  so the language is part of what identifies one: a switch asks again
+ *  instead of keeping the old language's text. */
+function buildKey(agencyId: number | null, tab: string | null, viewPayload: unknown, language: string): string | null {
   return agencyId == null || tab == null || !viewPayload
     ? null
-    : `${agencyId}:${tab}:${JSON.stringify(viewPayload)}`;
+    : `${language}:${agencyId}:${tab}:${JSON.stringify(viewPayload)}`;
 }
 
 /** The Copilot kill switch (`COPILOT_INSIGHT_ENABLED` server-side).
@@ -42,7 +46,8 @@ export function useCopilotInsight(
   tab: string | null,
   viewPayload: unknown,
 ): { insight: CopilotInsight | null; loading: boolean; error: unknown } {
-  const key = buildKey(agencyId, tab, viewPayload);
+  const { i18n } = useTranslation();
+  const key = buildKey(agencyId, tab, viewPayload, i18n.resolvedLanguage ?? i18n.language);
 
   // Only the request *key* is debounced here; useQuery (queryKey
   // ["copilot-insight", debouncedKey]) owns the fetch, loading/error state,

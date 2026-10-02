@@ -16,8 +16,16 @@ export function translationT(t: LabelT, key: string, options?: Record<string, un
  *  Unknown values render as the raw value rather than being guessed into a
  *  known label. */
 export function serviceValueLabel(service: string, t: LabelT): string {
-  if (service === "平日" || service === "土日祝") return translationT(t, `common.service_value.${service}`); // i18n-ignore: query contract
-  return service;
+  return serviceLabel(service, t).text;
+}
+
+/** A service's display text, and whether it is a translation. A service is an
+ *  agency's own calendar name (平日, 秋彼岸, お盆臨時 20日); the common ones
+ *  have copy under `common.service_value`, any other is shown as the agency
+ *  wrote it. */ // i18n-ignore: JSDoc examples
+export function serviceLabel(service: string, t: LabelT): { text: string; translated: boolean } {
+  const text = translationT(t, `common.service_value.${service}`, { defaultValue: "" });
+  return text ? { text, translated: true } : { text: service, translated: false };
 }
 
 export function dowValueLabel(dow: string, t: LabelT): string {

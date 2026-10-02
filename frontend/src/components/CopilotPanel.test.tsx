@@ -323,6 +323,17 @@ describe("CopilotPanel", () => {
     expect(postSpy).not.toHaveBeenCalled();
   });
 
+  it("says there is not enough data yet when the view has nothing for an insight", async () => {
+    vi.spyOn(client, "apiGetOrNull").mockResolvedValue(null as never);
+    vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
+      path.includes("/copilot/enabled") ? Promise.resolve({ enabled: true }) : Promise.reject(new Error("no data")),
+    );
+    const postSpy = vi.spyOn(client, "apiPost");
+    renderPanel("/agencies/1/pulse");
+    expect(await screen.findByText("Not enough data for an insight yet.")).toBeInTheDocument();
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
   it("stays off and makes no insight request when the flag check fails", async () => {
     const getSpy = vi.spyOn(client, "apiGet").mockRejectedValue(new Error("flag check down"));
     const postSpy = vi.spyOn(client, "apiPost");

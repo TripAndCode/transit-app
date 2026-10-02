@@ -21,15 +21,17 @@
       })();
     </script>
     <script>
-      // Starts downloading the active language's strings alongside the entry
-      // chunk instead of after it runs. Mirrors the language resolution in
-      // src/i18n/index.ts (stored choice, then navigator, else ja); the
-      // "index.html locale preload" tests in src/i18n/localeLoading.test.tsx
-      // keep the two in agreement. The build replaces the placeholder with
+      // Names the page and its language, and starts downloading the active
+      // language's strings alongside the entry chunk instead of after it
+      // runs. Mirrors the language resolution in src/i18n/index.ts (stored
+      // choice, then navigator, else ja); the "index.html locale preload"
+      // tests in src/i18n/localeLoading.test.tsx keep the languages, titles
+      // and resolution in agreement. The build replaces the placeholder with
       // each language's chunk URL.
       (function (chunks) {
+        var TITLES = { ja: "遅延ダッシュボード", en: "Delay Dashboard" };
         function has(code) {
-          return Object.prototype.hasOwnProperty.call(chunks, code);
+          return Object.prototype.hasOwnProperty.call(TITLES, code);
         }
         var codes = [];
         try {
@@ -43,7 +45,9 @@
         for (i = 0; i < codes.length && !lng; i++) if (has(codes[i])) lng = codes[i];
         for (i = 0; i < codes.length && !lng; i++) if (has(codes[i].split("-")[0])) lng = codes[i].split("-")[0];
         lng = lng || "ja";
-        if (!has(lng)) return;
+        document.documentElement.lang = lng;
+        document.title = TITLES[lng];
+        if (!Object.prototype.hasOwnProperty.call(chunks, lng)) return;
         var link = document.createElement("link");
         link.rel = "modulepreload";
         link.crossOrigin = "";

@@ -136,10 +136,12 @@ describe("Sidebar", () => {
     expect(mapLink.getAttribute("aria-current")).toBe("page");
   });
 
-  it("renders the brand block above the nav items", () => {
+  it("renders the brand as a one-line wordmark above the nav items, leaving the tagline to the sign-in pages", () => {
     renderSidebar();
-    expect(screen.getByText("Delay Dashboard")).toBeTruthy();
-    expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
+    const wordmark = screen.getByText("Delay Dashboard");
+    expect(wordmark.style.whiteSpace).toBe("nowrap");
+    expect(wordmark.style.wordBreak).toBe("keep-all");
+    expect(screen.queryByText("Real-time × Timetable")).toBeNull();
   });
 
   it("renders the brand block even when there is no agencyId, but not the nav items", () => {
@@ -155,7 +157,6 @@ describe("Sidebar", () => {
       </QueryClientProvider>
     );
     expect(screen.getByText("Delay Dashboard")).toBeTruthy();
-    expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
     expect(screen.queryByText("Live")).toBeNull();
   });
 
