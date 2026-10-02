@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Reproducible "full CI" run for one VPS worktree/job: builds and starts a
+# Reproducible "full CI" run for one worktree or job (the pre-push gate's
+# backend suite runs through it): builds and starts a
 # dedicated, uniquely-named/-ported Postgres + ClickHouse pair, applies
 # schema, runs the same lint/type/test gate as
 # .github/workflows/ci.yml's `test` job, then always tears both
@@ -29,7 +30,7 @@
 # nothing gates on the number and instrumenting every line the suite
 # executes is not free. Every other use of this script -- the pre-merge
 # check, the re-check after a review fix -- is a pass/fail gate that would
-# be paying for a report nobody reads, and on a VPS sharing CPU with a
+# be paying for a report nobody reads, and on a host sharing CPU with a
 # concurrent job that is minutes per run. Set COVERAGE=1 when the number
 # itself is the point.
 #
@@ -53,7 +54,7 @@ cleanup() {
   # `-v`: both images declare a VOLUME for their data directory, so a plain
   # `docker rm -f` without it would leave an anonymous volume orphaned on
   # disk after every single invocation (success or failure) -- this script
-  # is meant to run repeatedly/concurrently on one persistent VPS host, so
+  # is meant to run repeatedly/concurrently on one persistent host, so
   # that leak would otherwise accumulate without bound.
   docker rm -f -v "$pg_name" "$ch_name" >/dev/null 2>&1 || true
 }

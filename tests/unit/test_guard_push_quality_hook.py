@@ -209,6 +209,7 @@ def _deadcode_verdict(rc: int, stdout: str) -> int:
             f"rc={rc}\n"
             f'deadcode_out="{out}"\n'
             "run_with_timeout() { return 0; }\n"
+            "note_failed() { :; }\n"
             f"{_deadcode_classifier()}"
             'echo "FAIL=$FAIL"\n'
         )
@@ -262,7 +263,7 @@ def _hook_entry_timeout() -> int:
 
 
 def _ceilings(hook_text: str) -> list[int]:
-    return [int(n) for n in re.findall(r"run_with_timeout (\d+)", hook_text)]
+    return [int(n) for n in re.findall(r"(?:run_with_timeout|run_step) (\d+)", hook_text)]
 
 
 def test_the_step_ceilings_fit_inside_the_hooks_own_timeout():
@@ -277,13 +278,13 @@ def test_the_step_ceilings_fit_inside_the_hooks_own_timeout():
 
 def test_the_ceiling_check_sees_a_ceiling_raised_past_the_hooks_timeout():
     """Positive control for the check above: the same reading of the hook,
-    with only the backend ceiling raised by the whole harness timeout, must
+    with only the backend suite's ceiling raised by the whole harness timeout, must
     exceed it. A parser that stopped seeing a ceiling would pass the check
     above vacuously and fail here."""
     timeout = _hook_entry_timeout()
     text = HOOK_PATH.read_text()
-    assert "run_with_timeout 1200 " in text
-    raised = text.replace("run_with_timeout 1200 ", f"run_with_timeout {1200 + timeout} ", 1)
+    assert "run_step 1500 " in text
+    raised = text.replace("run_step 1500 ", f"run_step {1500 + timeout} ", 1)
     assert sum(_ceilings(raised)) >= timeout
 
 
@@ -318,3 +319,190 @@ def test_a_step_that_runs_out_of_time_is_named_when_the_push_is_blocked():
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
     assert result.returncode == 2
     assert "TIMED OUT after 1s: sleep 10" in result.stderr
+
+
+def _step_harness() -> str:
+    """The hook's step-reporting functions with the state they read, so a test
+    can run steps and then the final gate exactly as the hook does."""
+    return (
+        'LOG="$(mktemp)"\n'
+        'TIMED_OUT="$(mktemp)"\n'
+        'FAILED_STEPS="$(mktemp)"\n'
+        'STEP_DIR="$(mktemp -d)"\n'
+        "MARKER_FILES=()\n"
+        "FAIL=0\n"
+        + _function_source("_run_with_watchdog")
+        + _function_source("run_with_timeout")
+        + _function_source("note_failed")
+        + _function_source("run_step")
+        + _function_source("block_with_log")
+    )
+
+
+def test_a_failed_step_is_reported_with_its_own_output_not_the_log_tail():
+    """The log's tail is whatever ran last -- usually the build's chunk table
+    -- so a block that showed only the tail hid the step that failed. The
+    failing step must be named with its own output, and a step that passed
+    must not be."""
+    script = (
+        _step_harness()
+        + 'run_step 10 "first check" bash -c "echo the-real-error; exit 1" >>"$LOG" 2>&1 || FAIL=1\n'
+        + 'run_step 10 "second check" bash -c "yes later-noise | head -200" >>"$LOG" 2>&1 || FAIL=1\n'
+        + _final_gate_source()
+    )
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 2
+    assert "failed: first check" in result.stderr
+    assert "the-real-error" in result.stderr
+    assert "second check" not in result.stderr
+    assert "later-noise" not in result.stderr
+
+
+def _write_executable(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/usr/bin/env bash\n" + body)
+    path.chmod(0o755)
+
+
+def _python_env(tmp: Path, *, deps_changed: bool, gate_venv: bool, skip_tests: bool = False):
+    """Runs prepare_python_env against a fake `poetry` that reports a
+    virtualenv per working directory, then drives the shim it writes."""
+    main, gate = tmp / "main", tmp / "gate"
+    main.mkdir()
+    gate.mkdir()
+    for venv in ("main-venv", "gate-venv"):
+        _write_executable(tmp / venv / "bin" / "pytest", "exit 0\n")
+        _write_executable(tmp / venv / "bin" / "tool", f'echo "{venv} $*"\n')
+    _write_executable(
+        tmp / "bin" / "poetry",
+        'if [ "$1 $2 $3" = "env info --path" ]; then\n'
+        f'  case "$PWD" in "{gate}") [ "{int(gate_venv)}" = 1 ] && echo "{tmp}/gate-venv";;'
+        f' *) echo "{tmp}/main-venv";; esac\n'
+        "  exit 0\n"
+        "fi\n"
+        'echo "real-poetry $*"\n',
+    )
+    script = (
+        f'export PATH="{tmp}/bin:$PATH"\n'
+        f'CLAUDE_PROJECT_DIR="{main}"\nGATE_DIR="{gate}"\nPY_DEPS_CHANGED={int(deps_changed)}\n'
+        f"PUSH_GATE_SKIP_TESTS={int(skip_tests)}\n"
+        'cd "$CLAUDE_PROJECT_DIR"\n'
+        + _function_source("prepare_python_env")
+        + 'prepare_python_env || { echo "skipped"; exit 0; }\n'
+        + 'PATH="$SHIM_DIR:$PATH" poetry run -- tool a\n'
+        + 'PATH="$SHIM_DIR:$PATH" poetry run tool b\n'
+        + 'PATH="$SHIM_DIR:$PATH" poetry --version\n'
+    )
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+
+
+def test_the_poetry_shim_routes_poetry_run_to_the_main_checkouts_virtualenv():
+    """A worktree has no virtualenv of its own, and a bare `poetry run` there
+    would resolve one keyed on its own path. The shim must run each tool
+    from the main checkout's environment, with or without `--`, and leave
+    every other poetry subcommand to the real poetry."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _python_env(Path(tmp), deps_changed=False, gate_venv=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["main-venv a", "main-venv b", "real-poetry --version"]
+
+
+def test_a_dependency_change_is_tested_in_the_branchs_own_virtualenv():
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _python_env(Path(tmp), deps_changed=True, gate_venv=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:2] == ["gate-venv a", "gate-venv b"]
+
+
+def test_a_dependency_change_without_its_own_virtualenv_blocks():
+    """The main checkout's environment cannot reflect a changed lock, so
+    testing with it would pass or fail for reasons unrelated to the branch."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _python_env(Path(tmp), deps_changed=True, gate_venv=False)
+    assert result.returncode == 2
+    assert "poetry install" in result.stderr
+
+
+def test_the_explicit_opt_out_skips_python_steps_instead_of_blocking():
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _python_env(Path(tmp), deps_changed=True, gate_venv=False, skip_tests=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "skipped"
+    assert "PUSH_GATE_SKIP_TESTS=1" in result.stderr
+
+
+def _git_in(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, timeout=15)
+
+
+def _node_modules(
+    tmp: Path, *, change_deps: bool, own_node_modules: bool, scope_ok: bool = True, dangling_link: bool = False
+):
+    """Runs prepare_node_modules for a worktree branch of a throwaway repo."""
+    main = tmp / "repo"
+    (main / "frontend" / "node_modules").mkdir(parents=True)
+    (main / "frontend" / "package.json").write_text("{}\n")
+    _git_in(main, "init", "-q", "-b", "main")
+    _git_in(main, "-c", "user.email=t@example.com", "-c", "user.name=t", "add", "frontend/package.json")
+    _git_in(main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "init")
+    gate = tmp / "wt"
+    _git_in(main, "worktree", "add", "-q", "-b", "feature", str(gate))
+    if change_deps:
+        (gate / "frontend" / "package.json").write_text('{"dependencies": {}}\n')
+        _git_in(gate, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qam", "deps")
+    if own_node_modules:
+        (gate / "frontend" / "node_modules").mkdir()
+    if dangling_link:
+        (gate / "frontend" / "node_modules").symlink_to(tmp / "gone")
+    script = (
+        f'CLAUDE_PROJECT_DIR="{main}"\nGATE_DIR="{gate}"\nFE_DIR="$GATE_DIR/frontend"\n'
+        f'SCOPE_OK={int(scope_ok)}\nBASE_REF=main\nLINKED_NODE_MODULES=""\n'
+        f'cd "{main}"\n'
+        + _function_source("branch_changes")
+        + _function_source("prepare_node_modules")
+        + 'prepare_node_modules\necho "linked=$LINKED_NODE_MODULES"\n'
+        + 'readlink "$FE_DIR/node_modules" || echo "not-a-link"\n'
+    )
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30), main, gate
+
+
+def test_a_worktree_without_node_modules_borrows_the_main_checkouts_for_the_run():
+    with tempfile.TemporaryDirectory() as tmp:
+        result, main, gate = _node_modules(Path(tmp), change_deps=False, own_node_modules=False)
+        assert result.returncode == 0, result.stderr
+        lines = result.stdout.splitlines()
+        assert lines[0] == f"linked={gate}/frontend/node_modules"
+        assert lines[1] == f"{main}/frontend/node_modules"
+
+
+def test_a_worktree_with_its_own_node_modules_keeps_them():
+    with tempfile.TemporaryDirectory() as tmp:
+        result, _, _ = _node_modules(Path(tmp), change_deps=False, own_node_modules=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["linked=", "not-a-link"]
+
+
+def test_a_frontend_dependency_change_without_its_own_node_modules_blocks():
+    with tempfile.TemporaryDirectory() as tmp:
+        result, _, _ = _node_modules(Path(tmp), change_deps=True, own_node_modules=False)
+    assert result.returncode == 2
+    assert "npm ci" in result.stderr
+
+
+def test_an_unknown_base_counts_as_a_dependency_change():
+    """With no resolvable base the branch's dependency changes are unknown,
+    and reading that as "unchanged" would test it with the main checkout's
+    node_modules -- the wrong tree -- so it takes the stricter path."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result, _, _ = _node_modules(Path(tmp), change_deps=False, own_node_modules=False, scope_ok=False)
+    assert result.returncode == 2
+    assert "npm ci" in result.stderr
+
+
+def test_a_dangling_link_left_by_a_killed_run_is_replaced():
+    """A run killed past its EXIT trap leaves its link behind; once that
+    link dangles it must be replaced, not block every later push."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result, main, gate = _node_modules(Path(tmp), change_deps=False, own_node_modules=False, dangling_link=True)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [f"linked={gate}/frontend/node_modules", f"{main}/frontend/node_modules"]
