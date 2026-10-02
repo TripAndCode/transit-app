@@ -18,7 +18,8 @@ from clickhouse_connect.driver.exceptions import DataError
 from pipeline.clickhouse import distinct_file_names, insert_updates, recent_file_name_exists
 from pipeline.strategies import get_ingest_strategy
 
-# ── Re-exports for back-compat (existing tests import these) ──────────────────
+# archive_captured_at is used below; the private helpers are back-compat
+# re-exports that existing tests import from here.
 from pipeline.strategies._pb import _dec, _fields, _read_ld, _read_varint, _ts, archive_captured_at  # noqa: F401
 from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
@@ -233,7 +234,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     since = _archive_since(tarballs, pb_loose)
     done = distinct_file_names(ch_client, agency_id, since=since)
 
-    # `done` is only updated by _flush() (every _BATCH_ROWS rows, Task 8.9),
+    # `done` is only updated by _flush() (every _BATCH_ROWS rows),
     # so a file buffered but not yet flushed is invisible to any dedup check
     # against `done` alone. `seen` closes that gap: every file key is added
     # to it the instant it's buffered (added to pending_files), not once it's
@@ -280,7 +281,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
     # Rows accumulate here across BOTH the tarball loop and the loose-.pb
     # loop below (shared, not reset between them) and are flushed to
     # ClickHouse in one INSERT per _BATCH_ROWS-sized batch instead of one
-    # per source file (Task 8.9 — see _BATCH_ROWS docstring above for why).
+    # per source file (see _BATCH_ROWS docstring above for why).
     #
     # Crash-safety invariant, preserved from the old per-file code just at
     # batch grain: a file's rows are only ever marked `done` in the exact
@@ -426,7 +427,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                         # SAVEPOINT protects nothing for that step. The parsed
                         # rows are buffered into pending_rows/pending_files and
                         # only actually inserted (and marked `done`) by _flush(),
-                        # in batches, per Task 8.9 — see _flush()'s docstring
+                        # in batches — see _flush()'s docstring
                         # above for the crash-safety invariant this preserves.
                         try:
                             with _savepoint(cur, "tar_member"):
@@ -471,7 +472,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client) -> int:
                 # savepoint (see the tarball loop above for why); rows are
                 # buffered into pending_rows/pending_files and only actually
                 # inserted (and marked `done`) by _flush(), in batches shared
-                # with the tarball loop above (Task 8.9).
+                # with the tarball loop above, so `done` only advances once a
+                # batch is actually persisted.
                 try:
                     with _savepoint(cur, "pb_file"):
                         raw = path.read_bytes()
