@@ -153,7 +153,7 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
    CLICKHOUSE_DATABASE=transit
    CLICKHOUSE_SECURE=false                 # private network, no TLS needed internally
    GEMINI_API_KEY=...
-   CRON_SECRET=<openssl rand -hex 32>      # save this — it must match the GH secret (step 4)
+   CRON_SECRET=<openssl rand -hex 32>      # gates the fallback POST /internal/cron/ingest (step 4)
    CHAT_PROVIDERS=gemini                    # add ",openai" (and set OPENAI_API_KEY) for a paid fallback rung
    CORS_ORIGINS=                           # leave EMPTY — SPA + API are same-origin
    ```
@@ -176,7 +176,7 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
      collector tile reads "unknown".
 5. `app` → **Settings → Networking → Generate Domain**. Railway issues
    `https://<something>.up.railway.app` with TLS. Copy it — that's
-   `APP_BASE_URL` for the cron and `PUBLIC_BASE_URL` for SSO.
+   `PUBLIC_BASE_URL` for SSO and the base of `COLLECTOR_INGEST_URL` (step 4).
 6. First deploy: promote `main` to `production` now (see the "Updates"
    section below) to actually trigger it. The pre-deploy `migrate up` runs
    first; watch **Deploy Logs** for its `Applied N migration(s).` line (see
@@ -435,7 +435,7 @@ Skip entirely if it's only demo data.
 | App healthcheck failing | Deploy Logs — usually `DATABASE_URL` wrong (private host must resolve `${{db.RAILWAY_PRIVATE_DOMAIN}}`, port `5432`) or a missing provider key. |
 | `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of the private one. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
-| Cron returns 401 | `CRON_SECRET` mismatch between Railway Variables and the GH repo secret. |
+| `POST /internal/cron/ingest` returns 401 / 503 | 401: the caller's `X-Cron-Secret` header doesn't match `CRON_SECRET` in the `app` Variables. 503: `CRON_SECRET` is unset on `app`. |
 | Out of memory at boot | Not the embedder by default — it's excluded from this image (see the Image spec note above). If you've re-added the `embeddings` poetry group and a bake step yourself, that's the likely cause: the e5-small embedder (torch) is heavy (~1–2 GB resident once loaded). Bump the app service's memory, or drop the group back out. |
 | Slow first boot / `/health` timeout after a redeploy | Check the deploy's `PUBLISH_IMAGE`/`CREATE_CONTAINER` timing first — a large image takes real time to pull onto the runtime host before the process even starts, independent of anything the app itself does. |
 | Nobody can sign in (Google/GitHub OAuth down) | Sign in at `/login` with the break-glass `DEFAULT_ADMIN_USERNAME`/`DEFAULT_ADMIN_PASSWORD` account, turn `login_required` off on `/admin/flags`, and turn it back on once OAuth recovers. Keep those two variables set in production for exactly this: once any admin has set a `login_required` override, the `LOGIN_REQUIRED` env var alone cannot turn the gate off. |

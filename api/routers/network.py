@@ -50,7 +50,7 @@ class NetworkAgencyRow(BaseModel):
     # CURRENTLY loaded static-feed version's schedule definition (not a
     # date-range total). planned_vehicle_km and vehicle_km_delivered_pct are
     # None together whenever vehicle-km isn't computable (no shapes.txt) or
-    # item 92's executed/planned ratio isn't available for this agency —
+    # the executed/planned trip ratio isn't available for this agency —
     # never a misleading 100%; the UI falls back to planned_trip_count alone.
     static_version_id: str | None
     planned_trip_count: int | None

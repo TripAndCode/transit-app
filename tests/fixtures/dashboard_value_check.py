@@ -63,7 +63,7 @@ def assert_avg_min_matches(cell_text: str, expected_avg_min: float, *, label: st
     expected_rounded = round(expected_avg_min, 1)
     if actual != expected_rounded:
         raise AssertionError(
-            f"{label}: displayed avg delay {actual} does not match item 21's expected "
+            f"{label}: displayed avg delay {actual} does not match the fixture's expected "
             f"{expected_avg_min} (rounded to {expected_rounded} for display) — cell text was {cell_text!r}"
         )
 
@@ -73,6 +73,6 @@ def assert_samples_matches(cell_text: str, expected_samples: int, *, label: str)
     actual = extract_leading_number(cell_text)
     if actual != expected_samples:
         raise AssertionError(
-            f"{label}: displayed sample count {actual} does not match item 21's expected "
+            f"{label}: displayed sample count {actual} does not match the fixture's expected "
             f"{expected_samples} — cell text was {cell_text!r}"
         )
