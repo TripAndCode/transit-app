@@ -237,7 +237,8 @@ def _ch_test_client():
 
 @pytest.fixture(scope="session")
 def _ch_schema() -> None:
-    """Create the ClickHouse `updates` table once per test session.
+    """Create the ClickHouse `updates` and `updates_live` tables once per test
+    session.
 
     A no-op when RUN_CH_INTEGRATION isn't set, so requesting `ch_client`
     still skips cleanly instead of attempting a connection — the check must
@@ -248,6 +249,7 @@ def _ch_schema() -> None:
         return
     client = _ch_test_client()
     try:
+        client.command("DROP TABLE IF EXISTS updates_live")
         client.command("DROP TABLE IF EXISTS updates")
         _apply_ch_schema(client)
     finally:
@@ -261,19 +263,20 @@ def ch_client(_ch_schema):
     Lives in the root conftest, not a subdirectory one, because analyze()'s
     dedup materialization means tests/api/ and tests/query/ need a ClickHouse
     client too, not just tests/pipeline/ — a root conftest fixture is visible
-    to every subdirectory. Truncate (not drop+recreate) before each test for
-    isolation, since ClickHouse has no transactional rollback to
-    lean on like the pg_conn fixture does — the schema itself never changes
-    mid-session, so only `_ch_schema` needs to pay MergeTree's CREATE TABLE
-    cost, once. The skip (rather than a file-level pytestmark) lives here so
-    pure, DB-free tests elsewhere in the suite still run without
-    `make ch-test` — only tests that actually request this fixture are
-    gated behind RUN_CH_INTEGRATION.
+    to every subdirectory. Truncate (not drop+recreate) both `updates` and
+    `updates_live` before each test for isolation, since ClickHouse has no
+    transactional rollback to lean on like the pg_conn fixture does — the
+    schema itself never changes mid-session, so only `_ch_schema` needs to pay
+    MergeTree's CREATE TABLE cost, once. The skip (rather than a file-level
+    pytestmark) lives here so pure, DB-free tests elsewhere in the suite still
+    run without `make ch-test` — only tests that actually request this
+    fixture are gated behind RUN_CH_INTEGRATION.
     """
     if os.environ.get("RUN_CH_INTEGRATION") != "1":
         pytest.skip("requires `make ch-test` (RUN_CH_INTEGRATION=1)")
     client = _ch_test_client()
     client.command("TRUNCATE TABLE IF EXISTS updates")
+    client.command("TRUNCATE TABLE IF EXISTS updates_live")
     yield client
     client.close()
 
