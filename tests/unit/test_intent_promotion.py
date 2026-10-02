@@ -1,6 +1,6 @@
 """Pure-logic tests for pipeline.query.intent_promotion's rag_chunks upsert
 and single-signature promotion guard, faking asyncpg + the embedder so no DB
-is needed (CLAUDE.md's tests/unit convention). DB-backed coverage of the
+is needed (AGENTS.md's tests/unit convention). DB-backed coverage of the
 full promotion job (eligibility SQL, idempotency across real inserts) stays
 in tests/scripts/test_promote_intent_cache.py and tests/query/test_intent_cache.py.
 """

@@ -727,7 +727,7 @@ export function useTriggerRun() {
 //
 // "route" here is the Ask pipeline stage that answered a question (rules ->
 // nn (embedding nearest-neighbour) -> rag (Stage-3 LLM)), matching
-// CLAUDE.md's architecture naming, not a transit route/line. `no_history` is
+// AGENTS.md's architecture naming, not a transit route/line. `no_history` is
 // the router's own early-exit case (a follow-up with nothing to continue).
 // See api/routers/admin_ask.py's module docstring for why there is no
 // "user" field and why `providers` below is always null: ask_query_log

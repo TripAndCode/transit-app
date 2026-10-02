@@ -10,7 +10,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 
 // Rendered as a Mermaid flowchart rather than prose so it matches the
 // approved mockup's data-flow box. This is a MANUAL-SYNC reminder, not an
-// enforced one: CLAUDE.md's own "Architecture pointers" section is
+// enforced one: AGENTS.md's own "Architecture pointers" section is
 // agent-facing prose, not a frontend asset, so there is no way to derive
 // this diagram from it at build or run time. If that section's data path,
 // DB split, or Ask-routing stages change, update the flowchart below by
@@ -32,7 +32,7 @@ flowchart LR
 `;
 
 /** Developer/internal-only page at \`/admin/architecture\`: a Mermaid
- * rendering of CLAUDE.md's "Architecture pointers" (part A), plus a
+ * rendering of AGENTS.md's "Architecture pointers" (part A), plus a
  * sidebar-navigable index of \`docs/features/*.md\` (part B). Reuses the
  * existing \`RequireAdmin\` + \`AdminLayout\` gate exactly like
  * \`/admin/agencies\`, \`/admin/users\`, and \`/admin/ops\` -- reusing

@@ -85,7 +85,7 @@ become Nullable.
 
 ## DB safety
 - Dev Postgres (the instance `DATABASE_URL` names — not necessarily `compose.yml`'s
-  `:5433`; see `CLAUDE.md`) is READ-ONLY: EXPLAIN/SELECT only.
+  `:5433`; see `AGENTS.md`) is READ-ONLY: EXPLAIN/SELECT only.
 - Dev ClickHouse (`docker compose exec clickhouse`, hundreds of millions of real rows across 4
   agencies) is ALSO READ-ONLY for anything outside `make ch-bootstrap`: no
   manual `INSERT`/`ALTER`/`DROP` against it. `db/clickhouse/bootstrap.py` documents the one-time

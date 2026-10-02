@@ -27,7 +27,7 @@ and a real LLM provider key (e.g. ``GEMINI_API_KEY``) are set, the question
 really is routed through a live tool-use API exactly like production
 traffic, because the exact defect
 this test guards against (the *model* inventing or misreading a number) is
-inside the thing a mock would otherwise paper over — see CLAUDE.md's "mock
+inside the thing a mock would otherwise paper over — see AGENTS.md's "mock
 the ML embedder unless a test is explicitly slow" guidance; this test is the
 explicitly-slow, explicitly-live exception, same tier as ``test_baseline.py``.
 

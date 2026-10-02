@@ -76,7 +76,7 @@ for the current list and exact scope of
 each (e.g. `security` covers hardcoded creds, CSRF/SSRF, PII/PDPA-APPI,
 session-cookie flags; `consistency` covers cross-file contract drift like
 i18n key parity or `agg_*` column renames; `comments` narrows to the stale-candidate
-list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content rule).
+list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content rule).
 
 ## Guardrails baked into these files
 
@@ -92,7 +92,7 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   contents beyond that, or into a `DATABASE_URL` set outside the command line
   it sees, and it deliberately still blocks prose that merely names a dev
   store next to a write-sounding word — a false block only costs a rephrase,
-  a missed write costs the dataset. Treat the rule in `CLAUDE.md` as the
+  a missed write costs the dataset. Treat the rule in `AGENTS.md` as the
   protection, not the hook.
 - No command here commits or pushes without explicit user go-ahead.
 - Neither `/address-my-pr-comments` nor `/follow-up-pr-review` calls the GraphQL

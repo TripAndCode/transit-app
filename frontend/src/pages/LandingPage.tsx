@@ -8,7 +8,7 @@ import "./LandingPage.css";
 
 /** Pre-authentication marketing/landing page -- a cinematic first
  *  impression kept deliberately separate from the calm, data-dense signed-
- *  in dashboard (CLAUDE.md's "keep UI calm" rule governs the working
+ *  in dashboard (AGENTS.md's "keep UI calm" rule governs the working
  *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). It stays
  *  reachable after sign-in, so its one CTA is sign-in for a visitor and the
  *  dashboard for a signed-in user. The hero (animated live-map scene +

@@ -1,5 +1,5 @@
 """Pure-logic tests for the admin Ask-ops route/status derivation and the
-funnel aggregation helper — no DB, matches CLAUDE.md's tests/unit convention.
+funnel aggregation helper — no DB, matches AGENTS.md's tests/unit convention.
 """
 
 from __future__ import annotations

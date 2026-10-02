@@ -1,7 +1,7 @@
 """Fast, offline, always-run tests for `tests/fixtures/dashboard_value_check.py`.
 
 No DB, no browser, no network — this directory bypasses the DB fixtures per
-CLAUDE.md's "pure logic tests under tests/unit/" convention (see
+AGENTS.md's "pure logic tests under tests/unit/" convention (see
 `tests/unit/conftest.py`). These give the dashboard display check's
 "a deliberately wrong number makes the test fail, confirming it actually
 checks displayed values and isn't a vacuous pass" property a fast,

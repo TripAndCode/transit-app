@@ -1,7 +1,7 @@
 """Offline tests for ``api.routers.map._cohort_fields``.
 
 Pure function — no Postgres, no ClickHouse — lives under ``tests/unit`` per
-CLAUDE.md's "Put pure logic tests under tests/unit/" convention (see
+AGENTS.md's "Put pure logic tests under tests/unit/" convention (see
 ``tests/unit/test_ask_eval_numeric_helper.py`` for the same rationale).
 
 ``route_avg_sec`` is ``None`` for a stop_sequence with zero delay samples

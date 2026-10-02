@@ -1,7 +1,7 @@
 """Unit tests for the Insight Panel rule chain's route-grain pooling helpers
 (pipeline/reports/suggest.py::_pool_ranking_by_route / _pool_on_time_by_route).
 
-Pure functions, no DB -- see CLAUDE.md's tests/unit/ convention.
+Pure functions, no DB -- see AGENTS.md's tests/unit/ convention.
 compute_ranking/compute_on_time return one row per (route_code,
 service_type) pair (a route commonly has several service-type variants), so
 the rule chain must pool them into a genuine route-grain figure. Collapsing

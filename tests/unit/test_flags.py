@@ -1,5 +1,5 @@
 """Pure-logic tests for `pipeline.flags` -- the DB-backed feature-flag
-registry with an env-var fallback. Lives under `tests/unit/` per CLAUDE.md's
+registry with an env-var fallback. Lives under `tests/unit/` per AGENTS.md's
 "pure logic tests bypass DB fixtures" convention: every test here forces the
 DB read path to fail (an unreachable `DATABASE_URL`, or none at all) so the
 env fallback is what's actually exercised, never a real Postgres.

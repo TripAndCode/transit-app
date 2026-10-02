@@ -79,7 +79,7 @@ export default tseslint.config(
       // `any` defeats the type checker; every existing use has been
       // replaced with a real type, so this now blocks on new ones.
       '@typescript-eslint/no-explicit-any': 'error',
-      // React Compiler (enabled repo-wide, see CLAUDE.md) auto-memoizes —
+      // React Compiler (enabled repo-wide, see AGENTS.md) auto-memoizes —
       // manual useMemo/useCallback/React.memo are redundant at best and can
       // mask compiler bailouts at worst. Banned as a hard error; use
       // useEffectEvent for fresh-props-in-stable-handlers instead (see

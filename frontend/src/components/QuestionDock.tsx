@@ -45,7 +45,7 @@ export function QuestionDock({
   const { t } = useTranslation();
   // buildCardTemplates() returns static title_key/param specs (i18n-agnostic;
   // labels are translated later via t()), so it's cheap and safe to call
-  // directly on every render — no useMemo (see CLAUDE.md).
+  // directly on every render — no useMemo (see AGENTS.md).
   const templates = buildCardTemplates();
 
   const composing = templates.find((tpl) => tpl.id === composingId) ?? null;

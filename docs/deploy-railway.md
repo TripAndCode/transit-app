@@ -8,7 +8,7 @@ domain. No box to harden, no Caddy, no SSH.
 **Point every Railway service at the `production` branch, not `main`.**
 Sessions may squash-merge a PR themselves once the required
 `/review-branch` pass is clean, CI is green and it's mergeable/clean, with no
-separate human go-ahead required (see CLAUDE.md "Git and pull requests"). If Railway watched `main` directly, every one of
+separate human go-ahead required (see AGENTS.md "Git and pull requests"). If Railway watched `main` directly, every one of
 those merges — reviewed but not yet soak-tested in a real deploy — would
 auto-deploy and run `preDeployCommand` migrations immediately, with no
 remaining checkpoint before production traffic sees it. Instead, `main` is
@@ -98,7 +98,7 @@ exists when you wire the app.
 
 ## 1b. Create the ClickHouse service
 
-Raw GTFS-RT `updates` lives in ClickHouse, not Postgres (see CLAUDE.md ▸
+Raw GTFS-RT `updates` lives in ClickHouse, not Postgres (see AGENTS.md ▸
 Architecture pointers) — `db` above only covers the OLTP/aggregate/pgvector
 side. Unlike `db`, ClickHouse needs no custom extensions, so this service
 deploys straight from the official image: no Dockerfile, no repo checkout.

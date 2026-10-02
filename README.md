@@ -133,7 +133,7 @@ destructive and is not part of the normal reset flow.
 exploratory spatial SQL, local-only and never wired into `check`/`test`/
 `serve`. `tools/geosql/bootstrap.sh` prints the connection string to add; it
 points at the dev Postgres/PostGIS database, so the same read-only rule as
-any other dev-database access applies — see `CLAUDE.md`. `make geosql-down`
+any other dev-database access applies — see `AGENTS.md`. `make geosql-down`
 stops it.
 
 ## Development
@@ -170,7 +170,7 @@ uses instead:
 scripts/run_full_ci.sh
 ```
 
-Frontend checks: see `CLAUDE.md`'s Verification commands section for the
+Frontend checks: see `AGENTS.md`'s Verification commands section for the
 full required list to run before opening a PR.
 
 The React Compiler is enabled. Do not add `useMemo`, `useCallback`, or
@@ -312,6 +312,7 @@ tests/                  pytest suites (api, pipeline, query, db, frontend, unit)
 tools/                  optional local dev tools (GeoSQL/Dekart)
 docs/features/          feature-specific behavior guides
 .claude/                review and PR workflows
+AGENTS.md               rules for coding agents (CLAUDE.md imports it)
 ```
 
 Useful entry points:
@@ -325,12 +326,12 @@ Useful entry points:
 
 ## Safety Rules
 
-- Dev databases are read-only; see `CLAUDE.md`. Use the throwaway `:5544`/
+- Dev databases are read-only; see `AGENTS.md`. Use the throwaway `:5544`/
   `:8124` pair described above for writes.
 - Never push directly to `main`; use reviewed squash-merged PRs.
 - Branch commits carry no `[skip ci]`, so every push to a PR runs CI and the
   merge gate has a result to read. Only the squash-merge commit carries the
   trailer, keeping `main` from re-running what the branch proved. See
-  `CLAUDE.md` for the rule and `transit-app-gotchas` for how it behaves.
+  `AGENTS.md` for the rule and `transit-app-gotchas` for how it behaves.
 - Run the relevant checks before opening a PR, then run `make check` when the
   change affects backend behavior.
