@@ -18,7 +18,10 @@ function walk(dir: string): string[] {
   });
 }
 
+// Anchored at line start so a `//`-commented import never counts; block
+// comments are stripped before matching for the same reason.
 const CSS_IMPORT = /^import\s+["'](\.{1,2}\/[^"']+\.css)["'];?$/gm;
+const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
 
 describe("stylesheet imports", () => {
   it("imports every stylesheet under src from a non-test module", () => {
@@ -26,7 +29,8 @@ describe("stylesheet imports", () => {
     const imported = new Set<string>();
     for (const file of files) {
       if (!/\.tsx?$/.test(file) || /\.test\.tsx?$/.test(file)) continue;
-      for (const m of readFileSync(file, "utf8").matchAll(CSS_IMPORT)) {
+      const source = readFileSync(file, "utf8").replace(BLOCK_COMMENT, "");
+      for (const m of source.matchAll(CSS_IMPORT)) {
         imported.add(path.resolve(path.dirname(file), m[1]));
       }
     }
