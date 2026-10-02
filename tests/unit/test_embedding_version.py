@@ -1,7 +1,7 @@
 """Embedding-version stamping and drift guard, with no DB and no model load.
 
 Every assertion here is about the SQL text and arguments the writers/readers
-issue, so the embedder and the connection are both fakes (CLAUDE.md's
+issue, so the embedder and the connection are both fakes (AGENTS.md's
 tests/unit convention). DB-backed coverage of the same statements lives in
 tests/query/test_rag_index.py and tests/scripts/test_promote_intent_cache.py.
 """

@@ -1126,7 +1126,7 @@ async def list_admin_audit(
 # ── Architecture docs (developer/internal) endpoints ─────────────────────
 #
 # Backs `/admin/architecture`: a developer-only page rendering
-# CLAUDE.md's "Architecture pointers" as a Mermaid diagram plus a
+# AGENTS.md's "Architecture pointers" as a Mermaid diagram plus a
 # sidebar-navigable index of `docs/features/*.md`. Filesystem-only (no DB
 # connection needed) -- gated on `require_admin` the same way every other
 # `/api/admin/*` route is; developer pages reuse the `admin` role rather

@@ -170,7 +170,7 @@ reinstalling unless the rollback target predates this doc.
 ## 8. CI on an ops-monitoring PR
 
 Nothing here is special: this hub follows the repo-wide CI rule in
-`CLAUDE.md`'s "Git and pull requests" section, and `transit-app-gotchas`'s
+`AGENTS.md`'s "Git and pull requests" section, and `transit-app-gotchas`'s
 "Git" section owns how a push decides whether CI runs.
 
 ```bash

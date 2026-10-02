@@ -1,7 +1,7 @@
 """Structural (text-assertion) safety checks for `Makefile` and `.env.example`.
 
 Pure-logic, no DB: these parse the tracked files as text and assert on their
-content, so they belong under `tests/unit/` per CLAUDE.md's DB-fixture-bypass
+content, so they belong under `tests/unit/` per AGENTS.md's DB-fixture-bypass
 convention. They exist because a Makefile has no type system of its own --
 these invariants (a destructive target requires explicit confirmation, quality
 gates never silently reformat instead of checking, the test target never

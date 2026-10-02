@@ -106,7 +106,7 @@ def _savepoint(cur, name: str) -> Iterator[None]:
     run of *successful* items in one commit window (each successful
     SAVEPOINT still holds a slot until the next top-level commit). This
     pipeline's read endpoints serve from precomputed ``agg_*`` tables, not
-    live scans of ``updates`` (see CLAUDE.md), so the resulting
+    live scans of ``updates`` (see AGENTS.md), so the resulting
     pg_subtrans-lookup overhead on concurrent readers is low-impact here;
     lowering the commit cadence below 64 items would close that specific
     gap but cost more frequent fsyncs, so it's accepted as-is rather than

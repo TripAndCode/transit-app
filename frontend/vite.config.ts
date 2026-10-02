@@ -34,7 +34,7 @@ export default defineConfig(({ mode }) => {
       sourcemap: false,
       // Emitted to dist/.vite/manifest.json — scripts/check-entry-chunk.mjs
       // reads it to confirm the entry chunk's static import graph never
-      // pulls in maplibre-gl (CLAUDE.md: "keep MapLibre out of the entry
+      // pulls in maplibre-gl (AGENTS.md: "keep MapLibre out of the entry
       // chunk").
       manifest: true,
     },

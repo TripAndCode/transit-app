@@ -10,7 +10,7 @@ Nothing gets posted as a review comment without an explicit pick from the user i
 step 2. Listing the findings is not approval — post only the findings the user
 actually selected, never "post everything" by default.
 This gates Step 3 (posting the comments). Creating a PR is gated separately by Step 1's
-"stop and offer", and every PR this repo opens starts as `--draft` per CLAUDE.md.
+"stop and offer", and every PR this repo opens starts as `--draft` per AGENTS.md.
 
 ## Auth
 - Use the `gh` CLI — already authenticated via keyring. Do NOT ask for, paste, or
@@ -18,7 +18,7 @@ This gates Step 3 (posting the comments). Creating a PR is gated separately by S
 
 ## Steps
 1. Resolve the PR: `gh pr view --json number,url,headRefName,headRefOid`.
-   If none exists, stop and offer `gh pr create --draft` (per CLAUDE.md, PRs open as
+   If none exists, stop and offer `gh pr create --draft` (per AGENTS.md, PRs open as
    drafts until `/review-branch` is confirmed clean).
 2. List the findings from the latest branch review and get the user's pick (see "Hold
    for approval" — that's the single statement of the rule).
@@ -44,7 +44,7 @@ Write PR descriptions to be **scanned, not read**. Default to structure over pro
 - **Cut prose to the load-bearing clause.** Move rationale into the table cell /
   bullet it belongs to; don't write a paragraph to set it up.
 - **State the origin**, right after the one-line summary: `**Origin:**
-  Interactive session` (per CLAUDE.md's "Git and pull requests").
+  Interactive session` (per AGENTS.md's "Git and pull requests").
 - Keep sections short and titled: What · Affected · Behaviour · Fixes · Tests ·
   Verification (include only those that apply). End with the Claude Code trailer.
 

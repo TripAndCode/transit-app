@@ -8,7 +8,7 @@ whether it succeeded (``success``: bool). It has no ``route``, ``status``,
 identity, and ``pipeline/query/query_log.py``'s INSERT column list for the
 full set that exists. The admin surface's "route" and "status" columns are
 derived here from ``router_stage``/``success`` rather than stored directly,
-using CLAUDE.md's architecture naming (rules → embedding nearest-neighbour →
+using AGENTS.md's architecture naming (rules → embedding nearest-neighbour →
 RAG LLM) so the UI can speak "rules / nn / rag" without the DB needing a
 redundant column.
 """
