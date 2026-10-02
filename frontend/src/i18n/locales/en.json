@@ -898,7 +898,8 @@
       "date": "Date",
       "scheduled_time": "Scheduled",
       "actual_time": "Actual",
-      "delay_sec": "Delay (s)"
+      "delay_sec": "Delay (s)",
+      "with_unit": "{{label}} ({{unit}})"
     },
     "confidence_low_mark": "wide range",
     "direction": {

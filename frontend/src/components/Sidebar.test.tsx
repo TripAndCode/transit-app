@@ -10,6 +10,7 @@ import { ToastProvider } from "./ui/Toast";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 import * as auth from "../api/auth";
 import * as config from "../api/config";
+import { rememberScreenScope } from "../api/screenScope";
 
 const RAIL_ORDER = ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports"];
 
@@ -44,6 +45,8 @@ function renderSidebar(path = "/agencies/1/live") {
 }
 
 describe("Sidebar", () => {
+  beforeEach(() => sessionStorage.clear());
+
   it("renders the seven destinations in rail order, with the palette left to the top bar", () => {
     renderSidebar();
     const nav = screen.getByRole("navigation", { name: "Destinations" });
@@ -51,24 +54,32 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
   });
 
-  it("keeps a visible Ask entry below the destinations, carrying the filters", () => {
-    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
-    expect(screen.getByRole("link", { name: "Ask" })).toHaveAttribute("href", "/agencies/8/ask?from=2026-06-01&to=2026-06-07");
-  });
+  describe("each screen keeps its own filters", () => {
+    it("keeps a visible Ask entry below the destinations, without the current screen's filters", () => {
+      renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+      expect(screen.getByRole("link", { name: "Ask" })).toHaveAttribute("href", "/agencies/8/ask");
+    });
 
-  it("points Live at the current agency's live route, preserving the filter query string", () => {
-    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: "Live" });
-    expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
-  });
+    it("points Live, the screen on show, at its own current filters", () => {
+      renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+      expect(screen.getByRole("link", { name: "Live" })).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
+    });
 
-  it.each([
-    ["Routes", "routes"],
-    ["Time", "time"],
-    ["Reports", "reports"],
-  ])("points %s at the agency's %s screen, preserving the filter query string", (name, dest) => {
-    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
-    expect(screen.getByRole("link", { name })).toHaveAttribute("href", `/agencies/8/${dest}?from=2026-06-01&to=2026-06-07`);
+    it.each([
+      ["Routes", "routes"],
+      ["Time", "time"],
+      ["Reports", "reports"],
+    ])("points %s at the agency's %s screen without the current screen's filters", (name, dest) => {
+      renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+      expect(screen.getByRole("link", { name })).toHaveAttribute("href", `/agencies/8/${dest}`);
+    });
+
+    it("reopens a screen with the filters it last showed", () => {
+      rememberScreenScope("8", "routes", "routes=W54");
+      renderSidebar("/agencies/8/live?dow=weekend");
+      expect(screen.getByRole("link", { name: "Routes" })).toHaveAttribute("href", "/agencies/8/routes?routes=W54");
+      expect(screen.getByRole("link", { name: "Time" })).toHaveAttribute("href", "/agencies/8/time");
+    });
   });
 
   it("marks Routes active on a route dossier", () => {
@@ -334,10 +345,7 @@ describe("Sidebar", () => {
       const dialog = screen.getByRole("dialog");
       const nav = within(dialog).getByRole("navigation", { name: "Destinations" });
       expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Time", "Why", "Compare", "Reports"]);
-      expect(within(nav).getByRole("link", { name: "Reports" })).toHaveAttribute(
-        "href",
-        "/agencies/1/reports?from=2026-06-01&to=2026-06-07",
-      );
+      expect(within(nav).getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/agencies/1/reports");
       expect(within(dialog).getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
     });
 

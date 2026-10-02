@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyScopePatch,
+  explicitScopeQuery,
   isoDaysAgo,
   isoDaysBefore,
   jstYearMonth,
@@ -61,6 +62,18 @@ describe("scopeToQueryString", () => {
 
   it("writes a single hour without a range", () => {
     expect(new URLSearchParams(scopeToQueryString(parse("hour=8-8"))).get("hour")).toBe("8");
+  });
+});
+
+describe("explicitScopeQuery", () => {
+  it("keeps only the scope a URL states, canonical, without filling in the default period", () => {
+    expect(explicitScopeQuery("dow=sat%2Csun&report=trend")).toBe("dow=weekend");
+    expect(explicitScopeQuery("")).toBe("");
+  });
+
+  it("drops time_band for a valid hour only, as scopeToQueryString does", () => {
+    expect(explicitScopeQuery("hour=7-9&time_band=evening")).toBe("hour=7-9");
+    expect(explicitScopeQuery("hour=99&time_band=evening")).toBe("time_band=evening");
   });
 });
 

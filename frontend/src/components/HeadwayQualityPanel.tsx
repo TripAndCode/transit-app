@@ -59,10 +59,10 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
               {data.rows.map((r) => (
                 <tr key={r.route_code} style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtSignedMin(r.ewt_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtCov(r.cov)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtRatioPct(r.long_gap_rate)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(r.samples)}</td>
+                  <td style={td({ align: "right" })}>{fmtSignedMin(r.ewt_sec, t)}</td>
+                  <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>
+                  <td style={td({ align: "right" })}>{fmtRatioPct(r.long_gap_rate)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(r.samples)}</td>
                 </tr>
               ))}
             </tbody>

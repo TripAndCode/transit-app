@@ -41,7 +41,7 @@ describe("useDefaultRangeAnchor", () => {
       data: [agency({ latest_data_date: "2026-01-01" })],
       isPending: false,
     } as never);
-    renderAnchor(1, "/agencies/1/overview?from=2030-01-01&to=2030-01-07");
+    renderAnchor(1, "/agencies/1/pulse?from=2030-01-01&to=2030-01-07");
     expect(screen.getByTestId("params")).toHaveTextContent("from=2030-01-01&to=2030-01-07");
   });
 
@@ -50,7 +50,7 @@ describe("useDefaultRangeAnchor", () => {
       data: [agency({ latest_data_date: null })],
       isPending: false,
     } as never);
-    renderAnchor(1, "/agencies/1/overview");
+    renderAnchor(1, "/agencies/1/pulse");
     expect(screen.getByTestId("params")).toHaveTextContent("");
   });
 
@@ -59,7 +59,7 @@ describe("useDefaultRangeAnchor", () => {
       data: [agency({ latest_data_date: isoDaysAgo(5) })],
       isPending: false,
     } as never);
-    renderAnchor(1, "/agencies/1/overview");
+    renderAnchor(1, "/agencies/1/pulse");
     expect(screen.getByTestId("params")).toHaveTextContent("");
   });
 
@@ -68,7 +68,7 @@ describe("useDefaultRangeAnchor", () => {
       data: [agency({ latest_data_date: "2026-05-01" })],
       isPending: false,
     } as never);
-    renderAnchor(1, "/agencies/1/overview");
+    renderAnchor(1, "/agencies/1/pulse");
     const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
     expect(params.get("to")).toBe("2026-05-01");
     expect(params.get("from")).toBe("2026-04-02");
@@ -102,11 +102,11 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
       isPending: false,
     } as never);
     localStorage.setItem(
-      "transit.lastFilter.1",
+      "transit.lastFilter.1.pulse",
       JSON.stringify({ from: "2020-01-01", to: "2020-01-07" }),
     );
     render(
-      <MemoryRouter initialEntries={["/agencies/1/overview"]}>
+      <MemoryRouter initialEntries={["/agencies/1/pulse"]}>
         <CombinedProbe agencyId={1} />
       </MemoryRouter>,
     );
@@ -121,11 +121,11 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
       isPending: false,
     } as never);
     localStorage.setItem(
-      "transit.lastFilter.1",
+      "transit.lastFilter.1.pulse",
       JSON.stringify({ dow: "weekend", time_band: "evening" }),
     );
     render(
-      <MemoryRouter initialEntries={["/agencies/1/overview"]}>
+      <MemoryRouter initialEntries={["/agencies/1/pulse"]}>
         <CombinedProbe agencyId={1} />
       </MemoryRouter>,
     );
@@ -140,11 +140,11 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
       isPending: false,
     } as never);
     localStorage.setItem(
-      "transit.lastFilter.1",
+      "transit.lastFilter.1.pulse",
       JSON.stringify({ dow: "weekend", time_band: "evening" }),
     );
     render(
-      <MemoryRouter initialEntries={["/agencies/1/overview"]}>
+      <MemoryRouter initialEntries={["/agencies/1/pulse"]}>
         <CombinedProbe agencyId={1} />
       </MemoryRouter>,
     );
@@ -158,7 +158,7 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
     // drop dow/time_band just because this particular render's URL only
     // carries the anchor's own from/to -- those fields never conflicted
     // with anything the anchor did.
-    const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1") ?? "{}");
+    const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1.pulse") ?? "{}");
     expect(stored.dow).toBe("weekend");
     expect(stored.time_band).toBe("evening");
   });
