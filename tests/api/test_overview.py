@@ -174,26 +174,6 @@ async def _seed_agg_route_hour_dow(
     )
 
 
-async def _seed_agg_route_daily(aconn, agency_id, date_, route_code, service_type, avg_delay_sec, samples):
-    await aconn.execute(
-        "INSERT INTO agg_route_daily "
-        "(agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
-        " trips_observed, samples, last_seen_at, sum_delay_sec) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) "
-        "ON CONFLICT (agency_id, date, route_code, service_type) DO NOTHING",
-        agency_id,
-        date_,
-        route_code,
-        service_type,
-        int(avg_delay_sec),
-        int(avg_delay_sec),
-        1,
-        int(samples),
-        datetime.combine(date_, time(12, 0), tzinfo=timezone.utc),
-        int(avg_delay_sec) * int(samples),
-    )
-
-
 @pytest.mark.asyncio
 async def test_overview_endpoint_404s_for_soft_deleted_agency(client, aconn, aagency_id):
     """get_agency() must reject soft-deleted agencies like every other
@@ -1408,14 +1388,21 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
 
 
 @pytest.mark.asyncio
-async def test_route_summary_includes_late5_pct(client, aconn, aagency_id, ch_async_client):
-    from datetime import date
+async def test_route_summary_includes_late5_pct(client, aconn, aagency_id, ch_client, ch_async_client):
+    from zoneinfo import ZoneInfo
 
     from api.main import app
+    from api.range import jst_today
+    from pipeline.clickhouse import LIVE_TABLE, insert_updates
 
     app.state.ch_client = ch_async_client
-    d = date.today()
-    await _seed_agg_route_daily(aconn, aagency_id, d, "K31", "平日", 360, 100)
+    noon = datetime.combine(jst_today(), time(12), tzinfo=ZoneInfo("Asia/Tokyo"))
+    insert_updates(
+        ch_client,
+        aagency_id,
+        [(f"live_k31_{i}", noon, f"t{i}", "平日", "12:00", "K31", 1, 360) for i in range(100)],
+        table=LIVE_TABLE,
+    )
     await _seed_agg_route_stats(aconn, aagency_id, "K31", "平日", 6.0, 8.0, 23.5, 100)
     r = await client.get(f"/api/{aagency_id}/today/route-summary")
     assert r.status_code == 200
@@ -1426,14 +1413,21 @@ async def test_route_summary_includes_late5_pct(client, aconn, aagency_id, ch_as
 
 
 @pytest.mark.asyncio
-async def test_route_summary_late5_pct_null_when_no_stats(client, aconn, aagency_id, ch_async_client):
-    from datetime import date
+async def test_route_summary_late5_pct_null_when_no_stats(client, aconn, aagency_id, ch_client, ch_async_client):
+    from zoneinfo import ZoneInfo
 
     from api.main import app
+    from api.range import jst_today
+    from pipeline.clickhouse import LIVE_TABLE, insert_updates
 
     app.state.ch_client = ch_async_client
-    d = date.today()
-    await _seed_agg_route_daily(aconn, aagency_id, d, "K99", "平日", 120, 5)
+    noon = datetime.combine(jst_today(), time(12), tzinfo=ZoneInfo("Asia/Tokyo"))
+    insert_updates(
+        ch_client,
+        aagency_id,
+        [(f"live_k99_{i}", noon, f"t{i}", "平日", "12:00", "K99", 1, 120) for i in range(5)],
+        table=LIVE_TABLE,
+    )
     # No agg_route_stats row → late5_pct must be None
     r = await client.get(f"/api/{aagency_id}/today/route-summary")
     assert r.status_code == 200
