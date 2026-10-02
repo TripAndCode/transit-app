@@ -6,7 +6,8 @@
 # script can't determine what changed or can't run a required check, it
 # blocks (exit 2) rather than silently letting the push through — set
 # PUSH_GATE_SKIP_TESTS=1 for a deliberate, visible opt-out of the
-# container-backed backend suite only, or PUSH_GATE_SKIP_BUILD=1 to skip the
+# container-backed backend suite (and of mypy too, when a dependency change
+# leaves no virtualenv to run it in), or PUSH_GATE_SKIP_BUILD=1 to skip the
 # frontend build:bundle + entry-chunk check specifically.
 #
 # Every check reads the branch being pushed ($GATE_DIR below), never whatever
@@ -297,7 +298,7 @@ fi
 # by prepare_python_env.
 cd "$CLAUDE_PROJECT_DIR" || { echo "BLOCKED: git push — could not cd to \$CLAUDE_PROJECT_DIR ($CLAUDE_PROJECT_DIR)." >&2; exit 2; }
 if [ "$GATE_DIR" != "$CLAUDE_PROJECT_DIR" ]; then
-  echo "== push gate: files from $GATE_DIR, tools from $CLAUDE_PROJECT_DIR ==" >&2
+  echo "== push gate: files from $GATE_DIR ==" >&2
 fi
 
 # A branch every one of whose commits suppresses CI produces no run at all, so
@@ -496,11 +497,18 @@ if [ "$SCOPE_OK" -eq 1 ]; then
   done < <(git -C "$GATE_DIR" diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- "${FE_PATHSPEC[@]}")
 fi
 
+# Whether the pushed branch changes any of the given paths. An unresolvable
+# base counts as a change: it is the stricter answer, and a dependency change
+# read as "none" would test the branch with tools that don't match it.
+branch_changes() {
+  [ "$SCOPE_OK" -eq 0 ] || [ -n "$(git -C "$GATE_DIR" diff --name-only "$BASE_REF"...HEAD -- "$@")" ]
+}
+
 # A dependency change touches no .py file, yet it can break every import, so
 # it triggers the backend checks on its own.
 DEPS_PATHSPEC=('pyproject.toml' 'poetry.lock')
 PY_DEPS_CHANGED=0
-if [ "$SCOPE_OK" -eq 1 ] && [ -n "$(git -C "$GATE_DIR" diff --name-only "$BASE_REF"...HEAD -- "${DEPS_PATHSPEC[@]}")" ]; then
+if branch_changes "${DEPS_PATHSPEC[@]}"; then
   PY_DEPS_CHANGED=1
 fi
 
@@ -673,7 +681,7 @@ fi
 # reflect.
 prepare_node_modules() {
   local fe_deps_changed=0
-  if [ "$SCOPE_OK" -eq 1 ] && [ -n "$(git -C "$GATE_DIR" diff --name-only "$BASE_REF"...HEAD -- frontend/package.json frontend/package-lock.json)" ]; then
+  if branch_changes frontend/package.json frontend/package-lock.json; then
     fe_deps_changed=1
   fi
   if [ -e "$FE_DIR/node_modules" ] && { [ ! -L "$FE_DIR/node_modules" ] || [ "$fe_deps_changed" -eq 0 ]; }; then
@@ -684,7 +692,9 @@ prepare_node_modules() {
     echo "  checkout's node_modules does not reflect. Run 'npm ci' in $FE_DIR, then push again." >&2
     exit 2
   fi
-  if [ ! -d "$CLAUDE_PROJECT_DIR/frontend/node_modules" ] || ! ln -s "$CLAUDE_PROJECT_DIR/frontend/node_modules" "$FE_DIR/node_modules"; then
+  # -fn replaces a dangling link a hard-killed earlier run could not remove;
+  # a real directory never reaches here (the early return above keeps it).
+  if [ ! -d "$CLAUDE_PROJECT_DIR/frontend/node_modules" ] || ! ln -sfn "$CLAUDE_PROJECT_DIR/frontend/node_modules" "$FE_DIR/node_modules"; then
     echo "BLOCKED: git push — $FE_DIR has no node_modules and the main checkout's could not be linked in" >&2
     echo "  (run 'npm ci' in either)." >&2
     exit 2

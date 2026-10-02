@@ -435,7 +435,9 @@ def _git_in(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, timeout=15)
 
 
-def _node_modules(tmp: Path, *, change_deps: bool, own_node_modules: bool):
+def _node_modules(
+    tmp: Path, *, change_deps: bool, own_node_modules: bool, scope_ok: bool = True, dangling_link: bool = False
+):
     """Runs prepare_node_modules for a worktree branch of a throwaway repo."""
     main = tmp / "repo"
     (main / "frontend" / "node_modules").mkdir(parents=True)
@@ -450,10 +452,13 @@ def _node_modules(tmp: Path, *, change_deps: bool, own_node_modules: bool):
         _git_in(gate, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qam", "deps")
     if own_node_modules:
         (gate / "frontend" / "node_modules").mkdir()
+    if dangling_link:
+        (gate / "frontend" / "node_modules").symlink_to(tmp / "gone")
     script = (
         f'CLAUDE_PROJECT_DIR="{main}"\nGATE_DIR="{gate}"\nFE_DIR="$GATE_DIR/frontend"\n'
-        'SCOPE_OK=1\nBASE_REF=main\nLINKED_NODE_MODULES=""\n'
+        f'SCOPE_OK={int(scope_ok)}\nBASE_REF=main\nLINKED_NODE_MODULES=""\n'
         f'cd "{main}"\n'
+        + _function_source("branch_changes")
         + _function_source("prepare_node_modules")
         + 'prepare_node_modules\necho "linked=$LINKED_NODE_MODULES"\n'
         + 'readlink "$FE_DIR/node_modules" || echo "not-a-link"\n'
@@ -482,3 +487,22 @@ def test_a_frontend_dependency_change_without_its_own_node_modules_blocks():
         result, _, _ = _node_modules(Path(tmp), change_deps=True, own_node_modules=False)
     assert result.returncode == 2
     assert "npm ci" in result.stderr
+
+
+def test_an_unknown_base_counts_as_a_dependency_change():
+    """With no resolvable base the branch's dependency changes are unknown,
+    and reading that as "unchanged" would test it with the main checkout's
+    node_modules -- the wrong tree -- so it takes the stricter path."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result, _, _ = _node_modules(Path(tmp), change_deps=False, own_node_modules=False, scope_ok=False)
+    assert result.returncode == 2
+    assert "npm ci" in result.stderr
+
+
+def test_a_dangling_link_left_by_a_killed_run_is_replaced():
+    """A run killed past its EXIT trap leaves its link behind; once that
+    link dangles it must be replaced, not block every later push."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result, main, gate = _node_modules(Path(tmp), change_deps=False, own_node_modules=False, dangling_link=True)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [f"linked={gate}/frontend/node_modules", f"{main}/frontend/node_modules"]
