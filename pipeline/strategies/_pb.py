@@ -119,7 +119,10 @@ def archive_captured_at(pb_bytes: bytes, date_str: str, pb_name: str) -> str:
     """
     feed_ts = decode_feed_timestamp(pb_bytes)
     if isinstance(feed_ts, int) and feed_ts > 0:
-        stamped = datetime.fromtimestamp(feed_ts, tz=_JST)
+        try:
+            stamped = datetime.fromtimestamp(feed_ts, tz=_JST)
+        except (OverflowError, OSError, ValueError):
+            return _ts(date_str, pb_name)
         try:
             name_day = datetime.strptime(date_str, "%Y%m%d").date()
         except ValueError:

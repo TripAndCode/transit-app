@@ -91,8 +91,19 @@ def _epoch(*args: int) -> int:
         header_only_feed(_epoch(2026, 9, 13, 0, 0, 11)),
         # Further ahead than any zone could put the name.
         header_only_feed(_epoch(2026, 9, 20, 0, 0, 11)),
+        # Decodable, but past any representable date.
+        header_only_feed(99_999_999_999_999),
+        header_only_feed(2**63 - 1),
     ],
-    ids=["no-timestamp", "zero", "undecodable", "before-the-names-day", "days-after-the-names-day"],
+    ids=[
+        "no-timestamp",
+        "zero",
+        "undecodable",
+        "before-the-names-day",
+        "days-after-the-names-day",
+        "past-year-9999",
+        "int64-max",
+    ],
 )
 def test_archive_captured_at_falls_back_to_the_name_without_a_usable_header_timestamp(raw):
     iso = archive_captured_at(raw, "20260915", "TripUpdate_000011.pb")
