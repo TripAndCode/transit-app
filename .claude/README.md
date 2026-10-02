@@ -115,13 +115,15 @@ list from `scripts/comment_lint.py` and enforces `CLAUDE.md`'s durable-content r
   `.claude/settings.local.json` and must never be committed.
 - Non-interactive SSH and cron shells do not source `~/.bashrc`. Put required OAuth
   variables in `/etc/environment` and expose binaries through `/usr/local/bin`.
-- The pre-push backend timeout lives in `.claude/hooks/guard-push-quality.sh`
-  (read the ceiling there, not a hardcoded figure here). It is sized to clear
-  the full suite's legitimate wall-clock with headroom, including on a small
+- The pre-push step timeouts live in `.claude/hooks/guard-push-quality.sh`
+  (read the ceilings there, not a hardcoded figure here). Each is sized to
+  clear its suite's legitimate wall-clock with headroom, including on a small
   VPS, which can run noticeably slower than a typical dev machine; that
   script's own `.claude/settings.json` entry bounds the sum of every ceiling
-  in it. A timeout with no test failure is an infrastructure limitation, not
-  evidence that tests failed; resolve it before weakening the gate.
+  in it, and `tests/unit/test_guard_push_quality_hook.py` fails once they no
+  longer fit. A blocked push names any step that ran out of time. A timeout
+  with no test failure is an infrastructure limitation, not evidence that
+  tests failed; resolve it before weakening the gate.
 - An hourly crontab entry (`15 * * * *`, JST — the VPS's system timezone; see
   `crontab -l` for the current interval) runs
   `python3 /root/transit-app/scripts/daily_git_hygiene.py --apply`, appending to
