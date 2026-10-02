@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { Agency } from "./types";
 import { useAgencies } from "./hooks";
-import { DEFAULT_RANGE_DAYS, isoDaysAgo, isoDaysBefore } from "./scope";
+import { DEFAULT_RANGE_DAYS, defaultPeriod, isoDaysBefore } from "./scope";
 
 /**
  * Pure decision: on a fresh visit (no explicit from/to already in `params`),
@@ -36,8 +36,8 @@ export function computeAnchorRange(
   const latestDataDate = agency?.latest_data_date;
   if (!latestDataDate) return null;
 
-  const windowStart = isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
-  if (latestDataDate >= windowStart) return null; // already inside today's default window
+  const windowStart = defaultPeriod().from;
+  if (latestDataDate >= windowStart) return null; // already inside the default window
 
   return { from: isoDaysBefore(latestDataDate, DEFAULT_RANGE_DAYS - 1), to: latestDataDate };
 }

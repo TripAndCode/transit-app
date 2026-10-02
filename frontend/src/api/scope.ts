@@ -201,7 +201,7 @@ export function toJstISO(d: Date): string {
   return jstFmt.format(d);
 }
 
-/** YYYY-MM-DD today in JST. Default `to` for the date-range UI. */
+/** YYYY-MM-DD today in JST. */
 export function todayISO(): string {
   return toJstISO(new Date());
 }
@@ -221,6 +221,20 @@ export function isoDaysBefore(dateISO: string, days: number): string {
   return toJstISO(d);
 }
 
+/** YYYY-MM-DD of the last closed JST day (yesterday). History and every
+ *  aggregate hold closed days only, so this, not today, ends the default
+ *  report period; `api.range.last_closed_jst_day` is the server's twin. */
+export function lastClosedDayISO(): string {
+  return isoDaysAgo(1);
+}
+
+/** The default report period: DEFAULT_RANGE_DAYS closed days ending on
+ *  lastClosedDayISO(). Every default-range reader goes through this one window. */
+export function defaultPeriod(): { from: string; to: string } {
+  const to = lastClosedDayISO();
+  return { from: isoDaysBefore(to, DEFAULT_RANGE_DAYS - 1), to };
+}
+
 /** JST calendar (year, month=1..12) of a Date. */
 export function jstYearMonth(d: Date): { year: number; month: number } {
   const parts = jstFmt.formatToParts(d);
@@ -238,7 +252,7 @@ export const ScopeRouteContext = createContext<string | null>(null);
 export function useScope(): [Scope, (patch: ScopePatch) => void] {
   const [params, setParams] = useSearchParams();
   const pageRoute = useContext(ScopeRouteContext);
-  const parsed = parseScope(params, { from: isoDaysAgo(DEFAULT_RANGE_DAYS - 1), to: todayISO() });
+  const parsed = parseScope(params, defaultPeriod());
   const scope = pageRoute != null && parsed.routes.length === 0 ? { ...parsed, routes: [pageRoute] } : parsed;
   function update(patch: ScopePatch) {
     setParams((prev) => applyScopePatch(prev, patch), { replace: true });

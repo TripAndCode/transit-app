@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../../api/hooks";
 import { delayRampVar } from "../../styles/tokens";
-import { WEEKDAYS, isoDaysBefore, todayISO, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
+import { WEEKDAYS, isoDaysBefore, lastClosedDayISO, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
 import type { ScopeSummary } from "../../api/types";
 import { useAgencyId } from "../../api/useAgencyId";
 import { RoutesPicker } from "../RoutesPicker";
@@ -49,7 +49,7 @@ export function PeriodControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { data: agencies } = useAgencies();
-  const anchor = summary?.latest ?? agencies?.find((a) => a.agency_id === id)?.latest_data_date ?? todayISO();
+  const anchor = summary?.latest ?? agencies?.find((a) => a.agency_id === id)?.latest_data_date ?? lastClosedDayISO();
   const collectionStart = summary?.earliest ? sinceStart(summary.earliest, anchor) : null;
   function setDate(edge: "from" | "to", value: string) {
     const next = { from: scope.from, to: scope.to, [edge]: value };

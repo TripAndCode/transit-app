@@ -1,6 +1,6 @@
 """Tests for GET /api/{agency_id}/delays/heatmap — p90_delay_min field."""
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import httpx
 import pytest
@@ -33,7 +33,6 @@ async def hmap_client(apply_schema):
         40.7,
         140.7,
     )
-    today = date.today()
     # Three daily rows with delay_sum/samples giving per-day avgs: 60s, 120s, 600s
     # p90 over these 3 days ≈ PERCENTILE_CONT(0.9) of [1, 2, 10] min = 10*0.9=9+ → 9.0 min
     for d_offset, (ds, s) in enumerate([(60, 1), (120, 1), (600, 1)]):
@@ -44,7 +43,7 @@ async def hmap_client(apply_schema):
             "ON CONFLICT DO NOTHING",
             aid,
             "S1",
-            today - timedelta(days=d_offset),
+            jst_today() - timedelta(days=1 + d_offset),
             "平日",
             "朝",
             ds,
@@ -119,7 +118,7 @@ async def zero_sample_hmap_client(apply_schema):
         "VALUES ($1,$2,$3,$4,$5,0,0)",
         aid,
         "S0",
-        date.today(),
+        jst_today() - timedelta(days=1),
         "平日",
         "朝",
     )

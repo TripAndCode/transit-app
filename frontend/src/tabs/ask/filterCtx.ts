@@ -1,9 +1,4 @@
-import {
-  DEFAULT_RANGE_DAYS,
-  isoDaysAgo,
-  todayISO,
-  type Scope,
-} from "../../api/scope";
+import { defaultPeriod, type Scope } from "../../api/scope";
 import type { FilterCtx } from "../../api/types";
 
 /** Convert URL-based Scope to FilterCtx for new thread seeding. */
@@ -20,11 +15,10 @@ export function rangeCtxToFilterCtx(ctx: Scope): FilterCtx {
 
 /** Derive a FilterCtx from a conversation's stored filter_ctx, with defaults. */
 export function resolvedFilterCtx(fc: FilterCtx | undefined | null): FilterCtx {
-  const today = todayISO();
-  const fromDefault = isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
+  const period = defaultPeriod();
   return {
-    from_date: fc?.from_date ?? fromDefault,
-    to_date: fc?.to_date ?? today,
+    from_date: fc?.from_date ?? period.from,
+    to_date: fc?.to_date ?? period.to,
     dow: fc?.dow ?? "all",
     time_band: fc?.time_band ?? "all",
     service: fc?.service ?? "all",
