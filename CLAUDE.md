@@ -109,8 +109,8 @@ the task needs them.
   — chiefly that a tip which does carry the trailer produces no run at all, and
   the gate then has nothing to read rather than something to fail.
 - Local verification stays mandatory regardless: CI sees only the tip that
-  triggered it, and the pre-push hook's file-scoped checks cover only the pushed
-  worktree's changed Python — its own header states what it leaves uncovered.
+  triggered it, and the pre-push hook's own header states what it leaves
+  uncovered.
 - For stacked PRs, retarget dependants to `main` before deleting their base branch;
   GitHub otherwise closes them.
 - After a PR merge, run `/cleanup-merged` in persistent local/VPS clones. Its
