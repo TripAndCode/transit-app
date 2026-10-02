@@ -53,8 +53,6 @@ from pipeline.reports.headway_quality import compute_headway_quality
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 from pipeline.reports.supply import compute_supply_metrics_by_agency
 
-MetricType = Literal["ewt_sec", "vehicle_km_delivered_pct"]
-
 # Metrics for which a SMALLER actual value is better performance. Any
 # metric_type not listed here is treated as higher-is-better.
 _LOWER_IS_BETTER: frozenset[str] = frozenset({"ewt_sec"})
