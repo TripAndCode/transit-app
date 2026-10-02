@@ -254,12 +254,16 @@ def clamp_range_ctx(
     Rules, in order:
 
     * absent dates default to a trailing :data:`DEFAULT_RANGE_DAYS` window
-      ending on :func:`last_closed_jst_day`;
+      ending on :func:`last_closed_jst_day`; a start given alone ends there
+      too, or on itself when it is later, so it is never swapped into a
+      window it did not ask for;
       a malformed non-empty date is a 422;
-    * neither boundary may exceed :func:`jst_today` — no aggregate holds a
-      future date, so a future bound can only widen the scan. Both ends are
-      clamped *before* the reversed-range swap, so the swap can't reopen a
-      future ``to_date``;
+    * neither boundary may exceed :func:`jst_today` — nothing holds a future
+      date, so a future bound can only widen the scan. Today itself passes
+      through as asked, rather than being relabelled as the last closed day:
+      history and every aggregate hold closed days only, so a window through
+      today simply has no rows for it. Both ends are clamped *before* the
+      reversed-range swap, so the swap can't reopen a future ``to_date``;
     * a reversed range is swapped rather than rejected;
     * a window wider than :data:`MAX_RANGE_DAYS` is clamped at the *start*,
       preserving the most recent data;
@@ -274,9 +278,11 @@ def clamp_range_ctx(
     """
     today = jst_today()
 
-    to_date = _coerce_date(to, "to") or last_closed_jst_day()
+    explicit_to = _coerce_date(to, "to")
+    explicit_from = _coerce_date(from_, "from")
+    to_date = explicit_to or max(last_closed_jst_day(), explicit_from or date.min)
     to_date = min(to_date, today)
-    from_date = _coerce_date(from_, "from") or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
+    from_date = explicit_from or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
     from_date = min(from_date, today)
 
     if from_date > to_date:

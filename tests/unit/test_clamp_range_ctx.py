@@ -74,6 +74,23 @@ def test_future_from_date_is_clamped_to_today_and_not_swapped_back(frozen_today)
     assert ctx.from_date == frozen_today
 
 
+def test_a_start_alone_ends_on_the_last_closed_day_or_on_itself_if_later(frozen_today):
+    """Only a start: the end defaults to the last closed day unless the start
+    is later, so a start of today is never swapped into [yesterday, today]."""
+    ctx = _call(from_="2025-12-01")
+    assert (ctx.from_date, ctx.to_date) == (date(2025, 12, 1), frozen_today - timedelta(days=1))
+    for start in (frozen_today.isoformat(), "2099-01-01"):
+        ctx = _call(from_=start)
+        assert (ctx.from_date, ctx.to_date) == (frozen_today, frozen_today), start
+
+
+def test_tool_date_overrides_with_only_a_start_of_today_stay_on_today(frozen_today):
+    from pipeline.query.tools import _apply_date_overrides
+
+    ctx = _apply_date_overrides(_call(), {"from": frozen_today.isoformat()})
+    assert (ctx.from_date, ctx.to_date) == (frozen_today, frozen_today)
+
+
 def test_overwide_range_is_clamped_at_the_start(frozen_today):
     ctx = _call(from_="2000-01-01", to="2025-12-31")
     assert ctx.to_date == date(2025, 12, 31)

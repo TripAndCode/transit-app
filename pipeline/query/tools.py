@@ -340,10 +340,10 @@ _DATE_OVERRIDE_PROPS = {
         "format": "date",
         "description": (
             "Start date, ISO YYYY-MM-DD; takes precedence over days_back. Without to, the window ends "
-            "yesterday (JST), the last closed day. Future dates clamp to today, a reversed range is "
-            "swapped, windows over 365 days keep the latest 365, and an unparseable date counts as a "
-            "missing bound. Only the date range changes; UI day-of-week, time-band and service filters "
-            "still apply."
+            "yesterday (JST), the last closed day, or on from if that is later. Future dates clamp to "
+            "today, a reversed range is swapped, windows over 365 days keep the latest 365, and an "
+            "unparseable date counts as a missing bound. Only the date range changes; UI day-of-week, "
+            "time-band and service filters still apply."
         ),
     },
     "to": {
@@ -788,8 +788,10 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
             return None
 
     if raw_from or raw_to:
-        new_to = _parse(raw_to) or end
-        new_from = _parse(raw_from) or new_to - timedelta(days=29)
+        # A missing end is left to clamp_range_ctx, which ends a lone start on
+        # the last closed day or on the start itself when that is later.
+        new_to = _parse(raw_to)
+        new_from = _parse(raw_from) or (new_to or end) - timedelta(days=29)
     else:
         # Reaching this branch implies days_back is set: the early return
         # above already handled (days_back is None and no raw dates).

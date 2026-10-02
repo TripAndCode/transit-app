@@ -40,8 +40,8 @@ def test_get_range_ctx_default_window_uses_jst_today(monkeypatch):
 
 def test_apply_date_overrides_default_window_uses_jst_today(monkeypatch):
     """pipeline/query/tools.py's _apply_date_overrides is a sibling of
-    get_range_ctx's default-window logic (same today-29d..today pattern) and
-    must anchor to the same JST civil calendar, not the server's local time."""
+    get_range_ctx's default-window logic (the same window ending on the last
+    closed day) and must anchor to the same JST civil calendar, not the server's local time."""
     from pipeline.query.tools import _apply_date_overrides
 
     fixed_utc = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)
@@ -53,7 +53,7 @@ def test_apply_date_overrides_default_window_uses_jst_today(monkeypatch):
 
     monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
     ctx = range_mod.RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 31))
-    derived = _apply_date_overrides(ctx, {"from_date": "2026-01-01"})  # from set, to omitted -> defaults to today
+    derived = _apply_date_overrides(ctx, {"from_date": "2026-01-01"})  # to omitted -> the last closed JST day
     assert derived.to_date == date(2026, 1, 1)
 
 
