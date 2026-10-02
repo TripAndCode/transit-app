@@ -180,7 +180,6 @@ export function ReportTable({ reportType, rows }: Props) {
   const schema = SCHEMAS[reportType];
 
   const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
-  const maxes = computeColumnMaxes(schema, rows);
   const cappedRows = useCappedList(
     rows,
     compact ? PHONE_ROWS_CAP : ROWS_CAP,
@@ -188,7 +187,7 @@ export function ReportTable({ reportType, rows }: Props) {
   );
 
   if (!schema) {
-    // Unknown type — fall back to raw key/value table
+    // Unknown type: render nothing.
     return null;
   }
 
@@ -201,7 +200,10 @@ export function ReportTable({ reportType, rows }: Props) {
   if (compact) {
     // Seven columns can't share a phone's width without characters stacking,
     // so each row becomes one item: rank, route and the barred figure on top,
-    // every other column on a wrapping line beneath.
+    // every other column on a wrapping line beneath. The route column is
+    // found by its label, since not every report has it at index 0, and a
+    // report without one has no title.
+    const titleCol = schema.find((c) => c.labelKey === ROUTE_COL.labelKey);
     const headline = schema.find((c) => c.bar);
     return (
       <div>
@@ -210,7 +212,13 @@ export function ReportTable({ reportType, rows }: Props) {
             <li key={i} className="report-cards__item">
               <div className="report-cards__head">
                 <span className="report-cards__rank">{i + 1}</span>
-                <span className="report-cards__route">{formatRoute(String(row[ROUTE_COL.index] ?? ""))}</span>
+                {titleCol && (
+                  <span className="report-cards__route">
+                    {titleCol === ROUTE_COL
+                      ? formatRoute(String(row[titleCol.index] ?? ""))
+                      : cellText(titleCol, row[titleCol.index], t)}
+                  </span>
+                )}
                 {headline && (
                   <span
                     className="report-cards__headline"
@@ -223,7 +231,7 @@ export function ReportTable({ reportType, rows }: Props) {
               </div>
               <p className="report-cards__meta">
                 {schema
-                  .filter((c) => c !== ROUTE_COL && c !== headline)
+                  .filter((c) => c !== titleCol && c !== headline)
                   .map((c) => (
                     <span key={c.labelKey} className="report-cards__field">
                       {c.valueKey == null && (
@@ -243,6 +251,7 @@ export function ReportTable({ reportType, rows }: Props) {
     );
   }
 
+  const maxes = computeColumnMaxes(schema, rows);
   return (
     <div className="table-scroll" style={{ width: "100%", overflowX: "auto" }}>
       <table style={SHARED_TABLE}>

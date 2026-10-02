@@ -89,6 +89,10 @@ function RailTooltip({
   );
 }
 
+/** The More sheet's vertical padding; its sticky header offsets by the
+ *  same amount. */
+const MORE_SHEET_PAD_PX = 16;
+
 /** The mobile "…" destination: a bottom sheet holding the agency picker and
  *  the account/settings controls that don't fit as one of the four tab bar
  *  slots.
@@ -126,7 +130,7 @@ function MoreSheet({
         display: "flex",
         flexDirection: "column",
         overflowY: "auto",
-        padding: "16px 0",
+        padding: `${MORE_SHEET_PAD_PX}px 0`,
       }}
     >
       {children}
@@ -554,15 +558,17 @@ export function Sidebar() {
                 scrolls. */}
             <div
               style={{
+                // Pulled up over the sheet's top padding and pinned at its
+                // edge, so nothing scrolls by above the header.
                 position: "sticky",
-                top: -16,
+                top: -MORE_SHEET_PAD_PX,
                 zIndex: Z_INDEX.raised,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 4,
-                margin: "-16px 0 0",
-                padding: "16px 12px 16px 22px",
+                margin: `-${MORE_SHEET_PAD_PX}px 0 0`,
+                padding: `${MORE_SHEET_PAD_PX}px 12px 16px 22px`,
                 background: "var(--bg-surface)",
               }}
             >

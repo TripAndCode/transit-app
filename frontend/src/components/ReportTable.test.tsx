@@ -152,6 +152,22 @@ describe("ReportTable on a phone", () => {
     }
   });
 
+  it("names no route for a report without a route column", () => {
+    renderTable([[92.3, 5.2, 120, 100, 95, 95.0]], "council_summary");
+    const [item] = screen.getAllByRole("listitem");
+    expect(within(item).queryByText(/Route/)).not.toBeInTheDocument();
+    expect(within(item).getAllByText("On-time %")).toHaveLength(1);
+    expect(within(item).getByText("Planned trips")).toBeInTheDocument();
+  });
+
+  it("titles a certificate row by its own route column, not the agency in column 0", () => {
+    renderTable([["Agency A", "39061", "平日", "2026-09-01", "08:00", "08:12", 720]], "delay_certificate");
+    const [item] = screen.getAllByRole("listitem");
+    expect(item.querySelector(".report-cards__route")).toHaveTextContent("39061");
+    expect(within(item).getAllByText("Agency A")).toHaveLength(1);
+    expect(within(item).getAllByText("39061")).toHaveLength(1);
+  });
+
   it("shows 25 rows first and the rest on request", async () => {
     const rows = Array.from({ length: 30 }, (_, i) => ["39061", "平日", 5 - i / 10, 3, 8, 100 + i]);
     renderTable(rows);
