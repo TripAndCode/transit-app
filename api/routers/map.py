@@ -53,6 +53,7 @@ from api.range import (
 from api.scope_applied import ALL_SIX, scope_applied
 from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
+from pipeline.clickhouse import LIVE_TABLE
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
@@ -231,7 +232,7 @@ _LIVE_DELAYS_DEDUP_SQL = f"""
                 (u.captured_at, u.file_name, -toInt32(u.stop_sequence))
             ) AS winner,
             max(u.captured_at) AS captured_at
-        FROM updates AS u
+        FROM updates_live AS u
         WHERE u.agency_id = {{agency_id:UInt16}}
           AND u.dep_delay IS NOT NULL
           AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
@@ -253,7 +254,7 @@ async def live_delays(
     limit: int = Query(default=500, ge=1, le=500),
 ) -> dict[str, Any]:
     """Latest reported stop and delay for trips in the current feed window."""
-    latest_ts = await max_captured_at(ch, agency_id)
+    latest_ts = await max_captured_at(ch, agency_id, table=LIVE_TABLE)
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": []}
 
@@ -373,7 +374,7 @@ async def live_trip_progress(
     newest report for each sequence. This is a report trail, not a GPS trace
     or proof that the vehicle physically crossed the stop.
     """
-    latest_ts = await max_captured_at(ch, agency_id)
+    latest_ts = await max_captured_at(ch, agency_id, table=LIVE_TABLE)
     empty: dict[str, Any] = {
         "trip_id": trip_id,
         "route_code": None,
@@ -390,7 +391,7 @@ async def live_trip_progress(
     # trip IDs from triggering a wider history scan.
     active_result = await ch.query(
         "SELECT argMax(route_code, (captured_at, file_name)) AS route_code "
-        "FROM updates WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String} "
+        "FROM updates_live WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String} "
         "AND dep_delay IS NOT NULL AND captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE",
         parameters={"agency_id": agency_id, "trip_id": trip_id, "latest_ts": latest_ts},
     )
@@ -408,7 +409,7 @@ async def live_trip_progress(
                        tuple(stop_sequence, stop_id, scheduled_time, dep_delay),
                        toInt32(stop_sequence)
                    ) AS winner
-            FROM updates
+            FROM updates_live
             WHERE agency_id = {{agency_id:UInt16}} AND trip_id = {{trip_id:String}}
               AND dep_delay IS NOT NULL
               AND dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}

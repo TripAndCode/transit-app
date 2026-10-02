@@ -1,10 +1,12 @@
 import os
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from api.middleware.ratelimit import limiter
+from pipeline.clickhouse import LIVE_TABLE
 from tests.conftest import _test_pool
 
 
@@ -122,7 +124,7 @@ async def test_live_delays_tiebreaks_same_poll_rows_by_lowest_stop_sequence(map_
         )
     from tests.conftest import mirror_updates_to_ch
 
-    mirror_updates_to_ch(ch_client, agency_id)
+    mirror_updates_to_ch(ch_client, agency_id, table=LIVE_TABLE)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/delays/live")
@@ -150,7 +152,8 @@ async def test_live_delays_normalizes_5char_scheduled_time_to_hhmmss(map_app_ch,
     insert_updates(
         ch_client,
         agency_id=agency_id,
-        rows=[("aomori.pb", "2026-05-09T10:00:00Z", "T_5CHAR", "weekday", "10:05", "R_5CHAR", 1, 45)],
+        rows=[("aomori.pb", datetime.now(timezone.utc), "T_5CHAR", "weekday", "10:05", "R_5CHAR", 1, 45)],
+        table=LIVE_TABLE,
     )
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -185,7 +188,8 @@ async def test_live_delays_resolves_stop_location_from_static_schedule(map_app_c
     insert_updates(
         ch_client,
         agency_id=agency_id,
-        rows=[("live.pb", "2026-05-09T10:00:00Z", "T_STATIC", "weekday", "10:05", "R_STATIC", 2, 180)],
+        rows=[("live.pb", datetime.now(timezone.utc), "T_STATIC", "weekday", "10:05", "R_STATIC", 2, 180)],
+        table=LIVE_TABLE,
     )
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -224,14 +228,16 @@ async def test_live_trip_progress_returns_nearest_reported_stop_trail(map_app_ch
             "($1, 'T_PROGRESS', 1, 'S1'), ($1, 'T_PROGRESS', 2, 'S2')",
             agency_id,
         )
+    t0 = datetime.now(timezone.utc) - timedelta(minutes=2)
     insert_updates(
         ch_client,
         agency_id=agency_id,
         rows=[
-            ("poll-1.pb", "2026-09-12T06:00:00Z", "T_PROGRESS", "weekday", "15:00", "R_PROGRESS", 1, 60),
-            ("poll-1.pb", "2026-09-12T06:00:00Z", "T_PROGRESS", "weekday", "15:05", "R_PROGRESS", 2, 240),
-            ("poll-2.pb", "2026-09-12T06:02:00Z", "T_PROGRESS", "weekday", "15:05", "R_PROGRESS", 2, 180),
+            ("poll-1.pb", t0, "T_PROGRESS", "weekday", "15:00", "R_PROGRESS", 1, 60),
+            ("poll-1.pb", t0, "T_PROGRESS", "weekday", "15:05", "R_PROGRESS", 2, 240),
+            ("poll-2.pb", t0 + timedelta(minutes=2), "T_PROGRESS", "weekday", "15:05", "R_PROGRESS", 2, 180),
         ],
+        table=LIVE_TABLE,
     )
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -272,7 +278,7 @@ async def test_live_delays_latest_day_has_no_non_null_delay(map_app_ch, ch_clien
         )
     from tests.conftest import mirror_updates_to_ch
 
-    mirror_updates_to_ch(ch_client, agency_id)
+    mirror_updates_to_ch(ch_client, agency_id, table=LIVE_TABLE)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/{agency_id}/delays/live")
@@ -280,6 +286,57 @@ async def test_live_delays_latest_day_has_no_non_null_delay(map_app_ch, ch_clien
     payload = resp.json()
     assert payload["rows"] == []
     assert payload["latest_captured_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_the_live_screen_reads_updates_live_and_never_history(map_app_ch, ch_client):
+    """A row in `updates` stamped now (history never holds one once the split
+    ships, but the deploy day does) must not show as a current trip."""
+    from pipeline.clickhouse import LIVE_TABLE, insert_updates
+
+    app, agency_id = map_app_ch
+    now = datetime.now(timezone.utc)
+    insert_updates(
+        ch_client, agency_id, [("oracle/x/live.pb", now, "T_LIVE", "平日", "10:05", "R1", 1, 60)], table=LIVE_TABLE
+    )
+    insert_updates(ch_client, agency_id, [("20261002/hist.pb", now, "T_HIST", "平日", "10:05", "R1", 1, 600)])
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        live = (await client.get(f"/api/{agency_id}/delays/live")).json()
+        hist_trail = (await client.get(f"/api/{agency_id}/delays/live-progress", params={"trip_id": "T_HIST"})).json()
+        live_trail = (await client.get(f"/api/{agency_id}/delays/live-progress", params={"trip_id": "T_LIVE"})).json()
+    assert [r["trip_id"] for r in live["rows"]] == ["T_LIVE"]
+    assert hist_trail["stops"] == []
+    assert [s["dep_delay"] for s in live_trail["stops"]] == [60]
+
+
+@pytest.mark.asyncio
+async def test_todays_live_rows_reach_the_live_screen_and_no_aggregate(map_app_ch, ch_client):
+    import psycopg2
+
+    from pipeline.analyze import analyze
+    from pipeline.clickhouse import LIVE_TABLE, insert_updates
+
+    app, agency_id = map_app_ch
+    insert_updates(
+        ch_client,
+        agency_id,
+        [("oracle/x/1.pb", datetime.now(timezone.utc), "T1", "平日", "10:05", "R1", 1, 300)],
+        table=LIVE_TABLE,
+    )
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+        analyze(agency_id, conn, ch_client)
+        conn.commit()
+    finally:
+        conn.close()
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        live = (await client.get(f"/api/{agency_id}/delays/live")).json()
+        heat = (await client.get(f"/api/{agency_id}/delays/heatmap")).json()
+    assert [r["trip_id"] for r in live["rows"]] == ["T1"]
+    assert heat["features"] == []
+    assert await app.state.pool.fetchval("SELECT count(*) FROM agg_route_daily WHERE agency_id = $1", agency_id) == 0
 
 
 @pytest.mark.asyncio
