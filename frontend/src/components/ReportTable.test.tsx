@@ -127,6 +127,26 @@ describe("ReportTable units and route names", () => {
   });
 });
 
+describe("ReportTable route links", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("opens a row's route from its name, keeping the scope but not the report", () => {
+    mockRoutes([
+      { route_id: "T50線(39061)", route_short_name: "T50", route_long_name: "石江・新城線", route_code: "39061", trip_headsigns: [] },
+    ]);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/routes?report=ranking&from=2026-09-01&dow=weekday"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="ranking" rows={[["39061", "平日", 5.2, 3.1, 8.4, 120]]} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link", { name: /T50/ });
+    expect(link).toHaveAttribute("href", "/agencies/1/routes/39061?from=2026-09-01&dow=weekday");
+    expect(link.closest("tr")).toHaveClass("report-row--link");
+  });
+});
+
 describe("ReportTable on a phone", () => {
   beforeEach(() => {
     vi.spyOn(window, "matchMedia").mockReturnValue({

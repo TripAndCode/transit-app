@@ -180,7 +180,7 @@ it("keeps the route map mounted across tab switches instead of recreating its We
   await waitFor(() => expect(mapMounts).toHaveBeenCalledTimes(1));
   expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
 
-  await user.click(screen.getByRole("tab", { name: "Delay trend" }));
+  await user.click(screen.getByRole("tab", { name: "Along the route" }));
   expect(mapProps).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
 
   await user.click(screen.getByRole("tab", { name: "Map" }));

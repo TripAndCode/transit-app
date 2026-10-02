@@ -5,7 +5,7 @@ import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNav
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import { AnalysisTab } from "./AnalysisTab";
-import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType } from "../api/types";
+import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType, TrendPayload } from "../api/types";
 
 vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () => <div>headway-panel</div> }));
 vi.mock("../components/PerformanceStandardPanel", () => ({ PerformanceStandardPanel: () => <div>standards-panel</div> }));
@@ -209,6 +209,19 @@ describe("AnalysisTab", () => {
     } as never);
     renderAnalysis("/agencies/1/analysis/rider?report=ranking");
     expect(screen.getByText("No matching data")).toBeInTheDocument();
+  });
+
+  it("says a one-day period has no trend instead of drawing a single dot", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("trend")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    const rows: TrendPayload[] = [
+      { days: [{ date: "2026-09-28", avg_min: 8.3, samples: 40, top_offenders: [] }], hourly: [], dow_band: { grid: [], worst: null }, revision_boundaries: [] },
+    ];
+    const trend = { ...reportResponse("trend"), rows } as ReportResponse;
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: trend, isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderAnalysis("/agencies/1/analysis/when?report=trend&from=2026-09-28&to=2026-09-28", ["trend"]);
+    expect(screen.getByText("A trend needs more than one day. Pick a longer period to see how delay moved from day to day.")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /daily/i })).not.toBeInTheDocument();
   });
 
   it("marks the clicked report as active in the URL-driven list, switching report-type selection", async () => {

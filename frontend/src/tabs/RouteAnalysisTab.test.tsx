@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
@@ -89,8 +89,29 @@ describe("RouteAnalysisTab", () => {
       refetch: vi.fn(),
     } as never);
     renderTab("/agencies/1/route-analysis?routes=R1");
-    expect(screen.getByRole("heading", { name: "Where does delay build up?" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "R1" })).toBeInTheDocument();
     expect(screen.getByText("Delay by stop")).toBeInTheDocument();
+  });
+
+  it("titles the page by its route, asks its question beneath, and leads back to Routes", () => {
+    mockSupportHooks();
+    vi.spyOn(useRouteNamesModule, "useRouteNames").mockReturnValue({
+      data: new Map([["R1", "W54 沖舘・新田線 · for 新田"]]),
+      isLoading: false,
+      format: (code: string | null | undefined) => (code === "R1" ? "W54 沖舘・新田線 · for 新田" : (code ?? "—")),
+    });
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: shape([{ stop_sequence: 1, stop_name: "Stop A", lon: 140.7, lat: 40.8, avg_min: 2.4, samples: 10 }]),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1");
+    expect(screen.getByRole("heading", { level: 1, name: "W54 沖舘・新田線 · for 新田" })).toBeInTheDocument();
+    expect(screen.getByText("Where does delay build up?")).toBeInTheDocument();
+    const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(crumbs).getByRole("link", { name: "Routes" })).toHaveAttribute("href", expect.stringMatching(/^\/agencies\/1\/routes/));
+    expect(crumbs).toHaveTextContent("W54 沖舘・新田線 · for 新田");
   });
 
   it("titles a saved analysis with its scope in words", () => {
@@ -168,7 +189,7 @@ describe("RouteAnalysisTab sub-tab state", () => {
 
   it("falls back to the trend sub-tab when the URL names one that does not exist", () => {
     renderWithSubTab("&sub_tab=garbage");
-    expect(tab("Delay trend")).toHaveAttribute("aria-selected", "true");
+    expect(tab("Along the route")).toHaveAttribute("aria-selected", "true");
     expect(tab("Map")).toHaveAttribute("aria-selected", "false");
   });
 
@@ -180,7 +201,7 @@ describe("RouteAnalysisTab sub-tab state", () => {
 
   it("names each panel from the tab that controls it", () => {
     renderWithSubTab("");
-    const trendTab = tab("Delay trend");
+    const trendTab = tab("Along the route");
     const panel = screen.getByRole("tabpanel");
     expect(trendTab).toHaveAttribute("aria-controls", panel.id);
     expect(panel).toHaveAttribute("aria-labelledby", trendTab.id);
@@ -188,22 +209,22 @@ describe("RouteAnalysisTab sub-tab state", () => {
 
   it("moves selection and focus along the tablist with the arrow keys", () => {
     renderWithSubTab("");
-    const trendTab = tab("Delay trend");
+    const trendTab = tab("Along the route");
     trendTab.focus();
     expect(trendTab).toHaveAttribute("tabindex", "0");
-    expect(tab("Time–distance")).toHaveAttribute("tabindex", "-1");
+    expect(tab("Trips over time")).toHaveAttribute("tabindex", "-1");
 
     fireEvent.keyDown(trendTab, { key: "ArrowRight" });
-    expect(tab("Time–distance")).toHaveAttribute("aria-selected", "true");
-    expect(tab("Time–distance")).toHaveFocus();
+    expect(tab("Trips over time")).toHaveAttribute("aria-selected", "true");
+    expect(tab("Trips over time")).toHaveFocus();
 
-    fireEvent.keyDown(tab("Time–distance"), { key: "ArrowLeft" });
-    expect(tab("Delay trend")).toHaveAttribute("aria-selected", "true");
-    expect(tab("Delay trend")).toHaveFocus();
+    fireEvent.keyDown(tab("Trips over time"), { key: "ArrowLeft" });
+    expect(tab("Along the route")).toHaveAttribute("aria-selected", "true");
+    expect(tab("Along the route")).toHaveFocus();
 
     // Wraps rather than dead-ending at the edge, per the tabs pattern.
-    fireEvent.keyDown(tab("Delay trend"), { key: "ArrowLeft" });
-    expect(tab("By stop")).toHaveFocus();
+    fireEvent.keyDown(tab("Along the route"), { key: "ArrowLeft" });
+    expect(tab("Stop table")).toHaveFocus();
   });
 });
 
@@ -221,7 +242,7 @@ describe("RouteAnalysisTab without a usable agency id", () => {
       refetch: vi.fn(),
     } as never);
     renderTab("/agencies/not-an-id/route-analysis?routes=R1");
-    expect(screen.queryByRole("heading", { name: "Where does delay build up?" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 });
 

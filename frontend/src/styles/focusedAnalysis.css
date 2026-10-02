@@ -77,3 +77,6 @@
   .marey__scroll { overflow-x: auto; }
   .marey__chart { min-width: 560px; }
 }
+.focus-breadcrumb { margin: 0 0 6px; font-size: var(--text-sm); color: var(--text-tertiary); }
+.focus-breadcrumb a { color: var(--text-secondary); }
+.focus-subtitle { margin: 4px 0 0; }
