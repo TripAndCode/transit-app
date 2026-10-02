@@ -280,11 +280,12 @@ export type BoardAlert = {
   href: string | null;
 };
 
-/** One `pipeline_runs` row: an ingest, analyze, weather or static job, from
- *  the CLI or the cron path, including the ones the advisory lock displaced. */
+/** One `pipeline_runs` row: an ingest, promote, analyze, weather or static
+ *  job, from the CLI or the cron path, including the ones the advisory lock
+ *  displaced. */
 export type PipelineRun = {
   run_id: number;
-  kind: "ingest" | "analyze" | "weather" | "static";
+  kind: "ingest" | "promote" | "analyze" | "weather" | "static";
   /** Null for a fleet-wide job, and for one displaced before it resolved
    *  which agency it was for. */
   agency_id: number | null;
