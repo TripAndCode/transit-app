@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { Fragment, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Z_INDEX } from "../../styles/zIndex";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import { useSearchParams } from "react-router-dom";
 import type { ReactNode } from "react";
 import { td, th } from "../tableStyles";
@@ -357,23 +358,10 @@ function ShortcutHintChip({ shortcuts }: { shortcuts: readonly ShortcutHint[] })
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
 
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      triggerRef.current?.focus();
-    }
-    function onPointerDown(event: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("mousedown", onPointerDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, rootRef, () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  });
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>

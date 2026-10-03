@@ -17,6 +17,7 @@ import { Z_INDEX } from "../styles/zIndex";
 import { FILTER_SEPARATOR } from "../utils/format";
 import { dowValueLabel } from "../utils/filterValueLabels";
 import { menuItems, nextMenuItem } from "./menuKeys";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -87,18 +88,6 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const menuTriggerRef = useRef<HTMLElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menu) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenu(null);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [menu]);
-
   /** Every way out of the menu goes through here. Choosing an item unmounts
    *  the menuitem that had focus, so without this the keyboard user is left
    *  on `<body>` -- Escape is not the only exit that has to put them back. */
@@ -107,16 +96,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     menuTriggerRef.current?.focus();
   }
 
-  // Close menu on Escape.
-  useEffect(() => {
-    if (!menu) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      closeMenu();
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [menu]);
+  usePopoverDismiss(menu !== null, menuRef, closeMenu);
 
   // Focus enters the menu as it opens: an operator who reached the kebab by
   // keyboard must not have to Tab through the rest of the sidebar to get to

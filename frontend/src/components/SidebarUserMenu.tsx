@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
@@ -9,6 +9,7 @@ import { changeLocale, SUPPORTED_LOCALES, type Locale } from "../i18n";
 import { Z_INDEX } from "../styles/zIndex";
 import { Spinner } from "./Spinner";
 import { useToast } from "./ui/toastContext";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 
 const LOCALE_LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
 
@@ -60,24 +61,10 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  usePopoverDismiss(open, ref, () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  });
 
   if (sessionLoading || configLoading) return null;
 
