@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 import { computeTooltipPosition, type TooltipPlacement } from "./tooltipPosition";
+import { coalesceToFrame } from "../utils/frameCoalesce";
 
 /** Pointer dwell required before a tooltip appears. Short enough to feel
  *  immediate on a deliberate hover, long enough that a pointer crossing a
@@ -98,11 +99,13 @@ export function Tooltip({ label, placement = "top", children }: Props) {
       tip.dataset.placement = pos.placement;
     }
     place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
+    const frame = coalesceToFrame(place);
+    window.addEventListener("resize", frame.schedule);
+    window.addEventListener("scroll", frame.schedule, true);
     return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
+      frame.cancel();
+      window.removeEventListener("resize", frame.schedule);
+      window.removeEventListener("scroll", frame.schedule, true);
     };
   }, [open, placement, label]);
 
