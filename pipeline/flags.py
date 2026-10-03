@@ -27,13 +27,13 @@ from where it runs:
   threadpool. They block on the database only when nothing is cached at
   all; otherwise they serve the cache and let someone else refresh it.
 
-The trade-off that split buys: after `invalidate()` the owed refresh belongs
-to the next async caller, so a synchronous caller may keep seeing the old
-value for up to `_CACHE_TTL_SECONDS`. In a process with no async readers at
-all (a CLI run) it sees the old value until the next `warm()`. Correctness
-for the admin surface is unaffected -- the PATCH/DELETE handlers are async
-and resolve their own response through the async path, so the write is
-visible in the response that reports it.
+After `invalidate()` an async reader waits for the owed re-read; a
+synchronous reader serves the cached entry and starts that re-read behind
+it, so it may answer with the pre-write value once, never for the TTL. In a
+process with no readers at all nothing refreshes until the next read or
+`warm()`. Correctness for the admin surface is unaffected -- the PATCH/DELETE
+handlers are async and resolve their own response through the async path, so
+the write is visible in the response that reports it.
 """
 
 from __future__ import annotations
@@ -401,8 +401,9 @@ def get_flag_state(key: str) -> FlagState:
     blocks on Postgres only when this process has never resolved `key` at
     all; with anything cached it answers from the cache, so an `async def`
     handler that reaches here by mistake stalls the event loop for no longer
-    than a dict lookup. A refresh owed by `invalidate()` is left for an
-    async caller -- see the module docstring for the staleness this admits.
+    than a dict lookup. A refresh owed by `invalidate()` is started in a
+    worker thread behind this reader, so a synchronous caller sees the old
+    value at most once per write, not for the rest of the TTL.
 
     Raises `KeyError` for a key not in `REGISTRY` -- every caller of `flag()`
     is expected to pass a registered key, and a typo here should fail loud
@@ -413,8 +414,10 @@ def get_flag_state(key: str) -> FlagState:
         assert cached is not None
         return cached
     if cached is not None:
-        if state == _EXPIRED:
-            _start_background_refresh()
+        # Expired, or marked stale by `invalidate()`: either way the entry is
+        # served as it stands and the re-read runs behind the reader. This
+        # path may be on the event loop by mistake, so it never reads inline.
+        _start_background_refresh()
         return cached
     _refresh()
     return _resolve_after_refresh(key, cached)
@@ -471,14 +474,14 @@ async def aflag(key: str, /) -> bool:
 
 
 def invalidate() -> None:
-    """Mark the cache stale so the next *async* read re-reads the DB
-    immediately, instead of waiting out the TTL.
+    """Mark the cache stale so the next read re-reads the DB instead of
+    waiting out the TTL: an async read waits for the re-read, a synchronous
+    read serves the old value once and schedules it.
 
     Called after a write to `/api/admin/flags/:key` so the API's own next
     GET -- and the very next gated request anywhere in the process -- sees
-    the new value without delay. The owed read is deliberately an async
-    caller's to perform: it is a blocking psycopg2 round trip, and only the
-    async path can put it on a worker thread rather than the event loop.
+    the new value without delay. The re-read is a blocking psycopg2 round
+    trip, so it always runs on a worker thread, never on the event loop.
     """
     global _cache_expires_at, _refresh_owed, _generation
     with _cache_lock:
