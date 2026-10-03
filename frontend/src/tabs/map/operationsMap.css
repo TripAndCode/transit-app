@@ -361,7 +361,10 @@
    side column moves into a bottom sheet layered over the map instead. */
 @media (max-width: 640px) {
   .focused-overview.operations-page { height: 100%; }
-  .focused-overview .ops-workspace { display: block; height: 100%; max-height: none; position: relative; }
+  /* Clips again what the BP.md rule set visible: the bottom sheet is laid out
+     at its full height and translated down, and the translated-away part
+     must not extend the page's scroll range. */
+  .focused-overview .ops-workspace { display: block; height: 100%; max-height: none; position: relative; overflow: hidden; }
   .focused-overview .ops-map { position: absolute; inset: 0; height: 100%; }
   .ops-resizer { display: none; }
   .ops-map-ref__legend { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }

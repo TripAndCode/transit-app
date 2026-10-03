@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useState } from "react";
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BottomSheet } from "./BottomSheet";
 import { nextSnap, SNAP_HEIGHT_VH, type SnapPoint } from "./bottomSheetSnap";
+import { decl, ruleBody } from "../test/cssRules";
 
 describe("nextSnap", () => {
   it("settles on the nearest snap point when released with no meaningful velocity", () => {
@@ -104,27 +107,48 @@ describe("BottomSheet", () => {
     expect(screen.getByRole("button", { name: /expand|collapse|handle/i })).toHaveFocus();
   });
 
-  it("holds its resting height when a drag starts but has not travelled", () => {
+  /** The sheet is laid out at its full height and slid down; this is how far
+   *  it currently sits below the top of that box, in vh. */
+  function hiddenVh(region: HTMLElement): number {
+    return parseFloat(/translateY\(([-\d.]+)vh\)/.exec(region.style.transform)?.[1] ?? "NaN");
+  }
+
+  it("holds its resting position when a drag starts but has not travelled", () => {
     render(<Harness initial="peek" />);
     const region = screen.getByLabelText("Trips to check");
     const handle = grabHandle();
-
-    const restingY = 400;
-    pointer(handle, "pointerdown", restingY);
-    pointer(handle, "pointermove", restingY);
-
-    expect(region.style.height).toBe(`${SNAP_HEIGHT_VH.peek}vh`);
+    pointer(handle, "pointerdown", 400);
+    pointer(handle, "pointermove", 400);
+    expect(hiddenVh(region)).toBeCloseTo(SNAP_HEIGHT_VH.full - SNAP_HEIGHT_VH.peek, 5);
+    expect(region.style.height).toBe(`${SNAP_HEIGHT_VH.full}vh`);
   });
 
-  it("grows the sheet as the handle is dragged up from peek", () => {
+  it("slides the sheet up as the handle is dragged up from peek, never resizing it", () => {
     render(<Harness initial="peek" />);
     const region = screen.getByLabelText("Trips to check");
     const handle = grabHandle();
-
     pointer(handle, "pointerdown", 400);
     pointer(handle, "pointermove", 300);
+    expect(hiddenVh(region)).toBeLessThan(SNAP_HEIGHT_VH.full - SNAP_HEIGHT_VH.peek);
+    expect(region.style.height).toBe(`${SNAP_HEIGHT_VH.full}vh`);
+    expect(region.style.transition).toBe("none");
+  });
 
-    expect(parseFloat(region.style.height)).toBeGreaterThan(SNAP_HEIGHT_VH.peek);
+  it("is clipped by the phone workspace, so the part translated below the visible edge cannot extend the page", () => {
+    // The sheet is a sibling of .ops-map, positioned against .ops-workspace;
+    // the tablet rule sets that box to `overflow: visible`, so the phone shell
+    // has to clip it again or the hidden part of the full-height box scrolls.
+    const css = readFileSync(resolve(__dirname, "../tabs/map/operationsMap.css"), "utf8");
+    const phoneWorkspace = ruleBody(css, ".focused-overview .ops-workspace");
+    expect(decl(phoneWorkspace, "position")).toBe("relative");
+    expect(decl(phoneWorkspace, "overflow")).toBe("hidden");
+  });
+
+  it("transitions transform, not height, when settling on a snap point", () => {
+    render(<Harness initial="half" />);
+    const region = screen.getByLabelText("Trips to check");
+    expect(region.style.transition).toMatch(/transform/);
+    expect(region.style.transition).not.toMatch(/height/);
   });
 
   it("treats a real flick as a fling, advancing a snap point past the nearest one", () => {
