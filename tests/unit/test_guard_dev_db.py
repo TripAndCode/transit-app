@@ -71,6 +71,18 @@ BLOCKED = [
     # when the command only searches text. Blocking is the cheap direction:
     # this costs a rephrase, the alternative costs the dataset.
     pytest.param("grep -R 'transit-ch' docs/ | grep INSERT", id="mention-without-intent-still-blocks"),
+    # Volume teardown removes the dataset without a SQL keyword in sight.
+    pytest.param("docker compose down -v", id="compose-down-volumes"),
+    pytest.param("docker compose down --volumes --remove-orphans", id="compose-down-volumes-long"),
+    pytest.param("docker volume rm transit-app_transit_pgdata", id="volume-rm-project-prefixed"),
+    pytest.param("docker volume rm transit_chdata", id="volume-rm-bare"),
+    pytest.param("docker volume prune -f", id="volume-prune"),
+    pytest.param("docker system prune --volumes -f", id="system-prune-volumes"),
+    pytest.param("docker rm -v transit-pg", id="rm-legacy-container-with-volume"),
+    pytest.param("docker rm -fv transit-app-db-1", id="rm-derived-container-clustered-flags"),
+    # The shell's DATABASE_URL is the dev database unless the command says otherwise.
+    pytest.param('psql "$DATABASE_URL" -c "DELETE FROM agencies WHERE agency_id = 9"', id="database-url-write"),
+    pytest.param('psql "${DATABASE_URL}" -f fix.sql', id="database-url-braced-script"),
 ]
 
 ALLOWED = [
@@ -100,6 +112,15 @@ ALLOWED = [
     ),
     pytest.param("clickhouse-client --host transit-ch --query 'SELECT count() FROM updates'", id="ch-read"),
     pytest.param("curl -s 'http://localhost:8124/' --data-binary 'INSERT INTO updates VALUES (1)'", id="test-ch"),
+    pytest.param("docker compose down", id="compose-down-keeps-volumes"),
+    pytest.param("docker rm -f -v transit-test-pg transit-test-ch", id="test-containers-with-volume"),
+    pytest.param("docker volume rm transit-test-pgdata", id="volume-rm-throwaway"),
+    pytest.param('psql "$DATABASE_URL" -c "SELECT count(*) FROM agencies"', id="database-url-read"),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        'psql "${DATABASE_URL}" -c "DROP TABLE x"',
+        id="database-url-braced-pointed-at-test-db",
+    ),
 ]
 
 
@@ -118,6 +139,20 @@ def test_safe_command_is_allowed(command):
     assert _run(command) == 0, f"guard blocked a safe command: {command}"
 
 
-def test_malformed_input_does_not_block():
-    """A payload the hook can't parse must not wedge every Bash call."""
-    assert subprocess.run([str(HOOK)], input="not json", text=True, capture_output=True).returncode == 0
+def test_malformed_input_is_refused():
+    """A payload the hook cannot parse is a hook that cannot see the command.
+    Waving it through would make a broken harness the one way past the guard;
+    refusing costs one visible failure."""
+    assert subprocess.run([str(HOOK)], input="not json", text=True, capture_output=True).returncode == 2
+
+
+def test_db_reset_is_no_longer_a_recognised_target():
+    """The Makefile has no `db-reset`; the guard must not advertise a target it cannot gate."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("guard_dev_db", HOOK.with_name("guard_dev_db.py"))
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    assert "db-reset" not in module.DESTRUCTIVE_TARGETS
+    assert "db-reset" not in module.WRITE.pattern

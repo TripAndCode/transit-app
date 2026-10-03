@@ -85,10 +85,12 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   `hooks/guard-dev-db.sh` (a thin wrapper around `hooks/guard_dev_db.py`) is a
   partial net, not a guarantee: it shlex-tokenizes the command and blocks only
   when a dev-store target — a dev Postgres/ClickHouse port or container name,
-  `docker compose exec`/`run` against the dev service, or a `migrate-down`/
-  `db-reset` Make target with no throwaway port in the same command — appears
-  alongside a write/DDL keyword, or a `psql -f`/`--file` invocation whose
-  script contents it can't read. It has no visibility into a script's
+  `docker compose exec`/`run` against the dev service, a `$DATABASE_URL`
+  expansion, or a `migrate-down` Make target with no throwaway port in the same
+  command — appears alongside a write/DDL keyword, or a `psql -f`/`--file`
+  invocation whose script contents it can't read. A volume teardown
+  (`compose down -v`, `docker volume rm/prune` of a `transit_*data` volume,
+  `docker rm -v` of a dev container) is blocked on its own. It has no visibility into a script's
   contents beyond that, or into a `DATABASE_URL` set outside the command line
   it sees, and it deliberately still blocks prose that merely names a dev
   store next to a write-sounding word — a false block only costs a rephrase,
