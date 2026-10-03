@@ -1,0 +1,32 @@
+.heat-surface-card { background: var(--bg-surface); border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.heat-surface__head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.heat-surface__title { margin: 0; font-size: var(--text-sm); }
+.heat-surface__seg { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: 999px; overflow: hidden; background: var(--bg-surface); }
+.heat-surface__seg button { border: 0; background: transparent; padding: 5px 10px; font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+.heat-surface__seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); }
+.heat-surface__legend { display: flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--text-secondary); }
+.heat-surface__ramp { display: inline-grid; grid-auto-flow: column; gap: 2px; }
+.heat-surface__ramp i { width: 16px; height: 8px; border-radius: 2px; display: block; }
+.heat-surface__worst { margin: 0 0 10px; color: var(--text-secondary); font-size: var(--text-sm); }
+.heat-surface { display: grid; grid-template-columns: 36px repeat(24, minmax(0, 1fr)); gap: 3px; }
+/* Rows exist for the grid's accessibility tree only; the cells lay out on
+   .heat-surface's own 25 columns. */
+.heat-surface__row { display: contents; }
+.heat-surface__lab { font-size: var(--text-xs); color: var(--text-tertiary); display: flex; align-items: center; }
+.heat-surface__hl { font-size: var(--text-xs); color: var(--text-tertiary); text-align: center; }
+/* --c and --ring are set per cell. Colour and inset depth morph on the
+   data-change token; the dim is feedback and rides --dur-1. Nothing here
+   changes a size: the ring is an inset shadow, hover is an outline. */
+.heat-surface__cell {
+  aspect-ratio: 1.4;
+  border-radius: 4px;
+  background: var(--c, var(--none));
+  box-shadow: inset 0 0 0 var(--ring, 0px) color-mix(in srgb, var(--text-primary) 12%, transparent);
+  transition: background-color var(--dur-3) var(--ease-out), box-shadow var(--dur-3) var(--ease-out), opacity var(--dur-1) var(--ease-out);
+}
+.heat-surface__cell:hover,
+.heat-surface__cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.heat-surface__readout { margin: 10px 0 0; min-height: 1.6em; font-size: var(--text-sm); color: var(--text-secondary); }
+.heat-surface__empty { color: var(--text-tertiary); font-size: var(--text-sm); }
+/* BP.sm */
+@media (max-width: 640px) { .heat-surface__hl:nth-child(odd) { visibility: hidden; } }
