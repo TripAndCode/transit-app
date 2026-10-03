@@ -282,3 +282,53 @@ describe("MapTab relief layer", () => {
     expect(renderAndOpenPanel("?relief=1")).toHaveAttribute("aria-pressed", "true");
   });
 });
+
+describe("MapTab segment highlight and ambient light chips", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    stubReducedMotion();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  function openPanel() {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    renderMap("1");
+    fireEvent.click(screen.getByRole("button", { name: "Map style" }));
+  }
+
+  it("both start on, and each toggle persists under its own key", () => {
+    openPanel();
+    const pearl = screen.getByRole("button", { name: /Segment highlight/ });
+    const light = screen.getByRole("button", { name: /Ambient light/ });
+    expect(pearl).toHaveAttribute("aria-pressed", "true");
+    expect(light).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(pearl);
+    expect(screen.getByRole("button", { name: /Segment highlight/ })).toHaveAttribute("aria-pressed", "false");
+    expect(localStorage.getItem("transit.mapPearl")).toBe("0");
+    expect(localStorage.getItem("transit.mapLight")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Ambient light/ }));
+    expect(screen.getByRole("button", { name: /Ambient light/ })).toHaveAttribute("aria-pressed", "false");
+    expect(localStorage.getItem("transit.mapLight")).toBe("0");
+  });
+
+  it("restores a stored off preference", () => {
+    localStorage.setItem("transit.mapPearl", "0");
+    localStorage.setItem("transit.mapLight", "0");
+    openPanel();
+    expect(screen.getByRole("button", { name: /Segment highlight/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: /Ambient light/ })).toHaveAttribute("aria-pressed", "false");
+  });
+});
