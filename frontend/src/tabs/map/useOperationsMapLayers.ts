@@ -20,7 +20,7 @@ export const LIVE_TRIPS_SOURCE = "live-trips";
 export const LIVE_TRIPS_LAYER = "live-trip-markers";
 export const LIVE_TRIPS_LABEL_LAYER = "live-trip-labels";
 export const LIVE_TRIPS_CLUSTER_LAYER = "live-trip-clusters";
-const LIVE_TRIPS_CLUSTER_COUNT_LAYER = "live-trip-cluster-count";
+export const LIVE_TRIPS_CLUSTER_COUNT_LAYER = "live-trip-cluster-count";
 const ACTIVE_ROUTE_SOURCE = "active-route";
 const ACTIVE_ROUTE_CASING_LAYER = "active-route-casing";
 const ACTIVE_ROUTE_LAYER = "active-route-line";
@@ -225,6 +225,7 @@ export function useOperationsMapLayers(
   selectedTripId: string | null = null,
   progress?: LiveTripProgressResponse,
   stopProfile?: RouteStopProfileRow[],
+  restPitch = 0,
 ): void {
   const fittedAgencyRef = useRef<number | null>(null);
   const theme = useThemeSignal();
@@ -315,11 +316,11 @@ export function useOperationsMapLayers(
       if (agencyId != null && fittedAgencyRef.current !== agencyId && features.length > 0) {
         const bounds = new maplibregl.LngLatBounds();
         for (const feature of features) bounds.extend(feature.geometry.coordinates as [number, number]);
-        revealAgency(map, bounds);
+        revealAgency(map, bounds, restPitch);
         fittedAgencyRef.current = agencyId;
       }
     });
-  }, [agencyId, live, mapRef, selectedRoute, selectedTripId, styleEpoch, theme]);
+  }, [agencyId, live, mapRef, restPitch, selectedRoute, selectedTripId, styleEpoch, theme]);
 
   useEffect(() => {
     const map = mapRef.current;

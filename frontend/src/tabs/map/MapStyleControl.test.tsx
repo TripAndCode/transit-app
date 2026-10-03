@@ -82,6 +82,16 @@ describe("MapStyleControl", () => {
     fireOnChange(slider, "45");
     expect(onDimChange).toHaveBeenCalledWith(0.45);
   });
+
+  it("renders layer chips inside the panel, pressed when on, and toggles through the callback", async () => {
+    const onToggle = vi.fn();
+    renderControl({ layers: [{ id: "relief", label: "Relief", hint: "Column height = average delay", on: true, onToggle, icon: <span /> }] });
+    await userEvent.click(screen.getByRole("button", { name: /Map style|Layers/ }));
+    const chip = screen.getByRole("button", { name: /Relief/ });
+    expect(chip).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(chip);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
 });
 
 // userEvent has no direct "set range value" helper that fires React's onChange

@@ -5,10 +5,10 @@ import { prefersReducedMotion } from "../../utils/motion";
  * Every camera move on the operations map, in one place.
  *
  * A map that flies, eases and jumps with a different duration and a different
- * curve per call site reads as four unrelated maps. These four moves are the
- * whole vocabulary: arrive at an agency, frame a route, step in on one trip,
- * pull back to everything. They share one easing and two durations so the
- * camera has a recognisable hand.
+ * curve per call site reads as unrelated maps. These moves are the whole
+ * vocabulary: arrive at an agency, frame a route, step in on one trip, pull
+ * back to everything, and tilt for the relief layer. They share one easing
+ * and two durations so the camera has a recognisable hand.
  */
 
 /** Mirrors `--dur-3` and `--dur-4` in global.css. Duplicated as numbers
@@ -37,6 +37,11 @@ const FIT_ALL_MAX_ZOOM = 14;
 /** Closest a trip inspection ever pulls the camera back to. A trip the
  *  operator is already zoomed past must not be "helpfully" zoomed out. */
 const INSPECT_ZOOM = 13;
+
+/** The relief layer's tilt. The one pitched resting state in the app: steep
+ *  enough that a column has a visible face, shallow enough that the basemap
+ *  still reads as a map rather than a horizon. Never exceeded. */
+export const RELIEF_PITCH = 35;
 
 function bezier(t: number, p1: number, p2: number): number {
   const u = 1 - t;
@@ -73,11 +78,16 @@ function timing(duration: number): { duration: number; easing?: (progress: numbe
 
 /**
  * First arrival at an agency: the map tilts slightly, sits a little wider than
- * the final frame, and settles flat over `MOTION.reveal`. This is the only
- * pitched move in the app — it happens once per agency, to say "here is the
- * whole network" before anything is read off the map.
+ * the final frame, and settles over `MOTION.reveal`. Apart from the relief
+ * tilt the operator asks for, this is the only pitched move in the app — it
+ * happens once per agency, to say "here is the whole network" before anything
+ * is read off the map.
+ *
+ * `restPitch` is where the camera settles — 0 unless the relief layer is on,
+ * in which case flattening the map would flatten the columns the operator
+ * just turned on.
  */
-export function revealAgency(map: MLMap, bounds: LngLatBoundsLike): void {
+export function revealAgency(map: MLMap, bounds: LngLatBoundsLike, restPitch = 0): void {
   const camera = map.cameraForBounds(bounds, { padding: REVEAL_PADDING, maxZoom: REVEAL_MAX_ZOOM });
   const center = camera?.center;
   const zoom = camera?.zoom;
@@ -86,11 +96,11 @@ export function revealAgency(map: MLMap, bounds: LngLatBoundsLike): void {
     return;
   }
   if (prefersReducedMotion()) {
-    map.jumpTo({ center, zoom, pitch: 0 });
+    map.jumpTo({ center, zoom, pitch: restPitch });
     return;
   }
   map.jumpTo({ center, zoom: Math.max(zoom - REVEAL_BACKOFF, 0), pitch: REVEAL_PITCH });
-  map.flyTo({ center, zoom, pitch: 0, duration: MOTION.reveal, easing: easeOutCamera });
+  map.flyTo({ center, zoom, pitch: restPitch, duration: MOTION.reveal, easing: easeOutCamera });
 }
 
 /** Frames one route's shape. */
@@ -111,4 +121,10 @@ export function inspectTrip(map: MLMap, lngLat: LngLatLike, zoom?: number): void
     zoom: zoom ?? Math.max(map.getZoom(), INSPECT_ZOOM),
     ...timing(MOTION.move),
   });
+}
+
+/** Tilts for the relief layer, or lays the map flat again when it is turned
+ *  off. The only way the relief may move the camera. */
+export function reliefPitch(map: MLMap, on: boolean): void {
+  map.easeTo({ pitch: on ? RELIEF_PITCH : 0, ...timing(MOTION.move) });
 }

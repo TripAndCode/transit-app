@@ -7,6 +7,7 @@ import * as useRouteNamesModule from "../api/useRouteNames";
 import { MapTab } from "./MapTab";
 import { stubReducedMotion } from "../test/reducedMotion";
 import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse } from "../api/types";
+import { MockMap } from "../test/maplibreMock";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
 
@@ -204,5 +205,76 @@ describe("MapTab delayed-trips cap", () => {
 
     fireEvent.click(screen.getByText("refilter"));
     expect(screen.getByText(remainder)).toBeInTheDocument();
+  });
+});
+
+describe("MapTab relief layer", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  /** Reduced motion always (so camera moves are instant cuts); `phone`
+   *  additionally matches the mobile breakpoint query. */
+  function stubViewport(phone: boolean) {
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query.includes("prefers-reduced-motion") || (phone && query.includes("max-width")),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList);
+  }
+
+  function renderAndOpenPanel(search = "") {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    renderMap("1", search);
+    fireEvent.click(screen.getByRole("button", { name: "Map style" }));
+    return screen.getByRole("button", { name: /Relief/ });
+  }
+
+  function pitches(easeTo: { mock: { calls: unknown[][] } }) {
+    return easeTo.mock.calls.map(([options]) => (options as { pitch?: number }).pitch);
+  }
+
+  it("starts on at desktop width, tilts through the camera module, and persists a switch-off", () => {
+    stubViewport(false);
+    const easeTo = vi.spyOn(MockMap.prototype, "easeTo");
+    const chip = renderAndOpenPanel();
+    expect(chip).toHaveAttribute("aria-pressed", "true");
+    expect(pitches(easeTo)).toEqual([35]);
+
+    fireEvent.click(chip);
+    expect(screen.getByRole("button", { name: /Relief/ })).toHaveAttribute("aria-pressed", "false");
+    expect(localStorage.getItem("transit.mapRelief")).toBe("0");
+    expect(pitches(easeTo)).toEqual([35, 0]);
+  });
+
+  it("starts off on a phone and never tilts the map unasked", () => {
+    stubViewport(true);
+    const easeTo = vi.spyOn(MockMap.prototype, "easeTo");
+    const chip = renderAndOpenPanel();
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+    expect(easeTo).not.toHaveBeenCalled();
+  });
+
+  it("lets the URL override the stored preference", () => {
+    stubViewport(false);
+    localStorage.setItem("transit.mapRelief", "1");
+    expect(renderAndOpenPanel("?relief=0")).toHaveAttribute("aria-pressed", "false");
   });
 });

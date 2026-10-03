@@ -49,7 +49,11 @@ import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
 import { useCappedList } from "../hooks/useCappedList";
-import { fitAll, focusRoute as frameRoute, inspectTrip } from "./map/cameraChoreography";
+import { fitAll, focusRoute as frameRoute, inspectTrip, RELIEF_PITCH, reliefPitch } from "./map/cameraChoreography";
+import { useReliefLayer } from "./map/useReliefLayer";
+import { reliefPointsFromFrame, reliefPointsFromLive } from "./map/reliefLayer";
+import { RELIEF_PREF_KEY, useBoolPref } from "./map/mapLayerPrefs";
+import { CROSS_FADE_MS } from "./map/playbackFrames";
 import { InspectCard } from "./map/InspectCard";
 
 const DELAYED_TRIPS_CAP = 200;
@@ -164,6 +168,18 @@ export function MapTab() {
   const [playbackOn, setPlaybackOn] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+  // The relief follows the style's URL-over-localStorage rule. Off by
+  // default on a phone: a tilted map with columns needs room the screen does
+  // not have, and the chip is one tap away.
+  const [persistedRelief, setPersistedRelief] = useBoolPref(RELIEF_PREF_KEY, !isMobile);
+  const [reliefParam, setReliefParam] = useUrlState("relief", persistedRelief ? "1" : "0", ["1", "0"] as const);
+  const reliefOn = reliefParam === "1";
+  function setReliefOn(next: boolean) {
+    setPersistedRelief(next);
+    setReliefParam(next ? "1" : "0");
+  }
+  // The map is created flat, so a relief that starts off has nothing to undo.
+  const reliefPitchRef = useRef(false);
   const [sheetSnap, setSheetSnap] = useState<SnapPoint>("peek");
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -393,11 +409,21 @@ export function MapTab() {
     effectiveTrip?.trip_id ?? null,
     progressQuery.data,
     stopProfileQuery.data?.stops,
+    reliefOn ? RELIEF_PITCH : 0,
   );
   // Declared after useOperationsMapLayers: effects run in declaration order,
   // so on a style reload (which wipes every imperatively-added layer) the live
   // layers are re-added before playback hides them again.
   useTimelineLayers(mapRef, styleEpoch, playback.frames, playback.index, playbackOn, playback.steppingOnly, playback.pause);
+  // After useTimelineLayers for the reason useReliefLayer documents.
+  const reliefPoints = playbackOn ? reliefPointsFromFrame(playback.frames[playback.index]) : reliefPointsFromLive(liveRows);
+  useReliefLayer(mapRef, styleEpoch, reliefOn, reliefPoints, playback.steppingOnly ? 0 : CROSS_FADE_MS, playbackOn);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || reliefPitchRef.current === reliefOn) return;
+    reliefPitchRef.current = reliefOn;
+    reliefPitch(map, reliefOn);
+  }, [reliefOn]);
 
   /** Focus a row's route and select that row's own run in one write. */
   function focusTripRow(trip: LiveTrip) {
@@ -605,6 +631,18 @@ export function MapTab() {
               onDimChange={(amount) => { writeMapDimPref(amount); setDimAmountState(amount); }}
               mapRef={mapRef}
               lang={i18n.language}
+              layers={[{
+                id: "relief",
+                label: t("map.style.relief"),
+                hint: t("map.style.relief_hint"),
+                on: reliefOn,
+                onToggle: () => setReliefOn(!reliefOn),
+                icon: (
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <path d="M2 13 6 5l3 5 2-3 3 6Z" />
+                  </svg>
+                ),
+              }]}
               t={t}
             />
           )}

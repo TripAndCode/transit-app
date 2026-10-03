@@ -54,6 +54,10 @@ export class MockMap {
   getZoom() {
     return 11;
   }
+  // The style panel samples the view when it opens, for its thumbnails.
+  getCenter() {
+    return { lng: 140.7474, lat: 40.8246 };
+  }
   isStyleLoaded() {
     return true;
   }

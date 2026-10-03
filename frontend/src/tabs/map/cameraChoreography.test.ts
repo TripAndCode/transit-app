@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Map as MLMap } from "maplibre-gl";
 import {
   MOTION,
+  RELIEF_PITCH,
   easeOutCamera,
   fitAll,
   focusRoute,
   inspectTrip,
+  reliefPitch,
   revealAgency,
 } from "./cameraChoreography";
 
@@ -172,5 +174,27 @@ describe("reduced motion", () => {
     const still = fakeMap({ center: [140.75, 40.82], zoom: 12 });
     revealAgency(asMap(still), BOUNDS);
     expect(cameraCalls(still).every((options) => (options.pitch ?? 0) === 0)).toBe(true);
+  });
+});
+
+describe("reliefPitch", () => {
+  it("tilts to 35° when the relief turns on and back flat when it turns off, over the move duration", () => {
+    const map = fakeMap();
+    reliefPitch(asMap(map), true);
+    expect(map.easeTo).toHaveBeenCalledWith(expect.objectContaining({ pitch: RELIEF_PITCH, duration: MOTION.move, easing: easeOutCamera }));
+    reliefPitch(asMap(map), false);
+    expect(map.easeTo).toHaveBeenLastCalledWith(expect.objectContaining({ pitch: 0, duration: MOTION.move }));
+    expect(RELIEF_PITCH).toBeLessThanOrEqual(35);
+  });
+  it("cuts under reduced motion", () => {
+    setReducedMotion(true);
+    const map = fakeMap();
+    reliefPitch(asMap(map), true);
+    expect(map.easeTo).toHaveBeenCalledWith({ pitch: RELIEF_PITCH, duration: 0 });
+  });
+  it("revealAgency settles on the rest pitch the caller names, so a reveal cannot flatten an active relief", () => {
+    const map = fakeMap({ center: [140.75, 40.82], zoom: 12 });
+    revealAgency(asMap(map), BOUNDS, RELIEF_PITCH);
+    expect(map.flyTo.mock.calls[0][0]).toMatchObject({ pitch: RELIEF_PITCH });
   });
 });
