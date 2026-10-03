@@ -1,6 +1,6 @@
 """Tests for pipeline.db.build_prediction_accuracy_ch_sql.
 
-Mirrors tests/unit/test_db_dedup_ch.py's split: a pure string-shape test that
+Mirrors tests/clickhouse/test_db_dedup_ch.py's split: a pure string-shape test that
 runs everywhere, plus a ClickHouse-integration test gated behind
 RUN_CH_INTEGRATION=1 (see `make ch-test` / transit-app-gotchas)."""
 
