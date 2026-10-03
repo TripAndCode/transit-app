@@ -264,6 +264,7 @@
       "feed_status_ok": "正常稼働中",
       "feed_status_stale": "データ遅延あり",
       "feed_status_updated": "最終更新 {{when}}",
+      "feed_live": "直近2分以内に観測",
       "sparkline_baseline": "期間平均 {{value}}分"
     },
     "story": {

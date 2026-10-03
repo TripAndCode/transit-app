@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
@@ -9,6 +10,8 @@ import { periodMean } from "./periodMean";
 import { storySentence } from "./overview/storySentence";
 import { STALE_THRESHOLD_HOURS } from "./DataStalenessBanner";
 import { relativeTime } from "../utils/relativeTime";
+import { DayPulseRibbon } from "./overview/DayPulseRibbon";
+import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
 
 type Props = {
   headline: OverviewHeadline;
@@ -31,6 +34,17 @@ function relativeAgeHours(iso: string): number {
   const captured = new Date(iso).getTime();
   if (!Number.isFinite(captured)) return NaN;
   return (Date.now() - captured) / (1000 * 60 * 60);
+}
+
+// Hoisted for the same react-hooks/purity reason as relativeAgeHours.
+function breathingNow(iso: string): boolean {
+  return isBreathing(iso, Date.now());
+}
+
+// How long the observation at `iso` has left inside the breath window; not
+// positive once it has closed (or for an unparseable timestamp, as NaN).
+function breathLeftMs(iso: string): number {
+  return BREATH_WINDOW_MS - (Date.now() - new Date(iso).getTime());
 }
 
 export function OverviewHeroRow({
@@ -61,6 +75,20 @@ export function OverviewHeroRow({
     }
   }
 
+  // The dot breathes while the latest observation is under two minutes old.
+  // Nothing refetches this summary on its own, so the window's close is
+  // scheduled here: the timer records which observation it closed for, and
+  // a newer observation opens a fresh window.
+  const [breathClosedFor, setBreathClosedFor] = useState<string | null>(null);
+  const breathing = captured != null && breathClosedFor !== captured && breathingNow(captured);
+  useEffect(() => {
+    if (!captured) return;
+    const left = breathLeftMs(captured);
+    if (!(left > 0)) return;
+    const id = window.setTimeout(() => setBreathClosedFor(captured), left);
+    return () => window.clearTimeout(id);
+  }, [captured]);
+
   // The sparkline scales to its own min..max, so it is anchored on the period
   // mean rather than 0: the absolute figure is already shown beside it, and a
   // 0 axis would flatten the day-to-day variation the sparkline exists to show.
@@ -84,6 +112,7 @@ export function OverviewHeroRow({
 
   return (
     <div className="ov-hero">
+      {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
       <div className="ov-hero-figure">
         <InlineSparkline
           points={sparklinePoints}
@@ -106,7 +135,7 @@ export function OverviewHeroRow({
           </div>
         )}
       </div>
-      <div>
+      <div className="ov-hero-text">
         {/* A div, not a <p>: InsightHint's root is a div, and a div is not
             valid phrasing content inside a <p>. */}
         <div className="ov-hero-story">
@@ -118,16 +147,24 @@ export function OverviewHeroRow({
         </div>
         <div className="ov-hero-sub">
           <div className="ov-hero-sub-item">
-            <span className="ov-hero-sub-value">
+            <span className="ov-hero-sub-value num">
               {t("overview.hero_row.delayed_count_value", { count: delayedCountDisplay, total: totalRoutes })}
             </span>
             {t("overview.hero_row.delayed_count_label")}
           </div>
           <div className="ov-hero-sub-item">
             <span className="ov-hero-sub-value">
+              <i
+                className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${feedIsStale ? " ov-fresh-dot--stale" : ""}`}
+                aria-hidden="true"
+              />
               {t(feedIsStale ? "overview.hero_row.feed_status_stale" : "overview.hero_row.feed_status_ok")}
             </span>
-            {ageLabel ? t("overview.hero_row.feed_status_updated", { when: ageLabel }) : t("overview.hero_row.feed_status_label")}
+            {breathing
+              ? t("overview.hero_row.feed_live")
+              : ageLabel
+                ? t("overview.hero_row.feed_status_updated", { when: ageLabel })
+                : t("overview.hero_row.feed_status_label")}
           </div>
         </div>
       </div>

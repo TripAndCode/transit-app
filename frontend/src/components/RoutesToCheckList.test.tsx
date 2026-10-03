@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -6,6 +6,7 @@ import { RoutesToCheckList } from "./RoutesToCheckList";
 import * as scopeModule from "../api/scope";
 import { SCOPE_EXTRAS_NONE } from "../api/scope";
 import type { OverviewTopDelayedRoute } from "../api/types";
+import { stubReducedMotion } from "../test/reducedMotion";
 
 function routes(): OverviewTopDelayedRoute[] {
   return [
@@ -18,15 +19,27 @@ function routes(): OverviewTopDelayedRoute[] {
 // RoutesToCheckList calls useScope (react-router-dom's useSearchParams
 // under the hood), so — matching the existing pattern in
 // RouteForecastSection.test.tsx — every render needs a <MemoryRouter>.
-function renderList(rs: OverviewTopDelayedRoute[]) {
-  return renderWithProviders(
+function route(code: string, avgMin: number): OverviewTopDelayedRoute {
+  return { route_code: code, route_short_name: null, avg_min: avgMin };
+}
+
+function list(rs: OverviewTopDelayedRoute[]) {
+  return (
     <MemoryRouter>
       <RoutesToCheckList routes={rs} />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
+function renderList(rs: OverviewTopDelayedRoute[]) {
+  return renderWithProviders(list(rs));
+}
+
 describe("RoutesToCheckList", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("groups routes into severity bands with a worst-first header, count, and no empty bands", () => {
     renderList(routes());
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
@@ -64,7 +77,26 @@ describe("RoutesToCheckList", () => {
     renderList(routes());
     const bars = document.querySelectorAll(".ov-check-fill");
     expect(bars).toHaveLength(3);
-    expect((bars[0] as HTMLElement).style.width).toBe("100%");
+    expect((bars[0] as HTMLElement).style.getPropertyValue("--w")).toBe("1");
+  });
+
+  it("keys every row for FLIP and scales the bar with a transform, not a width", () => {
+    renderList([route("3", 4.2), route("12", 2.1)]);
+    const rows = screen.getAllByRole("button");
+    expect(rows.map((r) => r.getAttribute("data-flip-key"))).toEqual(["3", "12"]);
+    const fill = rows[0].querySelector<HTMLElement>(".ov-check-fill")!;
+    expect(fill.style.getPropertyValue("--w")).toBe("1");
+    expect(fill.style.width).toBe("");
+    expect(rows[1].querySelector<HTMLElement>(".ov-check-fill")!.style.getPropertyValue("--w")).toBe("0.5");
+  });
+
+  it("prints the figure with the numeric face and travels on change (reduced motion prints)", () => {
+    stubReducedMotion();
+    const { rerender } = renderList([route("3", 4.2)]);
+    const value = screen.getByText("4.2");
+    expect(value.classList.contains("num")).toBe(true);
+    rerender(list([route("3", 3.0)]));
+    expect(screen.getByText("3.0")).toBeInTheDocument();
   });
 
   it("shows the empty-state message when there are no routes", () => {
