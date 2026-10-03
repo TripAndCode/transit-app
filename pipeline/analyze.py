@@ -18,7 +18,8 @@ Aggregation tables produced:
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
-- agg_feed_health      — per-day raw vs implausible-delay counts (data-quality signal)
+- agg_feed_health      — per-day row counts (every row, and those with a delay) and implausible-delay
+  count; doubles as the incremental ledger
 - agg_service_delivered_daily — per-day non-executed trip count (executed-vs-planned rate; static_join agencies only)
 - agg_route_headway    — scheduled-headway median + high-frequency classification + scheduled mean-wait
   per route (static GTFS only)
@@ -165,7 +166,9 @@ _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 # build restricted — and requires that the staleness signal cover what the
 # table reads; see _dates_needing_rebuild for what that signal can and cannot
 # see. Every listed table is keyed by `date`, which is what makes a date-scoped
-# purge able to express "these rows and no others".
+# purge able to express "these rows and no others". Tables reading rows without
+# a dep_delay are covered because the ledger's total_rows counts every row of a
+# date, not only the delay-carrying ones.
 _INCREMENTAL_AGG_TABLES = frozenset(
     {
         "agg_daily_trend",
@@ -176,6 +179,8 @@ _INCREMENTAL_AGG_TABLES = frozenset(
         "agg_route_daily_dwell_run",
         "agg_route_headway_daily",
         "agg_route_stop_daily",
+        "agg_schedule_revision_daily",
+        "agg_service_delivered_daily",
         "agg_stop_daily",
     }
 )
@@ -196,9 +201,17 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # makes, paid today to reproduce a byte-identical result.
 _ALLTIME_AGG_TABLES = frozenset({"agg_route_stats", "agg_route_hour", "agg_route_hour_dow"})
 
+# Aggregates keyed by something other than date whose value spans all of
+# history. They cannot be rebuilt in part, but a run where no row of any date
+# changed would rebuild them to what already stands; the ledger's total_rows
+# is what makes "no row changed" knowable, because these read rows with and
+# without a dep_delay alike.
+_KEYSET_AGG_TABLES = frozenset({"agg_stop_routes"})
+
 # What a run with no changed date may leave standing: a date-scoped table with
-# no date to rebuild, or an all-time table whose whole input is unchanged.
-_NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _ALLTIME_AGG_TABLES
+# no date to rebuild, or an all-time or keyset table whose whole input is
+# unchanged.
+_NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _ALLTIME_AGG_TABLES | _KEYSET_AGG_TABLES
 
 
 # ── Step timing ──────────────────────────────────────────────────────────
@@ -461,23 +474,24 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
     A row's service date is ``toDate(captured_at, 'Asia/Tokyo')``, fixed by the
     observation itself, so a date's aggregates can only go stale when rows land
     in it — and ``agg_feed_health`` already records, per date, how many rows
-    carrying a ``dep_delay`` that date held when it was last built. Comparing
-    that ledger against the same count in ClickHouse names exactly the dates
-    that moved, in both directions: a date the ledger has and ClickHouse no
-    longer does is listed too, so the caller's purge clears aggregate rows
-    whose source is gone.
+    that date held when it was last built. Comparing that ledger against the
+    same counts in ClickHouse names exactly the dates that moved, in both
+    directions: a date the ledger has and ClickHouse no longer does is listed
+    too, so the caller's purge clears aggregate rows whose source is gone.
 
     Deliberately not "the last N days". A collector outage followed by a
     backlog ingest writes rows whose dates are weeks old, and any fixed window
     would leave those aggregates silently wrong. This asks what changed rather
     than when.
 
-    What the signal cannot see bounds who may use it: a row without a
-    ``dep_delay`` is invisible to the count, so an aggregate drawn from those
-    rows could go stale while it stands still. That is why
-    ``agg_service_delivered_daily`` (cancellations and skipped stops) and
-    ``agg_schedule_revision_daily`` (static_version_id) are not in
-    :data:`_INCREMENTAL_AGG_TABLES`.
+    Two counts per date, compared as a pair: ``raw_samples`` (rows carrying
+    a ``dep_delay``) and ``total_rows`` (every row). The second is what lets
+    the aggregates drawn from delay-less rows — cancellations and skipped
+    stops, ``static_version_id``, a stop's route coverage — trust the
+    ledger: an ingest made up entirely of delay-less rows leaves
+    ``raw_samples`` unmoved while changing exactly those tables. A stored row
+    whose ``total_rows`` is NULL predates that column and resolves to a full
+    rebuild, the same way a missing fingerprint does.
 
     The static schedule is the other half of the signal, and the ledger cannot
     see it at all — see :func:`_static_fingerprint`.
@@ -498,8 +512,8 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
             (agency_id,),
         )
         meta = cur.fetchone()
-        cur.execute("SELECT date, raw_samples FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
-        stored = dict(cur.fetchall())
+        cur.execute("SELECT date, raw_samples, total_rows FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
+        stored = {d: (raw, total) for d, raw, total in cur.fetchall()}
     if not stored:
         return None
     # A missing record predates this column, so what the stored aggregates were
@@ -507,21 +521,26 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
     if meta is None or meta[0] is None or meta[0] != static_fingerprint:
         logger.info("  incremental: static schedule changed since the last build")
         return None
+    if any(total is None for _, total in stored.values()):
+        logger.info("  incremental: ledger predates total_rows; rebuilding every date")
+        return None
 
     live = _ch_query(
         "plan: per-date ledger",
         ch_client,
         """
-        SELECT toDate(captured_at, 'Asia/Tokyo') AS date, count() AS raw_samples
+        SELECT toDate(captured_at, 'Asia/Tokyo') AS date,
+               countIf(dep_delay IS NOT NULL) AS raw_samples,
+               count() AS total_rows
         FROM updates
-        WHERE agency_id = {agency_id:UInt16} AND dep_delay IS NOT NULL
+        WHERE agency_id = {agency_id:UInt16}
         GROUP BY date
         """,
         {"agency_id": agency_id},
     )
-    live_counts = {row[0]: row[1] for row in live.result_rows}
+    live_counts = {row[0]: (row[1], row[2]) for row in live.result_rows}
 
-    stale = {d for d, n in live_counts.items() if stored.get(d) != n}
+    stale = {d for d, counts in live_counts.items() if stored.get(d) != counts}
     stale |= {d for d in stored if d not in live_counts}
     return sorted(stale)
 
@@ -1158,27 +1177,36 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             conn,
         )
 
-        # ── agg_feed_health (per-day data-quality signal) ────────────────
-        # Per-day raw observation count and how many were implausible (frozen/
-        # stale TripUpdate spikes, |dep_delay| > MAX_PLAUSIBLE_DELAY_SEC — the same
-        # rows the dedup clamp drops). Persisted (not just logged) so the app can
-        # surface a feed-health banner. Agency-wide — does NOT require static data,
-        # so it runs outside the has_static block. Pure aggregation (no static-table
-        # JOIN), so it queries ClickHouse directly and bulk-loads the small per-day
-        # result into Postgres. toDate(captured_at, 'Asia/Tokyo'), NOT bare
-        # toDate() — same JST-not-UTC reasoning as everywhere else in this
-        # migration (see build_dedup_ch_sql's docstring in pipeline/db.py).
+        # ── agg_feed_health (per-day data-quality signal and rebuild ledger) ──
+        # Per-day raw observation count (raw_samples: rows carrying a
+        # dep_delay), how many of those were implausible (frozen/stale
+        # TripUpdate spikes, |dep_delay| > MAX_PLAUSIBLE_DELAY_SEC — the same
+        # rows the dedup clamp drops), and every row of the date (total_rows).
+        # Persisted (not just logged) so the app can surface a feed-health
+        # banner, and read back by _dates_needing_rebuild as the ledger that
+        # decides which dates the next run rebuilds — which is why total_rows
+        # exists: it lets the ledger see delay-less rows too. A date whose rows
+        # all lack a dep_delay therefore has a row here with raw_samples = 0;
+        # every reader that divides by raw_samples treats zero as "nothing
+        # measurable" (see pipeline/health.py, api/agency_diagnostics.py).
+        # Agency-wide — does NOT require static data, so it runs outside the
+        # has_static block. Pure aggregation (no static-table JOIN), so it
+        # queries ClickHouse directly and bulk-loads the small per-day result
+        # into Postgres. toDate(captured_at, 'Asia/Tokyo'), NOT bare toDate() —
+        # same JST-not-UTC reasoning as everywhere else in this migration (see
+        # build_dedup_ch_sql's docstring in pipeline/db.py).
         _ch_build_and_insert(
             "agg_feed_health",
-            "(agency_id, date, raw_samples, clamp_count)",
+            "(agency_id, date, raw_samples, clamp_count, total_rows)",
             agency_id,
             ch_client,
             """
             SELECT toDate(captured_at, 'Asia/Tokyo') AS date,
-                   count() AS raw_samples,
-                   countIf(abs(dep_delay) > {max_delay:Int32}) AS clamp_count
+                   countIf(dep_delay IS NOT NULL) AS raw_samples,
+                   countIf(abs(dep_delay) > {max_delay:Int32}) AS clamp_count,
+                   count() AS total_rows
             FROM updates
-            WHERE agency_id = {agency_id:UInt16} AND dep_delay IS NOT NULL
+            WHERE agency_id = {agency_id:UInt16}
             """
             + date_where
             + """
@@ -1256,61 +1284,62 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # agency's keys, not a cheap add-on) is the correctness-over-perf
             # trade this table's semantics require.
             #
-            # The same property is why this scan runs on EVERY run, including
-            # one where no date needs rebuilding (see
-            # _NOOP_SKIPPABLE_AGG_TABLES): the ledger that answers "no date
-            # changed" counts only rows carrying a dep_delay, so an ingest made
-            # up entirely of delay-less rows leaves it unmoved while adding
-            # exactly the keys this table exists to keep. It cannot be gated on
-            # a signal that cannot see its own input.
-            with conn.cursor() as cur:
-                cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
-                cur.execute(
-                    "CREATE TEMP TABLE _analyze_raw_keys (route_code text, trip_id text, stop_sequence int) "
-                    "ON COMMIT DROP"
-                )
-                # `query_row_block_stream` (not `query`), same rationale as
-                # _analyze_deduped above: this key set is deliberately LARGER
-                # than _analyze_deduped by design (that's the correctness fix
-                # this block exists for), so buffering the whole thing in
-                # `.query()`'s result_rows would hit the same unbounded-memory
-                # shape that streaming was introduced to eliminate 40 lines
-                # up, just for a bigger set.
-                ch_keys_sql = (
-                    "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
-                    "WHERE agency_id = {agency_id:UInt16}"
-                )
-                with (
-                    _step("agg_stop_routes: ClickHouse key scan + load into TEMP"),
-                    ch_client.query_row_block_stream(ch_keys_sql, parameters={"agency_id": agency_id}) as stream,
-                ):
-                    for block in stream:
-                        if not block:
-                            continue
-                        psycopg2.extras.execute_values(
-                            cur, "INSERT INTO _analyze_raw_keys VALUES %s", block, page_size=10_000
-                        )
-                # The planner sizes a freshly created temp table at a few
-                # thousand rows (reltuples=0) regardless of how many rows it
-                # actually holds, and this table drives the join below against
-                # static_stop_times -- ANALYZE gives the planner real stats to
-                # pick a join strategy from, same as _analyze_deduped gets.
-                with _step("agg_stop_routes: ANALYZE TEMP"):
-                    cur.execute("ANALYZE _analyze_raw_keys")
-                sql = """
-                    INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
-                    SELECT %(agency_id)s, sst.stop_id,
-                           string_agg(DISTINCT k.route_code, ',' ORDER BY k.route_code)
-                    FROM _analyze_raw_keys k
-                    JOIN static_stop_times sst
-                      ON sst.agency_id = %(agency_id)s
-                     AND sst.trip_id = k.trip_id
-                     AND sst.stop_sequence = k.stop_sequence
-                    GROUP BY sst.stop_id
-                """
-                with _step("agg_stop_routes: build+insert"):
-                    cur.execute(sql, p)
-                logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
+            # Skipped only on a run where no date changed at all: the ledger's
+            # total_rows counts delay-less rows too, so "no date changed"
+            # covers this table's whole input (see _KEYSET_AGG_TABLES). A
+            # changed date means a whole rebuild — the value is an all-time
+            # set keyed by stop, which no date-scoped scan can produce.
+            if _nothing_to_rebuild("agg_stop_routes", rebuild_dates):
+                logger.info("  agg_stop_routes: unchanged, not rebuilt")
+            else:
+                with conn.cursor() as cur:
+                    cur.execute("DROP TABLE IF EXISTS _analyze_raw_keys")
+                    cur.execute(
+                        "CREATE TEMP TABLE _analyze_raw_keys (route_code text, trip_id text, stop_sequence int) "
+                        "ON COMMIT DROP"
+                    )
+                    # `query_row_block_stream` (not `query`), same rationale as
+                    # _analyze_deduped above: this key set is deliberately LARGER
+                    # than _analyze_deduped by design (that's the correctness fix
+                    # this block exists for), so buffering the whole thing in
+                    # `.query()`'s result_rows would hit the same unbounded-memory
+                    # shape that streaming was introduced to eliminate 40 lines
+                    # up, just for a bigger set.
+                    ch_keys_sql = (
+                        "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
+                        "WHERE agency_id = {agency_id:UInt16}"
+                    )
+                    with (
+                        _step("agg_stop_routes: ClickHouse key scan + load into TEMP"),
+                        ch_client.query_row_block_stream(ch_keys_sql, parameters={"agency_id": agency_id}) as stream,
+                    ):
+                        for block in stream:
+                            if not block:
+                                continue
+                            psycopg2.extras.execute_values(
+                                cur, "INSERT INTO _analyze_raw_keys VALUES %s", block, page_size=10_000
+                            )
+                    # The planner sizes a freshly created temp table at a few
+                    # thousand rows (reltuples=0) regardless of how many rows it
+                    # actually holds, and this table drives the join below against
+                    # static_stop_times -- ANALYZE gives the planner real stats to
+                    # pick a join strategy from, same as _analyze_deduped gets.
+                    with _step("agg_stop_routes: ANALYZE TEMP"):
+                        cur.execute("ANALYZE _analyze_raw_keys")
+                    sql = """
+                        INSERT INTO agg_stop_routes (agency_id, stop_id, route_codes)
+                        SELECT %(agency_id)s, sst.stop_id,
+                               string_agg(DISTINCT k.route_code, ',' ORDER BY k.route_code)
+                        FROM _analyze_raw_keys k
+                        JOIN static_stop_times sst
+                          ON sst.agency_id = %(agency_id)s
+                         AND sst.trip_id = k.trip_id
+                         AND sst.stop_sequence = k.stop_sequence
+                        GROUP BY sst.stop_id
+                    """
+                    with _step("agg_stop_routes: build+insert"):
+                        cur.execute(sql, p)
+                    logger.info(f"  agg_stop_routes: {cur.rowcount} rows")
 
             # ── agg_route_stop_daily (per-route-per-stop; powers route-filtered heatmap) ──
             # Same deduped source as agg_stop_daily, plus route_code in the grain.
@@ -1510,12 +1539,13 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # confirmed-populating feeds always send schedule_relationship_
             # trip on every observation (never NULL) -- this is defensive
             # symmetry, not dead code, since nothing prevents a future feed
-            # from sending it more sparingly. No date range filter -- analyze()
-            # always covers this agency's full history, same as agg_feed_health
-            # and the dedup materialization above. A day with zero non-executed
-            # trips has no matching row in the inner UNION, so it emits no row
-            # here at all -- the read path sums with a zero default rather than
-            # assuming row-per-day density.
+            # from sending it more sparingly. Date-scoped like every
+            # incremental table: both subqueries carry date_where, so a changed
+            # day is recomputed from all of that day's rows and no other day is
+            # touched. A day with zero non-executed trips has no matching row
+            # in the inner UNION, so it emits no row here at all -- the read
+            # path sums with a zero default rather than assuming row-per-day
+            # density.
             _ch_build_and_insert(
                 "agg_service_delivered_daily",
                 "(agency_id, date, non_executed_trips)",
@@ -1526,20 +1556,25 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     SELECT svc_date, trip_id FROM (
                         SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}
+                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
+                + date_where
+                + """
                         GROUP BY svc_date, trip_id
                     ) WHERE trip_rel = 3
                     UNION DISTINCT
                     SELECT svc_date, trip_id FROM (
                         SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_stop, -1), (captured_at, file_name)) AS stop_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}
+                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
+                + date_where
+                + """
                         GROUP BY svc_date, trip_id, stop_sequence
                     ) WHERE stop_rel = 1
                 ) GROUP BY svc_date
                 """,
-                {"agency_id": agency_id},
+                {**date_params},
                 conn,
+                rebuild_dates,
             )
         else:
             logger.info("  agg_service_delivered_daily: 0 rows (ingest_strategy != static_join)")
@@ -1573,14 +1608,17 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 SELECT toDate(captured_at, 'Asia/Tokyo') AS svc_date,
                        static_version_id AS version,
                        count() AS cnt
-                FROM updates WHERE agency_id = {agency_id:UInt16}
+                FROM updates WHERE agency_id = {agency_id:UInt16}"""
+            + date_where
+            + """
                 GROUP BY svc_date, version
             )
             GROUP BY svc_date
             HAVING static_version_id IS NOT NULL
             """,
-            {"agency_id": agency_id},
+            {**date_params},
             conn,
+            rebuild_dates,
         )
 
         # ── agg_route_daily_dwell_run (per-day dwell/running-time distribution) ──

@@ -40,11 +40,11 @@ class _EmptyStream:
 class FakeClickHouse:
     def __init__(self, ledger):
         self._ledger = ledger
-        self.queries: list[str] = []
+        self.queries: list[tuple[str, dict]] = []
         self.streams: list[str] = []
 
     def query(self, sql, parameters=None):
-        self.queries.append(sql)
+        self.queries.append((sql, parameters or {}))
         # The per-date ledger, not agg_feed_health's own build — the two read
         # the same rows and differ only in what they project.
         if "raw_samples" in sql and "clamp_count" not in sql:
@@ -63,6 +63,14 @@ class FakeClickHouse:
     @property
     def stop_routes_scans(self) -> list[str]:
         return [s for s in self.streams if "SELECT DISTINCT route_code" in s]
+
+    @property
+    def service_delivered_builds(self) -> list[tuple[str, dict]]:
+        return [q for q in self.queries if "schedule_relationship_trip" in q[0]]
+
+    @property
+    def schedule_revision_builds(self) -> list[tuple[str, dict]]:
+        return [q for q in self.queries if "static_version_id AS version" in q[0]]
 
 
 class FakeCursor:
@@ -95,9 +103,12 @@ class FakeCursor:
 class FakeConn:
     """Answers only the probes `analyze` makes; every builder returns no rows."""
 
-    def __init__(self, fingerprint):
+    def __init__(self, *, ledger_rows, ingest_strategy=None, has_static=False):
         self.executed: list[str] = []
-        self._fingerprint = fingerprint
+        self._fingerprint: str | None = None
+        self._ledger_rows = ledger_rows
+        self._ingest_strategy = ingest_strategy
+        self._has_static = has_static
 
     def cursor(self):
         return FakeCursor(self)
@@ -110,35 +121,54 @@ class FakeConn:
 
     def respond(self, sql):
         if "FROM static_stops" in sql:
-            return None, []
+            return ((1,) if self._has_static else None), []
+        if "SELECT count(*), coalesce(sum(" in sql:
+            return (0, 0), []
         if "static_fingerprint FROM agg_meta" in sql:
             return (self._fingerprint,), []
-        if "SELECT date, raw_samples FROM agg_feed_health" in sql:
-            return None, [(LEDGER_DATE, LEDGER_SAMPLES)]
+        if "SELECT date, raw_samples, total_rows FROM agg_feed_health" in sql:
+            return None, self._ledger_rows
         if "SUM(clamp_count)" in sql:
             return (0,), []
         if "ingest_strategy FROM agencies" in sql:
-            return None, []
+            return ((self._ingest_strategy,) if self._ingest_strategy else None), []
         return None, []
 
 
-def _run(ledger):
-    """Run `analyze` for an agency with no static schedule, returning the fakes."""
-    fingerprint = analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False)
-    conn = FakeConn(fingerprint)
+LEDGER_TOTAL = 50  # 41 rows with a dep_delay + 9 without
+
+
+def _run(ledger, *, stored=None, ingest_strategy=None, has_static=False):
+    """Run `analyze`, returning the fakes.
+
+    *ledger* is what ClickHouse answers (date, raw_samples, total_rows);
+    *stored* is what agg_feed_health holds, defaulting to the same rows.
+    *has_static* gives the agency a (row-less) static schedule, which the
+    builders joining it — agg_stop_routes among them — need in order to run.
+    """
+    conn = FakeConn(
+        ledger_rows=stored if stored is not None else ledger,
+        ingest_strategy=ingest_strategy,
+        has_static=has_static,
+    )
+    conn._fingerprint = analyze_mod._static_fingerprint(AGENCY_ID, conn, has_static=has_static)
     ch = FakeClickHouse(ledger)
     analyze(AGENCY_ID, conn, ch)
     return conn, ch
 
 
-def _noop_run():
+def _noop_run(**kw):
     """A run where the ledger already matches ClickHouse: no date needs rebuilding."""
-    return _run([(LEDGER_DATE, LEDGER_SAMPLES)])
+    return _run([(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)], **kw)
 
 
-def _changed_run():
+def _changed_run(**kw):
     """A run where one date gained rows since the last build."""
-    return _run([(LEDGER_DATE, LEDGER_SAMPLES + 1)])
+    return _run(
+        [(LEDGER_DATE, LEDGER_SAMPLES + 1, LEDGER_TOTAL + 1)],
+        stored=[(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)],
+        **kw,
+    )
 
 
 # ── The all-time slice and the aggregates built from it ──────────────────
@@ -178,17 +208,94 @@ def test_a_run_with_a_changed_date_purges_the_alltime_aggregate_whole(table):
     assert [s for s in conn.executed if f"DELETE FROM {table} WHERE agency_id" in s]
 
 
-def test_agg_stop_routes_is_not_skippable_on_a_noop_run():
-    """It is the one aggregate the ledger cannot speak for.
+# ── The scans the ledger now speaks for ───────────────────────────────────
 
-    Its key scan reads `updates` with no `dep_delay` filter — deliberately, so
-    a stop keeps its route coverage even where every observation lacked a
-    usable delay. The ledger counts only rows WITH a `dep_delay`
-    (`agg_feed_health.raw_samples`), so an ingest consisting entirely of
-    delay-less rows leaves it unmoved while genuinely changing this table.
-    Listing this table as skippable would drop those keys silently.
-    """
-    assert "agg_stop_routes" not in analyze_mod._NOOP_SKIPPABLE_AGG_TABLES
+
+def test_a_noop_run_does_not_scan_the_stop_route_keys():
+    """The key scan reads every row the agency has, with no dep_delay filter.
+    It can be skipped only because total_rows counts those same rows."""
+    _, ch = _noop_run(has_static=True)
+    assert ch.stop_routes_scans == []
+
+
+def test_a_run_with_a_changed_date_scans_the_stop_route_keys_whole():
+    _, ch = _changed_run(has_static=True)
+    (scan,) = ch.stop_routes_scans
+    assert "rebuild_dates" not in scan
+
+
+def test_agg_stop_routes_is_skippable_but_never_date_scoped():
+    """Keyed by stop, valued over all of history: a no-change run may leave
+    it standing, but a changed date can only mean a whole rebuild."""
+    assert "agg_stop_routes" in analyze_mod._NOOP_SKIPPABLE_AGG_TABLES
+    assert "agg_stop_routes" not in analyze_mod._INCREMENTAL_AGG_TABLES
+
+
+def test_a_noop_run_neither_purges_nor_rebuilds_agg_stop_routes():
+    conn, _ = _noop_run(has_static=True)
+    assert not [s for s in conn.executed if "DELETE FROM agg_stop_routes" in s]
+    assert not [s for s in conn.executed if "INSERT INTO agg_stop_routes" in s]
+
+
+@pytest.mark.parametrize("table", ["agg_service_delivered_daily", "agg_schedule_revision_daily"])
+def test_the_delayless_readers_are_incremental_now(table):
+    assert table in analyze_mod._INCREMENTAL_AGG_TABLES
+
+
+def test_a_noop_run_issues_no_service_delivered_or_schedule_revision_scan():
+    _, ch = _noop_run(ingest_strategy="static_join")
+    assert ch.service_delivered_builds == []
+    assert ch.schedule_revision_builds == []
+
+
+def test_a_changed_run_scopes_service_delivered_and_schedule_revision_to_the_changed_dates():
+    _, ch = _changed_run(ingest_strategy="static_join")
+    assert ch.service_delivered_builds and ch.schedule_revision_builds
+    for sql, params in ch.service_delivered_builds + ch.schedule_revision_builds:
+        assert sql.count("toDate(captured_at, 'Asia/Tokyo') IN {rebuild_dates:Array(Date)}") >= 1
+        assert params["rebuild_dates"] == [LEDGER_DATE]
+    # Every FROM updates in the cancellation builder is bounded, not just the first.
+    ((sd_sql, _),) = ch.service_delivered_builds
+    assert sd_sql.count("FROM updates") == sd_sql.count("{rebuild_dates:Array(Date)}")
+
+
+def test_a_date_that_lost_only_delayless_rows_is_rebuilt():
+    """raw_samples stands still; only total_rows moved."""
+    conn, ch = _run(
+        [(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL - 9)],
+        stored=[(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)],
+        has_static=True,
+    )
+    assert len(ch.stop_routes_scans) == 1
+    assert [s for s in conn.executed if "DELETE FROM agg_feed_health WHERE agency_id = %s AND date = ANY(%s)" in s]
+
+
+def test_a_ledger_without_total_rows_rebuilds_every_date():
+    """A row written before the column existed cannot vouch for delay-less rows."""
+    conn, ch = _run(
+        [(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)],
+        stored=[(LEDGER_DATE, LEDGER_SAMPLES, None)],
+    )
+    assert len(ch.alltime_scans) == 1
+    assert [
+        s for s in conn.executed if "DELETE FROM agg_daily_trend WHERE agency_id = %s" in s and "date = ANY" not in s
+    ]
+
+
+def test_the_ledger_query_counts_every_row_and_the_delay_rows_separately():
+    _, ch = _noop_run()
+    ledger_sql = next(sql for sql, _ in ch.queries if "raw_samples" in sql and "clamp_count" not in sql)
+    assert "count() AS total_rows" in ledger_sql
+    assert "countIf(dep_delay IS NOT NULL) AS raw_samples" in ledger_sql
+    where = ledger_sql.split("GROUP BY")[0].split("WHERE")[1]
+    assert "dep_delay" not in where, "a WHERE on dep_delay would hide delay-less rows from total_rows"
+
+
+def test_feed_health_build_records_total_rows():
+    _, ch = _changed_run()
+    build_sql = next(sql for sql, _ in ch.queries if "clamp_count" in sql)
+    assert "count() AS total_rows" in build_sql
+    assert "dep_delay IS NOT NULL" not in build_sql.split("GROUP BY")[0].split("WHERE")[1]
 
 
 def test_a_noop_run_still_records_this_build_in_agg_meta():
