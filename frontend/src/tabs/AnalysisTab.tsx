@@ -19,6 +19,7 @@ import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
 import { accentRampColor } from "../styles/tokens";
 import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
 import { WEEK } from "../utils/week";
+import { CompareBars } from "../components/charts/CompareBars";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
@@ -170,6 +171,8 @@ export function AnalysisTab({
               <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
               <DwellRunBlock payload={detail.data.rows[0]} />
+            ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
+              <CompareBars rows={detail.data.rows} />
             ) : detail.data.rows.length > 0 ? (
               <ReportTable
                 reportType={detail.data.report_type}

@@ -26,7 +26,12 @@
   },
   "compare": {
     "mode_periods": "Periods and routes",
-    "mode_agencies": "Agencies"
+    "mode_agencies": "Agencies",
+    "bars": {
+      "period_label": "Period",
+      "ghost_legend": "Dashed = {{period}}",
+      "aria": "Average delay by route ({{period}}, axis to {{max}} min)"
+    }
   },
   "saved": {
     "title": "Reports",

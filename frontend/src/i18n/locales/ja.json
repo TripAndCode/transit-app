@@ -26,7 +26,12 @@
   },
   "compare": {
     "mode_periods": "期間・路線どうし",
-    "mode_agencies": "事業者どうし"
+    "mode_agencies": "事業者どうし",
+    "bars": {
+      "period_label": "期間",
+      "ghost_legend": "破線 = {{period}}",
+      "aria": "路線ごとの平均遅延（{{period}}、軸は {{max}} 分まで）"
+    }
   },
   "saved": {
     "title": "レポート",
