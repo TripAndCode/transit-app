@@ -24,9 +24,9 @@ describe("FilterContextBar", () => {
     await i18n.changeLanguage("en");
   });
 
-  it("renders the custom-range summary with the locale-aware separator, not a hardcoded ja wave dash", () => {
+  it("renders a custom range in the language's date style", () => {
     renderBar({ from_date: "2026-06-01", to_date: "2026-07-15", dow: "all", time_band: "all", routes: [] });
-    expect(screen.getByText("2026-06-01 – 2026-07-15")).toBeInTheDocument();
+    expect(screen.getByText("Jun 1 – Jul 15, 2026")).toBeInTheDocument();
   });
 
   it("names the days of a weekday list instead of calling it the weekend", () => {

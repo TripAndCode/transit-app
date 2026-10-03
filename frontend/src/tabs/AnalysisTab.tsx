@@ -23,7 +23,7 @@ import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
-import { formatNumber } from "../utils/format";
+import { formatNumber, formatDateRange } from "../utils/format";
 import { serviceValueLabel } from "../utils/filterValueLabels";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
@@ -162,7 +162,7 @@ export function AnalysisTab({
             </div>
             {detail.data.ctx && (
               <div style={{ color: "var(--text-tertiary)", fontSize: 13, margin: "8px 0 4px" }}>
-                {t("reports.range_suffix", { from: detail.data.ctx.from, to: detail.data.ctx.to })}
+                {t("reports.range_suffix", { range: formatDateRange(detail.data.ctx.from, detail.data.ctx.to) })}
               </div>
             )}
             {detail.data.definition && <DefinitionMetaBlock definition={detail.data.definition} />}
@@ -395,7 +395,7 @@ function DowBandHeatmapCard({
           {worst && (
             <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>
               {t("reports.dow_band.worst_phrase", {
-                days: rangeDays,
+                count: rangeDays,
                 day: dayLabel(worst.dow),
                 band: bandLabel(worst.band),
                 min: worst.expected_avg_min.toFixed(1),
@@ -406,7 +406,6 @@ function DowBandHeatmapCard({
             grid={grid}
             bandLabel={bandLabel}
             dayLabel={dayLabel}
-            axisMin={axisMin}
             colorFor={accentRampColor}
             onTip={() => {}}
             onLeave={() => {}}

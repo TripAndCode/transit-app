@@ -14,7 +14,7 @@ describe("CompactDataStatus", () => {
       refetch: vi.fn(),
     } as never);
     render(<CompactDataStatus />);
-    expect(screen.getByText(/2026-10-01/)).toBeInTheDocument();
+    expect(screen.getByText(/Oct 1, 2026/)).toBeInTheDocument();
     expect(screen.queryByText(/2026-10-02/)).toBeNull();
   });
 });

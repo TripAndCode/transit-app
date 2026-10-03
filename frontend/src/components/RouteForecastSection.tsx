@@ -28,7 +28,7 @@ import { Tooltip } from "./Tooltip";
 import { onActivateKey } from "../utils/a11y";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
-import { formatNumber } from "../utils/format";
+import { formatNumber, formatMinutes } from "../utils/format";
 import {
   BAND_ORDER,
   bandOf,
@@ -207,13 +207,11 @@ function useRovingCells(slots: (string | null)[], columns: number) {
 function HeatmapGrid({
   cells,
   big,
-  axisMin,
   dayLabel,
   ariaLabel,
 }: {
   cells: ForecastHeatmapCell[];
   big: boolean;
-  axisMin: string;
   dayLabel: (dow: number) => string;
   ariaLabel: string;
 }) {
@@ -235,7 +233,7 @@ function HeatmapGrid({
   function cellText(dow: number, hour: number): string {
     const cell = byKey.get(`${dow}-${hour}`);
     const value = cell?.expected_avg_min;
-    const head = `${dayLabel(dow)} ${hour}:00 · ${value == null ? "—" : `${value.toFixed(1)}${axisMin}`}`;
+    const head = `${dayLabel(dow)} ${hour}:00 · ${value == null ? "—" : formatMinutes(value)}`;
     return cell?.low_confidence ? `${head} · ${t("forecast.lowSamples", { count: cell.samples })}` : head;
   }
 
@@ -360,7 +358,6 @@ function MarginBars({
   testid,
   big,
   sparse,
-  axisMin,
   ariaLabel,
 }: {
   values: (number | null)[];
@@ -368,7 +365,6 @@ function MarginBars({
   testid: string;
   big: boolean;
   sparse: boolean;
-  axisMin: string;
   ariaLabel: string;
 }) {
   const max = Math.max(...values.filter((v): v is number => v != null), 1);
@@ -383,7 +379,7 @@ function MarginBars({
       >
         {values.map((v, i) => {
           if (v == null) return <span key={i} style={{ flex: 1 }} />;
-          const text = `${labels[i]} · ${v.toFixed(1)}${axisMin}`;
+          const text = `${labels[i]} · ${formatMinutes(v)}`;
           return (
             <Tooltip key={i} label={text}>
               <i
@@ -541,7 +537,6 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           route={focusedRoute}
           dayLabel={dayLabel}
           bandLabel={bandLabel}
-          axisMin={min1}
           showGrid={showGrid}
           onToggleGrid={() => setShowGrid((v) => !v)}
           view={view}
@@ -613,7 +608,7 @@ function AgencyLanding({
       )}
 
       <SectionCard title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
-        <BandGrid grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} colorFor={colorFor} onTip={onTip} onLeave={onLeave} />
+        <BandGrid grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={colorFor} onTip={onTip} onLeave={onLeave} />
         {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} colorFor={colorFor} />}
       </SectionCard>
 
@@ -638,7 +633,6 @@ function RouteDetail({
   route,
   dayLabel,
   bandLabel,
-  axisMin,
   showGrid,
   onToggleGrid,
   view,
@@ -650,7 +644,6 @@ function RouteDetail({
   route: string;
   dayLabel: (dow: number) => string;
   bandLabel: (b: Band) => string;
-  axisMin: string;
   showGrid: boolean;
   onToggleGrid: () => void;
   view: View;
@@ -720,16 +713,16 @@ function RouteDetail({
       )}
 
       <SectionCard title={t("forecast.overview_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
-        <BandGrid grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
+        <BandGrid grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
         {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={bandColorFor} />}
       </SectionCard>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
         <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
-          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} axisMin={axisMin} ariaLabel={t("forecast.dow_summary")} />
+          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} ariaLabel={t("forecast.dow_summary")} />
         </SectionCard>
         <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
-          <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse axisMin={axisMin} ariaLabel={t("forecast.hour_summary")} />
+          <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse ariaLabel={t("forecast.hour_summary")} />
         </SectionCard>
       </div>
 
@@ -742,7 +735,7 @@ function RouteDetail({
       </button>
       {showGrid && (
         <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">
-          <HeatmapGrid cells={cells} big axisMin={axisMin} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} />
+          <HeatmapGrid cells={cells} big dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} />
           {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
         </div>
       )}
@@ -762,13 +755,13 @@ function RouteDetail({
               <>
                 <StatStrip
                   stats={[
-                    { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${(vals[wi] as number).toFixed(1)}${axisMin}` : "—" },
-                    { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${(vals[ci] as number).toFixed(1)}${axisMin}` : "—" },
-                    { label: t("forecast.stat_mean"), value: `${mean.toFixed(1)}${axisMin}` },
+                    { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${formatMinutes(vals[wi] as number)}` : "—" },
+                    { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${formatMinutes(vals[ci] as number)}` : "—" },
+                    { label: t("forecast.stat_mean"), value: formatMinutes(mean) },
                     { label: t("forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}
                 />
-                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={axisMin} ariaLabel={t(view === "dow" ? "forecast.dow_summary" : "forecast.hour_summary")} />
+                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} ariaLabel={t(view === "dow" ? "forecast.dow_summary" : "forecast.hour_summary")} />
               </>
             );
           })()}

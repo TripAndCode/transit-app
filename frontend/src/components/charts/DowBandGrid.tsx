@@ -4,6 +4,7 @@ import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/
 import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
 import { staggerDelay } from "./ChartEnter";
 import { DIM_OPACITY, isFocusDimmed, useTrendFocus } from "./trendFocus";
+import { formatMinutes } from "../../utils/format";
 
 const RAMP_STOPS = 5;
 
@@ -37,7 +38,6 @@ export function BandGrid({
   grid,
   bandLabel,
   dayLabel,
-  axisMin,
   colorFor,
   onTip,
   onLeave,
@@ -45,7 +45,6 @@ export function BandGrid({
   grid: ForecastOverviewGridCell[];
   bandLabel: (b: Band) => string;
   dayLabel: (dow: number) => string;
-  axisMin: string;
   colorFor: (v: number) => string;
   onTip: (e: React.MouseEvent, text: string) => void;
   onLeave: () => void;
@@ -81,7 +80,7 @@ export function BandGrid({
             ...BAND_ORDER.map((b, bi) => {
               const c = byKey.get(`${dow}-${b}`);
               const v = c?.expected_avg_min ?? null;
-              const tipText = `${dayLabel(dow)} ${bandLabel(b)} · ${v == null ? "—" : `${v.toFixed(1)}${axisMin}`}`;
+              const tipText = `${dayLabel(dow)} ${bandLabel(b)} · ${v == null ? "—" : formatMinutes(v)}`;
               // The dimming for a low-confidence cell (--cell-opacity) has to
               // come from a CSS custom property, not a plain inline
               // `opacity` -- an inline style always wins over the

@@ -4,6 +4,7 @@ import { Z_INDEX } from "../../styles/zIndex";
 import { useSearchParams } from "react-router-dom";
 import type { ReactNode } from "react";
 import { td, th } from "../tableStyles";
+import { formatNumber } from "../../utils/format";
 
 export type DataTableColumn<Row> = {
   /** Stable column identity; also the React key for the cell. */
@@ -243,7 +244,7 @@ export function DataTable<Row>({
                   }}
                 >
                   {view.label}
-                  {view.count != null && <span style={{ marginLeft: 6, opacity: 0.8 }}>{view.count}</span>}
+                  {view.count != null && <span style={{ marginLeft: 6, opacity: 0.8 }}>{formatNumber(view.count)}</span>}
                 </button>
               );
             })}

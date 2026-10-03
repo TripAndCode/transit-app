@@ -4,6 +4,7 @@ import { serviceValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewServiceSplitDay } from "../api/types";
 import { ServiceName } from "./ServiceName";
+import { formatMinutes } from "../utils/format";
 
 type Props = {
   service_split: Record<string, number>;
@@ -122,8 +123,7 @@ export function ServiceSplit({
                   <ServiceName value={k} />
                 </span>
                 <span className="ov-svc-num">
-                  {v.toFixed(1)}
-                  {t("overview.hero_unit_min")}
+                  {formatMinutes(v)}
                 </span>
               </div>
               <div className="ov-svc-track">
@@ -362,10 +362,10 @@ function ServiceSplitDailyChart({
         >
           {hover.label} —{" "}
           {hover.weekday != null
-            ? `${serviceValueLabel(WEEKDAY_KEY, t)} ${hover.weekday.toFixed(1)}${t("overview.hero_unit_min")}`
+            ? `${serviceValueLabel(WEEKDAY_KEY, t)} ${formatMinutes(hover.weekday)}`
             : "—"}
           {hover.weekend != null
-            ? `, ${serviceValueLabel(WEEKEND_KEY, t)} ${hover.weekend.toFixed(1)}${t("overview.hero_unit_min")}`
+            ? `, ${serviceValueLabel(WEEKEND_KEY, t)} ${formatMinutes(hover.weekend)}`
             : ""}
         </div>
       )}
