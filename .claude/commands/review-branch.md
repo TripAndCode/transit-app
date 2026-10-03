@@ -32,12 +32,13 @@ mode-0600 diff without serializing known lockfiles or credential carriers.
 Use the manifest's path-only tier as a suggestion and correct it when semantics show
 otherwise:
 
-- **Trivial:** human-facing Markdown outside `.claude/**` and root `CLAUDE.md`/`AGENTS.md`, with
-  no executable instructions. Review directly; no subagent.
-- **Process-doc:** only Markdown under `.claude/**` and/or root `CLAUDE.md`/`AGENTS.md`. Dispatch
+- **Trivial:** human-facing Markdown outside `.claude/**`, `.agents/**`, `.codex/**`,
+  and root `CLAUDE.md`/`AGENTS.md`, with no executable instructions. Review directly; no subagent.
+- **Process-doc:** only agent instruction Markdown or skill links under `.claude/**`,
+  `.agents/**`, `.codex/**`, and/or root `CLAUDE.md`/`AGENTS.md`. Dispatch
   one `branch-reviewer` for `logic+consistency+practices+comments+security`. If
   `enforcement` is true, add one standalone `enforcement` call. Code or config under
-  `.claude/**` (hooks, `settings.json`) routes as Standard even when the manifest
+  `.claude/**` or `.codex/**` (hooks, settings) routes as Standard even when the manifest
   suggests `process-doc`.
 - **Standard:** dispatch exactly two `branch-reviewer` calls:
   1. `bugs+logic+consistency`
