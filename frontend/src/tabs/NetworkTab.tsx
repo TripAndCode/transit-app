@@ -10,7 +10,7 @@ import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { PageHeader } from "../components/ui/PageHeader";
 import { delayColor, delayTextColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
-import { formatNumber } from "../utils/format";
+import { formatNumber, fmtPct, formatDateRange } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
 import { useUrlState } from "../api/useUrlState";
@@ -93,7 +93,7 @@ function AgencyRow({
   const coverage =
     a.data_to == null
       ? t("network.no_data_in_range")
-      : `${a.data_from} ${t("common.range_separator")} ${a.data_to}`;
+      : formatDateRange(a.data_from ?? a.data_to, a.data_to);
 
   return (
     <div
@@ -174,7 +174,7 @@ function AgencyRow({
             <span data-testid="clamp-dot" aria-hidden className="network-row__clamp-dot">
               ●
             </span>
-            {a.clamp_pct.toFixed(2)}%
+            {fmtPct(a.clamp_pct, t)}
           </span>
         )}
         {a.is_stale && (

@@ -53,7 +53,10 @@ function collectorLabel(t: TFunction, collector: BoardCollector): string {
 }
 
 function alertText(t: TFunction, alert: BoardAlert): string {
-  return t(`admin.board.alert.${alert.code}`, { ...alert.params, defaultValue: alert.text });
+  // Plural forms are picked by `count`; a stale-agency alert carries its
+  // lag as `days`.
+  const { params } = alert;
+  return t(`admin.board.alert.${alert.code}`, { ...params, count: params.count ?? params.days, defaultValue: alert.text });
 }
 
 function Sparkline({ history }: { history: number[] }) {

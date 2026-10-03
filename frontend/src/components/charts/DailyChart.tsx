@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
-import { formatNumber } from "../../utils/format";
+import { formatNumber, formatMinutes, formatShortDate } from "../../utils/format";
 import { useScope } from "../../api/scope";
 import { useDrawOn } from "./ChartEnter";
 import { ShadedDays, ThresholdBand, VerticalMarker } from "./annotations";
@@ -232,7 +232,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
               <g key={f}>
                 <line x1={padL} x2={W - padR} y1={y} y2={y} stroke="var(--border-soft)" strokeDasharray="2 4" />
                 <text x={6} y={y + 4} fontSize="10" fill="var(--text-tertiary)">
-                  {(stats.maxAvg * f).toFixed(1)}m
+                  {formatMinutes(stats.maxAvg * f)}
                 </text>
               </g>
             );
@@ -370,7 +370,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
                 fill="var(--text-tertiary)"
                 textAnchor="middle"
               >
-                {d.date.slice(5)}
+                {formatShortDate(d.date)}
               </text>
             );
           })}
@@ -411,13 +411,13 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
           <div>
             <strong>{days[cursor].date}</strong>:{" "}
             {t("reports.daily.tooltip_metrics", {
-              min: (days[cursor].avg_min ?? 0).toFixed(2),
+              min: (days[cursor].avg_min ?? 0).toFixed(1),
               count: formatNumber(days[cursor].samples ?? 0),
             })}
           </div>
           {days[cursor].avg_min_smoothed != null && (
             <div style={{ color: "var(--text-secondary)" }}>
-              {t("reports.daily.smoothed_tooltip", { min: days[cursor].avg_min_smoothed!.toFixed(2) })}
+              {t("reports.daily.smoothed_tooltip", { min: days[cursor].avg_min_smoothed!.toFixed(1) })}
             </div>
           )}
           {days[cursor].top_offenders?.length > 0 && (

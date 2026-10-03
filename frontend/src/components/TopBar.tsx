@@ -4,6 +4,7 @@ import { useAgencies } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { useMediaQuery, COARSE_POINTER_QUERY } from "../hooks/useMediaQuery";
 import { openCommandPalette } from "./commandPaletteEvents";
+import { formatDate } from "../utils/format";
 
 /** The bar above every agency screen: one search-and-ask field that opens
  *  the command palette, and how recent the agency's data is. */
@@ -76,7 +77,7 @@ export function TopBar() {
       </button>
       {through && (
         <span style={{ marginLeft: "auto", fontSize: "var(--text-xs)", color: "var(--text-secondary)", fontFamily: "var(--font-num)" }}>
-          {t("topbar.data_through", { date: through })}
+          {t("topbar.data_through", { date: formatDate(through) })}
         </span>
       )}
     </div>

@@ -8,6 +8,7 @@ import { InlineSparkline } from "./InlineSparkline";
 import { periodMean } from "./periodMean";
 import { storySentence } from "./overview/storySentence";
 import { STALE_THRESHOLD_HOURS } from "./DataStalenessBanner";
+import { relativeTime } from "../utils/relativeTime";
 
 type Props = {
   headline: OverviewHeadline;
@@ -47,11 +48,8 @@ export function OverviewHeroRow({
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
 
-  // Mirrors DataStalenessBanner.tsx's days/hours label branching exactly
-  // (that component does not have a sub-1-hour "minutes" case, despite
-  // common.rel_minutes_ago existing as a key used elsewhere — matching the
-  // specific sibling this tile reuses, not inventing a more granular scheme
-  // it doesn't itself use).
+  // A fresh feed is minutes old, so the label counts down to "just now"
+  // rather than bucketing to whole hours ("0 hours ago").
   const captured = feedSummary?.latest_captured_at;
   let ageLabel: string | null = null;
   let feedIsStale = false;
@@ -59,11 +57,7 @@ export function OverviewHeroRow({
     const ageH = relativeAgeHours(captured);
     if (Number.isFinite(ageH)) {
       feedIsStale = ageH >= STALE_THRESHOLD_HOURS;
-      const days = Math.floor(ageH / 24);
-      ageLabel =
-        days >= 1
-          ? t("common.rel_days_ago", { count: days })
-          : t("common.rel_hours_ago", { count: Math.floor(ageH) });
+      ageLabel = relativeTime(captured);
     }
   }
 

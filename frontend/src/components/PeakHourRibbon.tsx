@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { dowValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewPeakHour } from "../api/types";
+import { formatMinutes, formatHourRange } from "../utils/format";
 
 type Props = {
   peak_hour: OverviewPeakHour | null;
@@ -117,7 +118,7 @@ function PeakHourChart({
       px: barX * scaleX,
       py: barY * scaleY,
       label: `${idx}:00`,
-      value: `${v.toFixed(1)}${t("overview.hero_unit_min")}`,
+      value: formatMinutes(v),
     });
   }
 
@@ -350,8 +351,7 @@ export function PeakHourRibbon({
       <PeakHourChart peak_hour={peak_hour} onHourClick={onHourClick} />
       <p className="ov-pareto-rest" style={{ marginTop: 10 }}>
         {t("overview.peak_hour_callout", {
-          hour: peak_hour.peak_hour,
-          next_hour: peak_hour.peak_hour + 1,
+          range: formatHourRange(peak_hour.peak_hour),
           avg: peak_hour.peak_avg_min.toFixed(1),
         })}
       </p>

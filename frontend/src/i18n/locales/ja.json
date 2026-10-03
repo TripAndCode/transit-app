@@ -235,8 +235,8 @@
       "dismiss_aria": "閉じる"
     },
     "feed_health": {
-      "banner_one": "フィード健全性: 直近7日間で異常な遅延データ {{count}} 件（配信の停止・異常の可能性）を除外しました。表示中の数値には反映されていません。",
-      "banner_other": "フィード健全性: 直近7日間で異常な遅延データ {{count}} 件（配信の停止・異常の可能性）を除外しました。表示中の数値には反映されていません。",
+      "banner_one": "フィード健全性: 直近7日間で異常な遅延データ {{count, number}} 件（配信の停止・異常の可能性）を除外しました。表示中の数値には反映されていません。",
+      "banner_other": "フィード健全性: 直近7日間で異常な遅延データ {{count, number}} 件（配信の停止・異常の可能性）を除外しました。表示中の数値には反映されていません。",
       "dismiss_aria": "閉じる"
     },
     "loading": {
@@ -251,7 +251,7 @@
     "concentration_rest_one": "残り {{count}} 路線で {{rest}}%",
     "concentration_rest_other": "残り {{count}} 路線で {{rest}}%",
     "section_peak_hour": "時間帯別の悪化",
-    "peak_hour_callout": "ピークは {{hour}}時〜{{next_hour}}時です (平均 {{avg}} 分)。",
+    "peak_hour_callout": "ピークは{{range}}です（平均{{avg}}分）。",
     "section_service_split": "サービス日別",
     "hero_row": {
       "avg_delay_label": "ネットワーク平均遅延",
@@ -355,10 +355,6 @@
     "unit_sec": "秒",
     "unit_min_signed": "{{sign}}{{value}}分",
     "unit_sec_signed": "{{sign}}{{value}}秒",
-    "rel_days_ago": "{{count}}日前",
-    "rel_hours_ago": "{{count}}時間前",
-    "rel_minutes_ago": "{{count}}分前",
-    "rel_seconds_ago": "{{count}}秒前",
     "range_separator": "〜",
     "list_separator": "・",
     "language_aria": "言語",
@@ -387,7 +383,19 @@
     "route": "路線",
     "route_label": "{{name}} · {{heading}}",
     "route_heading_to": "{{to}}行き",
-    "route_heading_from_to": "{{from}}→{{to}}"
+    "route_heading_from_to": "{{from}}→{{to}}",
+    "minutes_value": "{{value}}分",
+    "duration_sec": "{{sec}}秒",
+    "duration_min": "{{min}}分",
+    "duration_min_sec": "{{min}}分{{sec}}秒",
+    "date_range": "{{from}}〜{{to}}",
+    "rel_just_now": "たった今",
+    "rel_minutes_ago_one": "{{count}}分前",
+    "rel_minutes_ago_other": "{{count}}分前",
+    "rel_hours_ago_one": "{{count}}時間前",
+    "rel_hours_ago_other": "{{count}}時間前",
+    "rel_days_ago_one": "{{count}}日前",
+    "rel_days_ago_other": "{{count}}日前"
   },
   "legal": {
     "privacy": "プライバシーポリシー",
@@ -877,7 +885,7 @@
   "reports": {
     "list_title": "レポート一覧",
     "select_prompt": "レポートを選択してください",
-    "range_suffix": "期間: {{from}} 〜 {{to}}",
+    "range_suffix": "期間: {{range}}",
     "raw_rows_one": "生データ（{{count}}件）",
     "raw_rows_other": "生データ（{{count}}件）",
     "type": {
@@ -913,8 +921,8 @@
       "date": "日付",
       "scheduled_time": "定刻",
       "actual_time": "実績時刻",
-      "delay_sec": "遅延(秒)",
-      "with_unit": "{{label}}（{{unit}}）"
+      "with_unit": "{{label}}（{{unit}}）",
+      "delay": "遅延"
     },
     "confidence_low_mark": "幅あり",
     "direction": {
@@ -950,14 +958,15 @@
       "legend_explainer": "・行 → 時間帯 ・列 → 日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
       "tooltip_hour": "{{hour}}時 ・ 平均",
-      "tooltip_metrics": "{{min}}分 ・ {{count}}件",
+      "tooltip_metrics": "{{min}}分 ・ {{count, number}}件",
       "ramp_max": "{{min}}分以上",
       "severe_outline": "枠線 = {{min}}分以上"
     },
     "dow_band": {
       "title": "いつもの遅れ方",
-      "worst_phrase": "過去{{days}}日間で最も遅れやすいのは {{day}}の{{band}}（平均 +{{min}}分）",
-      "empty": "この期間のデータがありません。"
+      "empty": "この期間のデータがありません。",
+      "worst_phrase_one": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（平均 +{{min}}分）",
+      "worst_phrase_other": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（平均 +{{min}}分）"
     },
     "daily": {
       "empty": "期間内にデータがありません。",
@@ -1292,7 +1301,7 @@
       "rt_absent": "なし",
       "rt_unprobed": "未計測",
       "rt_expired": "期限切れ",
-      "rt_detail": "被覆 {{pct}}% · 標本 {{samples}}",
+      "rt_detail": "被覆 {{pct}}% · 標本 {{samples, number}}",
       "static_section": "静的データ",
       "static_current": "現行",
       "static_detail": "路線 {{routes}} · 便 {{trips}}",
@@ -1300,9 +1309,7 @@
       "static_empty": "静的データの版はまだ記録されていません。",
       "policy_section": "基準とウェイト",
       "standards": "性能基準",
-      "standards_summary": "{{count}} 系統に設定",
       "weights": "乗車人員ウェイト",
-      "weights_summary": "{{withWeights}}/{{total}} 系統",
       "station": "気象観測所",
       "station_value": "{{name}}（{{id}}）",
       "station_none": "未設定",
@@ -1313,7 +1320,7 @@
       "action_probe": "フィードを今すぐ確認",
       "action_reanalyze": "この事業者だけ再集計",
       "action_reanalyze_disabled_hint": "無効化された事業者は集計対象から外れます。",
-      "probe_done": "プローブを記録しました（標本 {{samples}}）。",
+      "probe_done": "プローブを記録しました（標本 {{samples, number}}）。",
       "reanalyze_started": "再集計を開始しました。完了はしばらくお待ちください。",
       "danger_section": "危険操作",
       "danger_hint": "無効化すると取り込みが止まり、公開画面から消えます。復元は可能です。",
@@ -1331,7 +1338,11 @@
       "editor_add": "行を追加",
       "editor_remove": "行を削除",
       "editor_save": "保存",
-      "editor_empty": "設定はまだありません。"
+      "editor_empty": "設定はまだありません。",
+      "standards_summary_one": "{{count}} 系統に設定",
+      "standards_summary_other": "{{count}} 系統に設定",
+      "weights_summary_one": "{{withWeights}}/{{count}} 系統",
+      "weights_summary_other": "{{withWeights}}/{{count}} 系統"
     },
     "architecture": {
       "title": "アーキテクチャ",
@@ -1482,10 +1493,13 @@
       "alerts_none": "対応が必要な項目はありません。",
       "alert_open": "開く",
       "alert": {
-        "agency_stale": "{{agency}}：集計が {{days}} 日遅れ",
         "clamp_high": "{{agency}}：{{date}} のサンプルの {{pct}}% を異常値として除外",
-        "migrations_behind": "スキーマが {{count}} 件遅れています",
-        "llm_approvals_pending": "AI 利用の承認待ち {{count}} 名"
+        "agency_stale_one": "{{agency}}：集計が {{count}} 日遅れ",
+        "agency_stale_other": "{{agency}}：集計が {{count}} 日遅れ",
+        "migrations_behind_one": "スキーマが {{count}} 件遅れています",
+        "migrations_behind_other": "スキーマが {{count}} 件遅れています",
+        "llm_approvals_pending_one": "AI 利用の承認待ち {{count}} 名",
+        "llm_approvals_pending_other": "AI 利用の承認待ち {{count}} 名"
       }
     },
     "ask_ops": {

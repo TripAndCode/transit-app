@@ -65,7 +65,7 @@ describe("TopBar", () => {
 
   it("states how recent the current agency's data is", () => {
     renderBar();
-    expect(screen.getByText("Data through 2026-09-29")).toBeInTheDocument();
+    expect(screen.getByText("Data through Sep 29, 2026")).toBeInTheDocument();
   });
 
   it("states nothing about freshness while the agency has no data yet", () => {

@@ -1,4 +1,5 @@
 import type { FilterCtx } from "../api/types";
+import { formatDateRange } from "./format";
 
 /** Format a filter context's date range for display. */
 export function rangeLabel(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string | null {
@@ -9,5 +10,5 @@ export function rangeLabel(fc: FilterCtx, t: (key: string, opts?: Record<string,
   if (days === 6 || days === 7) return t("filters.range.last_7d");
   if (days >= 28 && days <= 31) return t("filters.range.last_30d");
   if (days >= 85 && days <= 92) return t("filters.range.last_90d");
-  return `${fc.from_date} ${t("common.range_separator")} ${fc.to_date}`;
+  return formatDateRange(fc.from_date, fc.to_date);
 }

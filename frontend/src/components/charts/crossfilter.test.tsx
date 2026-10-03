@@ -44,7 +44,6 @@ function renderLinked() {
             grid={grid()}
             bandLabel={(b) => b}
             dayLabel={(d) => `dow${d}`}
-            axisMin="m"
             colorFor={() => "var(--accent)"}
             onTip={() => {}}
             onLeave={() => {}}
@@ -116,7 +115,6 @@ describe("TrendFocus crossfilter", () => {
         grid={grid()}
         bandLabel={(b) => b}
         dayLabel={(d) => `dow${d}`}
-        axisMin="m"
         colorFor={() => "var(--accent)"}
         onTip={() => {}}
         onLeave={() => {}}

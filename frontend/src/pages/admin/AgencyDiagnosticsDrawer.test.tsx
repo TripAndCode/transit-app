@@ -180,8 +180,8 @@ describe("AgencyDiagnosticsDrawer", () => {
 
   it("summarises standards, weights coverage and the weather station", () => {
     renderDrawer();
-    expect(screen.getByText("Set on 1 route(s)")).toBeTruthy();
-    expect(screen.getByText("1/12 route(s)")).toBeTruthy();
+    expect(screen.getByText("Set on 1 route")).toBeTruthy();
+    expect(screen.getByText("1/12 routes")).toBeTruthy();
     expect(screen.getByText("Kanazawa (47605)")).toBeTruthy();
   });
 

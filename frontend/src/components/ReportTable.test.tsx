@@ -83,7 +83,8 @@ describe("ReportTable council_summary/delay_certificate schemas", () => {
     mockRoutes([]);
     renderTable([["Test Agency", "RCERT", "平日", "2026-06-20", "10:00:00", "10:06:40", 400]], "delay_certificate");
     expect(screen.getByText("Test Agency")).toBeInTheDocument();
-    expect(screen.getByText("400")).toBeInTheDocument();
+    // 400 seconds reads as minutes and seconds, like every other delay.
+    expect(screen.getByText("6 min 40 s")).toBeInTheDocument();
   });
 });
 

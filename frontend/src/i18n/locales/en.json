@@ -235,8 +235,8 @@
       "dismiss_aria": "Dismiss"
     },
     "feed_health": {
-      "banner_one": "Feed health: {{count}} implausible delay reading (likely a stuck or stale data feed) was filtered out over the last 7 days, so it doesn't skew the figures here.",
-      "banner_other": "Feed health: {{count}} implausible delay readings (likely a stuck or stale data feed) were filtered out over the last 7 days, so they don't skew the figures here.",
+      "banner_one": "Feed health: {{count, number}} implausible delay reading (likely a stuck or stale data feed) was filtered out over the last 7 days, so it doesn't skew the figures here.",
+      "banner_other": "Feed health: {{count, number}} implausible delay readings (likely a stuck or stale data feed) were filtered out over the last 7 days, so they don't skew the figures here.",
       "dismiss_aria": "Dismiss"
     },
     "loading": {
@@ -251,7 +251,7 @@
     "concentration_rest_one": "Remaining {{count}} route: {{rest}}%",
     "concentration_rest_other": "Remaining {{count}} routes: {{rest}}%",
     "section_peak_hour": "Worst hour of day",
-    "peak_hour_callout": "Peak: {{hour}}-{{next_hour}} ({{avg}} min avg).",
+    "peak_hour_callout": "Peak: {{range}} ({{avg}} min avg).",
     "section_service_split": "By service day",
     "hero_row": {
       "avg_delay_label": "Network avg delay",
@@ -355,10 +355,6 @@
     "unit_sec": "s",
     "unit_min_signed": "{{sign}}{{value}} min",
     "unit_sec_signed": "{{sign}}{{value}} s",
-    "rel_days_ago": "{{count}}d ago",
-    "rel_hours_ago": "{{count}}h ago",
-    "rel_minutes_ago": "{{count}}m ago",
-    "rel_seconds_ago": "{{count}}s ago",
     "range_separator": "–",
     "list_separator": ", ",
     "language_aria": "Language",
@@ -387,7 +383,19 @@
     "route": "Route",
     "route_label": "{{name}} · {{heading}}",
     "route_heading_to": "for {{to}}",
-    "route_heading_from_to": "{{from}} → {{to}}"
+    "route_heading_from_to": "{{from}} → {{to}}",
+    "minutes_value": "{{value}} min",
+    "duration_sec": "{{sec}} s",
+    "duration_min": "{{min}} min",
+    "duration_min_sec": "{{min}} min {{sec}} s",
+    "date_range": "{{from}} – {{to}}",
+    "rel_just_now": "just now",
+    "rel_minutes_ago_one": "{{count}} minute ago",
+    "rel_minutes_ago_other": "{{count}} minutes ago",
+    "rel_hours_ago_one": "{{count}} hour ago",
+    "rel_hours_ago_other": "{{count}} hours ago",
+    "rel_days_ago_one": "{{count}} day ago",
+    "rel_days_ago_other": "{{count}} days ago"
   },
   "legal": {
     "privacy": "Privacy Policy",
@@ -877,7 +885,7 @@
   "reports": {
     "list_title": "Reports",
     "select_prompt": "Select a report",
-    "range_suffix": "Range: {{from}} – {{to}}",
+    "range_suffix": "Range: {{range}}",
     "raw_rows_one": "Raw ({{count}} row)",
     "raw_rows_other": "Raw ({{count}} rows)",
     "type": {
@@ -913,8 +921,8 @@
       "date": "Date",
       "scheduled_time": "Scheduled",
       "actual_time": "Actual",
-      "delay_sec": "Delay (s)",
-      "with_unit": "{{label}} ({{unit}})"
+      "with_unit": "{{label}} ({{unit}})",
+      "delay": "Delay"
     },
     "confidence_low_mark": "wide range",
     "direction": {
@@ -950,14 +958,15 @@
       "legend_explainer": "· rows → time band · columns → date",
       "svg_aria": "Time-band delay heatmap",
       "tooltip_hour": "{{hour}}:00 · avg",
-      "tooltip_metrics": "{{min}} min · {{count}} obs.",
+      "tooltip_metrics": "{{min}} min · {{count, number}} obs.",
       "ramp_max": "{{min}} min and over",
       "severe_outline": "outlined = {{min}} min and over"
     },
     "dow_band": {
       "title": "Usual delay pattern",
-      "worst_phrase": "Over the past {{days}} days, {{day}} {{band}} runs latest (avg +{{min}} min)",
-      "empty": "No data for this period."
+      "empty": "No data for this period.",
+      "worst_phrase_one": "Over the past day, {{day}} {{band}} ran latest (avg +{{min}} min)",
+      "worst_phrase_other": "Over the past {{count}} days, {{day}} {{band}} runs latest (avg +{{min}} min)"
     },
     "daily": {
       "empty": "No data in this range.",
@@ -1292,7 +1301,7 @@
       "rt_absent": "Absent",
       "rt_unprobed": "Not probed",
       "rt_expired": "Expired",
-      "rt_detail": "coverage {{pct}}% · {{samples}} samples",
+      "rt_detail": "coverage {{pct}}% · {{samples, number}} samples",
       "static_section": "Static data",
       "static_current": "Current",
       "static_detail": "routes {{routes}} · trips {{trips}}",
@@ -1300,9 +1309,7 @@
       "static_empty": "No static version has been recorded yet.",
       "policy_section": "Standards and weights",
       "standards": "Performance standards",
-      "standards_summary": "Set on {{count}} route(s)",
       "weights": "Ridership weights",
-      "weights_summary": "{{withWeights}}/{{total}} route(s)",
       "station": "Weather station",
       "station_value": "{{name}} ({{id}})",
       "station_none": "Not set",
@@ -1313,7 +1320,7 @@
       "action_probe": "Check the feed now",
       "action_reanalyze": "Re-aggregate this agency only",
       "action_reanalyze_disabled_hint": "A disabled agency is skipped by the aggregation run.",
-      "probe_done": "Probe recorded ({{samples}} samples).",
+      "probe_done": "Probe recorded ({{samples, number}} samples).",
       "reanalyze_started": "Re-aggregation started; it runs in the background.",
       "danger_section": "Danger zone",
       "danger_hint": "Disabling stops ingest and removes the agency from the public views. It can be restored.",
@@ -1331,7 +1338,11 @@
       "editor_add": "Add row",
       "editor_remove": "Remove row",
       "editor_save": "Save",
-      "editor_empty": "Nothing configured yet."
+      "editor_empty": "Nothing configured yet.",
+      "standards_summary_one": "Set on {{count}} route",
+      "standards_summary_other": "Set on {{count}} routes",
+      "weights_summary_one": "{{withWeights}}/{{count}} route",
+      "weights_summary_other": "{{withWeights}}/{{count}} routes"
     },
     "architecture": {
       "title": "Architecture",
@@ -1482,10 +1493,13 @@
       "alerts_none": "Nothing needs attention.",
       "alert_open": "Open",
       "alert": {
-        "agency_stale": "{{agency}}: aggregates {{days}} day(s) behind",
         "clamp_high": "{{agency}}: {{pct}}% of samples clamped on {{date}}",
-        "migrations_behind": "Schema behind by {{count}} migration(s)",
-        "llm_approvals_pending": "{{count}} user(s) awaiting AI access approval"
+        "agency_stale_one": "{{agency}}: aggregates {{count}} day behind",
+        "agency_stale_other": "{{agency}}: aggregates {{count}} days behind",
+        "migrations_behind_one": "Schema behind by {{count}} migration",
+        "migrations_behind_other": "Schema behind by {{count}} migrations",
+        "llm_approvals_pending_one": "{{count}} user awaiting AI access approval",
+        "llm_approvals_pending_other": "{{count}} users awaiting AI access approval"
       }
     },
     "ask_ops": {
