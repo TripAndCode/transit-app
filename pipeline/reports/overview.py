@@ -72,6 +72,13 @@ _log = logging.getLogger(__name__)
 # :func:`_grain_window` enforces the resulting bound at runtime.
 _GRAIN_LOOKBACK_DAYS = 7
 
+# How many pooled connections one overview request may hold at once on its
+# pool-gather path. Eleven stages fan out per request; unbounded, two
+# concurrent cold requests alone would exhaust the pool and queue every other
+# endpoint behind them. Four keeps the peak-hour pair and two more stages in
+# flight, which is where the wall-clock gain of the gather lives.
+OVERVIEW_FANOUT_LIMIT = 4
+
 
 # ---------------------------------------------------------------------------
 # Shared slow-path grain
@@ -1316,9 +1323,11 @@ async def compute_overview_summary(
 
     else:
         # Pool-gather path — each task acquires its own pooled connection
-        # so all ten queries can run concurrently. A single asyncpg
+        # so the queries can run concurrently. A single asyncpg
         # connection cannot multiplex queries; pool.acquire() queues when
-        # saturated, so concurrency is naturally bounded by pool size. `ch`
+        # saturated, so a per-request `asyncio.Semaphore(OVERVIEW_FANOUT_LIMIT)`
+        # caps how many of the stages hold a connection at once, so two
+        # concurrent overview requests cannot drain the pool between them. `ch`
         # (a single shared ClickHouse client, not pool-backed) is closed
         # over directly rather than threaded through `_own_conn`'s *args.
         # No per-stage timed_blocks here; the top-level reports.overview
@@ -1328,14 +1337,16 @@ async def compute_overview_summary(
         # `_route_short_names`, and every fast-path helper's `agg_*` read (plus
         # `_route_weekly_history`'s live scan, in the narrow-`ctx` case where
         # the grain can't cover its span).
+        fanout = asyncio.Semaphore(OVERVIEW_FANOUT_LIMIT)
+
         async def _own_conn(fn, *args):
-            """Acquire a pool connection, call ``fn(*args, conn, ch=ch, grain=grain)``, release."""
-            async with pool.acquire() as c:
+            """Under the fan-out bound, acquire a connection and call ``fn(*args, conn, ch=ch, grain=grain)``."""
+            async with fanout, pool.acquire() as c:
                 return await fn(*args, c, ch=ch, grain=grain)
 
         async def _peak_dow(group: str) -> dict | None:
-            """Acquire a pool connection and run ``_peak_hour_by_dow`` for ``group``."""
-            async with pool.acquire() as c:
+            """``_peak_hour_by_dow`` for ``group``, through the same bounded acquire."""
+            async with fanout, pool.acquire() as c:
                 return await _peak_hour_by_dow(agency_id, ctx, c, group, ch=ch, grain=grain)
 
         (
