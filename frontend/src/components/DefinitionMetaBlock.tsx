@@ -35,11 +35,10 @@ export function DefinitionMetaBlock({ definition }: Props) {
       {definition.preset != null && (
         <span>{t("definitionMeta.tolerance_line", { preset: definition.preset, early, late })}</span>
       )}
-      {/* Translation-key suffix from the API's own identifier, mirroring
-          ReportTable.tsx's `valueKey` pattern -- an unrecognized identifier
-          falls back to rendering the raw value rather than silently
-          reusing whatever text happened to be here before, so the two can
-          never drift apart unnoticed. */}
+      {/* Translation-key suffix from the API's own identifier: an
+          unrecognized identifier falls back to rendering the raw value
+          rather than silently reusing whatever text happened to be here
+          before, so the two can never drift apart unnoticed. */}
       <span>
         {t(`definitionMeta.measurementPoint.${definition.measurement_point}`, {
           defaultValue: definition.measurement_point,

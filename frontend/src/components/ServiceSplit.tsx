@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { serviceValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewServiceSplitDay } from "../api/types";
+import { ServiceName } from "./ServiceName";
 
 type Props = {
   service_split: Record<string, number>;
@@ -118,7 +119,7 @@ export function ServiceSplit({
             <div className="ov-svc-row" key={k}>
               <div className="ov-svc-head">
                 <span className="ov-svc-label">
-                  {serviceValueLabel(k, t)}
+                  <ServiceName value={k} />
                 </span>
                 <span className="ov-svc-num">
                   {v.toFixed(1)}

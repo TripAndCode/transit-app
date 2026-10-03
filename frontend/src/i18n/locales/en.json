@@ -371,7 +371,18 @@
     "increment_aria": "Increment",
     "service_value": {
       "平日": "Weekday",
-      "土日祝": "Weekend/Holiday"
+      "土日祝": "Weekend/Holiday",
+      "土日": "Weekend",
+      "週末": "Weekend",
+      "土曜": "Saturday",
+      "日曜": "Sunday",
+      "日祝": "Sunday/Holiday",
+      "休日": "Holiday",
+      "祝日": "Holiday",
+      "秋彼岸": "Autumn equinox (Higan)",
+      "春彼岸": "Spring equinox (Higan)",
+      "年末年始": "New Year holidays",
+      "お盆": "Obon"
     },
     "route": "Route",
     "route_label": "{{name}} · {{heading}}",
@@ -1546,7 +1557,8 @@
     "error": "Couldn't generate an insight right now.",
     "low_confidence": "This is based on limited data.",
     "followup_placeholder": "Ask a follow-up…",
-    "followup_submit": "Ask"
+    "followup_submit": "Ask",
+    "no_insight": "Not enough data for an insight yet."
   },
   "palette": {
     "placeholder": "Search or jump to…",

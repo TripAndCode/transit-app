@@ -68,7 +68,7 @@ def _render_overview_top_delay_route(payload: dict, locale: str) -> RenderedInsi
         direction=_summary(direction_key, locale),
         delayed_count=payload["top_delayed"]["delayed_count"],
     )
-    cite = _summary("copilot_overview_top_delay_cite", locale, samples=headline["samples"])
+    cite = _summary("copilot_overview_top_delay_cite", locale, samples=f"{headline['samples']:,}")
     return {"text": text, "cite": cite}
 
 

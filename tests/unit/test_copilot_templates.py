@@ -55,7 +55,15 @@ def test_overview_top_delay_route_en_renders_english():
     rendered = render_template("overview_top_delay_route", OVERVIEW_PAYLOAD, "en")
     assert "Route 12" in rendered["text"]
     assert "up 56.1%" in rendered["text"]
-    assert rendered["cite"] == "Overview · 812 samples · top_delayed[0]"
+    assert rendered["cite"] == "Based on 812 departures · Pulse summary"
+
+
+def test_overview_cite_groups_the_count_and_names_no_payload_field():
+    payload = {**OVERVIEW_PAYLOAD, "headline": {**OVERVIEW_PAYLOAD["headline"], "samples": 138066}}
+    assert render_template("overview_top_delay_route", payload, "en")["cite"] == (
+        "Based on 138,066 departures · Pulse summary"
+    )
+    assert render_template("overview_top_delay_route", payload, "ja")["cite"] == "138,066件の観測に基づく · 概況の集計"
 
 
 def test_overview_top_delay_route_en_shows_down_when_delay_improved():

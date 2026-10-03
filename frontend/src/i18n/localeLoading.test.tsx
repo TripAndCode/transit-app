@@ -6,7 +6,7 @@ import { act, render, screen } from "@testing-library/react";
 import { I18nextProvider, useTranslation } from "react-i18next";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
-import { changeLocale, initI18n } from ".";
+import { changeLocale, initI18n, SUPPORTED_LOCALES } from ".";
 
 // The suite's shared instance preloads every locale (see test/setup.ts), so
 // each case here builds its own instance to observe what loads, and when.
@@ -161,6 +161,12 @@ describe("index.html locale preload", () => {
     for (const link of document.head.querySelectorAll('link[rel="modulepreload"]')) link.remove();
   });
 
+  it("knows the same languages, by the same titles, as the app", () => {
+    const titles = JSON.parse(script!.match(/var TITLES = (\{[^}]*\});/)![1].replace(/(\w+):/g, '"$1":'));
+    expect(Object.keys(titles)).toEqual([...SUPPORTED_LOCALES]);
+    expect(titles).toEqual({ ja: ja.header.app_title, en: en.header.app_title });
+  });
+
   it("carries the placeholder the build fills with chunk URLs", () => {
     expect(script).toBeDefined();
     expect(html.split(PLACEHOLDER)).toHaveLength(2);
@@ -190,4 +196,20 @@ describe("index.html locale preload", () => {
   it("does nothing when the map is unfilled, as under the dev server", () => {
     expect(runPreload(null)).toEqual([]);
   });
+
+  it.each([
+    { stored: "en", navigatorLanguages: ["ja-JP"] },
+    { stored: null, navigatorLanguages: ["en-US"] },
+    { stored: null, navigatorLanguages: ["fr-FR"] },
+  ])(
+    "names the page and its language before first paint, even with no chunk map (stored $stored, navigator $navigatorLanguages)",
+    async ({ stored, navigatorLanguages }) => {
+      if (stored) localStorage.setItem("app.locale", stored);
+      stubNavigatorLanguages(navigatorLanguages);
+      runPreload(null);
+      const resolved = (await initFresh()).language as "ja" | "en";
+      expect(document.documentElement.lang).toBe(resolved);
+      expect(document.title).toBe({ ja, en }[resolved].header.app_title);
+    },
+  );
 });
