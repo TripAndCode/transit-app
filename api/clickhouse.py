@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import clickhouse_connect
 
-from pipeline.clickhouse import ch_conn_kwargs
+from pipeline.clickhouse import UPDATES_TABLE, ch_conn_kwargs, checked_table
 
 
 async def get_ch_client():
@@ -45,7 +45,7 @@ async def get_ch_client():
             "max_execution_time": 30,
             "max_result_rows": 200_000,
             "result_overflow_mode": "throw",
-            # This process only ever SELECTs from `updates` — every write/DDL
+            # This process only ever SELECTs from `updates`/`updates_live` — every write/DDL
             # path (ingest, analyze, bootstrap) goes through pipeline/clickhouse.py's
             # sync client instead. `readonly=2` (not 1) so the settings above
             # can still be applied per-query; `readonly=1` would reject those
@@ -63,7 +63,7 @@ async def get_ch_client():
     )
 
 
-async def max_captured_at(ch, agency_id: int) -> datetime | None:
+async def max_captured_at(ch, agency_id: int, *, table: str = UPDATES_TABLE) -> datetime | None:
     """Async counterpart of `pipeline.clickhouse.max_captured_at`.
 
     Absolute latest `captured_at` for the agency (today included) — see that
@@ -78,9 +78,13 @@ async def max_captured_at(ch, agency_id: int) -> datetime | None:
     the unconstrained `captured_at` in the sort key, so an unbounded
     route-scoped query can't be pruned and costs a full-table scan whenever
     the route doesn't exist or has no recent data.
+
+    `table=LIVE_TABLE` answers live freshness; the default `updates` answers
+    "data through".
     """
     result = await ch.query(
-        "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at DESC LIMIT 1",
+        f"SELECT captured_at FROM {checked_table(table)} WHERE agency_id = {{agency_id:UInt16}} "
+        "ORDER BY captured_at DESC LIMIT 1",
         parameters={"agency_id": agency_id},
     )
     if not result.result_rows:

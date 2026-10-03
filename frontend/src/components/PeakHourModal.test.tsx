@@ -31,8 +31,15 @@ describe("PeakHourModal", () => {
     render(
       <PeakHourModal data={mockBreakdown} loading={false} onClose={onClose} />
     );
-    fireEvent.click(screen.getByTestId("peak-hour-modal-backdrop"));
+    fireEvent.click(screen.getByRole("presentation"));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("renders via the shared accessible Modal (aria-modal dialog)", () => {
+    render(
+      <PeakHourModal data={mockBreakdown} loading={false} onClose={() => {}} />
+    );
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
   });
 
   it("shows empty state when no routes", () => {
@@ -48,7 +55,7 @@ describe("PeakHourModal", () => {
 
   it("clamps the bar width to 0 instead of a negative value for an early-running route", () => {
     // maxAvg is set by K31 (a delayed route); K37 is early-running (negative
-    // avg_min), which used to divide out to a negative CSS width percentage.
+    // avg_min), which divides out to a negative CSS width percentage unless clamped.
     const mixed: PeakHourBreakdown = {
       hour: 8,
       dow: 5,
@@ -69,8 +76,8 @@ describe("PeakHourModal", () => {
   });
 
   it("does not render a NaN width when every route has avg_min of exactly 0", () => {
-    // maxAvg used to be 0 in this case (no `|| 1` fallback), so
-    // (0/0)*100 was NaN, and Math.max(NaN, 0) is NaN (not 0) since any
+    // Without a `|| 1` fallback maxAvg would be 0 in this case, so
+    // (0/0)*100 is NaN, and Math.max(NaN, 0) is NaN (not 0) since any
     // comparison with NaN is false in JS.
     const allZero: PeakHourBreakdown = {
       hour: 8,
@@ -88,7 +95,7 @@ describe("PeakHourModal", () => {
   it("caps the bar width at 100 instead of overflowing when every route is early-running", () => {
     // maxAvg is itself negative here (least-negative of the two), so a more
     // negative avg_min divided by a negative maxAvg is a ratio > 1 — the
-    // one-sided clamp used to let this exceed 100%.
+    // one-sided clamp would let this exceed 100%.
     const allNegative: PeakHourBreakdown = {
       hour: 8,
       dow: 5,

@@ -9,11 +9,8 @@
 # `Bash(poetry run pytest*)` only matches a command whose literal text
 # starts with "poetry" -- prepending `DATABASE_URL=... RUN_CH_INTEGRATION=1
 # ... poetry run pytest` breaks that match outright, since the command now
-# starts with "DATABASE_URL=". That is exactly what blocked items 16, 21,
-# 22, 23, and 25's own DB-backed verification from running unattended in a
-# sandboxed VPS-loop worker session, each one worked around by hand instead
-# of fixed at the root -- see transit-app-gotchas's "VPS loop / sandboxed
-# worker sessions" section. Allowlisting this script's own fixed prefix
+# starts with "DATABASE_URL=", so a sandboxed agent session allowlisted for
+# pytest still cannot run DB-backed tests unattended. Allowlisting this script's own fixed prefix
 # (`Bash(scripts/run_integration_tests.sh*)`) closes the gap for good.
 #
 # Usage: scripts/run_integration_tests.sh [--llm-eval] [--dashboard-e2e] <pytest args...>
@@ -28,6 +25,7 @@
 #                    e2e test boots the full app (whose startup unconditionally
 #                    requires a key) but never reaches the Ask/LLM code path.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 # Force-set, not `${VAR:-default}` fallbacks: this script's whole point is
 # a safe, unattended entry point into the THROWAWAY stack, so an inherited

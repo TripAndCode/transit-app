@@ -80,18 +80,17 @@ async def test_aggregate_freshness_no_updates_gives_null_data_to(health_pool, ch
 async def test_aggregate_freshness_falls_back_to_latest_completed_day_when_today_has_rows(
     health_pool, ch_client, ch_async_client
 ):
-    """Regression: an agency ingesting continuously (rows from a completed
+    """An agency ingesting continuously (rows from a completed
     past day AND from right now, no agg_route_daily seeded) must report the
     latest COMPLETED day as data_to and be flagged stale — not silently
     "heal" to data_to=None/is_stale=False just because the unconditional
     MAX(captured_at) happens to land on today (the normal, healthy,
     continuously-ingesting case in production).
 
-    A prior version of aggregate_freshness computed MAX(captured_at) over
-    the whole table and only accepted it in Python if it was already before
-    today's JST midnight — which meant it NEVER fell back to the latest
-    prior completed day when today also had rows, defeating staleness
-    detection under totally normal operating conditions.
+    Computing MAX(captured_at) over the whole table and accepting it only
+    if it is already before today's JST midnight would NEVER fall back to
+    the latest prior completed day when today also has rows, defeating
+    staleness detection under totally normal operating conditions.
     """
     async with health_pool.acquire() as conn:
         a = await conn.fetchrow(
@@ -122,7 +121,7 @@ async def test_aggregate_freshness_falls_back_to_latest_completed_day_when_today
 
 @pytest.mark.asyncio
 async def test_aggregate_freshness_never_analyzed_reports_real_backlog_span(health_pool, ch_client, ch_async_client):
-    """Regression: a never-analyzed agency (no agg_route_daily rows at all)
+    """A never-analyzed agency (no agg_route_daily rows at all)
     with N days of accumulated live data must report agg_behind_days == N,
     not a flat 1 — a freshly-onboarded or long-broken-then-recovered agency
     with, say, 10 days of backlog is genuinely 10 days behind, not the same

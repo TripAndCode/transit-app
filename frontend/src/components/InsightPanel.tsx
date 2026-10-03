@@ -1,15 +1,20 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import "./InsightPanel.css";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { useSuggestion } from "../api/hooks";
+import { useAgencyId } from "../api/useAgencyId";
 import { delayColor } from "../styles/tokens";
+import { routeHref } from "../routes/destinations";
+import { isoDaysBefore } from "../api/scope";
 
-// Map the backend's binary severity onto the existing delay warm ramp
-// (CLAUDE.md: "Severity uses the existing warm ramp") via representative
-// minute values landing in delayBand()'s "severe" vs "ok" tiers, rather
-// than inventing new colors just for this panel.
+/** Days of history a suggestion's route page opens on. */
+const ROUTE_WINDOW_DAYS = 14;
+
+// Map the backend's binary severity onto the existing delay warm ramp via
+// representative minute values landing in delayBand()'s "severe" vs "ok"
+// tiers, rather than inventing new colors just for this panel.
 function severityColor(severity: "notable" | "normal"): string {
   return delayColor(severity === "notable" ? 6 : 0);
 }
@@ -87,13 +92,16 @@ function addSeen(agencyId: number, key: string): void {
 
 export function InsightPanel({ className }: { className?: string } = {}) {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
-  const id = agencyId ? Number(agencyId) : null;
+  const id = useAgencyId();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [seen, setSeen] = useState<string[]>(() => (id != null ? readSeen(id) : []));
 
-  const enabled = readEnabled();
+  // Lazy initializer, not a plain call: reading readEnabled() during every
+  // render would make the panel appear/disappear mid-session if a devtools
+  // toggle changes localStorage while it's mounted, instead of only on the
+  // next real mount (e.g. AnalysisTab's `key={id}` agency switch).
+  const [enabled] = useState(readEnabled);
   // Also gated on !collapsed: a collapsed panel has nowhere to show a
   // suggestion, so polling it every refetchInterval would just be wasted
   // backend load for a rail the user has explicitly hidden.
@@ -115,16 +123,12 @@ export function InsightPanel({ className }: { className?: string } = {}) {
     const key = `${data.report_type}:${data.route_code}`;
     addSeen(id, key);
     setSeen(readSeen(id));
-    // Pin from/to to the window this suggestion actually evaluated (rather
-    // than the user's ambient Analysis tab filter, e.g. useRangeContext's
-    // 30-day default) so the click-through lands exactly where the reason
-    // text's numbers are visible.
-    const qs = new URLSearchParams({
-      routes: data.route_code,
-      from: data.from_date,
-      to: data.to_date,
-    });
-    navigate(`/agencies/${id}/analysis/${data.report_type}?${qs.toString()}`);
+    // Every suggestion is about one route, so it opens that route's page:
+    // the same destination whichever rule fired. The window ends on the day
+    // the suggestion looked at, rather than the user's ambient filter, and
+    // runs two weeks back, since the window itself can be a single day.
+    const qs = new URLSearchParams({ from: isoDaysBefore(data.to_date, ROUTE_WINDOW_DAYS - 1), to: data.to_date });
+    navigate(routeHref(id, data.route_code, `?${qs.toString()}`));
   }
 
   return (

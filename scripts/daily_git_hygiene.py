@@ -1,36 +1,24 @@
 #!/usr/bin/env python3
-"""Plan or apply daily git hygiene: local, remote, backup-branch, and venv cleanup.
+"""Plan or apply daily git hygiene: local branch/worktree and orphaned-venv cleanup.
 
-This closes four gaps `/vps-loop-run` only handles reactively (or not at all):
+Two stages, each closing a gap nothing else sweeps on a schedule:
 
-1. Local branch/worktree cleanup (`scripts/cleanup_git_state.py`) currently
-   only runs as a side effect of a loop tick, so it never runs during a long
-   idle stretch or while the loop is stuck.
-2. Merged `vps-loop/item-<N>` branches on GitHub are never deleted by the
-   loop itself (accepted operational debt, batched by a human "when it's
-   worth the time").
-3. `vps-loop/item-<N>-superseded-<sha>` backup branches (created by the
-   loop's Step 2b before a judgment-based delete) have no automated prune
-   path at all.
-4. Poetry names a project's virtualenv by hashing its absolute path, so a
-   worktree this script's own stage 1 (or the loop's own Step 2/2b) deletes
-   leaves its now-orphaned venv behind at several GB apiece with no automated
-   prune path -- poetry itself never revisits a path once it stops existing.
-   A handful of these is enough to fill a small VPS's root disk.
+1. Local branch/worktree cleanup (`scripts/cleanup_git_state.py`), which
+   otherwise only runs when someone remembers `/cleanup-merged`.
+2. Poetry names a project's virtualenv by hashing its absolute path, so a
+   worktree stage 1 (or a person) deletes leaves its now-orphaned venv behind
+   at several GB apiece -- poetry itself never revisits a path once it stops
+   existing. A handful of these is enough to fill a small VPS's root disk.
 
-This script must never race a live `/vps-loop-run` tick: it acquires the
-same `/tmp/claude-loop.lock` lock file non-blockingly before touching
-anything and skips cleanly (not an error) if the loop is mid-tick. A single
-fixed-time daily cron trigger has no retry if it loses that race, so the
-crontab should invoke this hourly; a same-day completion marker
-(`--state-file`, default `/root/.daily_git_hygiene_last_success`) keeps the
-actual cleanup itself running at most once per calendar day regardless of
-how often the trigger fires.
+A single lock file (`--lock-file`, taken non-blockingly) keeps two runs from
+overlapping; a run that finds it held skips cleanly rather than waiting. A
+single fixed-time daily cron trigger has no retry if it fails, so the crontab
+should invoke this hourly; a same-day completion marker (`--state-file`,
+default `/root/.daily_git_hygiene_last_success`) keeps the actual cleanup
+running at most once per calendar day regardless of how often it fires.
 
-Every deletion (local or remote) is appended to a dedicated hygiene log
-(default `/root/git-hygiene.log`) -- not `docs/refactor-log.md`, which is
-`/vps-loop-run`'s own per-item narrative trail, not a general housekeeping
-log.
+Every deletion is appended to a dedicated hygiene log (default
+`/root/git-hygiene.log`).
 
 Like `cleanup_git_state.py`, planning is the default; pass `--apply` to
 actually delete anything.
@@ -43,9 +31,6 @@ import contextlib
 import fcntl
 import importlib.util
 import io
-import itertools
-import json
-import re
 import shutil
 import subprocess
 import sys
@@ -68,20 +53,30 @@ _CLEANUP_SPEC.loader.exec_module(cleanup_git_state)
 
 # `importlib` hands a type checker a bare `ModuleType`, so an attribute read
 # off `cleanup_git_state` is an untyped value -- usable at runtime, but not
-# valid in an annotation. The static import below names the same two objects
-# from the same file so signatures referring to them stay checkable; the
+# valid in an annotation. The static import below names the same objects from
+# the same file so the type checker sees their real types; the
 # runtime branch keeps using the dynamically loaded module object, which is
 # the only one that exists when `scripts/` isn't importable as a package.
 if TYPE_CHECKING:
-    from scripts.cleanup_git_state import CleanupError, PullRequest
+    from scripts.cleanup_git_state import (
+        REVIEW_WORKTREE_PARENT_DIR,
+        REVIEW_WORKTREE_PREFIX,
+        CleanupError,
+        PullRequest,
+        is_review_worktree,
+    )
 else:
     PullRequest = cleanup_git_state.PullRequest
     CleanupError = cleanup_git_state.CleanupError
+    # The review-worktree convention lives in cleanup_git_state, the deletion
+    # authority, so the branch/worktree stage and the venv stage read one rule.
+    REVIEW_WORKTREE_PARENT_DIR = cleanup_git_state.REVIEW_WORKTREE_PARENT_DIR
+    REVIEW_WORKTREE_PREFIX = cleanup_git_state.REVIEW_WORKTREE_PREFIX
+    is_review_worktree = cleanup_git_state.is_review_worktree
 
-DEFAULT_LOCK_FILE = Path("/tmp/claude-loop.lock")
+DEFAULT_LOCK_FILE = Path("/tmp/transit-git-hygiene.lock")
 DEFAULT_LOG_FILE = Path("/root/git-hygiene.log")
 DEFAULT_STATE_FILE = Path("/root/.daily_git_hygiene_last_success")
-DEFAULT_RETENTION_DAYS = 30
 DEFAULT_POETRY_VENV_ROOT = Path("/root/.cache/pypoetry/virtualenvs")
 DEFAULT_MIN_VENV_AGE_HOURS = 24
 DEFAULT_MAX_VENV_DELETES_PER_RUN = 20
@@ -91,43 +86,9 @@ POETRY_ENV_INFO_TIMEOUT_SECONDS = 10
 # shared virtualenvs.path (e.g. a poetry-managed CLI tool used across other work).
 POETRY_VENV_GLOB = "transit-delay-app-*"
 
-# `vps-loop/item-<N>` (no suffix): the branch shape the loop pushes and opens
-# PRs from. `vps-loop/item-<N>-superseded-<sha>`: Step 2b's own local-only
-# backup-ref convention, deliberately not `cleanup_git_state.py`-managed.
-VPS_LOOP_ITEM_BRANCH_RE = re.compile(r"^vps-loop/item-\d+$")
-SUPERSEDED_BRANCH_RE = re.compile(r"^vps-loop/item-\d+-superseded-[0-9a-f]+$")
-
-# `/review-pr`'s own `git worktree add .worktrees/review-<headRefName>` convention
-# (`.claude/commands/review-pr.md`). If that command ever renames either part, this
-# match silently stops firing, and every orphaned venv is retained fail-closed until
-# a human intervenes -- named here so the coupling is greppable from both ends, and
-# covered by `test_review_worktree_naming_matches_review_pr_md`.
-REVIEW_WORKTREE_PARENT_DIR = ".worktrees"
-REVIEW_WORKTREE_PREFIX = "review-"
-
 
 class HygieneError(RuntimeError):
     """Raised when the hygiene job cannot make a conservative decision."""
-
-
-@dataclass(frozen=True)
-class RemoteBranchDecision:
-    """A keep/delete decision for one remote `vps-loop/item-<N>` branch."""
-
-    branch: str
-    head: str
-    action: Literal["keep", "delete"]
-    reason: str
-
-
-@dataclass(frozen=True)
-class BackupBranchDecision:
-    """A keep/delete decision for one local `...-superseded-<sha>` branch."""
-
-    branch: str
-    action: Literal["keep", "delete"]
-    reason: str
-    creation_epoch: int | None
 
 
 @dataclass(frozen=True)
@@ -147,10 +108,8 @@ class VenvDecision:
 def try_acquire_lock(lock_path: Path) -> IO[str] | None:
     """Return an open, exclusively-locked file handle, or None if held elsewhere.
 
-    Non-blocking (`LOCK_EX | LOCK_NB`) on the same lock file
-    `/root/claude-loop.sh` itself uses to guard against overlapping ticks --
-    this job must skip cleanly rather than wait or retry for a live
-    `/vps-loop-run` tick to finish.
+    Non-blocking (`LOCK_EX | LOCK_NB`): a second run must skip cleanly rather
+    than wait for the first to finish.
     """
 
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -198,10 +157,8 @@ def today_utc() -> str:
 def already_succeeded_today(state_file: Path, *, today: str | None = None) -> bool:
     """True if `state_file` already records `today` (default: `today_utc()`) as completed.
 
-    A single fixed cron time (e.g. once daily) can keep losing the
-    `try_acquire_lock` race to an unrelated `/vps-loop-run` tick with no
-    retry within that invocation (see that function's own docstring).
-    Pairing a same-day completion marker with a much more frequent cron
+    A single fixed cron time (e.g. once daily) has no retry if that run
+    fails or finds the lock held. Pairing a same-day completion marker with a much more frequent cron
     trigger (this job stays idempotent per day either way) turns that into
     an hourly retry instead of a 24-hour one, without ever running the
     real cleanup twice in one day.
@@ -256,11 +213,11 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
     this job is specifically meant to run during idle stretches where nothing
     else has refreshed that remote-tracking ref recently.
 
-    Unlike the other two stages, `cleanup_git_state.apply_plan` has no
-    per-item swallow-and-continue -- any problem raises `CleanupError`
-    immediately, which `main`'s own stage loop already catches. Always
-    returns True (or doesn't return at all) for that reason; the bool
-    return exists only so all four stages share one uniform contract.
+    Unlike the venv stage, `cleanup_git_state.apply_plan` has no per-item
+    swallow-and-continue -- any problem raises `CleanupError` immediately,
+    which `main`'s own stage loop already catches. Always returns True (or
+    doesn't return at all) for that reason; the bool return exists only so
+    both stages share one uniform contract.
     """
 
     print("== Local branch/worktree cleanup (cleanup_git_state) ==")
@@ -288,341 +245,7 @@ def run_local_cleanup(repo: Path, *, base: str, remote: str, protected: set[str]
 
 
 # ---------------------------------------------------------------------------
-# 2. Remote vps-loop/item-* branch cleanup
-# ---------------------------------------------------------------------------
-
-
-def list_remote_vps_loop_branches(repo: Path, remote: str) -> dict[str, str]:
-    """Return `vps-loop/item-<N>` branch names on `remote`, mapped to their tip SHA."""
-
-    output = cleanup_git_state.run_command(("git", "ls-remote", "--heads", remote, "vps-loop/item-*"), cwd=repo).stdout
-    branches: dict[str, str] = {}
-    for line in output.splitlines():
-        if not line.strip():
-            continue
-        sha, ref = line.split("\t", 1)
-        name = ref.removeprefix("refs/heads/")
-        if VPS_LOOP_ITEM_BRANCH_RE.match(name):
-            branches[name] = sha
-    return dict(sorted(branches.items()))
-
-
-def load_dependent_open_prs(repo: Path) -> dict[str, tuple[int, ...]]:
-    """Return open PR numbers grouped by their exact base branch name.
-
-    Fetches every open PR once and groups locally by `baseRefName`, the same
-    exact-match-in-Python pattern `cleanup_git_state.load_pull_requests` uses
-    for `headRefName` -- `gh`'s own `--base <branch>` filter is a search
-    qualifier, not guaranteed exact-equality matching, so trusting it alone
-    could produce a false negative that lets a real dependent branch be
-    deleted out from under an open PR.
-    """
-
-    result = cleanup_git_state.run_command(
-        ("gh", "pr", "list", "--state", "open", "--limit", "1000", "--json", "number,baseRefName"), cwd=repo
-    )
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise HygieneError(f"gh pr list --state open returned invalid JSON: {exc}") from exc
-
-    grouped: dict[str, list[int]] = {}
-    for item in payload:
-        base = item.get("baseRefName")
-        if not isinstance(base, str):
-            continue
-        grouped.setdefault(base, []).append(int(item["number"]))
-    return {base: tuple(sorted(numbers)) for base, numbers in grouped.items()}
-
-
-def decide_remote_branch(
-    branch: str, head: str, pull_requests: tuple[PullRequest, ...], dependent_open_prs: tuple[int, ...]
-) -> RemoteBranchDecision:
-    """Decide whether one remote `vps-loop/item-<N>` branch is safe to delete.
-
-    Deletable only when its remote tip exactly matches a merged PR's head
-    commit and no open PR still bases off it -- mirroring
-    `cleanup_git_state.decide_branch`'s exact-tip-match requirement for local
-    branches (a merged PR whose head no longer matches the branch's current
-    tip means real commits landed after the merge, which is not provably
-    recoverable). A branch with no PR history at all (a stray manually-pushed
-    branch) or only an open/closed-unmerged PR is a human's judgment call,
-    not this job's.
-    """
-
-    own_open = [pr for pr in pull_requests if pr.state == "OPEN"]
-    if own_open:
-        numbers = ", ".join(f"#{pr.number}" for pr in own_open)
-        return RemoteBranchDecision(branch, head, "keep", f"branch has its own open PR {numbers}")
-
-    merged = [pr for pr in pull_requests if pr.state == "MERGED"]
-    if not merged:
-        return RemoteBranchDecision(branch, head, "keep", "no merged PR evidence for this branch")
-
-    matching_merges = [pr for pr in merged if pr.head_oid == head]
-    if not matching_merges:
-        numbers = ", ".join(f"#{pr.number}" for pr in merged)
-        return RemoteBranchDecision(
-            branch, head, "keep", f"merged PR {numbers} exists, but remote tip differs (possible post-merge commits)"
-        )
-
-    if dependent_open_prs:
-        numbers = ", ".join(f"#{number}" for number in dependent_open_prs)
-        return RemoteBranchDecision(branch, head, "keep", f"open PR {numbers} still bases off this branch")
-
-    numbers = ", ".join(f"#{pr.number}" for pr in matching_merges)
-    return RemoteBranchDecision(branch, head, "delete", f"remote tip exactly matches merged PR {numbers}")
-
-
-def remote_branch_head(repo: Path, remote: str, branch: str) -> str | None:
-    """Return one branch's current tip SHA on `remote`, or None if it no longer exists.
-
-    Queried by exact branch name (not the `vps-loop/item-*` glob) so this can be
-    used as a cheap, single-branch immediately-before-delete recheck.
-    """
-
-    output = cleanup_git_state.run_command(("git", "ls-remote", "--heads", remote, branch), cwd=repo).stdout
-    for line in output.splitlines():
-        if not line.strip():
-            continue
-        sha, ref = line.split("\t", 1)
-        if ref.removeprefix("refs/heads/") == branch:
-            return sha
-    return None
-
-
-def delete_remote_branch(repo: Path, remote: str, branch: str) -> None:
-    """Delete one branch on `remote`."""
-
-    cleanup_git_state.run_git(repo, "push", remote, "--delete", "--", branch)
-
-
-def run_remote_branch_cleanup(repo: Path, *, remote: str, apply: bool, log_file: Path) -> bool:
-    """Plan (and optionally apply) deletion of merged, non-stacked `vps-loop/item-*` branches.
-
-    Returns False if any individual branch's tip-check or delete failed --
-    those are deliberately swallowed and logged per-branch (a transient
-    failure on one branch must not abort the rest), but the caller still
-    needs to know the stage wasn't fully clean, since that decides whether
-    today can be marked done (see `main`'s `mark_succeeded_today` gate).
-    """
-
-    print(f"== Remote vps-loop/item-* branch cleanup ({remote}) ==")
-    branches = list_remote_vps_loop_branches(repo, remote)
-    pull_requests = cleanup_git_state.load_pull_requests(repo)
-    dependents = load_dependent_open_prs(repo)
-
-    decisions = [
-        decide_remote_branch(branch, head, pull_requests.get(branch, ()), dependents.get(branch, ()))
-        for branch, head in branches.items()
-    ]
-    for decision in decisions:
-        print(f"{decision.action.upper():6} {remote}/{decision.branch} — {decision.reason}")
-    delete_count = sum(decision.action == "delete" for decision in decisions)
-    print(f"Summary: {delete_count} deletable, {len(decisions) - delete_count} retained")
-    if delete_count and not apply:
-        print(f"Dry run only. Re-run with --apply to delete the listed {remote} branches.")
-    if not apply:
-        return True
-
-    all_clean = True
-
-    # Re-fetch dependent-PR evidence once right before applying (not once per
-    # branch) to catch a stacked PR opened during planning, without regressing
-    # back to one `gh` call per branch.
-    fresh_dependents = load_dependent_open_prs(repo)
-    for decision in decisions:
-        if decision.action != "delete":
-            continue
-        recheck = fresh_dependents.get(decision.branch, ())
-        if recheck:
-            numbers = ", ".join(f"#{number}" for number in recheck)
-            message = f"remote cleanup: SKIPPED {remote}/{decision.branch} — open PR {numbers} appeared since planning"
-            print(message)
-            log_line(log_file, message)
-            continue
-        try:
-            current_head = remote_branch_head(repo, remote, decision.branch)
-        except (CleanupError, OSError) as exc:
-            message = f"remote cleanup: ERROR checking {remote}/{decision.branch} tip: {exc}"
-            print(message, file=sys.stderr)
-            log_line(log_file, message)
-            all_clean = False
-            continue
-        if current_head != decision.head:
-            observed = current_head[:12] if current_head else "branch gone"
-            message = (
-                f"remote cleanup: SKIPPED {remote}/{decision.branch} — tip changed since planning "
-                f"(planned {decision.head[:12]}, now {observed})"
-            )
-            print(message)
-            log_line(log_file, message)
-            continue
-        try:
-            delete_remote_branch(repo, remote, decision.branch)
-        except (CleanupError, OSError) as exc:
-            message = f"remote cleanup: ERROR deleting {remote}/{decision.branch}: {exc}"
-            print(message, file=sys.stderr)
-            log_line(log_file, message)
-            all_clean = False
-            continue
-        print(f"DELETED {remote}/{decision.branch}")
-        log_line(log_file, f"remote cleanup: DELETED {remote}/{decision.branch} — {decision.reason}")
-
-    return all_clean
-
-
-# ---------------------------------------------------------------------------
-# 3. Stale superseded-backup branch pruning
-# ---------------------------------------------------------------------------
-
-
-def load_local_superseded_branches(repo: Path) -> dict[str, int | None]:
-    """Return local `vps-loop/item-<N>-superseded-<sha>` branches mapped to when each was
-    itself CREATED, as a unix epoch -- or `None` if that can't be determined.
-
-    Deliberately not the backing commit's own committer date: a branch Step 2b judges
-    "fully superseded" typically already has an old tip commit by definition, so a backup
-    created *today* for it would otherwise look instantly past retention -- defeating the
-    whole point of a retention window that exists to give a human time to notice and
-    recover from a wrong judgment call.
-
-    A plain `git branch <name> <start-point>` (or `git checkout -b <name> <start-point>`,
-    Step 2b's own form) writes exactly one reflog entry for the new branch, `branch:
-    Created from <start-point>`, timestamped at that command's own real wall-clock time
-    regardless of how old the start point itself is (confirmed live). This reads every
-    matching branch's reflog in one bulk `git log -g --glob=...` call -- mirroring the same
-    bulk-read idiom this module already uses for `for-each-ref` -- rather than one `git
-    reflog show` per branch, and keeps the MINIMUM epoch seen per branch across every entry
-    `git log` reports for it: `--walk-reflogs` can't be combined with `--reverse` to read
-    oldest-first directly, and the minimum is correct regardless of how a ref's own entries
-    (there should only ever be one, for a branch nothing else ever updates) interleave with
-    other refs' entries in one combined stream.
-
-    Branch enumeration itself still goes through `for-each-ref`, not "whatever the reflog
-    scan happens to find": a real branch with no reflog at all (`core.logAllRefUpdates`
-    disabled, or an entry old enough to have been `git gc`-expired) is a distinct, visible
-    "unknown" outcome -- mapped to `None` so its decision says so explicitly, rather than
-    silently vanishing from the result the way it would if this function only reported
-    branches its reflog scan actually matched. Being built from two atomic reads (not a
-    per-branch loop), this also has no window in which a concurrently-deleted branch could
-    abort the whole listing.
-    """
-
-    branch_output = cleanup_git_state.run_command(
-        ("git", "for-each-ref", "--format=%(refname:short)", "refs/heads/vps-loop/item-*-superseded-*"),
-        cwd=repo,
-    ).stdout
-    branches: dict[str, int | None] = {
-        name: None
-        for name in (line.strip() for line in branch_output.splitlines())
-        if name and SUPERSEDED_BRANCH_RE.match(name)
-    }
-    if not branches:
-        return branches
-
-    reflog_output = cleanup_git_state.run_command(
-        ("git", "log", "-g", "--glob=refs/heads/vps-loop/item-*-superseded-*", "--date=unix", "--format=%gd|%gs"),
-        cwd=repo,
-    ).stdout
-    for line in reflog_output.splitlines():
-        if not line.strip() or "|" not in line:
-            continue
-        selector, _subject = line.split("|", 1)
-        match = re.match(r"^(.*)@\{(\d+)\}$", selector)
-        if not match:
-            continue
-        name, epoch = match.group(1), int(match.group(2))
-        if name not in branches:
-            continue  # defensive; the glob above is already scoped to this exact shape
-        current = branches[name]
-        if current is None or epoch < current:
-            branches[name] = epoch
-    return dict(sorted(branches.items()))
-
-
-def decide_backup_branch(
-    branch: str, creation_epoch: int | None, *, now_epoch: int, retention_days: int
-) -> BackupBranchDecision:
-    """Decide whether a superseded-backup branch has aged past its retention window.
-
-    Age is measured from when the backup branch was itself created (see
-    `load_local_superseded_branches`'s own docstring for why), not from its backing
-    commit's committer date. `creation_epoch` of `None` means that couldn't be determined
-    at all (no reflog entry) -- there is no safe default to fall back to, so this always
-    keeps rather than guessing "brand new" or "ancient".
-    """
-
-    if creation_epoch is None:
-        return BackupBranchDecision(
-            branch, "keep", "branch creation time unknown (no reflog entry); keeping conservatively", None
-        )
-
-    age_days = (now_epoch - creation_epoch) / 86400
-    if age_days > retention_days:
-        return BackupBranchDecision(
-            branch, "delete", f"branch is {age_days:.1f}d old, past {retention_days}d retention", creation_epoch
-        )
-    return BackupBranchDecision(
-        branch, "keep", f"branch is {age_days:.1f}d old, within {retention_days}d retention", creation_epoch
-    )
-
-
-def delete_local_branch(repo: Path, branch: str) -> None:
-    """Delete one local branch."""
-
-    cleanup_git_state.run_git(repo, "branch", "-D", "--", branch)
-
-
-def run_backup_branch_pruning(repo: Path, *, retention_days: int, apply: bool, log_file: Path) -> bool:
-    """Plan (and optionally apply) removal of superseded-backup branches past retention.
-
-    Returns False if any individual branch's delete failed -- deliberately
-    swallowed and logged per-branch (see `run_remote_branch_cleanup`'s
-    docstring for why), but still surfaced so `main` doesn't mark today
-    done on a stage that wasn't actually fully clean.
-    """
-
-    print(f"== Stale superseded-backup branch pruning (retention={retention_days}d) ==")
-    now_epoch = int(time.time())
-    decisions = [
-        decide_backup_branch(branch, creation_epoch, now_epoch=now_epoch, retention_days=retention_days)
-        for branch, creation_epoch in load_local_superseded_branches(repo).items()
-    ]
-    for decision in decisions:
-        print(f"{decision.action.upper():6} {decision.branch} — {decision.reason}")
-    delete_count = sum(decision.action == "delete" for decision in decisions)
-    print(f"Summary: {delete_count} deletable, {len(decisions) - delete_count} retained")
-    if delete_count and not apply:
-        print("Dry run only. Re-run with --apply to remove the listed backup branches.")
-    if not apply:
-        return True
-
-    all_clean = True
-    for decision in decisions:
-        if decision.action != "delete":
-            continue
-        # Rechecking the branch still exists immediately beforehand -- a
-        # concurrent interactive session could have already removed it.
-        exists = cleanup_git_state.run_git(repo, "rev-parse", "--verify", f"refs/heads/{decision.branch}", check=False)
-        if exists.returncode != 0:
-            continue
-        try:
-            delete_local_branch(repo, decision.branch)
-        except (CleanupError, OSError) as exc:
-            message = f"backup pruning: ERROR deleting {decision.branch}: {exc}"
-            print(message, file=sys.stderr)
-            log_line(log_file, message)
-            all_clean = False
-            continue
-        print(f"DELETED {decision.branch}")
-        log_line(log_file, f"backup pruning: DELETED {decision.branch} — {decision.reason}")
-
-    return all_clean
-
-
-# ---------------------------------------------------------------------------
-# 4. Orphaned poetry venv pruning
+# 2. Orphaned poetry venv pruning
 # ---------------------------------------------------------------------------
 
 
@@ -641,8 +264,8 @@ def poetry_env_path(location: Path) -> Path | None:
 
     A hard timeout guards against `poetry env info` hanging (config-file
     lock contention, a keyring/dbus stall in a headless environment) --
-    this runs under `/tmp/claude-loop.lock`, and a hang here must not hold
-    that lock indefinitely and block a live `/vps-loop-run` tick.
+    this runs under the hygiene lock, and a hang here must not hold that lock
+    indefinitely and block every later run.
     """
 
     try:
@@ -661,32 +284,6 @@ def poetry_env_path(location: Path) -> Path | None:
     return Path(path).resolve() if path else None
 
 
-def is_review_worktree(worktree_path: Path) -> bool:
-    """Match `/review-pr`'s own worktree naming shape; see `compute_in_use_poetry_venvs`
-    for why this exemption exists and what residual it accepts.
-
-    Matched structurally: a `REVIEW_WORKTREE_PARENT_DIR` segment immediately
-    followed by a `REVIEW_WORKTREE_PREFIX`-prefixed one, and nothing shaped
-    like a further nested worktree after that pair. Not just the last two
-    components, since `/review-pr` names the review worktree after the
-    reviewed branch's own head ref, which can itself contain slashes
-    (`vps-loop/item-85` produces `.worktrees/review-vps-loop/item-85`, three
-    components deep, not two) -- and not anchored to any particular
-    checkout, since `/review-pr` runs its `git worktree add` relative to
-    whichever checkout invokes it, normally but not necessarily the main
-    one. The "nothing nested after" requirement excludes a worktree created
-    *inside* a review worktree (e.g. a sandboxed `/vps-loop-run` worker
-    somehow dispatched from one) from inheriting this exemption -- that
-    shape must still hit this module's ordinary fail-closed handling.
-    """
-
-    parts = worktree_path.parts
-    for index, (parent, child) in enumerate(itertools.pairwise(parts)):
-        if parent == REVIEW_WORKTREE_PARENT_DIR and child.startswith(REVIEW_WORKTREE_PREFIX):
-            return not any(part in {"worktrees", REVIEW_WORKTREE_PARENT_DIR} for part in parts[index + 2 :])
-    return False
-
-
 def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: float) -> set[Path]:
     """Every currently in-use poetry venv path: `main_venv` plus every worktree's own.
 
@@ -703,8 +300,8 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
       Neither documented workflow that creates this shape (`/review-pr`,
       `/follow-up-pr-review`) ever runs a poetry command with it as cwd, so
       an unresolved venv here is overwhelmingly "never created," not
-      "transiently unresolved" -- unlike the `/vps-loop-run` worker case
-      below, whose unresolved venv could be a real, load-bearing one.
+      "transiently unresolved" -- unlike the agent-worktree case below,
+      whose unresolved venv could be a real, load-bearing one.
       `poetry_env_path` is still attempted first, exactly like any other
       worktree -- a resolved result is added to `in_use` the same as
       anywhere else, so a venv created out-of-band despite the documented
@@ -736,7 +333,7 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
       across ordinary operations (status/fetch/commit/switch/rebase/`gc`/
       lock/unlock), unlike a directory's own mtime, which resets on any
       root-level create/delete inside it (a `.mypy_cache/`, an untracked
-      `NEXT_TASK.md`, a branch switch that adds/removes a root file) --
+      scratch file, a branch switch that adds/removes a root file) --
       all routine activity for an actively-used worktree, which would
       otherwise make a genuinely old, in-use worktree look "young" and
       skip the very check meant to protect it. `git worktree move` and a
@@ -755,14 +352,13 @@ def compute_in_use_poetry_venvs(repo: Path, main_venv: Path, *, min_age_hours: f
     (never a directory -- only the main checkout's own `.git` is one), so
     an unexpected shape there also raises rather than silently guessing.
 
-    A known, undetected residual on the far side of that same trade-off: a
-    `/vps-loop-run` worker dispatched into a sandbox with no `poetry
-    install` permission (`transit-app-gotchas` documents this as routine,
-    not rare) can go past `min_age_hours` never having created a venv
-    either, for a structurally different reason than the review-worktree
-    case above -- but nothing here can tell that apart from a worktree
-    whose poetry install is merely running late or a transient hiccup hid a
-    real one, since `poetry_env_path` returns the same `None` for all three.
+    A known, undetected residual on the far side of that same trade-off: an
+    agent worktree whose sandbox has no `poetry install` permission can go
+    past `min_age_hours` never having created a venv either, for a
+    structurally different reason than the review-worktree case above -- but
+    nothing here can tell that apart from a worktree whose poetry install is
+    merely running late or a transient hiccup hid a real one, since
+    `poetry_env_path` returns the same `None` for all three.
     Unlike the review-worktree case, this is not exempted: doing so by
     matching `.claude/worktrees/agent-*` would also exempt the much more
     common worktree that *did* successfully create a real venv on a run
@@ -968,16 +564,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--repo", type=Path, default=Path("/root/transit-app"), help="Any worktree in the target repo")
     parser.add_argument("--base", default="main", help="Up-to-date integration branch (default: main)")
-    parser.add_argument("--remote", default="origin", help="Remote used for both base validation and branch cleanup")
+    parser.add_argument("--remote", default="origin", help="Remote used for base validation")
     parser.add_argument("--protect", action="append", default=[], metavar="BRANCH", help="Extra local branch to retain")
     parser.add_argument("--apply", action="store_true", help="Apply the printed plans; default is a dry run")
-    parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK_FILE, help="Lock shared with claude-loop.sh")
-    parser.add_argument("--log-file", type=Path, default=DEFAULT_LOG_FILE, help="Deletion log (not refactor-log.md)")
+    parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK_FILE, help="Keeps two runs from overlapping")
+    parser.add_argument("--log-file", type=Path, default=DEFAULT_LOG_FILE, help="Deletion log")
     parser.add_argument(
         "--state-file", type=Path, default=DEFAULT_STATE_FILE, help="Marks the last calendar day this job completed"
-    )
-    parser.add_argument(
-        "--retention-days", type=int, default=DEFAULT_RETENTION_DAYS, help="Backup-branch retention window in days"
     )
     parser.add_argument(
         "--venv-root", type=Path, default=DEFAULT_POETRY_VENV_ROOT, help="Poetry's virtualenvs.path to prune within"
@@ -1013,7 +606,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     lock_handle = try_acquire_lock(args.lock_file)
     if lock_handle is None:
-        message = f"SKIP: {args.lock_file} is held (a /vps-loop-run tick is likely mid-flight); not touching git state"
+        message = f"SKIP: {args.lock_file} is held (another run is mid-flight); not touching git state"
         print(message)
         log_line(log_file, message)
         return 0
@@ -1035,16 +628,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "local cleanup",
                 lambda: run_local_cleanup(
                     repo, base=args.base, remote=args.remote, protected=protected, apply=args.apply, log_file=log_file
-                ),
-            ),
-            (
-                "remote branch cleanup",
-                lambda: run_remote_branch_cleanup(repo, remote=args.remote, apply=args.apply, log_file=log_file),
-            ),
-            (
-                "backup branch pruning",
-                lambda: run_backup_branch_pruning(
-                    repo, retention_days=args.retention_days, apply=args.apply, log_file=log_file
                 ),
             ),
             (

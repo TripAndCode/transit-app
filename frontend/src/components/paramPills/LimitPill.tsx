@@ -8,6 +8,8 @@
  * whenever the parent updates it externally (e.g., chip-swap resetting defaults).
  */
 import { useState, useRef, useEffect } from "react";
+import { Z_INDEX } from "../../styles/zIndex";
+import { useTranslation } from "react-i18next";
 
 /** Props for {@link LimitPill}. */
 type LimitPillProps = {
@@ -21,6 +23,7 @@ type LimitPillProps = {
 
 /** Numeric stepper pill that commits only on blur or Enter, guarding invalid drafts. */
 export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled }: LimitPillProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string>(String(value));
   // Re-sync the draft when the parent updates `value` externally (chip-swap
@@ -89,12 +92,12 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
           (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
         }}
         style={{
-          background: "var(--bg-soft, rgba(0,0,0,0.04))",
+          background: "var(--bg-soft)",
           border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
           borderRadius: 6,
           padding: "3px 8px",
           fontSize: 12,
-          color: "var(--text-primary, #1a1a1a)",
+          color: "var(--text-primary)",
           cursor: disabled ? "not-allowed" : "pointer",
           display: "inline-flex",
           alignItems: "center",
@@ -106,7 +109,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
       >
         <span style={{ color: "var(--text-secondary, #666)" }}>{label}:</span>
         <b>{value}</b>
-        <span style={{ color: "var(--text-tertiary, #999)", fontSize: 10 }}>▾</span>
+        <span style={{ color: "var(--text-tertiary, #999)", fontSize: "var(--text-xs)" }}>▾</span>
       </button>
       {open && (
         <div
@@ -119,8 +122,8 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
             border: "1px solid var(--border-soft, rgba(0,0,0,0.12))",
             borderRadius: 8,
             padding: 8,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-            zIndex: 10,
+            boxShadow: "var(--el-2)",
+            zIndex: Z_INDEX.dropdown,
             display: "flex",
             gap: 6,
             alignItems: "center",
@@ -135,12 +138,12 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
               height: 26,
               borderRadius: 4,
               border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
-              background: "var(--bg-soft, rgba(0,0,0,0.04))",
+              background: "var(--bg-soft)",
               color: "var(--text-primary)",
               cursor: value <= min ? "not-allowed" : "pointer",
               fontSize: 14,
             }}
-            aria-label="decrement"
+            aria-label={t("common.decrement_aria")}
           >
             −
           </button>
@@ -175,12 +178,12 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
               height: 26,
               borderRadius: 4,
               border: "1px solid var(--border-soft, rgba(0,0,0,0.08))",
-              background: "var(--bg-soft, rgba(0,0,0,0.04))",
+              background: "var(--bg-soft)",
               color: "var(--text-primary)",
               cursor: value >= max ? "not-allowed" : "pointer",
               fontSize: 14,
             }}
-            aria-label="increment"
+            aria-label={t("common.increment_aria")}
           >
             +
           </button>

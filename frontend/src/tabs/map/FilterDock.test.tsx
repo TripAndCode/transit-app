@@ -13,7 +13,7 @@ const ROUTES = [
 const APPLY = /適用|apply/i;
 const PENDING = /変更が未適用|not applied yet/i;
 
-function renderDock(applied: string[] = []) {
+function renderDock(applied: string[] = [], playback?: { active: boolean; onToggle: () => void }) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({
     data: ROUTES,
     isPending: false,
@@ -22,7 +22,7 @@ function renderDock(applied: string[] = []) {
   const onApply = vi.fn();
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <FilterDock agencyId={1} applied={applied} onApply={onApply} />
+      <FilterDock agencyId={1} applied={applied} onApply={onApply} playback={playback} />
     </QueryClientProvider>,
   );
   return { onApply };
@@ -95,5 +95,29 @@ describe("FilterDock", () => {
     fireEvent.submit(screen.getByRole("button", { name: APPLY }).closest("form")!);
 
     expect(onApply).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("FilterDock playback toggle", () => {
+  const PLAYBACK_ON = /1日の動きを再生|Play the day/i;
+  const PLAYBACK_OFF = /現在の運行に戻る|Back to current observations/i;
+
+  it("is absent unless the caller offers playback", () => {
+    renderDock();
+    expect(screen.queryByRole("button", { name: PLAYBACK_ON })).toBeNull();
+  });
+
+  it("switches the map into playback and reports the state it is in", async () => {
+    const onToggle = vi.fn();
+    renderDock([], { active: false, onToggle });
+    const toggle = screen.getByRole("button", { name: PLAYBACK_ON });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    await userEvent.click(toggle);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the way back out once playback is on", () => {
+    renderDock([], { active: true, onToggle: vi.fn() });
+    expect(screen.getByRole("button", { name: PLAYBACK_OFF }).getAttribute("aria-pressed")).toBe("true");
   });
 });

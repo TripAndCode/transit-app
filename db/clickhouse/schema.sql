@@ -48,3 +48,17 @@ ORDER BY (agency_id, captured_at, route_code, trip_id, stop_sequence)
 -- sort-key column unless this setting is on, and the null-map overhead here
 -- is small next to a NOT NULL column that silently drops rows on insert.
 SETTINGS allow_nullable_key = 1;
+
+-- Realtime observations only: the collector push and ingest_live write here,
+-- and nothing else does. `updates` receives each closed JST day from this
+-- table by daily promotion (pipeline/promote.py), so it and every aggregate
+-- hold closed days only. Same columns as `updates`, because promotion copies
+-- by column name. Daily partitions, and a TTL that holds today, yesterday and
+-- one day of slack for a late promotion. A day still here when its TTL
+-- passes is gone.
+CREATE TABLE IF NOT EXISTS updates_live AS updates
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(captured_at)
+ORDER BY (agency_id, captured_at, route_code, trip_id, stop_sequence)
+TTL toDateTime(captured_at) + INTERVAL 3 DAY DELETE
+SETTINGS allow_nullable_key = 1;

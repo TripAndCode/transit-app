@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Modal } from "./Modal";
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -15,14 +16,6 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("api_key") ?? "");
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   function save() {
     if (apiKey) localStorage.setItem("api_key", apiKey);
     else localStorage.removeItem("api_key");
@@ -30,36 +23,23 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      role="presentation"
+    <Modal
+      open
+      onClose={onClose}
+      ariaLabel={t("header.settings_title")}
+      variant="drawer"
       style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.2)",
-        zIndex: 100,
+        right: 0,
+        width: 360,
+        padding: 24,
+        // Cast leftward, onto the page the drawer covers -- --el-left, not
+        // --el-2/--el-3, which only cast downward.
+        boxShadow: "var(--el-left)",
       }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("header.settings_title")}
-        style={{
-          position: "absolute",
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: 360,
-          background: "var(--bg-surface)",
-          padding: 24,
-          boxShadow: "-4px 0 16px rgba(0,0,0,0.06)",
-        }}
-      >
         <h3 style={{ marginTop: 0 }}>{t("header.settings_title")}</h3>
         <label style={{ display: "block", marginTop: 16 }}>
-          <div style={{ marginBottom: 4, color: "var(--text-secondary)", fontSize: 13 }}>
+          <div style={{ marginBottom: 4, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
             {t("header.settings_api_key_label")} <span style={{ color: "var(--text-tertiary)" }}>{t("common.optional_paren")}</span>
           </div>
           <input
@@ -69,7 +49,7 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
             placeholder={t("header.settings_api_key_placeholder")}
             style={{ width: "100%" }}
           />
-          <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
+          <div style={{ marginTop: 6, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", lineHeight: 1.5 }}>
             {t("header.settings_api_key_hint")}
           </div>
         </label>
@@ -89,7 +69,6 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
             {t("common.save")}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

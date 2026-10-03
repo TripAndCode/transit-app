@@ -9,12 +9,12 @@ from tests.conftest import mirror_updates_to_ch
 
 def _analyze(agency_id, pg_conn, ch_client):
     """Mirror this agency's Postgres `updates` rows into ClickHouse (the
-    dedup materialization's source as of Task 6) and run analyze().
+    dedup materialization's source) and run analyze().
 
-    Every fixture in this file seeds Postgres `updates` directly (pre-dating
-    the ClickHouse migration); mirroring right before analyze() lets those
-    seeds keep driving the ClickHouse-sourced aggregates without duplicating
-    each one. See tests.conftest.mirror_updates_to_ch.
+    Every fixture in this file seeds Postgres `updates` directly; mirroring
+    right before analyze() lets those seeds keep driving the
+    ClickHouse-sourced aggregates without duplicating each one. See
+    tests.conftest.mirror_updates_to_ch.
     """
     mirror_updates_to_ch(ch_client, agency_id)
     analyze(agency_id, pg_conn, ch_client)
@@ -191,7 +191,7 @@ def test_analyze_sum_delay_sec_pools_exactly_unlike_reweighted_avg_min(pg_conn, 
     0.69 min). Day 2: 7 observations at 100s each -> sum=700s, avg=100s
     (rounds to 1.67 min). The true combined mean is 824s / 10 / 60 = 1.3733
     min, which rounds to 1.37 -- but re-weighting the two ALREADY-ROUNDED
-    per-day avg_min values instead (the pre-fix pattern) gives
+    per-day avg_min values instead gives
     (0.69*3 + 1.67*7) / 10 = 1.376, which rounds to 1.38: a different, wrong
     answer that exists purely because of the intermediate rounding.
     """
@@ -241,7 +241,7 @@ def test_analyze_sum_delay_sec_pools_exactly_unlike_reweighted_avg_min(pg_conn, 
         )
         fixed_avg = float(cur.fetchone()[0])
 
-        # The bug this migration fixes: re-weighting each row's own
+        # The biased alternative: re-weighting each row's own
         # already-rounded avg_min instead of the raw sum.
         cur.execute(
             "SELECT ROUND((SUM(avg_min * samples) / SUM(samples))::numeric, 2) "
@@ -274,10 +274,9 @@ def test_analyze_sum_late_sec_is_clamped_per_observation_not_clamped_average(pg_
 
     5 observations at +600s (10 min) and 5 at -480s (-8 min): the day's
     signed average is (5*600 + 5*(-480)) / 10 / 60 = 1.0 min. Clamping THAT
-    average (the bug this column fixes) would score the day as
-    ``1.0 * 10 = 10`` late-minutes. The true per-observation clamped sum is
-    ``5 * 600 = 3000`` seconds = 50 minutes -- the -480s trips contribute 0,
-    never a negative offset.
+    average would score the day as ``1.0 * 10 = 10`` late-minutes. The true
+    per-observation clamped sum is ``5 * 600 = 3000`` seconds = 50 minutes --
+    the -480s trips contribute 0, never a negative offset.
     """
     with pg_conn.cursor() as cur:
         i = 0
@@ -543,7 +542,7 @@ def _seed_route_group(pg_conn, agency_id, route_code, service_type, n=25):
 
     Varies trip_id + day so each row survives the dedup DISTINCT ON. Pass
     ``service_type=None`` to simulate the rows that miss the static_join and
-    land with a NULL service_type (the agency-9 case).
+    land with a NULL service_type.
     """
     with pg_conn.cursor() as cur:
         for i in range(n):
@@ -569,10 +568,9 @@ def _seed_route_group(pg_conn, agency_id, route_code, service_type, n=25):
 def test_analyze_skips_null_service_type_without_crashing(pg_conn, agency_id, ch_client):
     """Rows with a NULL service_type (failed static_join) must not abort analyze.
 
-    Regression for the agency-9 case: a NULL service_type group violated the
-    NOT NULL constraint on agg_route_stats.service_type and rolled back the
-    whole run, leaving aggregates stale. analyze must drop those rows and
-    materialise the rest.
+    A NULL service_type group would violate the NOT NULL constraint on
+    agg_route_stats.service_type and roll back the whole run, leaving
+    aggregates stale. analyze must drop those rows and materialise the rest.
     """
     _seed_route_group(pg_conn, agency_id, "R1", "平日")
     _seed_route_group(pg_conn, agency_id, "R1", None)
@@ -678,13 +676,12 @@ def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(p
     table is about which routes serve a stop, independent of whether any
     observation happened to carry a numeric delay.
 
-    Regression: agg_stop_routes was derived from _analyze_deduped for one
-    perf-motivated commit, which pre-filters `dep_delay IS NOT NULL` — that
-    silently dropped this exact case (a real, non-trivial share of keys,
-    enough to lose stops' entire route coverage in practice). Restored to
-    the ClickHouse-sourced
+    So agg_stop_routes must come from the ClickHouse-sourced
     _analyze_raw_keys path, which reads route_code/trip_id/stop_sequence
-    only and never touches dep_delay."""
+    only and never touches dep_delay — not from _analyze_deduped, whose
+    `dep_delay IS NOT NULL` pre-filter silently drops this exact case (a
+    real, non-trivial share of keys, enough to lose stops' entire route
+    coverage in practice)."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
@@ -711,7 +708,7 @@ def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(p
 
 
 def test_agg_stop_daily_keeps_null_service_type_as_sentinel(pg_conn, agency_id, ch_client):
-    """NULL service_type rows (agency-9 case) must not abort the agg build,
+    """NULL service_type rows (a missed static_join) must not abort the agg build,
     and — matching agg_route_stop_daily's '' sentinel treatment — must not be
     silently dropped either: a stop whose traffic is entirely NULL-service
     would otherwise read as zero activity on the default (no route filter)
@@ -768,8 +765,8 @@ def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id, ch_client):
 
 def test_heatmap_aggs_clamp_implausible_delays(pg_conn, agency_id, ch_client):
     """A frozen-feed spike (|delay| > MAX_PLAUSIBLE_DELAY_SEC) is excluded from
-    BOTH heatmap aggregates, so it can't hijack the per-stop mean. Regression for
-    the 2026-06-07 馬木料金所前 72-min false reading."""
+    BOTH heatmap aggregates, so it can't hijack the per-stop mean (see
+    pipeline/db.py's MAX_PLAUSIBLE_DELAY_SEC comment)."""
     from datetime import time
 
     from pipeline.analyze import MAX_PLAUSIBLE_DELAY_SEC
@@ -907,7 +904,7 @@ def test_analyze_skips_agg_service_delivered_daily_for_non_static_join_agency(pg
 
 
 def test_analyze_service_delivered_daily_latest_stop_observation_wins_over_stale_skip(pg_conn, agency_id, ch_client):
-    """Regression: a stop flagged SKIPPED on an early poll, corrected back to
+    """A stop flagged SKIPPED on an early poll, corrected back to
     normal on a later poll (higher captured_at), must not count as
     non-executed -- the stop-level subquery's raw WHERE must not filter
     `schedule_relationship_stop IS NOT NULL` before argMax runs, or the
@@ -1006,7 +1003,7 @@ def test_analyze_classifies_high_frequency_route_from_static_schedule(pg_conn, a
     freq_median, freq_hf, freq_wait = by_route["R_FREQ"]
     assert abs(freq_median - 480) < 1  # hand-computed: 480s (8 min) between every pair
     assert freq_hf is True
-    # Perfectly regular headway -> mean wait reduces to headway/2 (item 94's
+    # Perfectly regular headway -> mean wait reduces to headway/2 (the
     # E[H^2]/(2E[H]) formula, see pipeline.headways.mean_wait_from_moments).
     assert abs(freq_wait - 240) < 1
 
@@ -1106,7 +1103,7 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     median_sec, samples, sum_sec, sumsq_sec2, long_gap_count = row
     assert samples == 2  # 3 events -> 2 consecutive gaps
     assert abs(median_sec - 480) <= 3
-    # Both gaps land exactly on 480s -- sum/sumsq are the item 94 sufficient
+    # Both gaps land exactly on 480s -- sum/sumsq are the sufficient
     # statistics behind that same median, additive across days (see
     # pipeline.headways module docstring).
     assert abs(sum_sec - 960) <= 6
@@ -1335,16 +1332,15 @@ def test_analyze_skips_agg_route_daily_dwell_run_without_static_schedule(pg_conn
 
 
 def test_analyze_dwell_run_latest_poll_wins_when_arr_delay_goes_null(pg_conn, agency_id, ch_client):
-    """Regression: a stop event whose LATEST poll has `arr_delay = NULL`
+    """A stop event whose LATEST poll has `arr_delay = NULL`
     (feed stopped sending an arrival estimate for that stop) must be treated
     as unavailable for that stop-visit, not silently resurrect an EARLIER
     poll's non-NULL `arr_delay` -- ClickHouse's `argMax(arg, val)` silently
     SKIPS a row whose `arg` is NULL when picking the row with the maximal
     `val`, so a naive `argMax(u.arr_delay, (captured_at, file_name))` would
     return the earlier, stale value instead of NULL. `build_dedup_ch_sql`
-    guards against this with a `coalesce`/`NULLIF` sentinel wrap (mirroring
-    the same fix already applied to `schedule_relationship_trip`/
-    `schedule_relationship_stop`)."""
+    guards against this with a `coalesce`/`NULLIF` sentinel wrap (the same
+    wrap `schedule_relationship_trip`/`schedule_relationship_stop` use)."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
     _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
     early = datetime(2026, 4, 1, 1, 0, tzinfo=timezone.utc)
@@ -1383,7 +1379,7 @@ def test_analyze_dwell_run_latest_poll_wins_when_arr_delay_goes_null(pg_conn, ag
 def test_analyze_dwell_run_missing_schedule_at_interior_stop_does_not_inflate_next_running(
     pg_conn, agency_id, ch_client
 ):
-    """Regression: a stop lacking a static schedule row (arrival_time/
+    """A stop lacking a static schedule row (arrival_time/
     departure_time optional for non-timepoint intermediate stops in real
     GTFS feeds) must yield None for its own dwell/running AND make the
     FOLLOWING stop's running time None too -- not silently pair the
@@ -1430,9 +1426,9 @@ def test_analyze_dwell_run_missing_schedule_at_interior_stop_does_not_inflate_ne
     dwell_samples, dwell_sum_sec, run_samples, run_sum_sec = row
     # Stop 3's own dwell (0) is unaffected -- it doesn't depend on stop 2.
     # Stop 3's running time DOES depend on stop 2's actual departure, which
-    # is None (no schedule) -- run_samples must be 0, not 1 (which the bug
-    # would produce by pairing stop 3 with stop 1's departure instead:
-    # actual_arr_sec(3) - actual_dep_sec(1) = 36610 - 36030 = 580).
+    # is None (no schedule) -- run_samples must be 0, not 1 (which skipping
+    # past the missing stop would produce by pairing stop 3 with stop 1's
+    # departure instead: actual_arr_sec(3) - actual_dep_sec(1) = 36610 - 36030 = 580).
     assert dwell_samples == 1
     assert dwell_sum_sec == 0
     assert run_samples == 0
@@ -1597,7 +1593,7 @@ def test_analyze_builds_agg_schedule_revision_daily_dominant_version_per_day(pg_
 
 def test_analyze_skips_agg_schedule_revision_daily_when_static_version_id_always_null(pg_conn, agency_id, ch_client):
     """An ingest strategy that never sets static_version_id (e.g.
-    aomori_regex) -- or any day predating item 88's rollout -- must get NO
+    aomori_regex) -- or any day whose rows all carry a NULL one -- must get NO
     row here, never a NULL-version row a boundary could be misdrawn against."""
     day1 = datetime(2026, 5, 1, 2, 0, tzinfo=timezone.utc)
     rows = [_ch_schedule_revision_row("T1", day1, None, file_name="d1t1.pb")]

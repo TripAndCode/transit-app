@@ -118,8 +118,8 @@ async def conn_with_observations(conn_with_seed):
 async def conn_with_observations_ch(conn_with_observations, ch_client, ch_async_client):
     """`conn_with_observations` plus the same rows mirrored into ClickHouse
     and a wired async client — needed by describe_data's `date_range` /
-    `sample_counts` / `overview` kinds, which now read live `updates` from
-    ClickHouse instead of Postgres (Task 8)."""
+    `sample_counts` / `overview` kinds, which read live `updates` from
+    ClickHouse instead of Postgres."""
     pool, agency_id = conn_with_observations
     from tests.conftest import mirror_updates_to_ch
 
@@ -151,7 +151,7 @@ async def test_describe_data_date_range(conn_with_observations_ch):
 
 @pytest.mark.asyncio
 async def test_describe_data_date_range_empty_agency(conn_with_seed, ch_async_client):
-    """Fix D regression: date_range's min/max split (two index-served
+    """date_range's min/max split (two index-served
     ORDER BY captured_at ASC/DESC LIMIT 1 probes instead of one full-scan
     minOrNull/maxOrNull) must still report 'no observations' — not crash on
     an empty result_rows list — when the agency has zero ClickHouse rows."""
@@ -163,7 +163,7 @@ async def test_describe_data_date_range_empty_agency(conn_with_seed, ch_async_cl
 
 @pytest.mark.asyncio
 async def test_describe_data_overview_empty_agency(conn_with_seed, ch_async_client):
-    """Fix D regression: overview's min/max split must degrade to '—' (not
+    """overview's min/max split must degrade to '—' (not
     crash) when the agency has zero ClickHouse rows."""
     pool, agency_id = conn_with_seed
     async with pool.acquire() as conn:
@@ -191,29 +191,13 @@ async def test_describe_data_agencies(conn_with_observations):
 
 
 @pytest.mark.asyncio
-async def test_describe_data_agencies_cross(conn_with_observations):
-    """When cross_agency=True, every agency is returned (admin path)."""
+async def test_describe_data_agencies_ignores_cross_agency_arg(conn_with_observations):
+    """A model-supplied ``cross_agency`` must not widen the tenant scope."""
     pool, agency_id = conn_with_observations
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO agencies (agency_name, feed_url) VALUES ('OTHER', 'http://other')")
         result = await describe_data({"kind": "agencies", "cross_agency": True}, _ctx(), conn, agency_id, locale="ja")
-    assert result.kind == "table"
-    names = {row[1] for row in result.rows}
-    assert "OTHER" in names
-    assert len(result.rows) >= 2
-
-
-@pytest.mark.asyncio
-async def test_describe_data_agencies_cross_excludes_deleted(conn_with_observations):
-    """cross_agency=True must still hide soft-deleted agencies."""
-    pool, agency_id = conn_with_observations
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO agencies (agency_name, feed_url, deleted_at) VALUES ('GONE', 'http://gone', now())"
-        )
-        result = await describe_data({"kind": "agencies", "cross_agency": True}, _ctx(), conn, agency_id, locale="ja")
-    names = {row[1] for row in result.rows}
-    assert "GONE" not in names
+    assert [row[0] for row in result.rows] == [agency_id]
 
 
 @pytest.mark.asyncio

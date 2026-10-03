@@ -19,10 +19,9 @@ def _run_analyze(agency_id, ch_client):
     precomputed aggregates (agg_daily_trend, agg_route_hour) — not live `updates`
     — so the fixture must analyze after seeding or every query returns empty.
 
-    analyze()'s dedup materialization now reads ClickHouse (Task 6); this
-    fixture seeds Postgres `updates` directly (pre-dating that migration), so
-    mirror the same rows into ClickHouse first — see
-    tests.conftest.mirror_updates_to_ch."""
+    analyze()'s dedup materialization reads ClickHouse, but this fixture
+    seeds Postgres `updates` directly, so mirror the same rows into
+    ClickHouse first — see tests.conftest.mirror_updates_to_ch."""
     import psycopg2
 
     from pipeline.analyze import analyze
@@ -160,5 +159,8 @@ async def test_movers_returns_rows(dash_app):
     assert r.status_code == 200
     body = r.json()
     assert "rows" in body
+    # Both compared windows (2026-05-25..31 and 2026-05-18..24) fall inside the
+    # seeded 20 days, so an empty list would mean the windows landed off the data.
+    assert body["rows"]
     expected_keys = {"route_code", "label", "current_avg", "previous_avg", "delta", "delta_pct", "samples"}
     assert all(expected_keys.issubset(r.keys()) for r in body["rows"])

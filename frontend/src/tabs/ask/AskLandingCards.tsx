@@ -46,7 +46,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
         <>
           <div
             style={{
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               fontWeight: 600,
               letterSpacing: "0.04em",
               textTransform: "uppercase",
@@ -80,7 +80,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
                 {tpl.example_answer_key && (
                   <div
                     style={{
-                      fontSize: 11.5,
+                      fontSize: "var(--text-xs)",
                       color: "var(--text-tertiary)",
                       marginTop: 6,
                       paddingLeft: 20,
@@ -99,7 +99,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
         <>
           <div
             style={{
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               fontWeight: 600,
               letterSpacing: "0.04em",
               textTransform: "uppercase",

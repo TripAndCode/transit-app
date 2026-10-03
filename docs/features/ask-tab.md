@@ -1,19 +1,34 @@
 # Ask tab
 
 Chat-first, deterministic-by-default Q&A over an agency's delay data. See
-`README.md` ▸ "Ask tab — how it works" for the architecture summary this
-doc expands on with file-level detail.
+`README.md` ▸ "Data Flow" (the Ask-tab bullet) for the architecture summary
+this doc expands on with file-level detail.
 
 ## How a user reaches it
 
 - Route: `/agencies/:agencyId/ask`, registered in `frontend/src/main.tsx`
   (`React.lazy`-loaded). It is **not** the default landing tab — a bare
-  `agencies/:agencyId` navigates to `overview`
+  `agencies/:agencyId` navigates to `pulse`
   (`frontend/src/main.tsx`), and `frontend/src/components/OnboardingGate.tsx`
-  redirects a fresh/remembered agency selection to `/agencies/{id}/map`.
-  Reach the Ask tab by clicking "Ask" in the sidebar.
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx` (`nav.ask` i18n
-  key).
+  redirects a fresh/remembered agency selection to
+  `/agencies/{id}/pulse`.
+  Reach the Ask tab from the rail's Ask link, the command palette's "Ask"
+  entry, or the `g q` chord.
+- Entry points: Ask is not one of the seven destinations in
+  `SIDEBAR_NAV_ITEMS`; the rail shows it as a separate dashed link below
+  them (`frontend/src/components/Sidebar.tsx`). The top bar
+  (`frontend/src/components/TopBar.tsx`) above every agency screen carries
+  a search field (`topbar.ask_placeholder`) that opens the command palette
+  (also ⌘K); the palette's "Go to" group lists Ask after the rail
+  destinations (`GO_TO_TARGETS` in
+  `frontend/src/components/paletteNavTargets.ts`, `nav.ask` i18n key —
+  "Ask" / "質問"). That field carries `data-tour="ask-nav"`, the first-run
+  tour's third step (placed "bottom"); the bar's right side holds the data-freshness
+  chip (`frontend/src/components/DataFreshness.tsx`): the agency's
+  `latest_data_date` and the newest live reading, with a panel that spells
+  both out (`topbar.freshness.*`). On a phone, Ask is also one of the bottom tabs in
+  `frontend/src/components/Sidebar.tsx`, beside Pulse, Routes, Live and
+  More.
 - Top-level component: `frontend/src/tabs/AskTab.tsx` — owns thread
   selection, the shared filter context (date range / DOW / time-band /
   service / routes), message dispatch, and anon-to-authenticated
@@ -62,7 +77,7 @@ What the user sees/does:
 `pipeline.query.tools.dispatch` directly — no router/LLM stages at all,
 since the frontend template already supplies `tool`/`args`.
 
-**Anonymous user, same templates:** `useAppendMessage`'s anon branch
+**Anonymous user (anonymous-only mode), same templates:** `useAppendMessage`'s anon branch
 builds a synthetic `question = "__build__ <tool> <json-args>"` and calls
 `POST /api/{agency_id}/ask` (`api/routers/ask.py: ask()`). This still
 passes through Stage 1 (regex `_RULES`) and Stage 2 (embedding NN) first
@@ -148,18 +163,21 @@ unwired/consumed elsewhere rather than assuming it's live in this UI.
 ## Who may reach the Stage-3 LLM
 
 Reaching an LLM requires a signed-in caller whose `users.llm_approved` flag an
-admin has set. The three LLM-backed surfaces enforce it in two different
-places, for one structural reason:
+admin has set. The two LLM-backed surfaces enforce it in different places, for
+one structural reason:
 
 | Surface | Where the gate runs | Rejected caller sees |
 | --- | --- | --- |
-| `POST /copilot/insight` | `require_llm_approved(user)` at the top of the handler (`api/security.py`) | `403 llm_not_approved` |
-| `POST /conversations/{id}/followup` | same | `403 llm_not_approved` |
+| `POST /conversations/{id}/followup` | `require_llm_approved(user)` at the top of the handler (`api/security.py`) | `403 llm_not_approved` |
 | `POST /ask` | inside `chat_with_tools`'s `_call_llm` (`pipeline/query/chat.py`), via the `llm_approved` argument the router threads in | `200` with an honest-degradation answer |
 
-`/ask` cannot reject the whole request upfront the way the other two do:
+The Copilot panel's `POST /copilot/insight` calls no LLM (its template is
+chosen and filled in code, `pipeline/query/copilot.py`), so it is open to every
+caller while `copilot_insight_enabled` is on.
+
+`/ask` cannot reject the whole request upfront the way the follow-up does:
 Stages 1 and 2 (regex rules, embedding nearest-neighbour) answer many
-questions with no LLM at all, and those stay open to everyone. So the flag
+questions with no LLM at all, and those stay open to every caller the login gate admits (everyone in anonymous-only mode). So the flag
 travels into the orchestrator and short-circuits only the Stage-3 call,
 returning `error_kind="not_approved"` before any provider or BYOK key is
 touched. Anonymous callers have no user row, so the router passes
@@ -191,7 +209,6 @@ so it is a separate mechanism to build, not a knob to turn on.
 | `frontend/src/components/ParamStrip.tsx` | Inline parameter composer for a chip template |
 | `frontend/src/components/paramPills/*.tsx` | Individual param controls (segmented/limit/route picker) |
 | `frontend/src/components/askCardTemplates.ts` | Declarative chip templates (tool + args + i18n keys) |
-| `frontend/src/components/askFollowupChips.ts` | Follow-up chip definitions |
 | `frontend/src/components/ThreadSidebar.tsx` | Conversation list (anon localStorage ↔ server) |
 | `frontend/src/components/FilterContextBar.tsx` | Date/DOW/time-band/service/route filter strip |
 | `frontend/src/api/hooks.ts` | TanStack Query hooks for all `/ask` + `/conversations` endpoints |
@@ -258,7 +275,7 @@ so it is a separate mechanism to build, not a knob to turn on.
   These are two different JSONL files with two different jobs — don't
   conflate them.
 - Most of these need both throwaway Postgres (`:5544`) and throwaway
-  ClickHouse (`:8124`) — see `CLAUDE.md` ▸ Database safety for the
+  ClickHouse (`:8124`) — see `AGENTS.md` ▸ Tests for the
   `RUN_CH_INTEGRATION=1` block; omitting it silently skips
   ClickHouse-gated tests instead of failing.
 
@@ -281,10 +298,16 @@ so it is a separate mechanism to build, not a knob to turn on.
    `"embedding"` instead of always falling to Stage 3:
    `poetry run python gtfs_pipeline.py build_rag_index --agency-id 1`
    (or `make build-rag-index` for all agencies). Without this,
-   `rag_chunks` is empty and Stage 2 never dispatches.
-4. Open the app — the default route lands on Overview
-   (`/agencies/{id}/overview`; a fresh/remembered agency selection instead
-   redirects to Map). Click "Ask" in the sidebar to reach this tab.
+   `rag_chunks` is empty and Stage 2 never dispatches. Every row is
+   stamped with `embedding_version` (`<model id>@<sentence-transformers
+   version>`); Stage 2 reads only rows matching the running embedder (plus
+   unstamped legacy rows) and logs a one-off "re-index required" warning
+   when other-version rows are present, so re-run the same command after
+   changing `EMBEDDING_MODEL_ID` or bumping the library's major.
+4. Open the app — the default route lands on Pulse
+   (`/agencies/{id}/pulse`; a fresh/remembered agency selection redirects
+   there too). Click the top bar's search field (or press ⌘K), choose "Ask",
+   and expect `/agencies/{id}/ask`; pressing `g` then `q` goes there directly.
 5. On the empty-thread landing view, click an instant card (e.g.
    "🏆 Top-N delays") — expect an immediate assistant bubble with a ranked
    table (deterministic `conversations/{cid}/messages` → `dispatch` path,

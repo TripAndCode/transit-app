@@ -68,7 +68,7 @@ def test_revalidates_and_follows_redirect_to_a_public_host(monkeypatch):
 
 def test_blocks_redirect_into_an_internal_host(monkeypatch):
     """The original URL passes validation; the redirect target must be
-    re-validated too, or this is exactly the bypass the fix exists for."""
+    re-validated too, or a redirect is a way around the guard entirely."""
 
     def fake_open(req, timeout=None):
         if req.full_url == "http://8.8.8.8/start":
@@ -241,7 +241,7 @@ def test_drops_entity_headers_alongside_body_on_302_redirect(monkeypatch):
 
 def test_preserves_request_body_across_redirect(monkeypatch):
     """A future POST-with-body Request must not silently lose its body on
-    a redirect hop - only headers/method were preserved before this fix."""
+    a redirect hop - the body is carried along with the headers/method."""
     seen_bodies = []
 
     def fake_open(req, timeout=None):

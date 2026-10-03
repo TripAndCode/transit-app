@@ -109,13 +109,13 @@ def test_misresolved_gate_dir_is_caught_by_the_safety_net(fake_repo):
 
 
 def test_explicit_dash_c_to_a_foreign_repo_is_not_overridden_by_a_preceding_cd(fake_repo):
-    """Regression: an explicit `-C <other-repo>` on the statement that
-    actually carries `push` must be resolved before tiers 2/3 run at all.
-    A prior version left GATE_DIR empty when `-C` named a real, existing,
-    but unrelated repository, which let a *preceding* `cd` into this
-    repo's own worktree silently fill GATE_DIR instead -- checking a
-    branch the push never touches while never inspecting the real
-    target (the other repo) at all."""
+    """An explicit `-C <other-repo>` on the statement that actually
+    carries `push` must be resolved before tiers 2/3 run at all. Leaving
+    GATE_DIR empty when `-C` names a real, existing, but unrelated
+    repository would let a *preceding* `cd` into this repo's own worktree
+    silently fill GATE_DIR instead -- checking a branch the push never
+    touches while never inspecting the real target (the other repo) at
+    all."""
     _git("branch", "feature", cwd=fake_repo)
     worktree = fake_repo.parent / "feature-worktree"
     _git("worktree", "add", "-q", str(worktree), "feature", cwd=fake_repo)
@@ -136,10 +136,11 @@ def test_explicit_dash_c_to_a_foreign_repo_is_not_overridden_by_a_preceding_cd(f
 
 
 def test_explicit_refspec_resolves_via_its_source_half_with_no_dash_c_or_cd(fake_repo):
-    """Regression: `${ref##*:}` (destination half) was used where the
-    source half -- the local branch actually being pushed -- was needed,
-    so an explicit `src:dst` refspec resolved to a remote-side name that
-    isn't a local worktree/branch, and this tier silently found nothing.
+    """An explicit `src:dst` refspec must resolve via its source half --
+    the local branch actually being pushed. The destination half
+    (`${ref##*:}`) is a remote-side name that isn't a local
+    worktree/branch, so resolving on it makes this tier silently find
+    nothing.
     Drives the real tier-2 (ref -> worktree) lookup with no `-C`/`cd` in
     the command at all, so only a correct source-half extraction can
     resolve GATE_DIR here."""
@@ -169,11 +170,11 @@ def test_explicit_refspec_resolves_via_its_source_half_with_no_dash_c_or_cd(fake
 
 
 def test_deletion_only_branch_from_the_correct_worktree_is_not_blocked(fake_repo):
-    """Regression: the safety net's own diff used to omit
-    --diff-filter=ACMR, so a branch whose only Python change is a file
-    deletion (which the scoped PY_FILES list correctly excludes) was
-    wrongly reported as differing from base -- refusing a legitimate push
-    from the directory that actually holds the branch."""
+    """The safety net's own diff must apply --diff-filter=ACMR, so a
+    branch whose only Python change is a file deletion (which the scoped
+    PY_FILES list correctly excludes) is not reported as differing from
+    base -- which would refuse a legitimate push from the directory that
+    actually holds the branch."""
     _git("branch", "drop-file", cwd=fake_repo)
     worktree = fake_repo.parent / "drop-worktree"
     _git("worktree", "add", "-q", str(worktree), "drop-file", cwd=fake_repo)

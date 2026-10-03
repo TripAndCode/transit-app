@@ -5,8 +5,14 @@
 #   id <TAB> name <TAB> interval_sec <TAB> feed_url <TAB> static_url <TAB> ping_url
 # Writes data/<id>/rt/<UTCDAY>/TripUpdate_HHMMSS.pb atomically (.part + mv).
 # When COLLECTOR_INGEST_URL and COLLECTOR_INGEST_SECRET are set, also pushes
-# each completed protobuf to the app's collector endpoint. A failed push is
-# logged and does not stop polling; the next poll is a fresh source snapshot.
+# to the app's collector endpoint every COLLECTOR_INGEST_INTERVAL_SEC (default
+# 300s). That interval is deliberately separate from the poll interval above
+# rather than reusing it: the local archive this writes every poll is what the
+# daily R2 upload ships, so it must stay dense regardless of how often -- or
+# whether -- the receiving app is pushed to. Set it equal to the poll interval
+# to push every poll. A failed push is logged and does not stop polling; the
+# local file is already durable by then, so R2 still gets that poll and the
+# next due push is a fresh source snapshot.
 # Sends a healthchecks.io ping after a successful fetch, at most every ~5 min.
 set -euo pipefail
 
@@ -38,6 +44,8 @@ trap 'exit 143' TERM INT
 
 PING_EVERY=$(( 300 / INTERVAL ))
 [ "$PING_EVERY" -lt 1 ] && PING_EVERY=1
+PUSH_EVERY=$(( ${COLLECTOR_INGEST_INTERVAL_SEC:-300} / INTERVAL ))
+[ "$PUSH_EVERY" -lt 1 ] && PUSH_EVERY=1
 i=0
 
 echo "[a$AGENCY_ID/$NAME] start interval=${INTERVAL}s feed=$FEED_URL"
@@ -61,7 +69,7 @@ while true; do
     if [ "$ok" -eq 1 ]; then
         mv "$f.part" "$f"
         echo "OK $(basename "$f") ($(wc -c < "$f" | tr -d ' ') bytes)"
-        if [ -n "${COLLECTOR_INGEST_URL:-}" ] && [ -n "${COLLECTOR_INGEST_SECRET:-}" ]; then
+        if [ -n "${COLLECTOR_INGEST_URL:-}" ] && [ -n "${COLLECTOR_INGEST_SECRET:-}" ] && [ $(( i % PUSH_EVERY )) -eq 0 ]; then
             source_file="$day/$(basename "$f")"
             captured_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             if ! curl -fsS --max-time "${COLLECTOR_INGEST_MAX_TIME:-15}" \

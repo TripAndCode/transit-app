@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useRouteError } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -7,7 +8,9 @@ import { useTranslation } from "react-i18next";
 export function RouteError() {
   const { t } = useTranslation();
   const error = useRouteError();
-  if (import.meta.env.DEV) console.error(error);
+  useEffect(() => {
+    if (import.meta.env.DEV) console.error(error);
+  }, [error]);
   return (
     <div role="alert" style={{ padding: 24, display: "grid", gap: 12, justifyItems: "start" }}>
       <span style={{ color: "var(--text-primary)" }}>{t("errors.generic")}</span>

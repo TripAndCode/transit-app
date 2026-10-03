@@ -1,21 +1,27 @@
 import type { TFunction } from "i18next";
 import type { ConvMessage, ToolResult } from "../../api/types";
 import { RichResult } from "./RichResult";
+import type { NextStepAction } from "./nextStepChips";
 import "./messageList.css";
 
 export function MessageList({
   messages,
   formatRoute,
   t,
+  onChip,
 }: {
   messages: ConvMessage[];
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
+  /** Forwarded to each message's evidence card next-step chips (see
+   *  RichResult/nextStepChips). Omitted in read-only/historical contexts
+   *  that don't wire up chip actions (e.g. the full-log disclosure). */
+  onChip?: (action: NextStepAction) => void;
 }) {
   return (
     <>
       {messages.map((m) => (
-        <Bubble key={m.message_id} msg={m} formatRoute={formatRoute} t={t} />
+        <Bubble key={m.message_id} msg={m} formatRoute={formatRoute} t={t} onChip={onChip} />
       ))}
     </>
   );
@@ -25,10 +31,12 @@ function Bubble({
   msg,
   formatRoute,
   t,
+  onChip,
 }: {
   msg: ConvMessage;
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
+  onChip?: (action: NextStepAction) => void;
 }) {
   const isUser = msg.role === "user";
   const result = msg.result as ToolResult | null;
@@ -45,7 +53,16 @@ function Bubble({
         }}
       >
         {result ? (
-          <RichResult result={result} fallbackText={msg.rendered_summary ?? ""} formatRoute={formatRoute} t={t} />
+          <RichResult
+            result={result}
+            fallbackText={msg.rendered_summary ?? ""}
+            formatRoute={formatRoute}
+            t={t}
+            tool={msg.tool}
+            args={msg.args}
+            conditions={msg.conditions}
+            onChip={onChip}
+          />
         ) : (
           <span style={{ whiteSpace: "pre-wrap" }}>{msg.rendered_summary ?? msg.tool}</span>
         )}

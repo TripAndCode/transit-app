@@ -1,16 +1,22 @@
 import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
-import type { OverviewHeadline } from "../api/types";
-import { delayColor } from "../styles/tokens";
+import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
+import { delayTextColor } from "../styles/tokens";
+import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
+import { periodMean } from "./periodMean";
+import { storySentence } from "./overview/storySentence";
 import { STALE_THRESHOLD_HOURS } from "./DataStalenessBanner";
+import { relativeTime } from "../utils/relativeTime";
 
 type Props = {
   headline: OverviewHeadline;
   delayedCount: number;
   agencyId: number;
   sparklinePoints: number[];
+  peakHour: OverviewPeakHour | null;
+  concentration: OverviewConcentration;
 };
 
 // Same shape as DataStalenessBanner.tsx's relativeAgeHours() — including
@@ -27,23 +33,23 @@ function relativeAgeHours(iso: string): number {
   return (Date.now() - captured) / (1000 * 60 * 60);
 }
 
-export function OverviewHeroRow({ headline, delayedCount, agencyId, sparklinePoints }: Props) {
+export function OverviewHeroRow({
+  headline,
+  delayedCount,
+  agencyId,
+  sparklinePoints,
+  peakHour,
+  concentration,
+}: Props) {
   const { t } = useTranslation();
   const { data: routes } = useRoutes(agencyId);
   const totalRoutes = (routes ?? []).filter((r) => r.route_code != null).length;
   const { data: feedSummary } = useTodayRouteSummary(agencyId, { autoRefresh: false });
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
-  // Always render an explicit sign — the displayed magnitude is
-  // Math.abs(delta_min), so without this a delay improvement and a
-  // worsening of the same magnitude would render identically.
-  const sign = hasBaseline && headline.delta_min! >= 0 ? "+" : "-";
 
-  // Mirrors DataStalenessBanner.tsx's days/hours label branching exactly
-  // (that component does not have a sub-1-hour "minutes" case, despite
-  // common.rel_minutes_ago existing as a key used elsewhere — matching the
-  // specific sibling this tile reuses, not inventing a more granular scheme
-  // it doesn't itself use).
+  // A fresh feed is minutes old, so the label counts down to "just now"
+  // rather than bucketing to whole hours ("0 hours ago").
   const captured = feedSummary?.latest_captured_at;
   let ageLabel: string | null = null;
   let feedIsStale = false;
@@ -51,50 +57,79 @@ export function OverviewHeroRow({ headline, delayedCount, agencyId, sparklinePoi
     const ageH = relativeAgeHours(captured);
     if (Number.isFinite(ageH)) {
       feedIsStale = ageH >= STALE_THRESHOLD_HOURS;
-      const days = Math.floor(ageH / 24);
-      ageLabel =
-        days >= 1
-          ? t("common.rel_days_ago", { count: days })
-          : t("common.rel_hours_ago", { count: Math.floor(ageH) });
+      ageLabel = relativeTime(captured);
     }
   }
 
-  const avgMinColor = headline.avg_min != null ? delayColor(headline.avg_min) : undefined;
+  // The sparkline scales to its own min..max, so it is anchored on the period
+  // mean rather than 0: the absolute figure is already shown beside it, and a
+  // 0 axis would flatten the day-to-day variation the sparkline exists to show.
+  const sparklineMean = periodMean(sparklinePoints);
+
+  const avgMinColor = headline.avg_min != null ? delayTextColor(headline.avg_min) : undefined;
+  // Called unconditionally (hooks can't branch on headline.avg_min's
+  // nullability) -- the "—" fallback below still renders in place of it when
+  // there is nothing to display.
+  const avgMinDisplay = useCountUp(headline.avg_min ?? 0, { decimals: 1 });
+  const delayedCountDisplay = useCountUp(delayedCount, { decimals: 0 });
+
+  // storySentence needs a real delta to pick a direction -- with no
+  // baseline at all there's nothing to compare against, so this keeps the
+  // plain "no comparison data" text rather than feeding it a fabricated
+  // delta_min: null and letting the sentence's own "flat" fallback claim
+  // the period is "about the same" (a specific claim this case cannot back).
+  const story = hasBaseline
+    ? storySentence(headline, peakHour, concentration, t)
+    : t("overview.hero_row.avg_delay_no_baseline");
 
   return (
-    <div className="ov-kpi-row">
-      <div className="ov-kpi-tile">
-        <div className="ov-kpi-label">{t("overview.hero_row.avg_delay_label")}</div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div className="ov-kpi-value" style={{ color: avgMinColor }}>
-            {headline.avg_min != null ? headline.avg_min.toFixed(1) : "—"}
-          </div>
-          <InlineSparkline points={sparklinePoints.slice(-7)} width={72} height={22} showLabels={false} showEndDot={false} />
+    <div className="ov-hero">
+      <div className="ov-hero-figure">
+        <InlineSparkline
+          points={sparklinePoints}
+          width={400}
+          height={190}
+          preserveAspectRatio="none"
+          showLabels={false}
+          showEndDot={false}
+          baseline={sparklineMean ?? undefined}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+        />
+        <div className="ov-hero-label">{t("overview.hero_row.avg_delay_label")}</div>
+        <div className="ov-kpi-value" style={{ color: avgMinColor }}>
+          {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
+          <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
         </div>
-        <div className="ov-kpi-context">
-          {hasBaseline
-            ? t("overview.hero_row.avg_delay_compared", { sign, min: Math.abs(headline.delta_min!).toFixed(1) })
-            : t("overview.hero_row.avg_delay_no_baseline")}
+        {sparklineMean != null && (
+          <div className="ov-hero-baseline">
+            {t("overview.hero_row.sparkline_baseline", { value: sparklineMean.toFixed(1) })}
+          </div>
+        )}
+      </div>
+      <div>
+        {/* A div, not a <p>: InsightHint's root is a div, and a div is not
+            valid phrasing content inside a <p>. */}
+        <div className="ov-hero-story">
+          {story}
           <InsightHint
             title={t("overview.hero_row.baseline_hint_title")}
             body={t("overview.hero_row.baseline_hint_body")}
           />
         </div>
-      </div>
-      <div className="ov-kpi-tile">
-        <div className="ov-kpi-label">{t("overview.hero_row.delayed_count_label")}</div>
-        <div className="ov-kpi-value" style={{ color: avgMinColor }}>
-          {t("overview.hero_row.delayed_count_value", { count: delayedCount, total: totalRoutes })}
+        <div className="ov-hero-sub">
+          <div className="ov-hero-sub-item">
+            <span className="ov-hero-sub-value">
+              {t("overview.hero_row.delayed_count_value", { count: delayedCountDisplay, total: totalRoutes })}
+            </span>
+            {t("overview.hero_row.delayed_count_label")}
+          </div>
+          <div className="ov-hero-sub-item">
+            <span className="ov-hero-sub-value">
+              {t(feedIsStale ? "overview.hero_row.feed_status_stale" : "overview.hero_row.feed_status_ok")}
+            </span>
+            {ageLabel ? t("overview.hero_row.feed_status_updated", { when: ageLabel }) : t("overview.hero_row.feed_status_label")}
+          </div>
         </div>
-      </div>
-      <div className="ov-kpi-tile">
-        <div className="ov-kpi-label">{t("overview.hero_row.feed_status_label")}</div>
-        <div className="ov-kpi-value ov-kpi-value-small">
-          {t(feedIsStale ? "overview.hero_row.feed_status_stale" : "overview.hero_row.feed_status_ok")}
-        </div>
-        {ageLabel && (
-          <div className="ov-kpi-context">{t("overview.hero_row.feed_status_updated", { when: ageLabel })}</div>
-        )}
       </div>
     </div>
   );

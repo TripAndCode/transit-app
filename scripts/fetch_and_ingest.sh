@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # Fetch archives from Oracle Cloud server then ingest into Postgres.
 # Local-dev replay path: requires SSH access to the Oracle VM. Production
-# ingests the same Oracle archives, but Oracle uploads them to object storage
-# (R2/S3) and a daily Railway scheduled job pulls + ingests them over HTTPS —
-# no SSH, no public DB (see docs/deploy-railway.md). `ingest_live` is the
-# no-Oracle fallback.
+# history comes from the live path instead (collector pushes into
+# updates_live, promoted daily by the cron); the same archives reach R2/S3 for
+# backfill (see docs/deploy-railway.md).
 # Does NOT crawl the GTFS website — fetches pre-collected archives only.
 #
 # Env vars: everything from fetch_archives.sh plus:
 #   DATABASE_URL   Postgres connection string
 #   AGENCY_ID      Agency ID to ingest (default: 1)
+#
+# Usage: scripts/fetch_and_ingest.sh
 
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENCY_ID="${AGENCY_ID:-1}"

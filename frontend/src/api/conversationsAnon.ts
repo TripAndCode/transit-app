@@ -2,6 +2,7 @@
 // Cap: 20 threads. When full, the oldest non-pinned thread drops.
 
 import type { AnonThread, ConvMessage, FilterCtx } from "./types";
+import { uuid } from "../utils/uuid";
 
 const KEY = "ask:conversations:v1";
 const MAX_THREADS = 20;
@@ -15,10 +16,6 @@ function read(): AnonThread[] {
 }
 function write(threads: AnonThread[]): void {
   try { localStorage.setItem(KEY, JSON.stringify(threads)); } catch { /* quota */ }
-}
-function uuid(): string {
-  // crypto.randomUUID is available in evergreen browsers
-  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 }
 
 export const conversationsAnon = {

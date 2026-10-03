@@ -1,6 +1,5 @@
 # Collector v3 migration runbook
 
-Spec: docs/superpowers/specs/2026-06-06-collector-v3-design.md
 Aomori RT gap: < 1 minute (step 4). Old tree left intact 1 week as fallback.
 
 ## Important behavior change: Aomori static GTFS
@@ -20,7 +19,7 @@ static IS collected on the VM via `direct_url` curl.
 
 ## 1. Install tree (no impact on running v1)
     # from workstation repo root:
-    KEY=oracle_cloud/ssh-key-2026-03-28.key; VM=opc@64.110.114.101
+    KEY=~/.ssh/<key>; VM=opc@<oci-public-ip>
     ssh -i $KEY $VM 'mkdir -p /home/opc/collector/{etc,bin,data}'
     scp -i $KEY oracle_cloud/v3/bin/* $VM:/home/opc/collector/bin/
     scp -i $KEY oracle_cloud/v3/etc/agencies.tsv.example $VM:/home/opc/collector/etc/agencies.tsv
@@ -149,10 +148,12 @@ Then reinstall the unit, reload systemd, and restart all active pollers:
     sudo systemctl daemon-reload
     sudo systemctl restart 'rt-poller@*'
 
-Each 2xx response means the payload was written to ClickHouse. A failed push
-is logged but does not stop polling; the next successful poll supplies a new
-snapshot. The endpoint is authenticated and deduplicates retries by the
-collector's source filename.
+Each 2xx response means the payload reached `updates_live`, not `updates`:
+history comes from the daily promotion (`POST /internal/cron/ingest`), which
+copies each closed JST day out of `updates_live` into `updates`/`agg_*`. A
+failed push is logged but does not stop polling; the next successful poll
+supplies a new snapshot. The endpoint is authenticated and deduplicates
+retries by the collector's source filename.
 
 ## 10. +1 week: remove old tree
     rm -rf /home/opc/app/transportation_analysis/{poller.sh,poller_static.sh,cron.log,poller.log,static_poller.log,static_cron.log,archive,static_archive}

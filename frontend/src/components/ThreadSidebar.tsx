@@ -1,10 +1,22 @@
-import { useState, useRef, useEffect, type CSSProperties, type RefObject } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
 import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
+import { Z_INDEX } from "../styles/zIndex";
+import { FILTER_SEPARATOR } from "../utils/format";
+import { dowValueLabel } from "../utils/filterValueLabels";
+import { menuItems, nextMenuItem } from "./menuKeys";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -30,10 +42,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
   if (range) parts.push(range);
 
   // Day-of-week
-  if (fc.dow && fc.dow !== "all") {
-    const dowKey = fc.dow === "weekday" ? "filters.dow.weekday" : "filters.dow.weekend";
-    parts.push(t(dowKey));
-  }
+  if (fc.dow && fc.dow !== "all") parts.push(dowValueLabel(fc.dow, t));
 
   // Time band
   if (fc.time_band && fc.time_band !== "all") {
@@ -42,7 +51,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
     if (label !== tbKey) parts.push(label);
   }
 
-  return parts.join(" ・ "); // i18n-ignore: locale-neutral separator
+  return parts.join(FILTER_SEPARATOR);
 }
 
 // ─── context menu ────────────────────────────────────────────────────────────
@@ -73,6 +82,9 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  // The control the menu was opened from, so Escape can hand focus back to
+  // it instead of dropping the keyboard user at the top of the document.
+  const menuTriggerRef = useRef<HTMLElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   // Close menu on outside click
@@ -87,6 +99,49 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     return () => document.removeEventListener("mousedown", handleClick);
   }, [menu]);
 
+  /** Every way out of the menu goes through here. Choosing an item unmounts
+   *  the menuitem that had focus, so without this the keyboard user is left
+   *  on `<body>` -- Escape is not the only exit that has to put them back. */
+  function closeMenu() {
+    setMenu(null);
+    menuTriggerRef.current?.focus();
+  }
+
+  // Close menu on Escape.
+  useEffect(() => {
+    if (!menu) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      closeMenu();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [menu]);
+
+  // Focus enters the menu as it opens: an operator who reached the kebab by
+  // keyboard must not have to Tab through the rest of the sidebar to get to
+  // the items it just put in front of them.
+  useEffect(() => {
+    if (!menu) return;
+    menuItems(menuRef.current)[0]?.focus();
+  }, [menu]);
+
+  // Clamp the menu to the viewport once its real size is known -- its
+  // anchor point (the kebab button's own position) can put a wide/tall menu
+  // partway or fully off-screen for rows near the right or bottom edge.
+  // Written directly to the node's style (not React state) since this is a
+  // one-off post-layout measurement of an external system (the rendered
+  // menu's own box), not state to synchronize back into a render.
+  useLayoutEffect(() => {
+    const node = menuRef.current;
+    if (!menu || !node) return;
+    const margin = 8;
+    const left = Math.max(margin, Math.min(menu.x, window.innerWidth - node.offsetWidth - margin));
+    const top = Math.max(margin, Math.min(menu.y, window.innerHeight - node.offsetHeight - margin));
+    node.style.left = `${left}px`;
+    node.style.top = `${top}px`;
+  }, [menu]);
+
   // Focus rename input when opened
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -95,12 +150,20 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     }
   }, [renamingId]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function openMenu(e: any, convId: string) {
+  function openMenu(e: ReactMouseEvent<HTMLElement>, convId: string) {
     e.preventDefault();
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const trigger = e.currentTarget as HTMLElement;
+    menuTriggerRef.current = trigger;
+    const rect = trigger.getBoundingClientRect();
     setMenu({ convId, x: rect.right, y: rect.top });
+  }
+
+  function onMenuKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const target = nextMenuItem(menuItems(menuRef.current), document.activeElement, e.key);
+    if (!target) return;
+    e.preventDefault();
+    target.focus();
   }
 
   function handleRename(conv: Conversation) {
@@ -119,12 +182,12 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   }
 
   function handleTogglePin(conv: Conversation) {
-    setMenu(null);
+    closeMenu();
     updateConv.mutate({ id: conv.conversation_id, patch: { pinned: !conv.pinned } });
   }
 
   function handleDelete(conv: Conversation) {
-    setMenu(null);
+    closeMenu();
     if (window.confirm(t("ask.sidebar.delete_confirm"))) {
       deleteConv.mutate(conv.conversation_id);
       if (activeId === conv.conversation_id) onSelect(null);
@@ -178,7 +241,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
           style={{
             width: "100%",
             background: "var(--accent)",
-            color: "#fff",
+            color: "var(--on-accent)",
             border: "none",
             borderRadius: "var(--radius)",
             padding: "9px var(--space-3)",
@@ -246,7 +309,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameBlur={commitRename}
                   onSelect={() => onSelect(conv.conversation_id)}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(" ・ ")} // i18n-ignore: locale-neutral separator
+                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(FILTER_SEPARATOR)}
                 />
               ))}
             </section>
@@ -260,15 +323,32 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const contextMenu = menu && activeConv && (
     <div
       ref={menuRef}
+      role="menu"
+      aria-label={t("ask.sidebar.more_options_aria")}
+      // Programmatically focusable only: the container is never a tab stop,
+      // but it owns the arrow-key handling for the items inside it.
+      tabIndex={-1}
+      onKeyDown={onMenuKeyDown}
+      // Tab past the last item and the menu is gone. Escape and an outside
+      // click already close it, but neither fires when focus simply walks off
+      // the end, leaving a mounted `role="menu"` behind the user.
+      onBlur={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && menuRef.current?.contains(next)) return;
+        setMenu(null);
+      }}
       style={{
         position: "fixed",
         top: menu.y,
         left: menu.x,
-        zIndex: 500,
+        // Deliberately above modal/modalBackdrop: this menu can be opened
+        // from inside a modal-hosted sidebar, and a menu opened from within
+        // a surface must render above that surface.
+        zIndex: Z_INDEX.contextMenu,
         background: "var(--bg-surface)",
         border: "1px solid var(--border-subtle)",
         borderRadius: "var(--radius)",
-        boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+        boxShadow: "var(--el-2)",
         minWidth: 160,
         padding: "var(--space-1) 0",
       }}
@@ -293,7 +373,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
 // ─── sub-components ───────────────────────────────────────────────────────────
 
 const groupHeaderStyle: CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   fontWeight: 600,
   textTransform: "uppercase",
   letterSpacing: "0.06em",
@@ -312,8 +392,7 @@ type ConvItemProps = {
   onRenameCommit: (id: string) => void;
   onRenameBlur: (id: string) => void;
   onSelect: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onContextMenu: (e: any) => void;
+  onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
   filterSummaryText: string;
 };
 
@@ -330,21 +409,17 @@ function ConvItem({
   onContextMenu,
   filterSummaryText,
 }: ConvItemProps) {
-  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(" ・ "); // i18n-ignore: locale-neutral separator
+  const { t } = useTranslation();
+  const subLine = [relativeTime(conv.updated_at), filterSummaryText].filter(Boolean).join(FILTER_SEPARATOR);
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
       onContextMenu={onContextMenu}
       style={{
         display: "flex",
         alignItems: "flex-start",
         gap: "var(--space-2)",
         padding: "8px var(--space-3)",
-        cursor: "pointer",
         background: isActive ? "var(--accent-soft)" : "transparent",
         borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
         transition: "background var(--transition)",
@@ -358,64 +433,90 @@ function ConvItem({
         if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "transparent";
       }}
     >
-      {/* Emoji */}
-      <span style={{ fontSize: 16, lineHeight: 1.5, flexShrink: 0 }}>💬</span>
-
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {isRenaming ? (
-          <input
-            ref={renameInputRef}
-            value={renameValue}
-            onChange={(e) => onRenameChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") onRenameCommit(conv.conversation_id);
-              if (e.key === "Escape") onRenameBlur(conv.conversation_id);
-              e.stopPropagation();
-            }}
-            onBlur={() => onRenameBlur(conv.conversation_id)}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "100%",
-              fontSize: 13,
-              padding: "2px 6px",
-              borderRadius: "var(--radius)",
-              border: "1px solid var(--accent)",
-              background: "var(--bg-surface)",
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: isActive ? 600 : 400,
-              color: "var(--text-primary)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              lineHeight: 1.4,
-            }}
-          >
-            {conv.title}
+      {isRenaming ? (
+        <>
+          {/* Emoji */}
+          <span style={{ fontSize: 16, lineHeight: 1.5, flexShrink: 0 }}>💬</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={(e) => onRenameChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onRenameCommit(conv.conversation_id);
+                if (e.key === "Escape") onRenameBlur(conv.conversation_id);
+                e.stopPropagation();
+              }}
+              onBlur={() => onRenameBlur(conv.conversation_id)}
+              style={{
+                width: "100%",
+                fontSize: 13,
+                padding: "2px 6px",
+                borderRadius: "var(--radius)",
+                border: "1px solid var(--accent)",
+                background: "var(--bg-surface)",
+              }}
+            />
           </div>
-        )}
+        </>
+      ) : (
+        // A real <button> (not a div carrying role="button") so it can't
+        // validly nest the kebab, which is a sibling instead -- it also
+        // gets native keyboard activation and the shared :focus-visible
+        // outline for free.
+        <button
+          type="button"
+          onClick={onSelect}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "var(--space-2)",
+            background: "none",
+            border: "none",
+            padding: 0,
+            margin: 0,
+            font: "inherit",
+            color: "inherit",
+            textAlign: "left",
+            cursor: "pointer",
+          }}
+        >
+          <span style={{ fontSize: 16, lineHeight: 1.5, flexShrink: 0 }}>💬</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: isActive ? 600 : 400,
+                color: "var(--text-primary)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                lineHeight: 1.4,
+              }}
+            >
+              {conv.title}
+            </div>
 
-        {!isRenaming && subLine && (
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              marginTop: 2,
-              lineHeight: 1.3,
-            }}
-          >
-            {subLine}
+            {subLine && (
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--text-tertiary)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  marginTop: 2,
+                  lineHeight: 1.3,
+                }}
+              >
+                {subLine}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </button>
+      )}
 
       {/* Kebab / more button */}
       <button
@@ -433,7 +534,7 @@ function ConvItem({
           opacity: 0.6,
           marginTop: 1,
         }}
-        aria-label="More options"
+        aria-label={t("ask.sidebar.more_options_aria")}
       >
         ⋯
       </button>
@@ -447,29 +548,16 @@ type ContextMenuItemProps = {
   danger?: boolean;
 };
 
+/** Highlight comes from `:hover, :focus-visible` on the class, not from
+ *  writing `style.background` on the node: a mouse-only hover handler leaves
+ *  the keyboard-focused item looking identical to the rest of the menu. */
 function ContextMenuItem({ label, onClick, danger }: ContextMenuItemProps) {
   return (
     <button
       type="button"
+      role="menuitem"
+      className={danger ? "context-menu__item context-menu__item--danger" : "context-menu__item"}
       onClick={onClick}
-      style={{
-        display: "block",
-        width: "100%",
-        textAlign: "left",
-        background: "none",
-        border: "none",
-        padding: "7px var(--space-4)",
-        fontSize: 13,
-        cursor: "pointer",
-        color: danger ? "var(--color-danger)" : "var(--text-primary)",
-        transition: "background var(--transition)",
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "none";
-      }}
     >
       {label}
     </button>

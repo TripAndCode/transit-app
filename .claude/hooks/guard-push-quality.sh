@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # PreToolUse(Bash) hook: gate `git push` on lint/test passing first.
-# Lint/format checks are scoped to files changed vs `main` (the repo has
-# pre-existing lint/format debt elsewhere, so a whole-repo gate would block
-# every push); tests, mypy, and frontend checks run whole-project since those
-# can't be meaningfully file-scoped. Fails CLOSED: anywhere this script can't
-# determine what changed or can't run a required check, it blocks (exit 2)
-# rather than silently letting the push through — set PUSH_GATE_SKIP_TESTS=1
-# for a deliberate, visible opt-out of the DB-dependent backend tests only,
-# or PUSH_GATE_SKIP_BUILD=1 to skip the frontend build:bundle + entry-chunk
-# check specifically.
+# Ruff runs first on the changed files alone, so a formatting nit fails in
+# seconds; mypy, the backend suite and the frontend checks run whole-project
+# since those can't be meaningfully file-scoped. Fails CLOSED: anywhere this
+# script can't determine what changed or can't run a required check, it
+# blocks (exit 2) rather than silently letting the push through — set
+# PUSH_GATE_SKIP_TESTS=1 for a deliberate, visible opt-out of the
+# container-backed backend suite (and of mypy too, when a dependency change
+# leaves no virtualenv to run it in), or PUSH_GATE_SKIP_BUILD=1 to skip the
+# frontend build:bundle + entry-chunk check specifically.
 #
-# Scope limitation, stated because it is not obvious and is easy to mistake
-# for coverage: the file-scoped ruff checks read the branch being pushed (see
-# $GATE_DIR below), but mypy, the backend tests and the frontend checks run
-# against $CLAUDE_PROJECT_DIR's own working tree. For a push from a worktree
-# those validate whatever the main checkout currently holds, not the branch.
-# Running them in the worktree instead would need a provisioned virtualenv
-# and node_modules there, which a worktree does not inherit. Until that is
-# solved, `scripts/run_full_ci.sh` from the worktree covers the backend
-# against the branch — it mirrors CI's `test` job only, so CI's separate
-# frontend job has no worktree-runnable equivalent and a frontend change
-# still has nothing checking it against the branch being pushed.
+# Every check reads the branch being pushed ($GATE_DIR below), never whatever
+# $CLAUDE_PROJECT_DIR's own working tree holds. A worktree inherits neither a
+# virtualenv nor node_modules, so the tools come from the main checkout: a
+# `poetry` shim routes `poetry run` to its virtualenv, and its node_modules is
+# linked in for the duration of the run when the worktree has none. A branch
+# that changes the dependencies themselves must bring its own, since the main
+# checkout's would not reflect the change. The backend suite runs through
+# scripts/run_full_ci.sh, which starts a Postgres + ClickHouse pair of its own
+# on free ports, so concurrent pushes from several sessions never share a
+# database. Not covered locally: CI's frontend coverage thresholds (this gate
+# runs `npm run test`, not `test:coverage`) and the Docker image build.
 #
 # Reads the tool input JSON on stdin; exit 2 = block the tool call.
 set -uo pipefail
@@ -289,16 +289,16 @@ if [ -z "$GATE_DIR" ]; then
 fi
 [ -n "$GATE_DIR" ] || GATE_DIR="$CLAUDE_PROJECT_DIR"
 
-# Stay in $CLAUDE_PROJECT_DIR to RUN the tools, and read the file list from
-# $GATE_DIR: poetry resolves its virtualenv by cwd identity, so running from a
-# worktree picks up that worktree's own — usually unprovisioned — environment
-# and would turn this gate's silent false pass into an equally useless false
-# block. The changed files are therefore passed as absolute paths under
-# $GATE_DIR instead; ruff reads its configuration from each file's own nearest
-# pyproject.toml, which is the same file in either checkout.
+# poetry resolves its virtualenv by cwd identity, so a bare `poetry run` from a
+# worktree picks up that worktree's own — usually unprovisioned — environment.
+# The file-scoped ruff steps therefore run from $CLAUDE_PROJECT_DIR with the
+# changed files passed as absolute paths under $GATE_DIR (ruff reads its
+# configuration from each file's own nearest pyproject.toml); every
+# whole-project step below runs inside $GATE_DIR with the virtualenv chosen
+# by prepare_python_env.
 cd "$CLAUDE_PROJECT_DIR" || { echo "BLOCKED: git push — could not cd to \$CLAUDE_PROJECT_DIR ($CLAUDE_PROJECT_DIR)." >&2; exit 2; }
 if [ "$GATE_DIR" != "$CLAUDE_PROJECT_DIR" ]; then
-  echo "== push gate: files from $GATE_DIR, tools from $CLAUDE_PROJECT_DIR ==" >&2
+  echo "== push gate: files from $GATE_DIR ==" >&2
 fi
 
 # A branch every one of whose commits suppresses CI produces no run at all, so
@@ -326,6 +326,11 @@ case "$tip_msg" in
 esac
 
 LOG="$(mktemp)"
+# One line per step that hit its ceiling. Kept apart from $LOG because a
+# timeout prints no error of its own and the BLOCKED tail of $LOG is
+# whatever a later step printed last, so the gate would otherwise block
+# without naming the step that actually ran out of time.
+TIMED_OUT="$(mktemp)"
 # run_with_timeout's fallback path (below) creates a marker temp file per
 # call; if this script's process receives a catchable termination (an
 # external harness timeout, SIGTERM, or a normal early exit) after a marker
@@ -335,34 +340,39 @@ LOG="$(mktemp)"
 # no shell trap, including EXIT, can catch it; same pre-existing limitation
 # $LOG's own cleanup already had.)
 MARKER_FILES=()
-# Count-guard the array expansion: bash 3.2 (macOS's default /bin/bash,
-# with no Homebrew coreutils -- exactly the environment run_with_timeout's
-# fallback branch targets) treats "${MARKER_FILES[@]}" on an empty array as
-# an unbound-variable error under `set -u`. $LOG's own removal (the first
-# statement) isn't affected -- it's the second statement that would abort
-# with a stray stderr message, leaving that call's marker file unswept.
-# Bash >=4.4 doesn't need this guard, but 3.2 does, so guard for both.
-trap 'rm -f "$LOG"; [ "${#MARKER_FILES[@]}" -eq 0 ] || rm -f "${MARKER_FILES[@]}"' EXIT
+# One "<step name><TAB><that step's own output file>" line per step that
+# failed, so a block can show each failure's own output instead of whatever
+# a later, passing step printed last.
+FAILED_STEPS="$(mktemp)"
+STEP_DIR="$(mktemp -d)"
+SHIM_DIR=""
+LINKED_NODE_MODULES=""
+cleanup() {
+  rm -f "$LOG" "$TIMED_OUT" "$FAILED_STEPS"
+  rm -rf "$STEP_DIR"
+  [ -z "$SHIM_DIR" ] || rm -rf "$SHIM_DIR"
+  # Only ever a symlink this script created; `rm -f` removes the link, never
+  # the main checkout's node_modules it points at.
+  [ -z "$LINKED_NODE_MODULES" ] || rm -f "$LINKED_NODE_MODULES"
+  # Count-guarded: bash 3.2 (macOS's default /bin/bash -- exactly the
+  # environment run_with_timeout's fallback branch targets) treats
+  # "${MARKER_FILES[@]}" on an empty array as an unbound-variable error
+  # under `set -u`.
+  [ "${#MARKER_FILES[@]}" -eq 0 ] || rm -f "${MARKER_FILES[@]}"
+}
+trap cleanup EXIT
 FAIL=0
 
-run_with_timeout() {
+# Neither GNU timeout nor gtimeout is on PATH (e.g. macOS without Homebrew
+# coreutils). Running unbounded there would silently defeat this script's
+# documented fail-closed contract, so run_with_timeout enforces the budget
+# with this background watchdog instead. Every real call site is a compound
+# command (bash -c "... && ..."), so job control (`set -m`) is required to
+# put it in its own process group — otherwise TERM/KILL only hits the
+# wrapper shell and leaves its child process tree (npm/vite/pytest workers)
+# running as an orphan.
+_run_with_watchdog() {
   local secs="$1"; shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$secs" "$@"
-    return $?
-  elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$secs" "$@"
-    return $?
-  fi
-
-  # Neither GNU timeout nor gtimeout is on PATH (e.g. macOS without Homebrew
-  # coreutils). Running unbounded here would silently defeat this script's
-  # documented fail-closed contract, so enforce the budget with a background
-  # watchdog instead. Every real call site is a compound command (bash -c
-  # "... && ..."), so job control (`set -m`) is required to put it in its
-  # own process group — otherwise TERM/KILL only hits the wrapper shell and
-  # leaves its child process tree (npm/vite/pytest workers) running as an
-  # orphan.
   local marker; marker="$(mktemp)"
   rm -f "$marker"
   MARKER_FILES+=("$marker")
@@ -386,6 +396,69 @@ run_with_timeout() {
     status=124
   fi
   return "$status"
+}
+
+run_with_timeout() {
+  local secs="$1"; shift
+  local status
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+    status=$?
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+    status=$?
+  else
+    _run_with_watchdog "$secs" "$@"
+    status=$?
+  fi
+  if [ "$status" -eq 124 ]; then
+    printf 'TIMED OUT after %ss: %s\n' "$secs" "$*" >>"$TIMED_OUT"
+  fi
+  return "$status"
+}
+
+note_failed() {
+  printf '%s\t%s\n' "$1" "$2" >>"$FAILED_STEPS"
+}
+
+# Runs one check with its output captured on its own, then appended to $LOG,
+# so a failure is reported with the failing step's output. A timeout is left
+# to run_with_timeout's own record rather than counted as a failure here.
+run_step() {
+  local secs="$1" name="$2"; shift 2
+  local out; out="$(mktemp "$STEP_DIR/step.XXXXXX")"
+  echo "== $name =="
+  run_with_timeout "$secs" "$@" >"$out" 2>&1
+  local status=$?
+  cat "$out"
+  if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
+    note_failed "$name" "$out"
+  fi
+  return "$status"
+}
+
+# `timeout` (and the watchdog) run an external command, not a shell function,
+# so a step that needs another working directory goes through bash, with the
+# directory passed as an argument rather than spliced into the script text.
+IN_DIR=(bash -c 'cd "$1" && shift && exec "$@"' in-dir)
+
+block_with_log() {
+  echo "BLOCKED: git push — $1." >&2
+  if [ -s "${FAILED_STEPS:-}" ]; then
+    local name out
+    while IFS="$(printf '\t')" read -r name out; do
+      echo "--- failed: $name (last 40 lines of its own output) ---" >&2
+      tail -40 "$out" >&2
+    done <"$FAILED_STEPS"
+  else
+    echo "Last 80 lines:" >&2
+    tail -80 "$LOG" >&2
+  fi
+  if [ -s "$TIMED_OUT" ]; then
+    echo "Ran out of time (the step's ceiling in this script, not a check failure):" >&2
+    cat "$TIMED_OUT" >&2
+  fi
+  exit 2
 }
 
 # SCOPE_OK=0 means we couldn't determine what changed (no resolvable base
@@ -424,6 +497,21 @@ if [ "$SCOPE_OK" -eq 1 ]; then
   done < <(git -C "$GATE_DIR" diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- "${FE_PATHSPEC[@]}")
 fi
 
+# Whether the pushed branch changes any of the given paths. An unresolvable
+# base counts as a change: it is the stricter answer, and a dependency change
+# read as "none" would test the branch with tools that don't match it.
+branch_changes() {
+  [ "$SCOPE_OK" -eq 0 ] || [ -n "$(git -C "$GATE_DIR" diff --name-only "$BASE_REF"...HEAD -- "$@")" ]
+}
+
+# A dependency change touches no .py file, yet it can break every import, so
+# it triggers the backend checks on its own.
+DEPS_PATHSPEC=('pyproject.toml' 'poetry.lock')
+PY_DEPS_CHANGED=0
+if branch_changes "${DEPS_PATHSPEC[@]}"; then
+  PY_DEPS_CHANGED=1
+fi
+
 # "Nothing changed here" is the shape a misdirected gate takes, so it cannot
 # be accepted on the word of a directory we only guessed at. When the push
 # names a branch that does carry changes, this directory is the wrong one and
@@ -439,7 +527,7 @@ fi
 # would otherwise read as a deletion and switch this whole check off.
 IS_DELETE=0
 [ "$(read_parsed is_delete)" = "True" ] && IS_DELETE=1
-if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ]; then
+if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 ] && [ "${#FE_FILES[@]}" -eq 0 ] && [ "$PY_DEPS_CHANGED" -eq 0 ]; then
   # A literal `HEAD` (`git push origin HEAD`) or a completely bare
   # `git push` (relying on the branch's own upstream tracking) cannot be
   # checked by this safety net: both mean "whatever branch GATE_DIR is
@@ -464,7 +552,7 @@ if [ "$IS_DELETE" -eq 0 ] && [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -eq 0 
     # shell/SQL/Markdown, legitimately produces no files here, and
     # comparing against its unfiltered diff would refuse both pushes for
     # a directory that was never actually wrong.
-    if [ -n "$(git diff --name-only --diff-filter=ACMR "$BASE_REF...refs/heads/$branch" -- "${PY_PATHSPEC[@]}" "${FE_PATHSPEC[@]}" 2>/dev/null)" ]; then
+    if [ -n "$(git diff --name-only --diff-filter=ACMR "$BASE_REF...refs/heads/$branch" -- "${PY_PATHSPEC[@]}" "${FE_PATHSPEC[@]}" "${DEPS_PATHSPEC[@]}" 2>/dev/null)" ]; then
       echo "BLOCKED: git push — the gate is running in $GATE_DIR, where nothing differs from $BASE_REF," >&2
       echo "  but branch '$branch' does differ. The scoped checks would inspect no files and pass" >&2
       echo "  without verifying anything. Push from the worktree holding '$branch', or use" >&2
@@ -484,54 +572,89 @@ if [ "$SCOPE_OK" -eq 1 ] && [ "${#PY_FILES[@]}" -gt 0 ]; then
   # filename is read as a path, not a ruff flag. Collapsing either back to
   # one -- has silently broken this before -- do not simplify.
   {
-    echo "== poetry run ruff format --check (changed files) =="
-    run_with_timeout 60 poetry run -- ruff format --check -- "${PY_FILES[@]}" || FAIL=1
-    echo "== poetry run ruff check (changed files) =="
-    run_with_timeout 60 poetry run -- ruff check -- "${PY_FILES[@]}" || FAIL=1
+    run_step 60 "ruff format --check (changed files)" poetry run -- ruff format --check -- "${PY_FILES[@]}" || FAIL=1
+    run_step 60 "ruff check (changed files)" poetry run -- ruff check -- "${PY_FILES[@]}" || FAIL=1
   } >>"$LOG" 2>&1
+fi
+
+RUN_BACKEND=0
+if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ] || [ "$PY_DEPS_CHANGED" -eq 1 ]; then
+  RUN_BACKEND=1
+fi
+
+# Picks the virtualenv for the whole-project Python steps and writes a
+# `poetry` shim that routes `poetry run <tool>` to it. Those steps run from
+# $GATE_DIR, so the code under test is still the branch's: pytest's rootdir, a
+# script's own directory and `python -c`'s cwd all precede the virtualenv's
+# own path entry for the main checkout. A branch that changes the
+# dependencies is tested in its own virtualenv instead. Returns non-zero when
+# the Python steps are to be skipped by explicit opt-out.
+prepare_python_env() {
+  local venv
+  if [ "$PY_DEPS_CHANGED" -eq 1 ] && [ "$GATE_DIR" != "$CLAUDE_PROJECT_DIR" ]; then
+    venv="$(cd "$GATE_DIR" && poetry env info --path 2>/dev/null)"
+    if [ -z "$venv" ] || [ ! -x "$venv/bin/pytest" ]; then
+      if [ "${PUSH_GATE_SKIP_TESTS:-0}" = "1" ]; then
+        echo "WARNING: this branch changes pyproject.toml/poetry.lock and $GATE_DIR has no provisioned virtualenv — PUSH_GATE_SKIP_TESTS=1 set, so mypy and the backend suite are left to CI (deliberate opt-out)." >&2
+        return 1
+      fi
+      echo "BLOCKED: git push — this branch changes pyproject.toml/poetry.lock, which the main checkout's" >&2
+      echo "  virtualenv does not reflect. Run 'poetry install' in $GATE_DIR so the gate can test" >&2
+      echo "  against the new dependencies, or set PUSH_GATE_SKIP_TESTS=1 to leave them to CI." >&2
+      exit 2
+    fi
+  else
+    venv="$(poetry env info --path 2>/dev/null)"
+    if [ -z "$venv" ] || [ ! -x "$venv/bin/pytest" ]; then
+      echo "BLOCKED: git push — $CLAUDE_PROJECT_DIR has no provisioned virtualenv; run 'poetry install' there." >&2
+      exit 2
+    fi
+  fi
+  SHIM_DIR="$(mktemp -d)"
+  printf '#!/usr/bin/env bash\n[ "$1" = run ] || exec %q "$@"\nshift\n[ "$1" = -- ] && shift\ntool="$1"\nshift\nexec %q/bin/"$tool" "$@"\n' \
+    "$(command -v poetry)" "$venv" >"$SHIM_DIR/poetry"
+  chmod +x "$SHIM_DIR/poetry"
+}
+if [ "$RUN_BACKEND" -eq 1 ] && ! prepare_python_env; then
+  RUN_BACKEND=0
 fi
 
 # mypy runs whole-project, not file-scoped: a type error is a property of a
 # module and of everything importing it, so checking only the changed files
-# would miss the breakage a changed signature causes in its callers. Unlike
-# ruff (which has pre-existing debt outside the changed set, hence the file
-# scoping above), the configured mypy scope in pyproject.toml is clean, so a
-# whole-project run blocks only on a real regression. Same trigger as the
-# backend tests below — Python changed, or scope couldn't be resolved.
-if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ]; then
+# would miss the breakage a changed signature causes in its callers.
+if [ "$RUN_BACKEND" -eq 1 ]; then
   {
-    echo "== poetry run mypy (whole configured scope) =="
-    run_with_timeout 180 poetry run -- mypy || FAIL=1
+    run_step 180 "mypy (whole configured scope)" \
+      "${IN_DIR[@]}" "$GATE_DIR" env PATH="$SHIM_DIR:$PATH" poetry run -- mypy || FAIL=1
   } >>"$LOG" 2>&1
 fi
 
 # Fail fast on the cheap checks before paying for the full backend + frontend
 # suites — a one-line format nit shouldn't cost a multi-minute double run.
 if [ "$FAIL" -ne 0 ]; then
-  echo "BLOCKED: git push — ruff format/lint or mypy failed (skipping tests). Last 80 lines:" >&2
-  tail -80 "$LOG" >&2
-  exit 2
+  block_with_log "ruff format/lint or mypy failed (skipping tests)"
 fi
 
-RUN_BACKEND=0
-if [ "$SCOPE_OK" -eq 0 ] || [ "${#PY_FILES[@]}" -gt 0 ]; then
-  RUN_BACKEND=1
-fi
-
-# Backend tests need the throwaway Postgres on :5544 (see CLAUDE.md — NEVER
-# point this at dev DB :5433). If Python changed (or scope is unknown) and
-# the DB isn't reachable, that's treated as a failed check, not a skip —
-# PUSH_GATE_SKIP_TESTS=1 is the explicit, visible opt-out for a deliberate
-# local bypass.
+# The backend suite runs through scripts/run_full_ci.sh rather than against
+# the long-lived :5544/:8124 pair: that pair is shared by every session on
+# the host, and two suites running against it at once reset each other's
+# tables mid-test. run_full_ci.sh starts a pair of its own on free ports and
+# removes it afterwards. If Docker is unreachable that's a failed check, not
+# a skip — PUSH_GATE_SKIP_TESTS=1 is the explicit, visible opt-out.
 if [ "$RUN_BACKEND" -eq 1 ]; then
-  if command -v pg_isready >/dev/null 2>&1 && pg_isready -h localhost -p 5544 >/dev/null 2>&1; then
-    echo "== poetry run pytest (DATABASE_URL -> :5544 test DB) ==" >>"$LOG"
+  if [ "${PUSH_GATE_SKIP_TESTS:-0}" = "1" ]; then
+    echo "WARNING: PUSH_GATE_SKIP_TESTS=1 set — skipping the backend suite for this push (deliberate opt-out; CI still runs it)." >&2
+  elif ! run_with_timeout 30 docker info >/dev/null 2>&1; then
+    echo "Docker is not reachable, so the backend suite's own Postgres + ClickHouse cannot start. Start Docker, or set PUSH_GATE_SKIP_TESTS=1 to skip explicitly (not recommended)." >"$STEP_DIR/docker"
+    note_failed "backend suite" "$STEP_DIR/docker"
+    FAIL=1
+  else
     # The whole backend suite is this gate's long pole by an order of
-    # magnitude, and every test builds its schema against the throwaway DB,
-    # so the ceiling has to clear the suite's real wall-clock with room for
-    # it to keep growing. Set too tight, the timeout fires on every Python
-    # change and the gate never reports a genuine pass -- pushes then either
-    # look broken or get routed around, which is strictly worse than no gate.
+    # magnitude, so the ceiling has to clear the suite's real wall-clock on a
+    # loaded host with room for it to keep growing. Set too tight, the
+    # timeout fires on every Python change and the gate never reports a
+    # genuine pass -- pushes then either look broken or get routed around,
+    # which is strictly worse than no gate.
     #
     # Every ceiling in this script is bounded by one more: the `timeout` on
     # this hook's entry in .claude/settings.json, enforced by the harness
@@ -540,43 +663,116 @@ if [ "$RUN_BACKEND" -eq 1 ]; then
     # that blocks the push or lets it through is outside this script's
     # control -- the one outcome its fail-closed design cannot guarantee.
     # Raise that entry alongside any ceiling raised here.
-    if ! run_with_timeout 1200 env DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test GEMINI_API_KEY=test-key \
-        poetry run pytest -x -q >>"$LOG" 2>&1; then
-      FAIL=1
-    fi
-  elif [ "${PUSH_GATE_SKIP_TESTS:-0}" = "1" ]; then
-    echo "WARNING: throwaway test DB (:5544) not reachable — PUSH_GATE_SKIP_TESTS=1 set, skipping backend tests for this push (deliberate opt-out)." >&2
-  else
-    echo "== backend tests skipped: throwaway test DB (:5544) not reachable ==" >>"$LOG"
-    echo "BLOCKED: git push — throwaway test DB (:5544) not reachable, cannot verify backend tests pass. Start it (see CLAUDE.md) or set PUSH_GATE_SKIP_TESTS=1 to explicitly skip (not recommended)." >&2
-    FAIL=1
+    run_step 1500 "backend suite (scripts/run_full_ci.sh: own Postgres + ClickHouse on free ports)" \
+      "${IN_DIR[@]}" "$GATE_DIR" env PATH="$SHIM_DIR:$PATH" GEMINI_API_KEY=test-key scripts/run_full_ci.sh -x -q \
+      >>"$LOG" 2>&1 || FAIL=1
   fi
 fi
 
+FE_DIR="$GATE_DIR/frontend"
 RUN_FRONTEND=0
-if { [ "$SCOPE_OK" -eq 0 ] || [ "${#FE_FILES[@]}" -gt 0 ]; } && [ -d "$CLAUDE_PROJECT_DIR/frontend" ]; then
+if { [ "$SCOPE_OK" -eq 0 ] || [ "${#FE_FILES[@]}" -gt 0 ]; } && [ -d "$FE_DIR" ]; then
   RUN_FRONTEND=1
 fi
 
+# Uses $FE_DIR's own node_modules when it has a real one. Otherwise the main
+# checkout's is linked in for this run and removed again on exit -- unless
+# the branch changes the frontend's dependencies, which that copy would not
+# reflect.
+prepare_node_modules() {
+  local fe_deps_changed=0
+  if branch_changes frontend/package.json frontend/package-lock.json; then
+    fe_deps_changed=1
+  fi
+  if [ -e "$FE_DIR/node_modules" ] && { [ ! -L "$FE_DIR/node_modules" ] || [ "$fe_deps_changed" -eq 0 ]; }; then
+    return 0
+  fi
+  if [ "$fe_deps_changed" -eq 1 ]; then
+    echo "BLOCKED: git push — this branch changes frontend/package.json or package-lock.json, which the main" >&2
+    echo "  checkout's node_modules does not reflect. Run 'npm ci' in $FE_DIR, then push again." >&2
+    exit 2
+  fi
+  # -fn replaces a dangling link a hard-killed earlier run could not remove;
+  # a real directory never reaches here (the early return above keeps it).
+  if [ ! -d "$CLAUDE_PROJECT_DIR/frontend/node_modules" ] || ! ln -sfn "$CLAUDE_PROJECT_DIR/frontend/node_modules" "$FE_DIR/node_modules"; then
+    echo "BLOCKED: git push — $FE_DIR has no node_modules and the main checkout's could not be linked in" >&2
+    echo "  (run 'npm ci' in either)." >&2
+    exit 2
+  fi
+  LINKED_NODE_MODULES="$FE_DIR/node_modules"
+}
+
 if [ "$RUN_FRONTEND" -eq 1 ]; then
+  prepare_node_modules
   {
-    echo "== npm run typecheck (whole project — tsc project refs can't be file-scoped) =="
-    run_with_timeout 90 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run typecheck" || FAIL=1
-    echo "== npm run test =="
-    run_with_timeout 120 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test" || FAIL=1
-    echo "== npm run lint (whole project — matches CI, a file-scoped eslint call can miss project config) =="
-    run_with_timeout 60 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint" || FAIL=1
-    echo "== npm run lint:i18n =="
-    run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n" || FAIL=1
-    echo "== npm run lint:i18n-strings =="
-    run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run lint:i18n-strings" || FAIL=1
-    echo "== npm run test:check-entry-chunk (fixture-based positive/negative controls for the checker itself) =="
-    run_with_timeout 30 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run test:check-entry-chunk" || FAIL=1
+    # --force: tsc -b decides a project is up to date from timestamps, and a
+    # node_modules linked in from the main checkout carries build info that
+    # other worktrees' runs wrote, so an unforced run could skip the check.
+    run_step 90 "npm run typecheck (whole project — tsc project refs can't be file-scoped)" \
+      "${IN_DIR[@]}" "$FE_DIR" npm run typecheck -- --force || FAIL=1
+    # Whole-project vitest saturates every core and grows with each test
+    # file, so like the backend ceiling above it needs headroom over the
+    # suite's real wall-clock on a loaded host, not a figure that only a
+    # quiet machine clears.
+    run_step 300 "npm run test" "${IN_DIR[@]}" "$FE_DIR" npm run test || FAIL=1
+    # Type-aware lint over the whole project; same loaded-host headroom
+    # reasoning as the test ceiling above.
+    run_step 180 "npm run lint (whole project — matches CI, a file-scoped eslint call can miss project config)" \
+      "${IN_DIR[@]}" "$FE_DIR" npm run lint || FAIL=1
+    run_step 30 "npm run lint:i18n" "${IN_DIR[@]}" "$FE_DIR" npm run lint:i18n || FAIL=1
+    run_step 30 "npm run lint:i18n-strings" "${IN_DIR[@]}" "$FE_DIR" npm run lint:i18n-strings || FAIL=1
+    echo "== npm run deadcode (knip, JSON reporter; same analysis CI's dead-code gate runs) =="
+    # Two different failures both come out of `knip` as a non-zero exit: dead
+    # code, which must block, and a toolchain that cannot run knip at all,
+    # which must not. The second is common rather than exotic -- knip needs a
+    # newer Node than an ambient install often provides, and it parses through
+    # oxc-parser's platform-specific native binary, which npm's
+    # optional-dependency resolution drops often enough to expect (npm/cli#4828).
+    # Every push in the repository runs this gate, so a broken local toolchain
+    # would block all of them behind a stack trace that names neither the
+    # cause nor the cure.
+    #
+    # The two are told apart structurally rather than by matching error text:
+    # knip that ran writes a report, and knip that could not start writes
+    # nothing parseable. Hence the JSON reporter -- the analysis is the one CI
+    # runs, only the output shape differs, and that shape is what makes the
+    # distinction decidable.
+    deadcode_out="$(mktemp "$STEP_DIR/deadcode.XXXXXX")"
+    deadcode_err="$(mktemp "$STEP_DIR/deadcode-err.XXXXXX")"
+    run_with_timeout 90 "${IN_DIR[@]}" "$FE_DIR" npm run --silent deadcode -- --reporter json \
+      >"$deadcode_out" 2>"$deadcode_err"
+    rc=$?
+    cat "$deadcode_out" "$deadcode_err"
+    if [ "$rc" -eq 124 ]; then
+      # A check that never finished is not the narrow exception below: nothing
+      # was classified, so the file header's fail-closed contract applies.
+      echo "npm run deadcode TIMED OUT after 90s — nothing to classify, so this blocks." >&2
+      FAIL=1
+    elif [ "$rc" -ne 0 ]; then
+      if node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$deadcode_out" 2>/dev/null; then
+        note_failed "npm run deadcode" "$deadcode_out"
+        FAIL=1
+      else
+        echo "WARNING: npm run deadcode produced no report — this toolchain cannot run knip (check node's version against knip's \`engines\`, that oxc-parser's native binding is installed in $FE_DIR/node_modules, and that frontend/package.json still defines a \`deadcode\` script). The local dead-code gate is skipped for this push; CI enforces it either way." >&2
+        # `--silent` is what keeps npm's banner out of the JSON, and it takes
+        # npm's own error output with it, so an npm-level failure would
+        # otherwise leave the log with no reason in it at all. One plain
+        # re-run costs nothing on a toolchain that is already failing fast.
+        echo "== npm run deadcode (plain re-run; the JSON run above produced no report) =="
+        run_with_timeout 90 "${IN_DIR[@]}" "$FE_DIR" npm run deadcode || true
+      fi
+    fi
+    run_step 30 "npm run test:check-entry-chunk (fixture-based positive/negative controls for the checker itself)" \
+      "${IN_DIR[@]}" "$FE_DIR" npm run test:check-entry-chunk || FAIL=1
+    run_step 30 "npm run test:check-css-tokens (fixture-based positive/negative controls for the checker itself)" \
+      "${IN_DIR[@]}" "$FE_DIR" npm run test:check-css-tokens || FAIL=1
+    run_step 30 "npm run check:css-tokens (static scan: var(--x) refs resolve, z-index uses the shared ladder)" \
+      "${IN_DIR[@]}" "$FE_DIR" npm run check:css-tokens || FAIL=1
     if [ "${PUSH_GATE_SKIP_BUILD:-0}" = "1" ]; then
       echo "WARNING: PUSH_GATE_SKIP_BUILD=1 set — skipping npm run build:bundle + check:entry-chunk for this push (deliberate opt-out; MapLibre-in-entry regressions won't be caught locally)." >&2
     else
-      echo "== npm run build:bundle && npm run check:entry-chunk (MapLibre must stay out of the entry chunk; typecheck already ran above, so this build step skips tsc -b) =="
-      run_with_timeout 480 bash -c "cd '$CLAUDE_PROJECT_DIR/frontend' && npm run build:bundle && npm run check:entry-chunk"
+      run_step 480 "npm run build:bundle && npm run check:entry-chunk (MapLibre must stay out of the entry chunk; typecheck already ran above, so this build step skips tsc -b)" \
+        "${IN_DIR[@]}" "$FE_DIR" bash -c 'npm run build:bundle && npm run check:entry-chunk'
       rc=$?
       if [ "$rc" -eq 124 ]; then
         echo "frontend build/check-entry-chunk TIMED OUT after 480s (not a build or check failure)." >&2
@@ -589,9 +785,7 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
 fi
 
 if [ "$FAIL" -ne 0 ]; then
-  echo "BLOCKED: git push — quality gate failed. Last 80 lines:" >&2
-  tail -80 "$LOG" >&2
-  exit 2
+  block_with_log "quality gate failed"
 fi
 
 exit 0

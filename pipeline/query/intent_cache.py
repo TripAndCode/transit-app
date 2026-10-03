@@ -142,10 +142,22 @@ async def promotion_candidates(
     return out
 
 
-async def mark_promoted(conn: asyncpg.Connection, signature_hash: str, agency_id: int) -> None:
-    """Mark a cache row as promoted to rag_chunks (called by the promotion job)."""
+async def mark_promoted(
+    conn: asyncpg.Connection,
+    signature_hash: str,
+    agency_id: int,
+    embedding_version: str | None = None,
+) -> None:
+    """Mark a cache row as promoted to rag_chunks (called by the promotion job).
+
+    ``embedding_version`` records which embedder built the promoted chunk, so a
+    later model or library change can tell which promotions need redoing. NULL
+    means the promotion predates stamping.
+    """
     await conn.execute(
-        "UPDATE ask_intent_cache SET promoted_at = now() WHERE signature_hash = $1 AND agency_id = $2",
+        "UPDATE ask_intent_cache SET promoted_at = now(), embedding_version = $3 "
+        "WHERE signature_hash = $1 AND agency_id = $2",
         signature_hash,
         agency_id,
+        embedding_version,
     )

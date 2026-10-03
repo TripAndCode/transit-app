@@ -38,4 +38,17 @@ describe("ErrorBanner", () => {
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
+
+  it("gives a distinct 'timed out' message (not the generic network copy) for a timeout error", () => {
+    const err = new Error("timed out");
+    err.name = "TimeoutError";
+    renderWithProviders(<ErrorBanner error={err} onRetry={vi.fn()} />);
+    expect(screen.getByText(/timed out/i)).toBeInTheDocument();
+    expect(screen.getByRole("button")).toBeInTheDocument();
+  });
+
+  it("gives the network message for a plain network failure, distinct from the timeout copy", () => {
+    renderWithProviders(<ErrorBanner error={new TypeError("Failed to fetch")} onRetry={vi.fn()} />);
+    expect(screen.getByText(/connection|network/i)).toBeInTheDocument();
+  });
 });

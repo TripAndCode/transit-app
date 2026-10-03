@@ -251,11 +251,42 @@ async def test_append_message_tool_args_path(conv_app):
 
 
 @pytest.mark.asyncio
+async def test_append_message_persists_dispatch_conditions(conv_app):
+    """The assistant message records the dow/time_band/service the dispatch
+    actually ran under (from the conversation's filter_ctx at send time) --
+    the historical provenance record the Ask evidence card's disclosure
+    reads, distinct from `args` and from the conversation's current,
+    editable filter_ctx."""
+    app, agency, uid, pool = conv_app
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, 'R1', 'R1')",
+            agency,
+        )
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(
+            f"/api/{agency}/conversations",
+            json={"title": "T", "filter_ctx": {"dow": "weekend", "time_band": "morning", "service": "all"}},
+            headers=_CSRF,
+        )
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["user"]["conditions"] is None
+        assert body["assistant"]["conditions"] == {"dow": "weekend", "time_band": "morning", "service": "all"}
+
+
+@pytest.mark.asyncio
 async def test_append_message_default_window_uses_jst_today(conv_app, monkeypatch):
     """When a conversation's filter_ctx has no explicit dates, the default
     30-day window built for tool dispatch must anchor on the JST civil
     calendar (jst_today()), not the server's local/UTC date - the same
-    class of bug fixed elsewhere via api.range.jst_today()."""
+    JST anchoring api.range.jst_today() provides everywhere else."""
     import api.range as range_mod
     import api.routers.conversations as conv_router
 
@@ -290,7 +321,7 @@ async def test_append_message_default_window_uses_jst_today(conv_app, monkeypatc
         )
         assert r.status_code == 200, r.text
 
-    assert captured["ctx"].to_date == date(2026, 1, 2)
+    assert captured["ctx"].to_date == date(2026, 1, 1)
 
 
 @pytest.mark.asyncio
@@ -358,14 +389,13 @@ async def test_migrate_anon_idempotent(conv_app):
         assert len(r3.json()) == 2
 
 
-# ─── Error-leakage regression (Fix-9i) ─────────────────────────────────────
+# ─── Error leakage ─────────────────────────────────────────────────────────
 #
-# A dispatch() failure during append_message_endpoint used to render
-# f"ツール {tool} の実行に失敗しました: {exc}" straight into rendered_summary,
-# which is PERSISTED to ask_conversation_messages — so a leaked ClickHouse
-# error string (SQL fragment / server version / query endpoint URL) would
-# resurface every time the conversation is reloaded, not just once. These
-# tests pin: (a) the ClickHouse-unavailable and (b) generic-exception paths
+# A dispatch() failure during append_message_endpoint is rendered into
+# rendered_summary, which is PERSISTED to ask_conversation_messages — so a
+# raw exception string there (SQL fragment / server version / query endpoint
+# URL from ClickHouse) would resurface every time the conversation is
+# reloaded, not just once. These tests pin: (a) the ClickHouse-unavailable and (b) generic-exception paths
 # both degrade to the safe locale strings, never the raw exception text,
 # in BOTH the HTTP response and the row actually written to the DB; (c) a
 # non-503 HTTPException still propagates untouched; (d) the real error is
@@ -545,21 +575,21 @@ async def test_append_message_logs_full_exception_server_side(conv_app, monkeypa
 
 @pytest.mark.asyncio
 async def test_append_message_undefined_table_error_propagates(conv_app, monkeypatch):
-    """Fix-9i regression: dispatch() raising asyncpg.exceptions.UndefinedTableError
-    (an agg_* table missing on a migration-lagged environment) must propagate
-    out of append_message_endpoint so FastAPI's registered
+    """dispatch() raising asyncpg.exceptions.UndefinedTableError (an agg_*
+    table missing on a migration-lagged environment) must propagate out of
+    append_message_endpoint so FastAPI's registered
     aggregate_not_ready_handler (api/main.py + api/aggregate_errors.py) turns
     it into the machine-readable {"code": "aggregate_not_ready"} 503 the
-    frontend reacts to — mirroring api/routers/ask.py's Fix-8f.
+    frontend reacts to — the same contract api/routers/ask.py keeps.
 
-    Before this fix, the blanket `except Exception` swallowed this into a
-    generic 200 tool_error. Worse, dispatch() runs inside this endpoint's
-    `async with conn.transaction():`, so if the except block had gone on to
-    run another query on the same (now-aborted) connection — as the
-    'except Exception' branch here does, via _conv.append_message(conn, ...)
-    — Postgres would raise asyncpg.exceptions.InFailedSQLTransactionError
-    instead, surfacing as an unhandled bare 500. This test pins that neither
-    happens: the response is the clean 503 aggregate_not_ready shape."""
+    The endpoint's `except Exception` degraded-answer branch must not catch
+    it, for two reasons. It would answer a generic 200 tool_error instead.
+    And dispatch() runs inside this endpoint's `async with
+    conn.transaction():`, so that branch's next query on the same
+    (now-aborted) connection, via _conv.append_message(conn, ...), would
+    raise asyncpg.exceptions.InFailedSQLTransactionError and surface as an
+    unhandled bare 500. This test pins that neither happens: the response is
+    the clean 503 aggregate_not_ready shape."""
     import api.routers.conversations as conv_router
 
     app, agency, uid, _pool = conv_app
@@ -601,13 +631,14 @@ async def test_append_message_postgres_error_in_dispatch_does_not_poison_transac
     failing statement on `conn` — the same connection append_message_endpoint
     holds inside its `async with conn.transaction():` — so the connection's
     transaction genuinely aborts, reproducing what a real asyncpg.PostgresError
-    (anything but UndefinedTableError) does. Before the fix, the generic
-    `except Exception` branch went on to call `_conv.append_message(conn, ...)`
-    on that same aborted connection, which raises
+    (anything but UndefinedTableError) does. The generic `except Exception`
+    branch then calls `_conv.append_message(conn, ...)` on that same
+    connection, which would raise
     asyncpg.exceptions.InFailedSQLTransactionError — an unhandled 500 instead
-    of the intended graceful tool_error response. The fix nests dispatch in
-    its own SAVEPOINT (conn.transaction() called again while already inside
-    one), confining the abort so the outer transaction stays writable."""
+    of the intended graceful tool_error response — were the abort not
+    confined. dispatch runs in its own SAVEPOINT (conn.transaction() called
+    again while already inside one), so the outer transaction stays
+    writable."""
     import api.routers.conversations as conv_router
 
     app, agency, uid, pool = conv_app
@@ -947,7 +978,8 @@ async def test_followup_anonymous_caller_rejected_before_any_other_check(conv_ap
         cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
         conv_id = cr.json()["conversation_id"]
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        # No context at all -- would have 400'd on the old anon path.
+        # No context at all -- the context_message_id check would 400 this, so
+        # the 403 proves the anonymous rejection runs first.
         r = await c.post(
             f"/api/{agency}/conversations/{conv_id}/followup",
             json={"question": "q"},

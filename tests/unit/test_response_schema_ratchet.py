@@ -28,33 +28,49 @@ PERMANENTLY_EXEMPT = {
 # Endpoints that should describe their response and do not yet. Shrink this;
 # never grow it. A new endpoint declares its response model instead of being
 # added here.
+#
+# Annotating a handler `-> dict[str, Any]` does not count as describing it, and
+# does not belong here as a way off this list: FastAPI infers a response model
+# from the return annotation, so `Any` produces a schema that says "object" and
+# constrains nothing -- while still routing the payload through Pydantic
+# serialization, where a Decimal renders as a JSON string instead of a number.
+# Those handlers carry `response_model=None` to keep FastAPI's plain
+# jsonable_encoder path, and stay listed here until they gain a real model.
 PENDING = {
     "GET /api/{agency_id}/ask/build-schema",
-    "GET /api/{agency_id}/ask/suggest",
-    "POST /api/{agency_id}/ask/edit-action",
-    "GET /api/{agency_id}/ask/dashboard/heatmap",
     "GET /api/{agency_id}/ask/dashboard/anomalies",
+    "GET /api/{agency_id}/ask/dashboard/heatmap",
     "GET /api/{agency_id}/ask/dashboard/movers",
-    "POST /api/auth/local/login",
-    "GET /api/{agency_id}/conversations",
-    "POST /api/{agency_id}/conversations",
-    "GET /api/{agency_id}/conversations/{conversation_id}",
-    "PATCH /api/{agency_id}/conversations/{conversation_id}",
-    "DELETE /api/{agency_id}/conversations/{conversation_id}",
-    "GET /api/{agency_id}/conversations/{conversation_id}/messages",
-    "POST /api/{agency_id}/conversations/migrate-anon",
-    "POST /api/{agency_id}/conversations/{conversation_id}/messages",
-    "POST /api/{agency_id}/conversations/{conversation_id}/followup",
     "GET /api/{agency_id}/ask/followup-enabled",
-    "GET /api/{agency_id}/copilot/enabled",
+    "GET /api/{agency_id}/conversations",
+    "GET /api/{agency_id}/conversations/{conversation_id}",
+    "GET /api/{agency_id}/conversations/{conversation_id}/messages",
+    "GET /api/{agency_id}/delays/heatmap",
     "GET /api/{agency_id}/delays/live",
     "GET /api/{agency_id}/delays/live-progress",
-    "POST /api/{agency_id}/delays/refresh",
     "GET /api/{agency_id}/route-shape",
     "GET /api/{agency_id}/today/route-summary",
-    "GET /api/{agency_id}/today/route/{route_code}/trips",
     "GET /api/{agency_id}/today/route/{route_code}/stop-profile",
-    "GET /api/{agency_id}/delays/heatmap",
+    "PATCH /api/{agency_id}/conversations/{conversation_id}",
+    "POST /api/{agency_id}/conversations",
+    "POST /api/{agency_id}/conversations/{conversation_id}/followup",
+    "POST /api/{agency_id}/conversations/{conversation_id}/messages",
+    "POST /api/{agency_id}/delays/refresh",
+    # Returns a raw Response subclass (JSONResponse), not a schema-describable
+    # model -- FastAPI does not infer a response_model from that return
+    # annotation, so this one stays pending until it grows a real model.
+    "POST /api/auth/local/login",
+}
+
+# Endpoints whose typed response is load-bearing and must stay typed. Shrinking
+# PENDING is the ratchet's one direction; this is its counterweight — an
+# endpoint listed here fails the suite the moment it loses its response model,
+# instead of quietly rejoining the undescribed set PENDING is allowed to hold.
+# Grow this whenever an endpoint is promoted out of PENDING.
+TYPED = {
+    "DELETE /api/admin/flags/{key}",
+    "GET /api/{agency_id}/delays/timeline",
+    "GET /api/{agency_id}/today/route/{route_code}/trips",
 }
 
 
@@ -105,3 +121,13 @@ def test_permanently_exempt_endpoints_all_exist():
     """A renamed or deleted route must not leave a silent hole in the exemptions."""
     known = {name for name, _ in _schema_routes()}
     assert not (PERMANENTLY_EXEMPT - known), f"Unknown routes exempted: {sorted(PERMANENTLY_EXEMPT - known)}"
+
+
+def test_typed_endpoints_still_declare_a_response_model():
+    regressed = TYPED & _undescribed()
+    assert not regressed, f"These lost their response model: {sorted(regressed)}"
+
+
+def test_typed_endpoints_all_exist():
+    known = {name for name, _ in _schema_routes()}
+    assert not (TYPED - known), f"Unknown routes listed as typed: {sorted(TYPED - known)}"

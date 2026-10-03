@@ -42,16 +42,16 @@ def make_document(states: dict[str, str], *, reasons: dict[str, str] | None = No
 
 
 def test_first_ever_bad_observation_alerts_as_entered():
-    document = make_document({"vps_loop": "failed"}, reasons={"vps_loop": "circuit-breaker paused"})
+    document = make_document({"oracle_crawler": "failed"}, reasons={"oracle_crawler": "RT feed is stale"})
     alerts, updated = evaluate_components(document, AlertState(), now=T0)
 
     assert len(alerts) == 1
-    assert alerts[0].component == "vps_loop"
+    assert alerts[0].component == "oracle_crawler"
     assert alerts[0].kind == "entered"
     assert alerts[0].state == "failed"
-    assert alerts[0].reason == "circuit-breaker paused"
-    assert updated["vps_loop"].last_alerted_state == "failed"
-    assert updated["vps_loop"].last_alert_at == ops_alerts._isoformat(T0)
+    assert alerts[0].reason == "RT feed is stale"
+    assert updated["oracle_crawler"].last_alerted_state == "failed"
+    assert updated["oracle_crawler"].last_alert_at == ops_alerts._isoformat(T0)
 
 
 def test_healthy_to_healthy_never_alerts():
@@ -152,14 +152,14 @@ def test_bad_to_unknown_to_healthy_still_fires_recovered():
 def test_recovery_alerts_after_a_prior_alert():
     state = AlertState(
         components={
-            "vps_loop": ComponentAlertState(
+            "oracle_crawler": ComponentAlertState(
                 last_observed_state="failed",
                 last_alerted_state="failed",
                 last_alert_at=ops_alerts._isoformat(T0 - timedelta(minutes=5)),
             )
         }
     )
-    document = make_document({"vps_loop": "healthy"})
+    document = make_document({"oracle_crawler": "healthy"})
 
     alerts, updated = evaluate_components(document, state, now=T0)
 
@@ -167,8 +167,8 @@ def test_recovery_alerts_after_a_prior_alert():
     assert alerts[0].kind == "recovered"
     assert alerts[0].state == "healthy"
     assert alerts[0].previous_state == "failed"
-    assert updated["vps_loop"].last_alerted_state is None
-    assert updated["vps_loop"].last_alert_at is None
+    assert updated["oracle_crawler"].last_alerted_state is None
+    assert updated["oracle_crawler"].last_alert_at is None
 
 
 def test_no_recovery_alert_when_never_previously_alerted():
@@ -272,17 +272,17 @@ def test_dropping_severity_while_still_bad_is_suppressed_not_escalated():
 
 def test_multiple_simultaneous_transitions_are_grouped_into_one_notification():
     document = make_document(
-        {"vps_loop": "failed", "github": "healthy", "r2": "stale"},
-        reasons={"vps_loop": "circuit-breaker paused", "r2": "disk usage is 95% (stale)"},
+        {"oracle_crawler": "failed", "github": "healthy", "r2": "stale"},
+        reasons={"oracle_crawler": "RT feed is stale", "r2": "disk usage is 95% (stale)"},
     )
 
     alerts, _updated = evaluate_components(document, AlertState(), now=T0)
     notification = build_notification(alerts, None, now=T0)
 
-    assert {a.component for a in notification.component_alerts} == {"vps_loop", "r2"}
+    assert {a.component for a in notification.component_alerts} == {"oracle_crawler", "r2"}
     assert not notification.is_empty
     text = notification.render_text()
-    assert "vps_loop" in text and "r2" in text
+    assert "oracle_crawler" in text and "r2" in text
     assert text.count("\n- ") == 2  # sanity: one line per component alert
 
 
@@ -319,7 +319,7 @@ def test_state_round_trips_through_disk(tmp_path: Path):
     state = AlertState(
         last_run_at=ops_alerts._isoformat(T0),
         components={
-            "vps_loop": ComponentAlertState(
+            "oracle_crawler": ComponentAlertState(
                 last_observed_state="failed", last_alerted_state="failed", last_alert_at=ops_alerts._isoformat(T0)
             )
         },
@@ -329,7 +329,7 @@ def test_state_round_trips_through_disk(tmp_path: Path):
     loaded = load_state(path)
 
     assert loaded.last_run_at == state.last_run_at
-    assert loaded.components["vps_loop"] == state.components["vps_loop"]
+    assert loaded.components["oracle_crawler"] == state.components["oracle_crawler"]
 
 
 def test_load_state_missing_file_returns_empty_state(tmp_path: Path):
@@ -363,7 +363,7 @@ def test_load_state_rejects_foreign_schema_version(tmp_path: Path):
 
 def test_main_exits_zero_and_writes_heartbeat_on_a_quiet_poll(tmp_path: Path, monkeypatch, capsys):
     state_path = tmp_path / "alert-state.json"
-    document = make_document({"vps_loop": "healthy", "github": "healthy", "oracle_crawler": "healthy", "r2": "healthy"})
+    document = make_document({"github": "healthy", "oracle_crawler": "healthy", "r2": "healthy"})
     monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
     monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
 
@@ -377,7 +377,7 @@ def test_main_exits_zero_and_writes_heartbeat_on_a_quiet_poll(tmp_path: Path, mo
 
 def test_main_exits_nonzero_and_prints_alert_on_a_new_failure(tmp_path: Path, monkeypatch, capsys):
     state_path = tmp_path / "alert-state.json"
-    document = make_document({"vps_loop": "failed"}, reasons={"vps_loop": "circuit-breaker paused"})
+    document = make_document({"oracle_crawler": "failed"}, reasons={"oracle_crawler": "RT feed is stale"})
     monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
     monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
 
@@ -386,7 +386,7 @@ def test_main_exits_nonzero_and_prints_alert_on_a_new_failure(tmp_path: Path, mo
     out = capsys.readouterr().out
     assert exit_code == 1
     assert "ALERT" in out
-    assert "vps_loop" in out
+    assert "oracle_crawler" in out
 
 
 def test_main_reports_monitor_silence_from_a_stale_state_file(tmp_path: Path, monkeypatch, capsys):
@@ -396,7 +396,7 @@ def test_main_reports_monitor_silence_from_a_stale_state_file(tmp_path: Path, mo
     # rather than the fixed T0 fixture used elsewhere in this file.
     stale_last_run = ops_alerts._isoformat(datetime.now(timezone.utc) - timedelta(hours=3))
     save_state(state_path, AlertState(last_run_at=stale_last_run))
-    document = make_document({"vps_loop": "healthy"})
+    document = make_document({"oracle_crawler": "healthy"})
     monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
     monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
 
@@ -455,7 +455,7 @@ def test_deliver_ping_swallows_a_delivery_failure(capsys):
 
 def test_main_delivers_ok_ping_on_a_quiet_poll(tmp_path: Path, monkeypatch):
     state_path = tmp_path / "alert-state.json"
-    document = make_document({"vps_loop": "healthy"})
+    document = make_document({"oracle_crawler": "healthy"})
     monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
     monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
     monkeypatch.setenv(ops_alerts.PING_URL_ENV_VAR, "https://example.test/ping/quiet")
@@ -471,7 +471,7 @@ def test_main_delivers_ok_ping_on_a_quiet_poll(tmp_path: Path, monkeypatch):
 
 def test_main_delivers_fail_ping_on_an_anomaly(tmp_path: Path, monkeypatch):
     state_path = tmp_path / "alert-state.json"
-    document = make_document({"vps_loop": "failed"}, reasons={"vps_loop": "circuit-breaker paused"})
+    document = make_document({"oracle_crawler": "failed"}, reasons={"oracle_crawler": "RT feed is stale"})
     monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
     monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
     monkeypatch.setenv(ops_alerts.PING_URL_ENV_VAR, "https://example.test/ping/quiet")
@@ -483,12 +483,12 @@ def test_main_delivers_fail_ping_on_an_anomaly(tmp_path: Path, monkeypatch):
     assert exit_code == 1
     assert len(calls) == 1
     assert calls[0][0] == "https://example.test/ping/quiet/fail"
-    assert "vps_loop" in calls[0][1]
+    assert "oracle_crawler" in calls[0][1]
 
 
 def test_main_delivers_no_ping_when_url_unset(tmp_path: Path, monkeypatch):
     state_path = tmp_path / "alert-state.json"
-    document = make_document({"vps_loop": "healthy"})
+    document = make_document({"oracle_crawler": "healthy"})
     monkeypatch.setattr(ops_alerts.ops_status_page, "collect_all", lambda **kw: [])
     monkeypatch.setattr(ops_alerts.ops_status_page, "build_document", lambda *a, **kw: document)
     monkeypatch.delenv(ops_alerts.PING_URL_ENV_VAR, raising=False)

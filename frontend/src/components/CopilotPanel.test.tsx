@@ -7,7 +7,7 @@ import { CopilotPanel } from "./CopilotPanel";
 import * as client from "../api/client";
 import { DEBOUNCE_MS } from "../api/copilot";
 
-// Matches the rest of the suite's convention (e.g. GuestPrompt.test.tsx,
+// Matches the rest of the suite's convention (e.g.
 // ReportTable.test.tsx): without this, vi.spyOn(client, ...) across tests
 // keeps stacking onto the same spy, so later tests' call counts/histories
 // leak earlier tests' calls.
@@ -78,8 +78,8 @@ function renderPanelWithNav(initialPath: string) {
     const navigate = useNavigate();
     return (
       <>
-        <button onClick={() => navigate("/agencies/1/overview")}>go-overview</button>
-        <button onClick={() => navigate("/agencies/1/map")}>go-map</button>
+        <button onClick={() => navigate("/agencies/1/pulse")}>go-overview</button>
+        <button onClick={() => navigate("/agencies/1/live")}>go-map</button>
         <CopilotPanel />
       </>
     );
@@ -103,8 +103,8 @@ function renderPanelWithAgencySwitch(initialPath: string) {
     const navigate = useNavigate();
     return (
       <>
-        <button onClick={() => navigate("/agencies/1/overview")}>go-agency-1</button>
-        <button onClick={() => navigate("/agencies/2/overview")}>go-agency-2</button>
+        <button onClick={() => navigate("/agencies/1/pulse")}>go-agency-1</button>
+        <button onClick={() => navigate("/agencies/2/pulse")}>go-agency-2</button>
         <CopilotPanel />
       </>
     );
@@ -124,7 +124,7 @@ function renderPanelWithAgencySwitch(initialPath: string) {
  * check with an overview payload, so route by path instead.
  *
  * The session is stubbed separately (`apiGetOrNull`, which `useSession`
- * uses) because the insight POST now also requires this caller's own
+ * uses) because the follow-up form requires this caller's own
  * `llm_approved`. It defaults to an approved session so each behavioral test
  * exercises the path it is actually about; pass `llmApproved: false` to
  * exercise the gate itself. */
@@ -144,30 +144,21 @@ function mockApiGet(opts: { enabled?: boolean; llmApproved?: boolean } = {}) {
   ) as unknown as ReturnType<typeof vi.spyOn>;
 }
 
-describe("CopilotPanel", () => {
-  it("shows a step-back note on the Ask tab instead of calling the insight endpoint", async () => {
-    mockApiGet();
-    const spy = vi.spyOn(client, "apiPost");
-    renderPanel("/agencies/1/ask");
-    await waitFor(() => expect(screen.getByRole("complementary")).toBeTruthy());
-    // Bilingual match — jsdom's detected language isn't pinned here (unlike
-    // renderWithProviders, which forces "en"), so this must tolerate either
-    // resource bundle resolving, matching the existing ErrorBanner.test.tsx
-    // convention for un-pinned-locale assertions.
-    expect(screen.getByText(/こちらで会話が続いています|already in the full conversation/i)).toBeTruthy();
-    expect(spy).not.toHaveBeenCalled();
-  });
+const COPILOT_ERROR = "Couldn't generate an insight right now.";
 
-  it("never fires the insight POST for a caller an admin hasn't approved", async () => {
-    // The insight fires from a pageview, not a user action, and the endpoint
-    // 403s an unapproved caller -- and `llm_approved` is false for every new
-    // account, so without this gate the default experience is one doomed
-    // request per Overview visit.
+describe("CopilotPanel", () => {
+  it("shows the insight but no follow-up form to a caller an admin hasn't approved", async () => {
+    // The insight is rendered from a template server-side and needs no
+    // approval; the follow-up goes to /ask, whose free-text stage does.
     mockApiGet({ llmApproved: false });
-    const spy = vi.spyOn(client, "apiPost");
-    renderPanel("/agencies/1/overview");
-    await waitFor(() => expect(client.apiGet).toHaveBeenCalled());
-    expect(spy).not.toHaveBeenCalled();
+    vi.spyOn(client, "apiPost").mockResolvedValue({
+      text: "Route 12 is delayed.",
+      cite: "Overview · 1 sample",
+      low_confidence: false,
+    });
+    renderPanel("/agencies/1/pulse");
+    await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
+    expect(screen.queryByPlaceholderText(/ask a follow-up|続けて質問/i)).toBeNull();
   });
 
   it("renders the fetched insight text on the Overview tab", async () => {
@@ -180,31 +171,28 @@ describe("CopilotPanel", () => {
       cite: "Overview · 1 sample",
       low_confidence: false,
     });
-    renderPanel("/agencies/1/overview");
+    renderPanel("/agencies/1/pulse");
     await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
   });
 
-  it("does not render anything on routes other than Overview/Ask", () => {
-    const { container } = renderPanel("/agencies/1/map");
-    expect(container.querySelector(".copilot-panel")).toBeNull();
-  });
-
-  it("shows the calm admin-approval-required banner instead of the generic error message", async () => {
-    mockApiGet();
-    vi.spyOn(client, "apiPost").mockRejectedValue(
-      new client.ApiError(403, JSON.stringify({ detail: "llm_not_approved" })),
-    );
-    renderPanel("/agencies/1/overview");
-    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
-    expect(
-      screen.queryByText(/couldn't generate an insight|インサイトを生成できません/i),
-    ).toBeNull();
-  });
+  // The component's own route gate, independent of App's focused-tab gate:
+  // useMatch ignores a trailing slash, so `/ask/` is checked here too.
+  it.each(["/agencies/1/live", "/agencies/1/ask/", "/agencies/1/time"])(
+    "renders nothing and requests no insight on %s, even with the flag on",
+    async (path) => {
+      mockApiGet();
+      const postSpy = vi.spyOn(client, "apiPost");
+      const { container } = renderPanel(path);
+      await act(() => vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 300));
+      expect(container.querySelector(".copilot-panel")).toBeNull();
+      expect(postSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it("clears a stale error instead of leaking it onto an unrelated tab", async () => {
     mockApiGet();
     vi.spyOn(client, "apiPost").mockRejectedValue(new Error("boom"));
-    const { container } = renderPanelWithNav("/agencies/1/overview");
+    const { container } = renderPanelWithNav("/agencies/1/pulse");
 
     await waitFor(() =>
       expect(screen.getByText(/couldn't generate an insight|インサイトを生成できません/i)).toBeTruthy(),
@@ -219,13 +207,13 @@ describe("CopilotPanel", () => {
   });
 
   it("never retries a failed insight POST, even under the production QueryClient's retry:1 default", async () => {
-    // A retry here would silently pay for a second provider call for what
-    // the user experiences as one request — so this must hold regardless of
-    // the ambient QueryClient default, not just under the test suite's own
-    // retry:false QueryClients.
+    // The POST fires from a page view with no user action, so a failure is
+    // shown once rather than repeated behind the user's back — and this must
+    // hold regardless of the ambient QueryClient default, not just under the
+    // test suite's own retry:false QueryClients.
     mockApiGet();
     const postSpy = vi.spyOn(client, "apiPost").mockRejectedValue(new Error("boom"));
-    renderPanelWithProductionRetryDefault("/agencies/1/overview");
+    renderPanelWithProductionRetryDefault("/agencies/1/pulse");
 
     await waitFor(() =>
       expect(screen.getByText(/couldn't generate an insight|インサイトを生成できません/i)).toBeTruthy(),
@@ -242,7 +230,7 @@ describe("CopilotPanel", () => {
       cite: "Overview · 1 sample",
       low_confidence: false,
     });
-    renderPanel("/agencies/1/overview");
+    renderPanel("/agencies/1/pulse");
     await waitFor(() => expect(postSpy).toHaveBeenCalled());
 
     const [, , opts] = postSpy.mock.calls[0];
@@ -268,7 +256,7 @@ describe("CopilotPanel", () => {
         result: null,
         ctx: {},
       });
-    renderPanel("/agencies/1/overview");
+    renderPanel("/agencies/1/pulse");
     await screen.findByText("Route 12 is delayed.");
     const input = await screen.findByPlaceholderText(/ask a follow-up|続けて質問/i);
     await setupUser().type(input, "how is route 12 doing{enter}");
@@ -288,7 +276,7 @@ describe("CopilotPanel", () => {
       cite: "Overview · 1 sample",
       low_confidence: false,
     });
-    renderPanelWithAgencySwitch("/agencies/1/overview");
+    renderPanelWithAgencySwitch("/agencies/1/pulse");
     await screen.findByText("Route 12 is delayed.");
 
     vi.spyOn(client, "apiPost").mockResolvedValueOnce({
@@ -318,14 +306,14 @@ describe("CopilotPanel", () => {
       cite: "c",
       low_confidence: false,
     } as never);
-    const on = renderPanel("/agencies/1/overview");
+    const on = renderPanel("/agencies/1/pulse");
     await waitFor(() => expect(on.container.querySelector(".copilot-panel")).not.toBeNull());
     on.unmount();
 
     vi.restoreAllMocks();
     mockApiGet({ enabled: false });
     const postSpy = vi.spyOn(client, "apiPost");
-    const off = renderPanel("/agencies/1/overview");
+    const off = renderPanel("/agencies/1/pulse");
     await waitFor(() => expect(client.apiGet).toHaveBeenCalled());
     expect(off.container.querySelector(".copilot-panel")).toBeNull();
     // Advance past the key debounce before asserting no POST. Rendering
@@ -337,29 +325,53 @@ describe("CopilotPanel", () => {
     expect(postSpy).not.toHaveBeenCalled();
   });
 
+  it("says there is not enough data yet, and asks for no insight, when the view has no observations", async () => {
+    vi.spyOn(client, "apiGetOrNull").mockResolvedValue(null as never);
+    vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
+      path.includes("/copilot/enabled")
+        ? Promise.resolve({ enabled: true })
+        : Promise.resolve({ headline: { avg_min: null, samples: 0 } }),
+    );
+    const postSpy = vi.spyOn(client, "apiPost");
+    renderPanel("/agencies/1/pulse");
+    expect(await screen.findByText("Not enough data for an insight yet.")).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 300));
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed summary as an error, not as a lack of data", async () => {
+    vi.spyOn(client, "apiGetOrNull").mockResolvedValue(null as never);
+    vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
+      path.includes("/copilot/enabled") ? Promise.resolve({ enabled: true }) : Promise.reject(new Error("503")),
+    );
+    renderPanel("/agencies/1/pulse");
+    expect(await screen.findByText(COPILOT_ERROR)).toBeInTheDocument();
+    expect(screen.queryByText("Not enough data for an insight yet.")).not.toBeInTheDocument();
+  });
+
   it("stays off and makes no insight request when the flag check fails", async () => {
     const getSpy = vi.spyOn(client, "apiGet").mockRejectedValue(new Error("flag check down"));
     const postSpy = vi.spyOn(client, "apiPost");
-    const { container } = renderPanel("/agencies/1/overview");
+    const { container } = renderPanel("/agencies/1/pulse");
     await waitFor(() => expect(getSpy).toHaveBeenCalled());
     expect(container.querySelector(".copilot-panel")).toBeNull();
     expect(postSpy).not.toHaveBeenCalled();
   });
 
-  it("does not re-bill the insight when Overview is left and re-entered", async () => {
+  it("does not re-request the insight when Overview is left and re-entered", async () => {
     mockApiGet();
     const postSpy = vi.spyOn(client, "apiPost").mockResolvedValue({
       text: "Route 12 is delayed.",
       cite: "Overview · 1 sample",
       low_confidence: false,
     } as never);
-    renderPanelWithNav("/agencies/1/overview");
+    renderPanelWithNav("/agencies/1/pulse");
     await waitFor(() => expect(screen.getByText("Route 12 is delayed.")).toBeTruthy());
     expect(postSpy).toHaveBeenCalledTimes(1);
 
     // Off Overview the query key goes null; coming back re-subscribes to the
-    // *same* key. Without a staleTime that re-subscription refetches, spending
-    // another LLM call for a view state that has not changed.
+    // *same* key. Without a staleTime that re-subscription refetches an
+    // insight for a view state that has not changed.
     fireEvent.click(screen.getByText("go-map"));
     await waitFor(() => expect(screen.queryByText("Route 12 is delayed.")).toBeNull());
     // Clicking back before this key-debounce timer actually fires would let

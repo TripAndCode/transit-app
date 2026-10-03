@@ -1,11 +1,13 @@
 """Tests for GET /api/{agency_id}/delays/heatmap — p90_delay_min field."""
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.range import jst_today
+from pipeline.clickhouse import LIVE_TABLE
 from tests.conftest import _test_pool
 
 
@@ -31,7 +33,6 @@ async def hmap_client(apply_schema):
         40.7,
         140.7,
     )
-    today = date.today()
     # Three daily rows with delay_sum/samples giving per-day avgs: 60s, 120s, 600s
     # p90 over these 3 days ≈ PERCENTILE_CONT(0.9) of [1, 2, 10] min = 10*0.9=9+ → 9.0 min
     for d_offset, (ds, s) in enumerate([(60, 1), (120, 1), (600, 1)]):
@@ -42,7 +43,7 @@ async def hmap_client(apply_schema):
             "ON CONFLICT DO NOTHING",
             aid,
             "S1",
-            today - timedelta(days=d_offset),
+            jst_today() - timedelta(days=1 + d_offset),
             "平日",
             "朝",
             ds,
@@ -75,11 +76,70 @@ async def test_heatmap_returns_p90_delay_min(hmap_client):
 @pytest.mark.asyncio
 async def test_heatmap_p90_null_when_no_data(hmap_client):
     client, aid = hmap_client
-    # Request a future date range with no data
-    r = await client.get(f"/api/{aid}/delays/heatmap?from=2099-01-01&to=2099-01-07")
+    # A historical range with no data. Not a FUTURE range: both range
+    # boundaries are clamped to jst_today() (api.range.clamp_range_ctx), so a
+    # far-future window collapses onto today — which this fixture does seed.
+    r = await client.get(f"/api/{aid}/delays/heatmap?from=2020-01-01&to=2020-01-07")
     assert r.status_code == 200
     # No features expected (no data in that range)
     assert r.json()["features"] == []
+
+
+@pytest.fixture
+async def zero_sample_hmap_client(apply_schema):
+    """One clustered stop whose only aggregate row records zero samples.
+
+    `agg_stop_daily.samples` is NOT NULL but unconstrained above zero, so a
+    cluster can legitimately sum to zero observations. The heatmap must report
+    "no average" for it rather than dividing by zero.
+    """
+    from api.main import app
+
+    pool = await _test_pool()
+    app.state.pool = pool
+    row = await pool.fetchrow(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
+        "HmapZeroAgency",
+        "http://hmap-zero-test.example.com",
+    )
+    aid = row["agency_id"]
+    await pool.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+        "VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($5,$4),4326))",
+        aid,
+        "S0",
+        "無観測停留所",
+        40.8,
+        140.8,
+    )
+    await pool.execute(
+        "INSERT INTO agg_stop_daily "
+        "(agency_id, stop_id, date, service_type, time_band, delay_sum, samples) "
+        "VALUES ($1,$2,$3,$4,$5,0,0)",
+        aid,
+        "S0",
+        jst_today() - timedelta(days=1),
+        "平日",
+        "朝",
+    )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c, aid
+    async with pool.acquire() as conn:
+        await conn.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_heatmap_zero_sample_cluster_reports_no_average(zero_sample_hmap_client):
+    client, aid = zero_sample_hmap_client
+    r = await client.get(f"/api/{aid}/delays/heatmap")
+    assert r.status_code == 200
+    features = r.json()["features"]
+    assert len(features) == 1
+    props = features[0]["properties"]
+    assert props["avg_delay_min"] is None
+    assert props["p90_delay_min"] is None
+    assert props["samples"] == 0
 
 
 @pytest.fixture
@@ -136,7 +196,7 @@ async def stop_profile_client(apply_schema, ch_client, ch_async_client):
         aid,
     )
     # Raw updates for today (K31 with big delay at S1)
-    today = date.today()
+    today = jst_today()
     jst = timezone(timedelta(hours=9))
     ts = datetime(today.year, today.month, today.day, 9, 0, 0, tzinfo=jst)
     await pool.execute(
@@ -199,7 +259,7 @@ async def stop_profile_client(apply_schema, ch_client, ch_async_client):
     )
     from tests.conftest import mirror_updates_to_ch
 
-    mirror_updates_to_ch(ch_client, aid)
+    mirror_updates_to_ch(ch_client, aid, table=LIVE_TABLE)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, aid
@@ -253,7 +313,7 @@ async def test_stop_profile_outlier_true(stop_profile_client):
 @pytest.fixture
 async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
     """Fixture whose cohort rows have deliberately unequal `samples` so a
-    naive per-row AVG (the pre-fix behavior) and a samples-weighted average
+    naive per-row AVG and a samples-weighted average
     diverge. `stop_profile_client` above can't distinguish the two: every
     one of its agg_route_stop_daily rows has samples=1, so a plain AVG of
     each row's ratio happens to equal the samples-weighted average."""
@@ -290,7 +350,7 @@ async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
         "VALUES ($1, CURRENT_DATE, 'R_W', '平日', 0, 0, 1, 1, NOW(), 0)",
         aid,
     )
-    today = date.today()
+    today = jst_today()
     jst = timezone(timedelta(hours=9))
     ts = datetime(today.year, today.month, today.day, 9, 0, 0, tzinfo=jst)
     await pool.execute(
@@ -328,7 +388,7 @@ async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
         )
     from tests.conftest import mirror_updates_to_ch
 
-    mirror_updates_to_ch(ch_client, aid)
+    mirror_updates_to_ch(ch_client, aid, table=LIVE_TABLE)
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, aid
@@ -341,8 +401,8 @@ async def weighted_cohort_client(apply_schema, ch_client, ch_async_client):
 async def test_stop_profile_cohort_avg_is_samples_weighted(weighted_cohort_client):
     """cohort_avg_delay_sec must weight each cohort row by its own `samples`,
     matching every other averaging site in map.py (today_route_summary's
-    `rb` CTE at map.py:635-636, delay_heatmap's `avg_delay_min` at
-    map.py:1062) rather than a plain AVG over each row's own
+    `rb` CTE, delay_heatmap's `avg_delay_min`) rather than a plain AVG over
+    each row's own
     delay_sum/samples ratio, where a 2-sample row would otherwise count the
     same as a 500-sample row."""
     client, aid = weighted_cohort_client

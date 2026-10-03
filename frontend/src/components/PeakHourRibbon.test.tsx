@@ -45,9 +45,9 @@ describe("PeakHourRibbon", () => {
   });
 
   it("keeps the hover tooltip within the chart's plot band for the same negative-scale dataset", () => {
-    // Same dataset/root cause as the bar test above: hovering over hour 10
-    // (far more negative than the peak/denom at hour 5) used to compute a
-    // tooltip y far outside the chart via the same unclamped toY().
+    // Same dataset as the bar test above: hovering over hour 10 (far more
+    // negative than the peak/denom at hour 5) would compute a tooltip y far
+    // outside the chart through an unclamped toY().
     const by_hour: (number | null)[] = new Array(24).fill(null);
     by_hour[5] = -1;
     by_hour[10] = -10;

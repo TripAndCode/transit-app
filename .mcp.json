@@ -9,7 +9,7 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-postgres",
-        "${POSTGRES_MCP_URL:-postgresql://transit:transit@localhost:5433/transit}"
+        "${POSTGRES_MCP_URL:-postgresql://transit:transit@localhost:5544/transit_test}"
       ]
     },
     "playwright": {

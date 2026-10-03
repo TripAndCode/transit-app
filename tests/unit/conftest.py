@@ -15,4 +15,19 @@ def apply_schema():
 
 @pytest.fixture(autouse=True)
 def _clear_compute_caches():
-    """No-op: pure-unit tests have no module-level caches to clear."""
+    """Reset `pipeline.flags`'s TTL cache between tests.
+
+    Unlike the report `compute_*` caches this fixture is named for, `flags`
+    has to be reset even here: its 30s TTL would otherwise leak a value
+    resolved (or an env fallback taken) by one test into the next, since
+    pytest runs the whole unit suite well inside that window.
+
+    `reset_cache()` rather than `invalidate()`: the latter keeps the entries
+    on purpose, and a synchronous reader is served them, so it does not give
+    the next test a clean slate.
+    """
+    from pipeline.flags import reset_cache
+
+    reset_cache()
+    yield
+    reset_cache()

@@ -9,6 +9,7 @@ import { after, test } from "node:test";
 const SCRIPT_PATH = fileURLToPath(new URL("../../frontend/scripts/check-entry-chunk.mjs", import.meta.url));
 const JS_MARKER = "getRTLTextPluginStatus";
 const CSS_MARKER = "maplibregl-canvas";
+const MERMAID_JS_MARKER = "mermaidAPI";
 
 const tmpDirs = [];
 after(() => {
@@ -93,6 +94,83 @@ test("MapLibre only in a dynamic (lazy) chunk -> exit 0 (lazy loading is allowed
       "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
     }),
     "assets/index.js": "console.log('hello');",
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test("mermaid statically imported (JS marker in a static chunk) -> exit 1", () => {
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": { file: "assets/index.js", isEntry: true, imports: ["src/vendor.ts"], dynamicImports: ["src/MapTab.tsx"] },
+      "src/vendor.ts": { file: "assets/vendor.js", imports: [] },
+      "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
+    }),
+    "assets/index.js": "console.log('hello');",
+    "assets/vendor.js": `${MERMAID_JS_MARKER}.render();`,
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /contains mermaid/);
+});
+
+test("mermaid only in a dynamic (lazy) chunk -> exit 0 (lazy loading is allowed)", () => {
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": { file: "assets/index.js", isEntry: true, imports: [], dynamicImports: ["src/MapTab.tsx", "src/AdminArchitecturePage.tsx"] },
+      "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
+      "src/AdminArchitecturePage.tsx": { file: "assets/AdminArchitecturePage.js", imports: [] },
+    }),
+    "assets/index.js": "console.log('hello');",
+    "assets/AdminArchitecturePage.js": `${MERMAID_JS_MARKER}.render();`,
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test("a locale bundle statically reachable from the entry -> exit 1", () => {
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": {
+        file: "assets/index.js",
+        isEntry: true,
+        imports: ["src/i18n/locales/en.json"],
+        dynamicImports: ["src/MapTab.tsx", "src/i18n/locales/ja.json"],
+      },
+      "src/i18n/locales/en.json": { file: "assets/en.js", src: "src/i18n/locales/en.json", isDynamicEntry: true },
+      "src/i18n/locales/ja.json": { file: "assets/ja.js", src: "src/i18n/locales/ja.json", isDynamicEntry: true },
+      "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
+    }),
+    "assets/index.js": "console.log('hello');",
+    "assets/en.js": "export default {};",
+    "assets/ja.js": "export default {};",
+    ...MAPTAB_FILES,
+  });
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /"src\/i18n\/locales\/en\.json".*locale/);
+  assert.doesNotMatch(result.stderr, /ja\.json/);
+});
+
+test("locale bundles only as dynamic chunks -> exit 0", () => {
+  const dist = makeDist({
+    ".vite/manifest.json": JSON.stringify({
+      "index.html": {
+        file: "assets/index.js",
+        isEntry: true,
+        imports: [],
+        dynamicImports: ["src/MapTab.tsx", "src/i18n/locales/en.json", "src/i18n/locales/ja.json"],
+      },
+      "src/i18n/locales/en.json": { file: "assets/en.js", src: "src/i18n/locales/en.json", isDynamicEntry: true },
+      "src/i18n/locales/ja.json": { file: "assets/ja.js", src: "src/i18n/locales/ja.json", isDynamicEntry: true },
+      "src/MapTab.tsx": MAPTAB_MANIFEST_NODE,
+    }),
+    "assets/index.js": "console.log('hello');",
+    "assets/en.js": "export default {};",
+    "assets/ja.js": "export default {};",
     ...MAPTAB_FILES,
   });
   const result = run(dist);
@@ -223,6 +301,29 @@ test("hand-authored <script src> in index.html bypasses the manifest but is stil
   <body>
     <script type="module" src="/assets/index.js"></script>
     <script src="/vendor-maplibre.js"></script>
+  </body>
+</html>`,
+    },
+  );
+  const result = run(dist);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /not part of the Vite manifest's static import graph/);
+});
+
+test("hand-authored <script src> embedding mermaid in index.html bypasses the manifest but is still caught", () => {
+  const dist = makeDist(
+    {
+      ".vite/manifest.json": JSON.stringify(CLEAN_MANIFEST),
+      "assets/index.js": "console.log('hello');",
+      "vendor-mermaid.js": `${MERMAID_JS_MARKER}.render();`,
+      ...MAPTAB_FILES,
+    },
+    {
+      indexHtml: `<!doctype html>
+<html>
+  <body>
+    <script type="module" src="/assets/index.js"></script>
+    <script src="/vendor-mermaid.js"></script>
   </body>
 </html>`,
     },

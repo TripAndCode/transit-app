@@ -1,7 +1,7 @@
-"""Applies the ClickHouse schema for `updates`. One table, no migration
+"""Applies the ClickHouse schema for `updates` and `updates_live`. No migration
 chain needed yet — CREATE TABLE IF NOT EXISTS is naturally idempotent.
 If this schema needs to evolve later, add versioned migrations then;
-building that machinery now for a single table is premature.
+building that machinery now for these two tables is premature.
 
 NOTE: the live dev ClickHouse instance (a large, real-data `updates` table)
 predates the trip_id/scheduled_time LowCardinality change in schema.sql and
@@ -64,15 +64,20 @@ _NEW_NULLABLE_COLUMNS = [
 ]
 
 
+_OBSERVATION_TABLES = ("updates", "updates_live")
+
+
 def apply_schema(client) -> None:
     """Run every `;`-separated statement in schema.sql against *client*, then
-    ensure every column in _NEW_NULLABLE_COLUMNS exists on `updates` —
-    self-healing schema evolution regardless of whether `updates` pre-existed
-    this call (see module docstring for why the ADD COLUMN step is required
-    even when CREATE TABLE IF NOT EXISTS is a no-op).
+    ensure every column in _NEW_NULLABLE_COLUMNS exists on both observation
+    tables. `updates_live` is created `AS updates`, so it inherits whatever
+    shape `updates` has at that moment and needs the same self-healing step
+    (see module docstring for why that step runs even when CREATE TABLE IF NOT
+    EXISTS is a no-op).
     """
     sql = SCHEMA_PATH.read_text()
     for statement in filter(None, (s.strip() for s in sql.split(";"))):
         client.command(statement)
-    for column, col_type in _NEW_NULLABLE_COLUMNS:
-        client.command(f"ALTER TABLE updates ADD COLUMN IF NOT EXISTS {column} {col_type}")
+    for table in _OBSERVATION_TABLES:
+        for column, col_type in _NEW_NULLABLE_COLUMNS:
+            client.command(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}")

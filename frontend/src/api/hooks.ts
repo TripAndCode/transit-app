@@ -7,20 +7,22 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
-import { ctxToQueryString, type RangeCtx } from "./rangeContext";
+import { scopeToQueryString, type Scope, type TimeBand } from "./scope";
 import { conversationsAnon } from "./conversationsAnon";
+import { scopeSummaryQuery } from "./scopeSummaryQuery";
 import type {
   Agency,
+  ScopeSummary,
   AnonThread,
   AppendMessageResult,
   AskResponse,
-  Conversation,
   ConvMessage,
+  Conversation,
+  DelayTimelineResponse,
   FilterCtx,
   ForecastHeatmap,
   ForecastOverview,
   HeadwayQualityResponse,
-  HeatmapCollection,
   LiveTripProgressResponse,
   LiveTripsResponse,
   NetworkSummary,
@@ -34,7 +36,9 @@ import type {
   RouteStopProfileResponse,
   RouteSummaryResponse,
   RouteTripsResponse,
+  RoutesResponse,
   Suggestion,
+  SuggestionEnvelope,
   WeatherDelayResponse,
 } from "./types";
 import { useSession } from "./auth";
@@ -68,7 +72,8 @@ export function useForecastOverview(
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
   return useQuery({
     queryKey: ["routes", agencyId],
-    queryFn: ({ signal }) => apiGet<Route[]>(`/api/${agencyId}/routes`, { signal }),
+    queryFn: ({ signal }) =>
+      apiGet<RoutesResponse>(`/api/${agencyId}/routes`, { signal }).then((r) => r.rows),
     enabled: agencyId != null,
     // Routes are quarterly-static, but a 1-hour staleTime froze empty
     // arrays (returned during a fresh deploy's initial ingest) for an
@@ -95,75 +100,100 @@ export function useReports(agencyId: number | null): UseQueryResult<ReportMeta[]
   });
 }
 
-function ctxKey(ctx: RangeCtx) {
-  // All filter dimensions must be in the cache key — missing routes/service
-  // here would silently serve stale data when those filters change.
-  return [ctx.from, ctx.to, ctx.dow, ctx.time_band, ctx.service, ctx.routes.join(",")];
+function scopeKey(scope: Scope) {
+  // The serializer names every scope field, so the cache key can never miss
+  // one and serve stale data when that filter changes.
+  return [scopeToQueryString(scope)];
+}
+
+/** The scope controls' data. `enabled` stays false until a control is on
+ *  screen, so a page load never pays for visuals nobody opened. The
+ *  aggregates behind it rebuild on the analyze schedule, not per minute, so
+ *  reopening a popover reuses a recent answer. */
+const SCOPE_SUMMARY_STALE_MS = 5 * 60_000;
+
+export function useScopeSummary(
+  agencyId: number | null,
+  scope: Scope,
+  enabled: boolean,
+): UseQueryResult<ScopeSummary> {
+  return useQuery({
+    queryKey: ["scope-summary", agencyId, scopeSummaryQuery(scope)],
+    queryFn: ({ signal }) =>
+      apiGet<ScopeSummary>(`/api/${agencyId}/scope/summary?${scopeSummaryQuery(scope)}`, { signal }),
+    enabled: enabled && agencyId != null,
+    staleTime: SCOPE_SUMMARY_STALE_MS,
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useReport(
   agencyId: number | null,
   reportType: string | null,
-  ctx: RangeCtx,
+  ctx: Scope,
 ): UseQueryResult<ReportResponse> {
   return useQuery({
-    queryKey: ["reports", agencyId, reportType, ...ctxKey(ctx)],
+    queryKey: ["reports", agencyId, reportType, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${ctxToQueryString(ctx)}`, { signal }),
+      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && !!reportType,
+    // Keep the prior report mounted while a new report type or filter change
+    // loads, so callers can gate their skeleton on `isPending` (first load
+    // only) instead of `isFetching` (every refetch), matching AnalysisTab's
+    // report-switch UX to useNetworkSummary/useForecastOverview's.
+    placeholderData: keepPreviousData,
   });
 }
 
-/** High-frequency-only Excess Waiting Time / CoV / long-gap-rate panel data
- *  (item 94) — meant to render alongside the `on_time` report, so callers
- *  gate `enabled` on that report actually being the one in view rather than
- *  fetching this on every report tab. */
+/** High-frequency-only Excess Waiting Time / CoV / long-gap-rate panel data,
+ *  rendered beside the `dwell_run` and `on_time` reports; callers gate
+ *  `enabled` on one of those being the report in view rather than fetching
+ *  this on every report. */
 export function useHeadwayQuality(
   agencyId: number | null,
-  ctx: RangeCtx,
+  ctx: Scope,
   enabled: boolean,
 ): UseQueryResult<HeadwayQualityResponse> {
   return useQuery({
-    queryKey: ["headway-quality", agencyId, ...ctxKey(ctx)],
+    queryKey: ["headway-quality", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<HeadwayQualityResponse>(`/api/${agencyId}/headway_quality?${ctxToQueryString(ctx)}`, { signal }),
+      apiGet<HeadwayQualityResponse>(`/api/${agencyId}/headway_quality?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && enabled,
   });
 }
 
 /** Per-route minimum-performance-standard achievement rate / estimated
- *  bonus-or-deduction panel data (item 104) -- an internal simulation only
- *  (see `PerformanceStandardsResponse.disclaimer`), meant to render
- *  alongside the `on_time` report the same way `useHeadwayQuality` does. */
+ *  bonus-or-deduction panel data -- an internal simulation only (see
+ *  `PerformanceStandardsResponse.disclaimer`), rendered beside the `on_time`
+ *  report. */
 export function usePerformanceStandards(
   agencyId: number | null,
-  ctx: RangeCtx,
+  ctx: Scope,
   enabled: boolean,
 ): UseQueryResult<PerformanceStandardsResponse> {
   return useQuery({
-    queryKey: ["performance-standards", agencyId, ...ctxKey(ctx)],
+    queryKey: ["performance-standards", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<PerformanceStandardsResponse>(`/api/${agencyId}/performance_standards?${ctxToQueryString(ctx)}`, {
+      apiGet<PerformanceStandardsResponse>(`/api/${agencyId}/performance_standards?${scopeToQueryString(ctx)}`, {
         signal,
       }),
     enabled: agencyId != null && enabled,
   });
 }
 
-/** Observed rain-vs-dry delay comparison (item 129) -- meant to render
- *  alongside the `on_time` report the same way `useHeadwayQuality` and
- *  `usePerformanceStandards` do. `routes`/`dow` filters already apply
- *  server-side via `ctxToQueryString`, so no params beyond `ctx` are
+/** Observed rain-vs-dry delay comparison, rendered beside the `dwell_run`
+ *  report. `routes`/`dow` filters already apply
+ *  server-side via `scopeToQueryString`, so no params beyond `ctx` are
  *  needed. */
 export function useWeatherDelay(
   agencyId: number | null,
-  ctx: RangeCtx,
+  ctx: Scope,
   enabled: boolean,
 ): UseQueryResult<WeatherDelayResponse> {
   return useQuery({
-    queryKey: ["weather-delay", agencyId, ...ctxKey(ctx)],
+    queryKey: ["weather-delay", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<WeatherDelayResponse>(`/api/${agencyId}/weather_delay?${ctxToQueryString(ctx)}`, { signal }),
+      apiGet<WeatherDelayResponse>(`/api/${agencyId}/weather_delay?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && enabled,
   });
 }
@@ -177,7 +207,9 @@ export function useSuggestion(
     queryKey: ["reports-suggest", agencyId, excludeKey],
     queryFn: ({ signal }) => {
       const qs = exclude.map((e) => `exclude=${encodeURIComponent(e)}`).join("&");
-      return apiGet<Suggestion | null>(`/api/${agencyId}/reports/suggest${qs ? `?${qs}` : ""}`, { signal });
+      return apiGet<SuggestionEnvelope>(`/api/${agencyId}/reports/suggest${qs ? `?${qs}` : ""}`, {
+        signal,
+      }).then((r) => r.suggestion);
     },
     enabled: agencyId != null,
     staleTime: 60 * 1000,
@@ -187,12 +219,12 @@ export function useSuggestion(
 
 export function useOverviewSummary(
   agencyId: number | null,
-  ctx: RangeCtx,
+  ctx: Scope,
 ): UseQueryResult<OverviewSummary> {
   return useQuery({
-    queryKey: ["overview-summary", agencyId, ...ctxKey(ctx)],
+    queryKey: ["overview-summary", agencyId, ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
-      apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${ctxToQueryString(ctx)}`, { signal }),
+      apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null,
   });
 }
@@ -216,9 +248,12 @@ export function usePeakHourBreakdown(
   });
 }
 
-export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary> {
+export function useNetworkSummary(ctx: Scope): UseQueryResult<NetworkSummary> {
   return useQuery({
-    queryKey: ["network-summary", ctx.from, ctx.to],
+    // The endpoint itself only reads from/to, but the key still spreads the
+    // full scopeKey(ctx) rather than hand-picking [ctx.from, ctx.to], so it
+    // stays in step if the endpoint starts honouring another scope field.
+    queryKey: ["network-summary", ...scopeKey(ctx)],
     queryFn: ({ signal }) =>
       apiGet<NetworkSummary>(`/api/network/summary?from=${ctx.from}&to=${ctx.to}`, { signal }),
     staleTime: 60 * 1000,
@@ -228,33 +263,71 @@ export function useNetworkSummary(ctx: RangeCtx): UseQueryResult<NetworkSummary>
   });
 }
 
-export function useHeatmap(
-  agencyId: number | null,
-  ctx: RangeCtx,
-): UseQueryResult<HeatmapCollection> {
-  return useQuery({
-    queryKey: ["heatmap", agencyId, ...ctxKey(ctx)],
-    queryFn: ({ signal }) =>
-      apiGet<HeatmapCollection>(`/api/${agencyId}/delays/heatmap?${ctxToQueryString(ctx)}`, { signal }),
-    enabled: agencyId != null,
-    staleTime: 60 * 1000,
-  });
-}
-
 export function useRouteShape(
   agencyId: number | null,
   route: string | null,
-  ctx: RangeCtx,
+  ctx: Scope,
 ): UseQueryResult<RouteShapeResponse> {
   return useQuery({
-    queryKey: ["route_shape", agencyId, route, ...ctxKey(ctx)],
+    queryKey: ["route_shape", agencyId, route, ...scopeKey(ctx)],
     queryFn: ({ signal }) => {
-      const qs = new URLSearchParams(ctxToQueryString(ctx));
+      const qs = new URLSearchParams(scopeToQueryString(ctx));
       qs.set("route", route!);
       return apiGet<RouteShapeResponse>(`/api/${agencyId}/route-shape?${qs.toString()}`, { signal });
     },
     enabled: agencyId != null && !!route,
     staleTime: 60 * 1000,
+  });
+}
+
+/** Per-trip, per-stop delay for one route on one day.
+ *
+ *  `date` defaults to the route's own latest observed day, which is what the
+ *  Marey diagram anchors on: the range filter's end date is often a day the
+ *  route did not run, and an empty diagram teaches nothing.
+ */
+export function useRouteTrips(
+  agencyId: number | null,
+  routeCode: string | null,
+  options: { date?: string | null; timeBand?: TimeBand } = {},
+): UseQueryResult<RouteTripsResponse> {
+  const { date = null, timeBand = "all" } = options;
+  return useQuery({
+    queryKey: ["route_trips", agencyId, routeCode, date, timeBand],
+    queryFn: ({ signal }) => {
+      const qs = new URLSearchParams();
+      if (date) qs.set("date", date);
+      if (timeBand !== "all") qs.set("time_band", timeBand);
+      const query = qs.toString();
+      return apiGet<RouteTripsResponse>(
+        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips${query ? `?${query}` : ""}`,
+        { signal },
+      );
+    },
+    enabled: agencyId != null && !!routeCode,
+    staleTime: 60 * 1000,
+  });
+}
+export function useRouteStopProfile(
+  agencyId: number | null,
+  routeCode: string | null,
+): UseQueryResult<RouteStopProfileResponse> {
+  return useQuery({
+    queryKey: ["route_stop_profile", agencyId, routeCode],
+    queryFn: ({ signal }) =>
+      apiGet<RouteStopProfileResponse>(
+        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/stop-profile`,
+        { signal },
+      ),
+    enabled: agencyId != null && !!routeCode,
+    staleTime: 60 * 1000,
+    // Feeds the operations map's delay gradient beside live trip positions.
+    // staleTime alone never refetches on its own, so without an interval the
+    // gradient would freeze at selection time while the trips beside it keep
+    // moving. Slower than those trip layers on purpose: this is an average
+    // over the whole service day so far, which moves far less per minute
+    // than a position does, and recomputing it rescans the day.
+    refetchInterval: 60_000,
   });
 }
 
@@ -282,6 +355,21 @@ export function useLiveTrips(
   });
 }
 
+/** One service day of playback frames. The server resolves the day (its
+ *  latest observed JST date) so the client never has to guess which day has
+ *  coverage; `staleTime` is generous because a finished day never changes. */
+export function useTimeline(
+  agencyId: number | null,
+  enabled: boolean,
+): UseQueryResult<DelayTimelineResponse> {
+  return useQuery({
+    queryKey: ["delay_timeline", agencyId],
+    queryFn: ({ signal }) => apiGet<DelayTimelineResponse>(`/api/${agencyId}/delays/timeline`, { signal }),
+    enabled: agencyId != null && enabled,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
 export function useLiveTripProgress(
   agencyId: number | null,
   tripId: string | null,
@@ -294,50 +382,6 @@ export function useLiveTripProgress(
     },
     enabled: agencyId != null && !!tripId,
     refetchInterval: 30_000,
-  });
-}
-
-export function useRouteTrips(
-  agencyId: number | null,
-  routeCode: string | null,
-): UseQueryResult<RouteTripsResponse> {
-  return useQuery({
-    queryKey: ["route_trips", agencyId, routeCode],
-    queryFn: ({ signal }) =>
-      apiGet<RouteTripsResponse>(
-        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/trips`,
-        { signal },
-      ),
-    enabled: agencyId != null && !!routeCode,
-    staleTime: 60 * 1000,
-  });
-}
-
-export function useRouteStopProfile(
-  agencyId: number | null,
-  routeCode: string | null,
-): UseQueryResult<RouteStopProfileResponse> {
-  return useQuery({
-    queryKey: ["route_stop_profile", agencyId, routeCode],
-    queryFn: ({ signal }) =>
-      apiGet<RouteStopProfileResponse>(
-        `/api/${agencyId}/today/route/${encodeURIComponent(routeCode!)}/stop-profile`,
-        { signal },
-      ),
-    enabled: agencyId != null && !!routeCode,
-    staleTime: 60 * 1000,
-  });
-}
-
-type CreateAgencyBody = Omit<Agency, "agency_id">;
-
-export function useCreateAgency() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateAgencyBody) => apiPost<Agency>("/api/agencies", body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["agencies"] });
-    },
   });
 }
 
@@ -390,6 +434,7 @@ export function useConversations(agencyId: number): UseQueryResult<Conversation[
       // Anonymous: read from localStorage; shape-convert to Conversation
       return conversationsAnon.list(agencyId).map(toServerLikeConversation);
     },
+    enabled: agencyId > 0,
     staleTime: 5_000,
   });
 }
@@ -414,7 +459,7 @@ export function useConversation(
       if (!anon) return null;
       return { conversation: toServerLikeConversation(anon), messages: anon.messages };
     },
-    enabled: Boolean(conversationId),
+    enabled: agencyId > 0 && Boolean(conversationId),
   });
 }
 

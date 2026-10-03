@@ -1,0 +1,18 @@
+/* Apply-button spinner. In CSS rather than an inline style + injected
+   <style> element so the reduced-motion gate is expressible: a keyframes
+   rule cannot live in a style object, and a component that injects its own
+   <style> re-declares the same keyframes for every instance mounted. */
+.fcb-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fcb-spinner { animation: fcb-spin 0.7s linear infinite; }
+  @keyframes fcb-spin {
+    to { transform: rotate(360deg); }
+  }
+}

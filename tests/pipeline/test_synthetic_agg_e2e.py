@@ -1,17 +1,17 @@
-"""End-to-end test: synthetic GTFS static+RT fixtures -> analyze() -> agg_* tables (item 21).
+"""End-to-end test: synthetic GTFS static+RT fixtures -> analyze() -> agg_* tables.
 
-Existing pipeline tests either only exercise the *loading* step
+The other pipeline tests either only exercise the *loading* step
 (`test_static_loader.py`/`test_static_join.py`) or seed `updates` with
 enough rows to produce SOME aggregate without checking its value is
 numerically correct (`test_analyze.py`'s `_seed_updates`, whose delay values
-were never chosen to make the resulting `avg_min`/percentiles easy to hand
+are not chosen to make the resulting `avg_min`/percentiles easy to hand
 verify). This module closes that gap: it loads a small synthetic GTFS
 static schedule via `pipeline.static_loader.load_static`, inserts matching
 synthetic `updates` rows directly into the throwaway ClickHouse, runs
 `pipeline.analyze.analyze`, and asserts every touched `agg_*` row against
 the hand-computed `expected` dict shipped with each pattern in
-`tests.fixtures.synthetic_gtfs` — the single source of truth those fixtures
-document as reusable by later frontend/Ask-tab checks (items 22/23) too.
+`tests.fixtures.synthetic_gtfs` — the single source of truth the dashboard
+display check and the live-LLM numeric eval also assert against.
 """
 
 from tests.fixtures.synthetic_gtfs import (
@@ -220,10 +220,11 @@ def test_null_delays_pattern_aggregates_match_hand_computed_values(tmp_path, pg_
 
 
 def test_all_named_patterns_are_registered_in_all_patterns():
-    """Growability guard: a future 4th pattern function added to
+    """Growability guard: a 4th pattern function added to
     `tests.fixtures.synthetic_gtfs` but forgotten from `ALL_PATTERNS` would
-    silently stay invisible to any item-22/23 test that loops over
-    `ALL_PATTERNS` instead of naming patterns individually. Pin the exact
-    set this item shipped with so that omission fails loudly instead."""
+    silently stay invisible to every test that loops over `ALL_PATTERNS`
+    (the dashboard display check, the live-LLM numeric eval) instead of
+    naming patterns individually. Pin the exact registered set so that
+    omission fails loudly instead."""
     names = {pattern_fn().name for pattern_fn in ALL_PATTERNS}
     assert names == {"uniform_delays", "outlier_spike", "null_delays"}

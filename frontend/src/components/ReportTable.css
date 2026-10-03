@@ -1,0 +1,64 @@
+/* Phone list form of a report table (ReportTable below BP.sm). */
+.report-cards {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.report-cards__item {
+  padding: var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.report-cards__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.report-cards__rank {
+  flex: none;
+  min-width: 1.5em;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.report-cards__route {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+.report-cards__headline {
+  flex: none;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.report-cards__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-1) 0 0 calc(1.5em + var(--space-2));
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.report-cards__field {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.report-cards__label {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+/* A row whose route opens its page. On the cells, not the row: the sticky
+   route cell paints its own opaque background inline, which a row
+   background would leave showing. */
+.report-row--link:hover > td { background-color: var(--bg-soft) !important; }
+.report-route-link { color: inherit; text-decoration: none; }
+.report-route-link:hover .route-label__code,
+.report-route-link:focus-visible .route-label__code { color: var(--text-secondary); }
+.report-route-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.report-route-link__chevron { color: var(--text-tertiary); }

@@ -1,5 +1,5 @@
 import type { ConvMessage } from "../../api/types";
-import { triggerBlobDownload } from "../../components/analysis/csv";
+import { buildCsv, triggerBlobDownload, type CsvColumn } from "../../components/analysis/csv";
 import type { InvestigationStep } from "./investigationSteps";
 
 export function resultSnapshot(agencyId: number, step: InvestigationStep, exportedAt: string) {
@@ -18,6 +18,8 @@ export function resultSnapshot(agencyId: number, step: InvestigationStep, export
 export function resultTableCsv(agencyId: number, message: ConvMessage): unknown[][] | null {
   const result = message.result;
   if (message.role !== "assistant" || result?.kind !== "table" || !result.columns || !result.rows?.every(Array.isArray)) return null;
+  const rows = result.rows as unknown[][];
+  const columns: CsvColumn<unknown[]>[] = result.columns.map((header, i) => ({ header, value: (row) => row[i] }));
   return [
     ["agency_id", agencyId],
     ["conversation_id", message.conversation_id],
@@ -28,7 +30,7 @@ export function resultTableCsv(agencyId: number, message: ConvMessage): unknown[
     ["tool", message.tool],
     ["recorded_args", JSON.stringify(message.args)],
     ["summary", result.summary],
-    [], result.columns, ...result.rows as unknown[][],
+    [], ...buildCsv(rows, columns),
   ];
 }
 

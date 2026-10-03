@@ -14,13 +14,13 @@ type Session = {
 };
 
 /** GET /api/me; returns null on 401 so callers can treat anonymous as a normal state. */
-async function fetchMe(): Promise<Session | null> {
-  return apiGetOrNull<Session>("/api/me");
+async function fetchMe(signal?: AbortSignal): Promise<Session | null> {
+  return apiGetOrNull<Session>("/api/me", { signal });
 }
 
 /** React Query hook for the current session (or null when anonymous). */
 export function useSession() {
-  return useQuery({ queryKey: ["me"], queryFn: fetchMe, staleTime: 30_000 });
+  return useQuery({ queryKey: ["me"], queryFn: ({ signal }) => fetchMe(signal), staleTime: 30_000 });
 }
 
 /** Mutation that posts /api/auth/logout and clears every cached query.
@@ -38,7 +38,11 @@ export function useLogout() {
   });
 }
 
-/** Build the OAuth start URL for ``provider``, preserving the current path as ``next``. */
-export function loginUrl(provider: "google" | "github", next: string = window.location.pathname) {
+/** Build the OAuth start URL for ``provider``; ``next`` defaults to the whole current URL
+ *  (path, query and fragment) so the visitor returns to exactly where they were. */
+export function loginUrl(
+  provider: "google" | "github",
+  next: string = window.location.pathname + window.location.search + window.location.hash,
+) {
   return `/api/auth/${provider}/login?next=${encodeURIComponent(next)}`;
 }

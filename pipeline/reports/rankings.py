@@ -565,17 +565,18 @@ async def compute_dow_ranking(
     sql = (
         # NULLIF maps the '' NULL-service sentinel back to None, matching the live path.
         f"SELECT route_code, NULLIF(service_type, '') AS service_type, '{label}' AS dow,\n"
-        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
-        # same row population — see pipeline/reports/overview.py's
-        # _route_weekly_history for the identical rationale. `samples` below
-        # stays the TRUE total (unfiltered) count.
+        # A count beside a sum_delay_sec-derived average counts that average's
+        # rows, so all three FILTER alike — matching _dow_ranking_live, whose
+        # count(*) covers exactly the rows its own average does.
+        # compute_on_time's on_time_count/samples stays unfiltered: that ratio
+        # does not condition on sum_delay_sec.
         "       ROUND((SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric\n"
         "           / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0), 2) AS avg_min,\n"
-        "       SUM(samples)::int AS samples\n"
+        "       COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0)::int AS samples\n"
         "FROM agg_daily_trend\n"
         f"WHERE agency_id = $1 AND {where}\n"
         "GROUP BY route_code, service_type\n"
-        "HAVING SUM(samples) > 10\n"
+        "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 10\n"
         "ORDER BY avg_min DESC NULLS LAST, route_code\n"
         f"LIMIT ${n}"
     )

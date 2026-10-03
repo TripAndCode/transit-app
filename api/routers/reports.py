@@ -7,16 +7,20 @@ moment the request was served. The ``snapshots`` table from v1 is gone.
 
 import csv
 import io
+import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
-from api.range import RangeCtx, get_range_ctx
+from api.range import RangeCtx, ctx_payload, get_range_ctx
+from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
     format_council_summary_text,
@@ -58,7 +62,22 @@ from pipeline.reports.suggest import compute_suggestion
 from pipeline.stats import annotate_on_time_pct_confidence
 from pipeline.weather import attribution as weather_attribution
 
+_log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/{agency_id}", tags=["reports"])
+
+# Pooled average delay plus the number of observations that average rests on,
+# for any aggregate carrying `sum_delay_sec`/`samples`. A row can carry a
+# sample count with no delay sum behind it, so the numerator, the denominator
+# AND the reported count are all FILTERed to the same row population: such a
+# row must neither inflate the denominator nor be counted as evidence behind
+# `avg_min`. One definition reused at every call site, so the two figures
+# cannot drift apart.
+_POOLED_DELAY_PROJECTION_SQL = (
+    "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
+    "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
+    "SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples "
+)
 
 # Static metadata for the listing endpoint. Ordered for sidebar display.
 _REPORT_TYPES = (
@@ -75,6 +94,47 @@ _REPORT_TYPES = (
     "delay_certificate",
 )
 
+_EARLY_TOLERANCE_TYPES = frozenset({"on_time", "council_summary"})
+_LATE_TOLERANCE_TYPES = frozenset({"on_time", "worst_5min", "council_summary"})
+# The scope's `late` is the on-time tolerance. worst_5min's late cutoff is its
+# "≥5 min" threshold, so the scope never moves it.
+_SCOPE_LATE_TYPES = frozenset({"on_time", "council_summary"})
+
+# What each report's rows actually filter on. compare_ranking and the dow_*
+# reports fix dow/service themselves; dwell_run cannot split by time band.
+_REPORT_HONOURS: dict[str, tuple[str, ...]] = {
+    "ranking": ALL_SIX,
+    "ranking_best": ALL_SIX,
+    "on_time": ALL_SIX,
+    "worst_5min": ALL_SIX,
+    "trend": ALL_SIX,
+    "compare_ranking": ("from", "to", "time_band", "routes"),
+    "dow_weekend": ("from", "to", "time_band", "routes"),
+    "dow_weekday": ("from", "to", "time_band", "routes"),
+    "dwell_run": ("from", "to", "dow", "service", "routes"),
+    "council_summary": ALL_SIX,
+    "delay_certificate": ALL_SIX,
+}
+
+
+def report_scope_applied(report_type: str) -> dict[str, bool]:
+    honoured = list(_REPORT_HONOURS[report_type])
+    if report_type in _SCOPE_LATE_TYPES:
+        honoured.append("late")
+    if report_type in _EARLY_TOLERANCE_TYPES:
+        honoured.append("early")
+    return scope_applied(*honoured)
+
+
+# What each panel endpoint filters on: headway_quality's aggregate carries
+# neither service nor time band; performance_standards reads dates only; the
+# forecast endpoints read all-time aggregates, the heatmap for the scope's one route.
+_HEADWAY_SCOPE = scope_applied("from", "to", "dow", "routes")
+_STANDARDS_SCOPE = scope_applied("from", "to")
+_WEATHER_SCOPE = scope_applied("from", "to", "dow", "service", "routes")
+_FORECAST_HEATMAP_SCOPE = scope_applied("routes")
+_FORECAST_OVERVIEW_SCOPE = scope_applied()
+
 
 class ReportMeta(BaseModel):
     """Listing entry returned by ``GET /reports``."""
@@ -84,14 +144,20 @@ class ReportMeta(BaseModel):
 
 
 class ReportCtx(BaseModel):
-    """Echoed back to clients with the frontend's preferred ``from``/``to`` keys."""
+    """Typed mirror of :func:`api.range.ctx_payload` — the range echo every
+    endpoint returns, with the wire-level ``from``/``to`` key names."""
 
-    from_: str = Field(serialization_alias="from")
+    from_: str = Field(alias="from")
     to: str
     dow: str
     time_band: str
     service: str = "all"
     routes: list[str] = []
+    hour: str | None = None
+    stop: str | None = None
+    dir: int | None = None
+
+    model_config = {"populate_by_name": True}
 
 
 class ReportResponse(BaseModel):
@@ -108,18 +174,12 @@ class ReportResponse(BaseModel):
     # so a caller comparing two responses can check the definition matches
     # instead of assuming it does.
     definition: DefinitionMeta
+    scope_applied: dict[str, bool]
 
 
-def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
-    """Project the internal ``RangeCtx`` into the client-facing ``ReportCtx``."""
-    return ReportCtx(
-        from_=ctx.from_date.isoformat(),
-        to=ctx.to_date.isoformat(),
-        dow=ctx.dow,
-        time_band=ctx.time_band,
-        service=ctx.service,
-        routes=list(ctx.routes),
-    )
+def _report_ctx(ctx: RangeCtx) -> ReportCtx:
+    """Typed wrapper over the shared echo so these responses keep a schema."""
+    return ReportCtx.model_validate(ctx_payload(ctx))
 
 
 @router.get("/reports", response_model=list[ReportMeta])
@@ -127,10 +187,9 @@ def _ctx_payload(ctx: RangeCtx) -> ReportCtx:
 async def list_reports(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-):
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[dict[str, Any]]:
     """Static list of report types. ``rendered_at`` is request time."""
-    del conn  # unused; keep for parity with get_report
     now = datetime.now(timezone.utc)
     return [{"report_type": rt, "rendered_at": now} for rt in _REPORT_TYPES]
 
@@ -159,10 +218,11 @@ class HeadwayQualityRow(BaseModel):
 class HeadwayQualityResponse(BaseModel):
     """Payload for ``GET /headway_quality`` — a second, narrower metric
     panel restricted to high-frequency routes, meant to render alongside
-    (not instead of) the ``on_time`` report for the same range (item 94)."""
+    (not instead of) the ``on_time`` report for the same range."""
 
     rows: list[HeadwayQualityRow]
     ctx: ReportCtx
+    scope_applied: dict[str, bool]
 
 
 @router.get("/headway_quality", response_model=HeadwayQualityResponse)
@@ -170,9 +230,9 @@ class HeadwayQualityResponse(BaseModel):
 async def get_headway_quality(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
-):
+) -> HeadwayQualityResponse:
     """Excess Waiting Time / CoV / long-gap rate, high-frequency routes only.
 
     Not part of the generic ``/reports/{report_type}`` dispatcher above
@@ -181,11 +241,13 @@ async def get_headway_quality(
     chose) — a dedicated endpoint, like ``/forecast/overview`` above.
     """
     rows = await compute_headway_quality(agency_id, ctx, conn)
-    return HeadwayQualityResponse(rows=[HeadwayQualityRow(**r) for r in rows], ctx=_ctx_payload(ctx))
+    return HeadwayQualityResponse(
+        rows=[HeadwayQualityRow(**r) for r in rows], ctx=_report_ctx(ctx), scope_applied=_HEADWAY_SCOPE
+    )
 
 
 class PerformanceStandardRow(BaseModel):
-    """One configured `route_performance_standards` row (item 104), joined
+    """One configured `route_performance_standards` row, joined
     against the current actual value of its `metric_type` and the resulting
     achievement rate / estimated bonus-or-deduction -- see
     `pipeline.reports.performance_standard.compute_performance_standards`
@@ -222,6 +284,7 @@ class PerformanceStandardsResponse(BaseModel):
     rows: list[PerformanceStandardRow]
     ctx: ReportCtx
     disclaimer: str
+    scope_applied: dict[str, bool]
 
 
 @router.get("/performance_standards", response_model=PerformanceStandardsResponse)
@@ -229,10 +292,10 @@ class PerformanceStandardsResponse(BaseModel):
 async def get_performance_standards(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
-):
+) -> PerformanceStandardsResponse:
     """Per-route minimum-performance-standard achievement rate and
     estimated bonus/deduction -- an internal simulation only (see
     `PerformanceStandardsResponse.disclaimer`), never a real invoice.
@@ -245,8 +308,9 @@ async def get_performance_standards(
     rows = await compute_performance_standards(agency_id, ctx, conn)
     return PerformanceStandardsResponse(
         rows=[PerformanceStandardRow(**r) for r in rows],
-        ctx=_ctx_payload(ctx),
+        ctx=_report_ctx(ctx),
         disclaimer=simulation_disclaimer(locale),
+        scope_applied=_STANDARDS_SCOPE,
     )
 
 
@@ -320,6 +384,7 @@ class WeatherDelayResponse(BaseModel):
     ctx: ReportCtx
     disclaimer: str
     attribution: str
+    scope_applied: dict[str, bool]
 
 
 @router.get("/weather_delay", response_model=WeatherDelayResponse)
@@ -327,10 +392,10 @@ class WeatherDelayResponse(BaseModel):
 async def get_weather_delay(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
-):
+) -> WeatherDelayResponse:
     """Average delay on observed-rainy service days vs non-rainy ones.
 
     Like `/headway_quality` and `/performance_standards`, a dedicated endpoint
@@ -341,9 +406,10 @@ async def get_weather_delay(
     result = await compute_rain_delay(agency_id, ctx, conn)
     return WeatherDelayResponse(
         **result,
-        ctx=_ctx_payload(ctx),
+        ctx=_report_ctx(ctx),
         disclaimer=observation_disclaimer(locale),
         attribution=weather_attribution(locale),
+        scope_applied=_WEATHER_SCOPE,
     )
 
 
@@ -364,28 +430,39 @@ class SuggestionResponse(BaseModel):
     to_date: str
 
 
-@router.get("/reports/suggest", response_model=SuggestionResponse | None)
+class SuggestionEnvelope(BaseModel):
+    """Payload for GET /reports/suggest.
+
+    ``suggestion`` is ``null`` when no rule produced a pick. The envelope
+    exists so that "no signal" stays a described 200 body a client can read
+    fields off, rather than a bare ``null`` with nowhere to say why.
+    """
+
+    suggestion: SuggestionResponse | None = None
+
+
+@router.get("/reports/suggest", response_model=SuggestionEnvelope)
 @limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
 async def get_suggestion(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
     exclude: list[str] = Query(default=[]),
-):
+) -> SuggestionEnvelope:
     """One rule-based 'go look at this' suggestion for the Analysis tab's
     Insight Panel. ``exclude`` entries are ``"report_type:route_code"``
     pairs the frontend has already shown this session (sessionStorage-backed,
-    stateless here). Returns ``null`` when every rule's candidates are
-    excluded or the agency has no data at all -- the frontend renders its
-    own calm 'no signal' copy for that case, not this endpoint.
+    stateless here). Returns ``{"suggestion": null}`` when every rule's
+    candidates are excluded or the agency has no data at all -- the frontend
+    renders its own calm 'no signal' copy for that case, not this endpoint.
     """
     exclude_set: frozenset[tuple[str, str]] = frozenset(
         (report_type, route_code) for item in exclude if ":" in item for report_type, route_code in [item.split(":", 1)]
     )
     result = await compute_suggestion(agency_id, conn, ch, exclude=exclude_set, locale=locale)
-    return result
+    return SuggestionEnvelope(suggestion=SuggestionResponse(**result) if result else None)
 
 
 class ForecastHeatmapCell(BaseModel):
@@ -404,6 +481,7 @@ class ForecastHeatmapResponse(BaseModel):
     route: str
     cells: list[ForecastHeatmapCell]
     disclaimer: str
+    scope_applied: dict[str, bool]
 
 
 @router.get("/forecast/heatmap", response_model=ForecastHeatmapResponse)
@@ -412,29 +490,21 @@ async def forecast_heatmap(
     request: Request,
     route: str = Query(..., min_length=1),
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, Any]:
     """Expected delay by day-of-week (ISODOW 1=Mon..7=Sun) × hour (0..23) for a
     route, pooled across service types (sample-weighted = exact pooled mean).
     Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
     """
     rows = await conn.fetch(
-        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
-        # same row population so a pre-backfill NULL row can't inflate the
-        # denominator without contributing to the numerator (see
-        # pipeline/reports/rankings.py's identical rationale).
-        "SELECT dow, hour, "
-        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
-        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
-        "SUM(samples)::int AS samples "
-        "FROM agg_route_hour_dow "
+        "SELECT dow, hour, " + _POOLED_DELAY_PROJECTION_SQL + "FROM agg_route_hour_dow "
         "WHERE agency_id = $1 AND route_code = $2 AND avg_min IS NOT NULL AND samples > 0 "
         "GROUP BY dow, hour ORDER BY dow, hour",
         agency_id,
         route,
     )
-    return summarize_expected_delay_heatmap(rows, route, locale)
+    return {**summarize_expected_delay_heatmap(rows, route, locale), "scope_applied": _FORECAST_HEATMAP_SCOPE}
 
 
 class ForecastOverviewGridCell(BaseModel):
@@ -478,6 +548,7 @@ class ForecastOverviewResponse(BaseModel):
     worst: ForecastOverviewWorst | None
     routes: list[ForecastOverviewRoute]
     disclaimer: str
+    scope_applied: dict[str, bool]
 
 
 async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> list[asyncpg.Record]:
@@ -510,33 +581,23 @@ async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> 
 async def forecast_overview(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
+    conn: asyncpg.Connection = Depends(get_conn),
     locale: str = Depends(get_locale),
-):
+) -> dict[str, Any]:
     """Agency-wide expected delay: a 7-day × time-band grid (pooled across all
     routes), the worst window, and a delay-ranked route list. Seasonal-naive
     baseline, NOT a prediction; carries a disclaimer. Re-pools agg_route_hour_dow
     (no dedicated aggregate — the table is small enough to pool on read).
     """
     grid_rows = await conn.fetch(
-        # sum_delay_sec is nullable (unlike samples); FILTER both sides to the
-        # same row population — see forecast_heatmap's identical rationale.
-        "SELECT dow, hour, "
-        "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
-        "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
-        "SUM(samples)::int AS samples "
-        "FROM agg_route_hour_dow "
+        "SELECT dow, hour, " + _POOLED_DELAY_PROJECTION_SQL + "FROM agg_route_hour_dow "
         "WHERE agency_id = $1 AND avg_min IS NOT NULL AND samples > 0 "
         "GROUP BY dow, hour",
         agency_id,
     )
     route_rows = await conn.fetch(
         "WITH ra AS ("
-        "  SELECT route_code, "
-        "    (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
-        "        / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min, "
-        "    SUM(samples)::int AS samples "
-        "  FROM agg_route_hour_dow "
+        "  SELECT route_code, " + _POOLED_DELAY_PROJECTION_SQL + "  FROM agg_route_hour_dow "
         "  WHERE agency_id = $1 AND avg_min IS NOT NULL AND samples > 0 "
         "  GROUP BY route_code"
         "), labels AS ("
@@ -556,8 +617,16 @@ async def forecast_overview(
     try:
         recent_daily_rows = await _fetch_recent_daily_rows(conn, agency_id)
     except Exception:
+        _log.warning(
+            "forecast_overview: recent-daily sparkline fetch failed for agency %s — degrading to no sparklines",
+            agency_id,
+            exc_info=True,
+        )
         recent_daily_rows = []
-    return summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale)
+    return {
+        **summarize_agency_overview(grid_rows, route_rows, recent_daily_rows, locale),
+        "scope_applied": _FORECAST_OVERVIEW_SCOPE,
+    }
 
 
 # Marker for a row's trailing `low_confidence` flag in the "on_time" CSV
@@ -663,7 +732,7 @@ def _csv_response(
 async def get_report(
     request: Request,
     report_type: str,
-    limit: int | None = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1, le=500),
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     preset: str | None = Query(
         default=None,
@@ -683,6 +752,21 @@ async def get_report(
         "on_time/council_summary, 300s for worst_5min). Passing this opts into a query-time "
         "histogram estimate instead of the exact legacy_60s column.",
     ),
+    late: int | None = Query(
+        default=None,
+        ge=0,
+        le=3600,
+        description="The scope's on-time late tolerance in seconds. Applied by on_time and "
+        "council_summary; otherwise ignored and reported false in scope_applied (worst_5min's "
+        "threshold stays its own late_tolerance_sec).",
+    ),
+    early: int | None = Query(
+        default=None,
+        ge=0,
+        le=3600,
+        description="The scope's early tolerance in seconds. Applied by on_time and council_summary; "
+        "otherwise ignored and reported false in scope_applied.",
+    ),
     threshold_sec: int | None = Query(
         default=None,
         ge=0,
@@ -691,14 +775,23 @@ async def get_report(
         "pipeline.reports.council.DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC.",
     ),
     agency_id: int = Depends(get_agency),
-    conn=Depends(get_conn),
-    ch=Depends(get_ch),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
     locale: str = Depends(get_locale),
-):
+) -> ReportResponse | StreamingResponse:
     """Compute the named report live and render it."""
     if report_type not in _REPORT_TYPES:
         raise HTTPException(status_code=404, detail=f"Unknown report type '{report_type}'")
+
+    if late is not None and late_tolerance_sec is not None:
+        raise HTTPException(status_code=400, detail="late and late_tolerance_sec set the same tolerance; pass one")
+    if early is not None and early_tolerance_sec is not None:
+        raise HTTPException(status_code=400, detail="early and early_tolerance_sec set the same tolerance; pass one")
+    if late is not None and report_type in _SCOPE_LATE_TYPES:
+        late_tolerance_sec = late
+    if early is not None and report_type in _EARLY_TOLERANCE_TYPES:
+        early_tolerance_sec = early
 
     if preset is not None:
         if early_tolerance_sec is not None or late_tolerance_sec is not None:
@@ -708,11 +801,11 @@ async def get_report(
         if preset not in ON_TIME_PRESETS:
             raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
         early_tolerance_sec, late_tolerance_sec = ON_TIME_PRESETS[preset]
-    if early_tolerance_sec is not None and report_type not in ("on_time", "council_summary"):
+    if early_tolerance_sec is not None and report_type not in _EARLY_TOLERANCE_TYPES:
         raise HTTPException(
             status_code=400, detail="early_tolerance_sec only applies to the on_time/council_summary reports"
         )
-    if late_tolerance_sec is not None and report_type not in ("on_time", "worst_5min", "council_summary"):
+    if late_tolerance_sec is not None and report_type not in _LATE_TOLERANCE_TYPES:
         raise HTTPException(
             status_code=400, detail="late_tolerance_sec only applies to the on_time/worst_5min/council_summary reports"
         )
@@ -770,13 +863,14 @@ async def get_report(
         days = series["days"]
         if format == "csv":
             return _csv_response(report_type, days, ctx, definition)
-        # Schedule-revision boundary dates (item 98) — dates within this
+        # Schedule-revision boundary dates — dates within this
         # range where the static feed version running that day changed —
         # so the Trend chart can mark a timetable revision instead of
         # letting a metric shift there be misread as a service-quality
         # change. Empty (not missing) when this agency has no
         # agg_schedule_revision_daily coverage at all (its ingest strategy
-        # never joins static data, or no reload has happened since item 88).
+        # never joins static data, or its RT rows carry no static_version_id
+        # yet).
         # Skipped entirely for the CSV export above, which has no chart to
         # annotate.
         revision_boundaries = await get_schedule_revision_boundaries(conn, agency_id, ctx.from_date, ctx.to_date)
@@ -786,8 +880,9 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=[{"days": days, "hourly": hourly, "dow_band": dow_band, "revision_boundaries": revision_boundaries}],
-            ctx=_ctx_payload(ctx),
+            ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "dwell_run":
         payload = await compute_dwell_run_decomposition(agency_id, ctx, conn)
@@ -806,8 +901,9 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=[payload],
-            ctx=_ctx_payload(ctx),
+            ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "council_summary":
         agency_row = await conn.fetchrow("SELECT agency_name FROM agencies WHERE agency_id = $1", agency_id)
@@ -841,8 +937,9 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=[row],
-            ctx=_ctx_payload(ctx),
+            ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
@@ -858,8 +955,9 @@ async def get_report(
             rendered_at=datetime.now(timezone.utc),
             text=text,
             rows=rows,
-            ctx=_ctx_payload(ctx),
+            ctx=_report_ctx(ctx),
             definition=definition,
+            scope_applied=report_scope_applied(report_type),
         )
     else:
         raise HTTPException(status_code=500, detail="unreachable")
@@ -873,6 +971,7 @@ async def get_report(
         rendered_at=datetime.now(timezone.utc),
         text=text,
         rows=rows,
-        ctx=_ctx_payload(ctx),
+        ctx=_report_ctx(ctx),
         definition=definition,
+        scope_applied=report_scope_applied(report_type),
     )

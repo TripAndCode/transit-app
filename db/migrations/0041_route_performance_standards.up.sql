@@ -1,16 +1,16 @@
 -- Per-route "minimum performance standard" configuration, powering the
--- internal bonus/malus simulation in pipeline.reports.performance_standard
--- (item 104). Manually populated by an operator, the same convention as
+-- internal bonus/malus simulation in pipeline.reports.performance_standard.
+-- Manually populated by an operator, the same convention as
 -- ridership_weights (migration 0035): a performance standard is a
 -- negotiated policy input, not something derivable from GTFS/GTFS-RT data,
 -- so there is no ingestion pipeline or CRUD API for this table.
 --
 -- metric_type selects which already-computed figure threshold_value is
 -- compared against:
---   'ewt_sec'                  -- item 94's per-route Excess Waiting Time
+--   'ewt_sec'                  -- the per-route Excess Waiting Time
 --                                  (pipeline.reports.headway_quality),
 --                                  in seconds, lower is better.
---   'vehicle_km_delivered_pct' -- item 98's vehicle-km-delivered rate
+--   'vehicle_km_delivered_pct' -- the vehicle-km-delivered rate
 --                                  (pipeline.reports.supply), in percent
 --                                  (0-100), higher is better. That figure
 --                                  is only ever computed at agency

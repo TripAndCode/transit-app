@@ -1,13 +1,59 @@
-"""Sync ClickHouse client + shared helpers for the `updates` table, used by
-the ingest/analyze CLI paths (pipeline/ingest.py, pipeline/analyze.py,
-pipeline/freshness.py). Mirrors pipeline/db.py's role for the Postgres side:
-one place for the raw-`updates` SQL shape, so ingest and analyze can't drift.
+"""Sync ClickHouse client + shared helpers for the two observation tables
+(`updates`, `updates_live`), used by the ingest/analyze CLI paths
+(pipeline/ingest.py, pipeline/analyze.py, pipeline/freshness.py). Mirrors
+pipeline/db.py's role for the Postgres side: one place for the raw-observation
+SQL shape, so ingest and analyze can't drift. `checked_table`/`live_table_for`
+here are the one place every reader and writer learns which table a JST day
+lives in.
 """
 
 import os
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import clickhouse_connect
+
+_JST = ZoneInfo("Asia/Tokyo")
+
+UPDATES_TABLE = "updates"
+LIVE_TABLE = "updates_live"
+_OBSERVATION_TABLES = frozenset({UPDATES_TABLE, LIVE_TABLE})
+
+
+def checked_table(table: str) -> str:
+    """*table*, if it names one of the two observation tables.
+
+    Table names are interpolated into SQL text (ClickHouse binds values, not
+    identifiers), so only these two literals may ever reach a query.
+    """
+    if table not in _OBSERVATION_TABLES:
+        raise ValueError(f"not an observation table: {table!r}")
+    return table
+
+
+def jst_date(instant: datetime) -> date:
+    """The JST calendar day a tz-aware *instant* falls on."""
+    return instant.astimezone(_JST).date()
+
+
+def jst_midnight_utc(day: date) -> datetime:
+    """The UTC instant JST *day* begins. `captured_at` is stored in UTC, so a
+    JST-day bound on it is this value, never UTC midnight."""
+    return datetime.combine(day, time.min, tzinfo=_JST).astimezone(timezone.utc)
+
+
+def live_table_for(day: date, *, now: datetime | None = None) -> str:
+    """The table that holds JST *day*'s observations.
+
+    Today and any later day are `updates_live`; every closed day is `updates`.
+    A closed day reads `updates` even before promotion has copied it there, so
+    a reader asking for yesterday between JST midnight and the first promotion
+    run gets nothing yet.
+    """
+    today = jst_date(now or datetime.now(timezone.utc))
+    return LIVE_TABLE if day >= today else UPDATES_TABLE
+
 
 # Column order matches every ingest strategy's row-tuple shape (see
 # pipeline/strategies/*.py parse_feed docstrings), minus agency_id which
@@ -80,8 +126,8 @@ def get_client():
     return clickhouse_connect.get_client(**ch_conn_kwargs())
 
 
-def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
-    """Prepend `agency_id` to each row and bulk-insert into `updates`.
+def insert_updates(client, agency_id: int, rows: list[tuple], *, table: str = UPDATES_TABLE) -> int:
+    """Prepend `agency_id` to each row and bulk-insert into *table*.
 
     No ON CONFLICT equivalent at the database level — see the design doc's
     dedup/idempotency section. File-level idempotency (distinct_file_names,
@@ -103,6 +149,7 @@ def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
     instead of every call site having to grow its tuple in lockstep with
     UPDATE_COLUMNS.
     """
+    target = checked_table(table)
     n_cols = len(UPDATE_COLUMNS) - 1  # excluding agency_id, which is prepended below
     seen: set[tuple] = set()
     ch_rows = []
@@ -116,19 +163,77 @@ def insert_updates(client, agency_id: int, rows: list[tuple]) -> int:
         ch_rows.append((agency_id, *r))
     if not ch_rows:
         return 0
-    summary = client.insert("updates", ch_rows, column_names=UPDATE_COLUMNS)
+    summary = client.insert(target, ch_rows, column_names=UPDATE_COLUMNS)
     return summary.written_rows
 
 
-def distinct_file_names(client, agency_id: int) -> set[str]:
+def distinct_file_names(client, agency_id: int, since: date | None = None) -> set[str]:
+    """Every `file_name` already ingested for the agency — an archive ingest's
+    skip-list, so a re-run doesn't re-insert a file (`updates` has no unique
+    constraint to absorb that).
+
+    Unbounded, this reads every row the agency has. *since* narrows it to rows
+    captured on or after that JST calendar day, which is served off the
+    `(agency_id, captured_at, ...)` sort key.
+
+    Bounding is the CALLER's proof obligation, not a hint: a file whose rows
+    fall before the bound is absent from the result, reads as new, and is
+    ingested a second time. Pass *since* only when every file key about to be
+    tested against the result is known to carry a captured_at at or after it;
+    pass None whenever even one of them cannot be placed (see
+    `pipeline.ingest._archive_since`).
+
+    The bound is JST midnight of *since* expressed in UTC, because the archive
+    layout names JST calendar days while `captured_at` is stored in UTC — a
+    UTC-midnight bound would sit nine hours late and hide every file captured
+    in that day's first nine JST hours.
+    """
+    where = "agency_id = {agency_id:UInt16}"
+    parameters: dict = {"agency_id": agency_id}
+    if since is not None:
+        where += " AND captured_at >= {since:DateTime64}"
+        parameters["since"] = jst_midnight_utc(since)
+    result = client.query(f"SELECT DISTINCT file_name FROM updates WHERE {where}", parameters=parameters)
+    return {row[0] for row in result.result_rows}
+
+
+# Each live writer stamps `file_name` in its own namespace: the collector's
+# durable `oracle/<YYYYMMDD>/<member>` and ingest_live's generated
+# `live_<timestamp>`. Promotion copies those names into `updates` unchanged,
+# while archive ingest writes `<YYYYMMDD>/<member>`. The prefix is therefore
+# the source of a row in `updates`.
+_LIVE_SOURCED = "(startsWith(file_name, 'oracle/') OR startsWith(file_name, 'live_'))"
+
+
+def days_with_source(client, agency_id: int, days: Iterable[date], *, live_sourced: bool) -> set[date]:
+    """The JST days among *days* on which `updates` already holds rows from the
+    live path (*live_sourced*) or from archive ingest (not *live_sourced*).
+
+    Bounded to the span of *days*, so the scan is served off the
+    `(agency_id, captured_at, ...)` sort key.
+    """
+    wanted = sorted(set(days))
+    if not wanted:
+        return set()
+    predicate = _LIVE_SOURCED if live_sourced else f"NOT {_LIVE_SOURCED}"
     result = client.query(
-        "SELECT DISTINCT file_name FROM updates WHERE agency_id = {agency_id:UInt16}",
-        parameters={"agency_id": agency_id},
+        "SELECT DISTINCT toDate(captured_at, 'Asia/Tokyo') AS day FROM updates "
+        "WHERE agency_id = {agency_id:UInt16} "
+        "AND captured_at >= {lo:DateTime64} AND captured_at < {hi:DateTime64} "
+        f"AND {predicate} AND has({{days:Array(Date)}}, toDate(captured_at, 'Asia/Tokyo'))",
+        parameters={
+            "agency_id": agency_id,
+            "lo": jst_midnight_utc(wanted[0]),
+            "hi": jst_midnight_utc(wanted[-1] + timedelta(days=1)),
+            "days": wanted,
+        },
     )
     return {row[0] for row in result.result_rows}
 
 
-def recent_file_name_exists(client, agency_id: int, file_name: str, since: datetime) -> bool:
+def recent_file_name_exists(
+    client, agency_id: int, file_name: str, since: datetime, *, table: str = UPDATES_TABLE
+) -> bool:
     """Bounded existence check for one specific `file_name` — for callers
     (ingest_live) that only ever need to ask about a file just constructed
     from `now()`, where distinct_file_names' unbounded per-agency scan would
@@ -137,7 +242,7 @@ def recent_file_name_exists(client, agency_id: int, file_name: str, since: datet
     full-partition scan for the `file_name` predicate alone.
     """
     result = client.query(
-        "SELECT 1 FROM updates WHERE agency_id = {agency_id:UInt16} "
+        f"SELECT 1 FROM {checked_table(table)} WHERE agency_id = {{agency_id:UInt16}} "
         "AND captured_at >= {since:DateTime64} AND file_name = {file_name:String} LIMIT 1",
         parameters={"agency_id": agency_id, "since": since, "file_name": file_name},
     )

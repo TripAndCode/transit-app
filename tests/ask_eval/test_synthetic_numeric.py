@@ -1,4 +1,4 @@
-"""Live-LLM numeric-answer regression test (item 23).
+"""Live-LLM numeric-answer regression test.
 
 ``tests/ask_eval/test_baseline.py``'s golden set (and ``scripts/ask_eval.py``'s
 CI gate) only check *which tool the LLM called and with what arguments* —
@@ -8,14 +8,14 @@ then states a hallucinated or stale-history-anchored average delay in its
 prose answer, or a dispatch bug that quietly returns the wrong row, would
 pass every existing ask_eval check.
 
-This module closes that gap using item 21's synthetic ground truth
+This module closes that gap using the synthetic GTFS fixture's ground truth
 (``tests.fixtures.synthetic_gtfs``): it seeds a throwaway agency with one
 named pattern's static GTFS fragment + matching ClickHouse ``updates`` rows,
 asks the running Ask tab a natural-language mean-delay question naming that
 pattern's route, and asserts the numeric ``avg_min`` the API actually returns
 matches the pattern's hand-computed ``expected["agg_route_stats"]["avg_min"]``
 — the same single source of truth ``tests/pipeline/test_synthetic_agg_e2e.py``
-(item 21) imports, not a number re-derived here.
+imports, not a number re-derived here.
 
 Unlike ``test_baseline.py`` (which posts to an already-running, externally
 started ``uvicorn`` process via ``EVAL_API_BASE``), this module boots
@@ -27,7 +27,7 @@ and a real LLM provider key (e.g. ``GEMINI_API_KEY``) are set, the question
 really is routed through a live tool-use API exactly like production
 traffic, because the exact defect
 this test guards against (the *model* inventing or misreading a number) is
-inside the thing a mock would otherwise paper over — see CLAUDE.md's "mock
+inside the thing a mock would otherwise paper over — see AGENTS.md's "mock
 the ML embedder unless a test is explicitly slow" guidance; this test is the
 explicitly-slow, explicitly-live exception, same tier as ``test_baseline.py``.
 
@@ -51,14 +51,14 @@ composed freely by the model. So a *fresh, isolated* question can't exercise
 incentive to call the right tool, and once it does, the number is guaranteed
 correct by construction. The one path where the model DOES emit free,
 unchecked text is when it skips tool dispatch entirely (``tool_calls`` empty,
-see ``chat.py``'s ``body = (msg.content or "").strip()`` fallback) — exactly
-item 16's original bug shape: an unrelated prior turn's result anchoring the
-model into answering from stale context instead of calling a tool. Each
-question therefore seeds a ``top_n`` ranking turn (mirroring item 16's own
-regression tests, e.g. ``tests/api/test_api_ask.py``) for an unrelated route
-before asking about the pattern's own route, so a regression in item 16's
-history-scoping guard has something real to trip on:
-``assert_matches_ground_truth`` checks the tool-call name first, so a model
+see ``chat.py``'s ``body = (msg.content or "").strip()`` fallback) — which
+is what an unrelated prior turn's result can tempt it into: answering from
+stale context instead of calling a tool. Each question therefore seeds a
+``top_n`` ranking turn (mirroring the unrelated-history tests in
+``tests/api/test_api_ask.py`` and ``tests/query/test_chat_null_args.py``)
+for an unrelated route before asking about the pattern's own route, so a
+regression in the history block's scoping guard has something real to
+trip on: ``assert_matches_ground_truth`` checks the tool-call name first, so a model
 that takes the free-text shortcut fails with a clear "expected tool_call
 'route_stats', got None" message, distinct from a wrong-number failure.
 """
@@ -88,7 +88,7 @@ _requires_llm_eval_flag = pytest.mark.skipif(
     reason="RUN_LLM_EVAL=1 not set",
 )
 
-# One natural-language mean-delay question per item-21 pattern. Phrased like
+# One natural-language mean-delay question per synthetic pattern. Phrased like
 # route_stats's own tool description example ("路線5の遅延", "44372はどう?")
 # so the model has every reason to pick that tool, not describe_data/top_n.
 _QUESTIONS: dict[str, str] = {
@@ -98,8 +98,8 @@ _QUESTIONS: dict[str, str] = {
 }
 
 # A misleading prior turn: an unrelated route-ranking result that has
-# nothing to do with the pattern's own route. Mirrors item 16's own live
-# repro/regression tests (tests/api/test_api_ask.py's
+# nothing to do with the pattern's own route. Mirrors the unrelated-history
+# tests (tests/api/test_api_ask.py's
 # test_unrelated_question_with_unrelated_history_gets_fresh_tool_call) — the
 # scenario that actually tempts the model to answer from stale context
 # instead of dispatching a fresh tool call. See the module docstring's "Why
@@ -160,11 +160,11 @@ async def _ask_about_pattern(
 async def test_answer_matches_synthetic_ground_truth(
     pattern_fn, tmp_path, pg_conn, agency_id, ch_client, ch_async_client
 ):
-    """One test per item-21 pattern in ``ALL_PATTERNS`` — parametrized directly
+    """One test per synthetic pattern in ``ALL_PATTERNS`` — parametrized directly
     over that tuple (not a hand-copied list) so a future pattern added there is
     automatically covered by this LLM-numeric check too, matching the "add a
     pattern, it's covered" framing ``tests/fixtures/synthetic_gtfs.py`` and
-    item 21's own ``tests/pipeline/test_synthetic_agg_e2e.py`` already use."""
+    ``tests/pipeline/test_synthetic_agg_e2e.py`` already use."""
     pattern = pattern_fn()
     response_json = await _ask_about_pattern(pattern, tmp_path, pg_conn, agency_id, ch_client, ch_async_client)
     assert_matches_ground_truth(response_json, pattern)

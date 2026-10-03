@@ -51,10 +51,9 @@ async def reports_app(apply_schema):
 def _run_analyze(agency_id, ch_client):
     """Build the agg_* tables (incl. agg_route_daily_dist) from seeded updates.
 
-    analyze()'s dedup materialization now reads ClickHouse (Task 6); this
-    file's fixtures seed Postgres `updates` directly (pre-dating that
-    migration), so mirror the same rows into ClickHouse first — see
-    tests.conftest.mirror_updates_to_ch."""
+    analyze()'s dedup materialization reads ClickHouse, but this file's
+    fixtures seed Postgres `updates` directly, so mirror the same rows into
+    ClickHouse first — see tests.conftest.mirror_updates_to_ch."""
 
     import psycopg2
 
@@ -141,7 +140,7 @@ async def _seed_route(pool, agency_id, route_code, service_type, day, delays):
 
 @pytest.mark.asyncio
 async def test_reports_get_ranking_reads_agg(reports_client, ch_client):
-    """ranking now reads agg_route_daily_dist; seed updates → analyze → render.
+    """ranking reads agg_route_daily_dist; seed updates → analyze → render.
 
     HAVING COUNT(*) > 20, so seed 25 rows for route 44 across distinct trips.
     """
@@ -470,7 +469,7 @@ async def test_on_time_csv_export_renders_low_confidence_marker(reports_client, 
 @pytest.mark.asyncio
 async def test_ranking_null_service_route_surfaces(reports_client, ch_client):
     """NULL service_type routes must still rank (the '' sentinel maps back to
-    None), matching the old live query which never filtered them."""
+    None) rather than being filtered out."""
     client, agency_id, pool = reports_client
     day = "2026-05-04"
     await _seed_route(pool, agency_id, "R_NULL", None, day, [200] * 25)
@@ -621,7 +620,7 @@ async def test_dow_ranking_pools_exact_sum_not_rounded_avg_min(reports_client, c
     248 -> analyze() rounds that day's own avg_min to 0.69 min) and day 2 (14
     obs, raw-seconds sum 1400 -> rounds to 1.67 min). Pooling the exact sums
     gives (248+1400)/20/60 = 1.37333... -> rounds to 1.37; re-weighting the
-    rounded 0.69/1.67 instead (the pre-fix pattern) gives
+    rounded 0.69/1.67 instead gives
     (0.69*6 + 1.67*14)/20 = 1.376 -> rounds to 1.38 -- a measurably different
     (and wrong) answer that exists purely from the intermediate rounding.
     """
@@ -683,7 +682,7 @@ async def test_reports_trend_reads_agg(reports_client, ch_client):
 
 @pytest.mark.asyncio
 async def test_reports_trend_surfaces_schedule_revision_boundary(reports_client, ch_client):
-    """Item 98: a static feed reload visible in `updates.static_version_id`
+    """A static feed reload visible in `updates.static_version_id`
     surfaces as a `revision_boundaries` date on the trend report, so a
     metric shift there isn't misread as a service-quality change.
 
@@ -793,7 +792,7 @@ async def _seed_route_at(pool, agency_id, route_code, service_type, day, sched, 
 
 @pytest.mark.asyncio
 async def test_reports_ranking_falls_back_to_live_under_time_band(reports_client, ch_client, ch_async_client):
-    """Task 8.5: a time_band filter bypasses agg_route_daily_dist and reads
+    """A time_band filter bypasses agg_route_daily_dist and reads
     live `updates` from ClickHouse via `_dedup_cte_ch` / `_ranking_live`.
 
     25 samples inside the 'morning' band (05:00-09:00) clear the ranking's
@@ -829,22 +828,22 @@ async def test_reports_ranking_falls_back_to_live_under_time_band(reports_client
 async def test_reports_ranking_live_percentile_matches_percent_rank_tie_semantics(
     reports_client, ch_client, ch_async_client
 ):
-    """Regression: `_ranking_live` (this endpoint's `time_band`-filtered
-    ClickHouse fallback) intentionally still reproduces the OLD min-rank-tie
-    `PERCENT_RANK()` formula, via `rank()`/`count()` window functions — NOT
-    ClickHouse's `quantileExact`, which is a pure positional pick
-    (`sorted[floor(q*n)]`). This is a known, accepted divergence from the
-    Postgres aggregate path (`agg_route_stats`/`agg_route_hour`), which has
-    since migrated to `PERCENTILE_DISC` and would give a different answer on
-    the same tied data — see `_ranking_live`'s own docstring.
+    """`_ranking_live` (this endpoint's `time_band`-filtered ClickHouse
+    fallback) intentionally reproduces the min-rank-tie `PERCENT_RANK()`
+    formula, via `rank()`/`count()` window functions — NOT ClickHouse's
+    `quantileExact`, which is a pure positional pick (`sorted[floor(q*n)]`).
+    This is a known, accepted divergence from the Postgres aggregate path
+    (`agg_route_stats`/`agg_route_hour`), which uses `PERCENTILE_DISC` and
+    would give a different answer on the same tied data — see
+    `_ranking_live`'s own docstring.
 
-    95 rows at 0s + 5 at 600s (n=100): the old min-rank tie handling this
+    95 rows at 0s + 5 at 600s (n=100): the min-rank tie handling this
     function reproduces gives every 0s row rank=1 (pct=0) and every 600s row
     rank=96 (pct=95/99≈0.960). That's the only group clearing >=0.5 AND
     >=0.9, so both p50 and p90 must read 10.0 (600s/60). quantileExact(0.5)/
     (0.9) would instead pick position floor(0.5*100)=50 and
     floor(0.9*100)=90 — both still inside the 95-row 0s run — giving 0.0 for
-    both. (`PERCENTILE_DISC`, the current Postgres aggregate path, would also
+    both. (`PERCENTILE_DISC`, the Postgres aggregate path, would also
     give 0.0 here — the same divergence from this function's 10.0.)
     """
     from api.main import app
@@ -867,11 +866,11 @@ async def test_reports_ranking_live_percentile_matches_percent_rank_tie_semantic
 
 @pytest.mark.asyncio
 async def test_reports_ranking_half_up_rounding_matches_agg_and_live(reports_client, ch_client, ch_async_client):
-    """Fix C regression: ClickHouse's round() is round-half-to-even; Postgres'
-    numeric ROUND() (and this codebase's Decimal(ROUND_HALF_UP) helpers) round
-    half away from zero. 12 rows at 127s + 12 rows at 128s average to exactly
+    """ClickHouse's round() is round-half-to-even; Postgres' numeric ROUND()
+    (and this codebase's Decimal(ROUND_HALF_UP) helpers) round half away from
+    zero, and the rankings must follow the latter. 12 rows at 127s + 12 rows at 128s average to exactly
     127.5s = 2.125min — an exact .5 boundary at the 3rd decimal. Half-up
-    rounds to 2.13; ClickHouse's native round() would have given 2.12. Both
+    rounds to 2.13; ClickHouse's native round() would give 2.12. Both
     the ClickHouse live fallback (time_band=morning, _ranking_live) and the
     agg fast path (time_band=all, after analyze(), agg_route_daily_dist) must
     agree on 2.13 for the same underlying data.
@@ -905,7 +904,7 @@ async def test_reports_ranking_half_up_rounding_matches_agg_and_live(reports_cli
 
 @pytest.mark.asyncio
 async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, ch_client, ch_async_client):
-    """Task 8.5: trend's daily series (compute_trend_series) and hourly
+    """Trend's daily series (compute_trend_series) and hourly
     heatmap (compute_hourly_heatmap) both fall back to the ClickHouse live
     scan under a non-default time_band; only the in-band sample counts."""
     from api.main import app
@@ -939,14 +938,14 @@ async def test_reports_trend_falls_back_to_live_under_time_band(reports_client, 
 
 @pytest.mark.asyncio
 async def test_reports_compare_ranking_falls_back_to_live_under_time_band(reports_client, ch_client, ch_async_client):
-    """Task 8: a time_band filter bypasses agg_daily_trend and reads live
+    """A time_band filter bypasses agg_daily_trend and reads live
     `updates` from ClickHouse via `_route_avg_by_dow_ch` / `_compare_ranking_live`.
 
-    Hand-computable repro (same numbers as the original review's standalone
-    verification): route R1 gets 15 weekday (Tue 2026-05-19) observations at
-    120s (2.00 min) and 15 weekend (Sat 2026-05-23) observations at 300s
-    (5.00 min), both inside the 'noon' band (12:00-14:00) — expected
-    (heijitsu, kyujitsu, abs_delta, signed_delta) = (2.00, 5.00, 3.00, 3.00).
+    Hand-computable case: route R1 gets 15 weekday (Tue 2026-05-19)
+    observations at 120s (2.00 min) and 15 weekend (Sat 2026-05-23)
+    observations at 300s (5.00 min), both inside the 'noon' band
+    (12:00-14:00) — expected (heijitsu, kyujitsu, abs_delta, signed_delta) =
+    (2.00, 5.00, 3.00, 3.00).
 
     Two things must NOT leak into that average:
     - An extra R1 weekday observation scheduled at 08:00 (outside 'noon')
@@ -1058,9 +1057,8 @@ async def test_compute_dow_ranking_live_path_without_ch_raises(aconn, aagency_id
 
 @pytest.mark.asyncio
 async def test_compute_compare_ranking_live_path_without_ch_raises(aconn, aagency_id):
-    """Also covers compute_compare_ranking's signature fix: ``ch`` used to be
-    a required positional arg (the only one of the six siblings without a
-    default); it now defaults to None like the rest, so this call is valid
+    """Also covers compute_compare_ranking's signature: like its five
+    sibling rankings it defaults ``ch`` to None, so this call is valid
     without a ch at all."""
     from datetime import date
 
@@ -1141,8 +1139,8 @@ async def test_compute_trend_series_week_bucket_pools_exact_sum_not_rounded_avg_
     samples, raw-seconds sum 124 -> analyze() rounds that day's own avg_min
     to 0.69 min) and day 2 (7 samples, raw-seconds sum 700 -> rounds to 1.67
     min). Pooling the exact sums gives (124+700)/10/60 = 1.37333... ->
-    rounds to 1.37; re-weighting the rounded 0.69/1.67 instead (the pre-fix
-    pattern) gives (0.69*3 + 1.67*7)/10 = 1.376 -> rounds to 1.38, a
+    rounds to 1.37; re-weighting the rounded 0.69/1.67 instead gives
+    (0.69*3 + 1.67*7)/10 = 1.376 -> rounds to 1.38, a
     measurably different (and wrong) answer that exists purely from the
     intermediate rounding.
     """
@@ -1357,7 +1355,7 @@ async def test_suggest_returns_on_time_fallback_when_no_anomaly(reports_client, 
 
     resp = await client.get(f"/api/{agency_id}/reports/suggest")
     assert resp.status_code == 200
-    body = resp.json()
+    body = resp.json()["suggestion"]
     assert body["report_type"] == "on_time"
     assert body["route_code"] == "BAD"
     assert body.get("reason_text")
@@ -1381,7 +1379,7 @@ async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_clien
     # keeps entries it can split into (report_type, route_code).
     resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY&exclude=garbage")
     assert resp.status_code == 200
-    assert resp.json() is None
+    assert resp.json() == {"suggestion": None}
 
 
 def _run_analyze_from_ch(agency_id, ch_client):
@@ -1907,3 +1905,55 @@ async def test_council_summary_degrades_is_stale_when_clickhouse_freshness_probe
         payload = await compute_council_summary(agency_id, ctx, conn, _BrokenCh())
     assert payload["on_time_pct"] == 100.0
     assert payload["is_stale"] is False
+
+
+@pytest.mark.asyncio
+async def test_report_carries_scope_applied(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/ranking")
+    assert resp.status_code == 200
+    assert resp.json()["scope_applied"]["routes"] is True
+    assert resp.json()["scope_applied"]["late"] is False
+
+
+@pytest.mark.asyncio
+async def test_scope_late_is_ignored_where_a_report_has_no_tolerance(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?late=180")
+    assert resp.status_code == 200
+    assert resp.json()["scope_applied"]["late"] is False
+
+
+@pytest.mark.asyncio
+async def test_scope_late_sets_the_on_time_tolerance(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?late=180&early=30")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["definition"]["late_tolerance_sec"] == 180
+    assert body["definition"]["early_tolerance_sec"] == 30
+    assert body["scope_applied"]["late"] is True
+
+
+@pytest.mark.asyncio
+async def test_scope_late_and_the_explicit_tolerance_together_are_a_400(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?late=180&late_tolerance_sec=60")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_hour_with_time_band_is_a_422(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?hour=7&time_band=morning")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_scope_late_leaves_the_worst_5min_threshold_alone(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/worst_5min?late=60")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["definition"]["late_tolerance_sec"] == 300
+    assert body["scope_applied"]["late"] is False

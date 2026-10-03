@@ -7,29 +7,14 @@ from pathlib import Path
 
 
 def test_ask_eval_passes():
-    # Use the poetry-managed virtualenv python if available, so the project
-    # packages (pipeline.*) are importable. Fall back to sys.executable for
-    # environments where the venv is already active (e.g. CI with poetry run).
-    import shutil
-
+    # The interpreter already running this suite, not `poetry run`, which
+    # resolves its venv by cwd and so picks an unprovisioned one in a worktree.
     project_root = Path(__file__).parent.parent.parent
-    poetry_exe = shutil.which("poetry")
-    if poetry_exe:
-        r = subprocess.run(
-            [poetry_exe, "run", "python", "scripts/ask_eval.py"],
-            capture_output=True,
-            text=True,
-            cwd=str(project_root),
-            env={**os.environ},
-        )
-    else:
-        # Fallback: sys.executable with project root on PYTHONPATH.
-        env = {**os.environ, "PYTHONPATH": str(project_root)}
-        r = subprocess.run(
-            [sys.executable, "scripts/ask_eval.py"],
-            capture_output=True,
-            text=True,
-            cwd=str(project_root),
-            env=env,
-        )
+    r = subprocess.run(
+        [sys.executable, "scripts/ask_eval.py"],
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
+        env={**os.environ, "PYTHONPATH": str(project_root)},
+    )
     assert r.returncode == 0, f"ask_eval failed:\n{r.stdout}\n{r.stderr}"

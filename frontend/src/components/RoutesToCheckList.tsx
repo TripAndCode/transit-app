@@ -1,6 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { delayColor } from "../styles/tokens";
-import { useRangeContext } from "../api/rangeContext";
+import { useScope } from "../api/scope";
+import { useAgencyId } from "../api/useAgencyId";
+import { useRouteNames } from "../api/useRouteNames";
+import { RouteLabel } from "./RouteLabel";
 import { groupBySeverityBand } from "./routesToCheckBands";
 import type { OverviewTopDelayedRoute } from "../api/types";
 
@@ -10,7 +13,8 @@ type Props = {
 
 export function RoutesToCheckList({ routes }: Props) {
   const { t } = useTranslation();
-  const [, update] = useRangeContext();
+  const [, update] = useScope();
+  const names = useRouteNames(useAgencyId());
 
   const groups = groupBySeverityBand(routes);
   const maxMin = routes.length > 0 ? Math.max(...routes.map((r) => r.avg_min)) : 0;
@@ -46,12 +50,7 @@ export function RoutesToCheckList({ routes }: Props) {
                 }}
               >
                 <span className="ov-check-name">
-                  {r.route_short_name || r.route_code}
-                  {/* "" is a real value the backend can return for an unnamed
-                      route, not just null/undefined — `||` (not `??`) so an
-                      empty string falls back to the code too, instead of
-                      rendering a blank row. */}
-                  {r.route_short_name && <span className="ov-check-name-code"> ({r.route_code})</span>}
+                  <RouteLabel code={r.route_code} names={names} fallbackName={r.route_short_name} />
                 </span>
                 <span className="ov-check-track">
                   <span

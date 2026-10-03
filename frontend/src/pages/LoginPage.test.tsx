@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
@@ -9,9 +9,11 @@ import { ApiError } from "../api/client";
 
 const mockApiPost = vi.fn();
 let mockConfig: { auth_enabled: boolean; local_admin_enabled: boolean } | undefined;
+let mockConfigIsError = false;
+const mockConfigRefetch = vi.fn();
 
 vi.mock("../api/config", () => ({
-  useConfig: () => ({ data: mockConfig }),
+  useConfig: () => ({ data: mockConfig, isError: mockConfigIsError, refetch: mockConfigRefetch }),
 }));
 
 vi.mock("../api/client", async (importOriginal) => {
@@ -36,6 +38,8 @@ describe("LoginPage", () => {
     mockApiPost.mockReset();
     assignSpy.mockReset();
     mockConfig = { auth_enabled: true, local_admin_enabled: false };
+    mockConfigIsError = false;
+    mockConfigRefetch.mockReset();
     // jsdom's window.location.assign isn't configurable, so vi.spyOn can't
     // touch it directly — replace the whole `location` object instead.
     Object.defineProperty(window, "location", {
@@ -44,11 +48,47 @@ describe("LoginPage", () => {
     });
   });
 
+  it("reads the consent line as one sentence, with the two legal links inside it", async () => {
+    await i18n.changeLanguage("en");
+    const { container } = renderLogin();
+    const footer = container.querySelector(".login-card__footer")!;
+    expect(footer.textContent).toBe("By continuing, you agree to the Terms of Service and Privacy Policy.");
+    expect(screen.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "/terms");
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
+    try {
+      await i18n.changeLanguage("ja");
+      await waitFor(() =>
+        expect(container.querySelector(".login-card__footer")!.textContent).toBe(
+          "続行すると、利用規約とプライバシーポリシーに同意したものとみなされます。",
+        ),
+      );
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("links the brand back to the welcome page", () => {
+    renderLogin();
+    expect(screen.getByRole("link", { name: "Delay Dashboard" })).toHaveAttribute("href", "/welcome");
+  });
+
   it("renders the SSO-disabled fallback only when neither auth method is available", () => {
     mockConfig = { auth_enabled: false, local_admin_enabled: false };
     renderLogin();
     expect(screen.getByText("SSO not configured")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Sign in with Google" })).toBeNull();
+  });
+
+  it("renders a retry fallback (not the login form) when /api/config fails to load", () => {
+    mockConfig = undefined;
+    mockConfigIsError = true;
+    renderLogin();
+    expect(screen.queryByRole("button", { name: "Sign in with Google" })).toBeNull();
+    expect(screen.queryByLabelText("Username")).toBeNull();
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry).toBeTruthy();
+    fireEvent.click(retry);
+    expect(mockConfigRefetch).toHaveBeenCalled();
   });
 
   it("shows the Google/GitHub buttons but no local form when only OAuth is enabled", () => {

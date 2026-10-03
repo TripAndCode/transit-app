@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Any
 
-from api.range import _TIME_BAND_RANGES, RangeCtx, build_agg_stop_filter, time_band_case_sql
+from api.range import TIME_BAND_RANGES, RangeCtx, build_agg_stop_filter, date_range_clause, time_band_case_sql
 
 
 def _ctx(**over: Any) -> RangeCtx:
@@ -21,9 +21,16 @@ def _ctx(**over: Any) -> RangeCtx:
 def test_time_band_case_covers_all_bands_and_null():
     sql = time_band_case_sql("scheduled_time")
     assert "scheduled_time IS NULL" in sql and "'none'" in sql
-    for band, (start, end) in _TIME_BAND_RANGES.items():
+    for band, (start, end) in TIME_BAND_RANGES.items():
         assert f"'{band}'" in sql and f"'{start}'" in sql and f"'{end}'" in sql
     assert sql.strip().startswith("CASE") and sql.strip().endswith("END")
+
+
+def test_date_range_clause_casts_the_iso_text_column_to_date():
+    frag, params, n = date_range_clause("date", _ctx(), next_param=3)
+    assert frag == "date::date BETWEEN ($3::text)::date AND ($4::text)::date"
+    assert params == ["2026-05-13", "2026-06-11"]
+    assert n == 5
 
 
 def test_build_agg_stop_filter_default_date_only():

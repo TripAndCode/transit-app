@@ -3,7 +3,8 @@ import { screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RoutesToCheckList } from "./RoutesToCheckList";
-import * as rangeContext from "../api/rangeContext";
+import * as scopeModule from "../api/scope";
+import { SCOPE_EXTRAS_NONE } from "../api/scope";
 import type { OverviewTopDelayedRoute } from "../api/types";
 
 function routes(): OverviewTopDelayedRoute[] {
@@ -14,7 +15,7 @@ function routes(): OverviewTopDelayedRoute[] {
   ];
 }
 
-// RoutesToCheckList calls useRangeContext (react-router-dom's useSearchParams
+// RoutesToCheckList calls useScope (react-router-dom's useSearchParams
 // under the hood), so — matching the existing pattern in
 // RouteForecastSection.test.tsx — every render needs a <MemoryRouter>.
 function renderList(rs: OverviewTopDelayedRoute[]) {
@@ -40,23 +41,23 @@ describe("RoutesToCheckList", () => {
     expect(screen.queryByText("< 1.5 min")).not.toBeInTheDocument();
   });
 
-  it("shows short_name with the code de-emphasized in parens, not as a separate raw-code column", () => {
+  it("shows the route's name with its code de-emphasized, not as a separate raw-code column", () => {
     renderList(routes());
     // K31 and K37 share the same short_name -- both rows render it
     expect(screen.getAllByText("観光通り線")).toHaveLength(2);
-    expect(screen.getByText("(K31)")).toBeInTheDocument();
-    expect(screen.getByText("(K37)")).toBeInTheDocument();
-    // W53 has no short_name -- falls back to the bare code, only once (no duplication)
-    expect(screen.getAllByText("W53")).toHaveLength(1);
+    expect(screen.getByText("K31")).toHaveClass("route-label__code");
+    expect(screen.getByText("K37")).toHaveClass("route-label__code");
+    // W53 has no name -- it reads as "Route W53", with the code only once
+    expect(screen.getAllByText(/W53/)).toHaveLength(1);
+    expect(screen.getByText("Route W53")).toBeInTheDocument();
   });
 
-  it("falls back to the bare code when route_short_name is an empty string, not just null", () => {
+  it("falls back to the code when route_short_name is an empty string, not just null", () => {
     // Real backend data can return "" (not null) for an unnamed route --
-    // `??` doesn't catch that, only `||` does. Regression test for a real
-    // blank-row bug found in production data (route_code 1404722872).
+    // `??` doesn't catch that, only `||` does, so an empty name must still
+    // fall back to the code rather than render a blank row.
     renderList([{ route_code: "R99", route_short_name: "", avg_min: 4.0 }]);
-    expect(screen.getByText("R99")).toBeInTheDocument();
-    expect(screen.queryByText("()")).not.toBeInTheDocument();
+    expect(screen.getByText("Route R99")).toBeInTheDocument();
   });
 
   it("scales each bar relative to the list's own max avg_min", () => {
@@ -84,8 +85,8 @@ describe("RoutesToCheckList", () => {
 
   it("narrows the shared route filter to the clicked route", () => {
     const update = vi.fn();
-    vi.spyOn(rangeContext, "useRangeContext").mockReturnValue([
-      { from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
+    vi.spyOn(scopeModule, "useScope").mockReturnValue([
+      { ...SCOPE_EXTRAS_NONE, from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
       update,
     ]);
     renderList(routes());
@@ -97,12 +98,12 @@ describe("RoutesToCheckList", () => {
 
   it("narrows the filter on Enter and Space, but not on other keys", () => {
     const update = vi.fn();
-    vi.spyOn(rangeContext, "useRangeContext").mockReturnValue([
-      { from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
+    vi.spyOn(scopeModule, "useScope").mockReturnValue([
+      { ...SCOPE_EXTRAS_NONE, from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
       update,
     ]);
     renderList(routes());
-    const row = screen.getByText("(K31)").closest('[role="button"]')!;
+    const row = screen.getByText("K31").closest('[role="button"]')!;
 
     fireEvent.keyDown(row, { key: "Tab" });
     expect(update).not.toHaveBeenCalled();

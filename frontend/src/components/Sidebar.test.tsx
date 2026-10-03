@@ -1,12 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
+import { ToastProvider } from "./ui/Toast";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
+import * as auth from "../api/auth";
+import * as config from "../api/config";
+import { rememberScreenScope } from "../api/screenScope";
+
+const RAIL_ORDER = ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports"];
 
 function mockMatchMedia(matches: boolean) {
   vi.spyOn(window, "matchMedia").mockReturnValue({
@@ -21,86 +27,142 @@ function mockMatchMedia(matches: boolean) {
   } as unknown as MediaQueryList);
 }
 
-function renderSidebar(path = "/agencies/1/map") {
+function renderSidebar(path = "/agencies/1/live") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
-        <MemoryRouter initialEntries={[path]}>
-          <Routes>
-            <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
-          </Routes>
-        </MemoryRouter>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
       </I18nextProvider>
     </QueryClientProvider>
   );
 }
 
 describe("Sidebar", () => {
-  it("renders three focused destinations without the former report catalog", () => {
+  beforeEach(() => sessionStorage.clear());
+
+  it("renders the seven destinations in rail order, with the palette left to the top bar", () => {
     renderSidebar();
-    expect(screen.getByText("Overview")).toBeTruthy();
-    expect(screen.getByText("Segment analysis")).toBeTruthy();
-    expect(screen.getByText("Reports")).toBeTruthy();
-    expect(screen.queryByText("Agencies")).toBeNull();
-    expect(screen.queryByText("Latest observations")).toBeNull();
+    const nav = screen.getByRole("navigation", { name: "Destinations" });
+    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(RAIL_ORDER);
+    expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
   });
 
-  it("renders Ask as a distinct CTA", () => {
+  describe("each screen keeps its own filters", () => {
+    it("keeps a visible Ask entry below the destinations, without the current screen's filters", () => {
+      renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+      expect(screen.getByRole("link", { name: "Ask" })).toHaveAttribute("href", "/agencies/8/ask");
+    });
+
+    it("points Live, the screen on show, at its own current filters", () => {
+      renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+      expect(screen.getByRole("link", { name: "Live" })).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
+    });
+
+    it.each([
+      ["Routes", "routes"],
+      ["Time", "time"],
+      ["Reports", "reports"],
+    ])("points %s at the agency's %s screen without the current screen's filters", (name, dest) => {
+      renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
+      expect(screen.getByRole("link", { name })).toHaveAttribute("href", `/agencies/8/${dest}`);
+    });
+
+    it("reopens a screen with the filters it last showed", () => {
+      rememberScreenScope("8", "routes", "routes=W54");
+      renderSidebar("/agencies/8/live?dow=weekend");
+      expect(screen.getByRole("link", { name: "Routes" })).toHaveAttribute("href", "/agencies/8/routes?routes=W54");
+      expect(screen.getByRole("link", { name: "Time" })).toHaveAttribute("href", "/agencies/8/time");
+    });
+  });
+
+  it("leaves data freshness to the top bar", () => {
     renderSidebar();
-    expect(screen.getByText("Ask")).toBeTruthy();
+    expect(screen.queryByText("Data status")).toBeNull();
   });
 
-  it("folds the former Live view into Overview", () => {
-    renderSidebar("/agencies/8/overview");
-    expect(screen.getByRole("link", { name: /Overview/ })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /Latest observations/ })).toBeNull();
+  it("marks Routes active on a route dossier", () => {
+    renderSidebar("/agencies/8/routes/50?routes=50");
+    expect(screen.getByRole("link", { name: "Routes" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("points Overview at the current agency's map route, preserving the filter query string", () => {
-    renderSidebar("/agencies/8/overview?from=2026-06-01&to=2026-06-07");
-    const link = screen.getByRole("link", { name: /Overview/ });
-    expect(link).toHaveAttribute("href", "/agencies/8/overview?from=2026-06-01&to=2026-06-07");
+  it("lists Help under Other, without Admin for a visitor who is not an admin", () => {
+    renderSidebar();
+    const other = screen.getByRole("navigation", { name: "Other" });
+    expect(within(other).getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
+    expect(within(other).queryByRole("link", { name: "Admin" })).toBeNull();
   });
 
-  it("does not render Overview outside any agency context", () => {
+  it("links the welcome page under Other, for signed-in and signed-out visitors alike", () => {
+    renderSidebar();
+    const other = screen.getByRole("navigation", { name: "Other" });
+    expect(within(other).getByRole("link", { name: "About this app" })).toHaveAttribute("href", "/welcome");
+  });
+
+  describe("with an admin session", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("lists Admin under Other", () => {
+      vi.spyOn(config, "useConfig").mockReturnValue({ data: { auth_enabled: true }, isLoading: false } as never);
+      vi.spyOn(auth, "useSession").mockReturnValue({
+        data: { email: "admin@example.test", name: "", role: "admin" },
+        isLoading: false,
+      } as never);
+      renderSidebar();
+      const other = screen.getByRole("navigation", { name: "Other" });
+      expect(within(other).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+    });
+  });
+
+  it("does not render Live outside any agency context", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <I18nextProvider i18n={i18n}>
-          <MemoryRouter initialEntries={["/"]}>
-            <Sidebar />
-          </MemoryRouter>
+          <ToastProvider>
+            <MemoryRouter initialEntries={["/"]}>
+              <Sidebar />
+            </MemoryRouter>
+          </ToastProvider>
         </I18nextProvider>
       </QueryClientProvider>
     );
-    expect(screen.queryByRole("link", { name: /Overview/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Live/ })).toBeNull();
   });
 
   it("marks the current route's nav link as active", () => {
-    renderSidebar("/agencies/1/overview");
-    const mapLink = screen.getByRole("link", { name: /Overview/ });
+    renderSidebar("/agencies/1/live");
+    const mapLink = screen.getByRole("link", { name: "Live" });
     expect(mapLink.getAttribute("aria-current")).toBe("page");
   });
 
-  it("renders the brand block above the nav items", () => {
+  it("renders the brand as a one-line wordmark above the nav items, leaving the tagline to the sign-in pages", () => {
     renderSidebar();
-    expect(screen.getByText("Delay Dashboard")).toBeTruthy();
-    expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
+    const wordmark = screen.getByText("Delay Dashboard");
+    expect(wordmark.style.whiteSpace).toBe("nowrap");
+    expect(wordmark.style.wordBreak).toBe("keep-all");
+    expect(screen.queryByText("Real-time × Timetable")).toBeNull();
   });
 
   it("renders the brand block even when there is no agencyId, but not the nav items", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <I18nextProvider i18n={i18n}>
-          <MemoryRouter initialEntries={["/"]}>
-            <Sidebar />
-          </MemoryRouter>
+          <ToastProvider>
+            <MemoryRouter initialEntries={["/"]}>
+              <Sidebar />
+            </MemoryRouter>
+          </ToastProvider>
         </I18nextProvider>
       </QueryClientProvider>
     );
     expect(screen.getByText("Delay Dashboard")).toBeTruthy();
-    expect(screen.getByText("Real-time × Timetable")).toBeTruthy();
-    expect(screen.queryByText("Overview")).toBeNull();
+    expect(screen.queryByText("Live")).toBeNull();
   });
 
   it("renders the dev-only PROTOTYPE section with all three state links", () => {
@@ -120,15 +182,15 @@ describe("Sidebar", () => {
   });
 
   it("points the no-data prototype link at a far-future date range on the current agency", () => {
-    renderSidebar("/agencies/8/map");
+    renderSidebar("/agencies/8/live");
     const link = screen.getByRole("link", { name: "No-data state" });
-    expect(link).toHaveAttribute("href", "/agencies/8/period-overview?from=2030-01-01&to=2030-01-07");
+    expect(link).toHaveAttribute("href", "/agencies/8/pulse?from=2030-01-01&to=2030-01-07");
   });
 
-  it("points the feed-stale prototype link at the current agency's overview, preserving the active filter", () => {
-    renderSidebar("/agencies/8/map?from=2026-06-01&to=2026-06-07");
+  it("points the feed-stale prototype link at the current agency's live view, preserving the active filter", () => {
+    renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
     const link = screen.getByRole("link", { name: "Feed-stale state" });
-    expect(link).toHaveAttribute("href", "/agencies/8/overview?from=2026-06-01&to=2026-06-07");
+    expect(link).toHaveAttribute("href", "/agencies/8/live?from=2026-06-01&to=2026-06-07");
   });
 
   describe("collapse", () => {
@@ -138,10 +200,10 @@ describe("Sidebar", () => {
       const user = userEvent.setup();
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-      expect(screen.queryByText("Overview")).toBeNull();
+      expect(screen.queryByText("Live")).toBeNull();
       expect(screen.queryByText("What's happening right now")).toBeNull();
       expect(screen.queryByText("PROTOTYPE")).toBeNull();
-      expect(screen.getByRole("link", { name: "Overview" })).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Live" })).toBeTruthy();
     });
 
     it("shows an expand toggle once collapsed, which restores the labels when clicked", async () => {
@@ -149,13 +211,13 @@ describe("Sidebar", () => {
       renderSidebar();
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
-      expect(screen.getByText("Overview")).toBeTruthy();
+      expect(screen.getByText("Live")).toBeTruthy();
     });
 
     it("persists the collapsed state to localStorage and restores it on remount", () => {
       localStorage.setItem("transit.sidebarCollapsed", "1");
       renderSidebar();
-      expect(screen.queryByText("Overview")).toBeNull();
+      expect(screen.queryByText("Live")).toBeNull();
       expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
     });
 
@@ -191,18 +253,20 @@ describe("Sidebar", () => {
       // width. Conditionally rendering on isMobile means it's now absent
       // entirely on a wide viewport.
       expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
-      expect(screen.getAllByRole("link", { name: /Overview/ }).length).toBe(1);
+      expect(screen.getAllByRole("link", { name: /Live/ }).length).toBe(1);
     });
 
-    it("renders only the mobile rail (no desktop nav) on a narrow viewport", () => {
+    it("renders the bottom tab bar (no desktop rail) on a narrow viewport", () => {
       mockMatchMedia(true);
       renderSidebar();
-      expect(screen.getByRole("button", { name: "Open menu" })).toBeTruthy();
-      expect(screen.queryByText("Overview")).toBeNull();
+      expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeTruthy();
+      // The desktop rail's own collapse toggle is the clearest sign the
+      // desktop variant isn't also mounted underneath.
+      expect(screen.queryByRole("button", { name: "Collapse sidebar" })).toBeNull();
     });
   });
 
-  describe("mobile drawer", () => {
+  describe("mobile tab bar", () => {
     beforeEach(() => {
       mockMatchMedia(true);
     });
@@ -211,49 +275,152 @@ describe("Sidebar", () => {
       vi.restoreAllMocks();
     });
 
-    it("renders the hamburger trigger without mounting the nav until opened", () => {
+    it("renders Pulse, Routes, Live and Ask as tabs, leaving the rest to the More sheet", () => {
       renderSidebar();
-      expect(screen.getByRole("button", { name: "Open menu" })).toBeTruthy();
-      // No Overview link should exist yet — the drawer body is lazily mounted
-      // on open, and (unlike the old always-mounted-desktop-plus-CSS-hidden
-      // pattern) the desktop nav isn't rendered at all on a narrow viewport,
-      // so the common (closed) case has zero nav links in the DOM.
-      expect(screen.queryAllByRole("link", { name: /Overview/ }).length).toBe(0);
+      const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Pulse", "Routes", "Live", "Ask"]);
     });
 
-    it("mounts the nav links once the hamburger is clicked", async () => {
-      const user = userEvent.setup();
-      renderSidebar();
-      await user.click(screen.getByRole("button", { name: "Open menu" }));
-      expect(screen.getAllByRole("link", { name: /Overview/ }).length).toBe(1);
+    it("marks the active tab", () => {
+      renderSidebar("/agencies/1/live");
+      const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+      expect(within(nav).getByRole("link", { name: /Live/ })).toHaveAttribute("aria-current", "page");
     });
 
-    it("closes the drawer (unmounting the nav) when a nav link inside it is clicked", async () => {
-      const user = userEvent.setup();
-      renderSidebar();
-      await user.click(screen.getByRole("button", { name: "Open menu" }));
-      const mapLinks = screen.getAllByRole("link", { name: /Overview/ });
-      expect(mapLinks.length).toBe(1);
-      await user.click(mapLinks[0]);
-      expect(screen.queryAllByRole("link", { name: /Overview/ }).length).toBe(0);
+    it("does not render the four destinations outside any agency context", () => {
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <I18nextProvider i18n={i18n}>
+            <ToastProvider>
+              <MemoryRouter initialEntries={["/"]}>
+                <Sidebar />
+              </MemoryRouter>
+            </ToastProvider>
+          </I18nextProvider>
+        </QueryClientProvider>
+      );
+      expect(screen.queryByRole("link", { name: /Live/ })).toBeNull();
+      expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
     });
 
-    it("closes the drawer when the close button inside it is clicked", async () => {
-      const user = userEvent.setup();
+    it("sets the More label in the same type as the other tab labels", () => {
       renderSidebar();
-      await user.click(screen.getByRole("button", { name: "Open menu" }));
-      expect(screen.getAllByRole("link", { name: /Overview/ }).length).toBe(1);
-      await user.click(screen.getByRole("button", { name: "Close" }));
-      expect(screen.queryAllByRole("link", { name: /Overview/ }).length).toBe(0);
+      const more = screen.getByRole("button", { name: "More" });
+      const pulse = screen.getByRole("link", { name: "Pulse" });
+      expect(more.style.fontSize).toBe(pulse.style.fontSize);
     });
 
-    it("closes the drawer when the backdrop is clicked", async () => {
+    it("renders a More trigger that does not mount the agency picker until opened", () => {
+      renderSidebar();
+      expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("stacks under the sheet's backdrop, so an aria-modal sheet is genuinely modal", async () => {
       const user = userEvent.setup();
       renderSidebar();
-      await user.click(screen.getByRole("button", { name: "Open menu" }));
-      expect(screen.getAllByRole("link", { name: /Overview/ }).length).toBe(1);
+      const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+      await user.click(screen.getByRole("button", { name: "More" }));
+
+      const backdrop = Number(screen.getByRole("presentation").style.zIndex);
+      // A tab bar above the backdrop stays tappable while the sheet claims
+      // `aria-modal`, and the route change it causes leaves the backdrop and
+      // the focus trap mounted over the page that replaced it.
+      expect(Number(nav.style.zIndex)).toBeLessThan(backdrop);
+    });
+  });
+
+  describe("mobile more sheet", () => {
+    beforeEach(() => {
+      mockMatchMedia(true);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("opens a dialog with the brand block and account menu, but not the four tab destinations again", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByText("Delay Dashboard")).toBeTruthy();
+      expect(await within(dialog).findByRole("button", { name: "Account menu" })).toBeTruthy();
+      // The nav destinations already live in the tab bar underneath; the
+      // sheet must not repeat them.
+      expect(within(dialog).queryByRole("link", { name: /Live/ })).toBeNull();
+    });
+
+    it("puts the account menu above the destinations, on the sheet's first screen", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const dialog = screen.getByRole("dialog");
+      const account = await within(dialog).findByRole("button", { name: "Account menu" });
+      const nav = within(dialog).getByRole("navigation", { name: "Destinations" });
+      expect(account.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("keeps its close button pinned while the sheet scrolls", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const close = within(screen.getByRole("dialog")).getByRole("button", { name: "Close menu" });
+      expect(close.parentElement?.style.position).toBe("sticky");
+    });
+
+    it("carries the destinations that have no tab of its own on a phone, and Help", async () => {
+      const user = userEvent.setup();
+      renderSidebar("/agencies/1/live?from=2026-06-01&to=2026-06-07");
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const dialog = screen.getByRole("dialog");
+      const nav = within(dialog).getByRole("navigation", { name: "Destinations" });
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Time", "Why", "Compare", "Reports"]);
+      expect(within(nav).getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/agencies/1/reports");
+      expect(within(dialog).getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
+    });
+
+    it("closes when the close button inside it is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Close menu" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("renders through the shared overlay base", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("dialog")).toHaveClass("ui-overlay-panel");
+      expect(screen.getByRole("presentation")).toHaveClass("ui-overlay-scrim");
+    });
+
+    it("closes when the backdrop is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("dialog")).toBeTruthy();
       await user.click(screen.getByRole("presentation"));
-      expect(screen.queryAllByRole("link", { name: /Overview/ }).length).toBe(0);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("closes when Escape is pressed", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("closes when a nav link inside it (e.g. the onboarding prototype link) is clicked", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getByText("First-time login screen"));
+      expect(screen.queryByRole("dialog")).toBeNull();
     });
   });
 });

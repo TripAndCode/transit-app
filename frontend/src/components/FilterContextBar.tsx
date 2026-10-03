@@ -1,11 +1,15 @@
-import { useState, type CSSProperties } from "react";
+import { use, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { FilterCtx } from "../api/types";
-import type { DowFilter } from "../api/rangeContext";
-import { DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
+import type { DowFilter } from "../api/scope";
+import { dowValueLabel } from "../utils/filterValueLabels";
+import { DataEndContext, defaultPeriod } from "../api/scope";
 import { rangeLabel } from "../utils/rangeLabel";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
+import { pill, groupLabel } from "./pillStyles";
+import { FILTER_SEPARATOR } from "../utils/format";
+import "./FilterContextBar.css";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -19,9 +23,9 @@ type Props = {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 /** Reuses ThreadSidebar's rangeLabel for the date-range segment; the
- *  day-of-week key namespace, empty-range fallback, and join separator are
- *  intentionally different between the two callers, so only the range block
- *  (the part that had the same separator bug fixed twice) is shared. */
+ *  day-of-week key namespace and empty-range fallback are intentionally
+ *  different between the two callers, so only the range block (the part
+ *  that had the same separator bug fixed twice) is shared. */
 function filterSummary(
   fc: FilterCtx,
   t: (key: string, opts?: Record<string, unknown>) => string,
@@ -33,9 +37,10 @@ function filterSummary(
   parts.push(rangeLabel(fc, t) ?? t("filters.range.last_30d"));
 
   // Day-of-week
-  if (fc.dow && fc.dow !== "all") {
-    const dowKey = fc.dow === "weekday" ? "ask.filter_bar.dow_weekday" : "ask.filter_bar.dow_weekend";
-    parts.push(t(dowKey));
+  if (fc.dow === "weekday" || fc.dow === "weekend") {
+    parts.push(t(fc.dow === "weekday" ? "ask.filter_bar.dow_weekday" : "ask.filter_bar.dow_weekend"));
+  } else if (fc.dow && fc.dow !== "all") {
+    parts.push(dowValueLabel(fc.dow, t));
   }
 
   // Time band
@@ -45,7 +50,7 @@ function filterSummary(
     if (label !== tbKey) parts.push(label);
   }
 
-  return parts.join(" ▸ ");
+  return parts.join(FILTER_SEPARATOR);
 }
 
 function routesSummary(
@@ -72,27 +77,6 @@ const pillRowStyle: CSSProperties = {
   fontSize: 12,
   color: "var(--text-secondary)",
 };
-
-const groupLabel: CSSProperties = {
-  fontSize: 11,
-  color: "var(--text-tertiary)",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  marginBottom: 6,
-  display: "block",
-};
-
-const pill = (active: boolean): CSSProperties => ({
-  background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-  color: active ? "var(--accent)" : "var(--text-secondary)",
-  border: `1px solid ${active ? "var(--accent)" : "var(--border-soft)"}`,
-  borderRadius: 999,
-  padding: "4px 12px",
-  fontSize: 12,
-  fontWeight: active ? 600 : 400,
-  cursor: "pointer",
-  transition: "all var(--transition)",
-});
 
 const editButtonStyle: CSSProperties = {
   background: "transparent",
@@ -123,8 +107,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
   const [editing, setEditing] = useState(false);
 
   // Draft uses explicit date defaults when value has no dates
-  const defaultFrom = isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
-  const defaultTo = todayISO();
+  const { from: defaultFrom, to: defaultTo } = defaultPeriod(use(DataEndContext));
 
   const [draft, setDraft] = useState<FilterCtx>(() => ({
     ...value,
@@ -234,7 +217,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
               type="button"
               onClick={() => setDraft((d) => ({ ...d, dow: o.value }))}
               disabled={pending}
-              style={pill((draft.dow ?? "all") === o.value)}
+              style={pill((draft.dow ?? "all") === o.value, "sm")}
             >
               {o.label}
             </button>
@@ -252,7 +235,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
               type="button"
               onClick={() => setDraft((d) => ({ ...d, time_band: o.value }))}
               disabled={pending}
-              style={pill((draft.time_band ?? "all") === o.value)}
+              style={pill((draft.time_band ?? "all") === o.value, "sm")}
             >
               {o.label}
             </button>
@@ -293,7 +276,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
             cursor: pending ? "not-allowed" : "pointer",
           }}
         >
-          {t("ask.filter_bar.cancel")}
+          {t("common.cancel")}
         </button>
         <button
           type="button"
@@ -301,7 +284,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
           disabled={pending}
           style={{
             background: pending ? "var(--bg-soft)" : "var(--accent)",
-            color: pending ? "var(--text-tertiary)" : "#fff",
+            color: pending ? "var(--text-tertiary)" : "var(--on-accent)",
             border: "none",
             borderRadius: 4,
             padding: "6px 18px",
@@ -311,29 +294,13 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
-            boxShadow: pending ? "none" : "0 1px 2px rgba(91,108,173,0.25)",
+            boxShadow: pending ? "none" : "var(--el-1)",
           }}
         >
-          {pending && (
-            <span
-              aria-hidden
-              style={{
-                display: "inline-block",
-                width: 12,
-                height: 12,
-                border: "2px solid currentColor",
-                borderTopColor: "transparent",
-                borderRadius: "50%",
-                animation: "fcb-spin 0.7s linear infinite",
-              }}
-            />
-          )}
+          {pending && <span aria-hidden className="fcb-spinner" />}
           {t("ask.filter_bar.apply")}
         </button>
       </div>
-
-      {/* Spinner keyframes (scoped) */}
-      <style>{`@keyframes fcb-spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

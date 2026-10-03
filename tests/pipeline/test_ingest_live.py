@@ -82,8 +82,8 @@ def test_ingest_live_fetches_and_ingests(tmp_path):
 def test_ingest_live_skips_duplicate_poll_within_same_second(tmp_path):
     """Two invocations landing in the same second (a double cron poke, or a
     retried BackgroundTask on the cron endpoint) would produce the identical
-    second-granularity file_name. Postgres's UNIQUE(agency_id, file_name,
-    trip_id, stop_sequence) + ON CONFLICT DO NOTHING used to absorb this
+    second-granularity file_name. A Postgres UNIQUE(agency_id, file_name,
+    trip_id, stop_sequence) + ON CONFLICT DO NOTHING would absorb this
     for free; ClickHouse has no equivalent, so ingest_live must check first
     and skip entirely rather than double-insert the same poll."""
     mock_conn = MagicMock()
@@ -108,3 +108,26 @@ def test_ingest_live_skips_duplicate_poll_within_same_second(tmp_path):
     mock_parse.assert_not_called()
     mock_insert.assert_not_called()
     assert result == 0
+
+
+def _counts(ch_client, agency_id):
+    def n(table):
+        return ch_client.query(
+            f"SELECT count() FROM {table} WHERE agency_id = {{a:UInt16}}", parameters={"a": agency_id}
+        ).result_rows[0][0]
+
+    return n("updates_live"), n("updates")
+
+
+def test_a_live_payload_lands_in_updates_live_only(pg_conn, ch_client, agency_id):
+    from datetime import datetime, timezone
+
+    from pipeline.ingest import ingest_live_payload
+
+    captured = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    row = ("oracle/20261002/TripUpdate_031500.pb", captured, "平日_12時00分_系統1", "平日", "12:00", "1", 1, 30)
+    with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[row]):
+        assert ingest_live_payload(agency_id, b"raw", captured, row[0], pg_conn, ch_client) == 1
+        # A retry is recognised against the table the first copy went to.
+        assert ingest_live_payload(agency_id, b"raw", captured, row[0], pg_conn, ch_client) == 0
+    assert _counts(ch_client, agency_id) == (1, 0)

@@ -13,6 +13,7 @@
 #
 # Usage: strip_vite_manifest.sh <dir-containing-a-.vite-subdir>
 set -eu
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 if [ -z "${1:-}" ]; then
   echo "usage: $0 <dir-containing-a-.vite-subdir>" >&2

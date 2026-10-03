@@ -17,6 +17,7 @@ response body can OOM the ingest process (a huge or zip-bomb'd payload).
 """
 
 import ipaddress
+import re
 import socket
 import urllib.error
 import urllib.request
@@ -47,6 +48,24 @@ def _redact_url(url: str) -> str:
     if parts.port:
         netloc += f":{parts.port}"
     return f"{parts.scheme}://{netloc}{parts.path}" if parts.scheme else netloc + parts.path
+
+
+#: An http(s) URL embedded in free text. Deliberately stops before trailing
+#: sentence punctuation so "fetching <url>." does not swallow the period into
+#: the path and change what the redacted URL says.
+_URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"']*[^\s<>\"'.,;:!?)\]}]")
+
+
+def redact_urls_in_text(text: str) -> str:
+    """``text`` with every embedded URL put through :func:`_redact_url`.
+
+    Anything a feed fetch raises can end up somewhere durable — an operator's
+    timeline row, an application log — and the URL inside it routinely
+    carries an API key in its query string or a ``user:pass@`` segment. This
+    is the message-shaped entry point to that redaction; :func:`_redact_url`
+    itself takes a bare URL and would mangle a sentence.
+    """
+    return _URL_IN_TEXT_RE.sub(lambda match: _redact_url(match.group(0)), text)
 
 
 _SIXTOFOUR_NET = ipaddress.ip_network("2002::/16")

@@ -173,6 +173,48 @@ def test_process_doc_wins_when_mixed_with_an_ordinary_markdown_file(repository: 
     assert manifest["suggested_tier"] == "process-doc"
 
 
+def test_agents_md_is_an_executable_process_doc(repository: Path, tmp_path: Path):
+    """AGENTS.md holds the rules CLAUDE.md imports, so a change to it alone must
+    route like CLAUDE.md rather than as ordinary prose."""
+
+    git(repository, "switch", "-c", "feature")
+    (repository / "AGENTS.md").write_text("# rules\n", encoding="utf-8")
+    git(repository, "add", "AGENTS.md")
+    git(repository, "commit", "-m", "touch agent rules")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == ["AGENTS.md"]
+    assert manifest["suggested_tier"] == "process-doc"
+
+
+def test_agents_md_mixed_with_an_ordinary_markdown_file_stays_a_process_doc(repository: Path, tmp_path: Path):
+    git(repository, "switch", "-c", "feature")
+    (repository / "AGENTS.md").write_text("# rules\n", encoding="utf-8")
+    docs = repository / "docs" / "features"
+    docs.mkdir(parents=True)
+    (docs / "foo.md").write_text("feature notes\n", encoding="utf-8")
+    git(repository, "add", "AGENTS.md", "docs/features/foo.md")
+    git(repository, "commit", "-m", "mix agent rules with ordinary doc")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == ["AGENTS.md", "docs/features/foo.md"]
+    assert manifest["suggested_tier"] == "process-doc"
+
+
+def test_codex_skill_link_is_reviewed_as_a_process_doc(repository: Path, tmp_path: Path):
+    skill = repository / ".agents" / "skills" / "example"
+    skill.parent.mkdir(parents=True)
+    skill.symlink_to("../../.claude/skills/example")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == [".agents/skills/example"]
+    assert manifest["suggested_tier"] == "process-doc"
+    assert "../../.claude/skills/example" in Path(str(manifest["diff_path"])).read_text(encoding="utf-8")
+
+
 def test_process_doc_wins_when_a_claude_markdown_file_mixes_with_an_ordinary_markdown_file(
     repository: Path, tmp_path: Path
 ):
@@ -239,21 +281,18 @@ def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: P
     "path",
     [
         ".pre-commit-config.yaml",
+        ".codex/hooks.json",
+        ".codex/hooks/pre-push.sh",
+        ".codex/config.toml",
         "scripts/setup_git_hooks.sh",
         "frontend/package.json",
         "scripts/cleanup_git_state.py",
         "scripts/daily_git_hygiene.py",
         "scripts/prepare_review.py",
-        "deploy/vps/claude-loop.sh",
-        "deploy/systemd/claude-loop.service",
-        "scripts/vps_loop_chain_state.py",
-        "scripts/vps_loop_health.py",
         "tests/unit/test_prepare_review.py",
         "tests/unit/test_cleanup_git_state.py",
         "tests/unit/test_daily_git_hygiene.py",
         "tests/unit/test_setup_git_hooks.py",
-        "tests/unit/test_vps_loop_chain_state.py",
-        "tests/unit/test_vps_loop_health.py",
         ".gitleaks.toml",
         "tests/unit/test_gitleaks_allowlist_scope.py",
         "tests/unit/test_gitleaks_version_pin.py",

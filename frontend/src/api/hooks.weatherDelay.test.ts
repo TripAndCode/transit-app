@@ -3,7 +3,8 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useWeatherDelay } from "./hooks";
-import type { RangeCtx } from "./rangeContext";
+import type { Scope } from "./scope";
+import { SCOPE_EXTRAS_NONE } from "./scope";
 import type { WeatherDelayResponse } from "./types";
 
 const mockApiGet = vi.fn();
@@ -11,7 +12,8 @@ vi.mock("./client", () => ({
   apiGet: (...args: unknown[]) => mockApiGet(...args),
 }));
 
-const CTX: RangeCtx = {
+const CTX: Scope = {
+  ...SCOPE_EXTRAS_NONE,
   from: "2026-08-01",
   to: "2026-08-31",
   dow: "all",
@@ -20,7 +22,7 @@ const CTX: RangeCtx = {
   routes: [],
 };
 
-function setup(agencyId: number | null, ctx: RangeCtx, enabled: boolean) {
+function setup(agencyId: number | null, ctx: Scope, enabled: boolean) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return renderHook(() => useWeatherDelay(agencyId, ctx, enabled), {
     wrapper: ({ children }) => createElement(QueryClientProvider, { client: queryClient }, children),

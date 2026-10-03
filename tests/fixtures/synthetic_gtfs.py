@@ -1,33 +1,34 @@
-"""Growable synthetic GTFS static+RT fixture generator (item 21).
+"""Growable synthetic GTFS static+RT fixture generator.
 
-Existing fixtures (``tests/fixtures/hiroden_static.zip`` etc.) and
+The other fixtures (``tests/fixtures/hiroden_static.zip`` etc.) and
 ``tests/pipeline/test_static_loader.py``/``test_static_join.py`` only cover
-the *loading* step of the pipeline — nothing before this module verified
+the *loading* step of the pipeline. This module is what lets tests verify
 that ``agg_*`` table values (built by ``pipeline/analyze.py`` from GTFS-RT
 ``updates`` observations in ClickHouse) are numerically correct against
 hand-computable expected results.
 
 This module provides two things:
 
-1. ``build_static_zip`` — a GTFS static zip builder. Hoisted from
-   ``tests/pipeline/test_static_loader.py``'s original ``_make_zip`` (now a
-   thin re-export there, see that file) so there is exactly one place that
-   builds a minimal GTFS static zip for tests, extended with an optional
-   ``stop_times_rows`` param the original never needed.
+1. ``build_static_zip`` — a GTFS static zip builder, the one place that
+   builds a minimal GTFS static zip for tests
+   (``tests/pipeline/test_static_loader.py`` imports it as ``_make_zip``),
+   with an optional ``stop_times_rows`` param for patterns whose RT rows
+   join to a static stop_id/stop_sequence pair.
 2. A small, growable set of named ``SyntheticPattern`` builder functions
    (``uniform_delays``, ``outlier_spike``, ``null_delays``). Each returns a
    fully self-contained dataset — a GTFS static fragment (routes/stops/
    trips/stop_times) plus matching synthetic ``updates`` rows — along with
    an ``expected`` dict of hand-computed ``agg_*`` values. That dict is the
    single source of truth for "what the right answer is" for this pattern;
-   ``tests/pipeline/test_synthetic_agg_e2e.py`` (item 21) and later
-   frontend/Ask-tab checks (items 22/23) both import it instead of each
-   re-deriving their own expected numbers.
+   ``tests/pipeline/test_synthetic_agg_e2e.py``, the dashboard display
+   check (``tests/dashboard_synthetic_display_test.py``) and the live-LLM
+   numeric eval (``tests/ask_eval/test_synthetic_numeric.py``) all import it
+   instead of each re-deriving their own expected numbers.
 
 Add new patterns as new functions returning ``SyntheticPattern`` — do not
 grow the existing three into a single parameterized mega-fixture; the whole
-point of separate named functions is that a future item can add a fourth
-pattern (e.g. multi-route, multi-day) without restructuring the existing
+point of separate named functions is that a fourth pattern (e.g.
+multi-route, multi-day) can be added without restructuring the existing
 ones or their callers.
 """
 
@@ -55,12 +56,10 @@ def build_static_zip(
 ) -> str:
     """Build a minimal GTFS Static zip for testing.
 
-    Same shape as the original ``_make_zip`` in
-    ``tests/pipeline/test_static_loader.py`` (stops.txt/trips.txt/routes.txt,
-    included only when their *_rows arg is not None), plus an optional
-    ``stop_times.txt`` the original never wrote — needed here so synthetic
-    RT `updates` rows can join to a real stop_id/stop_sequence pair the same
-    way ``pipeline/analyze.py``'s has_static path does in production.
+    Each of stops.txt/trips.txt/routes.txt/stop_times.txt is included only
+    when its *_rows arg is not None. ``stop_times.txt`` lets synthetic RT
+    `updates` rows join to a real stop_id/stop_sequence pair the same way
+    ``pipeline/analyze.py``'s has_static path does in production.
     """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -444,6 +443,5 @@ def null_delays() -> SyntheticPattern:
     )
 
 
-# All patterns, for callers (e.g. a future item 22/23 fixture) that want to
-# iterate every pattern rather than naming one.
+# All patterns, for callers that iterate every pattern rather than naming one.
 ALL_PATTERNS = (uniform_delays, outlier_spike, null_delays)

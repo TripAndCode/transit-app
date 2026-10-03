@@ -1,14 +1,11 @@
-"""Proves build_dedup_ch_sql selects the same "latest observation per stop
-event" rows as the Postgres DISTINCT ON version it replaced, on a small
-fixture designed to exercise the tiebreak (two files, same captured_at
-second, different file_name).
+"""Proves build_dedup_ch_sql selects the "latest observation per stop
+event" rows on a small fixture designed to exercise the tiebreak (two
+files, same captured_at second, different file_name).
 
-Also covers the pieces that used to be pinned against the now-deleted
-Postgres builders (`build_dedup_inner_sql` / `_dedup_cte`) in
-tests/pipeline/test_dedup.py: the implausible-delay clamp, the
-`include_captured_at` projection toggle, and `_dedup_cte_ch` — the
-ClickHouse-dialect composition of a range filter + dedup that every
-report/route/overview helper reads live `updates` through."""
+Also covers the implausible-delay clamp, the `include_captured_at`
+projection toggle, and `_dedup_cte_ch` — the ClickHouse-dialect composition
+of a range filter + dedup that every report/route/overview helper reads live
+`updates` through."""
 
 import os
 from datetime import date, datetime, timezone
@@ -155,10 +152,7 @@ def test_include_captured_at_flag_adds_last_captured_at_projection():
 def test_dedup_ch_excludes_implausible_delay_spikes():
     """The dedup drops |dep_delay| > MAX_PLAUSIBLE_DELAY_SEC (frozen-feed
     spikes), so every aggregate/report built from it is protected — not just
-    the heatmap. Regression for the 2026-06-07 馬木料金所前 false average (see
-    pipeline/db.py's MAX_PLAUSIBLE_DELAY_SEC docstring). Ports
-    tests/pipeline/test_dedup.py's equivalent assertion against the
-    now-deleted Postgres `build_dedup_inner_sql`."""
+    the heatmap (see pipeline/db.py's MAX_PLAUSIBLE_DELAY_SEC comment)."""
     from db.clickhouse.bootstrap import apply_schema
     from pipeline.clickhouse import insert_updates
 
@@ -294,3 +288,10 @@ def test_delay_ceiling_is_single_source_of_truth():
     import pipeline.db as db
 
     assert analyze.MAX_PLAUSIBLE_DELAY_SEC is db.MAX_PLAUSIBLE_DELAY_SEC
+
+
+def test_dedup_reads_the_table_it_is_given():
+    assert "FROM updates AS u" in build_dedup_ch_sql()
+    assert "FROM updates_live AS u" in build_dedup_ch_sql(table="updates_live")
+    with pytest.raises(ValueError):
+        build_dedup_ch_sql(table="agg_route_daily")

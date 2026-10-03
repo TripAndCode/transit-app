@@ -51,7 +51,6 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
         ctx,
         conn,
         agency_id,
-        model="x",
         locale="ja",
         rag_examples=None,
         history=None,
@@ -162,18 +161,17 @@ async def test_ask_router_rule_hit_skips_llm(ask_client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ask_stage1_dispatch_degrades_on_clickhouse_unavailable(ask_client):
-    """Fix B follow-up regression: a rule-hit question routed to a
-    ClickHouse-backed describe_data kind (date_range/overview/sample_counts)
-    must return 200 with a graceful tool_error answer when ClickHouse is
-    unavailable, not 503 the whole request.
+    """A rule-hit question routed to a ClickHouse-backed describe_data kind
+    (date_range/overview/sample_counts) must return 200 with a graceful
+    tool_error answer when ClickHouse is unavailable, not 503 the whole
+    request.
 
     `ask_app`'s fixture sets `app.state.ch_client = None`, which `api.deps
-    .get_ch` now turns into the always-raising `_ClickHouseUnavailable`
-    stand-in (Fix A) rather than a bare `None` — exercising the real
-    dispatch path end-to-end, no mocking needed. Before this fix, Stage 1/2
-    had no try/except around `dispatch(...)` (unlike chat.py's Stage 3,
-    which already degrades this way), so the stand-in's HTTPException(503)
-    propagated all the way up and 503'd the endpoint.
+    .get_ch` turns into the always-raising `_ClickHouseUnavailable`
+    stand-in rather than a bare `None` — exercising the real dispatch path
+    end-to-end, no mocking needed. Stage 1/2 must catch the stand-in's
+    HTTPException(503) around `dispatch(...)`, as chat.py's Stage 3 does,
+    rather than let it propagate up and 503 the endpoint.
     """
     client, agency_id = ask_client
     resp = await client.post(
@@ -188,7 +186,7 @@ async def test_ask_stage1_dispatch_degrades_on_clickhouse_unavailable(ask_client
     assert data.get("router_stage") == "rules"
     assert data["result"] is None
     assert "describe_data" in data["answer"]
-    # Fix 8f: the degraded answer must come from a fixed locale string, never
+    # The degraded answer must come from a fixed locale string, never
     # from the exception's raw text (the _ClickHouseUnavailable stand-in's
     # HTTPException.detail is "ClickHouse is unavailable") — that text must
     # never reach an unauthenticated client.
@@ -197,16 +195,17 @@ async def test_ask_stage1_dispatch_degrades_on_clickhouse_unavailable(ask_client
 
 @pytest.mark.asyncio
 async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, monkeypatch):
-    """Fix 8f regression: Stage 1/2's dispatch(...) raising
+    """Stage 1/2's dispatch(...) raising
     ``asyncpg.exceptions.UndefinedTableError`` (an ``agg_*`` table missing on a
     migration-lagged environment) must propagate out of the router body so
     FastAPI's registered ``aggregate_not_ready_handler`` (see api/main.py and
     api/aggregate_errors.py) catches it and returns the machine-readable
     ``{"code": "aggregate_not_ready"}`` 503 the frontend is built to react to.
 
-    Before this fix, the blanket ``except Exception`` around ``dispatch(...)``
-    in api/routers/ask.py swallowed this and answered a generic 200
-    ``tool_error`` instead — exactly the regression this fix closes.
+    The degraded-answer handler around ``dispatch(...)`` in api/routers/ask.py
+    must not catch it: answering a generic 200 ``tool_error`` instead would
+    hide a missing table behind something that looks like an ordinary
+    tool failure.
     """
     client, agency_id = ask_client
 
@@ -239,7 +238,6 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,
@@ -279,7 +277,6 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,
@@ -315,9 +312,9 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
     assert resp.status_code == 200
     assert captured["history"] and captured["history"][0]["question"] == "停留所はいくつ？"
     assert resp.json().get("router_stage") == "llm"
-    # Regression pin (item 8 / NEXT_TASK.md): a recognized pagination
-    # follow-up must force a tool call rather than leave tool_choice="auto",
-    # which live-observed a bare "次の50件" coming back with tool_call: None.
+    # A recognized pagination follow-up must force a tool call rather than
+    # leave tool_choice="auto", under which a bare "次の50件" can come back
+    # with tool_call: None.
     assert captured["force_tool_call"] is True
 
 
@@ -329,7 +326,7 @@ async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask
     that can legitimately follow an out-of-scope refusal, not just a
     pagination continuation. Forcing tool_choice="required" there would
     remove the model's only correct move (decline again) and risk a
-    hallucinated call instead (item 8 review finding).
+    hallucinated call instead.
     """
     client, agency_id = ask_client
     captured = {}
@@ -339,7 +336,6 @@ async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,
@@ -389,7 +385,6 @@ async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, m
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,
@@ -441,7 +436,6 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,
@@ -499,27 +493,27 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
 
 @pytest.mark.asyncio
 async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(ask_client, monkeypatch):
-    """item 16 repro: an unrelated in-scope question with no follow-up
-    phrasing, but with unrelated history from a prior ``top_n`` ranking
-    turn attached, must still be able to surface a fresh tool call.
+    """An unrelated in-scope question with no follow-up phrasing, but with
+    unrelated history from a prior ``top_n`` ranking turn attached, must
+    still be able to surface a fresh tool call.
 
-    Live-observed bug (2026-08-28): with an active conversation showing a
-    route delay ranking table, a plain "停留所はいくつ？" ("how many stops
-    are there?") — on topic but not continuation wording, so
-    ``is_follow_up()`` correctly evaluates False and ``route_or_examples()``
-    runs — came back as a prose non-answer ("the table doesn't include stop
-    counts") instead of dispatching ``describe_data(kind=stops)``, because
-    Stage 3 attached the full history and let the model reason from its
-    (unrelated) table text instead of calling a tool.
+    The failure this guards: with an active conversation showing a route
+    delay ranking table, a plain "停留所はいくつ？" ("how many stops are
+    there?") — on topic but not continuation wording, so ``is_follow_up()``
+    correctly evaluates False and ``route_or_examples()`` runs — can come
+    back as a prose non-answer ("the table doesn't include stop counts")
+    instead of dispatching ``describe_data(kind=stops)``, because Stage 3
+    attaches the full history and the model can reason from its (unrelated)
+    table text instead of calling a tool.
 
     This exact question actually matches Stage 1's deterministic
     ``meta-stops`` rule (``pipeline/query/router.py``), so ``route_or_examples``
     is monkeypatched here to force a fall-through to Stage 3
-    (``chat_with_tools``) exactly like the live repro, mirroring
+    (``chat_with_tools``), which is where the scenario above occurs, mirroring
     ``test_ask_writes_query_log_row``'s ``no_decision`` pattern in this same
     file. ``chat_with_tools`` is mocked here (as in the other tests in this
     file) to play the role of a correctly-behaving model — the real
-    prompt-level fix that makes that behaviour likely is pinned separately in
+    prompt-level guard that makes that behaviour likely is pinned separately in
     ``tests/query/test_chat_null_args.py``. This test pins the surrounding
     plumbing: not a recognized continuation (so ``force_tool_call`` stays
     False — tool_choice="auto" — see
@@ -536,7 +530,6 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,
@@ -593,7 +586,6 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,
@@ -640,7 +632,6 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,
@@ -770,7 +761,6 @@ async def test_ask_forwards_panel_ctx_to_chat_with_tools(ask_client, monkeypatch
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,
@@ -811,7 +801,6 @@ async def test_ask_omits_panel_ctx_by_default(ask_client, monkeypatch):
         ctx,
         conn,
         agency_id,
-        model=None,
         locale="ja",
         rag_examples=None,
         history=None,

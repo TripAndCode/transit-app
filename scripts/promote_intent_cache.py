@@ -5,12 +5,11 @@ A row is promoted when it has been observed >=hit_threshold times with no
 promoted yet.  After insertion the cache row's promoted_at is stamped so it
 isn't re-promoted.
 
-The inserted chunk reuses the same e5 ``passage:`` prefix as
-``build_rag_index`` so the Stage-2 embedding nearest-neighbor query in
-``rag_index.nearest()`` can find promoted questions without modification.
-
-chunk_id format: ``cache_<signature_hash>`` (16-hex chars) — unique per
-(agency, canonical intent) and clearly identifies the source.
+This is a thin CLI wrapper: the eligibility scan + rag_chunks upsert logic
+lives in ``pipeline.query.intent_promotion`` so the admin "promote to intent
+cache" action (``api/routers/admin_ask.py``, single-row, bypasses the
+hit_threshold/quiet_days gate) can reuse it without duplicating the
+embedding/upsert code.
 
 Usage::
 
@@ -22,24 +21,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
-import json
 import logging
 import os
 
 import asyncpg
 
-from pipeline.query import intent_cache
 from pipeline.query.embeddings import get_embedder
-from pipeline.query.rag_index import _format_vec
-from pipeline.query.tools import _HANDLERS as _DISPATCHABLE_TOOLS
+from pipeline.query.intent_promotion import promote as _promote_core
 
 _log = logging.getLogger(__name__)
-
-
-def _content_hash(text: str) -> str:
-    """Return the hex SHA-256 of ``text``, used as the ``rag_chunks.content_hash`` sentinel."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 async def promote(agency_id: int, hit_threshold: int = 5, quiet_days: int = 7) -> int:
@@ -50,68 +40,7 @@ async def promote(agency_id: int, hit_threshold: int = 5, quiet_days: int = 7) -
 
     conn = await asyncpg.connect(os.environ["DATABASE_URL"])
     try:
-        candidates = await intent_cache.promotion_candidates(
-            conn,
-            agency_id,
-            hit_threshold=hit_threshold,
-            quiet_days=quiet_days,
-        )
-        promoted = 0
-        for c in candidates:
-            # Skip rows whose stored tool is not in the live dispatch table.
-            # The LLM sometimes returns ``tool="none"`` (or an obsolete name)
-            # for out-of-scope questions; promoting them would pollute the RAG
-            # index with garbage NN candidates.
-            if c["tool"] not in _DISPATCHABLE_TOOLS:
-                _log.info("skipping unknown tool %r for sig %s", c["tool"], c["signature_hash"])
-                continue
-            content = c["last_question"]
-            chunk_id = f"cache_{c['signature_hash']}"
-
-            # Embed using the same convention as build_rag_index (passage: prefix).
-            vec = embedder.embed(content, mode="passage")
-            new_hash = _content_hash(content)
-
-            # Upsert: if a promoted chunk already exists (e.g. question text
-            # changed) update it; otherwise insert fresh.  In practice the
-            # promoted_at guard on promotion_candidates means we'll never
-            # re-visit an already-promoted row, but the upsert makes the job
-            # fully idempotent if called concurrently or after a partial run.
-            existing = await conn.fetchrow(
-                "SELECT content_hash FROM rag_chunks WHERE agency_id=$1 AND chunk_id=$2",
-                agency_id,
-                chunk_id,
-            )
-            if existing is None:
-                await conn.execute(
-                    "INSERT INTO rag_chunks (chunk_id, agency_id, content, embedding, content_hash) "
-                    "VALUES ($1, $2, $3, $4::vector, $5)",
-                    chunk_id,
-                    agency_id,
-                    content,
-                    _format_vec(vec),
-                    new_hash,
-                )
-            elif existing["content_hash"] != new_hash:
-                await conn.execute(
-                    "UPDATE rag_chunks SET content=$3, embedding=$4::vector, content_hash=$5, embedded_at=now() "
-                    "WHERE agency_id=$1 AND chunk_id=$2",
-                    agency_id,
-                    chunk_id,
-                    content,
-                    _format_vec(vec),
-                    new_hash,
-                )
-
-            await intent_cache.mark_promoted(conn, c["signature_hash"], agency_id)
-            promoted += 1
-            _log.info(
-                "promoted %s → %s(%s)",
-                c["signature_hash"],
-                c["tool"],
-                json.dumps(c["args"], ensure_ascii=False),
-            )
-        return promoted
+        return await _promote_core(conn, agency_id, embedder, hit_threshold=hit_threshold, quiet_days=quiet_days)
     finally:
         await conn.close()
 

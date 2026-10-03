@@ -1,1 +1,6 @@
-tests/fixtures/*.zip binary
+* text=auto eol=lf
+*.zip binary
+*.pb binary
+*.bin binary
+*.png binary
+*.jpg binary

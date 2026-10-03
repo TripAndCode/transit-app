@@ -82,7 +82,6 @@ def _redirect_to_test_db() -> None:
 
 
 _redirect_to_test_db()
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 # Origin that ASGITransport's default `base_url="http://test"` emits when tests
 # set it. csrf_guard's ALLOW_TEST_ORIGIN path trusts this exact value when
@@ -91,11 +90,38 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 TEST_ORIGIN = "http://test"
 
 
+def _database_url() -> str:
+    """Read ``DATABASE_URL`` lazily, only when a DB fixture is actually used.
+
+    This module is imported (as pytest's parent conftest) for every test
+    under ``tests/``, including ``tests/unit``, which has no DB dependency
+    and overrides the fixtures below to no-ops (see ``tests/unit/conftest.py``).
+    Reading the env var eagerly at import time would make ``pytest tests/unit``
+    crash with ``DATABASE_URL`` unset even though nothing here ever uses it.
+    """
+    try:
+        return os.environ["DATABASE_URL"]
+    except KeyError:
+        raise RuntimeError(
+            "DATABASE_URL is not set. Tests that touch Postgres require it; "
+            "tests/unit does not (see tests/unit/conftest.py)."
+        ) from None
+
+
+def __getattr__(name: str) -> str:
+    """Lazy module attribute for backward-compatible ``from tests.conftest
+    import DATABASE_URL`` in test files that need the resolved (possibly
+    ``_test``-redirected) URL directly."""
+    if name == "DATABASE_URL":
+        return _database_url()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema():
     from db.migrate import migrate_up
 
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     migrate_up(conn)
     conn.close()
 
@@ -124,7 +150,7 @@ def reset_sql(apply_schema) -> str:
     topological order, and back on before the statement ends, so no test
     body ever runs with them disabled.
     """
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -170,7 +196,7 @@ def _clear_compute_caches():
 
 @pytest.fixture
 def pg_conn(apply_schema, reset_sql):
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     # Mirror api/main.py _init_connection (and the aconn fixture) so
     # `captured_at::date` casts in psycopg2-path tests use the same JST
     # civil calendar as production. Without this, tests that depend on
@@ -211,7 +237,8 @@ def _ch_test_client():
 
 @pytest.fixture(scope="session")
 def _ch_schema() -> None:
-    """Create the ClickHouse `updates` table once per test session.
+    """Create the ClickHouse `updates` and `updates_live` tables once per test
+    session.
 
     A no-op when RUN_CH_INTEGRATION isn't set, so requesting `ch_client`
     still skips cleanly instead of attempting a connection — the check must
@@ -222,6 +249,7 @@ def _ch_schema() -> None:
         return
     client = _ch_test_client()
     try:
+        client.command("DROP TABLE IF EXISTS updates_live")
         client.command("DROP TABLE IF EXISTS updates")
         _apply_ch_schema(client)
     finally:
@@ -235,19 +263,20 @@ def ch_client(_ch_schema):
     Lives in the root conftest, not a subdirectory one, because analyze()'s
     dedup materialization means tests/api/ and tests/query/ need a ClickHouse
     client too, not just tests/pipeline/ — a root conftest fixture is visible
-    to every subdirectory. Truncate (not drop+recreate) before each test for
-    isolation, since ClickHouse has no transactional rollback to
-    lean on like the pg_conn fixture does — the schema itself never changes
-    mid-session, so only `_ch_schema` needs to pay MergeTree's CREATE TABLE
-    cost, once. The skip (rather than a file-level pytestmark) lives here so
-    pure, DB-free tests elsewhere in the suite still run without
-    `make ch-test` — only tests that actually request this fixture are
-    gated behind RUN_CH_INTEGRATION.
+    to every subdirectory. Truncate (not drop+recreate) both `updates` and
+    `updates_live` before each test for isolation, since ClickHouse has no
+    transactional rollback to lean on like the pg_conn fixture does — the
+    schema itself never changes mid-session, so only `_ch_schema` needs to pay
+    MergeTree's CREATE TABLE cost, once. The skip (rather than a file-level
+    pytestmark) lives here so pure, DB-free tests elsewhere in the suite still
+    run without `make ch-test` — only tests that actually request this
+    fixture are gated behind RUN_CH_INTEGRATION.
     """
     if os.environ.get("RUN_CH_INTEGRATION") != "1":
         pytest.skip("requires `make ch-test` (RUN_CH_INTEGRATION=1)")
     client = _ch_test_client()
     client.command("TRUNCATE TABLE IF EXISTS updates")
+    client.command("TRUNCATE TABLE IF EXISTS updates_live")
     yield client
     client.close()
 
@@ -276,7 +305,7 @@ async def ch_async_client(ch_client):
     await client.close()
 
 
-def mirror_updates_to_ch(ch_client, agency_id) -> None:
+def mirror_updates_to_ch(ch_client, agency_id, *, table: str = "updates") -> None:
     """Copy *agency_id*'s Postgres `updates` rows into ClickHouse.
 
     analyze() now reads ALL of its `updates` access from ClickHouse (dedup
@@ -292,7 +321,7 @@ def mirror_updates_to_ch(ch_client, agency_id) -> None:
     """
     from pipeline.clickhouse import insert_updates
 
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -319,7 +348,18 @@ def mirror_updates_to_ch(ch_client, agency_id) -> None:
                 dep_delay,
             )
         )
-    insert_updates(ch_client, agency_id, ch_rows)
+    insert_updates(ch_client, agency_id, ch_rows, table=table)
+
+
+@pytest.fixture(autouse=True)
+def _sso_off_unless_a_test_turns_it_on(monkeypatch):
+    """The login gate enforces only while SSO is configured. A shell that
+    exports the OAuth block would otherwise gate every anonymous read in the
+    suite; a test that needs SSO sets the variables itself."""
+    from api.sso import SSO_ENV
+
+    for var in SSO_ENV:
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture

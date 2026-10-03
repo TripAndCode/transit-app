@@ -134,7 +134,7 @@ def test_the_dockerfile_runs_the_gate_and_lets_it_fail_the_build():
     logical_lines = re.sub(r"\\\n\s*", " ", dockerfile)
     invocation = re.compile(
         r"^RUN\s+/usr/local/bin/assert-extensions"
-        r"\s+/usr/share/postgresql/14/extension"
+        r'\s+"/usr/share/postgresql/\$\{PG_MAJOR\}/extension"'
         r"\s+postgis=3\.2\s+vector=0\.8\s+pg_trgm\s*$",
         re.MULTILINE,
     )
@@ -148,6 +148,20 @@ def test_the_dockerfile_runs_the_gate_and_lets_it_fail_the_build():
     assert not re.search(r"^\s*SHELL\b", dockerfile, re.MULTILINE | re.IGNORECASE), (
         "db/Dockerfile must not override SHELL: it changes how every RUN reports its exit status, including the gate's"
     )
+
+
+def test_the_dockerfile_takes_every_postgres_major_from_the_base_image():
+    """An extension package or path for another major installs beside the server
+    without being loadable by it, and the gate would then read that major's
+    directory and pass. Both must follow the base image's `PG_MAJOR`."""
+
+    dockerfile = (ROOT / "db" / "Dockerfile").read_text()
+    instructions = "\n".join(line for line in dockerfile.splitlines() if not line.lstrip().startswith("#"))
+
+    assert not re.search(r"postgresql-\d+-", instructions), "extension packages must be named from ${PG_MAJOR}"
+    assert not re.search(r"/postgresql/\d+/", instructions), "extension paths must be built from ${PG_MAJOR}"
+    assert '"postgresql-${PG_MAJOR}-postgis-3"' in instructions
+    assert '"postgresql-${PG_MAJOR}-pgvector"' in instructions
 
 
 def test_rejects_a_spec_with_an_empty_minimum(extension_dir, stub_path):

@@ -28,8 +28,8 @@ weight.
 for why these describe the current static-feed version's schedule
 definition rather than a date-range total, and why
 ``vehicle_km_delivered_pct`` reads `None` ("trip-count-only" — fall back to
-`planned_trip_count`) whenever either the vehicle-km figure or item 92's
-executed/planned ratio isn't available for this agency.
+`planned_trip_count`) whenever either the vehicle-km figure or the
+executed/planned trip ratio isn't available for this agency.
 """
 
 import logging

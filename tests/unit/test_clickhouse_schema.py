@@ -47,6 +47,30 @@ def test_apply_schema_creates_updates_table():
 
 
 @pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+def test_apply_schema_creates_updates_live_beside_updates():
+    """`updates_live` carries exactly `updates`' columns, so promotion copies by
+    name, and a TTL, so a day nobody promoted cannot grow it without bound."""
+    client = _ch_test_client()
+    client.command("DROP TABLE IF EXISTS updates_live")
+    client.command("DROP TABLE IF EXISTS updates")
+    apply_schema(client)
+
+    def describe(table):
+        return [(r[0], r[1]) for r in client.query(f"DESCRIBE TABLE {table}").result_rows]
+
+    assert describe("updates_live") == describe("updates")
+    partition_key, sorting_key, engine_full = client.query(
+        "SELECT partition_key, sorting_key, engine_full FROM system.tables "
+        "WHERE database = currentDatabase() AND name = 'updates_live'"
+    ).result_rows[0]
+    assert partition_key == "toYYYYMMDD(captured_at)"
+    assert sorting_key == "agency_id, captured_at, route_code, trip_id, stop_sequence"
+    assert "TTL toDateTime(captured_at) + toIntervalDay(3)" in engine_full
+    apply_schema(client)  # idempotent
+    client.close()
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 def test_apply_schema_backfills_new_columns_on_pre_existing_table():
     """apply_schema must reach a table that already existed before its newest
     nullable columns (scheduled_sec, stop_id, arr_delay,
