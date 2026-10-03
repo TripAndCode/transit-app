@@ -36,7 +36,7 @@ export function DefinitionMetaBlock({ definition }: Props) {
   return (
     <details data-testid="definition-meta" className="definition-meta" style={{ margin: "2px 0 14px" }}>
       <summary>{t("definitionMeta.summary")}</summary>
-      <p>{sentences.join(" ")}</p>
+      <p>{sentences.join(t("definitionMeta.sentence_separator"))}</p>
     </details>
   );
 }

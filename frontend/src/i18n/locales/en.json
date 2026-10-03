@@ -227,7 +227,8 @@
     "exclusion_hours_other": "Readings more than {{count}} hours off are ignored as errors.",
     "exclusion_limit": "Readings more than {{limit}} off are ignored as errors.",
     "on_time_late": "On time = no more than {{late}} late.",
-    "on_time_late_early": "On time = no more than {{late}} late and no more than {{early}} early."
+    "on_time_late_early": "On time = no more than {{late}} late and no more than {{early}} early.",
+    "sentence_separator": " "
   },
   "app": {
     "data_stale": {

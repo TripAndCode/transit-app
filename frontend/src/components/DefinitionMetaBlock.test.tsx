@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
+import i18n from "../i18n";
 import { DefinitionMetaBlock } from "./DefinitionMetaBlock";
 import type { DefinitionMeta } from "../api/types";
 
@@ -14,6 +15,10 @@ const LEGACY: DefinitionMeta = {
 };
 
 describe("DefinitionMetaBlock", () => {
+  afterEach(async () => {
+    await i18n.changeLanguage("en");
+  });
+
   it("keeps the method behind one 'How this is calculated' disclosure", () => {
     renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
     const summary = screen.getByText("How this is calculated");
@@ -30,6 +35,12 @@ describe("DefinitionMetaBlock", () => {
     expect(block).toHaveTextContent("On time = no more than 1 min late.");
     expect(block).not.toHaveTextContent("legacy_60s");
     expect(block).not.toHaveTextContent("7200");
+  });
+
+  it("runs Japanese sentences together, without a half-width space between them", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
+    expect(screen.getByTestId("definition-meta").querySelector("p")?.textContent).toContain("平均です。同じ発車");
   });
 
   it("states a custom tolerance, early and late", () => {

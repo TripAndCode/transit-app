@@ -227,7 +227,8 @@
     "exclusion_hours_other": "{{count}}時間以上ずれた値は誤りとして除外します。",
     "exclusion_limit": "{{limit}}以上ずれた値は誤りとして除外します。",
     "on_time_late": "定時 = 遅れ{{late}}以内。",
-    "on_time_late_early": "定時 = 遅れ{{late}}以内、早発{{early}}以内。"
+    "on_time_late_early": "定時 = 遅れ{{late}}以内、早発{{early}}以内。",
+    "sentence_separator": ""
   },
   "app": {
     "data_stale": {
