@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { useTopmostEscape } from "../hooks/useFocusTrap";
-import { EM_DASH, FILTER_SEPARATOR, formatDate, formatDateTime, formatNumber } from "../utils/format";
+import { EM_DASH, FILTER_SEPARATOR, formatDate, formatDateTime, formatNumber, formatReportTime } from "../utils/format";
 import { isToday } from "../utils/threadDateBuckets";
 
 /** The one place that says how recent the agency's data is: the last service
@@ -35,8 +35,8 @@ export function DataFreshness({ agencyId, through }: { agencyId: number; through
   const live =
     lastReading &&
     (isToday(lastReading)
-      ? t("topbar.live_at", { time: formatDateTime(lastReading, { timeStyle: "short" }) })
-      : t("topbar.last_reading", { when: formatDateTime(lastReading) }));
+      ? t("topbar.live_at", { time: formatReportTime(lastReading) })
+      : t("topbar.last_reading", { when: formatReportTime(lastReading) }));
 
   return (
     <div ref={wrapper} className="data-freshness">
