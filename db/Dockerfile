@@ -18,13 +18,17 @@ FROM postgres:14
 # what this image guarantees.
 #
 # Installing at image-build time is what keeps this safe: the server is not
-# running yet, so a package that wants to upgrade `postgresql-14` cannot
+# running yet, so a package that wants to upgrade the server package cannot
 # ABI-mismatch an already-compiled extension against a live backend. The same
 # apt install against a running container is the case that breaks.
+#
+# The official image sets `PG_MAJOR` to its server's major. Every package name
+# and path below derives from it, because an extension built for another major
+# installs cleanly beside the server without being loadable by it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        postgresql-14-postgis-3 \
-        postgresql-14-pgvector \
+        "postgresql-${PG_MAJOR}-postgis-3" \
+        "postgresql-${PG_MAJOR}-pgvector" \
     && rm -rf /var/lib/apt/lists/*
 
 # Positive control for the layer above: the build fails here rather than
@@ -32,5 +36,5 @@ RUN apt-get update \
 # tested — a version floor buried in a `RUN` one-liner can be turned into a
 # no-op by a later cleanup with nothing to catch it.
 COPY assert_extensions.sh /usr/local/bin/assert-extensions
-RUN /usr/local/bin/assert-extensions /usr/share/postgresql/14/extension \
+RUN /usr/local/bin/assert-extensions "/usr/share/postgresql/${PG_MAJOR}/extension" \
         postgis=3.2 vector=0.8 pg_trgm

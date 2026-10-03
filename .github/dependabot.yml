@@ -94,7 +94,7 @@ updates:
           - "minor"
           - "patch"
 
-  # db/Dockerfile (postgres:14 base) -- kept separate from "/" above so a
+  # db/Dockerfile (the postgres base) -- kept separate from "/" above so a
   # bump here doesn't get grouped with the app image/compose bumps, which
   # have an unrelated release cadence.
   - package-ecosystem: "docker"
@@ -111,6 +111,14 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # A Postgres major changes the on-disk format, so a server on the new
+      # base cannot start on an existing data volume. The dev volume holds
+      # real data and needs a dump/restore or pg_upgrade first, which makes a
+      # major a planned migration rather than an update PR.
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
 
   # tools/geosql/compose.yml (dekartxyz/dekart) -- a standalone local tool,
   # not part of the deployed app.
