@@ -16,7 +16,7 @@ export function StopChart({ stops, previous, selected, onSelect }: {
   // into one long dash for the length of the animation and leave it looking
   // like a plain solid line forever after.
   const lineRef = useRef<SVGPathElement | null>(null);
-  useDrawOn(lineRef);
+  useDrawOn(lineRef, stops.length > 0);
   const low = Math.min(0, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const high = Math.max(1, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const x = (i: number) => 52 + i / Math.max(1, stops.length - 1) * 700;

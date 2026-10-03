@@ -745,10 +745,11 @@ summary::-webkit-details-marker { display: none; }
      opacity 0 to its own target opacity (--cell-opacity, set inline by the
      caller -- often itself data-driven, e.g. a sample-density encoding, so
      this can't just animate to a flat 1), each with its own transitionDelay
-     also set inline. */
+     also set inline. The fade is --dur-2 so that staggerDelay()'s cap plus
+     the fade is --dur-3: a whole grid arrives inside the data-change budget. */
   .chart-cell-enter {
     opacity: 0;
-    transition: opacity var(--dur-3) var(--ease-out);
+    transition: opacity var(--dur-2) var(--ease-out);
   }
   .chart-cell-enter.chart-cell-enter--in {
     opacity: var(--cell-opacity, 1);
@@ -766,7 +767,7 @@ summary::-webkit-details-marker { display: none; }
   }
   .chart-cell-enter.chart-focus-dimmable {
     transition:
-      opacity var(--dur-3) var(--ease-out),
+      opacity var(--dur-2) var(--ease-out),
       fill-opacity var(--dur-2) var(--ease-out);
   }
 
