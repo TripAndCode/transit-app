@@ -45,7 +45,7 @@ def _ctx(dow: str) -> RangeCtx:
 
 def test_sql_and_clickhouse_clauses_honour_a_weekday_list():
     frag, params, n = dow_clause("date", _ctx("mon,wed"), 3)
-    assert frag == "EXTRACT(ISODOW FROM date::date) IN (1, 3)"
+    assert frag == "EXTRACT(ISODOW FROM date) IN (1, 3)"
     assert (params, n) == ([], 3)
     ch_frag, ch_params = dow_clause_ch(_ctx("mon,wed"))
     assert ch_frag == "toDayOfWeek(toDate(captured_at, 'Asia/Tokyo')) IN (1, 3)"
@@ -53,8 +53,8 @@ def test_sql_and_clickhouse_clauses_honour_a_weekday_list():
 
 
 def test_legacy_groups_keep_their_clauses():
-    assert dow_clause("date", _ctx("weekday"), 1)[0] == "EXTRACT(ISODOW FROM date::date) BETWEEN 1 AND 5"
-    assert dow_clause("date", _ctx("weekend"), 1)[0] == "EXTRACT(ISODOW FROM date::date) IN (6, 7)"
+    assert dow_clause("date", _ctx("weekday"), 1)[0] == "EXTRACT(ISODOW FROM date) BETWEEN 1 AND 5"
+    assert dow_clause("date", _ctx("weekend"), 1)[0] == "EXTRACT(ISODOW FROM date) IN (6, 7)"
     assert dow_clause("date", _ctx("all"), 1)[0] == "TRUE"
 
 
