@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { reportHref, routeHref, routesHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
-import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
+import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { scopeToQueryString, useScope } from "../api/scope";
 import { useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";

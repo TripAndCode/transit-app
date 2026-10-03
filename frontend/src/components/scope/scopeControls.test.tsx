@@ -4,6 +4,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
+import { AgencyDataEndProvider } from "../../api/AgencyDataEndProvider";
 import * as hooks from "../../api/hooks";
 import { useScope } from "../../api/scope";
 import type { ScopeSummary } from "../../api/types";
@@ -57,10 +58,10 @@ function mount(C: ComponentType<ControlProps>, search = "", summary?: ScopeSumma
         <Route
           path="/agencies/:agencyId/time"
           element={
-            <>
+            <AgencyDataEndProvider>
               <Harness C={C} summary={summary} />
               <Probe />
-            </>
+            </AgencyDataEndProvider>
           }
         />
       </Routes>
@@ -124,6 +125,15 @@ describe("scope controls", () => {
   });
 
   describe("period", () => {
+    afterEach(() => vi.useRealTimers());
+
+    it("shows the default period as the 30-day preset when the data stops before yesterday", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-03T03:00:00Z"));
+      mount(PeriodControl);
+      expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
+    });
+
     it("anchors a preset on the agency's latest data", async () => {
       mount(PeriodControl);
       await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));

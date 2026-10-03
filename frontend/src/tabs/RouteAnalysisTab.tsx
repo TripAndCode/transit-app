@@ -2,7 +2,7 @@ import { Suspense, lazy, use, useRef, useState, type KeyboardEvent } from "react
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
-import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
+import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { ScopeRouteContext, useScope, isoDaysBefore } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";

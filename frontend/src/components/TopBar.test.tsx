@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
-import type { Agency } from "../api/types";
+import type { Agency, RouteSummaryResponse } from "../api/types";
+import { formatDateTime } from "../utils/format";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
 import { TopBar } from "./TopBar";
 
@@ -12,11 +13,16 @@ function agency(agency_id: number, latest_data_date: string | null): Agency {
   return { agency_id, agency_name: `Agency ${agency_id}`, feed_url: "", static_url: null, latest_data_date };
 }
 
-function renderBar(path = "/agencies/9/pulse") {
+function summary(latest_captured_at: string | null): RouteSummaryResponse {
+  return { latest_captured_at, date: null, routes: [], raw_samples: 436691, clamp_count: 0 };
+}
+
+function renderBar(path = "/agencies/9/pulse", latestCapturedAt: string | null = "2026-09-30T11:41:00Z") {
   vi.spyOn(hooks, "useAgencies").mockReturnValue({
     data: [agency(1, "2026-08-01"), agency(9, "2026-09-29")],
     isLoading: false,
   } as never);
+  vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: summary(latestCapturedAt) } as never);
   renderWithProviders(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -63,20 +69,61 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: /Search routes, reports and screens/ })).toBeInTheDocument();
   });
 
-  it("states how recent the current agency's data is", () => {
-    renderBar();
-    expect(screen.getByText("Data through Sep 29, 2026")).toBeInTheDocument();
-  });
+  describe("data freshness", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-30T12:00:00Z")); // 21:00 JST
+    });
+    afterEach(() => vi.useRealTimers());
 
-  it("states nothing about freshness while the agency has no data yet", () => {
-    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [agency(9, null)], isLoading: false } as never);
-    renderWithProviders(
-      <MemoryRouter initialEntries={["/agencies/9/pulse"]}>
-        <Routes>
-          <Route path="/agencies/:agencyId/*" element={<TopBar />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    expect(screen.queryByText(/Data through/)).toBeNull();
+    it("says in one place how far the analysis runs and when the feed last reported", () => {
+      renderBar();
+      const time = formatDateTime("2026-09-30T11:41:00Z", { timeStyle: "short" });
+      expect(screen.getByRole("button", { name: `Analyzed through Tue, Sep 29 · live ${time}` })).toBeInTheDocument();
+    });
+
+    it("dates the last reading when it did not arrive today", () => {
+      renderBar("/agencies/9/pulse", "2026-09-28T11:41:00Z");
+      const when = formatDateTime("2026-09-28T11:41:00Z");
+      expect(screen.getByRole("button", { name: `Analyzed through Tue, Sep 29 · last reading ${when}` })).toBeInTheDocument();
+    });
+
+    it("leaves the live part out before any reading has arrived", () => {
+      renderBar("/agencies/9/pulse", null);
+      expect(screen.getByRole("button", { name: "Analyzed through Tue, Sep 29" })).toBeInTheDocument();
+    });
+
+    it("spells it out in plain words on request, and closes on Escape", async () => {
+      renderBar();
+      const chip = screen.getByRole("button", { name: /Analyzed through/ });
+      await userEvent.click(chip);
+      const panel = screen.getByRole("region", { name: "How fresh the data is" });
+      expect(panel).toHaveTextContent("Service days through Tue, Sep 29, 2026");
+      expect(panel).toHaveTextContent("436,691");
+      expect(panel).toHaveTextContent("Days without readings are left out, not counted as on time.");
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("region", { name: "How fresh the data is" })).toBeNull();
+      expect(chip).toHaveFocus();
+    });
+
+    it("closes when the reader clicks elsewhere", async () => {
+      renderBar();
+      await userEvent.click(screen.getByRole("button", { name: /Analyzed through/ }));
+      await userEvent.click(document.body);
+      expect(screen.queryByRole("region", { name: "How fresh the data is" })).toBeNull();
+    });
+
+    it("states nothing about freshness while the agency has no data yet", () => {
+      vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [agency(9, null)], isLoading: false } as never);
+      vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: summary(null) } as never);
+      renderWithProviders(
+        <MemoryRouter initialEntries={["/agencies/9/pulse"]}>
+          <Routes>
+            <Route path="/agencies/:agencyId/*" element={<TopBar />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      expect(screen.queryByRole("button", { name: /Analyzed through/ })).toBeNull();
+    });
   });
 });

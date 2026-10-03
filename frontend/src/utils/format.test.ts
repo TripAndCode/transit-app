@@ -174,6 +174,13 @@ describe("formatDate and formatShortDate", () => {
     await i18n.changeLanguage("ja");
     expect(formatDate("2026-09-29")).toBe("2026年9月29日");
   });
+
+  it("names the weekday on request, the way each language writes it", async () => {
+    await i18n.changeLanguage("en");
+    expect(formatDate("2026-09-29", { year: false, weekday: true })).toBe("Tue, Sep 29");
+    await i18n.changeLanguage("ja");
+    expect(formatDate("2026-09-29", { year: false, weekday: true })).toBe("9月29日(火)");
+  });
 });
 
 describe("formatHourRange", () => {
