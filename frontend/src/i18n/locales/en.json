@@ -264,6 +264,7 @@
       "feed_status_ok": "Running normally",
       "feed_status_stale": "Data delayed",
       "feed_status_updated": "Last updated {{when}}",
+      "feed_live": "Observed within the last 2 minutes",
       "sparkline_baseline": "Period avg {{value}} min"
     },
     "story": {

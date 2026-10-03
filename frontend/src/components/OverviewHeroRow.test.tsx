@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewHeroRow } from "./OverviewHeroRow";
 import { stubReducedMotion } from "../test/reducedMotion";
@@ -45,6 +45,16 @@ function mockHooks(routeCount: number, feedAgeHours: number | null) {
   } as never);
 }
 
+// The feed's latest observation at an exact instant, for a test that pins the
+// clock rather than offsetting from the real one.
+function mockFeedSummary(capturedAt: string | null) {
+  mockHooks(38, null);
+  vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+    data: { latest_captured_at: capturedAt, date: null, routes: [], raw_samples: 0, clamp_count: 0 },
+    isPending: false,
+  } as never);
+}
+
 function renderHero(overrides: {
   headline?: OverviewHeadline;
   delayedCount?: number;
@@ -70,6 +80,7 @@ describe("OverviewHeroRow", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -159,6 +170,8 @@ describe("OverviewHeroRow", () => {
     renderHero();
     expect(screen.getByText("Data delayed")).toBeInTheDocument();
     expect(screen.queryByText("Running normally")).not.toBeInTheDocument();
+    // The dot does not stay "running normally" green beside a delayed label.
+    expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
   });
 
   it("keeps 'Running normally' when the feed is fresh", () => {
@@ -203,5 +216,54 @@ describe("OverviewHeroRow", () => {
     const { container } = renderHero({ sparklinePoints: [] });
     expect(container.querySelector('[data-testid="sparkline-baseline"]')).toBeNull();
     expect(screen.queryByText(/Period avg/)).toBeNull();
+  });
+
+  it("draws the day-pulse ribbon behind the hero from peak_hour.by_hour", () => {
+    mockHooks(38, 0.1);
+    renderHero({ peakHour: { by_hour: Array.from({ length: 24 }, (_, h) => h / 4), peak_hour: 8, peak_avg_min: 5.75 } });
+    // First child: the two columns after it are positioned, so they paint
+    // over it by DOM order.
+    expect(document.querySelector(".ov-hero > .ov-pulse-ribbon:first-child")).not.toBeNull();
+    expect(document.querySelector(".ov-hero > .ov-hero-text")).not.toBeNull();
+  });
+
+  it("draws no ribbon without an hourly profile", () => {
+    mockHooks(38, 0.1);
+    renderHero({ peakHour: null });
+    expect(document.querySelector(".ov-pulse-ribbon")).toBeNull();
+  });
+
+  it("breathes only while the feed is under two minutes old", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-03T08:00:00Z") });
+    mockFeedSummary("2026-10-03T07:59:00Z");
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot--live")).not.toBeNull();
+    expect(screen.getByText("Observed within the last 2 minutes")).toBeInTheDocument();
+    cleanup();
+    mockFeedSummary("2026-10-03T07:00:00Z");
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot")).not.toBeNull();
+    expect(document.querySelector(".ov-fresh-dot--live")).toBeNull();
+    expect(screen.getByText(/Last updated/)).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("prints the delayed-route count in the numeric face", () => {
+    mockHooks(38, 0.1);
+    renderHero();
+    expect(screen.getByText("3 / 38 routes")).toHaveClass("num");
+  });
+
+  it("stops breathing when the two-minute window closes, without a refetch", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-03T08:00:00Z") });
+    mockFeedSummary("2026-10-03T07:59:00Z");
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot--live")).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(document.querySelector(".ov-fresh-dot--live")).toBeNull();
+    expect(screen.queryByText("Observed within the last 2 minutes")).toBeNull();
+    vi.useRealTimers();
   });
 });

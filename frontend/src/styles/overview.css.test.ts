@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { decl, ruleBody } from "../test/cssRules";
 
 const css = readFileSync(resolve(__dirname, "./overview.css"), "utf-8");
 
@@ -8,5 +9,43 @@ describe("overview.css page width", () => {
   it(".ov-page fills its parent, so a long headline cannot widen it past a phone screen", () => {
     const body = css.match(/\.ov-page\s*\{([^}]*)\}/)?.[1] ?? "";
     expect(body).toMatch(/(^|;|\s)width:\s*100%/);
+  });
+});
+
+describe("overview.css living hero", () => {
+  it("the check bar scales by transform on --dur-3 and the value uses the numeric scale", () => {
+    const fill = ruleBody(css, ".ov-check-fill {");
+    expect(decl(fill, "transform")).toBe("scaleX(var(--w, 0))");
+    expect(decl(fill, "transform-origin")).toBe("left");
+    expect(decl(fill, "transition")).toBe("transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out)");
+    expect(decl(fill, "width")).toBe("100%");
+    // A span: without a block box neither the width nor the transform applies.
+    expect(decl(fill, "display")).toBe("block");
+    expect(decl(ruleBody(css, ".ov-check-value {"), "font-size")).toBe("var(--text-sm)");
+    expect(decl(ruleBody(css, ".ov-check-value {"), "font-family")).toBeNull();
+  });
+  it("a re-ranked row travels by transform on --dur-3", () => {
+    expect(decl(ruleBody(css, ".ov-check-row {"), "transition")).toBe("transform var(--dur-3) var(--ease-out), background var(--transition)");
+  });
+  it("the breath loop lives inside the motion block, on --ease-in-out at 3 × --dur-4", () => {
+    const motion = ruleBody(css, "@media (prefers-reduced-motion: no-preference)");
+    expect(motion).toMatch(/\.ov-fresh-dot--live\s*\{[^}]*animation:\s*ov-breath calc\(var\(--dur-4\) \* 3\) var\(--ease-in-out\) infinite/);
+    expect(css.replace(motion, "")).not.toMatch(/ov-breath/);
+  });
+  it("a stale feed's dot drops the ok green for a neutral tone", () => {
+    expect(decl(ruleBody(css, ".ov-fresh-dot {"), "background")).toBe("var(--delay-text-ok)");
+    expect(decl(ruleBody(css, ".ov-fresh-dot--stale {"), "background")).toBe("var(--text-tertiary)");
+  });
+  it("the ribbon's path transitions its geometry on --dur-3 only", () => {
+    expect(decl(ruleBody(css, ".ov-pulse-ribbon path {"), "transition")).toBe("d var(--dur-3) var(--ease-out)");
+  });
+  it("the ribbon takes no pointer and both hero columns paint over it", () => {
+    const ribbon = ruleBody(css, ".ov-pulse-ribbon {");
+    expect(decl(ribbon, "pointer-events")).toBe("none");
+    expect(decl(ribbon, "position")).toBe("absolute");
+    expect(decl(ribbon, "z-index")).toBeNull();
+    expect(decl(ruleBody(css, ".ov-hero {"), "position")).toBe("relative");
+    expect(decl(ruleBody(css, ".ov-hero-figure {"), "position")).toBe("relative");
+    expect(decl(ruleBody(css, ".ov-hero-text {"), "position")).toBe("relative");
   });
 });

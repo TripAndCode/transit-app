@@ -138,13 +138,15 @@
   border-radius: var(--radius);
   margin-bottom: 5px;
   cursor: pointer;
-  transition: background var(--transition);
+  /* A re-ranked row travels to its new place (useFlipRows) rather than
+     teleporting; background is the only other thing that moves. */
+  transition: transform var(--dur-3) var(--ease-out), background var(--transition);
 }
 .ov-check-row:hover {
   background: var(--bg-soft);
 }
 .ov-check-name {
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   flex: 1;
   overflow: hidden;
@@ -160,14 +162,20 @@
   overflow: hidden;
 }
 .ov-check-fill {
+  display: block;
+  width: 100%;
   height: 100%;
   border-radius: 2px;
+  transform-origin: left;
+  /* --w is the row's share of the worst route, set inline per row. The bar
+     grows by transform, never by width, so a re-sort costs no layout. */
+  transform: scaleX(var(--w, 0));
+  transition: transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out);
 }
+/* The face and tabular figures come from .num on the element. */
 .ov-check-value {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 600;
-  font-variant-numeric: tabular-nums;
   width: 48px;
   text-align: right;
   flex-shrink: 0;
@@ -410,11 +418,35 @@
    one only below the shared 640px breakpoint (BP.sm), not at a wider
    off-scale breakpoint, since 880px already reads fine as two columns. */
 .ov-hero {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
   gap: 20px 40px;
   align-items: end;
   margin-bottom: 24px;
+}
+/* The day's hourly profile across both hero columns, bottom-anchored. It
+   takes no pointer and no grid cell (absolutely positioned). It is the
+   hero's first child and both columns are positioned, so they paint over it
+   by DOM order -- no z-index rung needed. */
+.ov-pulse-ribbon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 160px;
+  display: block;
+  pointer-events: none;
+}
+/* A new profile reshapes in place where the engine can interpolate `d`;
+   elsewhere it snaps, which is the honest fallback for a data change. */
+.ov-pulse-ribbon path {
+  transition: d var(--dur-3) var(--ease-out);
+}
+/* Positioned only so it paints over the ribbon (see .ov-pulse-ribbon). */
+.ov-hero-text {
+  position: relative;
 }
 .ov-hero-figure {
   position: relative;
@@ -497,6 +529,23 @@
   color: var(--text-primary);
   font-weight: 700;
 }
+/* Feed-status dot: still by default; it breathes (motion block at the end
+   of this file) only while the latest observation is under two minutes old. */
+.ov-fresh-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--delay-text-ok);
+  vertical-align: middle;
+  opacity: 0.55;
+}
+/* A stale feed keeps the dot but drops the "running normally" green: the
+   label beside it already says the data is delayed, calmly. */
+.ov-fresh-dot--stale {
+  background: var(--text-tertiary);
+}
 
 /* BP.sm. Kept after the hero's base rules: an override of equal specificity
    placed earlier in the file loses to them at every width. */
@@ -505,4 +554,15 @@
   .ov-hero-figure { min-height: 150px; }
   .ov-hero-story { font-size: var(--text-lg); line-height: 1.45; }
   .ov-hero-sub-value { white-space: nowrap; }
+}
+
+/* The freshness dot's breath: a symmetric loop (the place --ease-in-out
+   belongs), running only while the feed is under two minutes old and never
+   for a reduced-motion viewer. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ov-breath {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1; }
+  }
+  .ov-fresh-dot--live { animation: ov-breath calc(var(--dur-4) * 3) var(--ease-in-out) infinite; }
 }
