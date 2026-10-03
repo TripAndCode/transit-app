@@ -2,7 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useScope, type TimeBand } from "../../api/scope";
 import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
-import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
+import { useFirstData } from "../../hooks/useFirstData";
 import { staggerDelay } from "./ChartEnter";
 import { DIM_OPACITY, isFocusDimmed, isoDow, useTrendFocus } from "./trendFocus";
 import { formatShortDate } from "../../utils/format";
@@ -60,7 +60,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const [showLegend, setShowLegend] = useState(false);
   const [, setCtx] = useScope();
   const { focus, setFocus } = useTrendFocus();
-  const entered = useEnteredOnMount();
+  const entered = useFirstData(cells.length > 0);
 
   const dates = Array.from(new Set(cells.map((c) => c.date))).sort();
 

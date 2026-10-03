@@ -8,8 +8,8 @@ import { formatDate, formatMinutes, formatNumber } from "../../utils/format";
 export function PeriodChart({ days }: { days: TrendDay[] }) {
   const { t } = useTranslation("design");
   const lineRef = useRef<SVGPathElement | null>(null);
-  useDrawOn(lineRef);
   const values = days.filter((d) => Number.isFinite(d.avg_min) && d.samples > 0);
+  useDrawOn(lineRef, values.length > 0);
   const low = Math.min(0, ...values.map((d) => d.avg_min));
   const high = Math.max(1, ...values.map((d) => d.avg_min));
   const first = Date.parse(days[0]?.date ?? "");

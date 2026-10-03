@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
-import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
+import { useFirstData } from "../../hooks/useFirstData";
 import { staggerDelay } from "./ChartEnter";
 import { DIM_OPACITY, isFocusDimmed, useTrendFocus } from "./trendFocus";
 import { formatMinutes } from "../../utils/format";
@@ -51,7 +51,7 @@ export function BandGrid({
 }) {
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
   const cols = `34px repeat(${BAND_ORDER.length}, 1fr)`;
-  const entered = useEnteredOnMount();
+  const entered = useFirstData(grid.length > 0);
   const { focus, setFocus } = useTrendFocus();
   // .chart-cell-opacity gives a reduced-motion viewer (who gets none of the
   // entrance classes) the same --cell-opacity the fade would have landed on,

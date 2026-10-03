@@ -711,7 +711,9 @@ describe("chart entrance motion (ChartEnter.tsx)", () => {
     expect(allowed).toHaveLength(1);
     const body = ruleBody(allowed[0], ".chart-cell-enter {");
     expect(decl(body, "opacity")).toBe("0");
-    expect(decl(body, "transition")).toBe("opacity var(--dur-3) var(--ease-out)");
+    // --dur-2, not --dur-3: staggerDelay()'s cap plus this fade is the whole
+    // grid's arrival, and that total has to fit the --dur-3 data budget.
+    expect(decl(body, "transition")).toBe("opacity var(--dur-2) var(--ease-out)");
     // The target opacity is per-cell, not a flat 1 -- HourlyHeatmap's cells
     // encode sample density as opacity, and the fade-in must land on that
     // value rather than overriding it.
