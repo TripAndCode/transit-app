@@ -203,6 +203,18 @@ def test_agents_md_mixed_with_an_ordinary_markdown_file_stays_a_process_doc(repo
     assert manifest["suggested_tier"] == "process-doc"
 
 
+def test_codex_skill_link_is_reviewed_as_a_process_doc(repository: Path, tmp_path: Path):
+    skill = repository / ".agents" / "skills" / "example"
+    skill.parent.mkdir(parents=True)
+    skill.symlink_to("../../.claude/skills/example")
+
+    manifest = run_script(repository, tmp_path / "artifacts")
+
+    assert manifest["changed_files"] == [".agents/skills/example"]
+    assert manifest["suggested_tier"] == "process-doc"
+    assert "../../.claude/skills/example" in Path(str(manifest["diff_path"])).read_text(encoding="utf-8")
+
+
 def test_process_doc_wins_when_a_claude_markdown_file_mixes_with_an_ordinary_markdown_file(
     repository: Path, tmp_path: Path
 ):
@@ -269,6 +281,9 @@ def test_entry_chunk_quality_gate_script_is_flagged_as_enforcement(repository: P
     "path",
     [
         ".pre-commit-config.yaml",
+        ".codex/hooks.json",
+        ".codex/hooks/pre-push.sh",
+        ".codex/config.toml",
         "scripts/setup_git_hooks.sh",
         "frontend/package.json",
         "scripts/cleanup_git_state.py",
