@@ -56,7 +56,7 @@ export function DataFreshness({ agencyId, through }: { agencyId: number; through
             <dt>{t("topbar.freshness.reports")}</dt>
             <dd>{t("topbar.freshness.reports_through", { date: formatDate(through, { weekday: true }) })}</dd>
             <dt>{t("topbar.freshness.live")}</dt>
-            <dd>{lastReading ? formatDateTime(lastReading) : t("topbar.freshness.live_none")}</dd>
+            <dd>{lastReading ? formatDateTime(lastReading) : data ? t("topbar.freshness.live_none") : EM_DASH}</dd>
             <dt>{t("topbar.freshness.readings")}</dt>
             <dd>{data ? formatNumber(data.raw_samples) : EM_DASH}</dd>
             <dt>{t("topbar.freshness.set_aside")}</dt>

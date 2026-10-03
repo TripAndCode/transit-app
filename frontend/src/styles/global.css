@@ -352,9 +352,9 @@
 input[type="date"] { color-scheme: light; }
 :root[data-theme="dark"] input[type="date"] { color-scheme: dark; }
 
-/* App.tsx's root wrapper and the sidebar's data-status disclosure are always
-   mounted, regardless of route, so their styling lives here rather than in a
-   route-lazy-loaded stylesheet. */
+/* The top bar's data-freshness chip belongs to the app shell, not to any one
+   route, so its styling lives here rather than in a route-lazy-loaded
+   stylesheet. */
 .data-freshness { position: relative; margin-left: auto; min-width: 0; }
 .data-freshness__chip {
   max-width: 100%;

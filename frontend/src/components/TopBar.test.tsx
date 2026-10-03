@@ -106,6 +106,14 @@ describe("TopBar", () => {
       expect(chip).toHaveFocus();
     });
 
+    it("says the live reading is unknown, not missing, when the status could not be fetched", async () => {
+      renderBar();
+      vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: undefined, error: new Error("503") } as never);
+      await userEvent.click(screen.getByRole("button", { name: /Analyzed through/ }));
+      const panel = screen.getByRole("region", { name: "How fresh the data is" });
+      expect(panel).not.toHaveTextContent("No readings received yet");
+    });
+
     it("closes when the reader clicks elsewhere", async () => {
       renderBar();
       await userEvent.click(screen.getByRole("button", { name: /Analyzed through/ }));
