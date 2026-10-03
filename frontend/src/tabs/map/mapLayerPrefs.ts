@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 export const RELIEF_PREF_KEY = "transit.mapRelief";
+export const PEARL_PREF_KEY = "transit.mapPearl";
+export const LIGHT_PREF_KEY = "transit.mapLight";
 
 /** A boolean map-layer preference in localStorage, "1"/"0". Unavailable
  *  storage reads as the fallback and swallows the write, like the style

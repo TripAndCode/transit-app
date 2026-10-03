@@ -617,7 +617,11 @@
       "dim_label": "Basemap dim",
       "layers_label": "Layers",
       "relief": "Relief",
-      "relief_hint": "A column per stop. Height = average delay (capped at 5.5 min). Tilts the map to 35°."
+      "relief_hint": "A column per stop. Height = average delay (capped at 5.5 min). Tilts the map to 35°.",
+      "pearl": "Segment highlight",
+      "pearl_hint": "A highlight travels only along the pinned trip's reported segments. It is not a vehicle position.",
+      "light": "Ambient light",
+      "light_hint": "During playback, a faint dawn, dusk or night tint follows the frame's hour."
     }
   },
   "ask": {
