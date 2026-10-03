@@ -538,6 +538,7 @@ export function MapTab() {
               where an observed trip is actually inspected. */}
           <details className="focus-queue-inspect" data-tour="map-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
           routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
+          reporting={liveRows.length > 0}
           activeRoutes={activeRouteOptions}
           directions={directions}
           selectedDirection={effectiveDirection}

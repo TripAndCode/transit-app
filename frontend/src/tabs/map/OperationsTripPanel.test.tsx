@@ -29,6 +29,7 @@ describe("OperationsTripPanel", () => {
     const selectTrip = vi.fn();
     render(<OperationsTripPanel
       routeName="B1 新町線"
+      reporting
       activeRoutes={[]}
       directions={[{ key: "direction:1", label: "新町", trips }]}
       selectedDirection="direction:1"
@@ -50,9 +51,13 @@ describe("OperationsTripPanel", () => {
     expect(selectTrip).toHaveBeenCalledWith(expect.objectContaining({ trip_id: "T2" }));
   });
 
-  it("says trips will appear, rather than asking for a choice there is none to make, while none report", () => {
+  it.each([
+    [false, "operations.trip_panel.none_reporting"],
+    [true, "operations.trip_panel.select_route"],
+  ])("with no route to browse, says trips will appear only while none report (reporting: %s)", (reporting, text) => {
     render(<OperationsTripPanel
       routeName="All routes"
+      reporting={reporting}
       activeRoutes={[]}
       directions={[]}
       selectedDirection={null}
@@ -65,7 +70,6 @@ describe("OperationsTripPanel", () => {
       onSelectTrip={() => {}}
       t={t}
     />);
-    expect(screen.queryByText("operations.trip_panel.select_route")).toBeNull();
-    expect(screen.getByText("operations.trip_panel.none_reporting")).toBeInTheDocument();
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 });
