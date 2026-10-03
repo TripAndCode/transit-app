@@ -1600,6 +1600,10 @@ async def _board_agency_freshness(conn: asyncpg.Connection, ch: AsyncClient) -> 
     stamped = time.monotonic()
     if _board_freshness_cache is not None and stamped - _board_freshness_cache[0] < _BOARD_FRESHNESS_TTL_SEC:
         return _board_freshness_cache[1]
+    # Stamped before the check, not after, holding the previous answer: polls
+    # that arrive while it runs reuse that answer instead of each starting
+    # their own probe.
+    _board_freshness_cache = (stamped, _board_freshness_cache[1] if _board_freshness_cache else None)
     answer: list[AgencyFreshness] | None
     try:
         answer = await aggregate_freshness(conn, ch)

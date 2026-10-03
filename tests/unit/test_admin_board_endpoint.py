@@ -267,6 +267,29 @@ def test_a_polled_board_reuses_one_freshness_answer(monkeypatch, result):
     assert len(calls) == 1
 
 
+async def test_polls_that_arrive_together_share_one_freshness_check(monkeypatch):
+    release = asyncio.Event()
+    calls: list[int] = []
+
+    async def _slow_freshness(conn, ch):
+        calls.append(1)
+        await release.wait()
+        return []
+
+    monkeypatch.setattr(health_mod, "aggregate_freshness", _slow_freshness)
+    first = asyncio.create_task(admin_router._board_agency_freshness(None, None))
+    await asyncio.sleep(0)
+    try:
+        # A second probe would wait on `release` too, so a short timeout is the
+        # failure signal rather than a hang.
+        second = await asyncio.wait_for(admin_router._board_agency_freshness(None, None), timeout=1.0)
+    finally:
+        release.set()
+    assert await first == []
+    assert second is None
+    assert len(calls) == 1
+
+
 def test_an_expired_freshness_answer_is_checked_again(monkeypatch):
     freshness, calls = _counting_freshness([])
     monkeypatch.setattr(health_mod, "aggregate_freshness", freshness)
