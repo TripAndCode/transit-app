@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
 import { LoginPage } from "./LoginPage";
 import { ApiError } from "../api/client";
+import { decl, ruleBody } from "../test/cssRules";
 
 const mockApiPost = vi.fn();
 let mockConfig: { auth_enabled: boolean; local_admin_enabled: boolean } | undefined;
@@ -104,6 +107,39 @@ describe("LoginPage", () => {
     expect(screen.queryByRole("button", { name: "Sign in with Google" })).toBeNull();
     expect(screen.getByLabelText("Username")).toBeTruthy();
     expect(screen.getByLabelText("Password")).toBeTruthy();
+  });
+
+  it("asks for a username, not an account choice, when the username form is the only way in", () => {
+    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+    renderLogin();
+    expect(screen.getByText("Sign in with your username")).toBeInTheDocument();
+    expect(screen.queryByText("Choose an account to sign in")).toBeNull();
+  });
+
+  it("claims no sign-in method before the configuration says which", () => {
+    mockConfig = undefined;
+    renderLogin();
+    expect(screen.queryByText("Sign in with your username")).toBeNull();
+  });
+
+  it("keeps the account choice wording while there are accounts to choose", () => {
+    renderLogin();
+    expect(screen.getByText("Choose an account to sign in")).toBeInTheDocument();
+  });
+
+  it("leaves a gap between the subtitle and a username form that follows it", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/pages/LoginPage.css"), "utf8");
+    expect(decl(ruleBody(css, ".login-card__sub + .login-card__local-form"), "margin-top")).toBe("16px");
+  });
+
+  it("offers the other language, and switches to it", async () => {
+    renderLogin();
+    const group = screen.getByRole("group", { name: "Language" });
+    expect(within(group).getByRole("button", { name: "English" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(within(group).getByRole("button", { name: "日本語" }));
+    await waitFor(() => expect(i18n.resolvedLanguage).toBe("ja"));
+    expect(document.title).toBe("遅延ダッシュボード");
+    await i18n.changeLanguage("en");
   });
 
   it("shows a divider between OAuth and local login when both are enabled", () => {
