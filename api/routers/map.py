@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter, user_key
 from api.range import (
     MAX_RANGE_DAYS,
     RangeCtx,
@@ -51,7 +51,7 @@ from api.range import (
     time_band_clause_ch_for,
 )
 from api.scope_applied import ALL_SIX, scope_applied
-from api.security import csrf_guard
+from api.security import User, csrf_guard, require_user
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, jst_midnight_utc, live_table_for
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
@@ -349,12 +349,18 @@ async def live_delays(
 
 
 @router.post("/delays/refresh", response_model=None)
-@limiter.limit("5/minute")
+@limiter.limit("5/minute", key_func=user_key)
 async def refresh_live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
+    _user: User = Depends(require_user),
 ) -> dict[str, Any]:
-    """Fetch the agency's current GTFS-RT feed and persist it before reading."""
+    """Fetch the agency's current GTFS-RT feed and persist it before reading.
+
+    A write against the live table, so it needs a signed-in caller and is
+    metered per account: an anonymous loop against it would otherwise re-poll
+    the collector on every request.
+    """
     csrf_guard(request)
     try:
         inserted = await asyncio.to_thread(_ingest_live_agency, agency_id)
