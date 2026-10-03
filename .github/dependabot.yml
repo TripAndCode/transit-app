@@ -28,6 +28,16 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      # vitest and its `@vitest/*` plugins pin each other's exact version, so
+      # a major bumped on one side alone fails every test file at coverage
+      # collection. Minor and patch bumps already land together above; this
+      # keeps a major in one PR too.
+      vitest-major:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+        update-types:
+          - "major"
     ignore:
       # `typescript-6` (package.json) is a deliberate `npm:typescript@6.0.3`
       # alias pinned for dual-version testing/compat, not a dependency meant
