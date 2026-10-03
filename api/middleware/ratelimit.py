@@ -23,6 +23,17 @@ PRO_LIMIT = "600/minute"
 ADMIN_ACTION_LIMIT = "20/minute"
 
 
+def tier_limit(key: str) -> str:
+    """The one limit a caller is held to, chosen from the key `_key_func` built.
+
+    slowapi parses and enforces *every* limit a decorator names, so a single
+    ``"60/minute;600/minute"`` string throttled a pro key at the free ceiling.
+    A provider that declares a ``key`` parameter is called with
+    ``key_func(request)`` instead, and only the tier's own limit is checked.
+    """
+    return PRO_LIMIT if key.startswith("pro:") else FREE_LIMIT
+
+
 def _key_func(request: Request) -> str:
     # get_remote_address() reads request.client.host, which uvicorn's
     # ProxyHeadersMiddleware (--forwarded-allow-ips='*', see Dockerfile) sets
