@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useFocusTrap } from "./useFocusTrap";
+import { useFocusTrap, useTopmostEscape } from "./useFocusTrap";
 
 function Harness({ onEscape }: { onEscape: () => void }) {
   const [active, setActive] = useState(false);
@@ -180,6 +180,36 @@ describe("useFocusTrap", () => {
 
     expect(onInner).toHaveBeenCalledTimes(1);
     expect(onOuter).not.toHaveBeenCalled();
+  });
+
+  it("keeps Tab inside the trap while an escape-only layer is open over it", async () => {
+    // A tooltip or popover inside a sheet joins the Escape stack on top of the
+    // sheet's trap. It owns the next Escape, but it traps nothing itself, so
+    // Tab containment has to stay with the trap beneath it.
+    function SheetWithLayer() {
+      const sheetRef = useRef<HTMLDivElement>(null);
+      const [layerOpen, setLayerOpen] = useState(false);
+      useFocusTrap(true, sheetRef, () => {});
+      useTopmostEscape(layerOpen, () => setLayerOpen(false));
+      return (
+        <div>
+          <div ref={sheetRef} tabIndex={-1}>
+            <button type="button">first</button>
+            <button type="button" onClick={() => setLayerOpen(true)}>
+              last
+            </button>
+          </div>
+          <button type="button">page behind</button>
+        </div>
+      );
+    }
+    const user = userEvent.setup();
+    render(<SheetWithLayer />);
+    await user.click(screen.getByText("last"));
+    await user.tab();
+    expect(screen.getByText("first")).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(screen.getByText("last")).toHaveFocus();
   });
 
   it("locks the page behind it from scrolling, and restores it on deactivation", async () => {

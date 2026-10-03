@@ -6,8 +6,9 @@
  * click, Escape, or option selection. Used by service, granularity, and metric
  * parameter kinds in {@link ParamStrip}.
  */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Z_INDEX } from "../../styles/zIndex";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 
 /** A single option entry for {@link SegmentedPill}. */
 type SegmentedOption = { value: string; label: string };
@@ -33,21 +34,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
     triggerRef.current?.focus();
   }
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, ref, close);
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>

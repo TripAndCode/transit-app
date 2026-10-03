@@ -29,7 +29,10 @@ import { focusableIn } from "../utils/focusable";
  * a `Modal` over either -- and each listens on `document`, where
  * `stopPropagation` does not reach a sibling listener on the same target.
  * Without the stack, one Escape would dismiss every open overlay at once
- * instead of the one on top.
+ * instead of the one on top. Tab answers to the topmost *trap* rather than
+ * the topmost surface: an escape-only layer (a tooltip, a popover) open
+ * inside a trapped sheet owns the next Escape but traps nothing, so Tab
+ * containment stays with the trap beneath it.
  *
  * `onEscape` is read through an effect event so that a caller passing an
  * inline closure does not re-run the trap on every render: re-running
@@ -59,15 +62,17 @@ export function useFocusTrap(
 
     const token = Symbol("focus-trap");
     ACTIVE_TRAPS.push(token);
+    FOCUS_TRAPS.push(token);
 
     function onKeyDown(e: KeyboardEvent) {
-      if (ACTIVE_TRAPS[ACTIVE_TRAPS.length - 1] !== token) return;
       if (e.key === "Escape") {
+        if (ACTIVE_TRAPS[ACTIVE_TRAPS.length - 1] !== token) return;
         e.stopPropagation();
         escape();
         return;
       }
       if (e.key !== "Tab" || !container) return;
+      if (FOCUS_TRAPS[FOCUS_TRAPS.length - 1] !== token) return;
       const focusable = focusableIn(container);
       if (focusable.length === 0) {
         e.preventDefault();
@@ -91,6 +96,8 @@ export function useFocusTrap(
       document.removeEventListener("keydown", onKeyDown);
       const at = ACTIVE_TRAPS.indexOf(token);
       if (at !== -1) ACTIVE_TRAPS.splice(at, 1);
+      const trapAt = FOCUS_TRAPS.indexOf(token);
+      if (trapAt !== -1) FOCUS_TRAPS.splice(trapAt, 1);
       document.body.style.overflow = prevOverflow;
       previouslyFocused.current?.focus();
     };
@@ -133,3 +140,6 @@ export function useTopmostEscape(active: boolean, onEscape: () => void): void {
  *  Overlays stack in the order they open, so nothing has to know about
  *  anything else to find out whether it is the one a keypress belongs to. */
 const ACTIVE_TRAPS: symbol[] = [];
+
+/** The focus traps alone, in the same order: the last entry owns Tab. */
+const FOCUS_TRAPS: symbol[] = [];

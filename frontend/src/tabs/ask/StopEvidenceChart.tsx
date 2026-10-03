@@ -6,6 +6,7 @@ import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
 import { Tooltip } from "../../components/Tooltip";
 import { formatNumber } from "../../utils/format";
+import { useTopmostEscape } from "../../hooks/useFocusTrap";
 import "./stopEvidence.css";
 
 export function StopEvidenceChart({ messageId, points, onFocus, complete = false, message }: {
@@ -31,6 +32,11 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [sequence, setSequence] = useState<number | null>(null);
   const [detailLeft, setDetailLeft] = useState(0);
+  useTopmostEscape(sequence !== null, () => {
+    setSequence(null);
+    onFocus?.(null);
+    selectedButtonRef.current?.focus();
+  });
   useEffect(() => {
     if (sequence === null) return;
     const container = scrollRef.current;
@@ -53,18 +59,8 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
     }
     updateDetailLeft();
     container?.addEventListener("scroll", updateDetailLeft);
-    function dismiss(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setSequence(null);
-      onFocus?.(null);
-      selectedButtonRef.current?.focus();
-    }
-    document.addEventListener("keydown", dismiss);
-    return () => {
-      document.removeEventListener("keydown", dismiss);
-      container?.removeEventListener("scroll", updateDetailLeft);
-    };
-  }, [sequence, onFocus]);
+    return () => container?.removeEventListener("scroll", updateDetailLeft);
+  }, [sequence]);
   const [windowSize, setWindowSize] = useState(Math.min(8, points.length));
   const [windowStart, setWindowStart] = useState(0);
   const size = complete ? Math.min(windowSize, points.length) : points.length;
