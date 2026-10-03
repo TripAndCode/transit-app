@@ -3,7 +3,9 @@ import { useTranslation } from "react-i18next";
 import type { TimeBand } from "../../api/scope";
 import type { RouteTrip } from "../../api/types";
 import { MOBILE_BREAKPOINT_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
+import "../../styles/scrubber.css";
 import { StopRibbon } from "./StopRibbon";
+import { defaultScrubSec, positionsAt, scrubBounds, tripsCrossing } from "./mareyScrub";
 import {
   MUTED_OPACITY,
   formatClock,
@@ -100,6 +102,8 @@ export function MareyDiagram({
   band,
   truncated = false,
   date = null,
+  scrubSec = null,
+  onScrub,
 }: {
   trips: RouteTrip[];
   /** The same route one week earlier, drawn as faint grey context. */
@@ -108,6 +112,9 @@ export function MareyDiagram({
   band: TimeBand;
   truncated?: boolean;
   date?: string | null;
+  /** The scrubbed second of day, or null when the rail is untouched. */
+  scrubSec?: number | null;
+  onScrub?: (sec: number | null) => void;
 }) {
   const { t } = useTranslation("design");
   // Pointer and keyboard are tracked apart so neither clears the other's
@@ -134,6 +141,12 @@ export function MareyDiagram({
   });
   const chartShown = !narrow || chartRevealed;
   const rows = drawn.map((trip) => tripRow(trip, axis));
+  const crossing = scrubSec == null ? null : new Set(tripsCrossing(drawn, scrubSec).map((trip) => trip.trip_id));
+  const positions = scrubSec == null ? [] : positionsAt(drawn, scrubSec, axis);
+  const bounds = scrubBounds(viewWindow);
+  const scrubValue = scrubSec ?? defaultScrubSec(viewWindow, peak);
+  const tripOpacity = (id: string) =>
+    crossing ? (crossing.has(id) ? 1 : MUTED_OPACITY) : active !== null && active !== id ? MUTED_OPACITY : 1;
 
   return (
     <div className="marey">
@@ -161,6 +174,30 @@ export function MareyDiagram({
             >
               {chartRevealed ? t("mareyHideChart") : t("mareyShowChart")}
             </button>
+          )}
+          {chartShown && onScrub && (
+            <div className="marey-scrub">
+              <output className="marey-scrub__clock num" htmlFor="marey-scrub-input">
+                {formatClock(scrubValue)}
+              </output>
+              <input
+                id="marey-scrub-input"
+                type="range"
+                className="scrub-input"
+                min={bounds.min}
+                max={bounds.max}
+                step={bounds.step}
+                value={scrubValue}
+                aria-label={t("mareyScrub")}
+                aria-valuetext={formatClock(scrubValue)}
+                onChange={(e) => onScrub(Number(e.target.value))}
+              />
+              {scrubSec != null && (
+                <button type="button" className="btn-ghost" onClick={() => onScrub(null)}>
+                  {t("mareyScrubClear")}
+                </button>
+              )}
+            </div>
           )}
           {chartShown && (
             <div className="marey__scroll">
@@ -226,6 +263,15 @@ export function MareyDiagram({
                     </g>
                   );
                 })}
+                {scrubSec != null && (
+                  <line
+                    className="marey-cursor"
+                    x1={timeToX(scrubSec, viewWindow, PLOT)}
+                    x2={timeToX(scrubSec, viewWindow, PLOT)}
+                    y1={PLOT.top}
+                    y2={PLOT.top + PLOT.height}
+                  />
+                )}
                 <g clipPath={`url(#${clipId})`}>
                   {ghosts.map((trip) => {
                     const points = tripPoints(trip, axis, viewWindow);
@@ -252,7 +298,7 @@ export function MareyDiagram({
                       <g
                         key={trip.trip_id}
                         data-trip-id={trip.trip_id}
-                        className="marey-trip"
+                        className={`marey-trip${crossing?.has(trip.trip_id) ? " marey-trip--cross" : ""}`}
                         tabIndex={0}
                         aria-label={t("mareyTripLabel", {
                           departure: row.departure,
@@ -260,7 +306,7 @@ export function MareyDiagram({
                           last: row.lastStop,
                           delay: row.delayMin,
                         })}
-                        opacity={active !== null && active !== trip.trip_id ? MUTED_OPACITY : 1}
+                        opacity={tripOpacity(trip.trip_id)}
                         onFocus={() => setFocused(trip.trip_id)}
                         onBlur={() => setFocused((current) => (current === trip.trip_id ? null : current))}
                       >
@@ -296,7 +342,11 @@ export function MareyDiagram({
           )}
           {chartShown && (
             <p className="focus-muted marey__readout" data-testid="marey-readout" aria-live="polite">
-              {activeTrip ? tripSummary(activeTrip, t) : t("mareyHover")}
+              {crossing
+                ? t("mareyScrubCrossing", { n: crossing.size })
+                : activeTrip
+                  ? tripSummary(activeTrip, t)
+                  : t("mareyHover")}
             </p>
           )}
           <table
@@ -328,7 +378,11 @@ export function MareyDiagram({
           {drawn.length > 0 && (
             <>
               <p className="focus-muted marey__caption">{ribbonLabel}</p>
-              <StopRibbon segments={ribbonSegments(drawn, axis, ribbonWindow)} label={ribbonLabel} />
+              <StopRibbon
+                segments={ribbonSegments(drawn, axis, ribbonWindow)}
+                label={ribbonLabel}
+                markers={positions.map((p) => ({ key: p.trip_id, fraction: p.axisFraction, color: segmentColor(p.delaySec) }))}
+              />
             </>
           )}
         </>

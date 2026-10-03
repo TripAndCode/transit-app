@@ -11,8 +11,13 @@ import { RouteAnalysisTab } from "./RouteAnalysisTab";
 import { readAnalyses } from "../components/analysis/savedAnalyses";
 import type { RouteShapeResponse } from "../api/types";
 
+const mapProps = vi.hoisted(() => ({ last: null as null | { positions?: Array<{ key: string; lon: number; lat: number; delaySec: number }> } }));
+
 vi.mock("../components/analysis/AnalysisMap", () => ({
-  AnalysisMap: () => <div data-testid="analysis-map" />,
+  AnalysisMap: (props: { positions?: Array<{ key: string; lon: number; lat: number; delaySec: number }> }) => {
+    mapProps.last = props;
+    return <div data-testid="analysis-map" />;
+  },
 }));
 
 function mockSupportHooks() {
@@ -253,5 +258,59 @@ describe("RouteAnalysisTab map chunk", () => {
     // which the sidebar warms on hover.
     expect(source).not.toMatch(/^import \{[^}]*AnalysisMap/m);
     expect(source).toMatch(/import\("\.\.\/components\/analysis\/AnalysisMap"\)/);
+  });
+});
+
+describe("RouteAnalysisTab Marey scrubber", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function renderScrubTab(search: string) {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: shape([
+        { stop_sequence: 1, stop_name: "A", lon: 132, lat: 34, avg_min: 1, samples: 5 },
+        { stop_sequence: 2, stop_name: "B", lon: 134, lat: 36, avg_min: 2, samples: 5 },
+      ]),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useRouteTrips").mockReturnValue({
+      data: {
+        date: "2026-10-01",
+        time_band: "all",
+        truncated: false,
+        trips: [
+          {
+            trip_id: "T1",
+            scheduled_time: "07:00",
+            headsign: null,
+            avg_delay_sec: 0,
+            samples: 2,
+            stops: [
+              { stop_id: "a", stop_sequence: 1, scheduled_sec: 25_200, observed_sec: 25_200, delay_sec: 0 },
+              { stop_id: "b", stop_sequence: 2, scheduled_sec: 25_800, observed_sec: 25_800, delay_sec: 0 },
+            ],
+          },
+        ],
+      },
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab(`/agencies/1/route-analysis?routes=R1${search}`);
+  }
+
+  it("scrubbing changes the readout and feeds one position to the map", async () => {
+    renderScrubTab("&sub_tab=marey");
+    fireEvent.change(screen.getByRole("slider", { name: "Scrub the clock" }), { target: { value: "25500" } });
+    expect(screen.getByTestId("marey-readout")).toHaveTextContent("1 trips under way");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Map" }));
+    expect(await screen.findByTestId("analysis-map")).toBeInTheDocument();
+    expect(mapProps.last?.positions).toHaveLength(1);
+    expect(mapProps.last?.positions?.[0]).toMatchObject({ key: "T1", lon: 133, lat: 35 });
   });
 });
