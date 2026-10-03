@@ -12,10 +12,38 @@ function resolvedLocale(): string {
   return i18n.resolvedLanguage ?? i18n.language;
 }
 
+// Building an Intl formatter costs far more than formatting with one, and
+// charts and tables format once per point or row; one instance per
+// language and options serves them all.
+const numberFormats = new Map<string, Intl.NumberFormat>();
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+
+function numberFormat(opts?: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const locale = resolvedLocale();
+  const key = `${locale}|${JSON.stringify(opts ?? {})}`;
+  let format = numberFormats.get(key);
+  if (!format) {
+    format = new Intl.NumberFormat(locale, opts);
+    numberFormats.set(key, format);
+  }
+  return format;
+}
+
+function dateFormat(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const locale = resolvedLocale();
+  const key = `${locale}|${JSON.stringify(opts)}`;
+  let format = dateFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, opts);
+    dateFormats.set(key, format);
+  }
+  return format;
+}
+
 /** Format a number using the active UI locale. Reads the current i18n
  *  instance directly so non-React callers don't need to thread a locale. */
 export function formatNumber(n: number, opts?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(resolvedLocale(), opts).format(n);
+  return numberFormat(opts).format(n);
 }
 
 // Intl.DateTimeFormat renders a date-only string when given no component
@@ -29,7 +57,7 @@ const DEFAULT_DATETIME_OPTS: Intl.DateTimeFormatOptions = { dateStyle: "medium",
 export function formatDateTime(iso: string, opts: Intl.DateTimeFormatOptions = DEFAULT_DATETIME_OPTS): string {
   const date = new Date(iso);
   if (isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(resolvedLocale(), opts).format(date);
+  return dateFormat(opts).format(date);
 }
 
 /** Formats a value already expressed on a 0-100 percent scale (e.g. the
@@ -84,11 +112,10 @@ function parseIsoDate(iso: string): Date | null {
 }
 
 function dayFormat(withYear: boolean): Intl.DateTimeFormat {
-  const locale = resolvedLocale();
   // Japanese writes the month as 9月, which is its "long" form; "short" is
   // a bare number there.
-  const month = locale.startsWith("ja") ? "long" : "short";
-  return new Intl.DateTimeFormat(locale, withYear ? { year: "numeric", month, day: "numeric" } : { month, day: "numeric" });
+  const month = resolvedLocale().startsWith("ja") ? "long" : "short";
+  return dateFormat(withYear ? { year: "numeric", month, day: "numeric" } : { month, day: "numeric" });
 }
 
 /** One day in the language's date style ("Sep 29, 2026", "2026年9月29日"). */ // i18n-ignore: JSDoc examples
@@ -98,7 +125,8 @@ export function formatDate(iso: string, { year = true }: { year?: boolean } = {}
 }
 
 /** A period, with its year written once, on the side the language writes it
- *  ("Sep 2 – Oct 1, 2026", "2026年9月2日〜10月1日"). Built from two dates
+ *  ("Sep 2 – Oct 1, 2026", "2026年9月2日〜10月1日"); `year: false` drops it
+ *  only within one year, where it says nothing. Built from two dates
  *  rather than Intl's formatRange, whose Japanese ranges fall back to a
  *  slashed numeric form unlike its single dates. */ // i18n-ignore: JSDoc examples
 export function formatDateRange(from: string, to: string, { year = true }: { year?: boolean } = {}): string {
@@ -107,8 +135,13 @@ export function formatDateRange(from: string, to: string, { year = true }: { yea
   if (!a || !b) return EM_DASH;
   if (from.slice(0, 10) === to.slice(0, 10)) return dayFormat(year).format(a);
   const sameYear = a.getFullYear() === b.getFullYear();
-  if (!year || !sameYear) {
-    return i18n.t("common.date_range", { from: dayFormat(year).format(a), to: dayFormat(year).format(b) });
+  if (!sameYear) {
+    const withYear = dayFormat(true);
+    return i18n.t("common.date_range", { from: withYear.format(a), to: withYear.format(b) });
+  }
+  if (!year) {
+    const noYear = dayFormat(false);
+    return i18n.t("common.date_range", { from: noYear.format(a), to: noYear.format(b) });
   }
   const yearFirst = dayFormat(true).formatToParts(a)[0]?.type === "year";
   return i18n.t("common.date_range", {
@@ -120,7 +153,7 @@ export function formatDateRange(from: string, to: string, { year = true }: { yea
 /** A chart tick's date: month and day, as numbers ("9/28"). */
 export function formatShortDate(iso: string): string {
   const date = parseIsoDate(iso);
-  return date ? new Intl.DateTimeFormat(resolvedLocale(), { month: "numeric", day: "numeric" }).format(date) : EM_DASH;
+  return date ? dateFormat({ month: "numeric", day: "numeric" }).format(date) : EM_DASH;
 }
 
 /** An hour of the day as the clock range it covers ("17:00–18:00"). */

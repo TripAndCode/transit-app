@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import i18n from "../i18n";
 import {
   formatNumber,
@@ -154,6 +154,8 @@ describe("formatDateRange", () => {
   it("can leave the year out, and shows one day once", async () => {
     await i18n.changeLanguage("en");
     expect(formatDateRange("2026-09-02", "2026-10-01", { year: false })).toBe("Sep 2 – Oct 1");
+    // Across a year boundary the years are what tell the ends apart.
+    expect(formatDateRange("2026-12-30", "2027-01-03", { year: false })).toBe("Dec 30, 2026 – Jan 3, 2027");
     expect(formatDateRange("2026-09-02", "2026-09-02")).toBe("Sep 2, 2026");
   });
 
@@ -178,5 +180,27 @@ describe("formatHourRange", () => {
   it("writes an hour as a clock range", () => {
     expect(formatHourRange(17)).toBe("17:00–18:00");
     expect(formatHourRange(9)).toBe("09:00–10:00");
+  });
+});
+
+describe("formatter reuse", () => {
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await i18n.changeLanguage("en");
+  });
+
+  it("builds one Intl formatter per language and options, not one per value", async () => {
+    await i18n.changeLanguage("en");
+    const numbers = vi.spyOn(Intl, "NumberFormat");
+    const dates = vi.spyOn(Intl, "DateTimeFormat");
+    for (let i = 0; i < 50; i++) {
+      formatNumber(1000 + i);
+      formatDate("2026-09-29");
+    }
+    expect(numbers.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(dates.mock.calls.length).toBeLessThanOrEqual(1);
+    await i18n.changeLanguage("ja");
+    expect(formatNumber(1234)).toBe("1,234");
+    expect(formatDate("2026-09-29")).toBe("2026年9月29日");
   });
 });
