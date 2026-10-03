@@ -109,8 +109,8 @@ export function ReportsHomeTab() {
         </tbody></table></div>}
       </AsyncSection></section>
       <p className="focus-muted">{t("reportNote")}</p>
+      {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
       <details><summary>{t("definitions")}</summary><p>{ctx.from} – {ctx.to}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
-        {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
         <Link to={reportHref(String(id), "trend", `?${queryString}`)}>{t("advanced")} →</Link>
       </details>
     </>}

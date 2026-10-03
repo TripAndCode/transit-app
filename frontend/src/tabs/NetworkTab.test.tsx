@@ -263,15 +263,13 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    // Behind "How these are calculated": one click away, not competing
-    // with the comparison it annotates.
-    const disclosure = screen.getByText("How these are calculated").closest("details");
-    expect(disclosure).not.toBeNull();
-    expect(disclosure).not.toHaveAttribute("open");
+    // Behind one "How this is calculated": a click away, not competing
+    // with the comparison it annotates, and not nested in a second one.
     const block = screen.getByTestId("definition-meta");
-    expect(disclosure).toContainElement(block);
-    expect(block).toHaveTextContent("legacy_60s");
-    expect(block).toHaveTextContent("unbounded");
+    expect(block.tagName).toBe("DETAILS");
+    expect(block).not.toHaveAttribute("open");
+    expect(block.parentElement?.closest("details")).toBeNull();
+    expect(block).toHaveTextContent("On time = no more than 1 min late.");
   });
 
   it("hides the ridership-weighted toggle when no agency has configured weights", () => {

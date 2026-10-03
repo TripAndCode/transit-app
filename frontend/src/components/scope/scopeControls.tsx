@@ -172,7 +172,6 @@ export function TimeControl({ scope, update }: ControlProps) {
           </Pill>
         ))}
       </div>
-      <p className="scope-note">{t("scope.control.hour_pending")}</p>
     </div>
   );
 }

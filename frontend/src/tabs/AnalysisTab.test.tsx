@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
+import * as adminHook from "../api/useIsAdmin";
 import { AnalysisTab } from "./AnalysisTab";
 import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType, TrendPayload } from "../api/types";
 
@@ -209,6 +210,20 @@ describe("AnalysisTab", () => {
     } as never);
     renderAnalysis("/agencies/1/analysis/rider?report=ranking");
     expect(screen.getByText("No matching data")).toBeInTheDocument();
+  });
+
+  it("keeps a report's raw rows for admins, out of everyone else's way", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("ranking")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    const ranking = { ...reportResponse("ranking"), rows: [["39061", "平日", 5.2, 3.1, 8.4, 120]] } as ReportResponse; // i18n-ignore: GTFS service name
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: ranking, isFetching: false, error: null, refetch: vi.fn() } as never);
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    renderAnalysis("/agencies/1/analysis/rider?report=ranking");
+    expect(screen.queryByText(/Raw \(/)).not.toBeInTheDocument();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    renderAnalysis("/agencies/1/analysis/rider?report=ranking");
+    expect(screen.getByText("Raw (1 row)")).toBeInTheDocument();
   });
 
   it("says a one-day period has no trend instead of drawing a single dot", () => {

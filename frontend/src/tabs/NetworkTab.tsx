@@ -269,15 +269,10 @@ export function NetworkTab() {
         )}
       </div>
 
-      {/* Behind a disclosure: the aggregation rules are what you check once a
-          comparison has raised a question, not what you read before making
-          one. */}
-      {data && (
-        <details className="network-definition" style={{ marginBottom: 12 }}>
-          <summary>{t("network.definition_disclosure")}</summary>
-          <DefinitionMetaBlock definition={data.definition} />
-        </details>
-      )}
+      {/* DefinitionMetaBlock is its own disclosure: the aggregation rules are
+          what you check once a comparison has raised a question, not what you
+          read before making one. */}
+      {data && <DefinitionMetaBlock definition={data.definition} />}
 
       <AsyncSection
         loading={isPending}

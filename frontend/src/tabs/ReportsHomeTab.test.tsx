@@ -65,6 +65,14 @@ describe("ReportsHomeTab", () => {
     expect(screen.getByText("Summarize service performance in one page")).toBeInTheDocument();
   });
 
+  it("shows how the figures are made as its own disclosure, not nested in another", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab();
+    const block = screen.getByTestId("definition-meta");
+    expect(block.tagName).toBe("DETAILS");
+    expect(block.parentElement?.closest("details")).toBeNull();
+  });
+
   it("shows the empty state for both trend and ranking sections when there are no rows", () => {
     mockReports(trendResponse([]), rankingResponse([]));
     renderTab();

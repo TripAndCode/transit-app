@@ -213,21 +213,22 @@
     "planned_trip_count_fallback": "計画本数 {{count}} 本（走行キロは算出不可）",
     "schedule_version_title": "静的ダイヤバージョン: {{version}}",
     "col_agency": "事業者",
-    "axis_caption": "共通軸 · 0〜{{max}} 分",
-    "definition_disclosure": "集計条件を見る"
+    "axis_caption": "共通軸 · 0〜{{max}} 分"
   },
   "definitionMeta": {
-    "tolerance_line": "定時判定: {{preset}}（早着許容 ≤ {{early}}、遅延許容 ≤ {{late}}）",
-    "unbounded": "無制限",
-    "not_applicable": "対象外",
-    "seconds": "{{value}}秒",
+    "summary": "集計のしかた",
     "measurementPoint": {
-      "all_stops_all_observations": "集計範囲：全停留所・全観測"
+      "all_stops_all_observations": "全停留所で記録されたすべての発車の平均です。"
     },
     "dedupRule": {
-      "latest_observation_per_stop_event": "重複排除：停留所イベントごとに最新観測を採用"
+      "latest_observation_per_stop_event": "同じ発車が複数回報告された場合は、最新の報告を使います。"
     },
-    "exclusion_rule": "除外基準：|遅延|>{{sec}}秒を除外"
+    "exclusion_hours_one": "{{count}}時間以上ずれた値は誤りとして除外します。",
+    "exclusion_hours_other": "{{count}}時間以上ずれた値は誤りとして除外します。",
+    "exclusion_limit": "{{limit}}以上ずれた値は誤りとして除外します。",
+    "on_time_late": "定時 = 遅れ{{late}}以内。",
+    "on_time_late_early": "定時 = 遅れ{{late}}以内、早発{{early}}以内。",
+    "sentence_separator": ""
   },
   "app": {
     "data_stale": {
@@ -566,7 +567,7 @@
       "departure": "{{time}}発",
       "reported": "最新報告 {{when}}",
       "progress_title": "便の遅延推移",
-      "progress_disclosure": "運行データの報告進行",
+      "progress_disclosure": "リアルタイム報告の推移",
       "progress_loading": "報告履歴を取得中…",
       "no_progress": "この便の報告履歴はまだありません",
       "select_route": "路線を選ぶか、地図上の便を押すと詳細を表示します。",
@@ -608,7 +609,7 @@
       "band_gt_5": "> 5分"
     },
     "style": {
-      "osm": "OSM",
+      "osm": "OpenStreetMap",
       "label": "地図スタイル",
       "pale": "淡色",
       "std": "標準",
@@ -1651,7 +1652,6 @@
       "weekday": "平日",
       "weekend": "土日",
       "service": "ダイヤ",
-      "hour_pending": "1時間単位の絞り込みは、時間別の集計が入ると使えます",
       "tolerance": "定時とみなす遅れ",
       "minutes": "{{n}}分",
       "clear": "解除",

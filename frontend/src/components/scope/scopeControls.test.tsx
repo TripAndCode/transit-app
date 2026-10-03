@@ -117,9 +117,9 @@ describe("scope controls", () => {
       expect(params().has("hour")).toBe(false);
     });
 
-    it("says hour filtering is not available yet", () => {
+    it("makes no promises about features to come", () => {
       mount(TimeControl);
-      expect(screen.getByText("Hour-by-hour filtering arrives with the hourly aggregate")).toBeInTheDocument();
+      expect(screen.queryByText(/arrives with/)).not.toBeInTheDocument();
     });
   });
 
