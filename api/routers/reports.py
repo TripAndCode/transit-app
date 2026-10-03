@@ -18,7 +18,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.query.formatter import (
@@ -183,7 +183,7 @@ def _report_ctx(ctx: RangeCtx) -> ReportCtx:
 
 
 @router.get("/reports", response_model=list[ReportMeta])
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def list_reports(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -226,7 +226,7 @@ class HeadwayQualityResponse(BaseModel):
 
 
 @router.get("/headway_quality", response_model=HeadwayQualityResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_headway_quality(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -288,7 +288,7 @@ class PerformanceStandardsResponse(BaseModel):
 
 
 @router.get("/performance_standards", response_model=PerformanceStandardsResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_performance_standards(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -388,7 +388,7 @@ class WeatherDelayResponse(BaseModel):
 
 
 @router.get("/weather_delay", response_model=WeatherDelayResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_weather_delay(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -442,7 +442,7 @@ class SuggestionEnvelope(BaseModel):
 
 
 @router.get("/reports/suggest", response_model=SuggestionEnvelope)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_suggestion(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -485,7 +485,7 @@ class ForecastHeatmapResponse(BaseModel):
 
 
 @router.get("/forecast/heatmap", response_model=ForecastHeatmapResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def forecast_heatmap(
     request: Request,
     route: str = Query(..., min_length=1),
@@ -577,7 +577,7 @@ async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> 
 
 
 @router.get("/forecast/overview", response_model=ForecastOverviewResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def forecast_overview(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -728,7 +728,7 @@ def _csv_response(
 
 
 @router.get("/reports/{report_type}", response_model=ReportResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_report(
     request: Request,
     report_type: str,

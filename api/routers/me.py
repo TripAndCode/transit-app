@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_conn
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.middleware.session import SESSION_COOKIE_NAME
 from api.range import jst_today
 from api.security import User, csrf_guard, require_user
@@ -280,7 +280,7 @@ async def get_llm_key(user: User = Depends(require_user), conn: asyncpg.Connecti
 
 
 @router.put("/me/llm-key", response_model=LLMKeyStatus)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def put_llm_key(
     body: LLMKeyPut,
     request: Request,
