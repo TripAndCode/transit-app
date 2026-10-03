@@ -33,7 +33,7 @@ export function StatTile({ label, value, flagged, suffix = "", decimals = 0 }: P
   return (
     <div className="stat-tile">
       <span className="stat-tile__label">{label}</span>
-      <span className={flagged ? "stat-tile__value stat-tile__value--flagged" : "stat-tile__value"}>{text}</span>
+      <span className={flagged ? "stat-tile__value stat-tile__value--flagged num" : "stat-tile__value num"}>{text}</span>
     </div>
   );
 }

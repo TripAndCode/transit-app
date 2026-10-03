@@ -96,7 +96,7 @@ export function OverviewHeroRow({
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         />
         <div className="ov-hero-label">{t("overview.hero_row.avg_delay_label")}</div>
-        <div className="ov-kpi-value" style={{ color: avgMinColor }}>
+        <div className="ov-kpi-value num" style={{ color: avgMinColor }}>
           {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
           <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
         </div>
@@ -118,7 +118,7 @@ export function OverviewHeroRow({
         </div>
         <div className="ov-hero-sub">
           <div className="ov-hero-sub-item">
-            <span className="ov-hero-sub-value">
+            <span className="ov-hero-sub-value num">
               {t("overview.hero_row.delayed_count_value", { count: delayedCountDisplay, total: totalRoutes })}
             </span>
             {t("overview.hero_row.delayed_count_label")}

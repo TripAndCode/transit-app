@@ -180,13 +180,14 @@ describe("OverviewHeroRow", () => {
     expect(screen.queryByRole("img", { hidden: true })).not.toBeInTheDocument();
   });
 
-  it("keeps the hero delay value on proportional figures, not tabular-nums", () => {
+  it("sets the hero delay value and the delayed-route count in the numeral face", () => {
     mockHooks(38, 0.1);
     const { container } = renderHero();
     const value = container.querySelector(".ov-kpi-value");
     expect(value).not.toBeNull();
-    expect(value!.className.split(/\s+/)).not.toContain("num");
+    expect(value).toHaveClass("num");
     expect(value!.getAttribute("style") ?? "").not.toMatch(/tabular-nums/);
+    expect(container.querySelector(".ov-hero-sub-value")).toHaveClass("num");
   });
 
   it("anchors the sparkline on the period mean, labelled in words", () => {

@@ -11,7 +11,7 @@
   border-radius: 50%;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .fcb-spinner { animation: fcb-spin 0.7s linear infinite; }
+  .fcb-spinner { animation: fcb-spin calc(var(--dur-4) * 0.6) linear infinite; }
   @keyframes fcb-spin {
     to { transform: rotate(360deg); }
   }

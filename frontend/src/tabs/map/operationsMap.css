@@ -29,7 +29,7 @@
   gap: 7px;
   white-space: nowrap;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 /* One rule per state `freshnessFor` can return, so no named state depends on
@@ -49,14 +49,14 @@
 .ops-refresh { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 34px; height: 34px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius); color: var(--text-primary); background: var(--bg-surface); font-size: var(--text-xs); font-weight: 700; }
 .ops-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 @media (prefers-reduced-motion: no-preference) {
-  .ops-refresh:disabled svg { animation: ops-spin 1s linear infinite; }
+  .ops-refresh:disabled svg { animation: ops-spin calc(var(--dur-4) * 0.75) linear infinite; }
 }
 .ops-refresh-result { max-width: 190px; color: var(--text-tertiary); font-size: var(--text-xs); line-height: 1.35; }
 
 .ops-workspace { display: grid; grid-template-columns: minmax(0, 2fr) minmax(360px, 440px); flex: 1 1 auto; min-height: clamp(320px, calc(100vh - 300px), 560px); overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-surface); box-shadow: var(--el-2); }
 .ops-map { position: relative; min-width: 0; overflow: hidden; }
 .ops-map__canvas { position: absolute; inset: 0; }
-.ops-map__loading { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 13px; border-radius: 999px; color: #2a2a2a; background: rgba(255,255,255,.92); box-shadow: var(--el-2); font-size: 12px; }
+.ops-map__loading { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 13px; border-radius: 999px; color: var(--text-primary); background: var(--glass); box-shadow: var(--el-2); font-size: var(--text-xs); }
 .ops-map__empty { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg-page) 92%, transparent); }
 /* Reference panel: what the markers mean, and what they are. Stacked under
    the filter dock, which owns the top-left corner -- the dock is a control the
@@ -159,12 +159,12 @@
 .ops-selected-trip__summary div { display: flex; min-width: 0; flex-direction: column; }
 .ops-selected-trip__summary strong { font-size: 14px; }
 .ops-selected-trip__summary span { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
-.ops-selected-trip__summary b { padding: 4px 8px; border: 1px solid var(--delay-flag); border-radius: 999px; color: var(--delay-flag); font-size: 12px; }
+.ops-selected-trip__summary b { padding: 4px 8px; border: 1px solid var(--delay-flag); border-radius: 999px; color: var(--delay-flag); font-size: var(--text-xs); }
 .ops-selected-trip__reported { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px 6px; margin-top: 10px; padding: 7px 8px; border-radius: var(--radius); color: var(--text-primary); background: var(--bg-soft); font-size: var(--text-xs); }
 .ops-selected-trip__reported svg { color: var(--text-tertiary); }
 .ops-selected-trip__reported small { grid-column: 2; color: var(--text-secondary); }
 .ops-progress-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-soft); }
-.ops-progress-heading div { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.ops-progress-heading div { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); }
 .ops-progress-heading svg { color: var(--accent); }
 .ops-progress-heading small { color: var(--text-secondary); font-size: var(--text-xs); text-align: right; }
 .ops-progress-loading, .ops-trip-panel__empty { display: grid; min-height: 150px; place-items: center; color: var(--text-secondary); font-size: var(--text-xs); text-align: center; }
@@ -302,7 +302,7 @@
 /* Export lives with the counts it exports, in the queue panel, not among the
    filters: narrowing the view and taking the data away are different actions,
    and the CSV is exactly the rows those tiles count. */
-.ops-queue__export { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 16px; padding: 7px 11px; font-size: 12px; }
+.ops-queue__export { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 16px; padding: 7px 11px; font-size: var(--text-xs); }
 
 /* ── Day playback ──────────────────────────────────────────────────────────
    The rail spans the map's bottom edge rather than floating in a corner: it

@@ -122,7 +122,7 @@ export function ServiceSplit({
                 <span className="ov-svc-label">
                   <ServiceName value={k} />
                 </span>
-                <span className="ov-svc-num">
+                <span className="ov-svc-num num">
                   {formatMinutes(v)}
                 </span>
               </div>
@@ -274,6 +274,7 @@ function ServiceSplitDailyChart({
           {serviceValueLabel(WEEKEND_KEY, t)}
         </span>
       </div>
+      <div className="ov-chart-plot">
       <svg
         width="100%"
         viewBox={`0 0 ${DC_W} ${DC_H}`}
@@ -297,33 +298,7 @@ function ServiceSplitDailyChart({
                 strokeWidth="1"
                 strokeDasharray={i === 0 ? "0" : "2 4"}
               />
-              <text
-                x={DC_PAD_LEFT - 6}
-                y={y + 3}
-                fontSize="10"
-                style={{ fill: "var(--text-tertiary)" }}
-                textAnchor="end"
-              >
-                {v.toFixed(1)}
-              </text>
             </g>
-          );
-        })}
-        {/* X tick labels (thinned to ~10) */}
-        {xs.map((x, i) => {
-          const step = Math.max(1, Math.ceil(xs.length / 10));
-          if (i % step !== 0 && i !== xs.length - 1) return null;
-          return (
-            <text
-              key={`xt-${i}`}
-              x={x}
-              y={DC_H - DC_PAD_BOTTOM + 14}
-              fontSize="10"
-              style={{ fill: "var(--text-tertiary)" }}
-              textAnchor="middle"
-            >
-              {dateLabels[i]}
-            </text>
           );
         })}
         {/* Lines */}
@@ -355,6 +330,39 @@ function ServiceSplitDailyChart({
           />
         )}
       </svg>
+      {/* Axis labels in HTML over the plot, positioned in percent of the
+          viewBox: SVG text would scale with the chart's width and fall
+          below the 12px floor on a narrow card. */}
+      {yTicks.map((v, i) => (
+        <span
+          key={`yt-${i}`}
+          className="ov-svc-daily-label ov-svc-daily-label--y num"
+          style={{
+            top: `${((DC_PAD_TOP + (1 - v / yMax) * innerH) / DC_H) * 100}%`,
+            left: `${((DC_PAD_LEFT - 6) / DC_W) * 100}%`,
+          }}
+        >
+          {v.toFixed(1)}
+        </span>
+      ))}
+      {xs.map((x, i) => {
+        // Thinned to ~10 labels.
+        const step = Math.max(1, Math.ceil(xs.length / 10));
+        if (i % step !== 0 && i !== xs.length - 1) return null;
+        return (
+          <span
+            key={`xt-${i}`}
+            className="ov-svc-daily-label ov-svc-daily-label--x num"
+            style={{
+              top: `${((DC_H - DC_PAD_BOTTOM + 14) / DC_H) * 100}%`,
+              left: `${(x / DC_W) * 100}%`,
+            }}
+          >
+            {dateLabels[i]}
+          </span>
+        );
+      })}
+      </div>
       {hover.visible && (
         <div
           className="ov-tooltip"

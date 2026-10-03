@@ -4,11 +4,11 @@
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  animation: as-pulse 1s ease-in-out infinite;
+  animation: as-pulse var(--dur-4) var(--ease-in-out) infinite;
   opacity: 0.25;
 }
-[data-activity-strip] .as-dot:nth-child(2) { animation-delay: 0.15s; }
-[data-activity-strip] .as-dot:nth-child(3) { animation-delay: 0.30s; }
+[data-activity-strip] .as-dot:nth-child(2) { animation-delay: var(--dur-1); }
+[data-activity-strip] .as-dot:nth-child(3) { animation-delay: calc(var(--dur-1) * 2); }
 @keyframes as-pulse {
   0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
   40%           { opacity: 1;    transform: scale(1.1); }
