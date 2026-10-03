@@ -144,6 +144,8 @@ function mockApiGet(opts: { enabled?: boolean; llmApproved?: boolean } = {}) {
   ) as unknown as ReturnType<typeof vi.spyOn>;
 }
 
+const COPILOT_ERROR = "Couldn't generate an insight right now.";
+
 describe("CopilotPanel", () => {
   it("shows the insight but no follow-up form to a caller an admin hasn't approved", async () => {
     // The insight is rendered from a template server-side and needs no
@@ -321,6 +323,30 @@ describe("CopilotPanel", () => {
     // gate removed.
     await act(() => vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 300));
     expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it("says there is not enough data yet, and asks for no insight, when the view has no observations", async () => {
+    vi.spyOn(client, "apiGetOrNull").mockResolvedValue(null as never);
+    vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
+      path.includes("/copilot/enabled")
+        ? Promise.resolve({ enabled: true })
+        : Promise.resolve({ headline: { avg_min: null, samples: 0 } }),
+    );
+    const postSpy = vi.spyOn(client, "apiPost");
+    renderPanel("/agencies/1/pulse");
+    expect(await screen.findByText("Not enough data for an insight yet.")).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 300));
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed summary as an error, not as a lack of data", async () => {
+    vi.spyOn(client, "apiGetOrNull").mockResolvedValue(null as never);
+    vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
+      path.includes("/copilot/enabled") ? Promise.resolve({ enabled: true }) : Promise.reject(new Error("503")),
+    );
+    renderPanel("/agencies/1/pulse");
+    expect(await screen.findByText(COPILOT_ERROR)).toBeInTheDocument();
+    expect(screen.queryByText("Not enough data for an insight yet.")).not.toBeInTheDocument();
   });
 
   it("stays off and makes no insight request when the flag check fails", async () => {

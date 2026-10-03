@@ -30,7 +30,7 @@ async def test_generate_proactive_insight_interpolates_from_payload():
     result = await copilot.generate_proactive_insight("overview", OVERVIEW_PAYLOAD, locale="en")
     assert "14.2" in result["text"]
     assert result["low_confidence"] is False
-    assert "Overview" in result["cite"]
+    assert "Pulse summary" in result["cite"]
 
 
 async def test_low_confidence_comes_from_the_payload():

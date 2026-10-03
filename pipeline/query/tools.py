@@ -291,8 +291,8 @@ _LOCALES: dict[tuple[str, str], str] = {
         "Across all routes the average is {avg} min this week, {direction} {delta}% "
         "from the {baseline} min baseline ({delayed_count} routes currently delayed)."
     ),
-    ("copilot_overview_top_delay_cite", "ja"): "概況 · サンプル {samples} 件 · top_delayed[0]",
-    ("copilot_overview_top_delay_cite", "en"): "Overview · {samples} samples · top_delayed[0]",
+    ("copilot_overview_top_delay_cite", "ja"): "{samples}件の観測に基づく · 概況の集計",
+    ("copilot_overview_top_delay_cite", "en"): "Based on {samples} departures · Pulse summary",
     ("copilot_delta_up", "ja"): "増加",
     ("copilot_delta_up", "en"): "up",
     ("copilot_delta_down", "ja"): "減少",

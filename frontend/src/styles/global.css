@@ -462,6 +462,14 @@ body {
   text-spacing-trim: space-first;
 }
 
+/* Japanese has no spaces to break at: auto-phrase breaks between phrases
+   rather than mid-word where the browser supports it, and balance evens a
+   heading's lines. */
+h1, h2, h3 {
+  word-break: auto-phrase;
+  text-wrap: balance;
+}
+
 /* `anywhere` also lowers an element's min-content width, which a table's
    auto layout reads when it narrows columns: cells shrank until headers,
    words and numbers split mid-token. `break-word` still breaks a token that

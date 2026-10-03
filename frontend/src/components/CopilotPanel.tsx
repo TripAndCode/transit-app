@@ -40,7 +40,10 @@ export function CopilotPanel() {
   // instance.
 
   const tab = overviewMatch && enabled ? "overview" : null;
-  const { insight, loading, error } = useCopilotInsight(agencyId, tab, overviewQuery.data ?? null);
+  // A view with no observations has nothing an insight could be drawn from,
+  // so none is asked for.
+  const hasObservations = (overviewQuery.data?.headline?.samples ?? 0) > 0;
+  const { insight, loading, error } = useCopilotInsight(agencyId, tab, hasObservations ? overviewQuery.data : null);
 
   // The kill switch removes the panel outright rather than showing an empty
   // shell — a disabled feature should be invisible, not broken-looking.
@@ -57,7 +60,7 @@ export function CopilotPanel() {
     <aside className="copilot-panel" aria-label={t("copilot.title")}>
       <h2>{t("copilot.title")}</h2>
       {loading && <p>{t("copilot.loading")}</p>}
-      {error != null && <p>{t("copilot.error")}</p>}
+      {(error != null || overviewQuery.isError) && <p>{t("copilot.error")}</p>}
       {insight && (
         <div>
           <p>{insight.text}</p>
@@ -65,6 +68,9 @@ export function CopilotPanel() {
           {insight.lowConfidence && <p className="copilot-low-confidence">{t("copilot.low_confidence")}</p>}
         </div>
       )}
+      {/* With no observations to draw from (an agency with no data yet) the
+          panel says so rather than standing empty under its heading. */}
+      {overviewQuery.isSuccess && !hasObservations && <p className="copilot-empty">{t("copilot.no_insight")}</p>}
       {/* The insight needs no approval; the follow-up goes to /ask, whose
           free-text stage answers only an admin-approved caller. */}
       {agencyId != null && tab != null && llmApproved && (
