@@ -1252,7 +1252,7 @@
       "col_last_analyzed": "最終集計",
       "col_freshness": "集計状態",
       "col_data_to": "データ最終日",
-      "col_clamp_pct": "クランプ率",
+      "col_clamp_pct": "異常値率",
       "fresh": "最新",
       "behind": "{{days}} 日遅れ",
       "never": "未集計",
@@ -1284,7 +1284,7 @@
       "col_freshness": "鮮度",
       "col_last_capture": "最終取得",
       "col_rt_coverage": "RT 被覆",
-      "col_clamp": "clamp 率 · 14日",
+      "col_clamp": "異常値率 · 14日",
       "col_static_version": "静的版",
       "table_label": "事業者一覧",
       "freshness_fresh": "最新",
@@ -1303,7 +1303,7 @@
       "strategy": "取得方式",
       "last_capture": "最終取得",
       "aggregation": "集計",
-      "clamp": "clamp 率 · 14日",
+      "clamp": "異常値率 · 14日",
       "rt_section": "RT フィールド診断（直近プローブ）",
       "rt_scope_note": "計測対象は TripUpdate の stop_time_update 項目です。VehiclePosition と Alerts は取り込んでいません。",
       "rt_present": "あり",
@@ -1497,7 +1497,7 @@
         "missing": "欠測"
       },
       "cell_tooltip": "{{agency}} · {{date}} · {{state}}",
-      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · クランプ {{pct}}%",
+      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · 異常値 {{pct}}%",
       "alerts_title": "警告",
       "alerts_none": "対応が必要な項目はありません。",
       "alert_open": "開く",
@@ -1508,8 +1508,14 @@
         "migrations_behind_one": "スキーマが {{count}} 件遅れています",
         "migrations_behind_other": "スキーマが {{count}} 件遅れています",
         "llm_approvals_pending_one": "AI 利用の承認待ち {{count}} 名",
-        "llm_approvals_pending_other": "AI 利用の承認待ち {{count}} 名"
-      }
+        "llm_approvals_pending_other": "AI 利用の承認待ち {{count}} 名",
+        "agencies_stale_one": "{{count}} 事業者の集計が遅れています",
+        "agencies_stale_other": "{{count}} 事業者の集計が遅れています",
+        "agencies_never_analyzed_one": "{{count}} 事業者はまだ一度も集計されていません",
+        "agencies_never_analyzed_other": "{{count}} 事業者はまだ一度も集計されていません"
+      },
+      "check_failed": "状態を確認できませんでした",
+      "details": "詳細"
     },
     "ask_ops": {
       "title": "Ask 運用",
