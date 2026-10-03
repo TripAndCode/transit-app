@@ -236,8 +236,12 @@ async def _fetch_userinfo(client: Any, token: dict[str, Any], provider: str) -> 
     user = user_resp.json()
     emails_resp = await client.get("user/emails", token=token)
     emails = emails_resp.json()
+    # GitHub answers a rejected token with `{"message": ...}` on both routes;
+    # indexing that as a user record would surface as a 500 KeyError.
+    if not isinstance(user, dict) or "id" not in user or not isinstance(emails, list):
+        raise HTTPException(status_code=502, detail="provider_error")
     primary = next(
-        (e for e in emails if e.get("primary") and e.get("verified")),
+        (e for e in emails if isinstance(e, dict) and e.get("primary") and e.get("verified")),
         None,
     )
     return {
