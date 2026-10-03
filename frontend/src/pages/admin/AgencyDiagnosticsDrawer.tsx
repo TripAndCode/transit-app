@@ -533,7 +533,7 @@ export function AgencyDiagnosticsDrawer({
                 <span>
                   {t("admin.agency_diag.weights_summary", {
                     withWeights: data.weights_coverage.routes_with_weights,
-                    total: data.weights_coverage.routes_total,
+                    count: data.weights_coverage.routes_total,
                   })}
                 </span>{" "}
                 <AdminButton

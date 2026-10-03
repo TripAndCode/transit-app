@@ -69,7 +69,7 @@ describe("NetworkTab", () => {
     expect(screen.getAllByTestId("network-row")).toHaveLength(3);
     expect(screen.getByText(/\+10\.0/)).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument(); // Hiroden's on-time %
-    expect(screen.getByText("10.00%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
+    expect(screen.getByText("10.0%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
     const staleBadge = screen.getByText("Behind");
     expect(staleBadge).toBeInTheDocument();
     // Native title= was replaced by the shared, keyboard-reachable Tooltip.
@@ -84,7 +84,7 @@ describe("NetworkTab", () => {
     // Hiroden (0.14 < 1) and Aomori (null) — no secondary line at all for
     // Hiroden since neither clamp nor stale triggers.
     expect(screen.getAllByTestId("clamp-dot")).toHaveLength(1);
-    expect(screen.getByText("2026-04-01 – 2026-04-02")).toBeInTheDocument();
+    expect(screen.getByText("Apr 1 – Apr 2, 2026")).toBeInTheDocument();
     expect(screen.getByText("no data in range")).toBeInTheDocument();
     expect(screen.getByText("How to read this")).toBeInTheDocument();
   });
@@ -241,7 +241,7 @@ describe("NetworkTab", () => {
     expect(screen.queryByTestId("you-badge")).not.toBeInTheDocument();
   });
 
-  it("renders the coverage-range separator via the locale-aware key, not a hardcoded en-dash", async () => {
+  it("writes the coverage range in the language's date style", async () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07", definition,
@@ -251,7 +251,7 @@ describe("NetworkTab", () => {
     } as never);
     await i18n.changeLanguage("ja");
     renderTab();
-    expect(screen.getByText("2026-04-01 〜 2026-04-02")).toBeInTheDocument();
+    expect(screen.getByText("2026年4月1日〜4月2日")).toBeInTheDocument();
   });
 
   it("keeps the definition metadata behind the aggregation-conditions disclosure", () => {

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TrendDay } from "../../api/types";
 import { ChartAxis } from "./ChartAxis";
 import { useDrawOn } from "../charts/ChartEnter";
+import { formatDate, formatMinutes, formatNumber } from "../../utils/format";
 
 export function PeriodChart({ days }: { days: TrendDay[] }) {
   const { t } = useTranslation("design");
@@ -20,7 +21,7 @@ export function PeriodChart({ days }: { days: TrendDay[] }) {
   return <svg className="focus-chart" viewBox="0 0 780 280" role="img" aria-label={t("trend")}>
     <ChartAxis low={low} high={high} y={y} />
     <path ref={lineRef} d={path} stroke="var(--accent)" strokeWidth={2} fill="none" />
-    {values.map((d, i) => <g key={d.date}><circle cx={x(d.date)} cy={y(d.avg_min)} r={4} fill="var(--accent)"><title>{d.date}: {d.avg_min} {t("minutes")} ({d.samples})</title></circle>
+    {values.map((d, i) => <g key={d.date}><circle cx={x(d.date)} cy={y(d.avg_min)} r={4} fill="var(--accent)"><title>{formatDate(d.date)}: {formatMinutes(d.avg_min)} ({formatNumber(d.samples)})</title></circle>
       {(i % Math.max(1, Math.ceil(values.length / 7)) === 0 || i === values.length - 1) && <text x={x(d.date)} y={250} textAnchor="middle" fill="var(--text-secondary)" fontSize={12}>{d.date.slice(5)}</text>}
     </g>)}
   </svg>;

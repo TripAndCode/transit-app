@@ -127,6 +127,11 @@ describe("AdminBoardPage", () => {
     vi.useRealTimers();
   });
 
+  it("words a stale agency's lag with its own plural, from the alert's days", () => {
+    wrap(<AdminBoardPage />);
+    expect(screen.getByText("Toyama Bayline: aggregates 3 days behind")).toBeInTheDocument();
+  });
+
   it("renders one tile per collector with its status and last success", () => {
     wrap(<AdminBoardPage />);
     const tiles = screen.getAllByTestId("collector-tile");

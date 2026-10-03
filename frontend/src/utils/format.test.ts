@@ -1,6 +1,19 @@
 import { describe, it, expect, afterEach } from "vitest";
 import i18n from "../i18n";
-import { formatNumber, formatDateTime, FILTER_SEPARATOR, EM_DASH, fmtPct, fmtRatioPct } from "./format";
+import {
+  formatNumber,
+  formatDateTime,
+  formatDate,
+  formatDateRange,
+  formatDuration,
+  formatHourRange,
+  formatMinutes,
+  formatShortDate,
+  FILTER_SEPARATOR,
+  EM_DASH,
+  fmtPct,
+  fmtRatioPct,
+} from "./format";
 
 describe("formatNumber", () => {
   afterEach(async () => {
@@ -90,5 +103,80 @@ describe("fmtRatioPct", () => {
 
   it("returns the em dash for null", () => {
     expect(fmtRatioPct(null)).toBe(EM_DASH);
+  });
+});
+
+describe("formatMinutes", () => {
+  afterEach(async () => i18n.changeLanguage("en"));
+
+  it("spaces the unit as each language does, at one decimal", async () => {
+    await i18n.changeLanguage("en");
+    expect(formatMinutes(6.34)).toBe("6.3 min");
+    expect(formatMinutes(1234.56)).toBe("1,234.6 min");
+    await i18n.changeLanguage("ja");
+    expect(formatMinutes(6.34)).toBe("6.3分");
+  });
+
+  it("returns the em dash for a missing value", () => {
+    expect(formatMinutes(null)).toBe("—");
+    expect(formatMinutes(Number.NaN)).toBe("—");
+  });
+});
+
+describe("formatDuration", () => {
+  afterEach(async () => i18n.changeLanguage("en"));
+
+  it("reads a delay in seconds as minutes and seconds", async () => {
+    await i18n.changeLanguage("en");
+    expect(formatDuration(355)).toBe("5 min 55 s");
+    expect(formatDuration(42)).toBe("42 s");
+    expect(formatDuration(120)).toBe("2 min");
+    await i18n.changeLanguage("ja");
+    expect(formatDuration(355)).toBe("5分55秒");
+  });
+
+  it("returns the em dash for a missing value", () => {
+    expect(formatDuration(null)).toBe("—");
+  });
+});
+
+describe("formatDateRange", () => {
+  afterEach(async () => i18n.changeLanguage("en"));
+
+  it("writes the year once, where each language writes it", async () => {
+    await i18n.changeLanguage("en");
+    expect(formatDateRange("2026-09-02", "2026-10-01")).toBe("Sep 2 – Oct 1, 2026");
+    expect(formatDateRange("2026-12-30", "2027-01-03")).toBe("Dec 30, 2026 – Jan 3, 2027");
+    await i18n.changeLanguage("ja");
+    expect(formatDateRange("2026-09-02", "2026-10-01")).toBe("2026年9月2日〜10月1日");
+  });
+
+  it("can leave the year out, and shows one day once", async () => {
+    await i18n.changeLanguage("en");
+    expect(formatDateRange("2026-09-02", "2026-10-01", { year: false })).toBe("Sep 2 – Oct 1");
+    expect(formatDateRange("2026-09-02", "2026-09-02")).toBe("Sep 2, 2026");
+  });
+
+  it("returns the em dash for an unparseable end", () => {
+    expect(formatDateRange("nope", "2026-10-01")).toBe("—");
+  });
+});
+
+describe("formatDate and formatShortDate", () => {
+  afterEach(async () => i18n.changeLanguage("en"));
+
+  it("formats one day in the language's style, and a chart tick as month/day", async () => {
+    await i18n.changeLanguage("en");
+    expect(formatDate("2026-09-29")).toBe("Sep 29, 2026");
+    expect(formatShortDate("2026-09-28")).toBe("9/28");
+    await i18n.changeLanguage("ja");
+    expect(formatDate("2026-09-29")).toBe("2026年9月29日");
+  });
+});
+
+describe("formatHourRange", () => {
+  it("writes an hour as a clock range", () => {
+    expect(formatHourRange(17)).toBe("17:00–18:00");
+    expect(formatHourRange(9)).toBe("09:00–10:00");
   });
 });

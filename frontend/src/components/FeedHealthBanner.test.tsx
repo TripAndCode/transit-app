@@ -54,7 +54,7 @@ describe("FeedHealthBanner", () => {
     } as never);
     renderBanner();
     const banner = screen.getByRole("status");
-    expect(banner.textContent).toContain("1906");
+    expect(banner.textContent).toContain("1,906");
   });
 
   it("renders the message as a single tappable line on a narrow viewport", () => {

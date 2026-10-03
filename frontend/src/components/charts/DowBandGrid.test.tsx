@@ -29,7 +29,6 @@ describe("BandGrid", () => {
         grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
-        axisMin="min"
         colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
@@ -44,7 +43,6 @@ describe("BandGrid", () => {
         grid={fullGrid([{ dow: 2, band: "evening", v: 9.0, n: 5 }])}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
-        axisMin="min"
         colorFor={() => "#abc"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
@@ -66,7 +64,6 @@ describe("BandGrid", () => {
         grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
-        axisMin="min"
         colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
@@ -98,7 +95,6 @@ describe("BandGrid severity outline", () => {
         ])}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
-        axisMin="min"
         colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}
@@ -116,7 +112,6 @@ describe("BandGrid severity outline", () => {
         grid={fullGrid()}
         bandLabel={(b) => b}
         dayLabel={(d) => String(d)}
-        axisMin="min"
         colorFor={() => "#000"}
         onTip={vi.fn()}
         onLeave={vi.fn()}

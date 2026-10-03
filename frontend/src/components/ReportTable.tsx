@@ -12,7 +12,7 @@ import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
-import { formatNumber, fmtPct } from "../utils/format";
+import { formatNumber, fmtPct, formatDuration } from "../utils/format";
 import "./ReportTable.css";
 
 const ROWS_CAP = 200;
@@ -122,7 +122,7 @@ const SCHEMAS: Record<string, Schema[]> = {
     { index: 3, labelKey: "reports.col.date", align: "left" },
     { index: 4, labelKey: "reports.col.scheduled_time", align: "left" },
     { index: 5, labelKey: "reports.col.actual_time", align: "left" },
-    { index: 6, labelKey: "reports.col.delay_sec", align: "right", format: (v, t) => fmtNum(v, t) },
+    { index: 6, labelKey: "reports.col.delay", align: "right", format: (v) => formatDuration(v == null ? null : Number(v)) },
   ],
 };
 

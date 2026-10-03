@@ -23,10 +23,11 @@ import { SHARED_TABLE, th, td } from "./tableStyles";
 import type { PerformanceStandardRow } from "../api/types";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
+import { formatDuration } from "../utils/format";
 
 function fmtMetricValue(v: number | null, metricType: PerformanceStandardRow["metric_type"]): string {
   if (v == null) return "—";
-  return metricType === "ewt_sec" ? `${Math.round(v)}s` : `${v.toFixed(1)}%`;
+  return metricType === "ewt_sec" ? formatDuration(v) : `${v.toFixed(1)}%`;
 }
 
 function fmtAchievementRate(v: number | null): string {
