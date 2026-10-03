@@ -6,6 +6,7 @@ import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
 import { Tooltip } from "../../components/Tooltip";
 import { formatNumber } from "../../utils/format";
+import { coalesceToFrame } from "../../utils/frameCoalesce";
 import "./stopEvidence.css";
 
 export function StopEvidenceChart({ messageId, points, onFocus, complete = false, message }: {
@@ -52,7 +53,8 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
       }
     }
     updateDetailLeft();
-    container?.addEventListener("scroll", updateDetailLeft);
+    const frame = coalesceToFrame(updateDetailLeft);
+    container?.addEventListener("scroll", frame.schedule);
     function dismiss(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       setSequence(null);
@@ -62,7 +64,8 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
     document.addEventListener("keydown", dismiss);
     return () => {
       document.removeEventListener("keydown", dismiss);
-      container?.removeEventListener("scroll", updateDetailLeft);
+      frame.cancel();
+      container?.removeEventListener("scroll", frame.schedule);
     };
   }, [sequence, onFocus]);
   const [windowSize, setWindowSize] = useState(Math.min(8, points.length));
