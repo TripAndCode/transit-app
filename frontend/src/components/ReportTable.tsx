@@ -1,5 +1,7 @@
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { useState } from "react";
+import { flushSync } from "react-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { TFunction } from "i18next";
 import { delayColor, delayTextColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
@@ -7,6 +9,8 @@ import { RouteLabel } from "./RouteLabel";
 import { ServiceName } from "./ServiceName";
 import { serviceValueLabel } from "../utils/filterValueLabels";
 import { routeHref } from "../routes/destinations";
+import { loadRouteAnalysisTab, loadRouteDossier } from "../routes/lazyTabs";
+import { isPlainLeftClick, routeTitleStyle, supportsViewTransition, withViewTransition } from "../utils/viewTransition";
 import { useAgencyId } from "../api/useAgencyId";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
@@ -174,6 +178,7 @@ type Props = {
 };
 
 export function ReportTable({ reportType, rows }: Props) {
+  const [transitioning, setTransitioning] = useState<string | null>(null);
   const { t } = useTranslation();
   const id = useAgencyId();
   const names = useRouteNames(id);
@@ -214,7 +219,7 @@ export function ReportTable({ reportType, rows }: Props) {
                 <span className="report-cards__rank">{i + 1}</span>
                 {titleCol && (
                   <span className="report-cards__route">
-                    <RouteCell agencyId={id} code={String(row[titleCol.index] ?? "")} names={names} search={search} />
+                    <RouteCell agencyId={id} code={String(row[titleCol.index] ?? "")} names={names} search={search} transitioning={transitioning} onTransition={setTransitioning} />
                   </span>
                 )}
                 {headline && (
@@ -286,7 +291,7 @@ export function ReportTable({ reportType, rows }: Props) {
                       // width it breaks onto a third line.
                       style={{ ...td(), ...(c === ROUTE_COL ? STICKY_CELL : null), minWidth: "16em", fontWeight: 500, wordBreak: "keep-all" }}
                     >
-                      <RouteCell agencyId={id} code={String(row[c.index] ?? "")} names={names} search={search} />
+                      <RouteCell agencyId={id} code={String(row[c.index] ?? "")} names={names} search={search} transitioning={transitioning} onTransition={setTransitioning} />
                     </td>
                   );
                 }
@@ -324,22 +329,50 @@ export function ReportTable({ reportType, rows }: Props) {
 
 /** A row's route, as a link to its page: rows are where a route is found,
  *  so they are how it is opened. The scope carries over; routeHref drops what
- *  only chose this screen's report. */
+ *  only chose this screen's report.
+ *
+ *  A plain click navigates inside a view transition where the engine has one:
+ *  the clicked label is named as the shared element so it travels into the
+ *  dossier's title. The dossier's chunks are loaded before the DOM swap so the
+ *  new snapshot holds the real title, not a Suspense fallback. Modified or
+ *  secondary clicks, unsupported engines and reduced motion keep the anchor's
+ *  own navigation. */
 function RouteCell({
   agencyId,
   code,
   names,
   search,
+  transitioning,
+  onTransition,
 }: {
   agencyId: number | null;
   code: string;
   names: ReturnType<typeof useRouteNames>;
   search: string;
+  /** The code whose label is currently the shared element, if any. */
+  transitioning: string | null;
+  onTransition: (code: string) => void;
 }) {
+  const navigate = useNavigate();
   if (agencyId == null || !code) return <RouteLabel code={code} names={names} />;
+  const href = routeHref(agencyId, code, search);
   return (
-    <Link className="report-route-link" to={routeHref(agencyId, code, search)}>
-      <RouteLabel code={code} names={names} />
+    <Link
+      className="report-route-link"
+      to={href}
+      onClick={(e) => {
+        if (!supportsViewTransition() || !isPlainLeftClick(e)) return;
+        e.preventDefault();
+        flushSync(() => onTransition(code));
+        void withViewTransition(async () => {
+          await Promise.all([loadRouteDossier(), loadRouteAnalysisTab()]);
+          flushSync(() => navigate(href));
+        });
+      }}
+    >
+      <span className="report-route-link__label" style={routeTitleStyle(transitioning === code)}>
+        <RouteLabel code={code} names={names} />
+      </span>
       <span className="report-route-link__chevron" aria-hidden="true">
         {" ›"}
       </span>

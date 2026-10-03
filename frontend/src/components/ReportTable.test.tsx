@@ -1,11 +1,23 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { ReportTable } from "./ReportTable";
 import * as hooks from "../api/hooks";
 import type { Route as RouteRecord } from "../api/types";
+import { stubReducedMotion } from "../test/reducedMotion";
+
+vi.mock("../routes/lazyTabs", () => ({
+  loadRouteDossier: () => Promise.resolve({ default: () => null }),
+  loadRouteAnalysisTab: () => Promise.resolve({ default: () => null }),
+}));
+
+type VTDoc = { startViewTransition?: unknown };
+
+function Where() {
+  return <div data-testid="location">{useLocation().pathname}</div>;
+}
 
 function mockRoutes(data: RouteRecord[]) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data, isLoading: false } as never);
@@ -16,6 +28,7 @@ function renderTable(rows: unknown[][], reportType = "ranking") {
     <MemoryRouter initialEntries={["/agencies/1/analysis"]}>
       <Routes>
         <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} />} />
+        <Route path="*" element={<Where />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -232,5 +245,38 @@ describe("ReportTable on a phone", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(25);
     await userEvent.click(screen.getByRole("button", { name: "Show 5 more" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(30);
+  });
+});
+
+describe("ReportTable route link transition", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete ((document as unknown as VTDoc)).startViewTransition;
+  });
+
+  it("on a plain click, names the clicked label and navigates inside a view transition", async () => {
+    mockRoutes([]);
+    const start = vi.fn((cb: () => void | Promise<void>) => {
+      void cb();
+      return { finished: Promise.resolve() };
+    });
+    ((document as unknown as VTDoc)).startViewTransition = start;
+    renderTable([["3", "weekday", 4.2, 3.1, 7.0, 120]]);
+    const link = screen.getByRole("link", { name: /3/ });
+    await userEvent.click(link);
+    expect(link.querySelector<HTMLElement>(".report-route-link__label")!.style.viewTransitionName).toBe("route-title");
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(await screen.findByTestId("location")).toHaveTextContent("/routes/3");
+  });
+
+  it("leaves navigation to the anchor under reduced motion (no transition)", async () => {
+    mockRoutes([]);
+    stubReducedMotion();
+    const start = vi.fn();
+    ((document as unknown as VTDoc)).startViewTransition = start;
+    renderTable([["3", "weekday", 4.2, 3.1, 7.0, 120]]);
+    await userEvent.click(screen.getByRole("link", { name: /3/ }));
+    expect(start).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("location")).toHaveTextContent("/routes/3");
   });
 });

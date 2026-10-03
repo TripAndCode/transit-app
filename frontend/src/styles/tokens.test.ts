@@ -679,7 +679,9 @@ describe("route-enter animation", () => {
       .map((m) => ruleBody(globalCss.slice(m.index), "@media (prefers-reduced-motion: no-preference)"))
       .filter((block) => block.includes(".route-enter"));
 
-    expect(globalCss.match(/\.route-enter/g)).toHaveLength(1);
+    // The one other mention only switches the fade off while a view
+    // transition runs (viewTransition.css.test.ts); it defines no animation.
+    expect(globalCss.match(/(?<!active-view-transition )\.route-enter/g)).toHaveLength(1);
     expect(allowed).toHaveLength(1);
     expect(decl(ruleBody(allowed[0], ".route-enter"), "animation")).toBe(
       "ov-fade-in var(--dur-2) var(--ease-out)",

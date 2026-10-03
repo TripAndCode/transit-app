@@ -78,6 +78,20 @@ describe("RouteAnalysisTab", () => {
     expect(screen.queryByRole("button", { name: "Clear the route filter" })).toBeNull();
   });
 
+  it("the dossier title is the shared element only while a route is on the page", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1");
+    expect(screen.getByRole("heading", { level: 1 }).style.viewTransitionName).toBe("route-title");
+  });
+
+  it("the choose-a-route heading carries no transition name", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: undefined, isPending: false, error: null, refetch: vi.fn() } as never);
+    renderTab("/agencies/1/route-analysis");
+    expect(screen.getByRole("heading", { level: 1 }).style.viewTransitionName).toBe("");
+  });
+
   it("renders the investigate heading and stop-delay content once a route has data", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useRouteShape").mockReturnValue({
