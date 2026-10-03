@@ -8,6 +8,7 @@ AGENTS.md's convention.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from fnmatch import fnmatch
 from pathlib import Path
@@ -115,6 +116,24 @@ def test_dependabot_keeps_a_vitest_major_in_one_pr():
     assert all(grouped(name) for name in vitest_family), vitest_family
     for unrelated in ("vite", "@vitejs/plugin-react", "eslint"):
         assert not grouped(unrelated), unrelated
+
+
+def test_dependabot_leaves_a_postgres_major_to_a_planned_migration():
+    """db/'s extensions follow the base image's own major, so a major bump
+    builds and passes CI while the server it starts cannot read an existing
+    data volume. A typo in the ignore rule would still parse and let that PR
+    through; an over-broad rule would also drop the minor and patch fixes."""
+
+    config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+    db = next(
+        entry for entry in config["updates"] if entry["package-ecosystem"] == "docker" and entry["directory"] == "/db"
+    )
+    base = re.search(r"^FROM\s+([^\s:@]+)", (REPO_ROOT / "db" / "Dockerfile").read_text(), re.MULTILINE)
+    assert base, "db/Dockerfile has no FROM line"
+
+    rules = [rule for rule in db.get("ignore", []) if fnmatch(base.group(1), rule["dependency-name"])]
+    assert rules, f"db/: nothing stops Dependabot proposing a {base.group(1)} major"
+    assert all(rule.get("update-types") == ["version-update:semver-major"] for rule in rules), rules
 
 
 def test_gitattributes_normalizes_line_endings_and_marks_binaries():
