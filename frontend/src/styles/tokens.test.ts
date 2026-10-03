@@ -352,8 +352,8 @@ describe("period overview uses shared typography, not a page-local override", ()
   });
 });
 
-describe("hero KPI values use proportional figures, not tabular-nums", () => {
-  it("does not force tabular-nums on the large standalone hero number", () => {
+describe("hero KPI value takes its figures from .num, not a rule of its own", () => {
+  it("declares no font-variant-numeric of its own on the hero number", () => {
     expect(decl(ovKpiValueBlock, "font-variant-numeric")).toBeNull();
   });
 });

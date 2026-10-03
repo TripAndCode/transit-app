@@ -488,13 +488,26 @@ table {
     radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--text-primary) 22%, transparent), transparent) right / 16px 100% no-repeat scroll;
 }
 
-/* Tabular figures for numbers that must align vertically outside a table —
-   chart axes, counters in a fixed-width slot — never a large standalone
-   number, which reads better with proportional figures. A table's numeric
-   cells get them from tableStyles' td({ align: "right" }). */
+/* The numeral face with tabular figures, on every figure the UI prints
+   outside a table — hero values, stat tiles, chart labels, counters — so a
+   value that counts up or updates in place keeps its width instead of
+   jittering. A table's numeric cells get them from tableStyles'
+   td({ align: "right" }). */
 .num {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
+}
+
+/* Two lines, then clamped, for a label that would otherwise take a one-line
+   ellipsis: Japanese has no spaces, so an ellipsis cuts a name mid-word after
+   a few characters where a second line keeps it readable. */
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  line-height: 1.3;
 }
 
 button { font: inherit; cursor: pointer; }

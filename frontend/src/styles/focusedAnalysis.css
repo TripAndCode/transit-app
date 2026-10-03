@@ -33,7 +33,12 @@
 .focus-tab-panel--hidden { display: none; }
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
 .focus-aside strong { font-size: 30px; color: var(--delay-severe); }
-.focus-chart { width: 100%; height: 300px; min-height: 230px; }
+/* Never narrower than the 780-unit viewBox, so the only scale left on its
+   labels is the fixed height against the viewBox height -- which keeps a
+   14-unit label above the 12px floor. A narrower screen scrolls the chart
+   sideways inside .focus-chart-scroll instead of shrinking its text. */
+.focus-chart { width: 100%; height: 300px; min-height: 230px; min-width: 780px; }
+.focus-chart-scroll { overflow-x: auto; }
 /* `components/tableStyles.ts` is where table and cell styling belongs, and
    the tables on these pages read from it. `.focus-table` stays for the one
    consumer that has not moved -- the Marey diagram's narrow-viewport data

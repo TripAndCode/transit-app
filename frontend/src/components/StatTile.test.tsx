@@ -25,6 +25,13 @@ describe("StatTile", () => {
     expect(container.querySelector(".stat-tile__value--flagged")).not.toBeNull();
   });
 
+  it("sets the value in the numeral face, flagged or not", () => {
+    const { container, rerender } = render(<StatTile label="遅延" value={2} />);
+    expect(container.querySelector(".stat-tile__value")).toHaveClass("num");
+    rerender(<StatTile label="遅延" value={2} flagged />);
+    expect(container.querySelector(".stat-tile__value")).toHaveClass("num");
+  });
+
   it("formats a numeric value via useCountUp and appends the suffix", () => {
     render(<StatTile label="On-time" value={87} suffix="%" />);
     expect(screen.getByText("87%")).toBeInTheDocument();

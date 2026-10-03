@@ -23,9 +23,9 @@
   cursor: pointer;
   white-space: nowrap;
   transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    background 120ms ease;
+    border-color var(--transition),
+    box-shadow var(--transition),
+    background var(--transition);
 }
 .rp-trigger:hover:not(:disabled) {
   border-color: var(--text-tertiary, #999);
@@ -134,7 +134,7 @@
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: background 100ms ease;
+  transition: background var(--transition);
 }
 .rp-opt:hover,
 .rp-opt:focus-visible {

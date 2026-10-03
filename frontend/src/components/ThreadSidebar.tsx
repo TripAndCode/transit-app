@@ -486,13 +486,11 @@ function ConvItem({
           <span style={{ fontSize: 16, lineHeight: 1.5, flexShrink: 0 }}>💬</span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
+              className="clamp-2"
               style={{
                 fontSize: 13,
                 fontWeight: isActive ? 600 : 400,
                 color: "var(--text-primary)",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
                 lineHeight: 1.4,
               }}
             >
@@ -501,12 +499,10 @@ function ConvItem({
 
             {subLine && (
               <div
+                className="clamp-2"
                 style={{
                   fontSize: "var(--text-xs)",
                   color: "var(--text-tertiary)",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
                   marginTop: 2,
                   lineHeight: 1.3,
                 }}

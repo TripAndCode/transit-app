@@ -1,6 +1,7 @@
 import { lazy } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
+import { PageHeader } from "../components/ui/PageHeader";
 import { COMPARE_REPORT_TYPES } from "../routes/destinations";
 import { loadAnalysisTab, loadNetworkTab } from "../routes/lazyTabs";
 
@@ -24,6 +25,7 @@ export function CompareTab() {
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <PageHeader title={t("nav.compare")} />
       <div
         role="group"
         aria-label={t("nav.compare")}

@@ -37,7 +37,7 @@ export function StopChart({ stops, previous, selected, onSelect }: {
         <title>{s.stop_name}</title>
       </circle>
       {(i % Math.max(1, Math.ceil(stops.length / 7)) === 0 || i === stops.length - 1) &&
-        <text x={x(i)} y={307} textAnchor="middle" fill="var(--text-secondary)" fontSize={11}>{s.stop_name.slice(0, 7)}</text>}
+        <text x={x(i)} y={307} textAnchor="middle" fill="var(--text-secondary)" fontSize={14}>{s.stop_name.slice(0, 7)}</text>}
     </g>)}
   </svg>;
 }

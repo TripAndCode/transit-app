@@ -223,7 +223,7 @@ export function ReportTable({ reportType, rows }: Props) {
                     style={headline.bar === "delay" ? { color: delayTextColor(Number(row[headline.index])) } : undefined}
                   >
                     <span className="report-cards__label">{t(headline.labelKey)}</span>{" "}
-                    <span>{cardValue(headline, row[headline.index], t)}</span>
+                    <span className="num">{cardValue(headline, row[headline.index], t)}</span>
                   </span>
                 )}
               </div>
@@ -381,7 +381,7 @@ function BarCell({
       >
         <div style={{ width: `${ratio * 100}%`, height: "100%", borderRadius: 3, background: color, opacity: 0.6 }} />
       </div>
-      <span style={{ color: textColor }}>{text}</span>
+      <span className="num" style={{ color: textColor }}>{text}</span>
     </div>
   );
 }

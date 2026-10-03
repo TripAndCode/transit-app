@@ -32,6 +32,24 @@ describe("destination screens", () => {
     expect(await screen.findByText("analysis-tab:dwell_run")).toBeInTheDocument();
   });
 
+  it.each([
+    ["/agencies/9/time", "agencies/:agencyId/time", <TimeTab key="time" />, "Time"],
+    ["/agencies/9/why", "agencies/:agencyId/why", <WhyTab key="why" />, "Why"],
+    ["/agencies/9/compare", "agencies/:agencyId/compare", <CompareTab key="compare" />, "Compare"],
+  ] as const)("titles %s with one level-1 heading", async (path, route, element, title) => {
+    open(path, route, element);
+    await screen.findByText(/^analysis-tab/);
+    expect(screen.getByRole("heading", { level: 1, name: title })).toBeInTheDocument();
+  });
+
+  it("keeps the Compare title above the mode toggle", async () => {
+    open("/agencies/9/compare", "agencies/:agencyId/compare", <CompareTab />);
+    await screen.findByText(/^analysis-tab/);
+    const heading = screen.getByRole("heading", { level: 1, name: "Compare" });
+    const toggle = screen.getByRole("group", { name: "Compare" });
+    expect(heading.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("shows the agencies board on Compare by agencies and switches back to periods", async () => {
     const router = open("/agencies/9/compare?by=agencies&from=2026-09-01", "agencies/:agencyId/compare", <CompareTab />);
     expect(await screen.findByText("network-tab")).toBeInTheDocument();

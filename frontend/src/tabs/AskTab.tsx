@@ -35,6 +35,7 @@ import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { Spinner } from "../components/Spinner";
 import { Skeleton } from "../components/Skeleton";
+import { PageHeader } from "../components/ui/PageHeader";
 import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
 import { InvestigationCanvas } from "./ask/InvestigationCanvas";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
@@ -292,8 +293,8 @@ export function AskTab() {
         minHeight: 0,
       }}
     >
+      <PageHeader title={t("nav.ask")} className="ask-page-header" />
       <header className="ask-workspace-bar">
-        <span>{t("nav.ask")}</span>
       {id != null && (
         <details ref={historyRef} className="ask-thread-menu">
           <summary>{t("ask.workspace.investigations")}</summary>

@@ -16,6 +16,18 @@ const PAD_BOTTOM = 22;
 const CELL_W = (W - 32) / 24;
 
 describe("PeakHourRibbon", () => {
+  it("draws its labels as HTML over the stretched chart, never as SVG text", () => {
+    const by_hour: (number | null)[] = Array.from({ length: 24 }, (_, h) => (h === 8 ? 6 : 2));
+    const { container } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 8, peak_avg_min: 6 }} />);
+    expect(container.querySelectorAll("text")).toHaveLength(0);
+    const ticks = container.querySelectorAll(".ov-peak-label--tick");
+    expect(ticks).toHaveLength(4);
+    expect(Array.from(ticks, (n) => n.textContent)).toEqual(["0", "6", "12", "18"]);
+    expect(container.querySelector(".ov-peak-label--max")).not.toBeNull();
+    expect(container.querySelector(".ov-peak-label--avg")).not.toBeNull();
+    for (const label of container.querySelectorAll(".ov-peak-label")) expect(label).toHaveClass("num");
+  });
+
   it("keeps every bar within the chart's viewBox when the scale itself (peak_avg_min) is negative", () => {
     // All hours are early-running (negative avg delay). peak_avg_min is the
     // *least* negative value (hour 5, -1min) — denom in toY() — but hour 10

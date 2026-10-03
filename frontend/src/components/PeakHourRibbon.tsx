@@ -193,15 +193,6 @@ function PeakHourChart({
               strokeWidth="1"
               strokeDasharray="4 4"
             />
-            <text
-              x={W - PAD_RIGHT + 4}
-              y={avgY + 3}
-              fontSize="10"
-              style={{ fill: "var(--text-tertiary)" }}
-              textAnchor="start"
-            >
-              {t("overview.peak_hour.avg_label")}
-            </text>
           </>
         )}
 
@@ -222,18 +213,6 @@ function PeakHourChart({
             style={{ stroke: "var(--trend-bad)" }}
             strokeWidth="1"
           />
-          <text
-            x={peakBarX + CELL_W / 2 + 6}
-            y={peakBarY - 9}
-            fontSize="11"
-            fontWeight="600"
-            style={{ fill: "var(--trend-bad)" }}
-            textAnchor="start"
-          >
-            {t("overview.peak_hour.max_label", {
-              avg: peak_hour.peak_avg_min.toFixed(1),
-            })}
-          </text>
         </g>
 
         <line
@@ -244,19 +223,6 @@ function PeakHourChart({
           style={{ stroke: "var(--border-subtle)" }}
           strokeWidth="1"
         />
-
-        {[0, 6, 12, 18].map((h) => (
-          <text
-            key={h}
-            x={PAD_LEFT + h * CELL_W + CELL_W / 2}
-            y={H - 6}
-            fontSize="10"
-            style={{ fill: "var(--text-tertiary)" }}
-            textAnchor="middle"
-          >
-            {h}
-          </text>
-        ))}
 
         {hover.visible && (
           <line
@@ -269,6 +235,32 @@ function PeakHourChart({
           />
         )}
       </svg>
+      {/* Labels in HTML, positioned in percent of the stretched svg: SVG text
+          here would be distorted by preserveAspectRatio="none" and scaled
+          below the 12px floor on a narrow card. */}
+      {overallAvg > 0 && (
+        <span
+          className="ov-peak-label ov-peak-label--avg num"
+          style={{ top: `${(avgY / H) * 100}%`, left: `${((W - PAD_RIGHT + 4) / W) * 100}%` }}
+        >
+          {t("overview.peak_hour.avg_label")}
+        </span>
+      )}
+      <span
+        className="ov-peak-label ov-peak-label--max num"
+        style={{ top: `${((peakBarY - 9) / H) * 100}%`, left: `${((peakBarX + CELL_W / 2 + 6) / W) * 100}%` }}
+      >
+        {t("overview.peak_hour.max_label", { avg: peak_hour.peak_avg_min.toFixed(1) })}
+      </span>
+      {[0, 6, 12, 18].map((h) => (
+        <span
+          key={h}
+          className="ov-peak-label ov-peak-label--tick num"
+          style={{ left: `${((PAD_LEFT + h * CELL_W + CELL_W / 2) / W) * 100}%` }}
+        >
+          {h}
+        </span>
+      ))}
       {hover.visible && (
         <div
           className="ov-tooltip"

@@ -74,7 +74,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
           display: "inline-flex",
           alignItems: "center",
           gap: 4,
-          transition: "background 120ms ease",
+          transition: "background var(--transition)",
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
