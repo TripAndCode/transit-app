@@ -424,4 +424,10 @@ describe("AnalysisTab evidence panels", () => {
     expect(screen.getByText("standards-panel")).toBeInTheDocument();
     expect(screen.queryByText("weather-panel")).toBeNull();
   });
+
+  it("draws compare_ranking as morphing bars rather than a table", () => {
+    show("/agencies/1/analysis/rider", "compare_ranking", [["3", 3.4, 2.7, 0.7, 0.7], ["12", 3.8, 3.1, 0.7, 0.7]]);
+    expect(screen.getAllByTestId("compare-bar-row")).toHaveLength(2);
+    expect(screen.queryByRole("table")).toBeNull();
+  });
 });
