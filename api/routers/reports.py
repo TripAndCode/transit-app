@@ -187,7 +187,6 @@ def _report_ctx(ctx: RangeCtx) -> ReportCtx:
 async def list_reports(
     request: Request,
     agency_id: int = Depends(get_agency),
-    conn: asyncpg.Connection = Depends(get_conn),
 ) -> list[dict[str, Any]]:
     """Static list of report types. ``rendered_at`` is request time."""
     now = datetime.now(timezone.utc)
