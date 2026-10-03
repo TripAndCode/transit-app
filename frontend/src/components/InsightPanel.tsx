@@ -139,7 +139,6 @@ export function InsightPanel({ className }: { className?: string } = {}) {
         flexShrink: 0,
         borderLeft: "1px solid var(--border-subtle)",
         padding: collapsed ? "12px 8px" : "12px 16px",
-        transition: "width var(--transition)",
       }}
     >
       <button

@@ -228,6 +228,16 @@ describe("Sidebar", () => {
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       expect(screen.queryByRole("button", { name: "Account menu" })).toBeNull();
     });
+
+    it("snaps between widths rather than animating layout", async () => {
+      const user = userEvent.setup();
+      const { container } = renderSidebar();
+      const aside = container.querySelector<HTMLElement>(".app-sidebar-desktop")!;
+      expect(aside.style.transition).not.toMatch(/width/);
+      await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      expect(aside.style.width).toBe("64px");
+      expect(aside.style.transition).not.toMatch(/width/);
+    });
   });
 
   it("renders the account-menu trigger (agency-independent) at the bottom of the sidebar", async () => {

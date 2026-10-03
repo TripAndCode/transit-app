@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { OverviewConcentration, OverviewMovers } from "../api/types";
@@ -134,8 +135,8 @@ export function ConcentrationBar({
                 style={{
                   width: `${r.share_pct}%`,
                   background: "var(--trend-bad)",
-                  opacity,
-                }}
+                  "--rank-opacity": opacity,
+                } as CSSProperties}
               />
             </div>
             <div className="ov-pareto-pct">{r.share_pct.toFixed(1)}%</div>
