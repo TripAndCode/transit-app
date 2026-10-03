@@ -213,21 +213,21 @@
     "planned_trip_count_fallback": "{{count}} planned trips (vehicle-km not available)",
     "schedule_version_title": "Static schedule version: {{version}}",
     "col_agency": "Agency",
-    "axis_caption": "Shared axis · 0–{{max}} min",
-    "definition_disclosure": "How these are calculated"
+    "axis_caption": "Shared axis · 0–{{max}} min"
   },
   "definitionMeta": {
-    "tolerance_line": "On-time definition: {{preset}} (early ≤ {{early}}, late ≤ {{late}})",
-    "unbounded": "unbounded",
-    "not_applicable": "n/a",
-    "seconds": "{{value}}s",
+    "summary": "How this is calculated",
     "measurementPoint": {
-      "all_stops_all_observations": "measured across all stops, all observations"
+      "all_stops_all_observations": "Average of every recorded departure at every stop."
     },
     "dedupRule": {
-      "latest_observation_per_stop_event": "duplicate readings: latest observation per stop event wins"
+      "latest_observation_per_stop_event": "When a departure is reported more than once, the latest report counts."
     },
-    "exclusion_rule": "excludes |delay| > {{sec}}s as implausible"
+    "exclusion_hours_one": "Readings more than {{count}} hour off are ignored as errors.",
+    "exclusion_hours_other": "Readings more than {{count}} hours off are ignored as errors.",
+    "exclusion_limit": "Readings more than {{limit}} off are ignored as errors.",
+    "on_time_late": "On time = no more than {{late}} late.",
+    "on_time_late_early": "On time = no more than {{late}} late and no more than {{early}} early."
   },
   "app": {
     "data_stale": {
@@ -566,7 +566,7 @@
       "departure": "{{time}} departure",
       "reported": "Last report {{when}}",
       "progress_title": "Trip delay progression",
-      "progress_disclosure": "TripUpdate report progression",
+      "progress_disclosure": "How the live reports progressed",
       "progress_loading": "Loading report history…",
       "no_progress": "No report history is available for this trip yet",
       "select_route": "Select a route or a trip on the map to see its details.",
@@ -608,7 +608,7 @@
       "band_gt_5": "> 5 min"
     },
     "style": {
-      "osm": "OSM",
+      "osm": "OpenStreetMap",
       "label": "Map style",
       "pale": "Light",
       "std": "Standard",
@@ -1651,7 +1651,6 @@
       "weekday": "Weekdays",
       "weekend": "Weekend",
       "service": "Timetable",
-      "hour_pending": "Hour-by-hour filtering arrives with the hourly aggregate",
       "tolerance": "Counted on time up to",
       "minutes": "{{n}} min",
       "clear": "Clear",

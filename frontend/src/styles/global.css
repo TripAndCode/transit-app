@@ -361,34 +361,18 @@ input[type="date"] { color-scheme: light; }
 *, *::before, *::after { box-sizing: border-box; }
 
 .definition-meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 8px;
   max-width: 800px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
-  line-height: 1.45;
+  line-height: 1.6;
 }
-.definition-meta > span {
-  min-width: 0;
-  padding: 8px 10px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
+.definition-meta > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-secondary);
 }
-.definition-meta > span::before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin: 0 7px 2px 0;
-  border-radius: 50%;
-  background: var(--accent);
-}
-/* BP.sm */
-@media (max-width: 640px) {
-  .definition-meta { grid-template-columns: 1fr; max-width: 100%; }
-}
+.definition-meta > summary::before { content: "ⓘ "; color: var(--accent); }
+.definition-meta > p { margin: 6px 0 0; max-width: 60ch; }
 html, body, #root { height: 100%; margin: 0; }
 
 /* In flow at the top of <main>, not floating over it. Everything around this

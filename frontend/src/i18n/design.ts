@@ -69,7 +69,7 @@ export const design = {
     mareyDeparture: "Departure", mareyTerminal: "Delay at last stop",
     mareyHover: "Hover a trip to see its departure time and the delay it carried to the last stop",
     mareyEmpty: "No trips ran in this window",
-    mareyChartLabel: "Time–distance diagram: {{n}} trips from {{from}} to {{to}}. The table below lists the same trips.",
+    mareyChartLabel: "Trips over time: {{n}} trips from {{from}} to {{to}}. The table below lists the same trips.",
     mareyTripLabel: "Departs {{departure}}, {{first}} to {{last}}, {{delay}} min delay at the last stop",
     mareyTableCaption: "Each trip's run and the delay it carried to the last stop",
     mareyFirstStop: "First stop", mareyLastStop: "Last stop",

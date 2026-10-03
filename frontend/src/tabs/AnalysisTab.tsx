@@ -35,6 +35,7 @@ import { SHARED_TABLE, th, td } from "../components/tableStyles";
 import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
+import { useIsAdmin } from "../api/useIsAdmin";
 
 /** One screen's reports: the list shows only `reportTypes`, and the open
  *  report is the `report` search param when it belongs to them, else
@@ -65,6 +66,7 @@ export function AnalysisTab({
   const list = useReports(id);
   const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
+  const isAdmin = useIsAdmin();
   // route_forecast is served by the forecast endpoint, so its own map
   // applies; a report's map counts only once that report's response is the
   // one on screen, not the previous report kept as placeholder data.
@@ -207,7 +209,9 @@ export function AnalysisTab({
                 <PerformanceStandardPanel aid={id} ctx={ctx} />
               </>
             )}
-            {detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
+            {/* The API's raw rows help someone checking the pipeline, not
+                someone reading the report. */}
+            {isAdmin && detail.data.report_type !== "trend" && detail.data.rows.length > 0 && (
               <details
                 style={{ marginTop: 16, color: "var(--text-tertiary)" }}
                 onToggle={(e) => setRawRowsOpen(e.currentTarget.open)}
