@@ -7,7 +7,9 @@ AGENTS.md's convention.
 
 from __future__ import annotations
 
+import json
 import subprocess
+from fnmatch import fnmatch
 from pathlib import Path
 
 import yaml
@@ -90,6 +92,29 @@ def test_dependabot_cannot_swamp_the_single_ci_runner():
         assert schedule.get("day") in {"saturday", "sunday"}, (
             f"{ecosystem}: a weekday batch blocks the merge queue during working hours"
         )
+
+
+def test_dependabot_keeps_a_vitest_major_in_one_pr():
+    """vitest and its `@vitest/*` plugins pin each other's exact version, so a
+    major bumped on one side alone fails every test file at coverage
+    collection. A pattern typo would still parse and simply stop grouping."""
+
+    config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+    npm = next(entry for entry in config["updates"] if entry["package-ecosystem"] == "npm")
+    group = npm["groups"]["vitest-major"]
+    assert group["update-types"] == ["major"]
+
+    package = json.loads((REPO_ROOT / "frontend" / "package.json").read_text())
+    dependencies = {**package.get("dependencies", {}), **package.get("devDependencies", {})}
+    vitest_family = [name for name in dependencies if name == "vitest" or name.startswith("@vitest/")]
+    assert "vitest" in vitest_family and len(vitest_family) > 1
+
+    def grouped(name: str) -> bool:
+        return any(fnmatch(name, pattern) for pattern in group["patterns"])
+
+    assert all(grouped(name) for name in vitest_family), vitest_family
+    for unrelated in ("vite", "@vitejs/plugin-react", "eslint"):
+        assert not grouped(unrelated), unrelated
 
 
 def test_gitattributes_normalizes_line_endings_and_marks_binaries():
