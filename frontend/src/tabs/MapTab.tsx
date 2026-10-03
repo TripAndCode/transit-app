@@ -23,7 +23,7 @@ import { ApiError, apiPost } from "../api/client";
 import { hhmm } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
 import { FILTER_SEPARATOR } from "../utils/format";
-import { buildStyle, getMapStyleOverride, MAP_STYLE_IDS, readMapDimPref, readMapStylePref, writeMapDimPref } from "../styles/mapStyle";
+import { buildStyle, getMapStyleOverride, MAP_STYLE_IDS, readMapDimPref, writeMapDimPref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -171,6 +171,10 @@ export function MapTab() {
   const refreshAbortRef = useRef<AbortController | null>(null);
   const fittedRouteRef = useRef<string | null>(null);
   const firstStyleRunRef = useRef(true);
+  // Snapshots for the one-time map construction below: the effect runs once,
+  // and the URL's `style` (or the persisted default it falls back to) is what
+  // the first frame must show. Later changes go through the style effect.
+  const initialStyleIdRef = useRef(styleId);
   const initialLanguageRef = useRef(i18n.language);
 
   const liveQuery = useLiveTrips(id);
@@ -284,7 +288,7 @@ export function MapTab() {
     const created = createSafeMap(
       {
         container: mapContainerRef.current,
-        style: getMapStyleOverride() ?? buildStyle(readMapStylePref(), initialLanguageRef.current),
+        style: getMapStyleOverride() ?? buildStyle(initialStyleIdRef.current, initialLanguageRef.current),
         center: [140.7474, 40.8246],
         zoom: 11,
       },
