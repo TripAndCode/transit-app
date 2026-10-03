@@ -35,4 +35,17 @@ def _key_func(request: Request) -> str:
     return get_remote_address(request)
 
 
+def user_key(request: Request) -> str:
+    """Bucket a signed-in caller's writes by account, not by address.
+
+    Session middleware attaches the resolved user before routing, so a route
+    behind ``require_user`` always has one here; the address fallback covers
+    only a route that forgot the dependency.
+    """
+    user = getattr(request.state, "user", None)
+    if user is not None:
+        return f"user:{user.user_id}"
+    return get_remote_address(request)
+
+
 limiter = Limiter(key_func=_key_func)
