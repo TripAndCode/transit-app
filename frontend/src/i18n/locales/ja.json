@@ -1511,8 +1511,8 @@
         "llm_approvals_pending_other": "AI 利用の承認待ち {{count}} 名",
         "agencies_stale_one": "{{count}} 事業者の集計が遅れています",
         "agencies_stale_other": "{{count}} 事業者の集計が遅れています",
-        "agencies_no_data_one": "{{count}} 事業者にまだデータがありません",
-        "agencies_no_data_other": "{{count}} 事業者にまだデータがありません"
+        "agencies_never_analyzed_one": "{{count}} 事業者はまだ一度も集計されていません",
+        "agencies_never_analyzed_other": "{{count}} 事業者はまだ一度も集計されていません"
       },
       "check_failed": "状態を確認できませんでした",
       "details": "詳細"

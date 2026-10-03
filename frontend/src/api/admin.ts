@@ -318,8 +318,8 @@ export type AdminBoard = {
 type AdminRuns = { date: string; runs: PipelineRun[] };
 
 /** The `/admin` entry page's single snapshot. Polled rather than pushed: the
- *  underlying collectors are themselves cached snapshots, so a short poll is
- *  as fresh as the data can be. */
+ *  collectors and the staleness check behind it are cached snapshots on the
+ *  server, so a short poll is as fresh as the data can be. */
 export function useAdminBoard() {
   return useQuery({
     queryKey: ["adminBoard"],

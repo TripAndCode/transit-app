@@ -142,8 +142,22 @@ def _lagging(name: str, days: int) -> AgencyFreshness:
 
 @pytest.fixture(autouse=True)
 def _no_real_freshness_check(monkeypatch):
-    """The Ops freshness check reads ClickHouse; a unit test answers for it."""
+    """The Ops freshness check reads ClickHouse; a unit test answers for it,
+    and starts with no answer cached from another test."""
     monkeypatch.setattr(health_mod, "aggregate_freshness", _stub_freshness([]))
+    monkeypatch.setattr(admin_router, "_board_freshness_cache", None)
+
+
+def _counting_freshness(result):
+    calls: list[int] = []
+
+    async def _freshness(conn, ch):
+        calls.append(1)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    return _freshness, calls
 
 
 @pytest.fixture(autouse=True)
@@ -237,7 +251,30 @@ def test_a_failing_freshness_check_raises_no_staleness_alert(monkeypatch):
     monkeypatch.setattr(health_mod, "aggregate_freshness", _stub_freshness(RuntimeError("clickhouse down")))
     response = _client(_Conn()).get("/api/admin/board")
     assert response.status_code == 200
-    assert not {"agency_stale", "agencies_stale", "agencies_no_data"} & {a["code"] for a in response.json()["alerts"]}
+    assert not {"agency_stale", "agencies_stale", "agencies_never_analyzed"} & {
+        a["code"] for a in response.json()["alerts"]
+    }
+
+
+@pytest.mark.parametrize("result", [[], RuntimeError("clickhouse down")])
+def test_a_polled_board_reuses_one_freshness_answer(monkeypatch, result):
+    """Staleness compares whole days; the board polls every few seconds."""
+    freshness, calls = _counting_freshness(result)
+    monkeypatch.setattr(health_mod, "aggregate_freshness", freshness)
+    client = _client(_Conn())
+    client.get("/api/admin/board")
+    client.get("/api/admin/board")
+    assert len(calls) == 1
+
+
+def test_an_expired_freshness_answer_is_checked_again(monkeypatch):
+    freshness, calls = _counting_freshness([])
+    monkeypatch.setattr(health_mod, "aggregate_freshness", freshness)
+    monkeypatch.setattr(admin_router, "_BOARD_FRESHNESS_TTL_SEC", 0.0)
+    client = _client(_Conn())
+    client.get("/api/admin/board")
+    client.get("/api/admin/board")
+    assert len(calls) == 2
 
 
 def test_clamped_samples_above_the_threshold_surface_as_a_warn_alert():

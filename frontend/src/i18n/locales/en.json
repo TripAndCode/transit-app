@@ -1511,8 +1511,8 @@
         "llm_approvals_pending_other": "{{count}} users awaiting AI access approval",
         "agencies_stale_one": "{{count}} agency's aggregates are behind",
         "agencies_stale_other": "{{count}} agencies' aggregates are behind",
-        "agencies_no_data_one": "{{count}} agency has no data yet",
-        "agencies_no_data_other": "{{count}} agencies have no data yet"
+        "agencies_never_analyzed_one": "{{count}} agency has never been analyzed",
+        "agencies_never_analyzed_other": "{{count}} agencies have never been analyzed"
       },
       "check_failed": "Couldn't check its status",
       "details": "Details"

@@ -182,11 +182,18 @@ def test_many_lagging_agencies_share_one_alert_naming_the_longest_lag():
     ]
 
 
-def test_agencies_with_no_data_at_all_share_one_info_alert():
+def test_agencies_never_analyzed_share_one_info_alert():
+    # data_to is None both when nothing was collected and when ClickHouse could
+    # not be read; "never analyzed" is true either way.
     agencies = [_af(f"A{i}", aid=i, data_to=None, analyzed=None) for i in range(13)]
     assert [(a["code"], a["level"], a["params"], a["href"]) for a in _alerts(agency_freshness=agencies)] == [
-        ("agencies_no_data", "info", {"count": 13}, "/admin/agencies")
+        ("agencies_never_analyzed", "info", {"count": 13}, "/admin/agencies")
     ]
+
+
+def test_a_never_analyzed_agency_with_collected_data_is_reported_once_as_lagging():
+    alerts = _alerts(agency_freshness=[_af(stale=True, behind=2, analyzed=None)])
+    assert [a["code"] for a in alerts] == ["agency_stale"]
 
 
 def test_an_unavailable_freshness_check_invents_no_staleness_alert():

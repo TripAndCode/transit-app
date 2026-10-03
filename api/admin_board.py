@@ -163,16 +163,19 @@ def board_alerts(
                 }
             )
 
-    # Nothing collected and nothing analyzed is a set-up state, not lag: one
-    # line for all of them, pointing where an agency is set up.
-    no_data = [af for af in agency_freshness or [] if af.data_to is None and af.last_analyzed_at is None]
-    if no_data:
+    # Never analyzed is a set-up state, not lag: one line for all of them,
+    # pointing where an agency is set up. Keyed on the Postgres fact alone,
+    # because a ClickHouse outage blanks every agency's collected-data probe,
+    # and "nothing collected" would then be a claim the board cannot back. One
+    # whose collected data is known to be waiting is already lagging above.
+    never_analyzed = [af for af in agency_freshness or [] if af.last_analyzed_at is None and not af.is_stale]
+    if never_analyzed:
         alerts.append(
             {
                 "level": "info",
-                "code": "agencies_no_data",
-                "params": {"count": len(no_data)},
-                "text": f"{len(no_data)} agency(ies) have no data yet",
+                "code": "agencies_never_analyzed",
+                "params": {"count": len(never_analyzed)},
+                "text": f"{len(never_analyzed)} agency(ies) never analyzed",
                 "href": "/admin/agencies",
             }
         )

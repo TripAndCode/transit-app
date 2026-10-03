@@ -176,13 +176,13 @@ describe("AdminBoardPage", () => {
         ...BOARD,
         alerts: [
           { level: "warn", code: "agencies_stale", params: { count: 5, days: 4 }, text: "", href: "/admin/ops" },
-          { level: "info", code: "agencies_no_data", params: { count: 13 }, text: "", href: "/admin/agencies" },
+          { level: "info", code: "agencies_never_analyzed", params: { count: 13 }, text: "", href: "/admin/agencies" },
         ],
       },
     };
     wrap(<AdminBoardPage />);
     expect(screen.getByText("5 agencies' aggregates are behind")).toBeInTheDocument();
-    expect(screen.getByText("13 agencies have no data yet")).toBeInTheDocument();
+    expect(screen.getByText("13 agencies have never been analyzed")).toBeInTheDocument();
   });
 
   it("renders one tile per collector with its status and last success", () => {
