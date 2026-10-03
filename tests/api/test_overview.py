@@ -45,7 +45,7 @@ async def _seed_agg_daily(
     must pass the true value explicitly; there is no way to derive it from
     ``avg_min``/``samples`` alone.
     """
-    iso = date_.isoformat() if hasattr(date_, "isoformat") else str(date_)
+    day = date_ if isinstance(date_, date) else date.fromisoformat(str(date_))
     samples = int(samples)
     sum_delay_sec = round(float(avg_min) * 60 * samples)
     if sum_late_sec is None:
@@ -58,7 +58,7 @@ async def _seed_agg_daily(
         "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec, "
         "sum_late_sec = EXCLUDED.sum_late_sec",
         agency_id,
-        iso,
+        day,
         route_code,
         service_type,
         float(avg_min),
@@ -275,7 +275,7 @@ async def test_headline_pools_exact_sum_delay_sec_not_rounded_avg_min(aconn, aag
             "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
             "VALUES ($1, $2, 'R_HL', '平日', $3, $4, $5)",
             aagency_id,
-            day.isoformat(),
+            day,
             avg_min,
             samples,
             sum_delay_sec,
@@ -319,7 +319,7 @@ async def test_headline_excludes_a_null_sum_delay_sec_row_from_both_avg_and_samp
         "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
         "VALUES ($1, $2, 'R_NULL', '平日', $3, $4, NULL)",
         aagency_id,
-        date(2026, 5, 23).isoformat(),
+        date(2026, 5, 23),
         0.5,  # pre-migration-style rounded avg_min; not used by the fast path
         5,
     )
@@ -328,7 +328,7 @@ async def test_headline_excludes_a_null_sum_delay_sec_row_from_both_avg_and_samp
         "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
         "VALUES ($1, $2, 'R_NULL', '平日', $3, $4, $5)",
         aagency_id,
-        date(2026, 5, 24).isoformat(),
+        date(2026, 5, 24),
         1.0,
         5,
         300,

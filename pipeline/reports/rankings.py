@@ -638,8 +638,8 @@ async def compute_compare_ranking(
         routes=ctx.routes,
     )
     where, params, n = _agg_filter(agg_ctx, next_param=2)
-    wd = "EXTRACT(ISODOW FROM date::date) BETWEEN 1 AND 5"
-    we = "EXTRACT(ISODOW FROM date::date) IN (6, 7)"
+    wd = "EXTRACT(ISODOW FROM date) BETWEEN 1 AND 5"
+    we = "EXTRACT(ISODOW FROM date) IN (6, 7)"
     # sum_delay_sec is nullable (unlike samples); each side's numerator AND
     # denominator (including the wd_n/we_n minimum-sample gate below) are
     # additionally FILTERed to sum_delay_sec IS NOT NULL so a row with
@@ -902,7 +902,7 @@ async def compute_trend_series(
         # bucket rather than across dates within one route/service group).
         where, params, _ = _agg_filter(ctx, next_param=2)
         sql = (
-            f"SELECT date_trunc('{trunc_unit}', date::date::timestamp)::date AS bucket,\n"
+            f"SELECT date_trunc('{trunc_unit}', date::timestamp)::date AS bucket,\n"
             "       route_code, NULLIF(service_type, '') AS service_type,\n"
             "       SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::bigint AS sum_delay_sec,\n"
             "       SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples\n"

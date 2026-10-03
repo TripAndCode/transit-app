@@ -1114,7 +1114,7 @@ async def test_compute_trend_series_top_offenders_tie_break_is_deterministic(aco
             "ON CONFLICT (agency_id, date, route_code, service_type) DO UPDATE "
             "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
             aagency_id,
-            day.isoformat(),
+            day,
             route_code,
             "平日",
             5.0,
@@ -1159,7 +1159,7 @@ async def test_compute_trend_series_week_bucket_pools_exact_sum_not_rounded_avg_
             "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
             "VALUES ($1, $2, 'R_WK', '平日', $3, $4, $5)",
             aagency_id,
-            day.isoformat(),
+            day,
             avg_min,
             samples,
             sum_delay_sec,
@@ -1196,7 +1196,7 @@ async def test_compute_trend_series_avg_min_smoothed_is_trailing_pooled_mean(aco
             "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
             "VALUES ($1, $2, 'R_SMOOTH', '平日', $3, $4, $5)",
             aagency_id,
-            day.isoformat(),
+            day,
             avg_min,
             samples,
             sum_delay_sec,
@@ -1250,7 +1250,7 @@ async def test_compute_trend_series_excludes_null_sum_delay_sec_group_from_bucke
         "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
         "VALUES ($1, $2, 'R_NULL', '平日', $3, $4, NULL)",
         aagency_id,
-        day.isoformat(),
+        day,
         0.5,  # pre-migration-style rounded avg_min; not used by the fast path
         6,
     )
@@ -1259,7 +1259,7 @@ async def test_compute_trend_series_excludes_null_sum_delay_sec_group_from_bucke
         "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
         "VALUES ($1, $2, 'R_OK', '平日', $3, $4, $5)",
         aagency_id,
-        day.isoformat(),
+        day,
         1.0,
         6,
         360,
@@ -1304,7 +1304,7 @@ async def test_compute_trend_series_week_bucket_sql_excludes_null_sum_delay_sec_
         "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
         "VALUES ($1, $2, 'R_WKNULL', '平日', $3, $4, NULL)",
         aagency_id,
-        date(2026, 5, 18).isoformat(),
+        date(2026, 5, 18),
         0.5,  # pre-migration-style rounded avg_min; not used by the fast path
         6,
     )
@@ -1313,7 +1313,7 @@ async def test_compute_trend_series_week_bucket_sql_excludes_null_sum_delay_sec_
         "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
         "VALUES ($1, $2, 'R_WKNULL', '平日', $3, $4, $5)",
         aagency_id,
-        date(2026, 5, 19).isoformat(),
+        date(2026, 5, 19),
         1.0,
         6,
         360,

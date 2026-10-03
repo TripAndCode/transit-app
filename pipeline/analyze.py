@@ -552,27 +552,6 @@ def _date_filter(rebuild_dates: list | None, agency_id: int) -> tuple[str, dict]
     return f" AND {predicate}", params
 
 
-def _text_dated_tables(conn) -> frozenset[str]:
-    """Incremental tables storing ``date`` as text rather than as a date.
-
-    The per-date purge compares ``date`` against the rebuild list, and that
-    comparison has to be expressed in the column's own type: casting the
-    column instead costs it its index, and no index means the purge reads
-    every row the agency has in the table it was supposed to narrow.
-
-    Read from the catalog rather than listed here, so a column whose type
-    changes cannot quietly leave an unindexed purge behind.
-    """
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT table_name FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND column_name = 'date' "
-            "AND data_type = 'text' AND table_name = ANY(%s)",
-            (sorted(_INCREMENTAL_AGG_TABLES),),
-        )
-        return frozenset(r[0] for r in cur.fetchall())
-
-
 def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
     """True when no date changed and *table* already holds what a rebuild would produce.
 
@@ -760,7 +739,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # whatever this run is not going to rebuild. The scope must match what
         # each table's build below produces; see _INCREMENTAL_AGG_TABLES and
         # _NOOP_SKIPPABLE_AGG_TABLES for why the two cannot diverge.
-        text_dated = _text_dated_tables(conn) if rebuild_dates else frozenset()
         with _step("purge: DELETE prior rows"), conn.cursor() as cur:
             for tbl in _AGG_TABLES_ORDERED:
                 if _nothing_to_rebuild(tbl, rebuild_dates):
@@ -768,15 +746,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 if rebuild_dates is None or tbl not in _INCREMENTAL_AGG_TABLES:
                     cur.execute(f"DELETE FROM {tbl} WHERE agency_id = %s", (agency_id,))
                 elif rebuild_dates:
-                    # The comparison is made in the column's own type rather
-                    # than casting either side. A cast on the column throws
-                    # away the index — agg_daily_trend stores its service date
-                    # as text, and `date::date` there turns what should be an
-                    # index scan into a read of every row the agency has.
-                    dates = [d.isoformat() for d in rebuild_dates] if tbl in text_dated else rebuild_dates
                     cur.execute(
                         f"DELETE FROM {tbl} WHERE agency_id = %s AND date = ANY(%s)",
-                        (agency_id, dates),
+                        (agency_id, rebuild_dates),
                     )
 
         # ── Materialise the deduped fact slices ─────────────────────────
@@ -999,18 +971,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # column) so NULL and '' can't split into duplicate keys. Readers that
         # surface service_type map '' back to None; the service-split panels
         # naturally ignore '' (no 平日/土日祝 match).
-        # to_char, not date::text: this is the only aggregate whose `date`
-        # column is text, so what this projects IS the stored value, and its
-        # format is a contract — the per-date purge matches this column
-        # against an ISO string, and every reader parses it as one. Naming
-        # the format here states that contract where the value is produced
-        # instead of leaving it to `date::text`'s dependence on the session's
-        # DateStyle.
         sql = """
             WITH deduped AS (SELECT * FROM _analyze_deduped)
             SELECT
                 %(agency_id)s AS agency_id,
-                to_char(date, 'YYYY-MM-DD') AS date, route_code,
+                date, route_code,
                 COALESCE(service_type, '') AS service_type,
                 ROUND(AVG(dep_delay)/60.0::numeric, 2) AS avg_min,
                 COUNT(*) AS samples,
