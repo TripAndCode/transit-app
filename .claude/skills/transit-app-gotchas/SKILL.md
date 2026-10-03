@@ -19,11 +19,11 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   (agency, static GTFS) in a throwaway Postgres on a spare port, then migrate +
   analyze there. The old Postgres `updates` table no longer receives ingest and is
   not a usable source.
-- Same rule applies to dev ClickHouse (`docker compose exec clickhouse`,
-  hundreds of millions of real rows across 4 agencies). The one sanctioned
-  exception is
-  `make ch-bootstrap`'s documented one-time column-type `ALTER TABLE` (see
-  `db/clickhouse/bootstrap.py`).
+- The same read-only rule applies to dev ClickHouse (`docker compose exec
+  clickhouse`, hundreds of millions of real rows across 4 agencies). `make
+  ch-bootstrap` writes schema changes; agents must not run it against the dev
+  instance. `db/clickhouse/bootstrap.py` describes operator maintenance, not an
+  exception to the agent rule.
 - Tests use throwaway Postgres on :5544 AND throwaway ClickHouse on :8124 —
   BOTH are required for any test touching `updates` (which is most of
   `tests/api/`, `tests/pipeline/`, `tests/query/`). Postgres image built from
@@ -109,14 +109,13 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   asserting only a non-zero exit code is satisfied by the crash and silently
   stops checking its actual subject.
 - `frontend/node_modules` is per-worktree (worktrees don't share untracked
-  directories), so run `npm install` in the `frontend/` of the worktree you
-  are verifying before trusting a frontend check there.
+  directories), so link the main checkout's `frontend/node_modules` or run
+  `npm ci` in the worktree before trusting a frontend check there. When the
+  branch changes `frontend/package*.json`, install its own dependencies.
 - `git stash` is repo-wide, not worktree-scoped — a stash pushed from one
   worktree is visible (and droppable) from every other worktree and the main
   checkout, and a dropped stash is recoverable only until `git gc` prunes it.
-  Another session may be holding one for human review, so never run `git
-  stash drop`/`clear`/`pop` against a stash you didn't create in the current
-  session.
+  Never run `git stash drop`/`clear`/`pop`; use a WIP commit to set work aside.
 - Whether a push runs CI is decided by ONE commit: the tip of that push.
   GitHub evaluates the skip trailer once per push event against that
   message alone — not retroactively across the push's other commits — so a
