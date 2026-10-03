@@ -168,10 +168,9 @@ export function MapTab() {
   const [playbackOn, setPlaybackOn] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
-  // The relief follows the style's URL-over-localStorage rule. Off by
-  // default on a phone: a tilted map with columns needs room the screen does
-  // not have, and the chip is one tap away.
-  const [persistedRelief, setPersistedRelief] = useBoolPref(RELIEF_PREF_KEY, !isMobile);
+  // The relief is opt-in and follows the style's URL-over-localStorage rule:
+  // a fresh visit starts flat, and the chip remembers the operator's choice.
+  const [persistedRelief, setPersistedRelief] = useBoolPref(RELIEF_PREF_KEY, false);
   const [reliefParam, setReliefParam] = useUrlState("relief", persistedRelief ? "1" : "0", ["1", "0"] as const);
   const reliefOn = reliefParam === "1";
   function setReliefOn(next: boolean) {
@@ -415,9 +414,10 @@ export function MapTab() {
   // so on a style reload (which wipes every imperatively-added layer) the live
   // layers are re-added before playback hides them again.
   useTimelineLayers(mapRef, styleEpoch, playback.frames, playback.index, playbackOn, playback.steppingOnly, playback.pause);
-  // After useTimelineLayers for the reason useReliefLayer documents.
+  // During playback the columns follow the frame on screen; otherwise the
+  // live readings.
   const reliefPoints = playbackOn ? reliefPointsFromFrame(playback.frames[playback.index]) : reliefPointsFromLive(liveRows);
-  useReliefLayer(mapRef, styleEpoch, reliefOn, reliefPoints, playback.steppingOnly ? 0 : CROSS_FADE_MS, playbackOn);
+  useReliefLayer(mapRef, styleEpoch, reliefOn, reliefPoints, playback.steppingOnly ? 0 : CROSS_FADE_MS);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || reliefPitchRef.current === reliefOn) return;

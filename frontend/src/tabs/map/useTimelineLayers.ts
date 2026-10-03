@@ -78,7 +78,12 @@ export function useTimelineLayers(
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !active) return;
-    const handler = () => interact();
+    // Only a person's gesture pauses: MapLibre attaches `originalEvent` to
+    // camera events it raises from input, and a move the app makes itself
+    // (the relief tilt, a route framing) carries none.
+    const handler = (event?: { originalEvent?: unknown }) => {
+      if (event?.originalEvent) interact();
+    };
     const events = ["dragstart", "zoomstart", "rotatestart", "pitchstart", "mousedown", "touchstart"];
     for (const event of events) map.on(event, handler);
     return () => {

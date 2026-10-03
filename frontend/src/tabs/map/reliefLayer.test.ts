@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   RELIEF_BASE_M, RELIEF_CAP_MIN, RELIEF_HEIGHT_M_PER_MIN,
-  reliefFeatures, reliefHeight, reliefPaint, reliefPointsFromFrame, reliefPointsFromLive,
+  reliefFeatures, reliefHeight, reliefPaint, reliefPointsFromFrame, reliefPointsFromLive, tweenFeatures,
 } from "./reliefLayer";
 import { severityStepColors } from "../../styles/tokens";
 import type { LiveTrip, TimelineFrame } from "../../api/types";
@@ -75,5 +75,29 @@ describe("reliefPointsFromFrame", () => {
     const frame: TimelineFrame = { t: "08:00", mean_delay_min: 3, samples: 4, points: [{ stop_id: "S9", stop_name: null, lon: 1, lat: 2, avg_delay_min: 3, samples: 4 }] };
     expect(reliefPointsFromFrame(frame)).toEqual([{ stop_id: "S9", lon: 1, lat: 2, delay_min: 3 }]);
     expect(reliefPointsFromFrame(undefined)).toEqual([]);
+  });
+});
+
+describe("tweenFeatures", () => {
+  const at = (stop_id: string, delay_min: number) => ({ stop_id, lon: 132.4585, lat: 34.397, delay_min });
+  const props = (fc: ReturnType<typeof reliefFeatures>) => fc.features.map((f) => f.properties);
+
+  it("runs each surviving stop's height and delay from the previous reading to the new one", () => {
+    const prev = reliefFeatures([at("S1", 1)]);
+    const next = reliefFeatures([at("S1", 3)]);
+    expect(props(tweenFeatures(prev, next, 0))).toEqual(props(prev));
+    expect(props(tweenFeatures(prev, next, 1))).toEqual(props(next));
+    const mid = tweenFeatures(prev, next, 0.5).features[0].properties;
+    expect(mid.delay_min).toBeCloseTo(2, 9);
+    expect(mid.h).toBeCloseTo((reliefHeight(1) + reliefHeight(3)) / 2, 9);
+  });
+
+  it("raises a newly reporting stop from the ground tile and drops a stop that stopped reporting", () => {
+    const prev = reliefFeatures([at("GONE", 4)]);
+    const next = reliefFeatures([at("NEW", 2)]);
+    const start = tweenFeatures(prev, next, 0);
+    expect(start.features.map((f) => f.properties.stop_id)).toEqual(["NEW"]);
+    expect(start.features[0].properties).toEqual({ stop_id: "NEW", delay_min: 0, h: RELIEF_BASE_M });
+    expect(start.features[0].geometry).toBe(next.features[0].geometry);
   });
 });

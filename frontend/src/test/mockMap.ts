@@ -58,19 +58,22 @@ export function makeMockMap(
     // readiness is driven via settleStyle/settleViaIdle (styledata + idle
     // backstop), so the one-shot never needs to fire in tests.
     once: () => {},
-    _handlers: {} as Record<string, Array<() => void>>,
-    on: (event: string, cb: () => void) => {
+    _handlers: {} as Record<string, Array<(e?: unknown) => void>>,
+    on: (event: string, cb: (e?: unknown) => void) => {
       (map._handlers[event] ||= []).push(cb);
     },
-    off: (event: string, cb: () => void) => {
+    off: (event: string, cb: (e?: unknown) => void) => {
       const a = map._handlers[event];
       if (a) {
         const i = a.indexOf(cb);
         if (i >= 0) a.splice(i, 1);
       }
     },
-    fire: (event: string) => {
-      (map._handlers[event] || []).slice().forEach((cb) => cb());
+    // `payload` is the MapLibre event object a handler receives; a camera
+    // event from a user gesture carries `originalEvent`, a programmatic one
+    // does not.
+    fire: (event: string, payload?: unknown) => {
+      (map._handlers[event] || []).slice().forEach((cb) => cb(payload));
     },
     // Simulate the style + its sources finishing via a qualifying `styledata`
     // (the fast path): flips isStyleLoaded() true and emits styledata.

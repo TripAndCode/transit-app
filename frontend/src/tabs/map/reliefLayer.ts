@@ -23,6 +23,7 @@ const M_PER_DEG_LON_AT_EQUATOR = 111_320;
 export type ReliefPoint = { stop_id: string; lon: number; lat: number; delay_min: number };
 type ReliefOptions = { capMin?: number; metresPerMin?: number; baseM?: number; halfSideM?: number };
 type ReliefProps = { stop_id: string; delay_min: number; h: number };
+export type ReliefCollection = GeoJSON.FeatureCollection<GeoJSON.Polygon, ReliefProps>;
 type FillExtrusionPaint = NonNullable<Extract<LayerSpecification, { type: "fill-extrusion" }>["paint"]>;
 /** MapLibre accepts `<property>-transition` beside every paint property but
  *  the bundle's types do not declare them; the two this layer sets are
@@ -41,10 +42,7 @@ export function reliefHeight(delayMin: number, opts: ReliefOptions = {}): number
  *  at every latitude, with the extrusion height precomputed as `h` -- the
  *  paint expression stays a plain `["get", "h"]` and the cap/ramp maths
  *  lives here, where it can be tested without a map. */
-export function reliefFeatures(
-  points: ReliefPoint[],
-  opts: ReliefOptions = {},
-): GeoJSON.FeatureCollection<GeoJSON.Polygon, ReliefProps> {
+export function reliefFeatures(points: ReliefPoint[], opts: ReliefOptions = {}): ReliefCollection {
   const halfSideM = opts.halfSideM ?? RELIEF_HALF_SIDE_M;
   const features: GeoJSON.Feature<GeoJSON.Polygon, ReliefProps>[] = [];
   for (const p of points) {
@@ -71,15 +69,13 @@ export function reliefFeatures(
 
 /**
  * Paint for the column layer. Colour is the shared severity ramp, the same
- * one the live and playback circles use, so switching the relief on changes
- * the mark's shape and never its meaning.
+ * one the live and playback circles use, so the column and the dot standing
+ * on it always agree.
  *
- * `crossFadeMs` is the playback cross-fade, 0 under reduced motion. MapLibre
- * interpolates a `-transition` only between two constant values; both
- * properties here are data-driven, so a new reading re-tessellates the
- * columns at their new height rather than tweening them. The transitions are
- * declared so the layer follows the same duration contract as the playback
- * layer, and drop to 0 together with it.
+ * The `-transition` entries carry the playback cross-fade (0 under reduced
+ * motion) but do not move the columns: MapLibre interpolates only between
+ * two constant values, and both properties here read feature data. Height
+ * and colour are eased by `tweenFeatures` instead, one `setData` per step.
  */
 export function reliefPaint(crossFadeMs: number): ReliefPaint {
   return {
@@ -112,4 +108,37 @@ export function reliefPointsFromLive(rows: LiveTrip[]): ReliefPoint[] {
 /** A playback frame already carries one averaged point per stop. */
 export function reliefPointsFromFrame(frame: TimelineFrame | undefined): ReliefPoint[] {
   return (frame?.points ?? []).map((p) => ({ stop_id: p.stop_id, lon: p.lon, lat: p.lat, delay_min: p.avg_delay_min }));
+}
+
+/**
+ * One step of the move from the reading on screen to the next one: every
+ * stop in `next`, with `h` and `delay_min` run linearly from its value in
+ * `prev` by `t` (0..1; the caller applies the easing). A stop that has just
+ * started reporting rises from the ground tile, and one that has stopped is
+ * dropped at once -- a column shrinking towards a reading that no longer
+ * exists would show a delay nobody measured.
+ */
+export function tweenFeatures(prev: ReliefCollection, next: ReliefCollection, t: number): ReliefCollection {
+  const from = new Map(prev.features.map((f) => [f.properties.stop_id, f.properties]));
+  return {
+    type: "FeatureCollection",
+    features: next.features.map((f) => {
+      const a = from.get(f.properties.stop_id) ?? { delay_min: 0, h: RELIEF_BASE_M };
+      const b = f.properties;
+      return {
+        ...f,
+        properties: { stop_id: b.stop_id, delay_min: a.delay_min + (b.delay_min - a.delay_min) * t, h: a.h + (b.h - a.h) * t },
+      };
+    }),
+  };
+}
+
+/** Whether two collections carry the same reading: a re-render that rebuilt
+ *  the same points must not restart a tween already running towards them. */
+export function sameReliefReading(a: ReliefCollection, b: ReliefCollection): boolean {
+  if (a.features.length !== b.features.length) return false;
+  return a.features.every((f, i) => {
+    const g = b.features[i].properties;
+    return f.properties.stop_id === g.stop_id && f.properties.h === g.h && f.properties.delay_min === g.delay_min;
+  });
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
@@ -251,30 +251,34 @@ describe("MapTab relief layer", () => {
     return easeTo.mock.calls.map(([options]) => (options as { pitch?: number }).pitch);
   }
 
-  it("starts on at desktop width, tilts through the camera module, and persists a switch-off", () => {
+  it("starts off at every width and never tilts the map unasked", () => {
+    for (const phone of [false, true]) {
+      stubViewport(phone);
+      const easeTo = vi.spyOn(MockMap.prototype, "easeTo");
+      const chip = renderAndOpenPanel();
+      expect(chip).toHaveAttribute("aria-pressed", "false");
+      expect(easeTo).not.toHaveBeenCalled();
+      cleanup();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("switching on tilts through the camera module and persists; switching off lays the map flat", () => {
     stubViewport(false);
     const easeTo = vi.spyOn(MockMap.prototype, "easeTo");
-    const chip = renderAndOpenPanel();
-    expect(chip).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(renderAndOpenPanel());
+    expect(screen.getByRole("button", { name: /Relief/ })).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem("transit.mapRelief")).toBe("1");
     expect(pitches(easeTo)).toEqual([35]);
 
-    fireEvent.click(chip);
-    expect(screen.getByRole("button", { name: /Relief/ })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: /Relief/ }));
     expect(localStorage.getItem("transit.mapRelief")).toBe("0");
     expect(pitches(easeTo)).toEqual([35, 0]);
   });
 
-  it("starts off on a phone and never tilts the map unasked", () => {
-    stubViewport(true);
-    const easeTo = vi.spyOn(MockMap.prototype, "easeTo");
-    const chip = renderAndOpenPanel();
-    expect(chip).toHaveAttribute("aria-pressed", "false");
-    expect(easeTo).not.toHaveBeenCalled();
-  });
-
   it("lets the URL override the stored preference", () => {
     stubViewport(false);
-    localStorage.setItem("transit.mapRelief", "1");
-    expect(renderAndOpenPanel("?relief=0")).toHaveAttribute("aria-pressed", "false");
+    localStorage.setItem("transit.mapRelief", "0");
+    expect(renderAndOpenPanel("?relief=1")).toHaveAttribute("aria-pressed", "true");
   });
 });

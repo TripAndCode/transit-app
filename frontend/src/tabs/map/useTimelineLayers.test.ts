@@ -14,6 +14,9 @@ import {
 } from "./useTimelineLayers";
 import type { TimelineFrame } from "../../api/types";
 
+/** What MapLibre hands a camera-event listener when a person moved the map. */
+const GESTURE = { originalEvent: new MouseEvent("mousedown") };
+
 const FRAMES: TimelineFrame[] = [
   {
     t: "05:00",
@@ -105,9 +108,20 @@ describe("useTimelineLayers", () => {
     const map = makeMockMap();
     const onInteract = vi.fn();
     mount(map, [0, FRAMES, 0, true, false, onInteract]);
-    map.fire("dragstart");
-    map.fire("zoomstart");
+    map.fire("dragstart", GESTURE);
+    map.fire("zoomstart", GESTURE);
     expect(onInteract).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps playing through a camera move the app made itself, such as the relief tilt", () => {
+    const map = makeMockMap();
+    const onInteract = vi.fn();
+    mount(map, [0, FRAMES, 0, true, false, onInteract]);
+    map.fire("pitchstart", {});
+    map.fire("zoomstart");
+    expect(onInteract).not.toHaveBeenCalled();
+    map.fire("pitchstart", GESTURE);
+    expect(onInteract).toHaveBeenCalledTimes(1);
   });
 
   it("stops listening for gestures once playback mode is left", () => {
@@ -121,7 +135,7 @@ describe("useTimelineLayers", () => {
       { initialProps: { active: true } },
     );
     rerender({ active: false });
-    map.fire("dragstart");
+    map.fire("dragstart", GESTURE);
     expect(onInteract).not.toHaveBeenCalled();
   });
 });

@@ -1,31 +1,49 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { Map as MLMap } from "maplibre-gl";
 import { useThemeSignal } from "../../styles/theme";
+import { easeOutCamera } from "./cameraChoreography";
 import { whenStyleReady } from "./styleReady";
 import { repaintLayer } from "./repaintLayer";
-import { RELIEF_LAYER, RELIEF_SOURCE, reliefFeatures, reliefPaint, type ReliefPoint } from "./reliefLayer";
 import {
-  LIVE_TRIPS_CLUSTER_COUNT_LAYER,
-  LIVE_TRIPS_CLUSTER_LAYER,
-  LIVE_TRIPS_LABEL_LAYER,
-  LIVE_TRIPS_LAYER,
-} from "./useOperationsMapLayers";
-import { TIMELINE_LAYER } from "./useTimelineLayers";
+  RELIEF_LAYER,
+  RELIEF_SOURCE,
+  reliefFeatures,
+  reliefPaint,
+  sameReliefReading,
+  tweenFeatures,
+  type ReliefCollection,
+  type ReliefPoint,
+} from "./reliefLayer";
+import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
 
-/** The circle layers (and the cluster counts printed on them) the columns
- *  stand in for. The label layer stays: a symbol layer draws over
- *  extrusions, so each vehicle keeps its name while the relief is on. */
-const CIRCLE_LAYERS = [LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_CLUSTER_COUNT_LAYER, LIVE_TRIPS_LAYER];
+/** The live layers, bottom first. The columns go under the lowest one present
+ *  so the vehicle dots, clusters and labels draw over them and keep every
+ *  click and hover they had: the columns themselves are not interactive. */
+const LIVE_LAYERS_BOTTOM_FIRST = [LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER];
+
+/** `setData` writes per tween. Enough for the eye to read a rise rather than
+ *  a jump; few enough that a few hundred polygons re-tessellate well inside a
+ *  frame budget. */
+const TWEEN_STEPS = 16;
+
+type ReliefSource = { setData: (data: ReliefCollection) => void };
+
+function cancelTween(rafRef: React.MutableRefObject<number | null>): void {
+  if (rafRef.current == null) return;
+  cancelAnimationFrame(rafRef.current);
+  rafRef.current = null;
+}
 
 /**
  * Registers the relief (delay-column) layer: one GeoJSON source and one
- * `fill-extrusion` layer, fed through `setData` on every reading.
+ * `fill-extrusion` layer beside the live layers, which it never hides.
  *
- * Declared in MapTab after `useTimelineLayers`: effects run in declaration
- * order, and playback's effect restores the live circle layers when it
- * stops, so this one has to run last to hide them again while the relief is
- * on. `playbackOn` tells the off-branch whether the circles belong to
- * playback (stay hidden) or to the live view (restore).
+ * MapLibre does not ease a paint property that reads feature data, so a new
+ * reading is tweened here: `crossFadeMs` of `--ease-out` from what is on
+ * screen to the new heights, in at most `TWEEN_STEPS` writes on one rAF
+ * loop. A newer reading cancels the running tween and starts from wherever
+ * it stopped; a re-render carrying the same reading leaves it alone.
+ * `crossFadeMs` of 0 (reduced motion) is one write and no loop.
  */
 export function useReliefLayer(
   mapRef: React.MutableRefObject<MLMap | null>,
@@ -33,36 +51,68 @@ export function useReliefLayer(
   on: boolean,
   points: ReliefPoint[],
   crossFadeMs: number,
-  playbackOn: boolean,
 ): void {
   const theme = useThemeSignal();
+  /** What the source holds now, mid-tween included. */
+  const shownRef = useRef<ReliefCollection | null>(null);
+  /** The reading the source is heading to. */
+  const targetRef = useRef<ReliefCollection | null>(null);
+  const rafRef = useRef<number | null>(null);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (!on) {
+      cancelTween(rafRef);
+      shownRef.current = null;
+      targetRef.current = null;
       return whenStyleReady(map, () => {
         if (map.getLayer(RELIEF_LAYER)) map.removeLayer(RELIEF_LAYER);
         if (map.getSource(RELIEF_SOURCE)) map.removeSource(RELIEF_SOURCE);
-        for (const id of CIRCLE_LAYERS) {
-          if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", playbackOn ? "none" : "visible");
-        }
-        if (map.getLayer(TIMELINE_LAYER)) map.setLayoutProperty(TIMELINE_LAYER, "visibility", "visible");
       });
     }
-    const data = reliefFeatures(points);
+    const next = reliefFeatures(points);
     return whenStyleReady(map, () => {
-      for (const id of [...CIRCLE_LAYERS, TIMELINE_LAYER]) {
-        if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
-      }
-      const existing = map.getSource(RELIEF_SOURCE) as { setData: (d: unknown) => void } | undefined;
-      if (existing) {
-        existing.setData(data);
-        repaintLayer(map, RELIEF_LAYER, reliefPaint(crossFadeMs));
+      const source = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
+      if (!source) {
+        // First show, or a style reload wiped the layer: no on-screen
+        // reading to tween from.
+        cancelTween(rafRef);
+        map.addSource(RELIEF_SOURCE, { type: "geojson", data: next });
+        const beforeId = LIVE_LAYERS_BOTTOM_FIRST.find((id) => map.getLayer(id));
+        map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint(crossFadeMs) }, beforeId);
+        shownRef.current = next;
+        targetRef.current = next;
         return;
       }
-      map.addSource(RELIEF_SOURCE, { type: "geojson", data });
-      const beforeId = map.getLayer(LIVE_TRIPS_LABEL_LAYER) ? LIVE_TRIPS_LABEL_LAYER : undefined;
-      map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint(crossFadeMs) }, beforeId);
+      repaintLayer(map, RELIEF_LAYER, reliefPaint(crossFadeMs));
+      if (targetRef.current && sameReliefReading(targetRef.current, next)) return;
+      cancelTween(rafRef);
+      targetRef.current = next;
+      const from = shownRef.current;
+      if (crossFadeMs <= 0 || !from) {
+        source.setData(next);
+        shownRef.current = next;
+        return;
+      }
+      const stepMs = crossFadeMs / TWEEN_STEPS;
+      let start: number | null = null;
+      let lastWrite = 0;
+      const tick = (now: number) => {
+        start ??= now;
+        const elapsed = now - start;
+        const done = elapsed >= crossFadeMs;
+        if (done || elapsed - lastWrite >= stepMs) {
+          lastWrite = elapsed;
+          const step = done ? next : tweenFeatures(from, next, easeOutCamera(elapsed / crossFadeMs));
+          source.setData(step);
+          shownRef.current = step;
+        }
+        rafRef.current = done ? null : requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
     });
-  }, [crossFadeMs, mapRef, on, playbackOn, points, styleEpoch, theme]);
+  }, [crossFadeMs, mapRef, on, points, styleEpoch, theme]);
+
+  useEffect(() => () => cancelTween(rafRef), []);
 }
