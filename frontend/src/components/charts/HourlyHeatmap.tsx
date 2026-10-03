@@ -5,7 +5,7 @@ import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
 import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
 import { staggerDelay } from "./ChartEnter";
 import { DIM_OPACITY, isFocusDimmed, isoDow, useTrendFocus } from "./trendFocus";
-import { formatShortDate } from "../../utils/format";
+import { formatDate, formatMinutes, formatNumber, formatShortDate } from "../../utils/format";
 
 export type HourlyCell = {
   date: string;
@@ -284,9 +284,9 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             pointerEvents: "none",
           }}
         >
-          {hover.date} {t("reports.heatmap.tooltip_hour", { hour: String(hover.hour).padStart(2, "0") })}
+          {formatDate(hover.date)} {t("reports.heatmap.tooltip_hour", { hour: String(hover.hour).padStart(2, "0") })}
           {" "}
-          {t("reports.heatmap.tooltip_metrics", { min: (hover.avg_min ?? 0).toFixed(1), count: hover.samples })}
+          {t("reports.heatmap.tooltip_metrics", { min: formatMinutes(hover.avg_min ?? 0), count: formatNumber(hover.samples) })}
         </div>
       )}
     </div>

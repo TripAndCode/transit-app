@@ -70,7 +70,7 @@ function parseHour(raw: string): [number, number] | null {
 
 /** One validator per param: the canonical text to write, or null when the
  *  value is invalid or the default (so it is omitted). */
-function canon(key: ScopeParam, raw: string): string | null {
+export function canon(key: ScopeParam, raw: string): string | null {
   switch (key) {
     case "from":
     case "to":

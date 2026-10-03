@@ -741,6 +741,8 @@
     "low_confidence_mark": "wide range",
     "more_rows": "…and {{count}} more",
     "build_labels": {
+      "summary": "🛠 {{tool}}",
+      "summary_with_args": "🛠 {{tool}} ({{args}})",
       "metric": "Metric",
       "n": "Count",
       "best_first": "Best first",
@@ -958,7 +960,7 @@
       "legend_explainer": "· rows → time band · columns → date",
       "svg_aria": "Time-band delay heatmap",
       "tooltip_hour": "{{hour}}:00 · avg",
-      "tooltip_metrics": "{{min}} min · {{count, number}} obs.",
+      "tooltip_metrics": "{{min}} · {{count}} obs.",
       "ramp_max": "{{min}} min and over",
       "severe_outline": "outlined = {{min}} min and over"
     },
@@ -971,11 +973,11 @@
     "daily": {
       "empty": "No data in this range.",
       "svg_aria": "Daily average delay chart",
-      "tooltip_metrics": "avg {{min}} min / {{count}} obs.",
-      "smoothed_tooltip": "7-day avg {{min}} min",
+      "tooltip_metrics": "avg {{min}} / {{count}} obs.",
+      "smoothed_tooltip": "7-day avg {{min}}",
       "smoothed_label": "- - - 7-day average",
       "worst_label": "Worst:",
-      "offender": "Route {{code}} ({{min}} min)",
+      "offender": "Route {{code}} ({{min}})",
       "revision_boundary_label": "Schedule change",
       "revision_boundary_aria": "Static schedule revision took effect on {{date}}",
       "brush_hint": "Drag across the chart to narrow the period",

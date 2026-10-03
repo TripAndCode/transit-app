@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { Agency } from "./types";
 import { useAgencies } from "./hooks";
-import { DEFAULT_RANGE_DAYS, defaultPeriod, isoDaysBefore } from "./scope";
+import { DEFAULT_RANGE_DAYS, canon, defaultPeriod, isoDaysBefore } from "./scope";
 
 /**
  * Pure decision: on a fresh visit (no explicit from/to already in `params`),
@@ -30,7 +30,10 @@ export function computeAnchorRange(
   params: URLSearchParams,
 ): { from: string; to: string } | null {
   if (agencyId == null || !agencies) return null;
-  if (params.get("from") || params.get("to")) return null;
+  const from = params.get("from");
+  const to = params.get("to");
+  // Only a value the scope would accept counts as explicit; garbage is absent.
+  if ((from && canon("from", from)) || (to && canon("to", to))) return null;
 
   const agency = agencies.find((a) => a.agency_id === agencyId);
   const latestDataDate = agency?.latest_data_date;

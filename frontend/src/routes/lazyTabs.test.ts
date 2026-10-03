@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import { ROUTE_CHUNK_LOADERS, loadMapTab, loadOverviewTab, loadSavedExportTab, prefetchRouteChunk } from "./lazyTabs";
 import { DESTINATIONS } from "./destinations";
+import type { Destination } from "./destinations";
 
 vi.mock("../tabs/RoutesIndex", () => ({ RoutesIndex: () => null }));
 vi.mock("../tabs/AnalysisTab", () => ({ AnalysisTab: () => null }));
@@ -16,6 +17,15 @@ describe("ROUTE_CHUNK_LOADERS", () => {
       expect(ROUTE_CHUNK_LOADERS[dest]).toBeTypeOf("function");
     }
     expect(ROUTE_CHUNK_LOADERS.ask).toBeTypeOf("function");
+  });
+
+  it("is keyed by destination at compile time, so a new destination needs a loader", () => {
+    const _everyDestinationHasALoader: Record<Destination | "ask", unknown> = ROUTE_CHUNK_LOADERS;
+    void _everyDestinationHasALoader;
+    // A string-keyed map would satisfy the line above too; pin the key type
+    // itself so the loaders cannot drift back to accepting any segment.
+    const _keyedByDestination: [keyof typeof ROUTE_CHUNK_LOADERS] extends [Destination | "ask"] ? true : false = true;
+    void _keyedByDestination;
   });
 
   it("maps each destination to the chunk it renders, and nothing else", () => {
@@ -58,6 +68,11 @@ describe("prefetchRouteChunk", () => {
 
   it("is a no-op for a segment with no chunk of its own", () => {
     expect(() => prefetchRouteChunk("not-a-route")).not.toThrow();
+  });
+
+  it("is a no-op for a segment that names an inherited object property", () => {
+    expect(() => prefetchRouteChunk("toString")).not.toThrow();
+    expect(() => prefetchRouteChunk("constructor")).not.toThrow();
   });
 
   it("swallows a failed chunk fetch — a prefetch must never surface an error", async () => {

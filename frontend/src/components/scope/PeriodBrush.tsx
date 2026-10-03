@@ -2,6 +2,7 @@ import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "
 import { useTranslation } from "react-i18next";
 import type { ScopeSummary } from "../../api/types";
 import { delayRampVar } from "../../styles/tokens";
+import { formatDate } from "../../utils/format";
 import { calendarDays, dayIndexAt, rangeFrom } from "./brushMath";
 
 const DAY_W = 8;
@@ -59,7 +60,7 @@ export function PeriodBrush({
   to: string;
   onCommit: (from: string, to: string) => void;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const titleId = useId();
   const svgRef = useRef<SVGSVGElement>(null);
   const [draft, setDraft] = useState<[number, number] | null>(null);
@@ -74,8 +75,7 @@ export function PeriodBrush({
   const overlaps = toPos >= 0 && fromPos < n;
   const clamp = (i: number) => Math.min(n - 1, Math.max(0, i));
   const [start, end] = draft ?? [clamp(fromPos), clamp(toPos)];
-  const longDate = new Intl.DateTimeFormat(i18n.language, { month: "short", day: "numeric", timeZone: "UTC" });
-  const spoken = (iso: string) => longDate.format(new Date(`${iso}T00:00:00Z`));
+  const spoken = (iso: string) => formatDate(iso, { year: false });
 
   function dayAt(clientX: number): number {
     const box = svgRef.current?.getBoundingClientRect();

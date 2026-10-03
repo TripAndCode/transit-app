@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
+import * as client from "../api/client";
 import { MapTab } from "./MapTab";
 import { stubReducedMotion } from "../test/reducedMotion";
 import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse } from "../api/types";
@@ -204,5 +205,46 @@ describe("MapTab delayed-trips cap", () => {
 
     fireEvent.click(screen.getByText("refilter"));
     expect(screen.getByText(remainder)).toBeInTheDocument();
+  });
+});
+
+describe("MapTab manual refresh", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("dates the refreshed observation against the clock at the moment the refresh lands", async () => {
+    // Only Date is faked: the refresh's promises and React's scheduler keep
+    // running on real timers.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const mounted = Date.parse("2026-06-01T00:00:00Z");
+    vi.setSystemTime(mounted);
+    mockCommonHooks();
+    // Between render ticks a fresh observation can be newer than the last
+    // tick's `now`; timing it against that stale tick would read as future.
+    const fresh = new Date(mounted + 25_000).toISOString();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue({ isError: false, data: { latest_captured_at: fresh, rows: [] } }),
+    } as never);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: todaySummary(),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue({ isError: false }),
+    } as never);
+    vi.spyOn(client, "apiPost").mockResolvedValue({ status: "ok", inserted: 3 } as never);
+    renderMap();
+    vi.setSystemTime(mounted + 30_000);
+    fireEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
+    expect(await screen.findByText("Live data loaded: 3 rows (just now)")).toBeInTheDocument();
   });
 });

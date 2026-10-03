@@ -90,9 +90,9 @@ function directionOptions(trips: LiveTrip[], t: ReturnType<typeof useTranslation
   }));
 }
 
-function freshnessFor(timestamp: string | null | undefined): Freshness {
+function freshnessFor(timestamp: string | null | undefined, now: number): Freshness {
   if (!timestamp) return "unknown";
-  const age = Date.now() - new Date(timestamp).getTime();
+  const age = now - new Date(timestamp).getTime();
   if (!Number.isFinite(age) || age < 0) return "unknown";
   if (age <= 2 * 60_000) return "normal";
   if (age <= MAX_REPORT_AGE_MS) return "delayed";
@@ -243,7 +243,7 @@ export function MapTab() {
   const progressQuery = useLiveTripProgress(id, effectiveTrip?.trip_id ?? null);
   const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
   const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
-  const freshness = freshnessFor(liveQuery.data?.latest_captured_at);
+  const freshness = freshnessFor(liveQuery.data?.latest_captured_at, now);
 
   const onTripClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
     const tripId = event.features?.[0]?.properties?.trip_id;
@@ -567,7 +567,7 @@ export function MapTab() {
         <div className={`ops-freshness ops-freshness--${freshness}`}>
           <span />
           {liveQuery.data?.latest_captured_at
-            ? t("operations.last_updated", { when: relativeTime(liveQuery.data.latest_captured_at) })
+            ? t("operations.last_updated", { when: relativeTime(liveQuery.data.latest_captured_at, now) })
             : t("operations.no_update")}
         </div>
         <button

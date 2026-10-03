@@ -63,6 +63,14 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: /Search routes, reports and screens/ })).toBeInTheDocument();
   });
 
+  it("labels the palette shortcut with the platform's modifier key", () => {
+    vi.stubGlobal("navigator", { ...navigator, platform: "Win32", userAgentData: undefined });
+    renderBar();
+    expect(screen.getByText("Ctrl")).toBeInTheDocument();
+    expect(screen.queryByText("⌘")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   it("states how recent the current agency's data is", () => {
     renderBar();
     expect(screen.getByText("Data through Sep 29, 2026")).toBeInTheDocument();

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, useSearchParams } from "react-router-dom";
 import * as hooks from "./hooks";
-import { latestDataWindow, useDefaultRangeAnchor, useJumpToLatestDataRange } from "./defaultRangeAnchor";
+import { computeAnchorRange, latestDataWindow, useDefaultRangeAnchor, useJumpToLatestDataRange } from "./defaultRangeAnchor";
 import { useAnonymousFilterPersistence } from "./anonymousFilterPersistence";
 import { DEFAULT_RANGE_DAYS, isoDaysAgo, isoDaysBefore } from "./scope";
 import type { Agency } from "./types";
@@ -170,6 +170,20 @@ describe("useDefaultRangeAnchor + useAnonymousFilterPersistence interaction", ()
     const stored = JSON.parse(localStorage.getItem("transit.lastFilter.1.pulse") ?? "{}");
     expect(stored.dow).toBe("weekend");
     expect(stored.time_band).toBe("evening");
+  });
+});
+
+describe("computeAnchorRange", () => {
+  const agencies = [agency({ latest_data_date: "2026-01-15" })];
+
+  it("treats an unparsable from/to as absent and still anchors", () => {
+    const range = computeAnchorRange(1, agencies, new URLSearchParams("from=not-a-date&to=2026-13-99"));
+    expect(range).toEqual({ from: isoDaysBefore("2026-01-15", DEFAULT_RANGE_DAYS - 1), to: "2026-01-15" });
+    expect(range?.from).toBe("2025-12-17");
+  });
+
+  it("leaves a valid explicit range alone", () => {
+    expect(computeAnchorRange(1, agencies, new URLSearchParams("from=2026-01-01"))).toBeNull();
   });
 });
 

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
-import { formatNumber, formatMinutes, formatShortDate } from "../../utils/format";
+import { formatDate, formatNumber, formatMinutes, formatShortDate } from "../../utils/format";
 import { useScope } from "../../api/scope";
 import { useDrawOn } from "./ChartEnter";
 import { ShadedDays, ThresholdBand, VerticalMarker } from "./annotations";
@@ -409,15 +409,15 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
           }}
         >
           <div>
-            <strong>{days[cursor].date}</strong>:{" "}
+            <strong>{formatDate(days[cursor].date)}</strong>:{" "}
             {t("reports.daily.tooltip_metrics", {
-              min: (days[cursor].avg_min ?? 0).toFixed(1),
+              min: formatMinutes(days[cursor].avg_min ?? 0),
               count: formatNumber(days[cursor].samples ?? 0),
             })}
           </div>
           {days[cursor].avg_min_smoothed != null && (
             <div style={{ color: "var(--text-secondary)" }}>
-              {t("reports.daily.smoothed_tooltip", { min: days[cursor].avg_min_smoothed!.toFixed(1) })}
+              {t("reports.daily.smoothed_tooltip", { min: formatMinutes(days[cursor].avg_min_smoothed!) })}
             </div>
           )}
           {days[cursor].top_offenders?.length > 0 && (
@@ -425,7 +425,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
               {t("reports.daily.worst_label")}{" "}
               {days[cursor].top_offenders
                 .slice(0, 3)
-                .map((o) => t("reports.daily.offender", { code: o.route_code, min: o.avg_min.toFixed(1) }))
+                .map((o) => t("reports.daily.offender", { code: o.route_code, min: formatMinutes(o.avg_min) }))
                 .join(", ")}
             </div>
           )}

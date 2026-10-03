@@ -98,6 +98,35 @@ describe("DailyChart", () => {
   });
 });
 
+describe("DailyChart tooltip", () => {
+  it("formats the tooltip's date and minutes for the locale", () => {
+    const { container } = renderChart(<DailyChart days={[day({ date: "2026-05-18", avg_min: 2.5, samples: 1234 })]} />);
+    fireEvent.mouseEnter(dayRects(container)[0]);
+    expect(screen.getByText(/May 18, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/2\.5 min/)).toBeInTheDocument();
+    expect(screen.getByText(/1,234/)).toBeInTheDocument();
+    expect(screen.queryByText(/2026-05-18/)).toBeNull();
+  });
+
+  it("writes the smoothed average and the worst routes with the shared minutes unit", () => {
+    const { container } = renderChart(
+      <DailyChart
+        days={[
+          day({
+            date: "2026-05-18",
+            avg_min: 2.5,
+            avg_min_smoothed: 1.25,
+            top_offenders: [{ route_code: "R1", service_type: "weekday", avg_min: 4.75, samples: 10 }],
+          }),
+        ]}
+      />,
+    );
+    fireEvent.mouseEnter(dayRects(container)[0]);
+    expect(screen.getByText("7-day avg 1.3 min")).toBeInTheDocument();
+    expect(screen.getByText(/Route R1 \(4\.8 min\)/)).toBeInTheDocument();
+  });
+});
+
 describe("DailyChart annotations", () => {
   it("bands the severe region when the plotted maximum reaches it", () => {
     const { container } = renderChart(
