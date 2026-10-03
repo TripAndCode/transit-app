@@ -441,29 +441,23 @@ export function Sidebar() {
       >
         {t("header.app_title").slice(0, 1)}
       </span>
+      {/* One line, never broken mid-word: the rail is too narrow for a
+          two-line name and a tagline, which stay on the sign-in pages. */}
       {!collapsedFlag && (
-        <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.1, minWidth: 0 }}>
-          <span
-            style={{
-              fontFamily: "var(--font-display)",
-              fontWeight: 700,
-              fontSize: "var(--text-base)",
-              letterSpacing: "0.01em",
-            }}
-          >
-            {t("header.app_title")}
-          </span>
-          <span
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: "var(--text-xs)",
-              color: "var(--text-tertiary)",
-              marginTop: 2,
-              letterSpacing: "0.04em",
-            }}
-          >
-            {t("header.app_tagline")}
-          </span>
+        <span
+          style={{
+            minWidth: 0,
+            fontFamily: "var(--font-display)",
+            fontWeight: 700,
+            fontSize: "var(--text-base)",
+            letterSpacing: "0.01em",
+            whiteSpace: "nowrap",
+            wordBreak: "keep-all",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {t("header.app_title")}
         </span>
       )}
     </Link>

@@ -478,6 +478,8 @@
   line-height: 1.6;
   color: var(--text-primary);
   margin: 0;
+  word-break: auto-phrase;
+  text-wrap: balance;
 }
 .ov-hero-sub {
   display: flex;

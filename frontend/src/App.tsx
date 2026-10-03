@@ -1,6 +1,5 @@
-import { Suspense, useEffect } from "react";
+import { Suspense } from "react";
 import { Outlet, useMatch, useLocation } from "react-router-dom";
-import { useTranslation } from "react-i18next";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useDefaultRangeAnchor } from "./api/defaultRangeAnchor";
 import { useAgencyId } from "./api/useAgencyId";
@@ -16,21 +15,10 @@ import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
 import { CommandPalette } from "./components/CommandPalette";
-
-/**
- * Keep <title> in sync with the active locale. The static `<title>` in
- * `index.html` is JP; this effect overwrites it post-mount and re-runs on
- * every language switch.
- */
-function useDocumentTitle() {
-  const { t, i18n } = useTranslation();
-  useEffect(() => {
-    document.title = t("header.app_title");
-  }, [t, i18n.language]);
-}
+import { useDocumentLocale } from "./i18n/useDocumentLocale";
 
 export default function App() {
-  useDocumentTitle();
+  useDocumentLocale();
   // Remount the routed tab when the agency changes so no tab carries another
   // agency's in-component state across a switch (e.g. a selected Ask thread or
   // forecast route). Non-agency routes (account) share the "root" key.
