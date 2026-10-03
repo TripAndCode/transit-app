@@ -8,8 +8,9 @@ Three resources back the Map tab:
   ``geometry`` field. Falls back to ``geometry: null`` so the frontend
   can draw a stop-coordinate polyline as a graceful degrade.
 - ``GET /delays/heatmap``: per-stop average delay GeoJSON, scoped by
-  the user's range / DOW / time-band filter. Stops are clustered by
-  ``stop_name`` plus actual spatial proximity (``ST_ClusterDBSCAN``) so
+  the user's range / DOW / time-band filter. Stops are grouped by the
+  ``stop_clusters`` table (``stop_name`` plus actual spatial proximity,
+  precomputed at static-load time by :mod:`pipeline.stop_clusters`) so
   inbound/outbound platforms of the same logical stop merge into one circle.
 
 The heatmap and route-shape endpoints honor :class:`~api.range.RangeCtx`
@@ -1294,27 +1295,13 @@ async def delay_heatmap(
 ) -> dict[str, Any]:
     """Per-stop average delay GeoJSON, scoped to the request's range/DOW/time-band.
 
-    Clustering: two physical platforms with the same ``stop_name`` within
-    ~550 m (``ST_ClusterDBSCAN(geom, eps := 0.005, minpoints := 1)``,
-    partitioned by name so only same-named stops can merge) collapse into one
-    circle. ``minpoints := 1`` means every point is a core point, so DBSCAN
-    chains transitively (A-B-C merge if each consecutive hop is within
-    ``eps``, even if A-C alone exceeds it) — real multi-platform hubs are
-    exactly this shape (checked on real data: the widest legitimate hubs
-    chain up to ~580m total span, but no single hop between platforms of
-    the same hub exceeds ~320m, and the next-nearest *coincidental* reuse of
-    a name starts at ~19 km away). ``eps`` sits well above the real hop
-    ceiling and nowhere near that 19 km gap, so it merges every genuine hub
-    without bridging unrelated same-named stops — an oversized `eps` (the
-    first version of this fix reused the old grid's ~5 km CELL SIZE as if it
-    were a merge RADIUS, a different quantity) chained across multiple
-    unrelated stops on real data. DBSCAN clusters by actual pairwise distance
-    rather than a fixed grid, so two close platforms also can't fail to merge
-    purely from straddling a grid-cell boundary the way ``ST_SnapToGrid`` did
-    (confirmed on real data, ~1.2% of same-named pairs within 200m). Stops
-    without a ``stop_name`` fall back to a synthetic ``stop_id``-based key,
-    so each stands alone (its own singleton partition — DBSCAN never runs on
-    more than one point per partition there).
+    Clustering: two physical platforms with the same ``stop_name`` that lie
+    close together collapse into one circle; stops without a ``stop_name``
+    each stand alone. The grouping is read from ``stop_clusters``, which the
+    static load builds — :mod:`pipeline.stop_clusters` owns the DBSCAN, its
+    merge radius and the rationale for that radius. A stop with no
+    ``stop_clusters`` row (no geometry, or seeded outside the static load) has
+    no dot.
 
     Output coordinates are the centroid of the merged poles so the dot sits
     between paired platforms rather than on one of them.
@@ -1324,28 +1311,16 @@ async def delay_heatmap(
     ``agg_route_stop_daily`` (pre-split by ``route_code``). Both aggregates are
     deduped to one row per trip-stop event, so ``samples`` is an observation count.
     """
-    # `name_key` names the partition each cluster is confined to: same key ->
-    # DBSCAN may merge; different key -> never (guarantees name is never lost
-    # across a merge, and unnamed stops — key is already unique per stop_id —
-    # each land alone). `cluster_id` is DBSCAN's within-partition cluster label.
-    # Computed once over `static_stops` (a few thousand rows/agency) rather
-    # than inline against the agg join — running the window function per
-    # *stop* instead of per (stop, date, time_band) agg row it joins to is
-    # cheaper by construction, since the stop set is far smaller than the
-    # agg join it would otherwise run against.
-    # `name_key` is computed in an inner SELECT so PARTITION BY can reference
-    # its alias once, rather than repeating the CASE expression.
-    stop_clusters_cte = """
-        stop_clusters AS (
-            SELECT stop_id, stop_name, platform_code, stop_code, geom, name_key,
-                ST_ClusterDBSCAN(geom, eps := 0.005, minpoints := 1) OVER (PARTITION BY name_key) AS cluster_id
-            FROM (
-                SELECT stop_id, stop_name, platform_code, stop_code, geom,
-                    CASE WHEN NULLIF(stop_name, '') IS NOT NULL THEN stop_name ELSE 'unnamed:' || stop_id END
-                        AS name_key
-                FROM static_stops
-                WHERE agency_id = $1 AND geom IS NOT NULL
-            ) named
+    # The same-named-platform grouping is precomputed into stop_clusters by
+    # the static load (pipeline/stop_clusters.py owns the DBSCAN and its
+    # radius); this request only joins it to the stop attributes it labels
+    # with. A stop with no cluster row has no dot.
+    clustered_stops_cte = """
+        clustered_stops AS (
+            SELECT s.stop_id, s.stop_name, s.platform_code, s.stop_code, s.geom, c.name_key, c.cluster_id
+            FROM stop_clusters c
+            JOIN static_stops s ON s.agency_id = c.agency_id AND s.stop_id = c.stop_id
+            WHERE c.agency_id = $1
         )
     """
     if ctx.routes:
@@ -1355,12 +1330,12 @@ async def delay_heatmap(
         agg_where, params, _ = build_agg_stop_filter(ctx, next_param=3)
         rows = await conn.fetch(
             f"""
-            WITH {stop_clusters_cte},
+            WITH {clustered_stops_cte},
             joined AS (
                 SELECT sc.geom, sc.stop_name, sc.stop_id, sc.platform_code, sc.stop_code,
                     sc.name_key, sc.cluster_id, a.route_code AS route_code_val, a.delay_sum, a.samples
                 FROM agg_route_stop_daily a
-                JOIN stop_clusters sc ON sc.stop_id = a.stop_id
+                JOIN clustered_stops sc ON sc.stop_id = a.stop_id
                 WHERE a.agency_id = $1 AND a.route_code = ANY($2) AND {agg_where}
             )
             {_HEATMAP_CLUSTER_PROJECTION_SQL}
@@ -1374,12 +1349,12 @@ async def delay_heatmap(
         agg_where, params, _ = build_agg_stop_filter(ctx, next_param=2)
         rows = await conn.fetch(
             f"""
-            WITH {stop_clusters_cte},
+            WITH {clustered_stops_cte},
             joined AS (
                 SELECT sc.geom, sc.stop_name, sc.stop_id, sc.platform_code, sc.stop_code,
                     sc.name_key, sc.cluster_id, r.route_codes AS route_code_val, a.delay_sum, a.samples
                 FROM agg_stop_daily a
-                JOIN stop_clusters sc ON sc.stop_id = a.stop_id
+                JOIN clustered_stops sc ON sc.stop_id = a.stop_id
                 LEFT JOIN agg_stop_routes r ON r.agency_id = $1 AND r.stop_id = a.stop_id
                 WHERE a.agency_id = $1 AND {agg_where}
             )
