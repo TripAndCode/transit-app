@@ -1264,6 +1264,7 @@ class CollectorTileOut(BaseModel):
     status: str  # ok | warn | down | unknown
     last_success_at: str | None
     detail: str | None
+    check_failed: bool
     history: list[int]
 
 
@@ -1580,9 +1581,10 @@ async def _maybe_reap_abandoned_runs() -> None:
 async def admin_board(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
 ) -> AdminBoard:
     """The admin entry page's one snapshot: collectors, freshness, alerts."""
-    from pipeline.health import migration_status
+    from pipeline.health import aggregate_freshness, migration_status
 
     await _maybe_reap_abandoned_runs()
 
@@ -1611,7 +1613,18 @@ async def admin_board(
         _log.warning("board: pending-approvals count failed", exc_info=True)
         pending_llm_approvals = 0
 
-    alerts = board_alerts(freshness=freshness, migrations=migrations, pending_llm_approvals=pending_llm_approvals)
+    agency_freshness = None
+    try:
+        agency_freshness = await aggregate_freshness(conn, ch)
+    except Exception:
+        _log.warning("board: aggregate freshness unavailable", exc_info=True)  # no staleness alerts
+
+    alerts = board_alerts(
+        freshness=freshness,
+        agency_freshness=agency_freshness,
+        migrations=migrations,
+        pending_llm_approvals=pending_llm_approvals,
+    )
     return AdminBoard(
         collectors=[CollectorTileOut(**tile) for tile in collectors],
         freshness=[AgencyFreshnessRowOut(**row) for row in freshness],

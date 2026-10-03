@@ -17,10 +17,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import pipeline.health as health_mod
 from api.admin_board import BOARD_WINDOW_DAYS, COLLECTOR_ORDER
-from api.deps import get_conn
+from api.deps import get_ch, get_conn
 from api.routers import admin as admin_router
 from api.security import require_admin
+from pipeline.health import AgencyFreshness
 from tests.fixtures.users import admin_user
 
 _ADMIN = admin_user()
@@ -92,6 +94,7 @@ def _client(conn: _Conn) -> TestClient:
     app.include_router(admin_router.router)
     app.dependency_overrides[require_admin] = lambda: _ADMIN
     app.dependency_overrides[get_conn] = lambda: conn
+    app.dependency_overrides[get_ch] = lambda: None
     return TestClient(app)
 
 
@@ -112,6 +115,35 @@ _REAL_COLLECT_DOCUMENTS = admin_router._collect_documents
 def _no_real_collectors(monkeypatch):
     """A unit test must never shell out to the real collectors."""
     monkeypatch.setattr(admin_router, "_collect_documents", _stub_documents([]))
+
+
+def _stub_freshness(result):
+    async def _freshness(conn, ch):
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    return _freshness
+
+
+def _lagging(name: str, days: int) -> AgencyFreshness:
+    return AgencyFreshness(
+        agency_id=1,
+        agency_name=name,
+        last_analyzed_at=_NOW,
+        analyze_age_hours=1.0,
+        agg_fresh=False,
+        agg_behind_days=days,
+        is_stale=True,
+        data_to=_YESTERDAY.isoformat(),
+        clamp_pct=None,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_freshness_check(monkeypatch):
+    """The Ops freshness check reads ClickHouse; a unit test answers for it."""
+    monkeypatch.setattr(health_mod, "aggregate_freshness", _stub_freshness([]))
 
 
 @pytest.fixture(autouse=True)
@@ -193,6 +225,19 @@ def test_pending_approvals_surface_as_an_info_alert():
     alerts = {a["code"]: a for a in _client(_Conn(approvals=2)).get("/api/admin/board").json()["alerts"]}
     assert alerts["llm_approvals_pending"]["level"] == "info"
     assert alerts["llm_approvals_pending"]["params"]["count"] == 2
+
+
+def test_staleness_alerts_come_from_the_check_ops_reads(monkeypatch):
+    monkeypatch.setattr(health_mod, "aggregate_freshness", _stub_freshness([_lagging("Hokuriku", 2)]))
+    alerts = {a["code"]: a for a in _client(_Conn()).get("/api/admin/board").json()["alerts"]}
+    assert alerts["agency_stale"]["params"] == {"agency": "Hokuriku", "days": 2}
+
+
+def test_a_failing_freshness_check_raises_no_staleness_alert(monkeypatch):
+    monkeypatch.setattr(health_mod, "aggregate_freshness", _stub_freshness(RuntimeError("clickhouse down")))
+    response = _client(_Conn()).get("/api/admin/board")
+    assert response.status_code == 200
+    assert not {"agency_stale", "agencies_stale", "agencies_no_data"} & {a["code"] for a in response.json()["alerts"]}
 
 
 def test_clamped_samples_above_the_threshold_surface_as_a_warn_alert():

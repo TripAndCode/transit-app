@@ -253,7 +253,10 @@ export type BoardCollector = {
   label: string;
   status: "ok" | "warn" | "down" | "unknown";
   last_success_at: string | null;
+  /** The collector's own reason text, verbatim; shown only on request. */
   detail: string | null;
+  /** The status check itself failed, so the state is not known at all. */
+  check_failed: boolean;
   /** 24 hourly cells, oldest first: 1 where the collector was still known good. */
   history: number[];
 };

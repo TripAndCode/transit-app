@@ -24,6 +24,7 @@ const BOARD: AdminBoard = {
       status: "ok",
       last_success_at: "2026-09-20T08:10:00Z",
       detail: null,
+      check_failed: false,
       history: Array(24).fill(1),
     },
     {
@@ -32,9 +33,18 @@ const BOARD: AdminBoard = {
       status: "warn",
       last_success_at: "2026-09-20T04:10:00Z",
       detail: "disk usage is degraded",
+      check_failed: false,
       history: [...Array(20).fill(1), 0, 0, 0, 0],
     },
-    { key: "github", label: "CI (GitHub)", status: "unknown", last_success_at: null, detail: null, history: Array(24).fill(0) },
+    {
+      key: "github",
+      label: "CI (GitHub)",
+      status: "unknown",
+      last_success_at: null,
+      detail: "collector could not run: OracleStatusUnavailable: no oracle-heartbeat-listener.yml run found, or `gh run list` failed (exit 0):",
+      check_failed: true,
+      history: Array(24).fill(0),
+    },
   ],
   freshness: [
     { agency_id: 1, agency_name: "Hokuriku", days: days(Array(14).fill("fresh")) },
@@ -130,6 +140,49 @@ describe("AdminBoardPage", () => {
   it("words a stale agency's lag with its own plural, from the alert's days", () => {
     wrap(<AdminBoardPage />);
     expect(screen.getByText("Toyama Bayline: aggregates 3 days behind")).toBeInTheDocument();
+  });
+
+  it("says in words when a collector's status could not be checked, and keeps the raw reason behind Details", () => {
+    wrap(<AdminBoardPage />);
+    const tile = screen.getAllByTestId("collector-tile")[2];
+    expect(within(tile).getByText("Couldn't check its status")).toBeInTheDocument();
+    const details = within(tile).getByText("Details").closest("details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details).toHaveTextContent("OracleStatusUnavailable");
+  });
+
+  it("keeps a healthy-but-behind collector's own reason behind Details too", () => {
+    wrap(<AdminBoardPage />);
+    const tile = screen.getAllByTestId("collector-tile")[1];
+    expect(within(tile).queryByText("Couldn't check its status")).toBeNull();
+    expect(within(tile).getByText("Details").closest("details")).toHaveTextContent("disk usage is degraded");
+  });
+
+  it("colours each legend swatch the way the heatmap colours its cells", () => {
+    wrap(<AdminBoardPage />);
+    const legend = screen.getByTestId("freshness-legend");
+    const fresh = within(legend).getByTestId("legend-swatch-fresh");
+    const stale = within(legend).getByTestId("legend-swatch-stale");
+    const cells = screen.getAllByTestId("freshness-cell");
+    expect(fresh.style.background).toBe(cells.find((c) => c.dataset.state === "fresh")!.style.background);
+    expect(stale.style.background).toBe(cells.find((c) => c.dataset.state === "stale")!.style.background);
+    expect(fresh.style.background).not.toBe(stale.style.background);
+  });
+
+  it("words the grouped alerts", () => {
+    mockQuery = {
+      ...mockQuery,
+      data: {
+        ...BOARD,
+        alerts: [
+          { level: "warn", code: "agencies_stale", params: { count: 5, days: 4 }, text: "", href: "/admin/ops" },
+          { level: "info", code: "agencies_no_data", params: { count: 13 }, text: "", href: "/admin/agencies" },
+        ],
+      },
+    };
+    wrap(<AdminBoardPage />);
+    expect(screen.getByText("5 agencies' aggregates are behind")).toBeInTheDocument();
+    expect(screen.getByText("13 agencies have no data yet")).toBeInTheDocument();
   });
 
   it("renders one tile per collector with its status and last success", () => {
