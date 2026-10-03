@@ -10,7 +10,8 @@ compose file happens to declare. A port listed here that turns out to hold
 someone else's database is harmless: refusing to write to it is right either
 way. A port left out is the dataset.
 
-Reads the tool input JSON on stdin; exit 2 = block the tool call, 0 = allow.
+Reads the tool input JSON on stdin; exit 2 = block the tool call (also when the
+payload cannot be parsed), 0 = allow.
 
 Targeting is decided on shlex-tokenized argv, not on a substring match over the
 raw command. A regex over raw text only recognises the one spelling it was
@@ -45,7 +46,7 @@ TEST_PORTS = (":5544", ":8124")
 # Make targets that take the Makefile's own DATABASE_URL default -- the real
 # dev database -- when the caller overrides nothing. They name no host, port or
 # container, so nothing else here can recognise what they are aimed at.
-DESTRUCTIVE_TARGETS = {"migrate-down", "db-reset"}
+DESTRUCTIVE_TARGETS = {"migrate-down"}
 
 # A mutation neither dev store must take. Matched over the raw command: this
 # asks "does this text contain a mutating statement", which needs no shell
@@ -60,7 +61,7 @@ WRITE = re.compile(
     r"|\b(dropdb|createdb|pg_restore)\b"
     r"|\bVACUUM\s+FULL\b"
     r"|\\copy\b[^|;&]*\bfrom\b"
-    r"|db-reset|migrate[^ ]*down|downgrade",
+    r"|migrate[^ ]*down|downgrade",
     re.IGNORECASE,
 )
 
@@ -68,6 +69,31 @@ WRITE = re.compile(
 # defaults to the checkout's directory name -- so match the shape, not one
 # literal project.
 CONTAINER = re.compile(r"[a-z0-9_.-]*-(db|clickhouse)-\d+")
+# compose.yml's named volumes, as compose publishes them: `<project>_<name>`.
+DEV_VOLUME = re.compile(r"(?:[a-z0-9_.-]+_)?transit_(?:pgdata|chdata)")
+# `-v`/`--volumes` on `docker rm`, alone or folded into a short-flag cluster (`-fv`).
+VOLUME_FLAG = re.compile(r"--volumes|-[a-z]*v[a-z]*")
+# The Makefile's DATABASE_URL default is the dev database, and so is the shell's
+# in a `make serve` session: a command that expands the variable is aimed there
+# unless it also names a throwaway port.
+DATABASE_URL_REF = re.compile(r"\$\{?DATABASE_URL\b")
+
+
+def destroys_dev_volume(lowered: list[str]) -> bool:
+    """A teardown that removes the dataset's volume carries no SQL keyword, so
+    it is a block on its own rather than a target waiting for a mutation."""
+    if "docker" not in lowered:
+        return False
+    if "compose" in lowered and "down" in lowered:
+        return bool({"-v", "--volumes"} & set(lowered))
+    if "volume" in lowered and {"rm", "remove"} & set(lowered):
+        return any(DEV_VOLUME.fullmatch(tok) for tok in lowered)
+    if "prune" in lowered:
+        return "volume" in lowered or "--volumes" in lowered
+    if "rm" in lowered:
+        names_dev = any(tok in DEV_CONTAINERS or CONTAINER.fullmatch(tok) for tok in lowered)
+        return names_dev and any(VOLUME_FLAG.fullmatch(tok) for tok in lowered)
+    return False
 
 
 def runs_a_sql_script(lowered: list[str]) -> bool:
@@ -87,6 +113,9 @@ def targets_dev_db(tokens: list[str], cmd: str) -> bool:
     if "make" in lowered and DESTRUCTIVE_TARGETS & set(lowered):
         if not any(port in cmd for port in TEST_PORTS):
             return True
+
+    if DATABASE_URL_REF.search(cmd) and not any(port in cmd for port in TEST_PORTS):
+        return True
 
     for i, tok in enumerate(lowered):
         for port in DEV_PORTS:
@@ -112,20 +141,26 @@ def should_block(cmd: str) -> bool:
         # Unbalanced quotes: fall back to whitespace splitting rather than give
         # up, so a malformed command can't slip past by failing to tokenize.
         tokens = cmd.split()
+    lowered = [t.lower() for t in tokens]
+    if destroys_dev_volume(lowered):
+        return True
     if not targets_dev_db(tokens, cmd):
         return False
-    return bool(WRITE.search(cmd)) or runs_a_sql_script([t.lower() for t in tokens])
+    return bool(WRITE.search(cmd)) or runs_a_sql_script(lowered)
 
 
 def main() -> int:
     try:
         cmd = json.load(sys.stdin).get("tool_input", {}).get("command", "") or ""
-    except Exception:
-        return 0
+    except (ValueError, AttributeError):
+        sys.stderr.write(
+            "BLOCKED: guard_dev_db could not read the hook payload; refusing rather than waving the command through.\n"
+        )
+        return 2
     if should_block(cmd):
         sys.stderr.write(
-            "BLOCKED: write against a dev store (Postgres :5433/:5543 / ClickHouse :8123) — "
-            "both hold real production data and are read-only. "
+            "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123 / "
+            "the transit_pgdata and transit_chdata volumes) — both hold real production data and are read-only. "
             "Use the throwaway :5544 / :8124 pair. See CLAUDE.md.\n"
         )
         return 2
