@@ -173,9 +173,8 @@ def build_diff(
 
 
 def _is_process_doc_path(path: str) -> bool:
-    """AGENTS.md, CLAUDE.md and everything under .claude/** are executable
-    process docs, not ordinary prose -- see AGENTS.md's "Git and pull requests"."""
-    return path in ("AGENTS.md", "CLAUDE.md") or path.startswith(".claude/")
+    """Recognize agent instructions and configuration as process docs."""
+    return path in ("AGENTS.md", "CLAUDE.md") or path.startswith((".claude/", ".agents/", ".codex/"))
 
 
 def suggested_tier(paths: list[str]) -> str:
@@ -191,7 +190,7 @@ def suggested_tier(paths: list[str]) -> str:
         return "trivial"
     # A non-Markdown process-doc path (e.g. .claude/settings.json) mixed with
     # an ordinary Markdown doc falls through to here rather than process-doc:
-    # that mix isn't "only .claude/**, CLAUDE.md or AGENTS.md" per this tier's own
+    # that mix isn't "only agent process docs" per this tier's own
     # definition, and "standard" dispatches strictly more review than
     # process-doc, so this never under-reviews -- deliberate, not a gap.
     return "standard"
@@ -219,6 +218,9 @@ def is_test_path(path: str) -> bool:
 ENFORCEMENT_PATTERNS: tuple[str, ...] = (
     ".claude/hooks/*",
     ".claude/settings.json",
+    ".codex/hooks/*",
+    ".codex/hooks.json",
+    ".codex/config.toml",
     ".github/workflows/*",
     ".pre-commit-config.yaml",
     "scripts/setup_git_hooks.sh",

@@ -6,12 +6,12 @@ to rediscover. Architecture, setup and feature walkthroughs live in `README.md` 
 `docs/features/`; read them only when the task needs them.
 
 Every rule applies whether or not a tool enforces it for you. Claude Code loads this
-file through `CLAUDE.md`, which adds only its own tooling: skills, slash commands, and
-hooks that enforce a few of these rules for Claude sessions. Agents without those hooks
-must apply the same rules by hand.
+file through `CLAUDE.md`; local Codex reads it directly. Claude's hooks live in
+`.claude/settings.json`; local Codex loads `.codex/hooks.json` when the project is
+trusted. Agents in sessions without active hooks must apply the same rules by hand.
 
-Longer reference notes live in `.claude/skills/*/SKILL.md`. They are plain Markdown any
-agent can read:
+Longer reference notes live in `.claude/skills/*/SKILL.md`; `.agents/skills/` links
+to the same files for Codex discovery. They are plain Markdown any agent can read:
 - `transit-app-gotchas`: test databases, i18n parity, worktrees, CI trailer mechanics;
 - `postgres-perf`: query and aggregate performance traps;
 - `maplibre-map`: Map tab conventions.
@@ -165,12 +165,13 @@ agent can read:
 - Every PR gets one independent review pass over its full diff against `main` before
   it opens as a draft.
   - Claude Code runs `/review-branch` (see `CLAUDE.md`).
-  - Other agents build the same prepared diff with `python3 scripts/prepare_review.py
+  - Codex uses `$review-branch`; other agents build the same prepared diff with
+    `python3 scripts/prepare_review.py
     --repo <worktree> --base main --output-dir <dir>` and review it against the
     dimensions in `.claude/agents/branch-reviewer.md`.
   - Record the result and how each finding was handled in the PR body.
-  - `AGENTS.md`, `CLAUDE.md` and `.claude/**` are executable process docs, not
-    ordinary prose.
+  - `AGENTS.md`, `CLAUDE.md`, `.claude/**`, `.agents/**`, and `.codex/**` are
+    executable process docs, not ordinary prose.
 - Open PRs as drafts, and mark ready only after the review pass is clean. A PR may
   then be squash-merged once all of these hold:
   - GitHub reports it mergeable/clean (no conflicts);

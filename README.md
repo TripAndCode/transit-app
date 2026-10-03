@@ -311,8 +311,10 @@ scripts/                operational tools and review helpers
 tests/                  pytest suites (api, pipeline, query, db, frontend, unit) and fixtures
 tools/                  optional local dev tools (GeoSQL/Dekart)
 docs/features/          feature-specific behavior guides
-.claude/                review and PR workflows
-AGENTS.md               rules for coding agents (CLAUDE.md imports it)
+.claude/                Claude Code workflows and shared skill instructions
+.agents/                Codex skills, including links to shared skill instructions
+.codex/                 local Codex hook configuration
+AGENTS.md               shared coding-agent rules (CLAUDE.md imports them)
 ```
 
 Useful entry points:
