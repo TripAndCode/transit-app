@@ -111,17 +111,23 @@ function parseIsoDate(iso: string): Date | null {
   return isNaN(date.getTime()) ? null : date;
 }
 
-function dayFormat(withYear: boolean): Intl.DateTimeFormat {
+function dayFormat(withYear: boolean, withWeekday = false): Intl.DateTimeFormat {
   // Japanese writes the month as 9月, which is its "long" form; "short" is
   // a bare number there.
   const month = resolvedLocale().startsWith("ja") ? "long" : "short";
-  return dateFormat(withYear ? { year: "numeric", month, day: "numeric" } : { month, day: "numeric" });
+  return dateFormat({
+    ...(withYear && { year: "numeric" }),
+    month,
+    day: "numeric",
+    ...(withWeekday && { weekday: "short" }),
+  });
 }
 
-/** One day in the language's date style ("Sep 29, 2026", "2026年9月29日"). */ // i18n-ignore: JSDoc examples
-export function formatDate(iso: string, { year = true }: { year?: boolean } = {}): string {
+/** One day in the language's date style, optionally with its weekday:
+ *  "Sep 29, 2026", "2026年9月29日", "Tue, Sep 29", "9月29日(火)". */ // i18n-ignore: JSDoc examples
+export function formatDate(iso: string, { year = true, weekday = false }: { year?: boolean; weekday?: boolean } = {}): string {
   const date = parseIsoDate(iso);
-  return date ? dayFormat(year).format(date) : EM_DASH;
+  return date ? dayFormat(year, weekday).format(date) : EM_DASH;
 }
 
 /** A period, with its year written once, on the side the language writes it

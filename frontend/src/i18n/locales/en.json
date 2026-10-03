@@ -1622,7 +1622,19 @@
   },
   "topbar": {
     "ask_placeholder": "Search routes, reports and screens",
-    "data_through": "Data through {{date}}"
+    "analyzed_through": "Analyzed through {{date}}",
+    "live_at": "live {{time}}",
+    "last_reading": "last reading {{when}}",
+    "freshness": {
+      "title": "How fresh the data is",
+      "reports": "Reports and charts",
+      "reports_through": "Service days through {{date}}",
+      "live": "Live",
+      "live_none": "No readings received yet",
+      "readings": "Readings, last 7 analyzed days",
+      "set_aside": "Set aside as implausible",
+      "note": "Days without readings are left out, not counted as on time."
+    }
   },
   "scope": {
     "label": "What you're viewing",

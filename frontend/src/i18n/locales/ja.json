@@ -1622,7 +1622,19 @@
   },
   "topbar": {
     "ask_placeholder": "路線・レポート・画面を検索",
-    "data_through": "データは{{date}}まで"
+    "analyzed_through": "{{date}}まで集計",
+    "live_at": "ライブ {{time}}",
+    "last_reading": "最終受信 {{when}}",
+    "freshness": {
+      "title": "データの鮮度",
+      "reports": "レポートとグラフ",
+      "reports_through": "{{date}}までの運行日",
+      "live": "ライブ",
+      "live_none": "まだ受信していません",
+      "readings": "直近7集計日の観測数",
+      "set_aside": "異常値として除外",
+      "note": "観測のない日は定時扱いにせず、集計から外しています。"
+    }
   },
   "scope": {
     "label": "表示の条件",

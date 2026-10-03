@@ -1,7 +1,6 @@
 export const design = {
   ja: {
     overview: "概況", reports: "レポート", live: "現在の運行",
-    aggregateDate: "最新集計日", excluded: "除外した異常値", lastObserved: "最新の観測日時",
     mapUnavailable: "この環境では地図を表示できません。観測データは引き続き確認できます。",
     investigate: "遅れが増えた区間を調べる", reportTitle: "運行の傾向を、一枚にまとめる",
     line: "路線", pattern: "系統", allLines: "すべての路線", allPatterns: "すべての系統",
@@ -14,7 +13,6 @@ export const design = {
     attention: "確認したい便", onTimePct: "定時運行率",
     observedLabel: "観測便", delayedLabel: "5分以上の遅延", resizeQueue: "パネルの幅を変更",
     openAnalysis: "この系統の区間を分析 →", allObserved: "観測便を確認", noDelayed: "この条件で5分以上の遅延は観測されていません",
-    status: "データの状態",
     stopDelay: "停留所ごとの遅延", mean: "平均出発遅延（分）", selected: "選択期間", previous: "1週間前の同曜日",
     compare: "1週間前と比較", selectedStop: "選択した停留所", samples: "観測数", missing: "観測なし",
     caveat: "代表的な運行経路の平均値です。停留所ごとの対象便が異なるため、差は個々の便の遅延増加や原因を示すものではありません。",
@@ -46,7 +44,6 @@ export const design = {
   },
   en: {
     overview: "Overview", reports: "Reports", live: "Current observations",
-    aggregateDate: "Latest aggregate date", excluded: "Excluded implausible observations", lastObserved: "Latest observation timestamp",
     mapUnavailable: "The map is unavailable in this environment. Observation data remains available.",
     investigate: "Where does delay build up?", reportTitle: "Summarize service performance in one page",
     line: "Route", pattern: "Service pattern", allLines: "All routes", allPatterns: "All patterns",
@@ -59,7 +56,6 @@ export const design = {
     attention: "Trips to check", onTimePct: "On-time rate",
     observedLabel: "Observed", delayedLabel: "Delayed 5+ min", resizeQueue: "Resize panel",
     openAnalysis: "Analyze this pattern's segments →", allObserved: "View observed trips", noDelayed: "No delays of 5+ minutes observed for these filters",
-    status: "Data status",
     stopDelay: "Delay by stop", mean: "Mean departure delay (min)", selected: "Selected period", previous: "Same weekdays, one week earlier",
     compare: "Compare with one week earlier", selectedStop: "Selected stop", samples: "Observations", missing: "No observation",
     caveat: "Means for the representative service path. Stop samples can contain different trips; differences do not measure individual trip delay growth or establish causes.",

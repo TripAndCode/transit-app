@@ -20,7 +20,6 @@ import { clearLastAgency } from "../api/lastAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
-import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { Tooltip } from "./Tooltip";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { OverlayBase } from "./ui/OverlayBase";
@@ -402,7 +401,6 @@ export function Sidebar() {
             )}
           </>
         )}
-        {!collapsedFlag && <CompactDataStatus />}
         {!collapsedFlag && !inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
       </>
     );
