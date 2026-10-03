@@ -524,6 +524,13 @@
   "operations": {
     "all_routes": "All routes",
     "last_updated": "Last updated {{when}}",
+    "feed_quiet": "Feed quiet for {{duration}} · last report {{time}}",
+    "quiet_for": {
+      "minutes": "{{n}} min",
+      "hours": "{{n}} h",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days"
+    },
     "no_update": "No update received",
     "refresh": "Fetch the latest live observation",
     "refresh_now": "Refresh now",
@@ -577,14 +584,15 @@
       "other_trips": "Other trips in this direction",
       "chart_label": "Delay progression by stop",
       "growth": "{{delay}} increase at {{stop}}",
-      "recovery": "{{delay}} min recovered at {{stop}}"
+      "recovery": "{{delay}} min recovered at {{stop}}",
+      "none_reporting": "Trips appear here as soon as they report."
     },
     "queue": {
       "location_unavailable": "Stop location unavailable"
     },
     "empty": {
-      "title": "No current trips to display",
-      "hint": "Waiting for the latest TripUpdate. New reports appear automatically."
+      "title": "No vehicles are reporting right now",
+      "hint": "This is normal late at night. If it lasts through service hours, the operator's feed may be down."
     },
     "playback": {
       "aria_label": "Day playback",

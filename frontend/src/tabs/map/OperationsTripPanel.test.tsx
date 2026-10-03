@@ -49,4 +49,23 @@ describe("OperationsTripPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: /15:20/ }));
     expect(selectTrip).toHaveBeenCalledWith(expect.objectContaining({ trip_id: "T2" }));
   });
+
+  it("says trips will appear, rather than asking for a choice there is none to make, while none report", () => {
+    render(<OperationsTripPanel
+      routeName="All routes"
+      activeRoutes={[]}
+      directions={[]}
+      selectedDirection={null}
+      trips={[]}
+      selectedTripId={null}
+      progress={undefined}
+      progressLoading={false}
+      onSelectDirection={() => {}}
+      onSelectRoute={() => {}}
+      onSelectTrip={() => {}}
+      t={t}
+    />);
+    expect(screen.queryByText("operations.trip_panel.select_route")).toBeNull();
+    expect(screen.getByText("operations.trip_panel.none_reporting")).toBeInTheDocument();
+  });
 });

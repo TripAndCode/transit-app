@@ -166,7 +166,9 @@ export function OperationsTripPanel({
           )}
         </section>
       ) : (
-        <div className="ops-trip-panel__empty">{t("operations.trip_panel.select_route")}</div>
+        <div className="ops-trip-panel__empty">
+          {t(activeRoutes.length === 0 ? "operations.trip_panel.none_reporting" : "operations.trip_panel.select_route")}
+        </div>
       )}
 
       {trips.length > 1 && (

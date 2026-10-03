@@ -524,6 +524,13 @@
   "operations": {
     "all_routes": "すべての路線",
     "last_updated": "最終更新 {{when}}",
+    "feed_quiet": "フィード停止 {{duration}} · 最終報告 {{time}}",
+    "quiet_for": {
+      "minutes": "{{n}}分",
+      "hours": "{{n}}時間",
+      "days_one": "{{count}}日",
+      "days_other": "{{count}}日"
+    },
     "no_update": "最終更新なし",
     "refresh": "ライブ観測を取得",
     "refresh_now": "今すぐ更新",
@@ -577,14 +584,15 @@
       "other_trips": "同じ方面のほかの便",
       "chart_label": "停留所ごとの遅延推移",
       "growth": "{{stop}}で {{delay}}拡大",
-      "recovery": "{{stop}}で {{delay}}分回復"
+      "recovery": "{{stop}}で {{delay}}分回復",
+      "none_reporting": "走行中の便が報告し始めると、ここに表示されます。"
     },
     "queue": {
       "location_unavailable": "停留所位置を解決できません"
     },
     "empty": {
-      "title": "現在表示できる便がありません",
-      "hint": "最新の運行データを待っています。受信後、自動的に表示します。"
+      "title": "いま走行を報告している車両はありません",
+      "hint": "深夜は通常の状態です。運行時間中も続く場合は、事業者のフィードが止まっている可能性があります。"
     },
     "playback": {
       "aria_label": "1日の再生",

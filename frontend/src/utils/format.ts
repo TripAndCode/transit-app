@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import i18n from "../i18n";
+import { isToday } from "./threadDateBuckets";
 
 /** Locale-neutral separator for joining short filter/context fragments
  *  (e.g. route name, date range, service type) into one line. */
@@ -58,6 +59,12 @@ export function formatDateTime(iso: string, opts: Intl.DateTimeFormatOptions = D
   const date = new Date(iso);
   if (isNaN(date.getTime())) return "—";
   return dateFormat(opts).format(date);
+}
+
+/** When a feed report arrived: its time alone when that was today (JST),
+ *  otherwise its date and time. */
+export function formatReportTime(iso: string): string {
+  return isToday(iso) ? formatDateTime(iso, { timeStyle: "short" }) : formatDateTime(iso);
 }
 
 /** Formats a value already expressed on a 0-100 percent scale (e.g. the
