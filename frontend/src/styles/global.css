@@ -345,6 +345,11 @@
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
 }
 
 /* Keep native date controls legible on both themes. Without an explicit
@@ -800,6 +805,24 @@ summary::-webkit-details-marker { display: none; }
   .reveal.reveal--in {
     transform: translateY(0);
   }
+}
+
+/* ---------- View transitions ----------
+   The route label is the one shared element (utils/viewTransition.ts). Its
+   travel and the root cross-fade are "things that appear" -- --dur-2 -- and
+   while a transition is running the route fade stands down, so a navigation
+   still has exactly one entrance. */
+::view-transition-old(route-title),
+::view-transition-new(route-title) {
+  animation-duration: var(--dur-2);
+  animation-timing-function: var(--ease-out);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--dur-2);
+}
+html:active-view-transition .route-enter {
+  animation: none;
 }
 
 /* The daily chart's plot is a keyboard-operable range control: arrows move
