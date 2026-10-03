@@ -8,7 +8,16 @@ import { TimeTab } from "./TimeTab";
 import { WhyTab } from "./WhyTab";
 
 vi.mock("../routes/lazyTabs", () => ({
-  loadNetworkTab: () => Promise.resolve({ default: () => <div>network-tab</div> }),
+  // NetworkTab titles itself; the stand-in keeps that heading so the count
+  // of level-1 headings on Compare by agencies is the real one.
+  loadNetworkTab: () =>
+    Promise.resolve({
+      default: () => (
+        <div>
+          <h1>Compare agencies</h1>network-tab
+        </div>
+      ),
+    }),
   loadAnalysisTab: () =>
     Promise.resolve({
       default: ({ reportTypes }: { reportTypes: readonly string[] }) => <div>analysis-tab:{reportTypes.join(",")}</div>,
@@ -40,6 +49,17 @@ describe("destination screens", () => {
     open(path, route, element);
     await screen.findByText(/^analysis-tab/);
     expect(screen.getByRole("heading", { level: 1, name: title })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["?by=periods", /^analysis-tab/, "Compare"],
+    ["?by=agencies", /network-tab/, "Compare agencies"],
+  ])("has exactly one level-1 heading on Compare%s", async (search, content, title) => {
+    open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
+    await screen.findByText(content);
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent(title);
   });
 
   it("keeps the Compare title above the mode toggle", async () => {
