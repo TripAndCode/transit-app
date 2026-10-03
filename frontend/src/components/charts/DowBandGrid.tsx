@@ -3,7 +3,7 @@ import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
 import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
 import { staggerDelay } from "./ChartEnter";
-import { DIM_OPACITY, isFocusDimmed, useTrendFocus } from "./trendFocus";
+import { useTrendFocus } from "./trendFocus";
 import { formatMinutes } from "../../utils/format";
 
 const RAMP_STOPS = 5;
@@ -52,13 +52,15 @@ export function BandGrid({
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
   const cols = `34px repeat(${BAND_ORDER.length}, 1fr)`;
   const entered = useEnteredOnMount();
-  const { focus, setFocus } = useTrendFocus();
+  const { setFocus } = useTrendFocus();
   // .chart-cell-opacity gives a reduced-motion viewer (who gets none of the
   // entrance classes) the same --cell-opacity the fade would have landed on,
-  // so the low-confidence dimming and the crossfilter both still apply.
-  const cellClass = `chart-cell-opacity chart-cell-enter${entered ? " chart-cell-enter--in" : ""}`;
+  // so the low-confidence dimming still applies; the crossfilter rides
+  // `filter` through .focus-dim-filter and needs no entrance class at all.
+  const cellClass = `chart-cell-opacity chart-cell-enter${entered ? " chart-cell-enter--in" : ""} focus-dim-filter`;
   return (
     <div
+      data-focus-viewer="dow"
       onMouseLeave={() => {
         onLeave();
         setFocus(null);
@@ -86,9 +88,10 @@ export function BandGrid({
               // `opacity` -- an inline style always wins over the
               // .chart-cell-enter class's own opacity rule, which would
               // permanently pin every cell at its final value and leave
-              // nothing for the fade-in to animate.
-              const dimmed = isFocusDimmed(focus, { dow }, "dow");
-              const targetOpacity = dimmed ? DIM_OPACITY : c?.low_confidence ? 0.5 : 1;
+              // nothing for the fade-in to animate. The crossfilter dim stays
+              // off `opacity` entirely: it rides `filter` (--focus-dim), so a
+              // hover never waits out this cell's staggered entrance delay.
+              const targetOpacity = c?.low_confidence ? 0.5 : 1;
               const staggerStyle = { ...staggerDelay(di * BAND_ORDER.length + bi), "--cell-opacity": targetOpacity } as CSSProperties;
               const onEnter = (e: React.MouseEvent) => {
                 onTip(e, tipText);
@@ -106,6 +109,7 @@ export function BandGrid({
                     key={b}
                     data-testid="ov-band-cell"
                     data-dow={dow}
+                    data-mark-dow={dow}
                     className={cellClass}
                     onMouseEnter={onEnter}
                     onMouseMove={(e) => onTip(e, tipText)}
@@ -123,6 +127,7 @@ export function BandGrid({
                   key={b}
                   data-testid="ov-band-cell"
                   data-dow={dow}
+                  data-mark-dow={dow}
                   className={cellClass}
                   onMouseEnter={onEnter}
                   onMouseMove={(e) => onTip(e, tipText)}
