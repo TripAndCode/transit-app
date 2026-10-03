@@ -1,3 +1,4 @@
+-- DESTRUCTIVE: drops every table (agencies, static GTFS, the Postgres updates mirror, rag_chunks) and both extensions.
 DROP TABLE IF EXISTS rag_chunks;
 DROP TABLE IF EXISTS agg_stop_seq;
 DROP TABLE IF EXISTS agg_daily_trend;

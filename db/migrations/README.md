@@ -42,6 +42,8 @@ migration unless called with `force_destructive=True`; the CLI exposes this as
 accidental or scripted rollback cannot discard data as a side effect — a
 destructive rollback has to be asked for explicitly, migration by migration.
 
+`tests/unit/test_migration_destructive_markers.py` holds every down file to this: one that drops a table or column, or deletes rows, outside the `agg_*` tables analyze rebuilds must carry the line.
+
 ## `CONCURRENTLY` is not available here
 
 `CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY` cannot run inside a
