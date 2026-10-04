@@ -65,6 +65,14 @@ describe("ReportsHomeTab", () => {
     expect(screen.getByText("Summarize service performance in one page")).toBeInTheDocument();
   });
 
+  it("shows how the figures are made as its own disclosure, not nested in another", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab();
+    const block = screen.getByTestId("definition-meta");
+    expect(block.tagName).toBe("DETAILS");
+    expect(block.parentElement?.closest("details")).toBeNull();
+  });
+
   it("shows the empty state for both trend and ranking sections when there are no rows", () => {
     mockReports(trendResponse([]), rankingResponse([]));
     renderTab();
@@ -77,6 +85,13 @@ describe("ReportsHomeTab", () => {
     expect(
       screen.getByText("Filters saved in this browser. Opening them queries the latest available data."),
     ).toBeInTheDocument();
+  });
+
+  it("says the routes list leaves out routes observed too few times to trust", () => {
+    const ranking = { ...rankingResponse([["101", "平日", 2, 1, 3, 400] as unknown as RankingRow]), reliable_min_samples: 100 };
+    mockReports(trendResponse(), ranking);
+    renderTab();
+    expect(screen.getByText("Routes observed fewer than 100 times in the period are left out.")).toBeInTheDocument();
   });
 
   it("opens a ranking row in its route's dossier and the detailed reports on Time", () => {

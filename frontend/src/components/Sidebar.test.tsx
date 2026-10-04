@@ -82,6 +82,11 @@ describe("Sidebar", () => {
     });
   });
 
+  it("leaves data freshness to the top bar", () => {
+    renderSidebar();
+    expect(screen.queryByText("Data status")).toBeNull();
+  });
+
   it("marks Routes active on a route dossier", () => {
     renderSidebar("/agencies/8/routes/50?routes=50");
     expect(screen.getByRole("link", { name: "Routes" }).getAttribute("aria-current")).toBe("page");

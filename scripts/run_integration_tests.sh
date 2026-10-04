@@ -37,7 +37,7 @@ case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,
 # pipeline/clickhouse.py reads CLICKHOUSE_DATABASE unconditionally, and
 # --dashboard-e2e's spawned app subprocess would otherwise inherit an
 # ambient dev value straight into a live connection against the real,
-# hundreds-of-millions-of-rows dev dataset across 4 agencies.
+# hundreds-of-millions-of-rows dev dataset.
 #
 # The host/db-name/user/password stay force-set for that same reason, but
 # the PORT is deliberately read from TEST_PG_PORT/TEST_CH_PORT (falling

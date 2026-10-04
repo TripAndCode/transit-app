@@ -22,6 +22,12 @@ describe("MapReference", () => {
     expect(screen.getByText(/12 of 14 trips/)).toBeTruthy();
   });
 
+  it("keeps the legend but drops the trip count while no trip is reporting", () => {
+    renderRef(0, 0);
+    expect(screen.getByText("operations.map.legend_current")).toBeTruthy();
+    expect(screen.queryByText(/0 of 0 trips/)).toBeNull();
+  });
+
   it("collapses to a single control and restores from it", async () => {
     renderRef();
 

@@ -118,8 +118,14 @@ function CollectorTile({ collector }: { collector: BoardCollector }) {
           ? t("admin.board.last_success", { when: formatDateTime(collector.last_success_at) })
           : t("admin.board.never")}
       </p>
+      {collector.check_failed && (
+        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", margin: "2px 0 0" }}>{t("admin.board.check_failed")}</p>
+      )}
       {collector.detail && (
-        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "2px 0 0" }}>{collector.detail}</p>
+        <details style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "2px 0 0" }}>
+          <summary style={{ cursor: "pointer" }}>{t("admin.board.details")}</summary>
+          <p style={{ margin: "4px 0 0", overflowWrap: "anywhere" }}>{collector.detail}</p>
+        </details>
       )}
       <Sparkline history={collector.history} />
     </div>
@@ -308,10 +314,20 @@ export function AdminBoardPage() {
           }}
         >
           <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>{t("admin.board.freshness_title")}</h2>
-          <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", display: "flex", gap: 12 }}>
-            <span>■ {t("admin.board.legend_fresh")}</span>
-            <span>■ {t("admin.board.legend_stale")}</span>
-            <span>□ {t("admin.board.legend_missing")}</span>
+          <p
+            data-testid="freshness-legend"
+            style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", display: "flex", gap: 12 }}
+          >
+            {(["fresh", "stale", "missing"] as const).map((state) => (
+              <span key={state} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span
+                  data-testid={`legend-swatch-${state}`}
+                  aria-hidden="true"
+                  style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, ...CELL_STYLES[state] }}
+                />
+                {t(`admin.board.legend_${state}`)}
+              </span>
+            ))}
           </p>
         </div>
         {isPending ? (

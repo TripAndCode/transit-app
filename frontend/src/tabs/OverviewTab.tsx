@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
-import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
+import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { useScope } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { ConcentrationBar } from "../components/ConcentrationBar";
@@ -113,6 +113,7 @@ export function OverviewTab() {
             <OverviewHeroRow
               headline={data.headline}
               delayedCount={data.top_delayed.delayed_count}
+              delayedThresholdMin={data.top_delayed.delayed_threshold_min}
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               peakHour={data.peak_hour}
