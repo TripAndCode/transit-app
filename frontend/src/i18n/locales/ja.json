@@ -1089,7 +1089,12 @@
     "trend": {
       "single_day": "推移を見るには2日以上の期間が必要です。期間を広げると、日ごとの遅延の動きが分かります。"
     },
-    "service_note": "種別：その便が走った時刻表（平日・土日祝・特別ダイヤなど）"
+    "service_note": "種別：その便が走った時刻表（平日・土日祝・特別ダイヤなど）",
+    "ranking_coverage": {
+      "include_sparse": "観測{{floor}}回未満の系統も含める",
+      "rows_shown": "{{total}}件中{{shown}}件を表示",
+      "show_all": "すべて表示"
+    }
   },
   "insight_panel": {
     "title": "注目ポイント",

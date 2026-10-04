@@ -40,6 +40,9 @@ type Schema = {
   route?: true;
   /** A non-empty cell is a caveat, shown as a muted badge. */
   badge?: true;
+  /** The cell is the row's observation count; under the report's floor it
+   *  carries the few-data badge. */
+  samples?: true;
 };
 
 // The route column of every per-route report. Kept in view while a wide table
@@ -53,7 +56,7 @@ const RANKING_COLS: Schema[] = [
   { index: 2, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
   { index: 3, labelKey: "reports.col.median", align: "right", unit: "min", format: fmtMinutes },
   { index: 4, labelKey: "reports.col.p90", align: "right", unit: "min", format: fmtMinutes },
-  { index: 5, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
+  { index: 5, labelKey: "reports.col.samples", align: "right", samples: true, format: (v, t) => fmtNum(v, t) },
 ];
 
 // dow_weekend + dow_weekday share columns; the API splits the rows by DOW
@@ -175,9 +178,11 @@ const STICKY_HEAD = { position: "sticky", left: 0, zIndex: Z_INDEX.raised, backg
 type Props = {
   reportType: string;
   rows: unknown[][];
+  /** The observation count below which a row is badged as thinly observed. */
+  minSamples?: number | null;
 };
 
-export function ReportTable({ reportType, rows }: Props) {
+export function ReportTable({ reportType, rows, minSamples }: Props) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const names = useRouteNames(id);
@@ -197,6 +202,8 @@ export function ReportTable({ reportType, rows }: Props) {
   }
 
   const serviceNote = schema.some((c) => c.service) && <ServiceNote />;
+  const caveatOf = (c: Schema, raw: unknown) =>
+    c.samples && minSamples != null && Number(raw) < minSamples ? t("reports.confidence_low_mark") : undefined;
   const showMore = cappedRows.remaining > 0 && (
     <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
       {t("common.show_more", { count: cappedRows.remaining })}
@@ -245,7 +252,7 @@ export function ReportTable({ reportType, rows }: Props) {
                             <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
                           </>
                         )}
-                        <CellValue column={c} raw={row[c.index]} text={text} />
+                        <CellValue column={c} raw={row[c.index]} text={text} caveat={caveatOf(c, row[c.index])} />
                       </span>
                     );
                   })}
@@ -318,7 +325,7 @@ export function ReportTable({ reportType, rows }: Props) {
                 }
                 return (
                   <td key={c.labelKey} style={td({ align: c.align ?? "left" })}>
-                    <CellValue column={c} raw={raw} text={text} />
+                    <CellValue column={c} raw={raw} text={text} caveat={caveatOf(c, raw)} />
                   </td>
                 );
               })}
@@ -370,10 +377,18 @@ function cardValue(c: Schema, raw: unknown, t: TFunction): string {
 }
 
 /** A plain cell: a service in the UI's language where it has copy, a caveat
- *  as a muted badge, anything else as its formatted text. */
-function CellValue({ column, raw, text }: { column: Schema; raw: unknown; text: string }) {
+ *  as a muted badge, anything else as its formatted text, followed by the
+ *  row's own caveat when it has one. */
+function CellValue({ column, raw, text, caveat }: { column: Schema; raw: unknown; text: string; caveat?: string }) {
   if (column.service && raw != null) return <ServiceName value={String(raw)} />;
   if (column.badge && text) return <span className="caveat-badge">{text}</span>;
+  if (caveat) {
+    return (
+      <>
+        {text} <span className="caveat-badge">{caveat}</span>
+      </>
+    );
+  }
   return <>{text}</>;
 }
 

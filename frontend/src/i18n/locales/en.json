@@ -1089,7 +1089,12 @@
     "trend": {
       "single_day": "A trend needs more than one day. Pick a longer period to see how delay moved from day to day."
     },
-    "service_note": "Service: the timetable the trip ran on (weekday, weekend and holiday, or a special day)."
+    "service_note": "Service: the timetable the trip ran on (weekday, weekend and holiday, or a special day).",
+    "ranking_coverage": {
+      "include_sparse": "Include routes observed fewer than {{floor}} times",
+      "rows_shown": "Showing {{shown}} of {{total}}",
+      "show_all": "Show all"
+    }
   },
   "insight_panel": {
     "title": "Worth a look",
