@@ -26,8 +26,7 @@ export type Scope = {
   early: number | null;
 };
 
-/** `null` clears a param (and, for from/to, lets useDefaultRangeAnchor
- *  re-derive the default). */
+/** `null` clears a param (and, for from/to, falls back to the default period). */
 export type ScopePatch = { [K in keyof Scope]?: Scope[K] | null };
 
 export const SCOPE_EXTRAS_NONE = { hour: null, stop: null, dir: null, late: null, early: null } as const;
@@ -228,10 +227,14 @@ export function lastClosedDayISO(): string {
   return isoDaysAgo(1);
 }
 
-/** The default report period: DEFAULT_RANGE_DAYS closed days ending on
- *  lastClosedDayISO(). Every default-range reader goes through this one window. */
-export function defaultPeriod(): { from: string; to: string } {
-  const to = lastClosedDayISO();
+/** The default report period: DEFAULT_RANGE_DAYS days ending on
+ *  lastClosedDayISO(), or on the agency's latest data day when the data
+ *  stops earlier. The default then never reaches past the data, and lines
+ *  up with the period presets, which end on that day too. Every
+ *  default-range reader goes through this one window. */
+export function defaultPeriod(latestDataDate?: string | null): { from: string; to: string } {
+  const closed = lastClosedDayISO();
+  const to = latestDataDate && latestDataDate < closed ? latestDataDate : closed;
   return { from: isoDaysBefore(to, DEFAULT_RANGE_DAYS - 1), to };
 }
 
@@ -249,10 +252,16 @@ export function jstYearMonth(d: Date): { year: number; month: number } {
  *  route filter the rest of the app would then carry. */
 export const ScopeRouteContext = createContext<string | null>(null);
 
+/** The current agency's latest data day, which the default period stops at.
+ *  The app shell provides it (AgencyDataEndProvider); outside the shell, as
+ *  on the landing page's demo charts, it is null and the default period ends
+ *  on the last closed day. */
+export const DataEndContext = createContext<string | null>(null);
+
 export function useScope(): [Scope, (patch: ScopePatch) => void] {
   const [params, setParams] = useSearchParams();
   const pageRoute = useContext(ScopeRouteContext);
-  const parsed = parseScope(params, defaultPeriod());
+  const parsed = parseScope(params, defaultPeriod(useContext(DataEndContext)));
   const scope = pageRoute != null && parsed.routes.length === 0 ? { ...parsed, routes: [pageRoute] } : parsed;
   function update(patch: ScopePatch) {
     setParams((prev) => applyScopePatch(prev, patch), { replace: true });

@@ -2,11 +2,11 @@
 
 Last updated: September 30, 2026
 
-These terms are the conditions for using Transit Delay App ("the Service"), run by TripAndCode, an individual. By signing in, you agree to them. The Japanese version of these terms is the authoritative one.
+These terms are the conditions for using Delay Dashboard (“the Service”), run by TripAndCode, an individual. By signing in, you agree to them. The Japanese version of these terms is the authoritative one.
 
 ## What the Service is
 
-The Service aggregates and shows bus delays from GTFS and GTFS-Realtime data that operators and others publish. The figures are for reference; they are not the operators' official information. The "delay certificate" output is a reference document too, and can't be used as an official delay certificate.
+The Service aggregates and shows bus delays from GTFS and GTFS-Realtime data that operators and others publish. The figures are for reference; they are not the operators' official information. The “delay certificate” output is a reference document too, and can't be used as an official delay certificate.
 
 ## Your account
 

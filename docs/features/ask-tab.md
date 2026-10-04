@@ -23,9 +23,10 @@ this doc expands on with file-level detail.
   destinations (`GO_TO_TARGETS` in
   `frontend/src/components/paletteNavTargets.ts`, `nav.ask` i18n key —
   "Ask" / "質問"). That field carries `data-tour="ask-nav"`, the first-run
-  tour's third step (placed "bottom"); the bar's right side shows "Data
-  through <date>" from the agency's `latest_data_date`
-  (`topbar.data_through`). On a phone, Ask is also one of the bottom tabs in
+  tour's third step (placed "bottom"); the bar's right side holds the data-freshness
+  chip (`frontend/src/components/DataFreshness.tsx`): the agency's
+  `latest_data_date` and the newest live reading, with a panel that spells
+  both out (`topbar.freshness.*`). On a phone, Ask is also one of the bottom tabs in
   `frontend/src/components/Sidebar.tsx`, beside Pulse, Routes, Live and
   More.
 - Top-level component: `frontend/src/tabs/AskTab.tsx` — owns thread

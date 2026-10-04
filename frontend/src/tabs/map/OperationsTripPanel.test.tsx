@@ -29,6 +29,7 @@ describe("OperationsTripPanel", () => {
     const selectTrip = vi.fn();
     render(<OperationsTripPanel
       routeName="B1 新町線"
+      reporting
       activeRoutes={[]}
       directions={[{ key: "direction:1", label: "新町", trips }]}
       selectedDirection="direction:1"
@@ -48,5 +49,27 @@ describe("OperationsTripPanel", () => {
     expect(screen.getByRole("img", { name: "operations.trip_panel.chart_label" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /15:20/ }));
     expect(selectTrip).toHaveBeenCalledWith(expect.objectContaining({ trip_id: "T2" }));
+  });
+
+  it.each([
+    [false, "operations.trip_panel.none_reporting"],
+    [true, "operations.trip_panel.select_route"],
+  ])("with no route to browse, says trips will appear only while none report (reporting: %s)", (reporting, text) => {
+    render(<OperationsTripPanel
+      routeName="All routes"
+      reporting={reporting}
+      activeRoutes={[]}
+      directions={[]}
+      selectedDirection={null}
+      trips={[]}
+      selectedTripId={null}
+      progress={undefined}
+      progressLoading={false}
+      onSelectDirection={() => {}}
+      onSelectRoute={() => {}}
+      onSelectTrip={() => {}}
+      t={t}
+    />);
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 });

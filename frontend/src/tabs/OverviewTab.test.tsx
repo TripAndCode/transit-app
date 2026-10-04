@@ -11,7 +11,7 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
     headline: { avg_min: null, baseline_avg_min: null, delta_min: null, delta_pct: null, samples: 0, window_from: "2030-01-01", window_to: "2030-01-07" },
     movers: { worse: [], better: [] },
     concentration: { top_routes: [], rest_share_pct: 0 },
-    top_delayed: { routes: [], delayed_count: 0 },
+    top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2 },
     peak_hour: null,
     service_split: {},
     sparkline_points: [],
@@ -73,7 +73,7 @@ describe("OverviewTab", () => {
     renderOverview(
       summary({
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
-        top_delayed: { routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }], delayed_count: 1 },
+        top_delayed: { routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }], delayed_count: 1, delayed_threshold_min: 2 },
       }),
     );
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
