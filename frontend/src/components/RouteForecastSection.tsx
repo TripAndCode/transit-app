@@ -490,6 +490,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
   const [ctx, update] = useScope();
   const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
+  const names = useRouteNames(aid);
 
   const [tip, setTip] = useState<Tip>(null);
   const [view, setView] = useState<View>(null);
@@ -515,10 +516,11 @@ export function RouteForecastSection({ aid }: { aid: number }) {
 
   return (
     <div>
-      <RoutePicker aid={aid} focusedRoute={focusedRoute} onPick={(code) => update({ routes: code ? [code] : null })} />
+      <RoutePicker aid={aid} names={names} focusedRoute={focusedRoute} onPick={(code) => update({ routes: code ? [code] : null })} />
       {!focusedRoute && (
         <AgencyLanding
           aid={aid}
+          names={names}
           dayLabel={dayLabel}
           bandLabel={bandLabel}
           axisMin={min1}
@@ -561,15 +563,16 @@ export function RouteForecastSection({ aid }: { aid: number }) {
  *  focused route without one, so the control always states what is shown. */
 function RoutePicker({
   aid,
+  names,
   focusedRoute,
   onPick,
 }: {
   aid: number;
+  names: ReturnType<typeof useRouteNames>;
   focusedRoute: string | null;
   onPick: (code: string | null) => void;
 }) {
   const { t } = useTranslation();
-  const names = useRouteNames(aid);
   const routes = useForecastOverview(aid).data?.routes ?? [];
   // An option holds plain text, so RouteLabel's muted code becomes a
   // parenthesis, added only where two routes would otherwise read the same.
@@ -596,6 +599,7 @@ function RoutePicker({
 /** Agency-wide landing: worst-window headline + day×band grid + delay-ranked routes. */
 function AgencyLanding({
   aid,
+  names,
   dayLabel,
   bandLabel,
   axisMin,
@@ -613,6 +617,7 @@ function AgencyLanding({
   onLeave,
 }: {
   aid: number;
+  names: ReturnType<typeof useRouteNames>;
   dayLabel: (dow: number) => string;
   bandLabel: (b: Band) => string;
   axisMin: string;
@@ -630,7 +635,6 @@ function AgencyLanding({
   onLeave: () => void;
 }) {
   const { data, isPending, error, refetch } = useForecastOverview(aid);
-  const names = useRouteNames(aid);
   if (isPending) return <Skeleton height={240} />;
   if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
   if (!data) return null;
