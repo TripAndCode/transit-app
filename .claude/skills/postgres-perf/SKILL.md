@@ -8,9 +8,9 @@ description: Performance patterns and known traps for this repo's Postgres/PostG
 Postgres (major version pinned by `db/Dockerfile`) + PostGIS + pgvector + pg_trgm holds `agg_*`/OLTP/PostGIS/pgvector data.
 The raw GTFS-RT `updates` fact table (hundreds of millions of rows across 4
 agencies, and growing) lives in ClickHouse
-instead (migrated from Postgres; the old Postgres `updates` table still exists as
-a rollback safety net but has zero production readers). MergeTree/partition-key/
-ORDER-BY-key advice DOES apply to `updates` — its `ORDER BY (agency_id,
+instead. A Postgres `updates` table is kept only as a rollback safety net, and no
+production code reads it. MergeTree/partition-key/
+ORDER-BY-key advice applies to `updates` — its `ORDER BY (agency_id,
 captured_at, route_code, trip_id, stop_sequence)` is why route-scoped probes need
 a date bound (see below) and why `route_code` needed `allow_nullable_key=1` to
 become Nullable.
@@ -23,22 +23,22 @@ become Nullable.
   Build aggregates in the analyze step. The default (`time_band=all`, no
   service/route filter) request on every
   read endpoint serves from an `agg_*` table — but a `time_band`/custom-threshold/
-  narrow-ctx filter falls back to a LIVE ClickHouse scan of `updates` (see
+  narrow-ctx filter falls back to a live ClickHouse scan of `updates` (see
   `pipeline/reports/filters.py::_dedup_cte_ch`); those live-fallback paths are
   where a new perf trap is most likely to show up first, not the fast path.
-- Materialize the dedup ONCE per agency. `analyze()` builds `_analyze_deduped` (a
+- Materialize the dedup once per agency. `analyze()` builds `_analyze_deduped` (a
   Postgres TEMP table, `ON COMMIT DROP`) from ClickHouse via
   `pipeline/db.py::build_dedup_ch_sql`, streamed in blocks (not `.query()`, which
   buffers the whole result in memory, scaling with the agency's row count), and
   every builder reads that temp table instead of re-scanning ClickHouse.
-  Exception: `agg_stop_routes` reads a SEPARATE unfiltered ClickHouse scan
+  Exception: `agg_stop_routes` reads a separate unfiltered ClickHouse scan
   (`_analyze_raw_keys`) — `_analyze_deduped` is pre-filtered by the delay clamp
   below, which would silently drop stops whose every observation was
   NULL/implausible delay (a real, non-trivial share of keys).
 - Data-quality clamp lives in `build_dedup_ch_sql` (`MAX_PLAUSIBLE_DELAY_SEC`,
   120min): frozen/stale-feed delay spikes (e.g. 976min) are dropped before any
   averaging, so they can't skew means/counts on any surface.
-- ClickHouse route-scoped probes MUST be date-bounded. `route_code` is the 3rd
+- ClickHouse route-scoped probes must be date-bounded. `route_code` is the 3rd
   sort-key column behind an unconstrained `captured_at`, so an unbounded
   `WHERE route_code = ...` forces a full-partition scan (hundreds of millions
   of rows, hundreds of milliseconds to low seconds) even for a route that
@@ -50,11 +50,11 @@ become Nullable.
   is bounded by the request's own date filter instead, and uses that 30-day window
   only as its fallback when the filtered window has no observations.
   `pipeline/query/tools.py`'s `_is_route_registered`
-  needs a DIFFERENT bound: a fixed 30-day window there would report a real,
+  needs a different bound: a fixed 30-day window there would report a real,
   merely-idle route as unregistered (see its docstring), so it derives the
   bound from `agg_route_daily`'s own analyze horizon for the agency instead —
   and when the agency has no `agg_route_daily` rows at all yet (no horizon to
-  derive), it scans unbounded with an execution-time cap and fails OPEN on
+  derive), it scans unbounded with an execution-time cap and fails open on
   timeout rather than bounding by a guessed constant.
 - Prefer `ORDER BY captured_at DESC LIMIT 1` over `maxOrNull(captured_at)` for a
   single-agency max: `captured_at` is the 2nd sort-key column, so the `LIMIT 1`
@@ -63,7 +63,7 @@ become Nullable.
 
 ## Known traps
 - `GROUP BY` binds the input column, not the output alias. A COALESCE-sentinel
-  aggregate (e.g. `COALESCE(service_type, '∅')`) MUST `GROUP BY` the same COALESCE
+  aggregate (e.g. `COALESCE(service_type, '∅')`) must `GROUP BY` the same COALESCE
   expression — grouping by the bare column duplicates the PK and aborts analyze.
 - Sargable rewrites don't always help: when filter columns are correlated (e.g.
   `agency_id` with a time column), the planner's row estimate stays off whatever the
@@ -72,7 +72,7 @@ become Nullable.
   the underlying GTFS-RT feeds); a typed aggregate that neither COALESCEs nor
   filters them silently drops the NULL rows. Check whether a new
   aggregate/live-fallback query needs the COALESCE-sentinel or an explicit filter.
-- ClickHouse's `quantileExact`/`round()` do NOT reproduce Postgres semantics.
+- ClickHouse's `quantileExact`/`round()` do not reproduce Postgres semantics.
   `quantileExact` is a positional pick (`sorted[floor(q*n)]`); Postgres's
   `PERCENT_RANK()` uses min-rank ties — they silently disagree whenever the
   column has ties (common: `dep_delay` is dominated by exact-zero and
@@ -85,13 +85,13 @@ become Nullable.
 
 ## DB safety
 - Dev Postgres (the instance `DATABASE_URL` names — not necessarily `compose.yml`'s
-  `:5433`; see `AGENTS.md`) is READ-ONLY: EXPLAIN/SELECT only.
+  `:5433`; see `AGENTS.md`) is read-only: EXPLAIN/SELECT only.
 - Dev ClickHouse (`docker compose exec clickhouse`, hundreds of millions of real
   rows across 4 agencies) is also read-only for agents. `make ch-bootstrap`
   writes schema changes and must not be run against the dev instance by an
   agent. `db/clickhouse/bootstrap.py` describes operator maintenance.
 - Tests run against throwaway Postgres `:5544` (built from `db/`, needs
-  PostGIS+pgvector+pg_trgm) AND throwaway ClickHouse `:8124` (`make ch-test`).
+  PostGIS+pgvector+pg_trgm) and throwaway ClickHouse `:8124` (`make ch-test`).
   `RUN_CH_INTEGRATION=1` + the `CLICKHOUSE_*` env vars gate the ClickHouse-touching
   tests — see `transit-app-gotchas` for the exact env block.
 - The API's async ClickHouse client (`api/clickhouse.py::get_ch_client`) runs
