@@ -133,7 +133,7 @@
     "dismiss": "Dismiss this tour",
     "filters": {
       "title": "Narrow what you're looking at",
-      "body": "Filter by route, day of week, or time of day — everything below updates to match."
+      "body": "Filter by route or service pattern — everything below updates to match."
     },
     "map": {
       "title": "Inspect what's running now",
