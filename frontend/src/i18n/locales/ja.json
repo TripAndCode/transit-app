@@ -715,7 +715,9 @@
       "historical": "過去の結果を表示中です。追質問は最新の結果をもとに回答します。",
       "return_latest": "最新の結果に戻る",
       "saved_result_notice": "取得済みの結果です。開くだけでは再取得しません。上のフィルターは次の分析用で、この結果の条件とは異なる場合があります。",
-      "full_log": "会話全文を開く"
+      "full_log": "会話全文を開く",
+      "new_analysis_first": "分析を始める",
+      "no_questions": "この調査にはまだ質問がありません。質問を選んで始めましょう。"
     },
     "thinking": "考え中...",
     "dock": {
@@ -810,7 +812,7 @@
     "sidebar": {
       "search": "タイトル・系統・期間で検索",
       "no_matches": "一致する調査がありません。検索条件を変えてください。",
-      "new_thread": "新しい会話",
+      "new_thread": "新しい調査",
       "pinned": "ピン留め",
       "today": "今日",
       "yesterday": "昨日",
@@ -820,8 +822,8 @@
       "pin": "ピン留め",
       "unpin": "ピン留めを外す",
       "delete": "削除",
-      "delete_confirm": "この会話を削除しますか？",
-      "empty": "まだ会話がありません",
+      "delete_confirm": "この調査を削除しますか？",
+      "empty": "まだ調査がありません",
       "more_options_aria": "その他のオプション"
     },
     "filter_bar": {

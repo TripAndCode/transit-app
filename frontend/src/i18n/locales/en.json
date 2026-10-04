@@ -715,7 +715,9 @@
       "historical": "Viewing an earlier result. Follow-up questions use the latest result.",
       "return_latest": "Return to latest",
       "saved_result_notice": "Previously returned results — opening a step does not fetch new data. The filters above apply to your next analysis, not necessarily this result.",
-      "full_log": "Full conversation"
+      "full_log": "Full conversation",
+      "new_analysis_first": "Start an analysis",
+      "no_questions": "This investigation has no questions yet. Pick one to start."
     },
     "thinking": "Thinking...",
     "dock": {
@@ -810,7 +812,7 @@
     "sidebar": {
       "search": "Search title, pattern or period",
       "no_matches": "No matching investigations. Try another search.",
-      "new_thread": "New conversation",
+      "new_thread": "New investigation",
       "pinned": "Pinned",
       "today": "Today",
       "yesterday": "Yesterday",
@@ -820,8 +822,8 @@
       "pin": "Pin",
       "unpin": "Unpin",
       "delete": "Delete",
-      "delete_confirm": "Delete this conversation?",
-      "empty": "No conversations yet",
+      "delete_confirm": "Delete this investigation?",
+      "empty": "No investigations yet",
       "more_options_aria": "More options"
     },
     "filter_bar": {

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { reportHref, routeHref, routesHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
@@ -45,6 +45,7 @@ export function ReportsHomeTab() {
   const jumpToLatestData = useJumpToLatestDataRange(id);
   const [doc] = useUrlState<string>("doc", "");
   const savedTab = doc === "saved";
+  const navigate = useNavigate();
   const trend = useReport(id, savedTab ? null : "trend", ctx);
   const ranking = useReport(id, savedTab ? null : "ranking", ctx);
   const agencies = useAgencies();
@@ -84,7 +85,9 @@ export function ReportsHomeTab() {
     </header>
     {notice && <p role="status">{notice}</p>}
     {savedTab ? <section><p className="focus-muted">{t("localOnly")}</p>
-      {!saved.some((s) => s.agencyId === id) && <EmptyState title={t("noSaved")} />}
+      {!saved.some((s) => s.agencyId === id) && (
+        <EmptyState title={t("noSaved")} recoveries={[{ label: t("goToRoutes"), onClick: () => navigate(routesHref(String(id), `?${queryString}`)) }]} />
+      )}
       <ul className="focus-saved">{saved.filter((s) => s.agencyId === id).map((s) => <li key={s.id}>
         <Link to={routesHref(String(id), `?${s.query}`)}>{s.title}</Link>
         <button aria-label={`${t("remove")}: ${s.title}`} onClick={() => { if (deleteAnalysis(s.id)) setSaved(readAnalyses()); else setNotice(t("saveFailed")); }}>{t("remove")}</button>
