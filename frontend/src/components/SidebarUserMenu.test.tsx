@@ -57,6 +57,10 @@ async function openLanguageToggle() {
 describe("SidebarUserMenu", () => {
   beforeEach(() => localStorage.clear());
   afterEach(async () => {
+    // Unmount first: some tests spy hooks with stand-ins that call no hooks,
+    // and a re-render after the restore below would run a different hook
+    // sequence on the same component.
+    cleanup();
     delete document.documentElement.dataset.theme;
     // The i18n instance is a shared singleton across tests in this file —
     // restore the Japanese strings a test may have unloaded and reset the
@@ -238,9 +242,33 @@ describe("SidebarUserMenu", () => {
     await user.click(await screen.findByRole("button", { name: "Account menu" }));
     await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
     expect(mutate).toHaveBeenCalledOnce();
-    // The spies above call no hooks; unmount before afterEach restores the
-    // real ones, or a re-render would run a different hook sequence.
-    cleanup();
+  });
+
+  function signedIn(logoutState: { isPending?: boolean; isError?: boolean }) {
+    vi.spyOn(config, "useConfig").mockReturnValue({ data: { auth_enabled: true }, isLoading: false } as never);
+    vi.spyOn(auth, "useSession").mockReturnValue({
+      data: { user_id: 1, email: "yo@example.com", name: "Yo", avatar_url: null, role: "user", identities: [] },
+      isLoading: false,
+    } as never);
+    vi.spyOn(auth, "useLogout").mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false, ...logoutState } as never);
+  }
+
+  it("marks the sign-out busy while it runs", async () => {
+    signedIn({ isPending: true });
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    const signOut = screen.getByRole("menuitem", { name: "Sign out" });
+    expect(signOut).toHaveAttribute("aria-busy", "true");
+    expect(signOut).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("says when signing out fails", async () => {
+    signedIn({ isError: true });
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("account.logout_error"));
   });
 
   it("offers no sign-out to a guest", async () => {

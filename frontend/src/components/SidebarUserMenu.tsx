@@ -64,6 +64,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const toast = useToast();
   const logout = useLogout();
   const languageLabelId = useId();
+  const [switchTarget, setSwitchTarget] = useState<Locale | null>(null);
   const appearanceLabelId = useId();
   const [open, setOpen] = useState(false);
   const { pending: switchingLocale, switchTo } = useLocaleSwitch(() => toast.show(t("common.language_switch_error")));
@@ -128,7 +129,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
               {t("common.language_aria")}
             </div>
             {SUPPORTED_LOCALES.map((lng) => {
-              const loading = switchingLocale && lng !== current;
+              const loading = switchingLocale && lng === switchTarget;
               return (
                 // aria-disabled rather than disabled: disabling the focused
                 // button would drop keyboard focus out of the open menu.
@@ -141,7 +142,9 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                   aria-busy={loading}
                   aria-disabled={loading}
                   onClick={() => {
-                    if (lng !== current) void switchTo(lng);
+                    if (lng === current || switchingLocale) return;
+                    setSwitchTarget(lng);
+                    void switchTo(lng);
                   }}
                   style={lng === current ? selectedItemStyle : loading ? { ...popItemStyle, cursor: "default" } : popItemStyle}
                 >
@@ -189,11 +192,22 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => logout.mutate(undefined, { onSuccess: () => window.location.assign("/welcome") })}
-                style={popItemStyle}
+                aria-busy={logout.isPending}
+                aria-disabled={logout.isPending}
+                onClick={() => {
+                  if (logout.isPending) return;
+                  logout.mutate(undefined, { onSuccess: () => window.location.assign("/welcome") });
+                }}
+                style={logout.isPending ? { ...popItemStyle, cursor: "default" } : popItemStyle}
               >
                 <span>{t("account.logout")}</span>
+                {logout.isPending && <Spinner size={12} inline />}
               </button>
+              {logout.isError && (
+                <p role="alert" style={{ margin: "4px 9px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+                  {t("account.logout_error")}
+                </p>
+              )}
             </>
           )}
         </div>
