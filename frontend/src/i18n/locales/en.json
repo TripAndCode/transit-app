@@ -401,7 +401,6 @@
   "legal": {
     "privacy": "Privacy Policy",
     "terms": "Terms of Service",
-    "back": "Back",
     "nav_label": "Legal"
   },
   "help": {
@@ -468,6 +467,7 @@
       "back_to_top": "Back to home",
       "welcome_back": "Welcome back",
       "choose_provider": "Choose an account to sign in",
+      "username_prompt": "Sign in with your username",
       "google_aria": "Sign in with Google",
       "google_continue": "Continue with Google",
       "github_aria": "Sign in with GitHub",
