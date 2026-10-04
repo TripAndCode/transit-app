@@ -23,6 +23,8 @@ export type HeroPalette = {
   rule: string;
   accent: string;
   delay: { ok: string; mild: string; moderate: string; severe: string };
+  /** Text-safe amber for a count that needs attention. */
+  warning: string;
   fontBody: string;
   fontMono: string;
 };

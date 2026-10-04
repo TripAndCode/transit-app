@@ -210,14 +210,16 @@ def test_analysis_ranking_table_matches_synthetic_ground_truth(seeded_agencies, 
     page = browser.new_page()
     try:
         for name, (agency_id, pattern) in seeded_agencies.items():
-            url = f"{base}/agencies/{agency_id}/analysis/ranking?from={pattern.date}&to={pattern.date}"
+            # Each pattern has a few dozen observations, under the ranking's
+            # default floor, so the page is asked to rank sparse groups too.
+            url = f"{base}/agencies/{agency_id}/analysis/ranking?from={pattern.date}&to={pattern.date}&sparse=1"
             page.goto(url, wait_until="networkidle", timeout=30_000)
             page.wait_for_selector("table tbody tr", timeout=15_000)
             rows = page.locator("table tbody tr")
             assert rows.count() == 1, (
                 f"{name}: expected exactly 1 ranking row (one route in this dedicated agency), "
-                f"got {rows.count()} — either the route was filtered out (e.g. the ranking fast "
-                f"path's `samples > 20` gate) or a stale/leftover row leaked in"
+                f"got {rows.count()} — either the route was filtered out (e.g. by the ranking's "
+                f"observation floor) or a stale/leftover row leaked in"
             )
             cells = rows.first.locator("td").all_inner_texts()
             exp = pattern.expected["agg_route_stats"]

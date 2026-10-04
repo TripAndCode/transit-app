@@ -8,7 +8,7 @@ import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { PageHeader } from "../components/ui/PageHeader";
-import { delayColor, delayTextColor } from "../styles/tokens";
+import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { formatNumber, fmtPct, formatDateRange } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
@@ -66,7 +66,7 @@ function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
   const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1, entrance: false });
   if (avgDelayMin == null) return <>—</>;
   return (
-    <span style={{ color: delayTextColor(avgDelayMin) }}>
+    <span>
       {avgDelayMin >= 0 ? "+" : ""}
       {displayed.toFixed(1)}
       <span className="network-row__unit">{t("network.delay_unit")}</span>
@@ -269,15 +269,10 @@ export function NetworkTab() {
         )}
       </div>
 
-      {/* Behind a disclosure: the aggregation rules are what you check once a
-          comparison has raised a question, not what you read before making
-          one. */}
-      {data && (
-        <details className="network-definition" style={{ marginBottom: 12 }}>
-          <summary>{t("network.definition_disclosure")}</summary>
-          <DefinitionMetaBlock definition={data.definition} />
-        </details>
-      )}
+      {/* DefinitionMetaBlock is its own disclosure: the aggregation rules are
+          what you check once a comparison has raised a question, not what you
+          read before making one. */}
+      {data && <DefinitionMetaBlock definition={data.definition} />}
 
       <AsyncSection
         loading={isPending}
