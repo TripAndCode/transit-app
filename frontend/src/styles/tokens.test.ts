@@ -539,11 +539,9 @@ describe("--delay-severe clears AA on its own theme's surface", () => {
   });
 });
 
-/** Every surface a `delayTextColor()` figure actually renders on. Checking
- *  only `--bg-surface` is what let these tokens ship tuned to clear AA on a
- *  card while failing on the page, the soft fill and the current-row tint --
- *  the KPI hero sits on the page, the report bar cell on the page, and the
- *  network row on `--bg-soft` or `--accent-soft` when it is the active one. */
+/** Every surface a delay-ramp text colour can sit on: a card, the page, the
+ *  soft fill and the current-row tint. Checking only `--bg-surface` would let
+ *  these tokens clear AA on a card while failing on the others. */
 const DELAY_TEXT_SURFACES = ["--bg-surface", "--bg-page", "--bg-soft", "--accent-soft"];
 const DELAY_TEXT_TOKENS = ["--delay-text-ok", "--delay-text-mild", "--delay-text-moderate"];
 
