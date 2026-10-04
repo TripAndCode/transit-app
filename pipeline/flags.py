@@ -28,12 +28,16 @@ from where it runs:
   all; otherwise they serve the cache and let someone else refresh it.
 
 After `invalidate()` an async reader waits for the owed re-read; a
-synchronous reader serves the cached entry and starts that re-read behind
-it, so it may answer with the pre-write value once, never for the TTL. In a
-process with no readers at all nothing refreshes until the next read or
-`warm()`. Correctness for the admin surface is unaffected -- the PATCH/DELETE
-handlers are async and resolve their own response through the async path, so
-the write is visible in the response that reports it.
+synchronous reader serves the cached entry and starts that same shared
+re-read behind it, so it answers with the pre-write value only until the
+re-read commits, not for the TTL. If the re-read cannot reach the database,
+the last-known overrides are carried forward and the TTL re-armed, so any
+reader may see the pre-write value for up to `_CACHE_TTL_SECONDS`: failing
+closed on an override is worth that. In a process with no readers at all
+nothing refreshes until the next read or `warm()`. Correctness for the admin
+surface is unaffected -- the PATCH/DELETE handlers are async and resolve
+their own response through the async path, so the write is visible in the
+response that reports it.
 """
 
 from __future__ import annotations
@@ -401,9 +405,10 @@ def get_flag_state(key: str) -> FlagState:
     blocks on Postgres only when this process has never resolved `key` at
     all; with anything cached it answers from the cache, so an `async def`
     handler that reaches here by mistake stalls the event loop for no longer
-    than a dict lookup. A refresh owed by `invalidate()` is started in a
-    worker thread behind this reader, so a synchronous caller sees the old
-    value at most once per write, not for the rest of the TTL.
+    than a dict lookup. A refresh owed by `invalidate()` is joined or started
+    in a worker thread behind this reader, so a synchronous caller sees the
+    old value only until it commits -- see the module docstring for a
+    re-read that fails.
 
     Raises `KeyError` for a key not in `REGISTRY` -- every caller of `flag()`
     is expected to pass a registered key, and a typo here should fail loud
@@ -417,7 +422,12 @@ def get_flag_state(key: str) -> FlagState:
         # Expired, or marked stale by `invalidate()`: either way the entry is
         # served as it stands and the re-read runs behind the reader. This
         # path may be on the event loop by mistake, so it never reads inline.
-        _start_background_refresh()
+        # An owed re-read is the one async readers wait on, so a sync and an
+        # async reader in the same window never start two.
+        if state == _OWED:
+            _join_owed_refresh()
+        else:
+            _start_background_refresh()
         return cached
     _refresh()
     return _resolve_after_refresh(key, cached)
@@ -476,7 +486,7 @@ async def aflag(key: str, /) -> bool:
 def invalidate() -> None:
     """Mark the cache stale so the next read re-reads the DB instead of
     waiting out the TTL: an async read waits for the re-read, a synchronous
-    read serves the old value once and schedules it.
+    read serves the old value until it commits.
 
     Called after a write to `/api/admin/flags/:key` so the API's own next
     GET -- and the very next gated request anywhere in the process -- sees
