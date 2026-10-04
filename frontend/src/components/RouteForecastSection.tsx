@@ -10,9 +10,8 @@
  * ctx.routes itself, no props needed beyond `aid`). Migrated from the former
  * ForecastTab.tsx; picking a route updates the shared ctx.routes filter, so
  * it also filters every other report type/tab — a deliberate, shared-filter
- * consequence, not a bug. There is no in-view "back" button: clearing the
- * route chip in the shared Filters bar is the way back, matching how every
- * other tab's focused-route mode already works.
+ * consequence, not a bug. The section's route picker is the way back to all
+ * routes, as is clearing the route chip in the shared Filters bar.
  */
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -40,6 +39,7 @@ import {
   type ForecastOverviewWorst,
 } from "../api/types";
 import { WEEK } from "../utils/week";
+import "./RouteForecastSection.css";
 
 type Tip = { x: number; y: number; text: string } | null;
 type View = "dow" | "hr" | null;
@@ -113,6 +113,8 @@ function RankedRoutes({
         >
           <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {r.route_name}
+            {/* Variants of a line share a name; the muted code tells them apart. */}
+            {!r.route_name.includes(r.route_code) && <> <span className="route-label__code">{r.route_code}</span></>}
             {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
           </span>
           <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
@@ -510,6 +512,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
 
   return (
     <div>
+      <RoutePicker aid={aid} focusedRoute={focusedRoute} onPick={(code) => update({ routes: code ? [code] : null })} />
       {!focusedRoute && (
         <AgencyLanding
           aid={aid}
@@ -548,6 +551,38 @@ export function RouteForecastSection({ aid }: { aid: number }) {
 
       <CrosshairTip tip={tip} />
     </div>
+  );
+}
+
+/** Which route the forecast is for: every route with a forecast, plus a
+ *  focused route without one, so the control always states what is shown. */
+function RoutePicker({
+  aid,
+  focusedRoute,
+  onPick,
+}: {
+  aid: number;
+  focusedRoute: string | null;
+  onPick: (code: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const routes = useForecastOverview(aid).data?.routes ?? [];
+  const nameCount = new Map<string, number>();
+  for (const r of routes) nameCount.set(r.route_name, (nameCount.get(r.route_name) ?? 0) + 1);
+  const listed = focusedRoute == null || routes.some((r) => r.route_code === focusedRoute);
+  return (
+    <label className="forecast-route-picker">
+      {t("forecast.route_picker_label")}
+      <select value={focusedRoute ?? ""} onChange={(e) => onPick(e.currentTarget.value || null)}>
+        <option value="">{t("forecast.route_picker_all")}</option>
+        {routes.map((r) => (
+          <option key={r.route_code} value={r.route_code}>
+            {(nameCount.get(r.route_name) ?? 0) > 1 ? `${r.route_name} (${r.route_code})` : r.route_name}
+          </option>
+        ))}
+        {!listed && <option value={focusedRoute}>{focusedRoute}</option>}
+      </select>
+    </label>
   );
 }
 
