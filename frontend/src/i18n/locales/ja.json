@@ -1003,7 +1003,7 @@
       "worst_day_label": "最も遅い日"
     },
     "dwell_run": {
-      "not_available": "この事業者のフィードは到着遅延を送信しないため、滞留・走行時間の内訳は利用できません。",
+      "not_available": "この事業者のフィードは出発時刻のみを送信するため、遅れを停留所での停車時間と走行時間に分けられません。",
       "time_band_unsupported": "時間帯フィルタが指定された滞留・走行時間の内訳には対応していません。",
       "col": {
         "dwell_avg": "滞留平均",
@@ -1014,7 +1014,10 @@
         "run_p50": "走行p50",
         "run_p90": "走行p90",
         "run_samples": "走行観測数"
-      }
+      },
+      "needs_arrivals": "遅れの内訳には到着時刻が必要です",
+      "see_when": "いつ遅れるかを見る",
+      "compare_day_types": "平日と土日祝を比べる"
     },
     "headway_quality": {
       "title": "運行間隔の質",

@@ -1003,7 +1003,7 @@
       "worst_day_label": "Worst day"
     },
     "dwell_run": {
-      "not_available": "This agency's feed doesn't report arrival delay, so dwell/running time decomposition isn't available.",
+      "not_available": "This agency's feed reports departures only, so delay can't yet be split into time spent at stops and time spent between them.",
       "time_band_unsupported": "This decomposition doesn't support a time-band filter yet.",
       "col": {
         "dwell_avg": "Dwell avg",
@@ -1014,7 +1014,10 @@
         "run_p50": "Running p50",
         "run_p90": "Running p90",
         "run_samples": "Running samples"
-      }
+      },
+      "needs_arrivals": "Splitting delay needs arrival times",
+      "see_when": "See when delay happens",
+      "compare_day_types": "Compare weekdays and weekends"
     },
     "headway_quality": {
       "title": "Headway quality",

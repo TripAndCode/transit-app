@@ -562,3 +562,42 @@ describe("AnalysisTab ranking coverage", () => {
     expect(screen.queryByRole("link", { name: /CSV/ })?.getAttribute("href") ?? "").not.toContain("include_sparse");
   });
 });
+
+describe("AnalysisTab Why without arrival times", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function showUnavailableDwellRun() {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dwell_run")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...emptyReport("dwell_run"), rows: [{ available: false, time_band_supported: true, routes: [] }] },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    return renderAnalysis("/agencies/1/analysis/why?report=dwell_run&from=2026-09-01&to=2026-09-07", ["dwell_run"]);
+  }
+
+  it("says why the split can't be shown and where to look instead", async () => {
+    const { router } = showUnavailableDwellRun();
+    expect(screen.getByText("Splitting delay needs arrival times")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "See when delay happens" }));
+    expect(router.state.location.pathname).toBe("/agencies/1/time");
+    expect(new URLSearchParams(router.state.location.search).get("from")).toBe("2026-09-01");
+  });
+
+  it("points to the weekday and weekend comparison too", async () => {
+    const { router } = showUnavailableDwellRun();
+    await userEvent.click(screen.getByRole("button", { name: "Compare weekdays and weekends" }));
+    expect(router.state.location.pathname).toBe("/agencies/1/compare");
+    expect(new URLSearchParams(router.state.location.search).get("report")).toBe("compare_ranking");
+  });
+
+  it("offers no CSV of a split it can't make", () => {
+    showUnavailableDwellRun();
+    expect(screen.queryByRole("link", { name: /CSV/ })).not.toBeInTheDocument();
+  });
+});
