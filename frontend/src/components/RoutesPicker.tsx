@@ -178,7 +178,6 @@ export function RoutesPicker({
                   alignItems: "center",
                   gap: 6,
                   minHeight: 36,
-                  boxSizing: "border-box",
                 }}
               >
                 <input
@@ -249,7 +248,6 @@ export function RoutesPicker({
                           alignItems: "center",
                           gap: 6,
                           minHeight: 32,
-                          boxSizing: "border-box",
                           borderTop: "1px dashed var(--border-soft)",
                         }}
                       >
