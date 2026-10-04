@@ -57,7 +57,7 @@ describe("ReportTable on_time confidence column", () => {
   it("marks a low-confidence percentage with a muted few-data badge", () => {
     mockRoutes([]);
     renderTable([["39061", "平日", 80.0, 0.5, 25, true]], "on_time");
-    expect(screen.getByText("few data")).toHaveClass("report-badge");
+    expect(screen.getByText("few data")).toHaveClass("caveat-badge");
     expect(screen.getByRole("columnheader", { name: "Data" })).toBeInTheDocument();
   });
 

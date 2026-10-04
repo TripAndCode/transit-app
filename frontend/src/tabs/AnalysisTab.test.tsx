@@ -350,6 +350,48 @@ describe("AnalysisTab dwell_run route cap", () => {
     );
   }
 
+  it("says under the dwell and running-time table what its service column means", () => {
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: {
+        ...emptyReport("dwell_run"),
+        rows: [
+          {
+            available: true,
+            time_band_supported: true,
+            routes: [
+              {
+                route_code: "R1",
+                service_type: "平日",
+                dwell_samples: 1,
+                dwell_avg_sec: 20,
+                dwell_p50_sec: 18,
+                dwell_p90_sec: 40,
+                run_samples: 1,
+                run_avg_sec: 90,
+                run_p50_sec: 85,
+                run_p90_sec: 130,
+              },
+            ],
+          },
+        ],
+      },
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(/Service: the timetable the trip ran on/)).toBeInTheDocument();
+  });
+
   it("keeps a raised cap across a refetch of the same report and re-caps when the agency changes", async () => {
     const user = userEvent.setup();
     // A fresh payload per call: every refetch hands back new objects even

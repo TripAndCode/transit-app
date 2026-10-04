@@ -14,6 +14,7 @@ import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, fmtPct, formatDuration } from "../utils/format";
 import "./ReportTable.css";
+import { ServiceNote } from "./ServiceNote";
 
 const ROWS_CAP = 200;
 // A phone list item is several times a table row's height, so the first
@@ -195,9 +196,7 @@ export function ReportTable({ reportType, rows }: Props) {
     return null;
   }
 
-  // "Service" names the timetable a trip ran on, which reads like a second
-  // day column until it is said.
-  const serviceNote = schema.some((c) => c.service) && <p className="report-footnote">{t("reports.service_note")}</p>;
+  const serviceNote = schema.some((c) => c.service) && <ServiceNote />;
   const showMore = cappedRows.remaining > 0 && (
     <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
       {t("common.show_more", { count: cappedRows.remaining })}
@@ -374,7 +373,7 @@ function cardValue(c: Schema, raw: unknown, t: TFunction): string {
  *  as a muted badge, anything else as its formatted text. */
 function CellValue({ column, raw, text }: { column: Schema; raw: unknown; text: string }) {
   if (column.service && raw != null) return <ServiceName value={String(raw)} />;
-  if (column.badge && text) return <span className="report-badge">{text}</span>;
+  if (column.badge && text) return <span className="caveat-badge">{text}</span>;
   return <>{text}</>;
 }
 

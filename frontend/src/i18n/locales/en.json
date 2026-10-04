@@ -947,8 +947,8 @@
       "trend_body": ": whether things are improving or worsening over time. A rising line means delays are growing.",
       "heatmap_strong": "Time-band heatmap",
       "heatmap_body": ": peak times during the day. Compare commuter peaks against midday.",
-      "dow_strong": "Weekday / Weekend patterns",
-      "dow_body": ": day-of-week characteristics. Surfaces whether weekends run more or less punctually than weekdays.",
+      "dow_strong": "Routes on weekdays / on weekends and holidays",
+      "dow_body": ": each route's average delay on that group of days. Compare the two to see which routes run later on weekends.",
       "csv": "CSV export lets you hand data off to Excel or BI tools."
     },
     "empty": {
