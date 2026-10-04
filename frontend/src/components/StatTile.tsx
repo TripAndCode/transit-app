@@ -17,9 +17,9 @@ type Props = {
 };
 
 /** Small bordered stat card: a label over a large number. `flagged` colors
- *  the value --delay-flag instead of --accent-strong for "needs attention"
- *  counts (e.g. a nonzero 5-minutes-plus-delay count) -- callers decide
- *  what counts as flagged, this component only renders the two states. */
+ *  the value in the warning amber instead of --accent-strong for "needs
+ *  attention" counts (e.g. a nonzero 5-minutes-plus-delay count) -- callers
+ *  decide what counts as flagged, this component only renders the two states. */
 export function StatTile({ label, value, flagged, suffix = "", decimals = 0 }: Props) {
   const numericTarget = typeof value === "number" ? value : null;
   const counted = useCountUp(numericTarget ?? 0, { decimals });

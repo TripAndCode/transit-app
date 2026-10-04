@@ -209,6 +209,12 @@ describe("OverviewHeroRow", () => {
     expect(screen.queryByRole("img", { hidden: true })).not.toBeInTheDocument();
   });
 
+  it("prints the hero figure in the text colour, whatever its size", () => {
+    mockHooks(38, 0.1);
+    const { container } = renderHero({ headline: headline({ avg_min: 7.4 }) });
+    expect((container.querySelector(".ov-kpi-value") as HTMLElement).style.color).toBe("");
+  });
+
   it("keeps the hero delay value on proportional figures, not tabular-nums", () => {
     mockHooks(38, 0.1);
     const { container } = renderHero();

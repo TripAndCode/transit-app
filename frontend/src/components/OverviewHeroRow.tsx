@@ -2,7 +2,6 @@ import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
 import type { TFunction } from "i18next";
 import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour, RouteSummaryResponse } from "../api/types";
-import { delayTextColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
@@ -72,7 +71,6 @@ export function OverviewHeroRow({
   // 0 axis would flatten the day-to-day variation the sparkline exists to show.
   const sparklineMean = periodMean(sparklinePoints);
 
-  const avgMinColor = headline.avg_min != null ? delayTextColor(headline.avg_min) : undefined;
   // Called unconditionally (hooks can't branch on headline.avg_min's
   // nullability) -- the "—" fallback below still renders in place of it when
   // there is nothing to display.
@@ -104,7 +102,7 @@ export function OverviewHeroRow({
         <div className="ov-hero-label">
           {t("overview.hero_row.avg_delay_label", { range })}
         </div>
-        <div className="ov-kpi-value" style={{ color: avgMinColor }}>
+        <div className="ov-kpi-value">
           {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
           <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
         </div>
