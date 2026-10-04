@@ -143,7 +143,7 @@ The popup explains things like:
 - Ranking tables are for finding "routes that are consistently late / consistently on time."
 - Trend is for seeing whether things are getting better or worse — trending up means worsening.
 - The time-of-day heatmap is for comparing which times of day tend to be busiest.
-- Weekday/weekend patterns are for spotting day-of-week habits.
+- Routes on weekdays / on weekends and holidays show each route's average delay for that group of days; compare the two to see which routes run later on weekends.
 - CSV export lets you download the table data to Excel or similar.
 
 **A similar "?" icon can also appear near the heading of individual report screens.**
