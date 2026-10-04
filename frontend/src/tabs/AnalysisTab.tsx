@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   REPORT_ROWS_MAX,
@@ -11,7 +11,7 @@ import {
 } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { scopeToQueryString, useScope, type Scope } from "../api/scope";
-import type { DwellRunPayload, TrendPayload } from "../api/types";
+import type { DwellRunPayload, ReportResponse, TrendPayload } from "../api/types";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
@@ -45,9 +45,21 @@ import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { ServiceNote } from "../components/ServiceNote";
+import { destHref, reportHref } from "../routes/destinations";
 import { RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 
 const RANKING_TYPES = new Set(["ranking", "ranking_best"]);
+
+/** Whether a report has rows to export: the trend is a chart, and a dwell
+ *  and running-time split this feed or filter can't make has none. */
+function hasCsv(data: ReportResponse): boolean {
+  if (data.report_type === "trend") return false;
+  if (data.report_type === "dwell_run") {
+    const payload = data.rows[0];
+    return !!payload?.available && payload.time_band_supported !== false;
+  }
+  return true;
+}
 
 /** A ranking's coverage options; every other report takes none, and the API
  *  refuses them there. */
@@ -184,7 +196,7 @@ export function AnalysisTab({
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
-              {detail.data.report_type !== "trend" && (
+              {hasCsv(detail.data) && (
                 <a
                   href={`/api/${id}/reports/${detail.data.report_type}?${reportQueryString(
                     ctx,
@@ -356,9 +368,24 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
   // refetch under the same ones is the same list, however new its objects are.
   const cappedRoutes = useCappedList(payload?.routes ?? [], 200, `${id ?? "none"}:${scopeToQueryString(ctx)}`);
   const jumpToLatestData = useJumpToLatestDataRange(id);
+  const navigate = useNavigate();
 
   if (!payload || !payload.available) {
-    return <EmptyState title={t("reports.dwell_run.not_available")} />;
+    const search = `?${scopeToQueryString(ctx)}`;
+    return (
+      <EmptyState
+        title={t("reports.dwell_run.needs_arrivals")}
+        hint={t("reports.dwell_run.not_available")}
+        recoveries={
+          id == null
+            ? []
+            : [
+                { label: t("reports.dwell_run.see_when"), onClick: () => navigate(destHref(id, "time", search)) },
+                { label: t("reports.dwell_run.compare_day_types"), onClick: () => navigate(reportHref(id, "compare_ranking", search)) },
+              ]
+        }
+      />
+    );
   }
   if (!payload.time_band_supported) {
     return <EmptyState title={t("reports.dwell_run.time_band_unsupported")} />;
