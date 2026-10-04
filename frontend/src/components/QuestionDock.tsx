@@ -134,7 +134,7 @@ export function QuestionDock({
                   }}
                   title={t(tpl.title_key)}
                 >
-                  {tpl.emoji} {t(tpl.title_key)}
+                  <tpl.icon size={14} strokeWidth={1.75} aria-hidden="true" style={{ verticalAlign: "-2px" }} /> {t(tpl.title_key)}
                 </button>
               );
             })}

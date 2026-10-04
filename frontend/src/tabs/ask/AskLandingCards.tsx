@@ -75,7 +75,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
                 }}
               >
                 <div style={{ fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>
-                  {tpl.emoji} {tpl.buildSummary(defaultsFor(tpl), t)}
+                  <tpl.icon size={14} strokeWidth={1.75} aria-hidden="true" style={{ verticalAlign: "-2px" }} /> {tpl.buildSummary(defaultsFor(tpl), t)}
                 </div>
                 {tpl.example_answer_key && (
                   <div
@@ -128,7 +128,7 @@ export function AskLandingCards({ templates, onInstantSubmit, onOpenChip, busy =
                   opacity: busy ? 0.6 : 1,
                 }}
               >
-                {tpl.emoji} {t(tpl.title_key)}
+                <tpl.icon size={14} strokeWidth={1.75} aria-hidden="true" style={{ verticalAlign: "-2px" }} /> {t(tpl.title_key)}
               </button>
             ))}
           </div>

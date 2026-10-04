@@ -1,3 +1,4 @@
+import { Bus, Clock, MapPin, Rows3, Scale, Target, TrendingUp, type LucideIcon } from "lucide-react";
 import type { TFunction } from "i18next";
 
 export type ParamSpec =
@@ -18,7 +19,8 @@ export type CardTemplate = {
   /** i18n key under `ask.card.<id>.title` */
   title_key: string;
   /** Emoji shown next to title. */
-  emoji: string;
+  /** A line icon from the app's set, shown before the card's label. */
+  icon: LucideIcon;
   /** Tool slug to dispatch (e.g. "top_n", "trend"). */
   tool: string;
   /** Static args merged into the final args (e.g. {"metric": "avg_delay"} when not user-selectable). */
@@ -47,7 +49,7 @@ export function buildCardTemplates(): CardTemplate[] {
     {
       id: "stop_patterns",
       title_key: "ask.card.stop_patterns.title",
-      emoji: "▥",
+      icon: Rows3,
       tool: "route_stop_patterns",
       params: [{ kind: "route", name: "route", required: true }],
       buildSummary: (v, t) => v.route ? t("ask.card.stop_patterns.summary", { route: v.route }) : t("ask.card.stop_patterns.title"),
@@ -55,7 +57,7 @@ export function buildCardTemplates(): CardTemplate[] {
     {
       id: "stop_hotspots",
       title_key: "ask.card.stop_hotspots.title",
-      emoji: "▥",
+      icon: MapPin,
       tool: "segment_hotspots",
       params: [{ kind: "route", name: "route", required: true }],
       buildSummary: (v, t) => v.route
@@ -65,7 +67,7 @@ export function buildCardTemplates(): CardTemplate[] {
     {
       id: "top_delay",
       title_key: "ask.card.top_delay.title",
-      emoji: "🏆",
+      icon: Clock,
       tool: "top_n",
       fixed_args: { metric: "avg_delay" },
       params: [
@@ -84,7 +86,7 @@ export function buildCardTemplates(): CardTemplate[] {
     {
       id: "ontime_rank",
       title_key: "ask.card.ontime_rank.title",
-      emoji: "🎯",
+      icon: Target,
       tool: "on_time",
       fixed_args: {},
       params: [
@@ -100,19 +102,15 @@ export function buildCardTemplates(): CardTemplate[] {
         },
       ],
       buildSummary: (v, t) =>
-        t("ask.card.ontime_rank.summary", {
+        t(v.best_first === "true" ? "ask.card.ontime_rank.summary_best" : "ask.card.ontime_rank.summary_worst", {
           k: v.k ?? 5,
-          dir:
-            v.best_first === "true"
-              ? t("ask.card.ontime_rank.best")
-              : t("ask.card.ontime_rank.worst"),
         }),
       example_answer_key: "ask.card.ontime_rank.example_answer",
     },
     {
       id: "route_trend",
       title_key: "ask.card.route_trend.title",
-      emoji: "📈",
+      icon: TrendingUp,
       tool: "trend",
       fixed_args: { metric: "avg_delay" },
       params: [
@@ -132,7 +130,7 @@ export function buildCardTemplates(): CardTemplate[] {
     {
       id: "weekday_vs_weekend",
       title_key: "ask.card.weekday_vs_weekend.title",
-      emoji: "⚖️",
+      icon: Scale,
       tool: "cmp_service",
       fixed_args: { metric: "avg_delay" },
       params: [{ kind: "route", name: "route_code", required: true }],
@@ -144,7 +142,7 @@ export function buildCardTemplates(): CardTemplate[] {
     {
       id: "route_overview",
       title_key: "ask.card.route_overview.title",
-      emoji: "🚏",
+      icon: Bus,
       tool: "route_stats",
       fixed_args: {},
       params: [{ kind: "route", name: "route_code", required: true }],

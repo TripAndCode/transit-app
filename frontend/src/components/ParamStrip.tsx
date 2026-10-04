@@ -51,7 +51,7 @@ export function ParamStrip({
       }}
     >
       <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)" }}>
-        {template.emoji} {t(template.title_key)}
+        <template.icon size={14} strokeWidth={1.75} aria-hidden="true" style={{ verticalAlign: "-2px" }} /> {t(template.title_key)}
       </span>
 
       {template.params.map((spec) => {
