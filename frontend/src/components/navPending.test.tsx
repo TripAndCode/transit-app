@@ -65,6 +65,14 @@ describe("PendingNavLink", () => {
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
   });
 
+  it("tells a screen reader the next screen is loading, and when it is not", async () => {
+    renderShell();
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("");
+    await userEvent.click(screen.getByRole("link", { name: /Slow screen/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("Loading...");
+  });
+
   it("shows no progress once a screen is in", async () => {
     renderShell();
     await userEvent.click(screen.getByRole("link", { name: /Other screen/ }));

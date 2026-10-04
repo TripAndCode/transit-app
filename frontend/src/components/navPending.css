@@ -29,3 +29,13 @@
   from { transform: translateX(-100%); }
   to { transform: translateX(340%); }
 }
+
+.nav-progress-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

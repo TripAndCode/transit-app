@@ -26,6 +26,11 @@ export function NavPendingProvider({ children }: { children: ReactNode }) {
   return (
     <NavPendingContext value={{ pendingTo: isPending ? target : null, go }}>
       {isPending && <div className="nav-progress" role="progressbar" aria-label={t("common.loading")} />}
+      {/* Always mounted: a live region announces changes to its text, not its
+          own arrival, so it has to exist before the navigation starts. */}
+      <p className="nav-progress-status" role="status">
+        {isPending ? t("common.loading") : ""}
+      </p>
       {children}
     </NavPendingContext>
   );
