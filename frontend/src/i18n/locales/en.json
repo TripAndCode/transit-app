@@ -39,7 +39,11 @@
   },
   "onboarding": {
     "subtitle": "Select your transit agency",
-    "no_agencies": "No agencies are configured yet."
+    "no_agencies": "No agencies are configured yet.",
+    "data_through": "Data through {{date}}",
+    "no_data_yet": "No data collected yet",
+    "search": "Search agencies",
+    "no_matches": "No agency matches. Try another name."
   },
   "landing": {
     "hero": {
@@ -320,7 +324,9 @@
     "empty": "No observations in this range. Try a wider window.",
     "concentration_explainer": "Each route's share of total delay in the selected range. The Lorenz curve below shows the skew: the dotted diagonal would be a perfectly even spread, and the further the curve bows away from it, the more the delay sits with a few routes.",
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split weekday vs weekend/holiday — compare commute peaks against weekend patterns.",
-    "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
+    "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off.",
+    "never_collected": "We haven't collected any data for {{agency}} yet.",
+    "choose_another_agency": "Choose another agency"
   },
   "markdownMermaid": {
     "diagram_fallback_label": "Diagram"

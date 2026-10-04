@@ -8,12 +8,22 @@ import { readLastAgency, writeLastAgency } from "../api/lastAgency";
 import { IndexLoadingPlaceholder } from "./RoutePlaceholders";
 import { ErrorBanner } from "./ErrorBanner";
 import type { Agency } from "../api/types";
+import { formatDate } from "../utils/format";
+import { LanguageToggle } from "./LanguageToggle";
 
 // Selection→navigate delay: must stay >= --transition (global.css) so the
 // dim/highlight finishes before the route changes. Not derived from the CSS
 // var directly (no runtime cost of reading it) — bump both together if
 // --transition ever grows past this.
 const SELECT_TRANSITION_MS = 250;
+
+// Past this many cards, finding one by eye is slower than typing its name.
+const SEARCH_MIN_AGENCIES = 9;
+
+/** Agencies with data first, each group in the API's order. */
+function byDataFirst(agencies: Agency[]): Agency[] {
+  return [...agencies.filter((a) => a.latest_data_date), ...agencies.filter((a) => !a.latest_data_date)];
+}
 
 /** Owns the "/" landing decision for a visitor RequireAuth has let through:
  *  while agencies load, show the existing placeholder;
@@ -35,6 +45,7 @@ export function OnboardingGate() {
   // live read here would immediately match that write on the next render,
   // short-circuiting straight to <Navigate> and skipping the transition.
   const [remembered] = useState(() => readLastAgency());
+  const [query, setQuery] = useState("");
 
   // Deferred navigate lives in an effect (not the click handler's own
   // setTimeout) so an unmount inside the delay window cleans up the timer
@@ -74,6 +85,12 @@ export function OnboardingGate() {
     writeLastAgency(agency.agency_id);
   }
 
+  const searchable = agencies.length >= SEARCH_MIN_AGENCIES;
+  const needle = query.normalize("NFKC").trim().toLocaleLowerCase();
+  const shown = byDataFirst(agencies).filter(
+    (a) => !searchable || a.agency_name.normalize("NFKC").toLocaleLowerCase().includes(needle),
+  );
+
   return (
     <div
       style={{
@@ -87,6 +104,9 @@ export function OnboardingGate() {
         zIndex: Z_INDEX.modal,
       }}
     >
+      <div style={{ position: "absolute", top: 16, right: 16 }}>
+        <LanguageToggle />
+      </div>
       <div style={{ width: "100%", maxWidth: 640, textAlign: "center" }}>
         <div style={{ marginBottom: 36 }}>
           <h1
@@ -105,6 +125,21 @@ export function OnboardingGate() {
             {t("onboarding.subtitle")}
           </div>
         </div>
+        {searchable && (
+          <input
+            type="search"
+            aria-label={t("onboarding.search")}
+            placeholder={t("onboarding.search")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ width: "100%", marginBottom: 16 }}
+          />
+        )}
+        {shown.length === 0 && (
+          <p role="status" style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
+            {t("onboarding.no_matches")}
+          </p>
+        )}
         <div
           style={{
             display: "grid",
@@ -112,7 +147,7 @@ export function OnboardingGate() {
             gap: 12,
           }}
         >
-          {agencies.map((a) => {
+          {shown.map((a) => {
             const isSelected = selectedId === a.agency_id;
             const isDimmed = selectedId != null && !isSelected;
             return (
@@ -156,6 +191,11 @@ export function OnboardingGate() {
                   </span>
                 )}
                 <div style={{ fontSize: 15, fontWeight: 600 }}>{a.agency_name}</div>
+                <div style={{ fontSize: 12, marginTop: 4, color: "var(--text-tertiary)" }}>
+                  {a.latest_data_date
+                    ? t("onboarding.data_through", { date: formatDate(a.latest_data_date) })
+                    : t("onboarding.no_data_yet")}
+                </div>
               </button>
             );
           })}

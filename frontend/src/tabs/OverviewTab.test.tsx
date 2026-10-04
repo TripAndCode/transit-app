@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewTab } from "./OverviewTab";
@@ -148,5 +149,46 @@ describe("OverviewTab without a usable agency id", () => {
     renderOverview(summary(), "/agencies/not-an-id/overview?from=2030-01-01&to=2030-01-07");
     expect(screen.queryByRole("region")).toBeNull();
     expect(document.querySelector(".ov-page")).toBeNull();
+  });
+});
+
+describe("OverviewTab for an agency never collected", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("waits for the agency list before saying the range is empty", () => {
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: summary(), isPending: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: undefined, isPending: true } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/8/overview"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/overview" element={<OverviewTab />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("No observations in this range. Try a wider window.")).not.toBeInTheDocument();
+  });
+
+  it("says no data was ever collected and offers another agency", async () => {
+    localStorage.setItem("transit.lastAgency", "8");
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: summary(), isPending: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [{ agency_id: 8, agency_name: "Hiroden", feed_url: "", static_url: null, latest_data_date: null }],
+      isPending: false,
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/8/overview"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/overview" element={<OverviewTab />} />
+          <Route path="/" element={<p>picker-page</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("We haven't collected any data for Hiroden yet.")).toBeInTheDocument();
+    expect(screen.queryByText("No observations in this range. Try a wider window.")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Choose another agency" }));
+    expect(screen.getByText("picker-page")).toBeInTheDocument();
+    expect(localStorage.getItem("transit.lastAgency")).toBeNull();
   });
 });
