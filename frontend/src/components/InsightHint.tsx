@@ -1,10 +1,10 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTopmostEscape } from "../hooks/useFocusTrap";
 import { Z_INDEX } from "../styles/zIndex";
-import { computeTooltipPosition } from "./tooltipPosition";
+import { usePortalPlacement } from "./usePortalPlacement";
 
 /**
  * Small (?) info icon that opens a quiet popover with a paragraph or two
@@ -44,32 +44,7 @@ export function InsightHint({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  // Position is written straight to the node, as Tooltip does: the
-  // measurement only places an element that is already mounted, and a layout
-  // effect places it before it paints, so it never flashes in the wrong spot.
-  useLayoutEffect(() => {
-    if (!open) return;
-    function place() {
-      const trigger = triggerRef.current;
-      const popover = popoverRef.current;
-      if (!trigger || !popover) return;
-      const pos = computeTooltipPosition(
-        trigger.getBoundingClientRect(),
-        popover.getBoundingClientRect(),
-        "bottom",
-        { width: window.innerWidth, height: window.innerHeight },
-      );
-      popover.style.left = `${pos.left}px`;
-      popover.style.top = `${pos.top}px`;
-    }
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-    };
-  }, [open]);
+  usePortalPlacement(open, () => triggerRef.current?.getBoundingClientRect(), popoverRef, "bottom");
 
   return (
     <div style={{ display: "inline-flex" }}>

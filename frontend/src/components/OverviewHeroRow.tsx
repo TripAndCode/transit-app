@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useRoutes, useTodayRouteSummary } from "../api/hooks";
-import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
+import type { TFunction } from "i18next";
+import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour, RouteSummaryResponse } from "../api/types";
 import { delayTextColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { InsightHint } from "./InsightHint";
@@ -31,6 +32,20 @@ function reportAgeMs(iso: string): number {
   return Number.isFinite(captured) ? Date.now() - captured : NaN;
 }
 
+/** The feed-status line, by the same rule as Live's freshness badge: a feed
+ *  whose newest report is older than the live window is quiet, however recent
+ *  the aggregates are. Nothing is claimed while the status is unread or its
+ *  timestamp unreadable. */
+function describeFeedStatus(summary: RouteSummaryResponse | undefined, t: TFunction): string {
+  if (!summary) return EM_DASH;
+  if (!summary.latest_captured_at) return t("overview.hero_row.feed_status_none");
+  const ageMs = reportAgeMs(summary.latest_captured_at);
+  if (!Number.isFinite(ageMs)) return EM_DASH;
+  return ageMs > MAX_REPORT_AGE_MS
+    ? t("overview.hero_row.feed_status_quiet", { duration: quietFor(ageMs, t) })
+    : t("overview.hero_row.feed_status_live");
+}
+
 export function OverviewHeroRow({
   headline,
   delayedCount,
@@ -47,19 +62,10 @@ export function OverviewHeroRow({
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
 
-  // The same rule as Live's freshness badge: a feed whose newest report is
-  // older than the live window is quiet, however recent the aggregates are.
-  // Until the status has been read (or when it can't be), nothing is
-  // claimed either way.
-  const captured = feedSummary?.latest_captured_at ?? null;
-  const ageMs = captured ? reportAgeMs(captured) : NaN;
-  const feedStatus = !feedSummary
-    ? EM_DASH
-    : !captured || !Number.isFinite(ageMs)
-      ? t("overview.hero_row.feed_status_none")
-      : ageMs > MAX_REPORT_AGE_MS
-        ? t("overview.hero_row.feed_status_quiet", { duration: quietFor(ageMs, t) })
-        : t("overview.hero_row.feed_status_live");
+  const feedStatus = describeFeedStatus(feedSummary, t);
+  const captured = feedSummary?.latest_captured_at;
+  const lastReport = captured && Number.isFinite(Date.parse(captured)) ? formatReportTime(captured) : null;
+  const range = formatDateRange(headline.window_from, headline.window_to, { year: false });
 
   // The sparkline scales to its own min..max, so it is anchored on the period
   // mean rather than 0: the absolute figure is already shown beside it, and a
@@ -96,9 +102,7 @@ export function OverviewHeroRow({
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         />
         <div className="ov-hero-label">
-          {t("overview.hero_row.avg_delay_label", {
-            range: formatDateRange(headline.window_from, headline.window_to, { year: false }),
-          })}
+          {t("overview.hero_row.avg_delay_label", { range })}
         </div>
         <div className="ov-kpi-value" style={{ color: avgMinColor }}>
           {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
@@ -117,9 +121,7 @@ export function OverviewHeroRow({
           {story}
           <InsightHint
             title={t("overview.hero_row.baseline_hint_title")}
-            body={t("overview.hero_row.baseline_hint_body", {
-              range: formatDateRange(headline.window_from, headline.window_to, { year: false }),
-            })}
+            body={t("overview.hero_row.baseline_hint_body", { range })}
           />
         </div>
         <div className="ov-hero-sub">
@@ -131,7 +133,7 @@ export function OverviewHeroRow({
           </div>
           <div className="ov-hero-sub-item">
             <span className="ov-hero-sub-value">{feedStatus}</span>
-            {captured && Number.isFinite(ageMs) && t("overview.hero_row.feed_status_last", { time: formatReportTime(captured) })}
+            {lastReport && t("overview.hero_row.feed_status_last", { time: lastReport })}
           </div>
         </div>
       </div>

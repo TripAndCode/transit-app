@@ -181,6 +181,16 @@ describe("OverviewHeroRow", () => {
     expect(screen.queryByText("Reporting live")).toBeNull();
   });
 
+  it("claims nothing about a report whose time can't be read", () => {
+    mockHooks(38, 0.1);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: { latest_captured_at: "not-a-time", date: null, routes: [], raw_samples: 0, clamp_count: 0 },
+    } as never);
+    renderHero();
+    expect(screen.queryByText("No reports yet")).toBeNull();
+    expect(screen.queryByText(/Last report/)).toBeNull();
+  });
+
   it("says so before any report has arrived", () => {
     mockHooks(38, null);
     renderHero();

@@ -887,8 +887,8 @@ async def test_top_delayed_routes_delayed_count_excludes_under_threshold(aconn, 
 
 @pytest.mark.asyncio
 async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
-    """Caps at 5 routes even with more seeded; empty dataset returns
-    {routes: [], delayed_count: 0}, not an error."""
+    """Caps at 5 routes even with more seeded; an empty dataset returns no
+    routes and a zero count (with its threshold), not an error."""
     from pipeline.reports import compute_overview_summary
 
     for i in range(7):
