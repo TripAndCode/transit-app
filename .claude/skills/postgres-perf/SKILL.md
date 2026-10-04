@@ -6,8 +6,8 @@ description: Performance patterns and known traps for this repo's Postgres/PostG
 # Postgres + ClickHouse performance — transit-app
 
 Postgres (major version pinned by `db/Dockerfile`) + PostGIS + pgvector + pg_trgm holds `agg_*`/OLTP/PostGIS/pgvector data.
-The raw GTFS-RT `updates` fact table (hundreds of millions of rows across 4
-agencies, and growing) lives in ClickHouse
+The raw GTFS-RT `updates` fact table (hundreds of millions of rows, and
+growing) lives in ClickHouse
 instead (a Postgres `updates` table is kept only as a rollback safety net; no
 production code writes to or reads from it). MergeTree/partition-key/
 ORDER-BY-key advice applies to the ClickHouse `updates` — its `ORDER BY (agency_id,
@@ -87,7 +87,7 @@ become Nullable.
 - Dev Postgres (the instance `DATABASE_URL` names — not necessarily `compose.yml`'s
   `:5433`; see `AGENTS.md`) is read-only: EXPLAIN/SELECT only.
 - Dev ClickHouse (`docker compose exec clickhouse`, hundreds of millions of real
-  rows across 4 agencies) is also read-only for agents. `make ch-bootstrap`
+  rows) is also read-only for agents. `make ch-bootstrap`
   writes schema changes and must not be run against the dev instance by an
   agent. `db/clickhouse/bootstrap.py` describes operator maintenance.
 - Tests run against throwaway Postgres `:5544` (built from `db/`, needs

@@ -6,8 +6,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
 # transit-app gotchas
 
 ## Databases
-- The raw GTFS-RT `updates` fact table (hundreds of millions of rows across 4
-  agencies, and growing) lives in ClickHouse, not Postgres. A Postgres `updates`
+- The raw GTFS-RT `updates` fact table (hundreds of millions of rows, and
+  growing) lives in ClickHouse, not Postgres. A Postgres `updates`
   table is kept only as a rollback safety net: no production code writes to or
   reads from it, so it is not a usable data source.
   `agg_*`/OLTP/PostGIS/pgvector stay on Postgres.
@@ -19,7 +19,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   (agency, static GTFS) in a throwaway Postgres on a spare port, then migrate +
   analyze there.
 - The same read-only rule applies to dev ClickHouse (`docker compose exec
-  clickhouse`, hundreds of millions of real rows across 4 agencies). `make
+  clickhouse`, hundreds of millions of real rows). `make
   ch-bootstrap` writes schema changes; agents must not run it against the dev
   instance. `db/clickhouse/bootstrap.py` describes operator maintenance, not an
   exception to the agent rule.
