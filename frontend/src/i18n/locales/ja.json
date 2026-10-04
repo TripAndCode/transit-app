@@ -508,10 +508,11 @@
   },
   "presets": {
     "login_to_save_tooltip": "ログインで保存",
-    "label": "プリセット",
-    "option_placeholder": "プリセット",
-    "save_current": "現在の条件を保存",
-    "name_placeholder": "プリセット名"
+    "label": "保存したビュー",
+    "save_current": "このビューを保存…",
+    "empty": "保存したビューはまだありません",
+    "save_title": "このビューを保存",
+    "name_label": "名前"
   },
   "filters": {
     "range": {
@@ -1731,7 +1732,7 @@
       "readout": "{{n}}分のとき{{pct}}%",
       "weekday_colour": "色は曜日ごとの平均遅延"
     },
-    "pin": "帯を固定",
+    "pin": "すべての条件を表示",
     "reset": "条件をリセット",
     "popover": {
       "routes": "対象の路線",

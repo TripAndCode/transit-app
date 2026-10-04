@@ -276,3 +276,6 @@
   font-size: var(--text-xs);
   color: var(--text-secondary);
 }
+
+/* Saved views in the Saved views popover: a plain column of pills. */
+.preset-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
