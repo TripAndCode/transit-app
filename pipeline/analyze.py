@@ -833,9 +833,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             )
 
         # Every route-keyed builder filters `route_code IS NOT NULL` in its own
-        # CTE rather than in the dedup load: agg_stop_daily and agg_stop_routes
-        # read the same slice and must keep a stop's traffic when the route is
-        # unknown. A NULL key would otherwise abort the whole-agency transaction.
+        # CTE rather than in the dedup load: agg_stop_daily reads the same slice
+        # and must keep a stop's traffic when the route is unknown. A NULL key
+        # would otherwise abort the whole-agency transaction.
         # ── agg_route_stats ──────────────────────────────────────────────
         # No minimum-sample HAVING here — see the module docstring's no-gate
         # policy.
@@ -1282,9 +1282,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 # `.query()`'s result_rows would hit the same unbounded-memory
                 # shape that streaming was introduced to eliminate 40 lines
                 # up, just for a bigger set.
+                # A stop whose only keys lack a route would aggregate to a NULL
+                # route_codes, which the NOT NULL column rejects for the whole
+                # agency; such keys name no route to list anyway.
                 ch_keys_sql = (
                     "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
-                    "WHERE agency_id = {agency_id:UInt16}"
+                    "WHERE agency_id = {agency_id:UInt16} AND route_code IS NOT NULL"
                 )
                 with (
                     _step("agg_stop_routes: ClickHouse key scan + load into TEMP"),

@@ -2009,3 +2009,33 @@ def test_stop_aggregates_keep_a_null_route_code_row_that_route_keyed_ones_drop(p
         assert cur.fetchone()[0] == 2  # 06-09 (R1) and 06-10 (no route) both count for stop s1
         cur.execute("SELECT COALESCE(SUM(samples), 0) FROM agg_route_stop_daily WHERE agency_id=%s", (agency_id,))
         assert cur.fetchone()[0] == 1  # only the keyed event
+
+
+def test_agg_stop_routes_skips_a_stop_served_only_by_no_route_keys(pg_conn, agency_id, ch_client):
+    """A stop whose every observed key lacks a route_code has no route to list;
+    it must get no agg_stop_routes row rather than a NULL route_codes that
+    aborts the agency's analyze."""
+    _seed_for_stop_agg(pg_conn, agency_id)  # stop s1 served by R1
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES (%s,'s3','無路線停留所',ST_SetSRID(ST_MakePoint(140.76,40.84),4326))",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES (%s,'TN',1,'s3')",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'tn.pb','2026-06-09T08:10:00','TN','平日',%s,NULL,1,60)",
+            (agency_id, time(8, 10)),
+        )
+    pg_conn.commit()
+
+    _analyze(agency_id, pg_conn, ch_client)  # must not raise NotNullViolation
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT stop_id, route_codes FROM agg_stop_routes WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchall() == [("s1", "R1")]
