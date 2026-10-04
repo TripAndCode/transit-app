@@ -205,8 +205,8 @@ async def _ranking_live(
     paths use different tie-handling rules. E.g. sorted `[0]*95 + [600]*5`:
     this function's p90 is 600s, `PERCENTILE_DISC`'s (the current aggregate
     path) is 0s, and `quantileExact`'s would also be 0s. Every group here has
-    at least MIN_GROUP_SAMPLES rows (the HAVING gate), so `avg` is never
-    NULL/NaN — no empty-input guard needed.
+    at least `min_samples` rows (the HAVING gate), so `avg` is never NULL/NaN
+    — no empty-input guard needed.
     """
     cte_sql, ch_params = _dedup_cte_ch(ctx)
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
