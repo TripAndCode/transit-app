@@ -1691,7 +1691,7 @@
     "days_all": "すべての曜日",
     "days_weekday": "平日",
     "days_weekend": "土日",
-    "time_all": "終日",
+    "time_all": "全時間帯",
     "hours": "{{from}}時〜{{to}}時台",
     "hour_single": "{{h}}時台",
     "service": "{{value}}ダイヤ",
@@ -1709,7 +1709,7 @@
       "days_all": "すべて",
       "weekday": "平日",
       "weekend": "土日",
-      "service": "ダイヤ",
+      "service": "ダイヤの種類",
       "tolerance": "定時とみなす遅れ",
       "minutes": "{{n}}分",
       "clear": "解除",
@@ -1728,7 +1728,8 @@
       "legend_d3": "3.5〜5分",
       "legend_d4": "5分以上",
       "whole_day_place": "この数値は時間帯・停留所・方向の条件を含みません",
-      "readout": "{{n}}分のとき{{pct}}%"
+      "readout": "{{n}}分のとき{{pct}}%",
+      "weekday_colour": "色は曜日ごとの平均遅延"
     },
     "pin": "帯を固定",
     "reset": "条件をリセット",
@@ -1737,11 +1738,13 @@
       "period": "期間",
       "days": "曜日とダイヤ",
       "time": "時間帯",
-      "service": "ダイヤ",
+      "service": "ダイヤの種類",
       "stop": "停留所",
       "dir": "方向",
       "early": "早発の幅",
       "tolerance": "定時の幅"
-    }
+    },
+    "unapplied_note": "この画面では使いません：{{list}}",
+    "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る"
   }
 }

@@ -91,7 +91,7 @@ describe("scope controls", () => {
       mount(DaysControl);
       await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
       expect(params().get("dow")).toBe("weekday");
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Timetable" }), "平日");
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Timetable type" }), "平日");
       expect(params().get("service")).toBe("平日");
     });
 
@@ -101,6 +101,16 @@ describe("scope controls", () => {
       expect(mon.querySelector(".scope-mini-bar")).toHaveStyle({ background: "var(--d1)" });
       expect(screen.getByRole("button", { name: "Sat 5.1 min" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Tue" })).toBeInTheDocument();
+    });
+
+    it("says what the weekday colours mean once they show", () => {
+      mount(DaysControl, "", SUMMARY);
+      expect(screen.getByText("Colour = average delay on that weekday")).toBeInTheDocument();
+    });
+
+    it("explains no colours before there are any", () => {
+      mount(DaysControl);
+      expect(screen.queryByText("Colour = average delay on that weekday")).toBeNull();
     });
 
     it("marks the selected days", () => {

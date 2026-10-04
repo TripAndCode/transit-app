@@ -144,6 +144,7 @@ export function DaysControl({ scope, update, summary }: ControlProps) {
           );
         })}
       </div>
+      {weekdayMeans.size > 0 && <p className="scope-note">{t("scope.control.weekday_colour")}</p>}
       <label htmlFor={serviceId} className="scope-field">
         {t("scope.control.service")}
       </label>

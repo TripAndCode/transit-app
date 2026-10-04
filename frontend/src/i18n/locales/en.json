@@ -1691,7 +1691,7 @@
     "days_all": "every day",
     "days_weekday": "weekdays",
     "days_weekend": "weekends",
-    "time_all": "all day",
+    "time_all": "all hours",
     "hours": "{{from}}:00–{{to}}:59",
     "hour_single": "{{h}}:00–{{h}}:59",
     "service": "{{value}} timetable",
@@ -1709,7 +1709,7 @@
       "days_all": "All",
       "weekday": "Weekdays",
       "weekend": "Weekend",
-      "service": "Timetable",
+      "service": "Timetable type",
       "tolerance": "Counted on time up to",
       "minutes": "{{n}} min",
       "clear": "Clear",
@@ -1728,7 +1728,8 @@
       "legend_d3": "3.5–5 min",
       "legend_d4": "5 min or more",
       "whole_day_place": "These figures cover the whole day, every stop and both directions",
-      "readout": "{{n}} min: {{pct}}%"
+      "readout": "{{n}} min: {{pct}}%",
+      "weekday_colour": "Colour = average delay on that weekday"
     },
     "pin": "Pin controls",
     "reset": "Reset conditions",
@@ -1737,11 +1738,13 @@
       "period": "Period",
       "days": "Days and timetable",
       "time": "Time of day",
-      "service": "Timetable",
+      "service": "Timetable type",
       "stop": "Stop",
       "dir": "Direction",
       "early": "Early tolerance",
       "tolerance": "On-time tolerance"
-    }
+    },
+    "unapplied_note": "Not used on this screen: {{list}}",
+    "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]"
   }
 }
