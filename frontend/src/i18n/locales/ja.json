@@ -141,7 +141,7 @@
   },
   "forecast": {
     "overview_worst_label": "いま見るべき時間帯",
-    "overview_worst_phrase": "{{day}}の{{band}} — 全体的に遅れやすい（平均{{min}}分の遅れ）",
+    "overview_worst_phrase": "{{day}}の{{band}}が最も遅れやすい（{{avg}}）",
     "overview_grid_title": "曜日 × 時間帯（全路線）",
     "overview_grid_caption": "事業者全体で、いつ遅れやすいか — 濃いほど遅延が大きい。",
     "overview_routes_title": "遅れやすい路線",
@@ -152,7 +152,7 @@
     "band_midday": "昼",
     "band_evening": "夕方",
     "band_night": "夜",
-    "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（平均{{min}}分の遅れ）",
+    "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（{{avg}}）",
     "detail_show_grid": "曜日×時間帯を詳しく",
     "low_confidence_note": "計測が少なく参考値",
     "lowSamples": "データ不足 ({{count}}件)",
@@ -177,7 +177,9 @@
     "stat_mean": "路線平均",
     "stat_samples": "計測回数",
     "route_picker_label": "系統",
-    "route_picker_all": "すべての系統"
+    "route_picker_all": "すべての系統",
+    "avg_late": "平均{{min}}分の遅れ",
+    "avg_early": "平均{{min}}分の早発"
   },
   "network": {
     "title": "事業者比較",
@@ -977,8 +979,8 @@
     "dow_band": {
       "title": "いつもの遅れ方",
       "empty": "この期間のデータがありません。",
-      "worst_phrase_one": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（平均{{min}}分の遅れ）",
-      "worst_phrase_other": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（平均{{min}}分の遅れ）"
+      "worst_phrase_one": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（{{avg}}）",
+      "worst_phrase_other": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（{{avg}}）"
     },
     "daily": {
       "empty": "期間内にデータがありません。",

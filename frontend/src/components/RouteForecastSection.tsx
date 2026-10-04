@@ -17,7 +17,9 @@ import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "reac
 import { useTranslation } from "react-i18next";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
 import { useScope } from "../api/scope";
+import { useRouteNames } from "../api/useRouteNames";
 import { InlineSparkline } from "./InlineSparkline";
+import { RouteLabel } from "./RouteLabel";
 import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -28,6 +30,7 @@ import { onActivateKey } from "../utils/a11y";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, formatMinutes } from "../utils/format";
+import { avgDelayText } from "../utils/delayPhrase";
 import {
   BAND_ORDER,
   bandOf,
@@ -90,11 +93,13 @@ function CrosshairTip({ tip }: { tip: Tip }) {
 /** Delay-ranked route list. Bar length encodes delay (not sample volume). */
 function RankedRoutes({
   routes,
+  names,
   axisMin,
   lowConfNote,
   onPick,
 }: {
   routes: ForecastOverviewRoute[];
+  names: ReturnType<typeof useRouteNames>;
   axisMin: string;
   lowConfNote: string;
   onPick: (code: string) => void;
@@ -112,9 +117,7 @@ function RankedRoutes({
           style={{ display: "grid", gridTemplateColumns: "minmax(120px, 34%) 1fr 72px auto", gap: 10, alignItems: "center", cursor: "pointer", padding: "5px 8px", borderRadius: 6, opacity: r.low_confidence ? 0.6 : 1 }}
         >
           <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {r.route_name}
-            {/* Variants of a line share a name; the muted code tells them apart. */}
-            {!r.route_name.includes(r.route_code) && <> <span className="route-label__code">{r.route_code}</span></>}
+            <RouteLabel code={r.route_code} names={names} fallbackName={r.route_name} />
             {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
           </span>
           <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
@@ -527,7 +530,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           noData={t("forecast.overview_no_data")}
           lowConfNote={t("forecast.low_confidence_note")}
           legendUnit={t("forecast.legend_unit")}
-          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), min: w.expected_avg_min.toFixed(1) })}
+          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), avg: avgDelayText(t, w.expected_avg_min) })}
           onPick={(code) => update({ routes: [code] })}
           onTip={onTip}
           onLeave={onLeave}
@@ -566,9 +569,13 @@ function RoutePicker({
   onPick: (code: string | null) => void;
 }) {
   const { t } = useTranslation();
+  const names = useRouteNames(aid);
   const routes = useForecastOverview(aid).data?.routes ?? [];
-  const nameCount = new Map<string, number>();
-  for (const r of routes) nameCount.set(r.route_name, (nameCount.get(r.route_name) ?? 0) + 1);
+  // An option holds plain text, so RouteLabel's muted code becomes a
+  // parenthesis, added only where two routes would otherwise read the same.
+  const labelOf = (r: ForecastOverviewRoute) => names.data.get(r.route_code) ?? r.route_name;
+  const labelCount = new Map<string, number>();
+  for (const r of routes) labelCount.set(labelOf(r), (labelCount.get(labelOf(r)) ?? 0) + 1);
   const listed = focusedRoute == null || routes.some((r) => r.route_code === focusedRoute);
   return (
     <label className="forecast-route-picker">
@@ -577,7 +584,7 @@ function RoutePicker({
         <option value="">{t("forecast.route_picker_all")}</option>
         {routes.map((r) => (
           <option key={r.route_code} value={r.route_code}>
-            {(nameCount.get(r.route_name) ?? 0) > 1 ? `${r.route_name} (${r.route_code})` : r.route_name}
+            {(labelCount.get(labelOf(r)) ?? 0) > 1 ? `${labelOf(r)} (${r.route_code})` : labelOf(r)}
           </option>
         ))}
         {!listed && <option value={focusedRoute}>{focusedRoute}</option>}
@@ -623,6 +630,7 @@ function AgencyLanding({
   onLeave: () => void;
 }) {
   const { data, isPending, error, refetch } = useForecastOverview(aid);
+  const names = useRouteNames(aid);
   if (isPending) return <Skeleton height={240} />;
   if (error) return <ErrorBanner error={error} onRetry={() => refetch()} />;
   if (!data) return null;
@@ -650,7 +658,7 @@ function AgencyLanding({
       {data.routes.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <SectionCard title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
-            <RankedRoutes routes={data.routes.slice(0, 8)} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
+            <RankedRoutes routes={data.routes.slice(0, 8)} names={names} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
           </SectionCard>
         </div>
       )}
@@ -743,7 +751,7 @@ function RouteDetail({
           data-testid="detail-worst"
           style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16, fontSize: 15, fontWeight: 600 }}
         >
-          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), min: (worstBand.expected_avg_min as number).toFixed(1) })}
+          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), avg: avgDelayText(t, worstBand.expected_avg_min as number) })}
         </div>
       )}
 

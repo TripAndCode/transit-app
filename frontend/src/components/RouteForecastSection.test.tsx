@@ -58,6 +58,7 @@ function heatmap(populate: { d: number; h: number; v?: number; n?: number }[] = 
 }
 
 function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "") {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
   vi.spyOn(hooks, "useForecastOverview").mockReturnValue({ data: ov, isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: heatmap(), isPending: false, error: null, refetch: vi.fn() } as never);
   const initialEntries = [`/agencies/1/analysis/route_forecast${initialRoute ? `?routes=${initialRoute}` : ""}`];
@@ -124,6 +125,11 @@ describe("RouteForecastSection", () => {
     expect(headline).not.toHaveTextContent("+");
   });
 
+  it("says an early-running worst window is early, not late", () => {
+    renderSection(overview({ worst: { dow: 1, band: "midday", expected_avg_min: -0.4, samples: 250 } }));
+    expect(screen.getByTestId("worst-headline")).toHaveTextContent("avg 0.4 min early");
+  });
+
   it("says how late a route's worst window runs in words too", () => {
     renderSection(overview(), "100");
     expect(screen.getByTestId("detail-worst")).toHaveTextContent(/avg 12\.0 min late/);
@@ -142,6 +148,16 @@ describe("RouteForecastSection", () => {
     const [first, second] = screen.getAllByTestId("ranked-route");
     expect(within(first).getByText("C12a")).toHaveClass("route-label__code");
     expect(within(second).getByText("C12b")).toHaveClass("route-label__code");
+  });
+
+  it("keeps a route's code beside a name that merely contains its digits", () => {
+    renderSection(
+      overview({
+        routes: [{ route_code: "1", route_name: "Line 10", expected_avg_min: 6.8, samples: 250, low_confidence: false }],
+      }),
+    );
+    const [row] = screen.getAllByTestId("ranked-route");
+    expect(within(row).getByText("1")).toHaveClass("route-label__code");
   });
 
   it("says what the small line beside each route shows", () => {

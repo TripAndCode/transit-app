@@ -141,7 +141,7 @@
   },
   "forecast": {
     "overview_worst_label": "When to watch out",
-    "overview_worst_phrase": "{{day}} {{band}} — generally runs late (avg {{min}} min late)",
+    "overview_worst_phrase": "{{day}} {{band}} runs latest ({{avg}})",
     "overview_grid_title": "Day × time of day (all routes)",
     "overview_grid_caption": "When the agency tends to run late — darker = more delay.",
     "overview_routes_title": "Routes that run late",
@@ -152,7 +152,7 @@
     "band_midday": "Midday",
     "band_evening": "Evening",
     "band_night": "Night",
-    "detail_worst_phrase": "Worst on {{day}} {{band}} (avg {{min}} min late)",
+    "detail_worst_phrase": "Worst on {{day}} {{band}} ({{avg}})",
     "detail_show_grid": "Show day × hour detail",
     "low_confidence_note": "Few measurements — indicative",
     "lowSamples": "Low data ({{count}} obs.)",
@@ -177,7 +177,9 @@
     "stat_mean": "Route avg",
     "stat_samples": "Measurements",
     "route_picker_label": "Route",
-    "route_picker_all": "All routes"
+    "route_picker_all": "All routes",
+    "avg_late": "avg {{min}} min late",
+    "avg_early": "avg {{min}} min early"
   },
   "network": {
     "title": "Compare agencies",
@@ -977,8 +979,8 @@
     "dow_band": {
       "title": "Usual delay pattern",
       "empty": "No data for this period.",
-      "worst_phrase_one": "Over the past day, {{day}} {{band}} ran latest (avg {{min}} min late)",
-      "worst_phrase_other": "Over the past {{count}} days, {{day}} {{band}} runs latest (avg {{min}} min late)"
+      "worst_phrase_one": "Over the past day, {{day}} {{band}} ran latest ({{avg}})",
+      "worst_phrase_other": "Over the past {{count}} days, {{day}} {{band}} runs latest ({{avg}})"
     },
     "daily": {
       "empty": "No data in this range.",
