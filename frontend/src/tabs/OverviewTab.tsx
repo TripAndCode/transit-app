@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
-import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import { useAgencies, useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import { clearLastAgency } from "../api/lastAgency";
 import { useAgencyId } from "../api/useAgencyId";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { useScope } from "../api/scope";
@@ -29,6 +31,8 @@ export function OverviewTab() {
   const agencyId = useAgencyId();
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(agencyId);
+  const navigate = useNavigate();
+  const agency = useAgencies().data?.find((a) => a.agency_id === agencyId);
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
@@ -89,6 +93,20 @@ export function OverviewTab() {
           data={data}
           hasContent={hasAnyData}
           empty={
+            agency && !agency.latest_data_date ? (
+              <EmptyState
+                title={t("overview.never_collected", { agency: agency.agency_name })}
+                recoveries={[
+                  {
+                    label: t("overview.choose_another_agency"),
+                    onClick: () => {
+                      clearLastAgency();
+                      navigate("/");
+                    },
+                  },
+                ]}
+              />
+            ) : (
             <EmptyState
               title={t("overview.empty")}
               reasons={buildFilterCtxReasons(ctx, t)}
@@ -100,6 +118,7 @@ export function OverviewTab() {
                 t,
               })}
             />
+            )
           }
           skeleton={
             <>

@@ -39,7 +39,10 @@
   },
   "onboarding": {
     "subtitle": "あなたの事業者を選んでください",
-    "no_agencies": "事業者がまだ登録されていません。"
+    "no_agencies": "事業者がまだ登録されていません。",
+    "data_through": "{{date}}までのデータ",
+    "no_data_yet": "まだデータを収集していません",
+    "search": "事業者を検索"
   },
   "landing": {
     "hero": {
@@ -320,7 +323,9 @@
     "empty": "この期間の観測データがありません。期間を広げてください。",
     "concentration_explainer": "各路線の遅延合計が全体に占める割合です。下のローレンツ曲線は偏りを表し、点線 (均等に遅延した場合) から離れるほど、少数の路線に遅延が集中していることを意味します。",
     "peak_explainer": "時間帯別 (0〜23時) の平均遅延を平日と土日祝に分けて表示します。通勤ピークと週末の傾向を比較できます。",
-    "service_split_explainer": "平日と土日祝の平均遅延の比較です。下の日別推移から、差が恒常的か一時的かを確認できます。"
+    "service_split_explainer": "平日と土日祝の平均遅延の比較です。下の日別推移から、差が恒常的か一時的かを確認できます。",
+    "never_collected": "{{agency}}のデータはまだ収集していません。",
+    "choose_another_agency": "別の事業者を選ぶ"
   },
   "markdownMermaid": {
     "diagram_fallback_label": "図"
