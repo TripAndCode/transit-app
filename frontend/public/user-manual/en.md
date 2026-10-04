@@ -162,6 +162,12 @@ What the columns mean:
 - **p90**: the delay in the worst 10% of cases (a rough gauge of "how bad it gets on a bad day").
 - **Samples**: the number of observations behind that row (fewer samples = lower confidence).
 
+The ranking leaves out routes observed fewer than 100 times in the period, so a rarely run
+special-day variant can't top it on a handful of trips. Tick **Include routes observed fewer
+than 100 times** to rank them too; their rows carry a "few data" badge. When more routes
+qualify than the table shows, the line under it says how many ("Showing 100 of 285"), and
+**Show all** lists the rest.
+
 The "⬇ CSV" button in the top-right downloads this table as-is.
 
 ### 5-5. Trend report — seeing when delays happen

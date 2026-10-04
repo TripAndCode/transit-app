@@ -482,3 +482,81 @@ describe("AnalysisTab evidence panels", () => {
     expect(screen.queryByText("weather-panel")).toBeNull();
   });
 });
+
+describe("AnalysisTab ranking coverage", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const TOGGLE = { name: "Include routes observed fewer than 100 times" };
+
+  function rankingResponse(overrides: Record<string, unknown> = {}): ReportResponse {
+    return {
+      ...reportResponse("ranking"),
+      rows: [
+        ["39061", "平日", 5.2, 3.1, 8.4, 120], // i18n-ignore: GTFS service name
+        ["39062", "平日", 4.0, 3.0, 6.0, 110], // i18n-ignore: GTFS service name
+      ],
+      rows_total: 5,
+      reliable_min_samples: 100,
+      ...overrides,
+    } as ReportResponse;
+  }
+
+  function setup(path: string, response: ReportResponse, reportTypes: readonly string[] = ["ranking", "on_time"]) {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({
+      data: reportTypes.map((type) => reportMeta(type as ReportType)),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    const useReport = vi
+      .spyOn(hooks, "useReport")
+      .mockReturnValue({ data: response, isFetching: false, error: null, refetch: vi.fn() } as never);
+    const { router } = renderAnalysis(path, reportTypes);
+    return { useReport, router };
+  }
+
+  it("ranks only well-observed routes until asked to include the rest", async () => {
+    const { useReport, router } = setup("/agencies/1/analysis/rider?report=ranking", rankingResponse());
+    const toggle = screen.getByRole("checkbox", TOGGLE);
+    expect(toggle).not.toBeChecked();
+    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeSparse: false });
+    await userEvent.click(toggle);
+    expect(new URLSearchParams(router.state.location.search).get("sparse")).toBe("1");
+    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ includeSparse: true });
+    expect(screen.getByRole("checkbox", TOGGLE)).toBeChecked();
+  });
+
+  it("keeps the toggle in reach when no route clears the floor", () => {
+    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ rows: [], rows_total: 0 }));
+    expect(screen.getByRole("checkbox", TOGGLE)).toBeInTheDocument();
+    expect(screen.getByText("No matching data")).toBeInTheDocument();
+  });
+
+  it("says how much of the ranking is shown, and shows the rest on request", async () => {
+    const { useReport } = setup("/agencies/1/analysis/rider?report=ranking", rankingResponse());
+    expect(screen.getByText("Showing 2 of 5")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(useReport.mock.calls.at(-1)?.[3]).toMatchObject({ limit: 500 });
+    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
+  });
+
+  it("states no count when every ranked row is on screen", () => {
+    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse({ rows_total: 2 }));
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
+  });
+
+  it("exports the rows the table shows", () => {
+    setup("/agencies/1/analysis/rider?report=ranking&sparse=1", rankingResponse());
+    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_sparse=1(&|$)/);
+  });
+
+  it("asks a report without a ranking floor for nothing extra", () => {
+    const { useReport } = setup("/agencies/1/analysis/rider?report=on_time&sparse=1", reportResponse("on_time"));
+    expect(screen.queryByRole("checkbox", TOGGLE)).not.toBeInTheDocument();
+    expect(useReport.mock.calls.at(-1)?.[3]?.includeSparse).toBeFalsy();
+    expect(screen.queryByRole("link", { name: /CSV/ })?.getAttribute("href") ?? "").not.toContain("include_sparse");
+  });
+});

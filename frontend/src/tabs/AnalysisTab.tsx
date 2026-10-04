@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useForecastOverview, useReport, useReports } from "../api/hooks";
+import {
+  REPORT_ROWS_MAX,
+  reportQueryString,
+  useForecastOverview,
+  useReport,
+  useReports,
+  type ReportOptions,
+} from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { scopeToQueryString, useScope, type Scope } from "../api/scope";
 import type { DwellRunPayload, TrendPayload } from "../api/types";
@@ -37,6 +44,20 @@ import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { ServiceNote } from "../components/ServiceNote";
+import { RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
+
+const RANKING_TYPES = new Set(["ranking", "ranking_best"]);
+
+/** A ranking's coverage options; every other report takes none, and the API
+ *  refuses them there. */
+function rankingOptions(
+  reportType: string | null | undefined,
+  includeSparse: boolean,
+  allRowsFor: string | null,
+): ReportOptions | undefined {
+  if (reportType == null || !RANKING_TYPES.has(reportType)) return undefined;
+  return { includeSparse, limit: allRowsFor === reportType ? REPORT_ROWS_MAX : undefined };
+}
 
 /** One screen's reports: the list shows only `reportTypes`, and the open
  *  report is the `report` search param when it belongs to them, else
@@ -64,8 +85,25 @@ export function AnalysisTab({
       return next;
     });
   }
+  const includeSparse = searchParams.get("sparse") === "1";
+  function setIncludeSparse(on: boolean) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (on) next.set("sparse", "1");
+      else next.delete("sparse");
+      return next;
+    });
+  }
+  // "Show all" belongs to the ranking it was asked on; another report opens
+  // at the default length.
+  const [allRowsFor, setAllRowsFor] = useState<string | null>(null);
   const list = useReports(id);
-  const detail = useReport(id, reportType && reportType !== "route_forecast" ? reportType : null, ctx);
+  const detail = useReport(
+    id,
+    reportType && reportType !== "route_forecast" ? reportType : null,
+    ctx,
+    rankingOptions(reportType, includeSparse, allRowsFor),
+  );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
   const isAdmin = useIsAdmin();
   // route_forecast is served by the forecast endpoint, so its own map
@@ -147,7 +185,10 @@ export function AnalysisTab({
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
               {detail.data.report_type !== "trend" && (
                 <a
-                  href={`/api/${id}/reports/${detail.data.report_type}?${scopeToQueryString(ctx)}&format=csv`}
+                  href={`/api/${id}/reports/${detail.data.report_type}?${reportQueryString(
+                    ctx,
+                    rankingOptions(detail.data.report_type, includeSparse, allRowsFor),
+                  )}&format=csv`}
                   download
                   style={{
                     fontSize: 12,
@@ -169,15 +210,28 @@ export function AnalysisTab({
               </div>
             )}
             {detail.data.definition && <DefinitionMetaBlock definition={detail.data.definition} />}
+            {detail.data.reliable_min_samples != null && (
+              <SparseToggle checked={includeSparse} floor={detail.data.reliable_min_samples} onChange={setIncludeSparse} />
+            )}
             {detail.data.report_type === "trend" ? (
               <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
               <DwellRunBlock payload={detail.data.rows[0]} />
             ) : detail.data.rows.length > 0 ? (
-              <ReportTable
-                reportType={detail.data.report_type}
-                rows={detail.data.rows}
-              />
+              <>
+                <ReportTable
+                  reportType={detail.data.report_type}
+                  rows={detail.data.rows}
+                  minSamples={detail.data.reliable_min_samples}
+                />
+                {detail.data.rows_total != null && detail.data.rows_total > detail.data.rows.length && (
+                  <RowsShown
+                    shown={detail.data.rows.length}
+                    total={detail.data.rows_total}
+                    onShowAll={allRowsFor === reportType ? undefined : () => setAllRowsFor(reportType)}
+                  />
+                )}
+              </>
             ) : (
               <EmptyState
                 title={t("reports.no_data.title")}

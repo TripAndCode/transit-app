@@ -13,3 +13,5 @@
   .analysis-insights { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border-subtle); }
 }
 .trend-single-day { margin: 12px 0 20px; color: var(--text-secondary); font-size: var(--text-sm); }
+.ranking-sparse-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0; color: var(--text-secondary); font-size: var(--text-sm); }
+.ranking-rows-shown { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; color: var(--text-tertiary); font-size: var(--text-xs); }

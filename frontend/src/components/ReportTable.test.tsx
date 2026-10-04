@@ -11,11 +11,14 @@ function mockRoutes(data: RouteRecord[]) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data, isLoading: false } as never);
 }
 
-function renderTable(rows: unknown[][], reportType = "ranking") {
+function renderTable(rows: unknown[][], reportType = "ranking", minSamples?: number) {
   return renderWithProviders(
     <MemoryRouter initialEntries={["/agencies/1/analysis"]}>
       <Routes>
-        <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} />} />
+        <Route
+          path="/agencies/:agencyId/analysis"
+          element={<ReportTable reportType={reportType} rows={rows} minSamples={minSamples} />}
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -272,5 +275,31 @@ describe("ReportTable day-group reports", () => {
     mockRoutes([]);
     renderTable([["33101", "平日", "平日", 3.4, 120]], "dow_weekday");
     expect(screen.getByText(/Service: the timetable the trip ran on/)).toBeInTheDocument();
+  });
+});
+
+describe("ReportTable thinly observed rows", () => {
+  beforeEach(() => mockRoutes([]));
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("marks a row observed fewer times than the reliable floor with a few-data badge", () => {
+    renderTable(
+      [
+        ["SPARSE", "平日", 9.1, 8.0, 12.0, 30], // i18n-ignore: GTFS service name
+        ["SOLID", "平日", 2.0, 1.5, 4.0, 150], // i18n-ignore: GTFS service name
+      ],
+      "ranking",
+      100,
+    );
+    const [sparseRow, solidRow] = screen.getAllByRole("row").slice(1);
+    expect(within(sparseRow).getByText("few data")).toHaveClass("caveat-badge");
+    expect(within(solidRow).queryByText("few data")).not.toBeInTheDocument();
+  });
+
+  it("marks nothing when the report states no floor", () => {
+    renderTable([["SPARSE", "平日", 9.1, 8.0, 12.0, 30]]); // i18n-ignore: GTFS service name
+    expect(screen.queryByText("few data")).not.toBeInTheDocument();
   });
 });
