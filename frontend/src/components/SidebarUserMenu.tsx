@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useSession } from "../api/auth";
+import { useLogout, useSession } from "../api/auth";
 import { useConfig } from "../api/config";
 import { useTheme } from "../styles/useTheme";
 import type { Theme } from "../styles/theme";
@@ -44,6 +44,14 @@ const selectedItemStyle: CSSProperties = {
   background: "var(--accent-soft)",
 };
 
+/** A visible heading over a set of choices in the menu, which also names
+ *  the set for assistive tech. */
+const groupLabelStyle: CSSProperties = {
+  padding: "6px 9px 2px",
+  fontSize: "var(--text-xs)",
+  color: "var(--text-tertiary)",
+};
+
 /** Sidebar footer control: collapses what used to be five separate header
  *  controls (Live/sign-in/language/theme/settings) into one avatar-trigger
  *  popover, following the standard "user menu" pattern instead of a row of
@@ -54,6 +62,9 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const { data: session, isLoading: sessionLoading } = useSession();
   const [theme, setTheme] = useTheme();
   const toast = useToast();
+  const logout = useLogout();
+  const languageLabelId = useId();
+  const appearanceLabelId = useId();
   const [open, setOpen] = useState(false);
   const { pending: switchingLocale, switchTo } = useLocaleSwitch(() => toast.show(t("common.language_switch_error")));
   const ref = useRef<HTMLDivElement>(null);
@@ -81,7 +92,6 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   if (sessionLoading || configLoading) return null;
 
   const current = (i18n.resolvedLanguage ?? "ja") as Locale;
-  const other = SUPPORTED_LOCALES.find((l) => l !== current) ?? current;
   const displayName = session ? session.name || session.email : t("common.guest");
   const initial = displayName.slice(0, 1).toUpperCase();
 
@@ -113,27 +123,42 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                 <span>{t("common.login")}</span>
               </Link>
             ))}
-          {/* aria-disabled rather than disabled: disabling the focused
-              button would drop keyboard focus out of the open menu. */}
-          <button
-            type="button"
-            role="menuitem"
-            aria-busy={switchingLocale}
-            aria-disabled={switchingLocale}
-            onClick={() => void switchTo(other)}
-            style={switchingLocale ? { ...popItemStyle, cursor: "default" } : popItemStyle}
-          >
-            <span>{t("common.language_aria")}</span>
-            <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
-              {switchingLocale && <Spinner size={12} inline />}
-              {LOCALE_NAMES[current]}
-            </span>
-          </button>
+          <div role="group" aria-labelledby={languageLabelId}>
+            <div id={languageLabelId} style={groupLabelStyle}>
+              {t("common.language_aria")}
+            </div>
+            {SUPPORTED_LOCALES.map((lng) => {
+              const loading = switchingLocale && lng !== current;
+              return (
+                // aria-disabled rather than disabled: disabling the focused
+                // button would drop keyboard focus out of the open menu.
+                <button
+                  key={lng}
+                  type="button"
+                  role="menuitemradio"
+                  lang={lng}
+                  aria-checked={lng === current}
+                  aria-busy={loading}
+                  aria-disabled={loading}
+                  onClick={() => {
+                    if (lng !== current) void switchTo(lng);
+                  }}
+                  style={lng === current ? selectedItemStyle : loading ? { ...popItemStyle, cursor: "default" } : popItemStyle}
+                >
+                  <span>{LOCALE_NAMES[lng]}</span>
+                  {loading && <Spinner size={12} inline />}
+                </button>
+              );
+            })}
+          </div>
           {/* Three states, not a two-way toggle: "system" has to be reachable
               and distinguishable from whichever theme it currently resolves
               to. menuitemradio (not radio) because these live inside a menu,
               where radio is not a permitted child role. */}
-          <div role="group" aria-label={t("common.theme_aria")}>
+          <div role="group" aria-labelledby={appearanceLabelId}>
+            <div id={appearanceLabelId} style={groupLabelStyle}>
+              {t("common.theme_aria")}
+            </div>
             {THEME_OPTIONS.map((option) => (
               <button
                 key={option}
@@ -158,6 +183,19 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           >
             <span>{t("header.settings_aria")}</span>
           </button>
+          {config?.auth_enabled && session && (
+            <>
+              <div role="separator" style={{ height: 1, margin: "6px 0", background: "var(--border-soft)" }} />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => logout.mutate(undefined, { onSuccess: () => window.location.assign("/welcome") })}
+                style={popItemStyle}
+              >
+                <span>{t("account.logout")}</span>
+              </button>
+            </>
+          )}
         </div>
       )}
       <button

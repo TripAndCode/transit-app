@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
@@ -8,6 +8,8 @@ import i18n from "../i18n";
 import ja from "../i18n/locales/ja.json";
 import { ToastProvider } from "./ui/Toast";
 import { SidebarUserMenu } from "./SidebarUserMenu";
+import * as auth from "../api/auth";
+import * as config from "../api/config";
 
 function renderMenu(onOpenSettings = vi.fn()) {
   // retry: false — without a real backend, /api/me and /api/config fail
@@ -49,7 +51,7 @@ function holdJapaneseFetch({ succeeds }: { succeeds: boolean }) {
 async function openLanguageToggle() {
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "Account menu" }));
-  return { user, toggle: screen.getByRole("menuitem", { name: /English/ }) };
+  return { user, toggle: screen.getByRole("menuitemradio", { name: /日本語/ }) };
 }
 
 describe("SidebarUserMenu", () => {
@@ -88,9 +90,7 @@ describe("SidebarUserMenu", () => {
     renderMenu();
     const trigger = await screen.findByRole("button", { name: "Account menu" });
     await user.click(trigger);
-    // Baseline is English; the row shows the CURRENT locale ("English") and
-    // clicking it switches to the other supported one ("ja").
-    await user.click(screen.getByRole("menuitem", { name: /English/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: /日本語/ }));
     await waitFor(() => expect(i18n.resolvedLanguage).toBe("ja"));
     expect(screen.queryByRole("status")).toBeNull();
   });
@@ -147,7 +147,7 @@ describe("SidebarUserMenu", () => {
     renderMenu();
     const trigger = await screen.findByRole("button", { name: "Account menu" });
     await user.click(trigger);
-    const options = screen.getAllByRole("menuitemradio");
+    const options = within(screen.getByRole("group", { name: "Appearance" })).getAllByRole("menuitemradio");
     expect(options.map((o) => o.textContent)).toEqual(["System", "Light", "Dark"]);
     expect(options.map((o) => o.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
   });
@@ -175,7 +175,9 @@ describe("SidebarUserMenu", () => {
     ] as const) {
       await user.click(screen.getByRole("menuitemradio", { name: label }));
       expect(localStorage.getItem("transit.theme")).toBe(value);
-      const checked = screen.getAllByRole("menuitemradio").filter((o) => o.getAttribute("aria-checked") === "true");
+      const checked = within(screen.getByRole("group", { name: "Appearance" }))
+        .getAllByRole("menuitemradio")
+        .filter((o) => o.getAttribute("aria-checked") === "true");
       expect(checked.map((o) => o.textContent)).toEqual([label]);
     }
   });
@@ -203,5 +205,48 @@ describe("SidebarUserMenu", () => {
     const trigger = await screen.findByRole("button", { name: "Account menu" });
     await user.click(trigger);
     expect(screen.queryByRole("menuitem", { name: "Sign in" })).toBeNull();
+  });
+
+  it("shows both languages under a visible label, the current one checked", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    const languages = screen.getByRole("group", { name: "Language" });
+    const options = within(languages).getAllByRole("menuitemradio");
+    expect(options.map((o) => o.textContent)).toEqual(["日本語", "English"]);
+    expect(options.map((o) => o.getAttribute("aria-checked"))).toEqual(["false", "true"]);
+    expect(screen.getByText("Language")).toBeVisible();
+  });
+
+  it("heads the theme choices with a visible Appearance label", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    expect(screen.getByText("Appearance")).toBeVisible();
+  });
+
+  it("signs out from the menu when signed in", async () => {
+    const mutate = vi.fn();
+    vi.spyOn(config, "useConfig").mockReturnValue({ data: { auth_enabled: true }, isLoading: false } as never);
+    vi.spyOn(auth, "useSession").mockReturnValue({
+      data: { user_id: 1, email: "yo@example.com", name: "Yo", avatar_url: null, role: "user", identities: [] },
+      isLoading: false,
+    } as never);
+    vi.spyOn(auth, "useLogout").mockReturnValue({ mutate, isPending: false } as never);
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(mutate).toHaveBeenCalledOnce();
+    // The spies above call no hooks; unmount before afterEach restores the
+    // real ones, or a re-render would run a different hook sequence.
+    cleanup();
+  });
+
+  it("offers no sign-out to a guest", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    expect(screen.queryByRole("menuitem", { name: "Sign out" })).toBeNull();
   });
 });
