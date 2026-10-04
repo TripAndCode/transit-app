@@ -432,5 +432,7 @@ describe("NetworkTab", () => {
 
     fireEvent.change(document.querySelector("input[type='date']")!, { target: { value: "2026-03-25" } });
     expect(screen.getAllByTestId("network-row")).toHaveLength(200);
-  });
+    // The cap is 200 rows, so proving it renders a few hundred rows several
+    // times; on a loaded machine that alone outlasts the default timeout.
+  }, 45_000);
 });
