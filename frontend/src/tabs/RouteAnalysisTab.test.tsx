@@ -125,7 +125,7 @@ describe("RouteAnalysisTab", () => {
     } as never);
     renderTab("/agencies/1/route-analysis?routes=R1&from=2026-09-01&to=2026-09-28");
     fireEvent.click(screen.getByRole("button", { name: "Save analysis" }));
-    expect(readAnalyses()[0].title).toBe("R1, 9/1 – 9/28, every day, all day, within 1 min");
+    expect(readAnalyses()[0].title).toBe("R1, 9/1 – 9/28, every day, all hours, within 1 min");
   });
 });
 
