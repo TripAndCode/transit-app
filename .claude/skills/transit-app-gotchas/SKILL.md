@@ -8,8 +8,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
 ## Databases
 - The raw GTFS-RT `updates` fact table (hundreds of millions of rows across 4
   agencies, and growing) lives in ClickHouse, not Postgres. A Postgres `updates`
-  table is kept only as a rollback safety net: nothing ingests into it and no
-  production code reads it, so it is not a usable data source.
+  table is kept only as a rollback safety net: no production code writes to or
+  reads from it, so it is not a usable data source.
   `agg_*`/OLTP/PostGIS/pgvector stay on Postgres.
 - Dev Postgres read-only rule, and which port actually holds the data (read
   `DATABASE_URL`; it need not be `compose.yml`'s `:5433`): canonical in `AGENTS.md`.

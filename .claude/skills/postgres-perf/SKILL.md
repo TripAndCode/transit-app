@@ -8,9 +8,9 @@ description: Performance patterns and known traps for this repo's Postgres/PostG
 Postgres (major version pinned by `db/Dockerfile`) + PostGIS + pgvector + pg_trgm holds `agg_*`/OLTP/PostGIS/pgvector data.
 The raw GTFS-RT `updates` fact table (hundreds of millions of rows across 4
 agencies, and growing) lives in ClickHouse
-instead. A Postgres `updates` table is kept only as a rollback safety net, and no
-production code reads it. MergeTree/partition-key/
-ORDER-BY-key advice applies to `updates` — its `ORDER BY (agency_id,
+instead (a Postgres `updates` table is kept only as a rollback safety net; no
+production code writes to or reads from it). MergeTree/partition-key/
+ORDER-BY-key advice applies to the ClickHouse `updates` — its `ORDER BY (agency_id,
 captured_at, route_code, trip_id, stop_sequence)` is why route-scoped probes need
 a date bound (see below) and why `route_code` needed `allow_nullable_key=1` to
 become Nullable.
