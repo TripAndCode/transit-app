@@ -512,7 +512,8 @@
     "save_current": "Save this view…",
     "empty": "No saved views yet",
     "save_title": "Save this view",
-    "name_label": "Name"
+    "name_label": "Name",
+    "load_error": "Couldn't load your saved views."
   },
   "filters": {
     "range": {

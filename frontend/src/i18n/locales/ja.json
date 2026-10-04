@@ -512,7 +512,8 @@
     "save_current": "このビューを保存…",
     "empty": "保存したビューはまだありません",
     "save_title": "このビューを保存",
-    "name_label": "名前"
+    "name_label": "名前",
+    "load_error": "保存したビューを読み込めませんでした。"
   },
   "filters": {
     "range": {

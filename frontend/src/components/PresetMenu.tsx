@@ -5,6 +5,7 @@ import { useSession } from "../api/auth";
 import { apiGet, apiPost, formatApiError } from "../api/client";
 import type { Scope } from "../api/scope";
 import { Modal } from "./Modal";
+import { Skeleton } from "./Skeleton";
 import { Tooltip } from "./Tooltip";
 import { ScopePopover } from "./scope/ScopePopover";
 
@@ -31,7 +32,7 @@ export function PresetMenu({
   const titleId = useId();
   const nameId = useId();
 
-  const { data: presets } = useQuery({
+  const { data: presets, isError: presetsFailed } = useQuery({
     queryKey: ["presets", agencyId],
     queryFn: ({ signal }) => apiGet<Preset[]>(`/api/me/presets?agency_id=${agencyId}`, { signal }),
     enabled: !!session,
@@ -85,7 +86,11 @@ export function PresetMenu({
       </button>
       {menuOpen && (
         <ScopePopover label={t("presets.label")} onClose={() => setMenuOpen(false)} returnFocusTo={triggerRef}>
-          {presets && presets.length > 0 ? (
+          {presetsFailed ? (
+            <p className="scope-note">{t("presets.load_error")}</p>
+          ) : presets == null ? (
+            <Skeleton height={28} />
+          ) : presets.length > 0 ? (
             <ul className="preset-list">
               {presets.map((p) => (
                 <li key={p.preset_id}>

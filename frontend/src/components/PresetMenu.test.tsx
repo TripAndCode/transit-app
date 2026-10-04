@@ -58,6 +58,23 @@ describe("PresetMenu (signed in)", () => {
     expect(await screen.findByText("No saved views yet")).toBeInTheDocument();
   });
 
+  it("claims no empty list while the saved views are still loading", async () => {
+    vi.spyOn(auth, "useSession").mockReturnValue({ data: { user_id: 1 } } as never);
+    vi.spyOn(client, "apiGet").mockReturnValue(new Promise(() => {}) as never);
+    renderWithProviders(<PresetMenu agencyId={1} currentRangeCtx={{ ...SCOPE }} onSelect={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Saved views" }));
+    expect(screen.queryByText("No saved views yet")).toBeNull();
+  });
+
+  it("says when the saved views couldn't be loaded", async () => {
+    vi.spyOn(auth, "useSession").mockReturnValue({ data: { user_id: 1 } } as never);
+    vi.spyOn(client, "apiGet").mockRejectedValue(new Error("network down"));
+    renderWithProviders(<PresetMenu agencyId={1} currentRangeCtx={{ ...SCOPE }} onSelect={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Saved views" }));
+    expect(await screen.findByText("Couldn't load your saved views.")).toBeInTheDocument();
+    expect(screen.queryByText("No saved views yet")).toBeNull();
+  });
+
   it("names a new view in a labelled dialog that Escape closes", async () => {
     signedIn([]);
     const user = userEvent.setup();
