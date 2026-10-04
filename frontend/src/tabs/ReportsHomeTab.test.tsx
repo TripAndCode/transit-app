@@ -87,6 +87,13 @@ describe("ReportsHomeTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("says the routes list leaves out routes observed too few times to trust", () => {
+    const ranking = { ...rankingResponse([["101", "平日", 2, 1, 3, 400] as unknown as RankingRow]), reliable_min_samples: 100 };
+    mockReports(trendResponse(), ranking);
+    renderTab();
+    expect(screen.getByText("Routes observed fewer than 100 times in the period are left out.")).toBeInTheDocument();
+  });
+
   it("opens a ranking row in its route's dossier and the detailed reports on Time", () => {
     mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 4] as unknown as RankingRow]));
     renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07");

@@ -33,7 +33,7 @@ ON_TIME_PRESETS: dict[str, tuple[int | None, int | None]] = {
 }
 
 
-# The smallest group any report ranks: percentiles over fewer rows say nothing.
+# The smallest group compute_ranking ranks: percentiles over fewer rows say nothing.
 MIN_GROUP_SAMPLES = 21
 # The reports tab's ranking floor. A special-day variant observed a few dozen
 # times would otherwise top a ranking of routes observed hundreds of times.
