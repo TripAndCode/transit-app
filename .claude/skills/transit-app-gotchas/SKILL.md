@@ -7,9 +7,9 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
 
 ## Databases
 - The raw GTFS-RT `updates` fact table (hundreds of millions of rows across 4
-  agencies, and growing) lives in ClickHouse, not Postgres — migrated; the old
-  Postgres `updates` table still exists as a rollback safety net but has zero
-  production readers.
+  agencies, and growing) lives in ClickHouse, not Postgres. A Postgres `updates`
+  table is kept only as a rollback safety net: no production code writes to or
+  reads from it, so it is not a usable data source.
   `agg_*`/OLTP/PostGIS/pgvector stay on Postgres.
 - Dev Postgres read-only rule, and which port actually holds the data (read
   `DATABASE_URL`; it need not be `compose.yml`'s `:5433`): canonical in `AGENTS.md`.
@@ -17,15 +17,14 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   demo needs a read-only `SELECT` of one agency + a few days from dev ClickHouse
   loaded into a throwaway ClickHouse, plus the Postgres rows that agency needs
   (agency, static GTFS) in a throwaway Postgres on a spare port, then migrate +
-  analyze there. The old Postgres `updates` table no longer receives ingest and is
-  not a usable source.
+  analyze there.
 - The same read-only rule applies to dev ClickHouse (`docker compose exec
   clickhouse`, hundreds of millions of real rows across 4 agencies). `make
   ch-bootstrap` writes schema changes; agents must not run it against the dev
   instance. `db/clickhouse/bootstrap.py` describes operator maintenance, not an
   exception to the agent rule.
-- Tests use throwaway Postgres on :5544 AND throwaway ClickHouse on :8124 —
-  BOTH are required for any test touching `updates` (which is most of
+- Tests use throwaway Postgres on :5544 and throwaway ClickHouse on :8124;
+  both are required for any test touching `updates` (which is most of
   `tests/api/`, `tests/pipeline/`, `tests/query/`). Postgres image built from
   `db/`, which layers PostGIS and pgvector onto the official multi-architecture
   `postgres` base — a stock `postgres` or bare pgvector image lacks PostGIS and
@@ -44,7 +43,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
     CLICKHOUSE_USER=transit CLICKHOUSE_PASSWORD=transit CLICKHOUSE_DATABASE=transit_test \
     poetry run pytest
   ```
-  Omitting `RUN_CH_INTEGRATION=1` doesn't fail the suite — it silently SKIPS
+  Omitting `RUN_CH_INTEGRATION=1` doesn't fail the suite — it silently skips
   every ClickHouse-gated test instead, which is easy to mistake for "all
   passing." `make test`/`make check` are covered: both go through
   `scripts/run_integration_tests.sh`, which exports it. A bare `poetry run
@@ -59,7 +58,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `scripts/run_integration_tests.sh` itself also accepts `TEST_PG_PORT`/
   `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
   for a caller that starts its own containers by some other means.
-- `run_full_ci.sh` mirrors only the backend `test` job and does NOT measure pytest
+- `run_full_ci.sh` mirrors only the backend `test` job and does not measure pytest
   coverage by default, matching `ci.yml`, which measures backend coverage on `main`
   pushes only since nothing gates on that number. Pass `COVERAGE=1` when the number
   itself is what you want. The instrumentation adds minutes per run, and this gate is
@@ -73,7 +72,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   editing it.
 
 ## Frontend i18n
-- Every user-visible string goes through `t()` with keys in BOTH
+- Every user-visible string goes through `t()` with keys in both
   `frontend/src/i18n/locales/{ja,en}.json` (key parity is CI-linted).
 - Kana in `.ts/.tsx` source fails `lint:i18n-strings`; suppress intentional cases
   with `i18n-ignore`.
@@ -116,7 +115,7 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   worktree is visible (and droppable) from every other worktree and the main
   checkout, and a dropped stash is recoverable only until `git gc` prunes it.
   Never run `git stash drop`/`clear`/`pop`; use a WIP commit to set work aside.
-- Whether a push runs CI is decided by ONE commit: the tip of that push.
+- Whether a push runs CI is decided by one commit: the tip of that push.
   GitHub evaluates the skip trailer once per push event against that
   message alone — not retroactively across the push's other commits — so a
   multi-commit push whose tip omits it runs CI however many of the earlier
