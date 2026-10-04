@@ -32,6 +32,10 @@ export function ConcentrationBar({
 
   const visibleRoutes = concentration.top_routes.slice(0, limit);
   const totalTop = visibleRoutes.reduce((s, r) => s + r.share_pct, 0);
+  // Bars scale to the largest share shown, not to 100%: shares of a few
+  // percent would otherwise draw as dots. The figure beside each bar keeps
+  // the absolute share.
+  const maxShare = Math.max(0, ...visibleRoutes.map((r) => r.share_pct));
   // When the slice doesn't cover all top routes, fold the unsliced
   // remainder into rest_share_pct + rest_route_count for an honest
   // "the remaining N routes carry M%" line.
@@ -133,7 +137,7 @@ export function ConcentrationBar({
               <div
                 className="ov-pareto-fill"
                 style={{
-                  width: `${r.share_pct}%`,
+                  width: `${maxShare > 0 ? (r.share_pct / maxShare) * 100 : 0}%`,
                   background: "var(--trend-bad)",
                   opacity,
                 }}

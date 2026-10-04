@@ -252,7 +252,7 @@
     "concentration_rest_one": "Remaining {{count}} route: {{rest}}%",
     "concentration_rest_other": "Remaining {{count}} routes: {{rest}}%",
     "section_peak_hour": "Worst hour of day",
-    "peak_hour_callout": "Peak: {{range}} ({{avg}} min avg).",
+    "peak_hour_callout": "Peak {{range}} ({{avg}} min average)",
     "section_service_split": "By service day",
     "hero_row": {
       "avg_delay_label": "Average delay · {{range}}",
@@ -280,7 +280,13 @@
     },
     "routes_to_check": {
       "title": "Routes to check now",
-      "empty": "No routes need attention"
+      "empty": "No routes need attention",
+      "band_severe_one": "{{count}} route averaging more than {{min}} min late",
+      "band_severe_other": "{{count}} routes averaging more than {{min}} min late",
+      "band_moderate_one": "{{count}} route averaging {{min}}–{{max}} min late",
+      "band_moderate_other": "{{count}} routes averaging {{min}}–{{max}} min late",
+      "band_mild_one": "{{count}} route averaging {{min}}–{{max}} min late",
+      "band_mild_other": "{{count}} routes averaging {{min}}–{{max}} min late"
     },
     "concentration": {
       "single_route": "{{name}} accounts for 100% — only 1 route observed.",
@@ -288,7 +294,7 @@
       "lorenz_caption": "Top 20% of routes carry {{pct}}% of the delay."
     },
     "service_split": {
-      "diff": "Δ: {{diff}} min ({{pct}}%)",
+      "diff": "Difference: {{diff}} min ({{pct}}%)",
       "story_weekday_higher": "Weekdays are {{ratio}}× the weekend delay.",
       "story_weekend_higher": "Weekends are {{ratio}}× the weekday delay.",
       "story_same": "Weekday and weekend nearly identical.",
@@ -298,7 +304,8 @@
       "max_label": "Max {{avg}} min",
       "avg_label": "Avg",
       "weekday_empty": "No weekday data.",
-      "weekend_empty": "No weekend data."
+      "weekend_empty": "No weekend data.",
+      "spread_legend": "Shaded: hours above the day's average"
     },
     "modal": {
       "concentration": "Delay concentration (top 20)",
