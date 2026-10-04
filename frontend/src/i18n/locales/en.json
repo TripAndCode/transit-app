@@ -1147,8 +1147,8 @@
   "admin": {
     "users": {
       "table_label": "Users",
-      "title": "User management",
-      "search_placeholder": "Search by email / name",
+      "title": "Users",
+      "search_placeholder": "Email or name",
       "col": {
         "email": "Email",
         "name": "Name",
@@ -1185,7 +1185,7 @@
       },
       "view": {
         "all": "All",
-        "pending": "Pending approval",
+        "pending": "Awaiting AI access",
         "admin": "Admins",
         "suspended": "Suspended"
       },
@@ -1260,7 +1260,7 @@
       "ops": "Ops",
       "architecture": "Architecture",
       "audit": "Audit log",
-      "flags": "Flags",
+      "flags": "Feature flags",
       "board": "Control board",
       "group": {
         "operations": "Operations",
