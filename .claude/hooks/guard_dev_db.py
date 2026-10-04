@@ -73,10 +73,42 @@ CONTAINER = re.compile(r"[a-z0-9_.-]*-(db|clickhouse)-\d+")
 DEV_VOLUME = re.compile(r"(?:[a-z0-9_.-]+_)?transit_(?:pgdata|chdata)")
 # `-v`/`--volumes` on `docker rm`, alone or folded into a short-flag cluster (`-fv`).
 VOLUME_FLAG = re.compile(r"--volumes|-[a-z]*v[a-z]*")
+# Docker CLI global options that take their value as the next token, so the
+# subcommand is read after the value rather than mistaken for it.
+DOCKER_VALUE_FLAGS = {"-c", "--context", "-h", "--host", "--config", "-l", "--log-level"}
 # The Makefile's DATABASE_URL default is the dev database, and so is the shell's
 # in a `make serve` session: a command that expands the variable is aimed there
 # unless it also names a throwaway port.
 DATABASE_URL_REF = re.compile(r"\$\{?DATABASE_URL\b")
+
+
+def normalise_docker(tokens: list[str]) -> list[str]:
+    """Spell the standalone `docker-compose` binary as `docker compose`, and a
+    path-invoked binary by its bare name, so one set of checks covers every
+    spelling of the same command."""
+    out: list[str] = []
+    for tok in tokens:
+        name = tok.rsplit("/", 1)[-1]
+        if name == "docker-compose":
+            out += ["docker", "compose"]
+        elif name == "docker":
+            out.append(name)
+        else:
+            out.append(tok)
+    return out
+
+
+def docker_subcommands(lowered: list[str]) -> list[list[str]]:
+    """The first two words after each `docker`, past its global options."""
+    found = []
+    for i, tok in enumerate(lowered):
+        if tok != "docker":
+            continue
+        j = i + 1
+        while j < len(lowered) and lowered[j].startswith("-"):
+            j += 2 if lowered[j] in DOCKER_VALUE_FLAGS else 1
+        found.append(lowered[j : j + 2])
+    return found
 
 
 def destroys_dev_volume(lowered: list[str]) -> bool:
@@ -90,7 +122,11 @@ def destroys_dev_volume(lowered: list[str]) -> bool:
         return any(DEV_VOLUME.fullmatch(tok) for tok in lowered)
     if "prune" in lowered:
         return "volume" in lowered or "--volumes" in lowered
-    if "rm" in lowered:
+    # Docker's own `rm`, not an `rm` run inside a container by `docker exec`.
+    if any(
+        words[:1] == ["rm"] or words in (["container", "rm"], ["container", "remove"])
+        for words in docker_subcommands(lowered)
+    ):
         names_dev = any(tok in DEV_CONTAINERS or CONTAINER.fullmatch(tok) for tok in lowered)
         return names_dev and any(VOLUME_FLAG.fullmatch(tok) for tok in lowered)
     return False
@@ -141,6 +177,7 @@ def should_block(cmd: str) -> bool:
         # Unbalanced quotes: fall back to whitespace splitting rather than give
         # up, so a malformed command can't slip past by failing to tokenize.
         tokens = cmd.split()
+    tokens = normalise_docker(tokens)
     lowered = [t.lower() for t in tokens]
     if destroys_dev_volume(lowered):
         return True
@@ -149,10 +186,18 @@ def should_block(cmd: str) -> bool:
     return bool(WRITE.search(cmd)) or runs_a_sql_script(lowered)
 
 
-def main() -> int:
+def read_command() -> str | None:
+    """The Bash command in the hook payload, or None when the payload is unreadable."""
     try:
         cmd = json.load(sys.stdin).get("tool_input", {}).get("command", "") or ""
     except (ValueError, AttributeError):
+        return None
+    return cmd if isinstance(cmd, str) else None
+
+
+def main() -> int:
+    cmd = read_command()
+    if cmd is None:
         sys.stderr.write(
             "BLOCKED: guard_dev_db could not read the hook payload; refusing rather than waving the command through.\n"
         )
@@ -161,7 +206,7 @@ def main() -> int:
         sys.stderr.write(
             "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123 / "
             "the transit_pgdata and transit_chdata volumes) — both hold real production data and are read-only. "
-            "Use the throwaway :5544 / :8124 pair. See CLAUDE.md.\n"
+            "Use the throwaway :5544 / :8124 pair. See AGENTS.md.\n"
         )
         return 2
     return 0

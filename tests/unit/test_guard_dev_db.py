@@ -80,6 +80,12 @@ BLOCKED = [
     pytest.param("docker system prune --volumes -f", id="system-prune-volumes"),
     pytest.param("docker rm -v transit-pg", id="rm-legacy-container-with-volume"),
     pytest.param("docker rm -fv transit-app-db-1", id="rm-derived-container-clustered-flags"),
+    pytest.param("docker container rm -fv transit-pg", id="container-rm"),
+    pytest.param("docker --context default rm -v transit-pg", id="rm-after-global-option"),
+    # The standalone v1 binary and a path-invoked one are the same commands.
+    pytest.param("docker-compose down -v", id="hyphenated-compose-down-volumes"),
+    pytest.param('docker-compose exec db psql -U transit -c "DROP TABLE updates"', id="hyphenated-compose-exec"),
+    pytest.param("/usr/local/bin/docker volume rm transit_pgdata", id="path-invoked-docker"),
     # The shell's DATABASE_URL is the dev database unless the command says otherwise.
     pytest.param('psql "$DATABASE_URL" -c "DELETE FROM agencies WHERE agency_id = 9"', id="database-url-write"),
     pytest.param('psql "${DATABASE_URL}" -f fix.sql', id="database-url-braced-script"),
@@ -115,6 +121,8 @@ ALLOWED = [
     pytest.param("docker compose down", id="compose-down-keeps-volumes"),
     pytest.param("docker rm -f -v transit-test-pg transit-test-ch", id="test-containers-with-volume"),
     pytest.param("docker volume rm transit-test-pgdata", id="volume-rm-throwaway"),
+    pytest.param("docker exec transit-pg rm -rfv /tmp/x", id="rm-inside-a-container-is-not-docker-rm"),
+    pytest.param("docker-compose down", id="hyphenated-compose-down-keeps-volumes"),
     pytest.param('psql "$DATABASE_URL" -c "SELECT count(*) FROM agencies"', id="database-url-read"),
     pytest.param(
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
@@ -139,11 +147,14 @@ def test_safe_command_is_allowed(command):
     assert _run(command) == 0, f"guard blocked a safe command: {command}"
 
 
-def test_malformed_input_is_refused():
+@pytest.mark.parametrize(
+    "payload", ["not json", '{"tool_input": {"command": 5}}', '{"tool_input": "docker compose down -v"}']
+)
+def test_unreadable_input_is_refused(payload):
     """A payload the hook cannot parse is a hook that cannot see the command.
     Waving it through would make a broken harness the one way past the guard;
     refusing costs one visible failure."""
-    assert subprocess.run([str(HOOK)], input="not json", text=True, capture_output=True).returncode == 2
+    assert subprocess.run([str(HOOK)], input=payload, text=True, capture_output=True).returncode == 2
 
 
 def test_db_reset_is_no_longer_a_recognised_target():
