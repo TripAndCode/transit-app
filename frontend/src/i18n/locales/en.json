@@ -117,7 +117,8 @@
       "ask": {
         "title": "Ask, get evidence",
         "body": "The same evidence view Ask shows for a real answer — not a screenshot. Select a stop below to see it."
-      }
+      },
+      "scroll_hint": "Scroll sideways to see the whole chart."
     }
   },
   "tour": {
