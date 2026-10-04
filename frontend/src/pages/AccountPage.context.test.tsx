@@ -91,6 +91,14 @@ describe("AccountPage context", () => {
     expect(remove).toHaveBeenCalledWith("/api/me/sessions/bbbbbbbbbbbb");
   });
 
+  it("says when signing out another session fails", async () => {
+    const { remove } = renderPage();
+    remove.mockRejectedValue(new Error("network down"));
+    await screen.findByText("Safari on iOS");
+    await userEvent.click(screen.getByRole("button", { name: "Sign out this session" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't sign out that session. Please try again.");
+  });
+
   it("keeps account deletion apart from the data download, in its own warning section", () => {
     renderPage();
     const exportSection = screen.getByRole("link", { name: "Download my data" }).closest("section");

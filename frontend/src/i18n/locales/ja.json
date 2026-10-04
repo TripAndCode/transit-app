@@ -503,7 +503,8 @@
     "session_unknown_device": "不明な端末",
     "this_device": "この端末",
     "session_sign_out": "サインアウト",
-    "session_sign_out_aria": "このセッションをサインアウト"
+    "session_sign_out_aria": "このセッションをサインアウト",
+    "session_sign_out_error": "そのセッションをサインアウトできませんでした。もう一度お試しください。"
   },
   "presets": {
     "login_to_save_tooltip": "ログインで保存",

@@ -503,7 +503,8 @@
     "session_unknown_device": "Unknown device",
     "this_device": "This device",
     "session_sign_out": "Sign out",
-    "session_sign_out_aria": "Sign out this session"
+    "session_sign_out_aria": "Sign out this session",
+    "session_sign_out_error": "Couldn't sign out that session. Please try again."
   },
   "presets": {
     "login_to_save_tooltip": "Sign in to save",

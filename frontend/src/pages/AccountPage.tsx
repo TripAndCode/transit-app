@@ -291,6 +291,11 @@ export function AccountPage() {
             </Card>
           );
         })}
+        {signOutSession.isError && (
+          <p role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+            {t("account.session_sign_out_error")}
+          </p>
+        )}
       </Section>
       <DataSection />
       <button
