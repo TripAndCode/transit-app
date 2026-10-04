@@ -41,7 +41,8 @@ body:has(.login-shell),
   transform: translate(-50%, -50%);
   width: calc(100vw - 48px);
   max-width: 380px;
-  padding: 36px 32px 28px;
+  /* Room above the brand for the language switch in the top-right corner. */
+  padding: 48px 32px 28px;
   /* Surface, border and elevation come from the shared `ui-card` class this
      element also carries; only the card's own size and centring live here. */
   border-radius: var(--radius-xl);
@@ -180,6 +181,14 @@ body:has(.login-shell),
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.login-card__sub + .login-card__local-form {
+  margin-top: 16px;
+}
+.login-card .language-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
 }
 
 .login-card__field {

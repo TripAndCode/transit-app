@@ -194,7 +194,7 @@ function drawKpiTiles(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, p: Pan
     ctx.fillText(label, x + tw * 0.1, y + 22 * s);
     const n = Math.round(value * expoOut(segment(since, 0.2 + i * (BEAT / 2), 0.9 + i * (BEAT / 2))));
     setFont(ctx, 800, Math.min(26 * s, tw * 0.24), palette.fontBody);
-    ctx.fillStyle = flagged ? palette.delay.severe : palette.text;
+    ctx.fillStyle = flagged ? palette.warning : palette.text;
     ctx.fillText(formatNumber(n) + suffix, x + tw * 0.1, y + 56 * s);
     ctx.restore();
   });

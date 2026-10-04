@@ -11,11 +11,14 @@ function mockRoutes(data: RouteRecord[]) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data, isLoading: false } as never);
 }
 
-function renderTable(rows: unknown[][], reportType = "ranking") {
+function renderTable(rows: unknown[][], reportType = "ranking", minSamples?: number) {
   return renderWithProviders(
     <MemoryRouter initialEntries={["/agencies/1/analysis"]}>
       <Routes>
-        <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} />} />
+        <Route
+          path="/agencies/:agencyId/analysis"
+          element={<ReportTable reportType={reportType} rows={rows} minSamples={minSamples} />}
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -54,16 +57,17 @@ describe("ReportTable on_time confidence column", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows a caveat marker for a low-confidence percentage", () => {
+  it("marks a low-confidence percentage with a muted few-data badge", () => {
     mockRoutes([]);
     renderTable([["39061", "平日", 80.0, 0.5, 25, true]], "on_time");
-    expect(screen.getByText("wide range")).toBeInTheDocument();
+    expect(screen.getByText("few data")).toHaveClass("caveat-badge");
+    expect(screen.getByRole("columnheader", { name: "Data" })).toBeInTheDocument();
   });
 
-  it("renders no caveat marker for a confident percentage", () => {
+  it("renders no badge for a confident percentage", () => {
     mockRoutes([]);
     renderTable([["39061", "平日", 90.0, 0.5, 300, false]], "on_time");
-    expect(screen.queryByText("wide range")).not.toBeInTheDocument();
+    expect(screen.queryByText("few data")).not.toBeInTheDocument();
   });
 });
 
@@ -214,9 +218,9 @@ describe("ReportTable on a phone", () => {
       "on_time",
     );
     const [confident, wide] = screen.getAllByRole("listitem");
-    expect(within(confident).queryByText("Confidence")).not.toBeInTheDocument();
-    expect(within(wide).getByText("Confidence")).toBeInTheDocument();
-    expect(within(wide).getByText("wide range")).toBeInTheDocument();
+    expect(within(confident).queryByText("Data")).not.toBeInTheDocument();
+    expect(within(wide).getByText("Data")).toBeInTheDocument();
+    expect(within(wide).getByText("few data")).toBeInTheDocument();
   });
 
   it("shows a missing service as a dash, not as the word null", () => {
@@ -232,5 +236,70 @@ describe("ReportTable on a phone", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(25);
     await userEvent.click(screen.getByRole("button", { name: "Show 5 more" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(30);
+  });
+});
+
+describe("ReportTable delay figures", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("prints delay figures in the text colour, and marks only the severe ones", () => {
+    mockRoutes([]);
+    renderTable([
+      ["33101", "平日", 6.0, 5.5, 9.8, 436],
+      ["33102", "平日", 3.2, 3.0, 6.1, 512],
+    ]);
+    const severe = screen.getByText("6.0");
+    expect(severe.style.color).toBe("");
+    expect(within(severe.closest("td")!).getByTestId("delay-marker")).toBeInTheDocument();
+    const moderate = screen.getByText("3.2");
+    expect(moderate.style.color).toBe("");
+    expect(within(moderate.closest("td")!).queryByTestId("delay-marker")).toBeNull();
+  });
+});
+
+describe("ReportTable day-group reports", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("leaves out the day column the report's own title already states", () => {
+    mockRoutes([]);
+    renderTable([["33101", "平日", "平日", 3.4, 120]], "dow_weekday");
+    expect(screen.queryByRole("columnheader", { name: "Day" })).toBeNull();
+    expect(screen.getByText("3.4")).toBeInTheDocument();
+  });
+
+  it("says under the table what the service column means", () => {
+    mockRoutes([]);
+    renderTable([["33101", "平日", "平日", 3.4, 120]], "dow_weekday");
+    expect(screen.getByText(/Service: the timetable the trip ran on/)).toBeInTheDocument();
+  });
+});
+
+describe("ReportTable thinly observed rows", () => {
+  beforeEach(() => mockRoutes([]));
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("marks a row observed fewer times than the reliable floor with a few-data badge", () => {
+    renderTable(
+      [
+        ["SPARSE", "平日", 9.1, 8.0, 12.0, 30], // i18n-ignore: GTFS service name
+        ["SOLID", "平日", 2.0, 1.5, 4.0, 150], // i18n-ignore: GTFS service name
+      ],
+      "ranking",
+      100,
+    );
+    const [sparseRow, solidRow] = screen.getAllByRole("row").slice(1);
+    expect(within(sparseRow).getByText("few data")).toHaveClass("caveat-badge");
+    expect(within(solidRow).queryByText("few data")).not.toBeInTheDocument();
+  });
+
+  it("marks nothing when the report states no floor", () => {
+    renderTable([["SPARSE", "平日", 9.1, 8.0, 12.0, 30]]); // i18n-ignore: GTFS service name
+    expect(screen.queryByText("few data")).not.toBeInTheDocument();
   });
 });

@@ -1,9 +1,9 @@
-import { useState, type CSSProperties } from "react";
+import { use, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { FilterCtx } from "../api/types";
 import type { DowFilter } from "../api/scope";
 import { dowValueLabel } from "../utils/filterValueLabels";
-import { defaultPeriod } from "../api/scope";
+import { DataEndContext, defaultPeriod } from "../api/scope";
 import { rangeLabel } from "../utils/rangeLabel";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
@@ -107,7 +107,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
   const [editing, setEditing] = useState(false);
 
   // Draft uses explicit date defaults when value has no dates
-  const { from: defaultFrom, to: defaultTo } = defaultPeriod();
+  const { from: defaultFrom, to: defaultTo } = defaultPeriod(use(DataEndContext));
 
   const [draft, setDraft] = useState<FilterCtx>(() => ({
     ...value,

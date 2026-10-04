@@ -10,15 +10,16 @@
  * ctx.routes itself, no props needed beyond `aid`). Migrated from the former
  * ForecastTab.tsx; picking a route updates the shared ctx.routes filter, so
  * it also filters every other report type/tab — a deliberate, shared-filter
- * consequence, not a bug. There is no in-view "back" button: clearing the
- * route chip in the shared Filters bar is the way back, matching how every
- * other tab's focused-route mode already works.
+ * consequence, not a bug. The section's route picker is the way back to all
+ * routes, as is clearing the route chip in the shared Filters bar.
  */
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
 import { useScope } from "../api/scope";
+import { useRouteNames } from "../api/useRouteNames";
 import { InlineSparkline } from "./InlineSparkline";
+import { RouteLabel } from "./RouteLabel";
 import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
@@ -29,6 +30,7 @@ import { onActivateKey } from "../utils/a11y";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, formatMinutes } from "../utils/format";
+import { avgDelayText } from "../utils/delayPhrase";
 import {
   BAND_ORDER,
   bandOf,
@@ -40,6 +42,7 @@ import {
   type ForecastOverviewWorst,
 } from "../api/types";
 import { WEEK } from "../utils/week";
+import "./RouteForecastSection.css";
 
 type Tip = { x: number; y: number; text: string } | null;
 type View = "dow" | "hr" | null;
@@ -90,11 +93,13 @@ function CrosshairTip({ tip }: { tip: Tip }) {
 /** Delay-ranked route list. Bar length encodes delay (not sample volume). */
 function RankedRoutes({
   routes,
+  names,
   axisMin,
   lowConfNote,
   onPick,
 }: {
   routes: ForecastOverviewRoute[];
+  names: ReturnType<typeof useRouteNames>;
   axisMin: string;
   lowConfNote: string;
   onPick: (code: string) => void;
@@ -112,7 +117,7 @@ function RankedRoutes({
           style={{ display: "grid", gridTemplateColumns: "minmax(120px, 34%) 1fr 72px auto", gap: 10, alignItems: "center", cursor: "pointer", padding: "5px 8px", borderRadius: 6, opacity: r.low_confidence ? 0.6 : 1 }}
         >
           <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {r.route_name}
+            <RouteLabel code={r.route_code} names={names} fallbackName={r.route_name} />
             {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
           </span>
           <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
@@ -485,6 +490,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
   const [ctx, update] = useScope();
   const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
+  const names = useRouteNames(aid);
 
   const [tip, setTip] = useState<Tip>(null);
   const [view, setView] = useState<View>(null);
@@ -510,9 +516,11 @@ export function RouteForecastSection({ aid }: { aid: number }) {
 
   return (
     <div>
+      <RoutePicker aid={aid} names={names} focusedRoute={focusedRoute} onPick={(code) => update({ routes: code ? [code] : null })} />
       {!focusedRoute && (
         <AgencyLanding
           aid={aid}
+          names={names}
           dayLabel={dayLabel}
           bandLabel={bandLabel}
           axisMin={min1}
@@ -524,7 +532,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           noData={t("forecast.overview_no_data")}
           lowConfNote={t("forecast.low_confidence_note")}
           legendUnit={t("forecast.legend_unit")}
-          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), min: w.expected_avg_min.toFixed(1) })}
+          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), avg: avgDelayText(t, w.expected_avg_min) })}
           onPick={(code) => update({ routes: [code] })}
           onTip={onTip}
           onLeave={onLeave}
@@ -551,9 +559,47 @@ export function RouteForecastSection({ aid }: { aid: number }) {
   );
 }
 
+/** Which route the forecast is for: every route with a forecast, plus a
+ *  focused route without one, so the control always states what is shown. */
+function RoutePicker({
+  aid,
+  names,
+  focusedRoute,
+  onPick,
+}: {
+  aid: number;
+  names: ReturnType<typeof useRouteNames>;
+  focusedRoute: string | null;
+  onPick: (code: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const routes = useForecastOverview(aid).data?.routes ?? [];
+  // An option holds plain text, so RouteLabel's muted code becomes a
+  // parenthesis, added only where two routes would otherwise read the same.
+  const labelOf = (r: ForecastOverviewRoute) => names.data.get(r.route_code) ?? r.route_name;
+  const labelCount = new Map<string, number>();
+  for (const r of routes) labelCount.set(labelOf(r), (labelCount.get(labelOf(r)) ?? 0) + 1);
+  const listed = focusedRoute == null || routes.some((r) => r.route_code === focusedRoute);
+  return (
+    <label className="forecast-route-picker">
+      {t("forecast.route_picker_label")}
+      <select value={focusedRoute ?? ""} onChange={(e) => onPick(e.currentTarget.value || null)}>
+        <option value="">{t("forecast.route_picker_all")}</option>
+        {routes.map((r) => (
+          <option key={r.route_code} value={r.route_code}>
+            {(labelCount.get(labelOf(r)) ?? 0) > 1 ? `${labelOf(r)} (${r.route_code})` : labelOf(r)}
+          </option>
+        ))}
+        {!listed && <option value={focusedRoute}>{focusedRoute}</option>}
+      </select>
+    </label>
+  );
+}
+
 /** Agency-wide landing: worst-window headline + day×band grid + delay-ranked routes. */
 function AgencyLanding({
   aid,
+  names,
   dayLabel,
   bandLabel,
   axisMin,
@@ -571,6 +617,7 @@ function AgencyLanding({
   onLeave,
 }: {
   aid: number;
+  names: ReturnType<typeof useRouteNames>;
   dayLabel: (dow: number) => string;
   bandLabel: (b: Band) => string;
   axisMin: string;
@@ -615,7 +662,7 @@ function AgencyLanding({
       {data.routes.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <SectionCard title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
-            <RankedRoutes routes={data.routes.slice(0, 8)} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
+            <RankedRoutes routes={data.routes.slice(0, 8)} names={names} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
           </SectionCard>
         </div>
       )}
@@ -708,7 +755,7 @@ function RouteDetail({
           data-testid="detail-worst"
           style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16, fontSize: 15, fontWeight: 600 }}
         >
-          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), min: (worstBand.expected_avg_min as number).toFixed(1) })}
+          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), avg: avgDelayText(t, worstBand.expected_avg_min as number) })}
         </div>
       )}
 

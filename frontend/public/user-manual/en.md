@@ -119,13 +119,13 @@ broken, it just means nothing has been picked yet.
 The left menu lists the following reports. Matched to "what you want to know":
 
 - **Delay ranking**: to see which routes are the most delayed, ranked.
-- **On-time ranking**: the opposite — to see which routes run most on time.
+- **Lowest average delay**: the opposite — the routes with the smallest average delay first.
 - **On-time rate**: to see, per route, the percentage of arrivals that were on time.
 - **≥5-min delays**: to see only especially large delays (5+ minutes).
 - **Trend**: to see how delay changes day by day, and how it differs by weekday/time.
 - **Compare ranking**: to compare routes side by side.
-- **Weekend pattern / Weekday pattern**: to see whether weekday and weekend trends differ.
-- **Route forecast**: to see a forecast of upcoming delay trends.
+- **Routes on weekdays / Routes on weekends and holidays**: each route's average delay on that group of days, to see whether weekday and weekend trends differ.
+- **Route forecast**: to see when routes tend to run late, by day of week and time of day. Pick a route from its **Route** list for that route's breakdown.
 
 If you're not sure where to start, look at **Delay ranking** (which routes are bad) first,
 then **Trend** (when they're bad).
@@ -143,7 +143,7 @@ The popup explains things like:
 - Ranking tables are for finding "routes that are consistently late / consistently on time."
 - Trend is for seeing whether things are getting better or worse — trending up means worsening.
 - The time-of-day heatmap is for comparing which times of day tend to be busiest.
-- Weekday/weekend patterns are for spotting day-of-week habits.
+- Routes on weekdays / on weekends and holidays show each route's average delay for that group of days; compare the two to see which routes run later on weekends.
 - CSV export lets you download the table data to Excel or similar.
 
 **A similar "?" icon can also appear near the heading of individual report screens.**
@@ -161,6 +161,12 @@ What the columns mean:
 - **Median**: the middle value — a "typical" delay that isn't skewed by a few extreme days.
 - **p90**: the delay in the worst 10% of cases (a rough gauge of "how bad it gets on a bad day").
 - **Samples**: the number of observations behind that row (fewer samples = lower confidence).
+
+The ranking leaves out routes observed fewer than 100 times in the period, so a rarely run
+special-day variant can't top it on a handful of trips. Tick **Include routes observed fewer
+than 100 times** to rank them too; their rows carry a "few data" badge. When more routes
+qualify than the table shows, the line under it says how many ("Showing 100 of 285"), and
+**Show all** lists the rest.
 
 The "⬇ CSV" button in the top-right downloads this table as-is.
 
