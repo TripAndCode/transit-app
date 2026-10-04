@@ -1,10 +1,13 @@
 import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout, useSession } from "../api/auth";
 import { apiDelete, apiErrorDetail, apiGet, apiPut } from "../api/client";
 import { formatDateTime } from "../utils/format";
+import { describeUserAgent } from "../utils/userAgent";
+import { useAgencies } from "../api/hooks";
+import { readLastAgency } from "../api/lastAgency";
 import { Card } from "../components/ui/Card";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Section } from "../components/ui/Section";
@@ -12,6 +15,7 @@ import { Toolbar } from "../components/ui/Toolbar";
 import { LegalLinks } from "../components/LegalLinks";
 import { Modal } from "../components/Modal";
 import { Skeleton } from "../components/Skeleton";
+import "./AccountPage.css";
 
 type SessionRow = {
   sid_prefix: string;
@@ -19,6 +23,8 @@ type SessionRow = {
   ip: string | null;
   created_at: string;
   last_seen_at: string;
+  /** The session this page was loaded with. */
+  current: boolean;
 };
 
 type LlmKeyStatus = {
@@ -109,10 +115,24 @@ const DELETE_ERROR_KEYS: Record<string, string> = {
   managed_account: "account.data.error_managed",
 };
 
-/** Download everything the app holds about you, or delete the account for
- *  good. Deletion is a hard delete on the server, so the confirm button waits
- *  for the account's own email to be typed. */
-function DataSection({ email }: { email: string }) {
+/** Download everything the app holds about you. */
+function DataSection() {
+  const { t } = useTranslation();
+  return (
+    <Section title={t("account.data.title")} description={t("account.data.description")}>
+      <Toolbar>
+        <a href="/api/me/export" download>
+          {t("account.data.export")}
+        </a>
+      </Toolbar>
+    </Section>
+  );
+}
+
+/** Delete the account for good, apart from everything else on the page.
+ *  Deletion is a hard delete on the server, so the confirm button waits for
+ *  the account's own email to be typed. */
+function DangerZone({ email }: { email: string }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -131,12 +151,10 @@ function DataSection({ email }: { email: string }) {
   const errorKey = remove.error ? (DELETE_ERROR_KEYS[detail ?? ""] ?? "account.data.error_generic") : null;
 
   return (
-    <Section title={t("account.data.title")} description={t("account.data.description")}>
+    <Section className="account-danger" title={t("account.data.delete")} description={t("account.data.delete_description")}>
       <Toolbar>
-        <a href="/api/me/export" download>
-          {t("account.data.export")}
-        </a>
         <button
+          className="account-danger__button"
           onClick={() => {
             setTyped("");
             remove.reset();
@@ -179,7 +197,7 @@ function DataSection({ email }: { email: string }) {
           <button onClick={() => setOpen(false)} disabled={remove.isPending}>
             {t("common.cancel")}
           </button>
-          <button onClick={() => remove.mutate()} disabled={!matches || remove.isPending}>
+          <button className="account-danger__button" onClick={() => remove.mutate()} disabled={!matches || remove.isPending}>
             {t("account.data.delete_confirm")}
           </button>
         </div>
@@ -212,12 +230,24 @@ export function AccountPage() {
     queryFn: ({ signal }) => apiGet<SessionRow[]>("/api/me/sessions", { signal }),
   });
   const logout = useLogout();
+  const qc = useQueryClient();
+  const signOutSession = useMutation({
+    mutationFn: (prefix: string) => apiDelete(`/api/me/sessions/${prefix}`),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["mySessions"] }),
+  });
+  const lastAgencyId = readLastAgency();
+  const lastAgency = useAgencies().data?.find((a) => a.agency_id === lastAgencyId);
 
   if (isLoading) return <AccountSkeleton />;
   if (!session) return <Navigate to="/login" replace />;
 
   return (
     <div style={{ maxWidth: 640, margin: "32px auto", padding: 24 }}>
+      {lastAgency && (
+        <Link to={`/agencies/${lastAgency.agency_id}/pulse`} style={{ display: "inline-block", marginBottom: 12, fontSize: "var(--text-sm)" }}>
+          {t("account.back_to_agency", { agency: lastAgency.agency_name })}
+        </Link>
+      )}
       <PageHeader title={t("account.title")} subtitle={session.email} />
       <Card style={{ marginBottom: 24 }}>
         <div style={{ color: "var(--text-tertiary)" }}>{session.name ?? ""}</div>
@@ -226,20 +256,43 @@ export function AccountPage() {
         </div>
       </Card>
       <Section title={t("account.linked_providers")}>
-        <ul>{session.identities.map((i) => <li key={i.provider}>{i.provider}</li>)}</ul>
+        {session.identities.length > 0 ? (
+          <ul>{session.identities.map((i) => <li key={i.provider}>{i.provider}</li>)}</ul>
+        ) : (
+          <p style={{ margin: 0, color: "var(--text-tertiary)", fontSize: "var(--text-sm)" }}>{t("account.linked_none")}</p>
+        )}
       </Section>
       <LlmKeySection />
       <Section title={t("account.active_sessions")}>
-        {sessions?.map((s) => (
-          <Card key={s.sid_prefix} style={{ marginBottom: 6, fontSize: "var(--text-sm)" }}>
-            <div>{s.user_agent ?? "(unknown UA)"}</div>
-            <div style={{ color: "var(--text-tertiary)" }}>
-              {t("account.session_last_seen", { when: formatDateTime(s.last_seen_at) })}
-            </div>
-          </Card>
-        ))}
+        {sessions?.map((s) => {
+          const device = describeUserAgent(s.user_agent);
+          return (
+            <Card key={s.sid_prefix} style={{ marginBottom: 6, fontSize: "var(--text-sm)", display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div>
+                  {device ? t("account.session_device", device) : t("account.session_unknown_device")}
+                  {s.current && <span className="caveat-badge" style={{ marginLeft: 8 }}>{t("account.this_device")}</span>}
+                </div>
+                <div style={{ color: "var(--text-tertiary)" }}>
+                  {t("account.session_last_seen", { when: formatDateTime(s.last_seen_at) })}
+                </div>
+              </div>
+              {/* This device signs out with the page's own button below. */}
+              {!s.current && (
+                <button
+                  type="button"
+                  aria-label={t("account.session_sign_out_aria")}
+                  onClick={() => signOutSession.mutate(s.sid_prefix)}
+                  disabled={signOutSession.isPending}
+                >
+                  {t("account.session_sign_out")}
+                </button>
+              )}
+            </Card>
+          );
+        })}
       </Section>
-      <DataSection email={session.email} />
+      <DataSection />
       <button
         onClick={() => logout.mutate(undefined, { onSuccess: () => window.location.assign("/welcome") })}
         disabled={logout.isPending}
@@ -253,6 +306,7 @@ export function AccountPage() {
           {t("account.logout_error")}
         </div>
       )}
+      <DangerZone email={session.email} />
       <div style={{ marginTop: 24, fontSize: "var(--text-sm)" }}>
         <LegalLinks />
       </div>

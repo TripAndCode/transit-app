@@ -456,7 +456,7 @@
     "logout_error": "Couldn't sign out. Please check your connection and try again.",
     "data": {
       "title": "Your data",
-      "description": "Download everything this app holds about you, or delete your account.",
+      "description": "Download everything this app holds about you.",
       "export": "Download my data",
       "delete": "Delete account",
       "delete_title": "Delete your account?",
@@ -465,7 +465,8 @@
       "delete_confirm": "Delete permanently",
       "error_last_admin": "You're the only admin, so this account can't be deleted. Make someone else an admin first.",
       "error_managed": "This is the operator's built-in account and can't be deleted here.",
-      "error_generic": "Couldn't delete the account. Please check your connection and try again."
+      "error_generic": "Couldn't delete the account. Please check your connection and try again.",
+      "delete_description": "Deletes your account and everything saved with it. This can't be undone."
     },
     "login": {
       "error": {
@@ -495,7 +496,14 @@
       "password_label": "Password",
       "local_submit": "Sign in",
       "terms_consent": "By continuing, you agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>."
-    }
+    },
+    "back_to_agency": "← Back to {{agency}}",
+    "linked_none": "None linked",
+    "session_device": "{{browser}} on {{os}}",
+    "session_unknown_device": "Unknown device",
+    "this_device": "This device",
+    "session_sign_out": "Sign out",
+    "session_sign_out_aria": "Sign out this session"
   },
   "presets": {
     "login_to_save_tooltip": "Sign in to save",
