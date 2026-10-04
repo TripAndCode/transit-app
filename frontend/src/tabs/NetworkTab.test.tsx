@@ -309,6 +309,16 @@ describe("NetworkTab", () => {
   });
 
 
+  it("prints each agency's delay figure in the text colour", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: { from: "2026-04-01", to: "2026-04-07", definition, agencies: [row({ agency_id: 1, agency_name: "Worst", avg_delay_min: 6.4 })] },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const figure = screen.getByTestId("network-row").querySelector(".network-row__unit")!.parentElement as HTMLElement;
+    expect(figure.style.color).toBe("");
+  });
+
   it("sorts rows worst-delay-first regardless of the order the API returned, nulls last", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {

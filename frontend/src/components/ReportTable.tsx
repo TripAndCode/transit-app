@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import type { TFunction } from "i18next";
-import { delayColor, delayTextColor } from "../styles/tokens";
+import { DELAY_THRESHOLDS, delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "./RouteLabel";
 import { ServiceName } from "./ServiceName";
@@ -218,11 +218,9 @@ export function ReportTable({ reportType, rows }: Props) {
                   </span>
                 )}
                 {headline && (
-                  <span
-                    className="report-cards__headline"
-                    style={headline.bar === "delay" ? { color: delayTextColor(Number(row[headline.index])) } : undefined}
-                  >
+                  <span className="report-cards__headline">
                     <span className="report-cards__label">{t(headline.labelKey)}</span>{" "}
+                    {headline.bar === "delay" && isSevere(row[headline.index]) && <DelayMarker />}
                     <span>{cardValue(headline, row[headline.index], t)}</span>
                   </span>
                 )}
@@ -296,14 +294,19 @@ export function ReportTable({ reportType, rows }: Props) {
                   const max = maxes.get(c.index) ?? 1;
                   const v = Number(raw);
                   const ratio = isFinite(v) ? Math.min(1, Math.abs(v) / max) : 0;
-                  // The bar fill can stay the plain ramp colour (it's a mark, not
-                  // text); the label sitting on top needs the text-safe variant,
-                  // since delayColor()'s ok/mild/moderate fall short of AA as text.
-                  const color = c.bar === "delay" ? delayColor(v) : "var(--accent)";
-                  const textColor = c.bar === "delay" ? delayTextColor(v) : "var(--accent)";
+                  // The bar carries the ramp colour; the figure stays in the text
+                  // colour, with an amber marker only past the severe threshold,
+                  // so colour flags the few that need attention instead of all.
+                  const isDelay = c.bar === "delay";
                   return (
                     <td key={c.labelKey} style={td({ align: c.align ?? "right" })}>
-                      <BarCell text={text} ratio={ratio} color={color} textColor={textColor} />
+                      <BarCell
+                        text={text}
+                        ratio={ratio}
+                        color={isDelay ? delayColor(v) : "var(--accent)"}
+                        textColor={isDelay ? undefined : "var(--accent)"}
+                        marked={isDelay && isSevere(raw)}
+                      />
                     </td>
                   );
                 }
@@ -359,16 +362,28 @@ function cardValue(c: Schema, raw: unknown, t: TFunction): string {
   return c.unit && raw != null ? t("reports.card.value_with_unit", { value: text, unit: t("common.unit_min") }) : text;
 }
 
+/** At or past the colour ramp's severe threshold. */
+function isSevere(raw: unknown): boolean {
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= DELAY_THRESHOLDS.severe;
+}
+
+function DelayMarker() {
+  return <span data-testid="delay-marker" className="delay-marker" aria-hidden="true" />;
+}
+
 function BarCell({
   text,
   ratio,
   color,
   textColor,
+  marked,
 }: {
   text: string;
   ratio: number;
   color: string;
-  textColor: string;
+  textColor?: string;
+  marked: boolean;
 }) {
   return (
     // The bar has its own track beside the figure: drawn under the text, it
@@ -381,7 +396,8 @@ function BarCell({
       >
         <div style={{ width: `${ratio * 100}%`, height: "100%", borderRadius: 3, background: color, opacity: 0.6 }} />
       </div>
-      <span style={{ color: textColor }}>{text}</span>
+      {marked && <DelayMarker />}
+      <span style={textColor ? { color: textColor } : undefined}>{text}</span>
     </div>
   );
 }

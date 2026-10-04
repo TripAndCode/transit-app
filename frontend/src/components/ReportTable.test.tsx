@@ -234,3 +234,23 @@ describe("ReportTable on a phone", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(30);
   });
 });
+
+describe("ReportTable delay figures", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("prints delay figures in the text colour, and marks only the severe ones", () => {
+    mockRoutes([]);
+    renderTable([
+      ["33101", "平日", 6.0, 5.5, 9.8, 436],
+      ["33102", "平日", 3.2, 3.0, 6.1, 512],
+    ]);
+    const severe = screen.getByText("6.0");
+    expect(severe.style.color).toBe("");
+    expect(within(severe.closest("td")!).getByTestId("delay-marker")).toBeInTheDocument();
+    const moderate = screen.getByText("3.2");
+    expect(moderate.style.color).toBe("");
+    expect(within(moderate.closest("td")!).queryByTestId("delay-marker")).toBeNull();
+  });
+});

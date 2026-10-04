@@ -352,6 +352,10 @@
 input[type="date"] { color-scheme: light; }
 :root[data-theme="dark"] input[type="date"] { color-scheme: dark; }
 
+/* A delay figure at or past the severe threshold: a small amber dot beside
+   the figure, which itself stays in the text colour. */
+.delay-marker { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--color-warning); vertical-align: middle; flex: none; }
+
 /* The language switch on pages outside the app shell (login, legal). */
 .language-toggle__options { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: var(--radius); overflow: hidden; }
 .language-toggle__options button { padding: 3px 10px; border: 0; background: transparent; color: var(--text-secondary); font-size: var(--text-xs); cursor: pointer; }
