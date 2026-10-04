@@ -127,15 +127,30 @@ export function useScopeSummary(
   });
 }
 
+/** A ranking's own options beyond the scope: whether groups observed too few
+ *  times to trust join it, and how many rows come back. */
+export type ReportOptions = { includeSparse?: boolean; limit?: number };
+
+/** The most rows the reports API returns in one response. */
+export const REPORT_ROWS_MAX = 500;
+
+export function reportQueryString(ctx: Scope, options: ReportOptions = {}): string {
+  const parts = [scopeToQueryString(ctx)];
+  if (options.includeSparse) parts.push("include_sparse=1");
+  if (options.limit != null) parts.push(`limit=${options.limit}`);
+  return parts.filter(Boolean).join("&");
+}
+
 export function useReport(
   agencyId: number | null,
   reportType: string | null,
   ctx: Scope,
+  options: ReportOptions = {},
 ): UseQueryResult<ReportResponse> {
   return useQuery({
-    queryKey: ["reports", agencyId, reportType, ...scopeKey(ctx)],
+    queryKey: ["reports", agencyId, reportType, ...scopeKey(ctx), !!options.includeSparse, options.limit ?? null],
     queryFn: ({ signal }) =>
-      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${scopeToQueryString(ctx)}`, { signal }),
+      apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${reportQueryString(ctx, options)}`, { signal }),
     enabled: agencyId != null && !!reportType,
     // Keep the prior report mounted while a new report type or filter change
     // loads, so callers can gate their skeleton on `isPending` (first load

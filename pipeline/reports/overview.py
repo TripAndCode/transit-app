@@ -696,12 +696,17 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
     }
 
 
+#: A route averaging at least this late (minutes) over the current window
+#: counts as delayed in the headline's count. The count carries it, so the UI
+#: states the threshold it was counted against instead of keeping its own copy.
+DELAYED_ROUTE_MIN = 2.0
+
+
 async def _top_delayed_routes(
     agency_id: int, cur_ctx: RangeCtx, conn, limit: int = 5, ch=None, grain: _Grain | None = None
 ) -> dict:
     """Routes ranked by absolute current-window avg delay ("routes to check
-    now"), plus a count of routes at/above the DELAY_RAMP "not ok" threshold
-    (2.0 min — frontend/src/styles/tokens.ts's ok/mild boundary).
+    now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN``.
 
     Uses cur_ctx (the same current-window — up to 7 days, narrower only when
     ctx itself is narrower — compute_overview_summary already builds for the
@@ -751,9 +756,9 @@ async def _top_delayed_routes(
         ]
 
     if not rows:
-        return {"routes": [], "delayed_count": 0}
+        return {"routes": [], "delayed_count": 0, "delayed_threshold_min": DELAYED_ROUTE_MIN}
 
-    delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= 2.0)
+    delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= DELAYED_ROUTE_MIN)
     top_n = rows[:limit]
     codes = [r["route_code"] for r in top_n]
     names = await _route_short_names(agency_id, codes, conn)
@@ -767,6 +772,7 @@ async def _top_delayed_routes(
             for r in top_n
         ],
         "delayed_count": delayed_count,
+        "delayed_threshold_min": DELAYED_ROUTE_MIN,
     }
 
 
