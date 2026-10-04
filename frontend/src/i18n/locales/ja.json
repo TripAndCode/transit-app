@@ -1148,7 +1148,7 @@
     "users": {
       "table_label": "ユーザー一覧",
       "title": "ユーザー管理",
-      "search_placeholder": "メール / 名前で検索",
+      "search_placeholder": "メールまたは名前",
       "col": {
         "email": "メール",
         "name": "名前",
@@ -1185,7 +1185,7 @@
       },
       "view": {
         "all": "すべて",
-        "pending": "承認待ち",
+        "pending": "AI利用の承認待ち",
         "admin": "管理者",
         "suspended": "停止中"
       },
