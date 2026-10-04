@@ -32,7 +32,10 @@
     "title": "レポート",
     "view_summary": "期間のまとめ",
     "view_saved": "保存した分析",
-    "view_reports": "協議会向けまとめ・遅延の参考資料"
+    "view_reports": "協議会向けまとめ・遅延証明",
+    "subtitle_summary": "期間中の運行を、印刷できる一枚にまとめます。",
+    "subtitle_saved": "このブラウザで路線のページから保存した分析です。",
+    "subtitle_reports": "協議会や役員会向けのまとめと、遅延の証明です。"
   },
   "sheet": {
     "handle": "シートの持ち手"
@@ -1121,7 +1124,8 @@
       "include_sparse": "観測{{floor}}回未満の系統も含める",
       "rows_shown": "{{total}}件中{{shown}}件を表示",
       "show_all": "すべて表示"
-    }
+    },
+    "download_csv": "CSVダウンロード"
   },
   "insight_panel": {
     "title": "注目ポイント",

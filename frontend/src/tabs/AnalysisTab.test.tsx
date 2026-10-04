@@ -550,6 +550,11 @@ describe("AnalysisTab ranking coverage", () => {
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
   });
 
+  it("names its export Download CSV, as every other export is named", () => {
+    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse());
+    expect(screen.getByRole("link", { name: "Download CSV" })).toBeInTheDocument();
+  });
+
   it("exports the rows the table shows", () => {
     setup("/agencies/1/analysis/rider?report=ranking&sparse=1", rankingResponse());
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_sparse=1(&|$)/);

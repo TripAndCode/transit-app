@@ -60,11 +60,18 @@ describe("ReportsHomeTab", () => {
     expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
   });
 
-  it("renders the report heading and description", () => {
+  it("leaves the page heading to the Reports shell", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();
-    expect(screen.getByRole("heading", { name: "Reports" })).toBeInTheDocument();
-    expect(screen.getByText("Summarize service performance in one page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("names the routes table's service column and shows its values and counts readably", () => {
+    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 12345] as unknown as RankingRow])); // i18n-ignore: GTFS service name
+    renderTab();
+    expect(screen.getByRole("columnheader", { name: "Service" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Weekday" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
   });
 
   it("shows how the figures are made as its own disclosure, not nested in another", () => {
