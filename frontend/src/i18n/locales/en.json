@@ -141,18 +141,18 @@
   },
   "forecast": {
     "overview_worst_label": "When to watch out",
-    "overview_worst_phrase": "{{day}} {{band}} — generally runs late (avg +{{min}} min)",
+    "overview_worst_phrase": "{{day}} {{band}} runs latest ({{avg}})",
     "overview_grid_title": "Day × time of day (all routes)",
     "overview_grid_caption": "When the agency tends to run late — darker = more delay.",
     "overview_routes_title": "Routes that run late",
-    "overview_routes_caption": "Click a route for its breakdown.",
+    "overview_routes_caption": "Click a route for its breakdown. The small line traces its daily average over its last 7 days of data.",
     "overview_no_data": "No measurements yet.",
     "band_early": "Early",
     "band_morning": "Morning",
     "band_midday": "Midday",
     "band_evening": "Evening",
     "band_night": "Night",
-    "detail_worst_phrase": "Worst on {{day}} {{band}} (avg +{{min}} min)",
+    "detail_worst_phrase": "Worst on {{day}} {{band}} ({{avg}})",
     "detail_show_grid": "Show day × hour detail",
     "low_confidence_note": "Few measurements — indicative",
     "lowSamples": "Low data ({{count}} obs.)",
@@ -175,7 +175,11 @@
     "stat_worst": "Worst",
     "stat_calmest": "Calmest",
     "stat_mean": "Route avg",
-    "stat_samples": "Measurements"
+    "stat_samples": "Measurements",
+    "route_picker_label": "Route",
+    "route_picker_all": "All routes",
+    "avg_late": "avg {{min}} min late",
+    "avg_early": "avg {{min}} min early"
   },
   "network": {
     "title": "Compare agencies",
@@ -975,8 +979,8 @@
     "dow_band": {
       "title": "Usual delay pattern",
       "empty": "No data for this period.",
-      "worst_phrase_one": "Over the past day, {{day}} {{band}} ran latest (avg +{{min}} min)",
-      "worst_phrase_other": "Over the past {{count}} days, {{day}} {{band}} runs latest (avg +{{min}} min)"
+      "worst_phrase_one": "Over the past day, {{day}} {{band}} ran latest ({{avg}})",
+      "worst_phrase_other": "Over the past {{count}} days, {{day}} {{band}} runs latest ({{avg}})"
     },
     "daily": {
       "empty": "No data in this range.",
@@ -1079,7 +1083,7 @@
       "dow_weekday": "Each route's average delay on weekdays.",
       "dow_weekend": "Each route's average delay on weekends and holidays.",
       "dwell_run": "Where time goes: waiting at stops against running between them.",
-      "route_forecast": "Expected delay for a route on an upcoming day.",
+      "route_forecast": "When routes tend to run late, by day of week and time of day.",
       "council_summary": "A period summary written for a council or board.",
       "delay_certificate": "Proof of a specific late departure, for a passenger."
     },

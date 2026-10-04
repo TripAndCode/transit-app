@@ -31,6 +31,7 @@ import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
 import { formatNumber, formatDateRange } from "../utils/format";
+import { avgDelayText } from "../utils/delayPhrase";
 import { serviceValueLabel } from "../utils/filterValueLabels";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
@@ -458,7 +459,7 @@ function DowBandHeatmapCard({
                 count: rangeDays,
                 day: dayLabel(worst.dow),
                 band: bandLabel(worst.band),
-                min: worst.expected_avg_min.toFixed(1),
+                avg: avgDelayText(t, worst.expected_avg_min),
               })}
             </p>
           )}

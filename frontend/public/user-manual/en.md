@@ -125,7 +125,7 @@ The left menu lists the following reports. Matched to "what you want to know":
 - **Trend**: to see how delay changes day by day, and how it differs by weekday/time.
 - **Compare ranking**: to compare routes side by side.
 - **Routes on weekdays / Routes on weekends and holidays**: each route's average delay on that group of days, to see whether weekday and weekend trends differ.
-- **Route forecast**: to see a forecast of upcoming delay trends.
+- **Route forecast**: to see when routes tend to run late, by day of week and time of day. Pick a route from its **Route** list for that route's breakdown.
 
 If you're not sure where to start, look at **Delay ranking** (which routes are bad) first,
 then **Trend** (when they're bad).
