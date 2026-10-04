@@ -401,7 +401,6 @@
   "legal": {
     "privacy": "プライバシーポリシー",
     "terms": "利用規約",
-    "back": "戻る",
     "nav_label": "規約"
   },
   "help": {
@@ -468,6 +467,7 @@
       "back_to_top": "トップへ戻る",
       "welcome_back": "おかえりなさい",
       "choose_provider": "アカウントを選択してログイン",
+      "username_prompt": "ユーザー名でサインイン",
       "google_aria": "Googleでログイン",
       "google_continue": "Googleで続ける",
       "github_aria": "GitHubでログイン",

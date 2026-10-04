@@ -5,12 +5,11 @@ import { useSession } from "../api/auth";
 import { useConfig } from "../api/config";
 import { useTheme } from "../styles/useTheme";
 import type { Theme } from "../styles/theme";
-import { changeLocale, SUPPORTED_LOCALES, type Locale } from "../i18n";
+import { LOCALE_NAMES, SUPPORTED_LOCALES, type Locale } from "../i18n";
+import { useLocaleSwitch } from "../i18n/useLocaleSwitch";
 import { Z_INDEX } from "../styles/zIndex";
 import { Spinner } from "./Spinner";
 import { useToast } from "./ui/toastContext";
-
-const LOCALE_LABELS: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: native locale labels render in their own language
 
 const THEME_OPTIONS = ["system", "light", "dark"] as const satisfies readonly Theme[];
 const THEME_OPTION_LABEL_KEYS: Record<(typeof THEME_OPTIONS)[number], string> = {
@@ -56,7 +55,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const [theme, setTheme] = useTheme();
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const [switchingLocale, setSwitchingLocale] = useState(false);
+  const { pending: switchingLocale, switchTo } = useLocaleSwitch(() => toast.show(t("common.language_switch_error")));
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -85,17 +84,6 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const other = SUPPORTED_LOCALES.find((l) => l !== current) ?? current;
   const displayName = session ? session.name || session.email : t("common.guest");
   const initial = displayName.slice(0, 1).toUpperCase();
-
-  // The other language may still have to be fetched, so a switch can take a
-  // moment; clicks while one is in flight would only queue more switches.
-  // A failed fetch leaves the current language in place, which alone would
-  // read as an ignored click.
-  async function switchLocale() {
-    if (switchingLocale) return;
-    setSwitchingLocale(true);
-    const switched = await changeLocale(i18n, other).finally(() => setSwitchingLocale(false));
-    if (!switched) toast.show(t("common.language_switch_error"));
-  }
 
   return (
     <div ref={ref} style={{ position: "relative", margin: "4px 10px 0" }}>
@@ -132,13 +120,13 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             role="menuitem"
             aria-busy={switchingLocale}
             aria-disabled={switchingLocale}
-            onClick={() => void switchLocale()}
+            onClick={() => void switchTo(other)}
             style={switchingLocale ? { ...popItemStyle, cursor: "default" } : popItemStyle}
           >
             <span>{t("common.language_aria")}</span>
             <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)" }}>
               {switchingLocale && <Spinner size={12} inline />}
-              {LOCALE_LABELS[current]}
+              {LOCALE_NAMES[current]}
             </span>
           </button>
           {/* Three states, not a two-way toggle: "system" has to be reachable
@@ -215,7 +203,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
           <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {displayName}
           </div>
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{LOCALE_LABELS[current]}</div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{LOCALE_NAMES[current]}</div>
         </span>
         <span
           aria-hidden
