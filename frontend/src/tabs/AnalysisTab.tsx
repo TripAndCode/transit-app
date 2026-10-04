@@ -213,7 +213,8 @@ export function AnalysisTab({
                     textDecoration: "none",
                   }}
                 >
-                  ⬇ CSV
+                  <span aria-hidden="true">⬇ </span>
+                  {t("reports.download_csv")}
                 </a>
               )}
             </div>

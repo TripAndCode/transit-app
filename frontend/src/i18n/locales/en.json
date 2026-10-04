@@ -32,7 +32,10 @@
     "title": "Reports",
     "view_summary": "Period summary",
     "view_saved": "Saved analyses",
-    "view_reports": "Council summary & delay reference"
+    "view_reports": "Council report & delay certificate",
+    "subtitle_summary": "How service ran over the period, on one printable page.",
+    "subtitle_saved": "Analyses saved on route pages in this browser.",
+    "subtitle_reports": "A summary for a council or board, and proof of a late departure."
   },
   "sheet": {
     "handle": "Sheet handle"
@@ -1121,7 +1124,8 @@
       "include_sparse": "Include routes observed fewer than {{floor}} times",
       "rows_shown": "Showing {{shown}} of {{total}}",
       "show_all": "Show all"
-    }
+    },
+    "download_csv": "Download CSV"
   },
   "insight_panel": {
     "title": "Worth a look",
