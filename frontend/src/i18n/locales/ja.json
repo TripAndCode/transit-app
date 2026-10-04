@@ -252,7 +252,7 @@
     "concentration_rest_one": "残り {{count}} 路線で {{rest}}%",
     "concentration_rest_other": "残り {{count}} 路線で {{rest}}%",
     "section_peak_hour": "時間帯別の悪化",
-    "peak_hour_callout": "ピークは{{range}}です（平均{{avg}}分）。",
+    "peak_hour_callout": "ピーク {{range}}（平均{{avg}}分）",
     "section_service_split": "サービス日別",
     "hero_row": {
       "avg_delay_label": "平均遅延 · {{range}}",
@@ -280,7 +280,13 @@
     },
     "routes_to_check": {
       "title": "今すぐ確認すべき路線",
-      "empty": "確認が必要な路線はありません"
+      "empty": "確認が必要な路線はありません",
+      "band_severe_one": "平均{{min}}分超の遅れ：{{count}}路線",
+      "band_severe_other": "平均{{min}}分超の遅れ：{{count}}路線",
+      "band_moderate_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
+      "band_moderate_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
+      "band_mild_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
+      "band_mild_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線"
     },
     "concentration": {
       "single_route": "{{name}} が全体の 100% を占めています (観測は1路線のみ)。",
@@ -288,7 +294,7 @@
       "lorenz_caption": "上位 20% の路線が遅延の {{pct}}% を占めています。"
     },
     "service_split": {
-      "diff": "差: {{diff}}分 ({{pct}}%)",
+      "diff": "差：{{diff}}分（{{pct}}%）",
       "story_weekday_higher": "平日の遅延は土日祝の {{ratio}}倍です。",
       "story_weekend_higher": "土日祝の遅延は平日の {{ratio}}倍です。",
       "story_same": "平日と土日祝でほぼ差はありません。",
@@ -298,7 +304,8 @@
       "max_label": "最大 {{avg}}分",
       "avg_label": "平均",
       "weekday_empty": "平日のデータがありません。",
-      "weekend_empty": "土日祝のデータがありません。"
+      "weekend_empty": "土日祝のデータがありません。",
+      "spread_legend": "網掛け：1日の平均より遅れの大きい時間帯"
     },
     "modal": {
       "concentration": "遅延の集中度 (上位20)",
@@ -611,11 +618,6 @@
     }
   },
   "map": {
-    "legend": {
-      "band_1_5_3": "1.5 – 3分",
-      "band_3_5": "3 – 5分",
-      "band_gt_5": "> 5分"
-    },
     "style": {
       "osm": "OpenStreetMap",
       "label": "地図スタイル",
