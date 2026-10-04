@@ -508,10 +508,12 @@
   },
   "presets": {
     "login_to_save_tooltip": "Sign in to save",
-    "label": "Presets",
-    "option_placeholder": "Presets",
-    "save_current": "Save current filters",
-    "name_placeholder": "Preset name"
+    "label": "Saved views",
+    "save_current": "Save this view…",
+    "empty": "No saved views yet",
+    "save_title": "Save this view",
+    "name_label": "Name",
+    "load_error": "Couldn't load your saved views."
   },
   "filters": {
     "range": {
@@ -1731,7 +1733,7 @@
       "readout": "{{n}} min: {{pct}}%",
       "weekday_colour": "Colour = average delay on that weekday"
     },
-    "pin": "Pin controls",
+    "pin": "Show all filters",
     "reset": "Reset conditions",
     "popover": {
       "routes": "Routes",

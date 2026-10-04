@@ -182,7 +182,7 @@ describe("ScopeSentence", () => {
   it("fetches while the strip is pinned", async () => {
     const summary = vi.spyOn(hooks, "useScopeSummary");
     mount();
-    await userEvent.click(screen.getByRole("button", { name: "Pin controls" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show all filters" }));
     expect(summary.mock.calls.at(-1)?.[2]).toBe(true);
   });
 
@@ -239,7 +239,7 @@ describe("ScopeSentence", () => {
 
   it("greys a pinned control the same way", async () => {
     mount("?from=2026-09-01&to=2026-09-28&dow=weekday", { dow: false });
-    await userEvent.click(screen.getByRole("button", { name: "Pin controls" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show all filters" }));
     expect(screen.getByText("Days and timetable")).toHaveClass("scope-strip__label--off");
   });
 
@@ -255,7 +255,7 @@ describe("ScopeSentence", () => {
 
   it("pins every control inline and remembers it", async () => {
     const view = mount();
-    const pin = screen.getByRole("button", { name: "Pin controls" });
+    const pin = screen.getByRole("button", { name: "Show all filters" });
     expect(pin).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("button", { name: "Weekdays" })).toBeNull();
     await userEvent.click(pin);
@@ -264,7 +264,7 @@ describe("ScopeSentence", () => {
     expect(localStorage.getItem("transit.scopePinned")).toBe("1");
     view.unmount();
     mount();
-    expect(screen.getByRole("button", { name: "Pin controls" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Show all filters" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("offers a reset once a condition differs from the default", async () => {
