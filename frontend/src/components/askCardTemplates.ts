@@ -18,7 +18,6 @@ export type CardTemplate = {
   id: string;
   /** i18n key under `ask.card.<id>.title` */
   title_key: string;
-  /** Emoji shown next to title. */
   /** A line icon from the app's set, shown before the card's label. */
   icon: LucideIcon;
   /** Tool slug to dispatch (e.g. "top_n", "trend"). */
