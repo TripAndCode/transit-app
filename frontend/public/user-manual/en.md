@@ -289,8 +289,8 @@ Once you ask, the result appears on screen like this.
 > follow what it says: shorten the question, wait a moment, or try again.
 
 - Below that, **quick-question shortcuts** (icon buttons: 🏆🎯📈⚖️🚏) let you start a new question.
-- The sidebar on the left keeps a history of past questions, grouped by conversation.
-  Click "＋ New conversation" to start a new one.
+- The sidebar on the left keeps a history of past questions, grouped by investigation.
+  Click "＋ New investigation" to start a new one.
 
 If you're not sure which report to look at, it's often faster to just pick what you want
 to know on the Ask tab rather than hunting through the Analysis tab.

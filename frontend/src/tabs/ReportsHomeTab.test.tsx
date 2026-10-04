@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
@@ -41,6 +42,7 @@ function renderTab(path = "/agencies/1/reports") {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/agencies/:agencyId/reports" element={<ReportsHomeTab />} />
+        <Route path="/agencies/:agencyId/routes" element={<p>routes-page</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -111,6 +113,13 @@ describe("ReportsHomeTab", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab("/agencies/1/reports?doc=saved");
     expect(screen.getByText("Save filters on a route's page to see them here")).toBeInTheDocument();
+  });
+
+  it("takes an empty saved view straight to the route pages", async () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?doc=saved");
+    await userEvent.click(screen.getByRole("button", { name: "Go to Routes" }));
+    expect(screen.getByText("routes-page")).toBeInTheDocument();
   });
 
   it.each([
