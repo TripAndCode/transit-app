@@ -12,6 +12,7 @@ import { FirstRunTourOnLive } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import { RouteTransition } from "./components/RouteTransition";
 import { Sidebar } from "./components/Sidebar";
+import { NavPendingProvider } from "./components/navPending";
 import { TopBar } from "./components/TopBar";
 import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
 import { CommandPalette } from "./components/CommandPalette";
@@ -29,6 +30,7 @@ export default function App() {
   useAnonymousFilterPersistence(agencyIdNum);
   return (
     <AgencyDataEndProvider>
+      <NavPendingProvider>
       <div className="app-shell" style={{ display: "flex", height: "100dvh" }}>
         <CommandPalette />
         <Sidebar />
@@ -68,6 +70,7 @@ export default function App() {
             closes it for that visit without marking it seen. */}
         <FirstRunTourOnLive />
       </div>
+      </NavPendingProvider>
     </AgencyDataEndProvider>
   );
 }

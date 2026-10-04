@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
+import { PendingNavLink } from "./navPending";
 import {
   HelpCircle,
   Info,
@@ -216,7 +217,7 @@ export function Sidebar() {
           <nav aria-label={t("nav.destinations_label")} style={{ display: "flex", flexDirection: "column" }}>
             {navItems.map((item) => (
               <RailTooltip key={item.to} collapsed={collapsedFlag} label={t(item.labelKey)}>
-                <NavLink
+                <PendingNavLink
                   to={screenHref(item.to)}
                   aria-label={collapsedFlag ? t(item.labelKey) : undefined}
                   onMouseEnter={() => prefetchRouteChunk(item.to)}
@@ -230,7 +231,7 @@ export function Sidebar() {
                       <span>{t(item.labelKey)}</span>
                     </span>
                   )}
-                </NavLink>
+                </PendingNavLink>
               </RailTooltip>
             ))}
           </nav>
@@ -240,7 +241,7 @@ export function Sidebar() {
             sheet: Ask has its own bottom tab there. */}
         {agencyId && !inSheet && (
           <RailTooltip collapsed={collapsedFlag} label={t("nav.ask")}>
-            <NavLink
+            <PendingNavLink
               to={screenHref("ask")}
               aria-label={collapsedFlag ? t("nav.ask") : undefined}
               onMouseEnter={() => prefetchRouteChunk("ask")}
@@ -263,7 +264,7 @@ export function Sidebar() {
             >
               <MessageCircleQuestion size={16} strokeWidth={1.5} aria-hidden="true" />
               {!collapsedFlag && t("nav.ask")}
-            </NavLink>
+            </PendingNavLink>
           </RailTooltip>
         )}
         <nav aria-label={t("nav.other")} style={{ display: "flex", flexDirection: "column", marginTop: 16 }}>
@@ -281,7 +282,7 @@ export function Sidebar() {
             </div>
           )}
           <RailTooltip collapsed={collapsedFlag} label={t("nav.help")}>
-            <NavLink
+            <PendingNavLink
               to="/help"
               aria-label={collapsedFlag ? t("nav.help") : undefined}
               onClick={() => onNavigate?.()}
@@ -289,7 +290,7 @@ export function Sidebar() {
             >
               <HelpCircle size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
               {!collapsedFlag && <span>{t("nav.help")}</span>}
-            </NavLink>
+            </PendingNavLink>
           </RailTooltip>
           <RailTooltip collapsed={collapsedFlag} label={t("nav.about")}>
             <NavLink
@@ -304,7 +305,7 @@ export function Sidebar() {
           </RailTooltip>
           {isAdmin && (
             <RailTooltip collapsed={collapsedFlag} label={t("account.admin_link")}>
-              <NavLink
+              <PendingNavLink
                 to="/admin"
                 aria-label={collapsedFlag ? t("account.admin_link") : undefined}
                 onClick={() => onNavigate?.()}
@@ -312,7 +313,7 @@ export function Sidebar() {
               >
                 <Shield size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
                 {!collapsedFlag && <span>{t("account.admin_link")}</span>}
-              </NavLink>
+              </PendingNavLink>
             </RailTooltip>
           )}
         </nav>
@@ -505,7 +506,7 @@ export function Sidebar() {
         >
           {agencyId &&
             TAB_BAR_ITEMS.map((item) => (
-              <NavLink
+              <PendingNavLink spinner={false}
                 key={item.to}
                 to={screenHref(item.to)}
                 onMouseEnter={() => prefetchRouteChunk(item.to)}
@@ -514,10 +515,10 @@ export function Sidebar() {
               >
                 <item.Icon size={20} strokeWidth={1.5} aria-hidden="true" />
                 <span>{t(item.labelKey)}</span>
-              </NavLink>
+              </PendingNavLink>
             ))}
           {agencyId && (
-            <NavLink
+            <PendingNavLink spinner={false}
               to={screenHref("ask")}
               onMouseEnter={() => prefetchRouteChunk("ask")}
               onFocus={() => prefetchRouteChunk("ask")}
@@ -525,7 +526,7 @@ export function Sidebar() {
             >
               <HelpCircle size={20} strokeWidth={1.5} aria-hidden="true" />
               <span>{t("nav.ask")}</span>
-            </NavLink>
+            </PendingNavLink>
           )}
           <button
             type="button"
