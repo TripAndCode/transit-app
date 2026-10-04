@@ -11,6 +11,7 @@ import { Section } from "../components/ui/Section";
 import { Toolbar } from "../components/ui/Toolbar";
 import { LegalLinks } from "../components/LegalLinks";
 import { Modal } from "../components/Modal";
+import { Skeleton } from "../components/Skeleton";
 
 type SessionRow = {
   sid_prefix: string;
@@ -187,6 +188,21 @@ function DataSection({ email }: { email: string }) {
   );
 }
 
+/** The account page's outline while the session loads: a title, the
+ *  profile card and two sections, so the page settles in place. */
+function AccountSkeleton() {
+  return (
+    <div aria-hidden="true" style={{ maxWidth: 640, margin: "32px auto", padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+      <Skeleton width="40%" height={28} />
+      <Skeleton height={72} />
+      <Skeleton width="30%" height={18} />
+      <Skeleton height={48} />
+      <Skeleton width="30%" height={18} />
+      <Skeleton height={96} />
+    </div>
+  );
+}
+
 /** Self-service profile + active sessions + logout. */
 export function AccountPage() {
   const { t } = useTranslation();
@@ -197,7 +213,7 @@ export function AccountPage() {
   });
   const logout = useLogout();
 
-  if (isLoading) return <div style={{ padding: 24 }}>{t("common.loading")}</div>;
+  if (isLoading) return <AccountSkeleton />;
   if (!session) return <Navigate to="/login" replace />;
 
   return (
