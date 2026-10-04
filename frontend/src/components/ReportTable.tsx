@@ -14,6 +14,7 @@ import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, fmtPct, formatDuration } from "../utils/format";
 import "./ReportTable.css";
+import { ServiceNote } from "./ServiceNote";
 
 const ROWS_CAP = 200;
 // A phone list item is several times a table row's height, so the first
@@ -37,6 +38,8 @@ type Schema = {
   service?: true;
   /** The cell holds a route_code, shown as the route's label. */
   route?: true;
+  /** A non-empty cell is a caveat, shown as a muted badge. */
+  badge?: true;
 };
 
 // The route column of every per-route report. Kept in view while a wide table
@@ -53,11 +56,12 @@ const RANKING_COLS: Schema[] = [
   { index: 5, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
 ];
 
-// dow_weekend + dow_weekday share columns; the API splits the rows by DOW group.
+// dow_weekend + dow_weekday share columns; the API splits the rows by DOW
+// group. The group itself (row index 2) is the report's own title, so it is
+// not repeated as a column.
 const DOW_COLS: Schema[] = [
   ROUTE_COL,
   { index: 1, labelKey: "reports.col.service", align: "left", service: true },
-  { index: 2, labelKey: "reports.col.dow", align: "left", service: true },
   { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
   { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
 ];
@@ -74,7 +78,7 @@ const SCHEMAS: Record<string, Schema[]> = {
     // 95% Wilson interval too wide to trust the percentage (see
     // pipeline/stats.py) — a caveat marker, not a plain value, so it's
     // blank rather than "false" for the common (confident) case.
-    { index: 5, labelKey: "reports.col.confidence", align: "left", format: (v, t) => fmtConfidence(v, t) },
+    { index: 5, labelKey: "reports.col.confidence", align: "left", badge: true, format: (v, t) => fmtConfidence(v, t) },
   ],
   worst_5min: [
     ROUTE_COL,
@@ -192,6 +196,7 @@ export function ReportTable({ reportType, rows }: Props) {
     return null;
   }
 
+  const serviceNote = schema.some((c) => c.service) && <ServiceNote />;
   const showMore = cappedRows.remaining > 0 && (
     <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
       {t("common.show_more", { count: cappedRows.remaining })}
@@ -240,7 +245,7 @@ export function ReportTable({ reportType, rows }: Props) {
                             <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
                           </>
                         )}
-                        <span>{c.service && row[c.index] != null ? <ServiceName value={String(row[c.index])} /> : text}</span>
+                        <CellValue column={c} raw={row[c.index]} text={text} />
                       </span>
                     );
                   })}
@@ -249,6 +254,7 @@ export function ReportTable({ reportType, rows }: Props) {
           ))}
         </ol>
         {showMore}
+        {serviceNote}
       </div>
     );
   }
@@ -312,7 +318,7 @@ export function ReportTable({ reportType, rows }: Props) {
                 }
                 return (
                   <td key={c.labelKey} style={td({ align: c.align ?? "left" })}>
-                    {c.service && raw != null ? <ServiceName value={String(raw)} /> : text}
+                    <CellValue column={c} raw={raw} text={text} />
                   </td>
                 );
               })}
@@ -321,6 +327,7 @@ export function ReportTable({ reportType, rows }: Props) {
         </tbody>
       </table>
       {showMore}
+      {serviceNote}
     </div>
   );
 }
@@ -360,6 +367,14 @@ function cellText(c: Schema, raw: unknown, t: TFunction): string {
 function cardValue(c: Schema, raw: unknown, t: TFunction): string {
   const text = cellText(c, raw, t);
   return c.unit && raw != null ? t("reports.card.value_with_unit", { value: text, unit: t("common.unit_min") }) : text;
+}
+
+/** A plain cell: a service in the UI's language where it has copy, a caveat
+ *  as a muted badge, anything else as its formatted text. */
+function CellValue({ column, raw, text }: { column: Schema; raw: unknown; text: string }) {
+  if (column.service && raw != null) return <ServiceName value={String(raw)} />;
+  if (column.badge && text) return <span className="caveat-badge">{text}</span>;
+  return <>{text}</>;
 }
 
 /** At or past the colour ramp's severe threshold. */

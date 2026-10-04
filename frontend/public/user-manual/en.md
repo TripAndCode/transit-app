@@ -119,12 +119,12 @@ broken, it just means nothing has been picked yet.
 The left menu lists the following reports. Matched to "what you want to know":
 
 - **Delay ranking**: to see which routes are the most delayed, ranked.
-- **On-time ranking**: the opposite — to see which routes run most on time.
+- **Lowest average delay**: the opposite — the routes with the smallest average delay first.
 - **On-time rate**: to see, per route, the percentage of arrivals that were on time.
 - **≥5-min delays**: to see only especially large delays (5+ minutes).
 - **Trend**: to see how delay changes day by day, and how it differs by weekday/time.
 - **Compare ranking**: to compare routes side by side.
-- **Weekend pattern / Weekday pattern**: to see whether weekday and weekend trends differ.
+- **Routes on weekdays / Routes on weekends and holidays**: each route's average delay on that group of days, to see whether weekday and weekend trends differ.
 - **Route forecast**: to see a forecast of upcoming delay trends.
 
 If you're not sure where to start, look at **Delay ranking** (which routes are bad) first,
@@ -143,7 +143,7 @@ The popup explains things like:
 - Ranking tables are for finding "routes that are consistently late / consistently on time."
 - Trend is for seeing whether things are getting better or worse — trending up means worsening.
 - The time-of-day heatmap is for comparing which times of day tend to be busiest.
-- Weekday/weekend patterns are for spotting day-of-week habits.
+- Routes on weekdays / on weekends and holidays show each route's average delay for that group of days; compare the two to see which routes run later on weekends.
 - CSV export lets you download the table data to Excel or similar.
 
 **A similar "?" icon can also appear near the heading of individual report screens.**

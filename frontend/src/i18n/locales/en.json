@@ -901,13 +901,13 @@
     "raw_rows_other": "Raw ({{count}} rows)",
     "type": {
       "ranking": "Delay ranking",
-      "ranking_best": "On-time ranking",
+      "ranking_best": "Lowest average delay",
       "on_time": "On-time rate",
       "worst_5min": "≥5-min delays",
       "trend": "Trend",
       "compare_ranking": "Compare ranking",
-      "dow_weekday": "Weekday pattern",
-      "dow_weekend": "Weekend pattern",
+      "dow_weekday": "Routes on weekdays",
+      "dow_weekend": "Routes on weekends and holidays",
       "dwell_run": "Dwell/running time",
       "route_forecast": "Route forecast",
       "council_summary": "Council report",
@@ -919,12 +919,11 @@
       "median": "Median",
       "p90": "p90",
       "samples": "Samples",
-      "dow": "Day",
       "on_time_pct": "On-time %",
       "over_5min_count": "≥5 min late",
       "diff": "Diff",
       "direction": "Direction",
-      "confidence": "Confidence",
+      "confidence": "Data",
       "planned_trips": "Planned trips",
       "executed_trips": "Executed trips",
       "service_delivered_pct": "Service-delivered %",
@@ -935,7 +934,7 @@
       "with_unit": "{{label}} ({{unit}})",
       "delay": "Delay"
     },
-    "confidence_low_mark": "wide range",
+    "confidence_low_mark": "few data",
     "direction": {
       "weekend_higher": "Weekend > Weekday",
       "weekday_higher": "Weekday > Weekend"
@@ -948,8 +947,8 @@
       "trend_body": ": whether things are improving or worsening over time. A rising line means delays are growing.",
       "heatmap_strong": "Time-band heatmap",
       "heatmap_body": ": peak times during the day. Compare commuter peaks against midday.",
-      "dow_strong": "Weekday / Weekend patterns",
-      "dow_body": ": day-of-week characteristics. Surfaces whether weekends run more or less punctually than weekdays.",
+      "dow_strong": "Routes on weekdays / on weekends and holidays",
+      "dow_body": ": each route's average delay on that group of days. Compare the two to see which routes run later on weekends.",
       "csv": "CSV export lets you hand data off to Excel or BI tools."
     },
     "empty": {
@@ -1072,13 +1071,13 @@
     },
     "desc": {
       "ranking": "Which routes run latest, worst first.",
-      "ranking_best": "Which routes keep to the timetable best.",
+      "ranking_best": "Routes with the lowest average delay, best first.",
       "on_time": "Share of departures inside the on-time threshold, by route.",
       "worst_5min": "Routes with the most departures five minutes or more late.",
       "trend": "How delay moved day by day, by hour and by weekday.",
       "compare_ranking": "The same ranking against the previous period.",
-      "dow_weekday": "How a typical weekday runs, band by band.",
-      "dow_weekend": "How a typical weekend or holiday runs, band by band.",
+      "dow_weekday": "Each route's average delay on weekdays.",
+      "dow_weekend": "Each route's average delay on weekends and holidays.",
       "dwell_run": "Where time goes: waiting at stops against running between them.",
       "route_forecast": "Expected delay for a route on an upcoming day.",
       "council_summary": "A period summary written for a council or board.",
@@ -1089,7 +1088,8 @@
     },
     "trend": {
       "single_day": "A trend needs more than one day. Pick a longer period to see how delay moved from day to day."
-    }
+    },
+    "service_note": "Service: the timetable the trip ran on (weekday, weekend and holiday, or a special day)."
   },
   "insight_panel": {
     "title": "Worth a look",

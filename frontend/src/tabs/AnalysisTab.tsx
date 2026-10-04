@@ -36,6 +36,7 @@ import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
 import { useIsAdmin } from "../api/useIsAdmin";
+import { ServiceNote } from "../components/ServiceNote";
 
 /** One screen's reports: the list shows only `reportTypes`, and the open
  *  report is the `report` search param when it belongs to them, else
@@ -363,6 +364,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
           ))}
         </tbody>
       </table>
+      <ServiceNote />
       {cappedRoutes.remaining > 0 && (
         <button type="button" className="btn-ghost" onClick={cappedRoutes.showMore}>
           {t("common.show_more", { count: cappedRoutes.remaining })}

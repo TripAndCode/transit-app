@@ -356,6 +356,13 @@ input[type="date"] { color-scheme: light; }
    the figure, which itself stays in the text colour. */
 .delay-marker { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--color-warning); vertical-align: middle; flex: none; }
 
+/* A muted caveat pill beside a figure or a heading ("few data",
+   "simulation"): it qualifies what it sits beside without competing with it. */
+.caveat-badge { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-soft); border-radius: 999px; background: var(--bg-soft); color: var(--text-secondary); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
+
+/* A one-line note under a report table. */
+.report-footnote { margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--text-xs); }
+
 /* The language switch on pages outside the app shell (login, legal). */
 .language-toggle__options { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: var(--radius); overflow: hidden; }
 .language-toggle__options button { padding: 3px 10px; border: 0; background: transparent; color: var(--text-secondary); font-size: var(--text-xs); cursor: pointer; }
