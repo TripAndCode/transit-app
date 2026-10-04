@@ -135,6 +135,11 @@ export function OnboardingGate() {
             style={{ width: "100%", marginBottom: 16 }}
           />
         )}
+        {shown.length === 0 && (
+          <p role="status" style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
+            {t("onboarding.no_matches")}
+          </p>
+        )}
         <div
           style={{
             display: "grid",

@@ -171,6 +171,13 @@ describe("OnboardingGate", () => {
     expect(screen.getAllByRole("button", { name: /^Agency/ })).toHaveLength(1);
   });
 
+  it("says when a search matches no agency", () => {
+    mockAgencies(Array.from({ length: 9 }, (_, i) => agency({ agency_id: i + 1, agency_name: `Agency ${i + 1}` })));
+    renderGate();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
+    expect(screen.getByRole("status")).toHaveTextContent("No agency matches. Try another name.");
+  });
+
   it("has no search for a short list", () => {
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();

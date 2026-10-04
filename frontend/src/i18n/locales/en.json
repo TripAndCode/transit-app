@@ -42,7 +42,8 @@
     "no_agencies": "No agencies are configured yet.",
     "data_through": "Data through {{date}}",
     "no_data_yet": "No data collected yet",
-    "search": "Search agencies"
+    "search": "Search agencies",
+    "no_matches": "No agency matches. Try another name."
   },
   "landing": {
     "hero": {

@@ -32,7 +32,8 @@ export function OverviewTab() {
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(agencyId);
   const navigate = useNavigate();
-  const agency = useAgencies().data?.find((a) => a.agency_id === agencyId);
+  const agencies = useAgencies();
+  const agency = agencies.data?.find((a) => a.agency_id === agencyId);
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
@@ -76,6 +77,37 @@ export function OverviewTab() {
     summary.concentration.top_routes.length > 0 ||
     Object.keys(summary.service_split).length > 0;
 
+  // Whether the agency was ever collected decides which empty state is true,
+  // so the generic "nothing in this range" waits for the agency list.
+  const emptyState = agencies.isPending ? (
+    <SkeletonTable rows={3} />
+  ) : agency && !agency.latest_data_date ? (
+    <EmptyState
+      title={t("overview.never_collected", { agency: agency.agency_name })}
+      recoveries={[
+        {
+          label: t("overview.choose_another_agency"),
+          onClick: () => {
+            clearLastAgency();
+            navigate("/");
+          },
+        },
+      ]}
+    />
+  ) : (
+    <EmptyState
+      title={t("overview.empty")}
+      reasons={buildFilterCtxReasons(ctx, t)}
+      recoveries={buildFilterCtxRecoveries({
+        ctx,
+        onClearRoutes: () => update({ routes: null }),
+        onResetService: () => update({ service: "all" }),
+        jumpToLatestData,
+        t,
+      })}
+    />
+  );
+
   const modalTitleKey: Record<Exclude<OpenCard, null>, string> = {
     concentration: "overview.modal.concentration",
     peak_hour: "overview.modal.peak_hour",
@@ -92,34 +124,7 @@ export function OverviewTab() {
           onRetry={() => refetch()}
           data={data}
           hasContent={hasAnyData}
-          empty={
-            agency && !agency.latest_data_date ? (
-              <EmptyState
-                title={t("overview.never_collected", { agency: agency.agency_name })}
-                recoveries={[
-                  {
-                    label: t("overview.choose_another_agency"),
-                    onClick: () => {
-                      clearLastAgency();
-                      navigate("/");
-                    },
-                  },
-                ]}
-              />
-            ) : (
-            <EmptyState
-              title={t("overview.empty")}
-              reasons={buildFilterCtxReasons(ctx, t)}
-              recoveries={buildFilterCtxRecoveries({
-                ctx,
-                onClearRoutes: () => update({ routes: null }),
-                onResetService: () => update({ service: "all" }),
-                jumpToLatestData,
-                t,
-              })}
-            />
-            )
-          }
+          empty={emptyState}
           skeleton={
             <>
               <SkeletonKpiRow />

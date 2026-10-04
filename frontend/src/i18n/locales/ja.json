@@ -42,7 +42,8 @@
     "no_agencies": "事業者がまだ登録されていません。",
     "data_through": "{{date}}までのデータ",
     "no_data_yet": "まだデータを収集していません",
-    "search": "事業者を検索"
+    "search": "事業者を検索",
+    "no_matches": "一致する事業者がありません。別の名前で検索してください。"
   },
   "landing": {
     "hero": {

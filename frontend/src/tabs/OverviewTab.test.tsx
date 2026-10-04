@@ -155,6 +155,20 @@ describe("OverviewTab without a usable agency id", () => {
 describe("OverviewTab for an agency never collected", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("waits for the agency list before saying the range is empty", () => {
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: summary(), isPending: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: undefined, isPending: true } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/8/overview"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/overview" element={<OverviewTab />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("No observations in this range. Try a wider window.")).not.toBeInTheDocument();
+  });
+
   it("says no data was ever collected and offers another agency", async () => {
     localStorage.setItem("transit.lastAgency", "8");
     vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: summary(), isPending: false, error: null, refetch: vi.fn() } as never);
