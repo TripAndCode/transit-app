@@ -606,6 +606,7 @@ describe("--color-danger is retired outside destructive-action buttons", () => {
         [/^\s*--color-danger:[^;]*;/gm, /\.context-menu__item--danger\s*\{\s*color:\s*var\(--color-danger\);\s*\}/g],
       ],
       [resolve(srcDir, "pages/admin/adminControls.tsx"), [/\.admin-btn\.danger[^{]*\{[^}]*\}/g]],
+      [resolve(srcDir, "pages/AccountPage.css"), [/\.account-danger__button\s*\{[^}]*\}/g]],
     ]);
 
     const offenders = walk(srcDir).filter((file) => {

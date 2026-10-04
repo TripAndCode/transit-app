@@ -14,7 +14,7 @@ from api.deps import get_conn
 from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
 from api.middleware.session import SESSION_COOKIE_NAME
 from api.range import jst_today
-from api.security import User, csrf_guard, require_user
+from api.security import User, csrf_guard, require_user, token_hash
 from pipeline.account_erasure import ErasureRefused, erase_user
 from pipeline.account_export import collect_user_data
 from pipeline.query.llm_key_validation import validate_provider_key
@@ -79,13 +79,18 @@ class SessionOut(BaseModel):
     ip: str | None
     created_at: Any
     last_seen_at: Any
+    # The session this request was made with, so the page can mark "this
+    # device" and send its sign-out through the regular logout instead.
+    current: bool
 
 
 @router.get("/me/sessions", response_model=list[SessionOut])
 async def list_sessions(
-    user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)
+    request: Request, user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)
 ) -> list[SessionOut]:
     """List the caller's active sessions, ordered by most-recent activity."""
+    sid = request.cookies.get(SESSION_COOKIE_NAME)
+    current_hash = token_hash(sid) if sid else None
     rows = await conn.fetch(
         "SELECT sid_hash, user_agent, ip::text AS ip, created_at, last_seen_at "
         "FROM sessions WHERE user_id=$1 ORDER BY last_seen_at DESC",
@@ -98,6 +103,7 @@ async def list_sessions(
             ip=r["ip"],
             created_at=r["created_at"],
             last_seen_at=r["last_seen_at"],
+            current=r["sid_hash"] == current_hash,
         )
         for r in rows
     ]

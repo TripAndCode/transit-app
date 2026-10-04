@@ -456,7 +456,7 @@
     "logout_error": "ログアウトできませんでした。接続を確認して再度お試しください。",
     "data": {
       "title": "あなたのデータ",
-      "description": "このアプリが保持するあなたのデータをダウンロード、またはアカウントを削除できます。",
+      "description": "このアプリが保持するあなたのデータをダウンロードできます。",
       "export": "データをダウンロード",
       "delete": "アカウントを削除",
       "delete_title": "アカウントを削除しますか？",
@@ -465,7 +465,8 @@
       "delete_confirm": "完全に削除",
       "error_last_admin": "唯一の管理者のため、このアカウントは削除できません。先に別のユーザーを管理者にしてください。",
       "error_managed": "運営者の組み込みアカウントのため、ここでは削除できません。",
-      "error_generic": "アカウントを削除できませんでした。接続を確認して再度お試しください。"
+      "error_generic": "アカウントを削除できませんでした。接続を確認して再度お試しください。",
+      "delete_description": "アカウントと、保存したすべてのデータを削除します。元に戻せません。"
     },
     "login": {
       "error": {
@@ -495,7 +496,15 @@
       "password_label": "パスワード",
       "local_submit": "サインイン",
       "terms_consent": "続行すると、<terms>利用規約</terms>と<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
-    }
+    },
+    "back_to_agency": "← {{agency}}に戻る",
+    "linked_none": "連携なし",
+    "session_device": "{{os}} の {{browser}}",
+    "session_unknown_device": "不明な端末",
+    "this_device": "この端末",
+    "session_sign_out": "サインアウト",
+    "session_sign_out_aria": "このセッションをサインアウト",
+    "session_sign_out_error": "そのセッションをサインアウトできませんでした。もう一度お試しください。"
   },
   "presets": {
     "login_to_save_tooltip": "ログインで保存",
