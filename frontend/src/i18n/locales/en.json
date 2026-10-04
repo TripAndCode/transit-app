@@ -546,6 +546,7 @@
     "refresh_unchanged": "Reloaded; no newer observation available",
     "refresh_failed": "Reload failed",
     "refresh_rate_limited": "Too many refreshes; please try again shortly",
+    "refresh_sign_in": "Sign in to fetch the latest live observation",
     "loading": "Loading the latest operations...",
     "map": {
       "aria_label": "Map of latest reported stops and delays",

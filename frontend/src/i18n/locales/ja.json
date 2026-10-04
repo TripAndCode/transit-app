@@ -546,6 +546,7 @@
     "refresh_unchanged": "再取得済み・新しい観測はありません",
     "refresh_failed": "再取得できませんでした",
     "refresh_rate_limited": "更新回数が多すぎます。しばらく待ってから再試行してください",
+    "refresh_sign_in": "ライブ観測を取得するにはログインしてください",
     "loading": "最新の運行状況を取得中...",
     "map": {
       "aria_label": "最新報告停留所と遅延の地図",

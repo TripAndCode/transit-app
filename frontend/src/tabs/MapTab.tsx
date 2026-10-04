@@ -464,9 +464,12 @@ export function MapTab() {
         : t("operations.refresh_unchanged");
       showRefreshMessage(message);
     } catch (error) {
-      showRefreshMessage(error instanceof ApiError && error.status === 429
+      const status = error instanceof ApiError ? error.status : null;
+      showRefreshMessage(status === 429
         ? t("operations.refresh_rate_limited")
-        : t("operations.refresh_failed"));
+        : status === 401
+          ? t("operations.refresh_sign_in")
+          : t("operations.refresh_failed"));
     } finally {
       setIsRefreshing(false);
     }

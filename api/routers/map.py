@@ -51,7 +51,7 @@ from api.range import (
     time_band_clause_ch_for,
 )
 from api.scope_applied import ALL_SIX, scope_applied
-from api.security import User, csrf_guard, require_user
+from api.security import User, csrf_guard, require_user_when_sign_in_exists
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, jst_midnight_utc, live_table_for
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
@@ -353,13 +353,14 @@ async def live_delays(
 async def refresh_live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
-    _user: User = Depends(require_user),
+    _user: User | None = Depends(require_user_when_sign_in_exists),
 ) -> dict[str, Any]:
     """Fetch the agency's current GTFS-RT feed and persist it before reading.
 
-    A write against the live table, so it needs a signed-in caller and is
-    metered per account: an anonymous loop against it would otherwise re-poll
-    the collector on every request.
+    A write against the live table, so while sign-in exists it needs a
+    signed-in caller and is metered per account: an anonymous loop against it
+    would otherwise re-poll the collector on every request. In anonymous-only
+    mode it stays open under the per-address limit.
     """
     csrf_guard(request)
     try:

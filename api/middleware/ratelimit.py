@@ -13,6 +13,8 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
+from api.security import current_user
+
 FREE_LIMIT = "60/minute"
 PRO_LIMIT = "600/minute"
 
@@ -38,11 +40,10 @@ def _key_func(request: Request) -> str:
 def user_key(request: Request) -> str:
     """Bucket a signed-in caller's writes by account, not by address.
 
-    Session middleware attaches the resolved user before routing, so a route
-    behind ``require_user`` always has one here; the address fallback covers
-    only a route that forgot the dependency.
+    Session middleware attaches the resolved user before routing. The address
+    fallback covers anonymous-only mode, where nobody can sign in.
     """
-    user = getattr(request.state, "user", None)
+    user = current_user(request)
     if user is not None:
         return f"user:{user.user_id}"
     return get_remote_address(request)
