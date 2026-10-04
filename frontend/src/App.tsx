@@ -17,9 +17,12 @@ import { TopBar } from "./components/TopBar";
 import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
 import { CommandPalette } from "./components/CommandPalette";
 import { useDocumentLocale } from "./i18n/useDocumentLocale";
+import { useTranslation } from "react-i18next";
+import { useAgencies } from "./api/hooks";
+import { pageTitleKey } from "./routes/pageTitle";
 
 export default function App() {
-  useDocumentLocale();
+  const { t } = useTranslation();
   // Remount the routed tab when the agency changes so no tab carries another
   // agency's in-component state across a switch (e.g. a selected Ask thread or
   // forecast route). Non-agency routes (account) share the "root" key.
@@ -28,6 +31,9 @@ export default function App() {
   const { pathname } = useLocation();
   const focused = FOCUSED_TAB_PATTERN.test(pathname);
   useAnonymousFilterPersistence(agencyIdNum);
+  const titleKey = pageTitleKey(pathname);
+  const agencyName = useAgencies().data?.find((a) => a.agency_id === agencyIdNum)?.agency_name;
+  useDocumentLocale([titleKey ? t(titleKey) : null, agencyName]);
   return (
     <AgencyDataEndProvider>
       <NavPendingProvider>
