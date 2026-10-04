@@ -54,16 +54,17 @@ describe("ReportTable on_time confidence column", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows a caveat marker for a low-confidence percentage", () => {
+  it("marks a low-confidence percentage with a muted few-data badge", () => {
     mockRoutes([]);
     renderTable([["39061", "平日", 80.0, 0.5, 25, true]], "on_time");
-    expect(screen.getByText("wide range")).toBeInTheDocument();
+    expect(screen.getByText("few data")).toHaveClass("report-badge");
+    expect(screen.getByRole("columnheader", { name: "Data" })).toBeInTheDocument();
   });
 
-  it("renders no caveat marker for a confident percentage", () => {
+  it("renders no badge for a confident percentage", () => {
     mockRoutes([]);
     renderTable([["39061", "平日", 90.0, 0.5, 300, false]], "on_time");
-    expect(screen.queryByText("wide range")).not.toBeInTheDocument();
+    expect(screen.queryByText("few data")).not.toBeInTheDocument();
   });
 });
 
@@ -214,9 +215,9 @@ describe("ReportTable on a phone", () => {
       "on_time",
     );
     const [confident, wide] = screen.getAllByRole("listitem");
-    expect(within(confident).queryByText("Confidence")).not.toBeInTheDocument();
-    expect(within(wide).getByText("Confidence")).toBeInTheDocument();
-    expect(within(wide).getByText("wide range")).toBeInTheDocument();
+    expect(within(confident).queryByText("Data")).not.toBeInTheDocument();
+    expect(within(wide).getByText("Data")).toBeInTheDocument();
+    expect(within(wide).getByText("few data")).toBeInTheDocument();
   });
 
   it("shows a missing service as a dash, not as the word null", () => {
@@ -252,5 +253,24 @@ describe("ReportTable delay figures", () => {
     const moderate = screen.getByText("3.2");
     expect(moderate.style.color).toBe("");
     expect(within(moderate.closest("td")!).queryByTestId("delay-marker")).toBeNull();
+  });
+});
+
+describe("ReportTable day-group reports", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("leaves out the day column the report's own title already states", () => {
+    mockRoutes([]);
+    renderTable([["33101", "平日", "平日", 3.4, 120]], "dow_weekday");
+    expect(screen.queryByRole("columnheader", { name: "Day" })).toBeNull();
+    expect(screen.getByText("3.4")).toBeInTheDocument();
+  });
+
+  it("says under the table what the service column means", () => {
+    mockRoutes([]);
+    renderTable([["33101", "平日", "平日", 3.4, 120]], "dow_weekday");
+    expect(screen.getByText(/Service: the timetable the trip ran on/)).toBeInTheDocument();
   });
 });

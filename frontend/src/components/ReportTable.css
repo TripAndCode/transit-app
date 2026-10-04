@@ -62,3 +62,21 @@
 .report-route-link:focus-visible .route-label__code { color: var(--text-secondary); }
 .report-route-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 .report-route-link__chevron { color: var(--text-tertiary); }
+
+/* A caveat on a row's figure (e.g. too few observations to trust it): muted,
+   so it qualifies the figure without competing with it. */
+.report-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.report-footnote {
+  margin: 8px 0 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}

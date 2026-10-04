@@ -187,7 +187,7 @@ describe("AnalysisTab", () => {
     } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
     const { router } = renderAnalysis("/agencies/1/analysis/when?routes=50", WHEN_TYPES);
-    await userEvent.click(screen.getByRole("button", { name: /^Weekday pattern/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Routes on weekdays/ }));
     const params = new URLSearchParams(router.state.location.search);
     expect(params.get("report")).toBe("dow_weekday");
     expect(params.get("routes")).toBe("50");

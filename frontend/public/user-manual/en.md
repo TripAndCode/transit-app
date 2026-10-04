@@ -119,12 +119,12 @@ broken, it just means nothing has been picked yet.
 The left menu lists the following reports. Matched to "what you want to know":
 
 - **Delay ranking**: to see which routes are the most delayed, ranked.
-- **On-time ranking**: the opposite — to see which routes run most on time.
+- **Lowest average delay**: the opposite — the routes with the smallest average delay first.
 - **On-time rate**: to see, per route, the percentage of arrivals that were on time.
 - **≥5-min delays**: to see only especially large delays (5+ minutes).
 - **Trend**: to see how delay changes day by day, and how it differs by weekday/time.
 - **Compare ranking**: to compare routes side by side.
-- **Weekend pattern / Weekday pattern**: to see whether weekday and weekend trends differ.
+- **Routes on weekdays / Routes on weekends and holidays**: each route's average delay on that group of days, to see whether weekday and weekend trends differ.
 - **Route forecast**: to see a forecast of upcoming delay trends.
 
 If you're not sure where to start, look at **Delay ranking** (which routes are bad) first,
