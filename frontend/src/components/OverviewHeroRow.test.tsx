@@ -5,6 +5,7 @@ import { OverviewHeroRow } from "./OverviewHeroRow";
 import { stubReducedMotion } from "../test/reducedMotion";
 import * as hooks from "../api/hooks";
 import type { OverviewConcentration, OverviewHeadline, OverviewPeakHour } from "../api/types";
+import { formatDateRange } from "../utils/format";
 
 function headline(partial: Partial<OverviewHeadline> = {}): OverviewHeadline {
   return {
@@ -56,6 +57,7 @@ function renderHero(overrides: {
     <OverviewHeroRow
       headline={overrides.headline ?? headline()}
       delayedCount={overrides.delayedCount ?? 3}
+      delayedThresholdMin={2}
       agencyId={1}
       sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
       peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
@@ -73,24 +75,27 @@ describe("OverviewHeroRow", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the eyebrow label and the primary avg-delay value", () => {
+  it("labels the primary figure with the dates it averages", () => {
     mockHooks(38, 0.1);
     renderHero();
-    expect(screen.getByText("Network avg delay")).toBeInTheDocument();
+    expect(screen.getByText(`Average delay · ${formatDateRange("2026-06-03", "2026-06-09", { year: false })}`)).toBeInTheDocument();
     expect(screen.getByText(/3\.3/)).toBeInTheDocument();
   });
 
-  it("renders the delayed-route count over the total from useRoutes", () => {
+  it("states the delayed-route count, out of the total, with the threshold it was counted against", () => {
     mockHooks(38, 0.1);
     renderHero();
-    expect(screen.getByText("3 / 38 routes")).toBeInTheDocument();
+    expect(screen.getByText("3 of 38 routes")).toBeInTheDocument();
+    expect(screen.getByText("averaged 2 min or more late")).toBeInTheDocument();
   });
 
   it("renders the behind-schedule story sentence with the delta, peak hour, and concentration share", () => {
     mockHooks(38, 0.1);
     renderHero({ headline: headline({ delta_min: 0.9 }) });
     expect(
-      screen.getByText(/Running 0\.9 min behind last week; the 17:00 hour is heaviest\. 60% of delay sits in the top 1 route\./),
+      screen.getByText(
+        /Delays are 0\.9 min longer than in the 7-day period before; 17:00–18:00 is the heaviest hour\. 60% of delay sits in the top route\./,
+      ),
     ).toBeInTheDocument();
   });
 
@@ -119,19 +124,19 @@ describe("OverviewHeroRow", () => {
     renderHero({
       headline: headline({ baseline_avg_min: 3.8, delta_min: -1.2, delta_pct: -13.2 }),
     });
-    expect(screen.getByText(/Running 1\.2 min ahead of last week/)).toBeInTheDocument();
+    expect(screen.getByText(/Delays are 1\.2 min shorter than in the 7-day period before/)).toBeInTheDocument();
   });
 
   it("falls back to the short story template when peak-hour data is missing", () => {
     mockHooks(38, 0.1);
     renderHero({ headline: headline({ delta_min: 0.9 }), peakHour: null });
-    expect(screen.getByText("Running 0.9 min behind last week.")).toBeInTheDocument();
+    expect(screen.getByText("Delays are 0.9 min longer than in the 7-day period before.")).toBeInTheDocument();
   });
 
   it("falls back to the short story template when concentration has no top routes", () => {
     mockHooks(38, 0.1);
     renderHero({ headline: headline({ delta_min: 0.9 }), concentration: emptyConcentration });
-    expect(screen.getByText("Running 0.9 min behind last week.")).toBeInTheDocument();
+    expect(screen.getByText("Delays are 0.9 min longer than in the 7-day period before.")).toBeInTheDocument();
   });
 
   it("shows 'no comparison data' instead of a story sentence when baseline_avg_min is null", () => {
@@ -142,10 +147,11 @@ describe("OverviewHeroRow", () => {
     expect(screen.getByText("No comparison data")).toBeInTheDocument();
   });
 
-  it("shows the feed's last-updated age", () => {
+  it("says how long a quiet feed has been quiet, by the rule Live uses", () => {
     mockHooks(38, 2);
     renderHero();
-    expect(screen.getByText(/Last updated/)).toBeInTheDocument();
+    expect(screen.getByText("Feed quiet for 2 h")).toBeInTheDocument();
+    expect(screen.getByText(/Last report /)).toBeInTheDocument();
   });
 
   it("renders an inline info hint next to the story sentence", () => {
@@ -154,18 +160,31 @@ describe("OverviewHeroRow", () => {
     expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
   });
 
-  it("shows a stale-feed label instead of 'Running normally' when the feed is stale", () => {
-    mockHooks(38, 30 * 24); // 30 days old — well past the 24h threshold
+  it("counts a long-quiet feed in days", () => {
+    mockHooks(38, 30 * 24);
     renderHero();
-    expect(screen.getByText("Data delayed")).toBeInTheDocument();
-    expect(screen.queryByText("Running normally")).not.toBeInTheDocument();
+    expect(screen.getByText("Feed quiet for 30 days")).toBeInTheDocument();
   });
 
-  it("keeps 'Running normally' when the feed is fresh", () => {
-    mockHooks(38, 0.1);
+  it("says the feed is reporting live while its newest report is minutes old", () => {
+    mockHooks(38, 0.05);
     renderHero();
-    expect(screen.getByText("Running normally")).toBeInTheDocument();
-    expect(screen.queryByText("Data delayed")).not.toBeInTheDocument();
+    expect(screen.getByText("Reporting live")).toBeInTheDocument();
+    expect(screen.queryByText(/Feed quiet/)).toBeNull();
+  });
+
+  it("claims nothing about reports when the feed status could not be read", () => {
+    mockHooks(38, 0.1);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: undefined, error: new Error("500") } as never);
+    renderHero();
+    expect(screen.queryByText("No reports yet")).toBeNull();
+    expect(screen.queryByText("Reporting live")).toBeNull();
+  });
+
+  it("says so before any report has arrived", () => {
+    mockHooks(38, null);
+    renderHero();
+    expect(screen.getByText("No reports yet")).toBeInTheDocument();
   });
 
   it("renders a full-bleed trend sparkline when there are at least 2 points", () => {
@@ -195,13 +214,13 @@ describe("OverviewHeroRow", () => {
     // Without a reference the reader cannot tell a half-minute wobble from a
     // ten-minute climb: the shape is auto-scaled to the window's own extremes.
     expect(container.querySelector('[data-testid="sparkline-baseline"]')).not.toBeNull();
-    expect(screen.getByText("Period avg 4.0 min")).toBeInTheDocument();
+    expect(screen.getByText("Selected period's average 4.0 min")).toBeInTheDocument();
   });
 
   it("drops the reference line when there is no series to average", () => {
     mockHooks(38, 0.1);
     const { container } = renderHero({ sparklinePoints: [] });
     expect(container.querySelector('[data-testid="sparkline-baseline"]')).toBeNull();
-    expect(screen.queryByText(/Period avg/)).toBeNull();
+    expect(screen.queryByText(/Selected period's average/)).toBeNull();
   });
 });

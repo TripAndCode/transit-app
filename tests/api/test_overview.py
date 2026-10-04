@@ -903,7 +903,7 @@ async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
     # Empty-dataset agency: no seeded rows at all.
     empty_ctx = RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 1))
     empty_out = await compute_overview_summary(aagency_id, empty_ctx, aconn, "ja")
-    assert empty_out["top_delayed"] == {"routes": [], "delayed_count": 0}
+    assert empty_out["top_delayed"] == {"routes": [], "delayed_count": 0, "delayed_threshold_min": 2.0}
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 
 import type { OverviewConcentration, OverviewMovers } from "../api/types";
 import { InlineSparkline } from "./InlineSparkline";
+import { CONCENTRATION_TOP_N } from "./overview/concentrationTopN";
 
 type Props = {
   concentration: OverviewConcentration;
@@ -22,7 +23,7 @@ const RANK_OPACITY = [1, 0.8, 0.6, 0.45, 0.35];
 export function ConcentrationBar({
   concentration,
   movers,
-  limit = 5,
+  limit = CONCENTRATION_TOP_N,
   variant = "card",
   onClick,
 }: Props) {

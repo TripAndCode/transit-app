@@ -826,6 +826,8 @@ export type OverviewTopDelayedRoute = {
 type OverviewTopDelayed = {
   routes: OverviewTopDelayedRoute[];
   delayed_count: number;
+  /** The average delay (minutes) at or above which a route was counted. */
+  delayed_threshold_min: number;
 };
 
 export type OverviewPeakHour = {
