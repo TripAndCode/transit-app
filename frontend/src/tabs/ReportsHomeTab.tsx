@@ -71,8 +71,8 @@ export function ReportsHomeTab() {
     t,
   });
   return <div className="focus-page">
-    <header className="focus-header"><div />
-      {!savedTab && <ExportMenu
+    {!savedTab && <div className="focus-header" style={{ justifyContent: "flex-end" }}>
+      <ExportMenu
         svgContainerRef={chartWrapRef}
         pngFilenameBase={`trend-${id}`}
         csv={{
@@ -82,8 +82,8 @@ export function ReportsHomeTab() {
           ctx,
           extraRows: [[], ...buildCsv(rows, rankingColumns)],
         }}
-      />}
-    </header>
+      />
+    </div>}
     {notice && <p role="status">{notice}</p>}
     {savedTab ? <section><p className="focus-muted">{t("localOnly")}</p>
       {!saved.some((s) => s.agencyId === id) && (
