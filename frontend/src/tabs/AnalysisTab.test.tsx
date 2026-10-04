@@ -448,7 +448,9 @@ describe("AnalysisTab dwell_run route cap", () => {
 
     await user.click(screen.getByRole("button", { name: "switch agency" }));
     expect(routeCells()).toHaveLength(200);
-  });
+    // The cap is 200 rows, so proving it renders a few hundred table rows
+    // four times; on a loaded machine that alone outlasts the default timeout.
+  }, 45_000);
 });
 
 describe("AnalysisTab evidence panels", () => {

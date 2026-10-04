@@ -96,6 +96,17 @@ describe("drawHeroFrame", () => {
     expect(styles).toEqual(new Set([PALETTE.warning]));
   });
 
+  it("prints the panel's delay figures in the text colour, leaving the delay colour to the dots", () => {
+    const delayFigure = /^\+\d+$/;
+    const styles = new Set<unknown>();
+    for (let t = 0; t < DURATION; t += 0.25) {
+      const { ctx, fills } = makeFakeCtx();
+      drawHeroFrame(ctx, 1440, 740, frameAt(t), PALETTE, LABELS);
+      for (const [text, style] of fills) if (delayFigure.test(text)) styles.add(style);
+    }
+    expect(styles).toEqual(new Set([PALETTE.text]));
+  });
+
   it("renders every moment of the script, wide and narrow, without throwing", () => {
     for (let t = 0; t <= DURATION; t += 0.1) {
       expect(() => textsAt(t)).not.toThrow();
