@@ -618,11 +618,6 @@
     }
   },
   "map": {
-    "legend": {
-      "band_1_5_3": "1.5 – 3分",
-      "band_3_5": "3 – 5分",
-      "band_gt_5": "> 5分"
-    },
     "style": {
       "osm": "OpenStreetMap",
       "label": "地図スタイル",
