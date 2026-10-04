@@ -141,18 +141,18 @@
   },
   "forecast": {
     "overview_worst_label": "いま見るべき時間帯",
-    "overview_worst_phrase": "{{day}}の{{band}} — 全体的に遅れやすい（平均 +{{min}}分）",
+    "overview_worst_phrase": "{{day}}の{{band}}が最も遅れやすい（{{avg}}）",
     "overview_grid_title": "曜日 × 時間帯（全路線）",
     "overview_grid_caption": "事業者全体で、いつ遅れやすいか — 濃いほど遅延が大きい。",
     "overview_routes_title": "遅れやすい路線",
-    "overview_routes_caption": "クリックすると路線ごとの詳細を表示します。",
+    "overview_routes_caption": "系統をクリックすると内訳を表示します。小さな線は、データのある直近7日間の日平均です。",
     "overview_no_data": "計測記録がまだありません。",
     "band_early": "早朝",
     "band_morning": "朝",
     "band_midday": "昼",
     "band_evening": "夕方",
     "band_night": "夜",
-    "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（平均 +{{min}}分）",
+    "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（{{avg}}）",
     "detail_show_grid": "曜日×時間帯を詳しく",
     "low_confidence_note": "計測が少なく参考値",
     "lowSamples": "データ不足 ({{count}}件)",
@@ -175,7 +175,11 @@
     "stat_worst": "最も遅い",
     "stat_calmest": "最も軽い",
     "stat_mean": "路線平均",
-    "stat_samples": "計測回数"
+    "stat_samples": "計測回数",
+    "route_picker_label": "系統",
+    "route_picker_all": "すべての系統",
+    "avg_late": "平均{{min}}分の遅れ",
+    "avg_early": "平均{{min}}分の早発"
   },
   "network": {
     "title": "事業者比較",
@@ -976,8 +980,8 @@
     "dow_band": {
       "title": "いつもの遅れ方",
       "empty": "この期間のデータがありません。",
-      "worst_phrase_one": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（平均 +{{min}}分）",
-      "worst_phrase_other": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（平均 +{{min}}分）"
+      "worst_phrase_one": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（{{avg}}）",
+      "worst_phrase_other": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（{{avg}}）"
     },
     "daily": {
       "empty": "期間内にデータがありません。",
@@ -1080,7 +1084,7 @@
       "dow_weekday": "平日の系統ごとの平均遅延です。",
       "dow_weekend": "土日祝の系統ごとの平均遅延です。",
       "dwell_run": "停留所での停車時間と走行時間の内訳を見ます。",
-      "route_forecast": "指定日の系統別の遅れを予測します。",
+      "route_forecast": "系統ごとに、曜日と時間帯で遅れやすい時を示します。",
       "council_summary": "議会・取締役会向けの期間まとめです。",
       "delay_certificate": "特定の遅延便を証明する書類です。"
     },
