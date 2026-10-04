@@ -253,7 +253,10 @@ export type BoardCollector = {
   label: string;
   status: "ok" | "warn" | "down" | "unknown";
   last_success_at: string | null;
+  /** The collector's own reason text, verbatim; shown only on request. */
   detail: string | null;
+  /** The status check itself failed, so the state is not known at all. */
+  check_failed: boolean;
   /** 24 hourly cells, oldest first: 1 where the collector was still known good. */
   history: number[];
 };
@@ -315,8 +318,8 @@ export type AdminBoard = {
 type AdminRuns = { date: string; runs: PipelineRun[] };
 
 /** The `/admin` entry page's single snapshot. Polled rather than pushed: the
- *  underlying collectors are themselves cached snapshots, so a short poll is
- *  as fresh as the data can be. */
+ *  collectors and the staleness check behind it are cached snapshots on the
+ *  server, so a short poll is as fresh as the data can be. */
 export function useAdminBoard() {
   return useQuery({
     queryKey: ["adminBoard"],

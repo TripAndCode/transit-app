@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import i18n from "../i18n";
 import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { LegalPage } from "./LegalPage";
@@ -20,7 +22,10 @@ function stubDocFetch(markdown: string, ok = true) {
 }
 
 describe("LegalPage", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await i18n.changeLanguage("en");
+  });
 
   it("fetches the privacy policy for the active locale and renders it under the page's own heading", async () => {
     stubDocFetch("# Privacy Policy\n\nLast updated: today\n\n## Operator\n\nTripAndCode\n");
@@ -56,10 +61,20 @@ describe("LegalPage", () => {
     expect(screen.getByText("Loading...")).toBeInTheDocument();
   });
 
-  it("links back to the app", () => {
+  it("links back to the app by name, at its welcome page", () => {
     stubDocFetch("# Privacy Policy\n");
     renderDoc("privacy");
 
-    expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Delay Dashboard" })).toHaveAttribute("href", "/welcome");
+  });
+
+  it("switches to Japanese from its header, fetching that version and retitling the tab", async () => {
+    stubDocFetch("# Privacy Policy\n\n## Operator\n");
+    renderDoc("privacy");
+    await userEvent.click(screen.getByRole("button", { name: "日本語" }));
+
+    await waitFor(() => expect((fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]).toBe("/legal/privacy.ja.md"));
+    expect(document.title).toBe("遅延ダッシュボード");
+    expect(document.documentElement.lang).toBe("ja");
   });
 });

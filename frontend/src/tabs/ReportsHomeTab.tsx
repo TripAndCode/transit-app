@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { reportHref, routeHref, routesHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
-import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
+import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { scopeToQueryString, useScope } from "../api/scope";
 import { useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
@@ -107,10 +107,12 @@ export function ReportsHomeTab() {
             <Link to={routeHref(String(id), String(row[0]), `?${(() => { const next = new URLSearchParams(queryString); if (row[1] === "平日" || row[1] === "土日祝") next.set("service", row[1]); return next.toString(); })()}`)}>{t("open")}</Link>{/* i18n-ignore: query contract */}
           </td></tr>)}
         </tbody></table></div>}
-      </AsyncSection></section>
+      </AsyncSection>
+      {ranking.data?.reliable_min_samples != null && <p className="focus-muted">{t("routesFloor", { floor: ranking.data.reliable_min_samples })}</p>}
+      </section>
       <p className="focus-muted">{t("reportNote")}</p>
+      {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
       <details><summary>{t("definitions")}</summary><p>{ctx.from} – {ctx.to}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
-        {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
         <Link to={reportHref(String(id), "trend", `?${queryString}`)}>{t("advanced")} →</Link>
       </details>
     </>}

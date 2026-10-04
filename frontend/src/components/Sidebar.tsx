@@ -14,14 +14,12 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useSession } from "../api/auth";
-import { useConfig } from "../api/config";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { useScreenQuery, withQuery } from "../api/screenScope";
 import { clearLastAgency } from "../api/lastAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
-import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { Tooltip } from "./Tooltip";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { OverlayBase } from "./ui/OverlayBase";
@@ -157,9 +155,7 @@ export function Sidebar() {
   const { t } = useTranslation();
   const { agencyId } = useParams();
   const navigate = useNavigate();
-  const { data: config } = useConfig();
-  const { data: session } = useSession();
-  const isAdmin = Boolean(config?.auth_enabled && session?.role === "admin");
+  const isAdmin = useIsAdmin();
   // Each screen opens with its own last filters (see api/screenScope), so
   // nothing set on the screen being left follows the visitor elsewhere.
   const screenQuery = useScreenQuery();
@@ -405,7 +401,6 @@ export function Sidebar() {
             )}
           </>
         )}
-        {!collapsedFlag && <CompactDataStatus />}
         {!collapsedFlag && !inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
       </>
     );
