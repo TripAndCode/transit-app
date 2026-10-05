@@ -127,9 +127,10 @@ export function useScopeSummary(
   });
 }
 
-/** A ranking's own options beyond the scope: whether groups observed too few
- *  times to trust join it, and how many rows come back. */
-export type ReportOptions = { includeSparse?: boolean; limit?: number };
+/** A report's own options beyond the scope: whether a ranking's groups
+ *  observed too few times to trust join it, how many rows come back, and
+ *  how late a departure must be for the delay certificate to list it. */
+export type ReportOptions = { includeSparse?: boolean; limit?: number; thresholdSec?: number };
 
 /** The most rows the reports API returns in one response. */
 export const REPORT_ROWS_MAX = 500;
@@ -138,6 +139,7 @@ export function reportQueryString(ctx: Scope, options: ReportOptions = {}): stri
   const parts = [scopeToQueryString(ctx)];
   if (options.includeSparse) parts.push("include_sparse=1");
   if (options.limit != null) parts.push(`limit=${options.limit}`);
+  if (options.thresholdSec != null) parts.push(`threshold_sec=${options.thresholdSec}`);
   return parts.filter(Boolean).join("&");
 }
 
@@ -148,7 +150,7 @@ export function useReport(
   options: ReportOptions = {},
 ): UseQueryResult<ReportResponse> {
   return useQuery({
-    queryKey: ["reports", agencyId, reportType, ...scopeKey(ctx), !!options.includeSparse, options.limit ?? null],
+    queryKey: ["reports", agencyId, reportType, ...scopeKey(ctx), !!options.includeSparse, options.limit ?? null, options.thresholdSec ?? null],
     queryFn: ({ signal }) =>
       apiGet<ReportResponse>(`/api/${agencyId}/reports/${reportType}?${reportQueryString(ctx, options)}`, { signal }),
     enabled: agencyId != null && !!reportType,

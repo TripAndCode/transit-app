@@ -1129,8 +1129,28 @@
       "on_time": "On time",
       "avg_delay": "Average delay",
       "departures": "Departures observed",
-      "planned_trips": "Planned trips",
-      "print": "Print / Save as PDF"
+      "planned_trips": "Planned trips"
+    },
+    "print": "Print / Save as PDF",
+    "certificate": {
+      "intro": "Choose the day and route you travelled on, then your departure, to get a certificate of its delay.",
+      "date": "Date",
+      "route": "Route",
+      "route_placeholder": "Search routes",
+      "departure": "Scheduled departure",
+      "departure_prompt": "Choose a departure",
+      "departure_option": "{{time}} ({{delay}} late)",
+      "loading": "Looking up late departures…",
+      "none": "No departure of this route left late on this day.",
+      "not_listed": "A departure that isn't listed left on time or early, or wasn't in the live feed.",
+      "card": "Delay certificate for the chosen departure",
+      "statement": "On {{date}}, the {{scheduled}} departure of {{route}} left its first recorded stop at {{actual}}, {{delay}} late.",
+      "operator": "Operator",
+      "scheduled": "Scheduled departure",
+      "actual": "Actual departure",
+      "delay": "Delay",
+      "measured_at": "Times are at the first stop recorded for this trip in the operator's real-time feed.",
+      "all_late": "All late departures in the period"
     }
   },
   "insight_panel": {

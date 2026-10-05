@@ -45,7 +45,7 @@ export function CouncilSummaryBlock({ row, text }: { row: CouncilSummaryRow; tex
         </p>
       ))}
       <button type="button" className="btn-ghost council-report__print" onClick={() => window.print()}>
-        {t("reports.council.print")}
+        {t("reports.print")}
       </button>
     </div>
   );

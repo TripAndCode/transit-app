@@ -1129,8 +1129,28 @@
       "on_time": "定時率",
       "avg_delay": "平均遅延",
       "departures": "観測した発車",
-      "planned_trips": "計画便数",
-      "print": "印刷 / PDFで保存"
+      "planned_trips": "計画便数"
+    },
+    "print": "印刷 / PDFで保存",
+    "certificate": {
+      "intro": "乗車した日と路線、便を選ぶと、その便の遅延証明を表示します。",
+      "date": "日付",
+      "route": "路線",
+      "route_placeholder": "路線を検索",
+      "departure": "定刻の発車時刻",
+      "departure_prompt": "便を選択",
+      "departure_option": "{{time}}（{{delay}}遅れ）",
+      "loading": "遅れた便を検索しています…",
+      "none": "この日、この路線に遅れて発車した便はありません。",
+      "not_listed": "一覧にない便は、定刻どおりか早く発車したか、リアルタイムデータに含まれていません。",
+      "card": "選んだ便の遅延証明書",
+      "statement": "{{date}}、{{route}} {{scheduled}}発の便は、最初に記録された停留所を{{actual}}に発車し、{{delay}}遅れました。",
+      "operator": "事業者",
+      "scheduled": "定刻の発車",
+      "actual": "実際の発車",
+      "delay": "遅れ",
+      "measured_at": "時刻は、事業者のリアルタイムデータでこの便が最初に記録された停留所でのものです。",
+      "all_late": "期間内のすべての遅延便"
     }
   },
   "insight_panel": {
