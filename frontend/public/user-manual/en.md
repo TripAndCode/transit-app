@@ -277,7 +277,7 @@ Live shows the trips reporting now, under the heading “Current observations”
 - The map places each trip at its last reported stop, not at a GPS position. The legend explains the marks: “Latest report”, “Report trail”, “Delayed” and “Number = overlapping trips”. Hover over a trip for its details; “Pin this trip” keeps them on screen. “Fit all trips in view” moves the map to frame every trip, and **Layers** switches the map style.
 - Filters on the map: choose a “Route” and a “Service pattern”, then press **Apply**.
 - **Play the day** replays the day’s observations on the map; “Back to current observations” returns to now.
-- **Trips to check**, on the right: “Observed”, “Delayed 5+ min” and “On-time rate” for the trips reporting now, **Download CSV** for those trips, and a list of the trips running five minutes or more late, latest first. Each trip in the list links to its route’s page. “View observed trips” lets you pick a running route, a direction and a trip, and follow how its delay has developed.
+- **Trips to check**, on the right: “Observed”, “5+ min late” and “On-time rate” for the trips reporting now, **Download CSV** for those trips, and a list of the trips running five minutes or more late, latest first. Each trip in the list links to its route’s page. “View observed trips” lets you pick a running route, a direction and a trip, and follow how its delay has developed.
 
 When no vehicle is reporting, the map says “No vehicles are reporting right now”. That is normal late at night; if it lasts through service hours, the agency’s feed may be down.
 
