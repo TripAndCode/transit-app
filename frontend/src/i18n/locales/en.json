@@ -85,7 +85,7 @@
       "queue_title": "Trips to check",
       "kpi": {
         "observed": "Observed",
-        "delayed": "Delayed 5+ min",
+        "delayed": "5+\u00a0min late",
         "on_time": "On-time rate"
       },
       "legend": {
@@ -891,7 +891,9 @@
       },
       "top_delay": {
         "title": "Top-N delays",
-        "summary": "Most delayed routes: top {{k}} ({{service}})",
+        "summary_all": "{{k}} most delayed routes",
+        "summary_weekday": "{{k}} most delayed routes on weekdays",
+        "summary_weekend": "{{k}} most delayed routes on weekends and holidays",
         "example_answer": "e.g., lists the routes with the highest average delay, worst first."
       },
       "ontime_rank": {
@@ -899,8 +901,8 @@
         "best": "Best first",
         "worst": "Worst first",
         "example_answer": "e.g., lists routes and their on-time rate, ranked best or worst first.",
-        "summary_worst": "Least on-time routes: {{k}}",
-        "summary_best": "Most on-time routes: {{k}}"
+        "summary_worst": "{{k}} least on-time routes",
+        "summary_best": "{{k}} most on-time routes"
       },
       "route_trend": {
         "title": "Route delay trend",

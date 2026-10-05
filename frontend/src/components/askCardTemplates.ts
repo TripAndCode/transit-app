@@ -74,12 +74,7 @@ export function buildCardTemplates(): CardTemplate[] {
         { kind: "service", name: "service_type", default: "all" },
       ],
       buildSummary: (v, t) =>
-        t("ask.card.top_delay.summary", {
-          k: v.k ?? 5,
-          service: t(
-            `ask.card.param.service.${(v.service_type as string) ?? "all"}`,
-          ),
-        }),
+        t(`ask.card.top_delay.summary_${(v.service_type as string) ?? "all"}`, { k: v.k ?? 5 }),
       example_answer_key: "ask.card.top_delay.example_answer",
     },
     {

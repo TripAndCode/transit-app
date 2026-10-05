@@ -891,7 +891,9 @@
       },
       "top_delay": {
         "title": "遅延の大きい路線 Top-N",
-        "summary": "遅延の大きい路線：上位{{k}}件（{{service}}）",
+        "summary_all": "遅延の大きい路線：上位{{k}}件",
+        "summary_weekday": "遅延の大きい路線：上位{{k}}件（平日）",
+        "summary_weekend": "遅延の大きい路線：上位{{k}}件（土日祝）",
         "example_answer": "例: 平均遅延の大きい路線を、大きい順に一覧表示します。"
       },
       "ontime_rank": {

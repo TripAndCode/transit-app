@@ -277,7 +277,7 @@ Live shows the trips reporting now, under the heading “Current observations”
 - The map places each trip at its last reported stop, not at a GPS position. The legend explains the marks: “Latest report”, “Report trail”, “Delayed” and “Number = overlapping trips”. Hover over a trip for its details; “Pin this trip” keeps them on screen. “Fit all trips in view” moves the map to frame every trip, and **Layers** switches the map style.
 - Filters on the map: choose a “Route” and a “Service pattern”, then press **Apply**.
 - **Play the day** replays the day’s observations on the map; “Back to current observations” returns to now.
-- **Trips to check**, on the right: “Observed”, “Delayed 5+ min” and “On-time rate” for the trips reporting now, **Download CSV** for those trips, and a list of the trips running five minutes or more late, latest first. Each trip in the list links to its route’s page. “View observed trips” lets you pick a running route, a direction and a trip, and follow how its delay has developed.
+- **Trips to check**, on the right: “Observed”, “5+ min late” and “On-time rate” for the trips reporting now, **Download CSV** for those trips, and a list of the trips running five minutes or more late, latest first. Each trip in the list links to its route’s page. “View observed trips” lets you pick a running route, a direction and a trip, and follow how its delay has developed.
 
 When no vehicle is reporting, the map says “No vehicles are reporting right now”. That is normal late at night; if it lasts through service hours, the agency’s feed may be down.
 
@@ -328,7 +328,7 @@ Ask answers common questions about delay with a table or chart, so you do not ha
 ### 11-1. Asking a question
 
 - The bar at the top shows the period and routes your questions will cover. **Edit** changes them (“Date range”, “DOW”, “Time band”, “Routes”); press **Apply** to keep the change.
-- Under “You can ask things like”, a card runs at once: “Most delayed routes: top 5 (All)” or “Least on-time routes: 5”.
+- Under “You can ask things like”, a card runs at once: “5 most delayed routes” or “5 least on-time routes”.
 - Under “More questions”, each question needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
 - After the first answer, open **Start another analysis** at the bottom to see every question. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes question.
 
