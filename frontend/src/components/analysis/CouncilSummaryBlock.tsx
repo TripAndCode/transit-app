@@ -1,12 +1,12 @@
 import { useTranslation } from "react-i18next";
 import type { CouncilSummaryRow } from "../../api/types";
-import { fmtPct, formatMinutes, formatNumber } from "../../utils/format";
+import { EM_DASH, fmtPct, formatMinutes, formatNumber } from "../../utils/format";
 import "./CouncilSummaryBlock.css";
 
 const FOOTNOTE_MARK = /^(※|\* )/; // i18n-ignore: the server's footnote marks, not copy
 
 function count(v: number | null): string {
-  return v == null ? "—" : formatNumber(v);
+  return v == null ? EM_DASH : formatNumber(v);
 }
 
 /** The council report as a page someone can read aloud or print: the four

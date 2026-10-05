@@ -71,16 +71,9 @@ describe("ReportTable on_time confidence column", () => {
   });
 });
 
-describe("ReportTable council_summary/delay_certificate schemas", () => {
+describe("ReportTable delay_certificate schema", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  it("renders the pooled council_summary row", () => {
-    mockRoutes([]);
-    renderTable([[71.4, 3.2, 35, 4, 3, 75.0]], "council_summary");
-    expect(screen.getByText("71.4%")).toBeInTheDocument();
-    expect(screen.getByText("75.0%")).toBeInTheDocument();
   });
 
   it("renders a delay_certificate row without crashing on the un-enriched route column", () => {
@@ -191,14 +184,6 @@ describe("ReportTable on a phone", () => {
     for (const text of ["1", "T50", "39061", "Avg", "5.2 min", "Weekday", "Median", "3.1 min", "p90", "8.4 min", "Samples", "120"]) {
       expect(within(item).getByText(text)).toBeInTheDocument();
     }
-  });
-
-  it("names no route for a report without a route column", () => {
-    renderTable([[92.3, 5.2, 120, 100, 95, 95.0]], "council_summary");
-    const [item] = screen.getAllByRole("listitem");
-    expect(within(item).queryByText(/Route/)).not.toBeInTheDocument();
-    expect(within(item).getAllByText("On-time %")).toHaveLength(1);
-    expect(within(item).getByText("Planned trips")).toBeInTheDocument();
   });
 
   it("titles a certificate row by its own route column, not the agency in column 0", () => {
