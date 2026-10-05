@@ -151,6 +151,7 @@
     "overview_worst_label": "When to watch out",
     "overview_worst_phrase": "{{day}} {{band}} runs latest ({{avg}})",
     "overview_grid_title": "Day × time of day (all routes)",
+    "route_grid_title": "Day × time of day (this route)",
     "overview_grid_caption": "When the agency tends to run late — darker = more delay.",
     "overview_routes_title": "Routes that run late",
     "overview_routes_caption": "Click a route for its breakdown. The small line traces its daily average over its last 7 days of data.",

@@ -759,7 +759,7 @@ function RouteDetail({
         </div>
       )}
 
-      <SectionCard title={t("forecast.overview_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
+      <SectionCard title={t("forecast.route_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
         <BandGrid grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
         {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={bandColorFor} />}
       </SectionCard>
