@@ -30,6 +30,10 @@ describe("Testing Library's async queries", () => {
     try {
       render(<Late delayMs={1500} />);
       const found = screen.findByText("arrived");
+      // Handled here so a wait that gives up while the clock is advanced
+      // fails this test through the `await` below, not as an unhandled
+      // rejection another test could be blamed for.
+      found.catch(() => {});
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1500);
       });
