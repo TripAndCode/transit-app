@@ -60,12 +60,15 @@ describe("ReportsHomeTab", () => {
     expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
   });
 
-  it("titles the period the way the rest of the page writes dates", () => {
+  it("writes its period the way the rest of the page writes dates", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab("/agencies/1/reports?from=2026-08-12&to=2026-09-10");
     const title = screen.getByRole("heading", { level: 2, name: /Hiroden/ });
     expect(title).toHaveTextContent("Aug 12 – Sep 10, 2026");
     expect(title).not.toHaveTextContent("2026-08-12");
+    const definitions = screen.getByText("View filters and definitions").closest("details") as HTMLElement;
+    expect(definitions).toHaveTextContent("Aug 12 – Sep 10, 2026");
+    expect(definitions).not.toHaveTextContent("2026-08-12");
   });
 
   it("leaves the page heading to the Reports shell", () => {

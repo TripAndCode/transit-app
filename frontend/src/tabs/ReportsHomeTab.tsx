@@ -116,7 +116,7 @@ export function ReportsHomeTab() {
       </section>
       <p className="focus-muted">{t("reportNote")}</p>
       {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
-      <details><summary>{t("definitions")}</summary><p>{ctx.from} – {ctx.to}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
+      <details><summary>{t("definitions")}</summary><p>{formatDateRange(ctx.from, ctx.to)}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
         <Link to={reportHref(String(id), "trend", `?${queryString}`)}>{t("advanced")} →</Link>
       </details>
     </>}
