@@ -27,7 +27,7 @@ export function StillWorking({ scope, update }: { scope?: Scope; update?: (patch
         <>
           <span>{narrower ? t("common.still_working_period") : t("common.still_working")}</span>
           {narrower && (
-            <button type="button" className="btn-ghost still-working__narrow" onClick={narrower}>
+            <button type="button" className="btn-ghost" onClick={narrower}>
               {t("common.narrow_to_week")}
             </button>
           )}
