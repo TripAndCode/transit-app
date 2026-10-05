@@ -328,7 +328,7 @@ Ask answers common questions about delay with a table or chart, so you do not ha
 ### 11-1. Asking a question
 
 - The bar at the top shows the period and routes your questions will cover. **Edit** changes them (“Date range”, “DOW”, “Time band”, “Routes”); press **Apply** to keep the change.
-- Under “You can ask things like”, a card runs at once: “Most delayed routes: top 5 (All)” or “Least on-time routes: 5”.
+- Under “You can ask things like”, a card runs at once: “5 most delayed routes” or “5 least on-time routes”.
 - Under “More questions”, each question needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
 - After the first answer, open **Start another analysis** at the bottom to see every question. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes question.
 
