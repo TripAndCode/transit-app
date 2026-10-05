@@ -27,9 +27,10 @@ function renderProbe(agencyId: number | null, initialPath: string) {
   );
 }
 
-// Mirrors AgencyPicker's `selectAgency`, which navigates to the same or a
-// different agency without preserving any filter query params (unlike
-// Sidebar's nav links, which always carry `ctxToQueryString`).
+// Mirrors a navigation to the same or a different agency that carries no
+// filter query params (a hand-typed or bookmarked bare URL), unlike
+// Sidebar's nav links and the agency switcher, which always carry
+// `ctxToQueryString`.
 function NavigatingProbe({ agencyId }: { agencyId: number }) {
   useAnonymousFilterPersistence(agencyId);
   const navigate = useNavigate();

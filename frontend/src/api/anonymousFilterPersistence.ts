@@ -150,9 +150,9 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
       // A bare "no filter params" URL for an agency we've already processed
       // this session is ambiguous — it can mean an explicit in-session
       // clear-all, but it's also exactly what a same-agency re-navigation
-      // with a dropped query string (e.g. AgencyPicker's `selectAgency`,
-      // which doesn't preserve filter params the way Sidebar's nav links
-      // do) looks like. Since we can't tell those apart, never let this
+      // with a dropped query string (e.g. a bare tab link, which doesn't
+      // preserve filter params the way Sidebar's nav links do) looks like.
+      // Since we can't tell those apart, never let this
       // ambiguous case silently overwrite an already-stored non-empty
       // filter; only an agency's genuine first attempt (or storage that was
       // already empty) can persist an empty object.

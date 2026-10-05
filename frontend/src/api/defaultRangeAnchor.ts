@@ -94,7 +94,7 @@ export function useJumpToLatestDataRange(agencyId: number | null): (() => void) 
  * is already correct in that case).
  *
  * Reads the already-cached agencies list (useAgencies, 5min staleTime,
- * already fetched by AgencyPicker on nearly every page) — no new network
+ * already fetched by the agency switcher on nearly every page) — no new network
  * round-trip in the common case.
  */
 export function useDefaultRangeAnchor(agencyId: number | null): void {

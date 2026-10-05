@@ -20,6 +20,8 @@ import { useTheme } from "../styles/useTheme";
 import { filterItems, type Searchable } from "./commandPaletteMatch";
 import { onActivateKey } from "../utils/a11y";
 import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
+import { openAgencySwitcher } from "./agencySwitcherEvents";
+import { buildAgencySwitchPath } from "./agencySwitcherModel";
 import "./commandPalette.css";
 
 const RECENTS_KEY = "transit.commandPaletteRecents";
@@ -268,7 +270,7 @@ export function CommandPalette() {
   }
 
   function goToAgency(id: number) {
-    navigate(`/agencies/${id}/${tabParam ?? "overview"}`);
+    navigate(buildAgencySwitchPath(id, tabParam, ctxSuffix));
   }
 
   function goToRoute(code: string) {
@@ -311,6 +313,16 @@ export function CommandPalette() {
       label: t("palette.action.toggle_theme"),
       sublabel: t("palette.action.toggle_theme_sublabel"),
       run: cycleTheme,
+    },
+    {
+      id: "action:switch_agency",
+      group: "action",
+      label: t("palette.action.switch_agency"),
+      sublabel: t("palette.action.switch_agency_sublabel"),
+      // Hands off to the switcher in the app chrome rather than listing
+      // every agency a second time: that list already carries each agency's
+      // data freshness and its recently-visited order.
+      run: openAgencySwitcher,
     },
     {
       id: "action:shortcuts",

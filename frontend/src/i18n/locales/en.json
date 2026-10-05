@@ -1482,7 +1482,9 @@
     "action": {
       "toggle_theme": "Toggle theme",
       "toggle_theme_sublabel": "System / light / dark",
-      "shortcuts": "Keyboard shortcuts"
+      "shortcuts": "Keyboard shortcuts",
+      "switch_agency": "Switch agency…",
+      "switch_agency_sublabel": "Keeps the current tab and filters"
     },
     "footer": {
       "navigate": "Navigate",
@@ -1504,5 +1506,14 @@
       "reset_service": "Reset service type to all",
       "jump_latest_data": "Jump to the latest data"
     }
+  },
+  "agency_switcher": {
+    "list_aria": "Switch agency",
+    "group_recent": "Recent agencies",
+    "group_all": "All agencies",
+    "option_aria": "{{agency}} (data: {{freshness}})",
+    "freshness_current": "Up to date",
+    "freshness_unknown": "No data yet",
+    "switched": "Switched to {{agency}}"
   }
 }

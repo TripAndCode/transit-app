@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   HelpCircle,
@@ -13,7 +13,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
 import { clearLastAgency } from "../api/lastAgency";
-import { AgencyPicker } from "./AgencyPicker";
+import type { Agency } from "../api/types";
+import { AgencySwitcher } from "./AgencySwitcher";
 import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { CompactDataStatus } from "./analysis/CompactDataStatus";
@@ -23,6 +24,7 @@ import { useFocusTrap } from "../hooks/useFocusTrap";
 import { Z_INDEX } from "../styles/zIndex";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
 import { openCommandPalette } from "./commandPaletteEvents";
+import { AGENCY_SWITCHER_OPEN_EVENT } from "./agencySwitcherEvents";
 
 
 import { SIDEBAR_NAV_ITEMS } from "./sidebarNavItems";
@@ -80,9 +82,9 @@ function RailTooltip({
   );
 }
 
-/** The mobile "…" destination: a bottom sheet holding the agency picker and
- *  the account/settings controls that don't fit as one of the four tab bar
- *  slots. Traps focus and closes on Escape or a backdrop click.
+/** The mobile "…" destination: a bottom sheet holding the agency switcher
+ *  and the account/settings controls that don't fit as one of the four tab
+ *  bar slots. Traps focus and closes on Escape or a backdrop click.
  *
  *  Not the shared `Modal`: its two variants are a centred card and a
  *  full-height side drawer, and this is anchored to the bottom edge above
@@ -161,8 +163,35 @@ export function Sidebar() {
   // Below BP.sm the rail's nav links move into a persistent bottom tab bar
   // (thumb-reachable, and it gives the tab content back the width the rail
   // used to take); this sheet holds what doesn't fit in four tab slots --
-  // the agency picker and the settings/account controls -- behind "…".
+  // the agency switcher and the settings/account controls -- behind "…".
   const [moreOpen, setMoreOpen] = useState(false);
+  // The switch confirmation lives here, not in the switcher: on mobile the
+  // switcher is inside the sheet that the switch closes, so a live region
+  // owned by the popover would be torn down before it could be announced.
+  const [switchedAgency, setSwitchedAgency] = useState<string | null>(null);
+
+  // On mobile the switcher only exists inside the "more" sheet, so the
+  // command palette's "switch agency" entry opens the sheet that holds it;
+  // on desktop the mounted switcher answers the same event itself.
+  const handleSwitcherRequest = useEffectEvent(() => {
+    if (isMobile) setMoreOpen(true);
+  });
+
+  useEffect(() => {
+    window.addEventListener(AGENCY_SWITCHER_OPEN_EVENT, handleSwitcherRequest);
+    return () => window.removeEventListener(AGENCY_SWITCHER_OPEN_EVENT, handleSwitcherRequest);
+  }, []);
+
+  function handleAgencySwitch(agency: Agency) {
+    setSwitchedAgency(agency.agency_name);
+    setMoreOpen(false);
+  }
+
+  const switchAnnouncement = (
+    <p role="status" aria-live="polite" className="agency-switcher-announcement">
+      {switchedAgency ? t("agency_switcher.switched", { agency: switchedAgency }) : ""}
+    </p>
+  );
 
   function toggleCollapsed() {
     setCollapsed((c) => {
@@ -188,11 +217,6 @@ export function Sidebar() {
   function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void, includeNav = true) {
     return (
       <>
-        {!collapsedFlag && (
-          <div style={{ padding: "0 22px 16px" }}>
-            <AgencyPicker />
-          </div>
-        )}
         {includeNav && agencyId && (
           <nav style={{ display: "flex", flexDirection: "column" }}>
             {ITEMS.map((item) => (
@@ -566,10 +590,17 @@ export function Sidebar() {
                 <X size={18} strokeWidth={1.5} aria-hidden="true" />
               </button>
             </div>
+            {/* Same top-of-chrome placement as the desktop rail: the agency
+                being looked at sits directly under the brand, above
+                everything it governs. */}
+            <div style={{ padding: "0 22px 16px" }}>
+              <AgencySwitcher onSwitch={handleAgencySwitch} />
+            </div>
             {renderNavAndFooter(false, () => setMoreOpen(false), false)}
           </MoreSheet>
         )}
 
+        {switchAnnouncement}
         <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </>
     );
@@ -594,33 +625,46 @@ export function Sidebar() {
           transition: "width var(--transition)",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: collapsed ? "center" : "space-between",
-            gap: 4,
-            padding: collapsed ? "0 0 16px" : "0 12px 16px 22px",
-          }}
-        >
-          {brandBlock(collapsed)}
+        {/* Top chrome: identity and the agency being looked at, together and
+            above the nav. The switcher is a change of subject for everything
+            below it, so it reads as part of the header rather than as the
+            first row of the nav list it governs. */}
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: collapsed ? "center" : "space-between",
+              gap: 4,
+              padding: collapsed ? "0 0 16px" : "0 12px 16px 22px",
+            }}
+          >
+            {brandBlock(collapsed)}
+            {!collapsed && (
+              <button
+                type="button"
+                aria-label={t("nav.collapse_sidebar")}
+                onClick={toggleCollapsed}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-tertiary)",
+                  cursor: "pointer",
+                  display: "flex",
+                  padding: 4,
+                  flexShrink: 0,
+                }}
+              >
+                <ChevronLeft size={16} strokeWidth={1.5} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          {/* The collapsed rail is 64px wide: too narrow for an agency name,
+              and the rail expands in one click when one is needed. */}
           {!collapsed && (
-            <button
-              type="button"
-              aria-label={t("nav.collapse_sidebar")}
-              onClick={toggleCollapsed}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "var(--text-tertiary)",
-                cursor: "pointer",
-                display: "flex",
-                padding: 4,
-                flexShrink: 0,
-              }}
-            >
-              <ChevronLeft size={16} strokeWidth={1.5} aria-hidden="true" />
-            </button>
+            <div style={{ padding: "0 22px 16px" }}>
+              <AgencySwitcher onSwitch={handleAgencySwitch} />
+            </div>
           )}
         </div>
         {collapsed && (
@@ -643,6 +687,7 @@ export function Sidebar() {
           </button>
         )}
         {renderNavAndFooter(collapsed)}
+        {switchAnnouncement}
       </aside>
 
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />

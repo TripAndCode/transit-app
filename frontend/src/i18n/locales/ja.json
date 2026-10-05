@@ -1482,7 +1482,9 @@
     "action": {
       "toggle_theme": "テーマを切り替える",
       "toggle_theme_sublabel": "システム / ライト / ダーク",
-      "shortcuts": "ショートカット一覧"
+      "shortcuts": "ショートカット一覧",
+      "switch_agency": "事業者を切り替え…",
+      "switch_agency_sublabel": "タブと絞り込み条件はそのまま"
     },
     "footer": {
       "navigate": "移動",
@@ -1504,5 +1506,14 @@
       "reset_service": "運行種別をすべてに戻す",
       "jump_latest_data": "最新のデータに移動する"
     }
+  },
+  "agency_switcher": {
+    "list_aria": "事業者を切り替え",
+    "group_recent": "最近使った事業者",
+    "group_all": "すべての事業者",
+    "option_aria": "{{agency}}（データ: {{freshness}}）",
+    "freshness_current": "最新",
+    "freshness_unknown": "データなし",
+    "switched": "{{agency}} に切り替えました"
   }
 }

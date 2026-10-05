@@ -183,6 +183,28 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/route-analysis");
   });
 
+  it("switching agencies keeps the active filter context", async () => {
+    const user = userEvent.setup();
+    renderPalette("/agencies/1/route-analysis?from=2026-06-01&to=2026-06-07&dow=weekday");
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Kaga Bay Bus");
+    await user.click(screen.getByText("Kaga Bay Bus"));
+    expect(screen.getByTestId("pathname").textContent).toBe("/agencies/2/route-analysis");
+    expect(screen.getByTestId("search").textContent).toContain("from=2026-06-01&to=2026-06-07&dow=weekday");
+  });
+
+  it("offers a Switch agency action that opens the agency switcher", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    window.addEventListener("agency-switcher:open", onOpen);
+    renderPalette();
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "Switch agency");
+    await user.click(screen.getByText("Switch agency…"));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    window.removeEventListener("agency-switcher:open", onOpen);
+  });
+
   it("records a run item in localStorage and shows it under Recent next time", async () => {
     const user = userEvent.setup();
     renderPalette();

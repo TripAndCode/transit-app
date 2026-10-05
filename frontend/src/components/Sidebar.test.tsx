@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
+import { openAgencySwitcher } from "./agencySwitcherEvents";
 import { readLastAgency, writeLastAgency } from "../api/lastAgency";
+import * as hooks from "../api/hooks";
+import type { Agency } from "../api/types";
 
 function mockMatchMedia(matches: boolean) {
   vi.spyOn(window, "matchMedia").mockReturnValue({
@@ -353,6 +356,57 @@ describe("Sidebar", () => {
       await user.click(screen.getByRole("button", { name: "More" }));
       await user.click(screen.getByText("First-time login screen"));
       expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
+  describe("agency switcher", () => {
+    const switcherAgencies: Agency[] = [
+      { agency_id: 1, agency_name: "Hokuriku Transit", feed_url: "", static_url: null, latest_data_date: null },
+      { agency_id: 2, agency_name: "Kaga Bay Bus", feed_url: "", static_url: null, latest_data_date: null },
+    ];
+
+    beforeEach(() => {
+      localStorage.clear();
+      vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: switcherAgencies, isLoading: false } as never);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("sits in the sidebar header beside the brand block, not in the nav body", () => {
+      renderSidebar();
+      const header = screen.getByText("Delay Dashboard").closest("a")!.parentElement!.parentElement!;
+      const trigger = screen.getByRole("button", { name: /Hokuriku Transit/ });
+      expect(header.contains(trigger)).toBe(true);
+      expect(trigger.closest("nav")).toBeNull();
+    });
+
+    it("announces the switch in a polite live region that outlives the popover", async () => {
+      const user = userEvent.setup();
+      renderSidebar("/agencies/1/operations");
+      await user.click(screen.getByRole("button", { name: /Hokuriku Transit/ }));
+      await user.click(screen.getByRole("option", { name: /Kaga Bay Bus/ }));
+      const status = await screen.findByText("Switched to Kaga Bay Bus");
+      expect(status).toHaveAttribute("aria-live", "polite");
+    });
+
+    it("offers the switcher inside the mobile more sheet", async () => {
+      mockMatchMedia(true);
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByRole("button", { name: /Hokuriku Transit/ })).toBeTruthy();
+    });
+
+    it("opens the more sheet on mobile when the palette asks for the agency switcher", async () => {
+      mockMatchMedia(true);
+      renderSidebar();
+      await act(async () => {
+        openAgencySwitcher();
+      });
+      expect(screen.getByRole("dialog")).toBeTruthy();
     });
   });
 });

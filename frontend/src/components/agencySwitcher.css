@@ -1,0 +1,170 @@
+/* Styling for AgencySwitcher.tsx, imported by the component itself so the
+   switcher carries its own appearance into whichever chrome mounts it (the
+   desktop rail header or the mobile "more" sheet). */
+
+.agency-switcher {
+  position: relative;
+}
+
+.agency-switcher-static {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.agency-switcher-muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.agency-switcher-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  /* 44px is the comfortable touch target the mobile sheet needs; the desktop
+     rail is no worse for sharing it. */
+  min-height: 44px;
+  padding: 6px 12px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.agency-switcher-trigger:hover {
+  background: var(--bg-soft);
+}
+
+.agency-switcher-trigger-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agency-switcher-chevron {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.agency-switcher-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  z-index: var(--z-dropdown);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--el-2);
+  overflow: hidden;
+}
+
+/* Opt-in rather than opt-out: with no `prefers-reduced-motion` preference
+   expressed the popover fades in, and everyone else gets it already in
+   place. */
+@media (prefers-reduced-motion: no-preference) {
+  .agency-switcher-popover {
+    animation: agency-switcher-fade var(--dur-1) var(--ease-out);
+  }
+}
+
+@keyframes agency-switcher-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.agency-switcher-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.agency-switcher-list:focus {
+  outline: none;
+}
+
+.agency-switcher-group-label {
+  padding: 8px 12px 4px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.agency-switcher-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.agency-switcher-option[aria-selected="true"] {
+  background: var(--bg-soft);
+}
+
+.agency-switcher-option[aria-current="true"] .agency-switcher-option-name {
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.agency-switcher-option-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agency-switcher-pill {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  background: var(--bg-soft);
+  color: var(--text-tertiary);
+}
+
+.agency-switcher-pill--current {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.agency-switcher-pill--recent {
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+}
+
+/* The warm tan the app already uses for "this data is behind" — never an
+   alarm red for what is only an older feed. */
+.agency-switcher-pill--stale {
+  background: var(--error-bg);
+  color: var(--error-fg);
+}
+
+/* The switch confirmation is announced, not shown: the trigger label and the
+   page content already change in front of a sighted user, and a persistent
+   banner for something they just did would be clutter. */
+.agency-switcher-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
