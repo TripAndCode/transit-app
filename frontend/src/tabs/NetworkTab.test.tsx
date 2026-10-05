@@ -142,7 +142,8 @@ describe("NetworkTab", () => {
     renderTab();
     expect(screen.getByText(/91\.2%/)).toBeInTheDocument();
     const hiroBusCard = screen.getByText("HiroBus").closest(".network-row");
-    expect(hiroBusCard).toHaveTextContent("150");
+    expect(hiroBusCard).toHaveTextContent("Planned trips 150 (vehicle-km not available)");
+    expect(hiroBusCard).not.toHaveTextContent("Vehicle-km delivered %");
     const aomoriCard2 = screen.getByText("Aomori").closest(".network-row");
     expect(aomoriCard2).toHaveTextContent("—");
   });

@@ -156,15 +156,14 @@ function AgencyRow({
               : null
           }
         >
+          {/* The planned-trip fallback carries its own label: after the
+              vehicle-km label, a trip count would read as that percentage. */}
           <span>
-            {t("network.col_vehicle_km_delivered")}{" "}
-            {a.vehicle_km_delivered_pct != null
-              ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
-              : a.planned_trip_count != null
-                ? t("network.planned_trip_count_fallback", {
-                    count: formatNumber(a.planned_trip_count),
-                  })
-                : "—"}
+            {a.vehicle_km_delivered_pct == null && a.planned_trip_count != null
+              ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
+              : `${t("network.col_vehicle_km_delivered")} ${
+                  a.vehicle_km_delivered_pct != null ? `${a.vehicle_km_delivered_pct.toFixed(1)}%` : "—"
+                }`}
           </span>
         </ScheduleVersionTooltip>
         <span>
