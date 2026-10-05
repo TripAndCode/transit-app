@@ -679,11 +679,14 @@ describe("AnalysisTab delay certificate", () => {
     return renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", ["delay_certificate"]);
   }
 
-  it("opens on the passenger's lookup, with the period's full list folded away", () => {
+  it("opens on the passenger's lookup, with the period's full list folded away until asked for", async () => {
     showCertificate();
     expect(screen.getByLabelText("Date")).toBeInTheDocument();
-    const staff = screen.getByText("All late departures in the period").closest("details")!;
+    const summary = screen.getByText("All late departures in the period");
+    const staff = summary.closest("details")!;
     expect(staff).not.toHaveAttribute("open");
+    expect(screen.queryByRole("table")).toBeNull();
+    await userEvent.click(summary);
     expect(staff).toContainElement(screen.getByRole("table"));
     expect(staff).toContainElement(screen.getByRole("link", { name: /CSV/ }));
     expect(staff).toHaveTextContent("1 departure left more than 300 s late.");

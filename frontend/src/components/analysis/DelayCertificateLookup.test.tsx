@@ -107,8 +107,35 @@ describe("DelayCertificateLookup", () => {
     expect(print).toHaveBeenCalledOnce();
   });
 
+  it("keeps certifying the chosen departure when a refetch adds an earlier one", async () => {
+    let rows = ROWS;
+    vi.spyOn(hooks, "useReport").mockImplementation(
+      (_aid, reportType) =>
+        ({ data: reportType == null ? undefined : certificate(rows), error: null, isPlaceholderData: false, refetch: vi.fn() }) as never,
+    );
+    const { rerender } = renderLookup();
+    await chooseRoute();
+    await userEvent.selectOptions(screen.getByLabelText("Scheduled departure"), "15:15 (1 min 10 s late)");
+    rows = [["Aomori City Bus", "W54", "weekday", "2026-09-02", "14:15:00", "14:17:00", 120], ...ROWS];
+    rerender(
+      <DataEndContext value="2026-09-02">
+        <DelayCertificateLookup aid={1} />
+      </DataEndContext>,
+    );
+    const card = screen.getByRole("region", { name: "Delay certificate for the chosen departure" });
+    expect(within(card).getByText("Scheduled departure").nextElementSibling).toHaveTextContent("15:15");
+  });
+
   it("drops the chosen departure when the day changes", async () => {
-    mockReport({ data: certificate(ROWS) });
+    vi.spyOn(hooks, "useReport").mockImplementation(
+      (_aid, reportType, scope) =>
+        ({
+          data: reportType == null ? undefined : certificate(ROWS.map((r) => [r[0], r[1], r[2], scope.from, r[4], r[5], r[6]])),
+          error: null,
+          isPlaceholderData: false,
+          refetch: vi.fn(),
+        }) as never,
+    );
     renderLookup();
     await chooseRoute();
     await userEvent.selectOptions(screen.getByLabelText("Scheduled departure"), "14:45 (5 min 55 s late)");

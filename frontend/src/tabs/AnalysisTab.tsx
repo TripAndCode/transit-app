@@ -120,6 +120,7 @@ export function AnalysisTab({
     rankingOptions(reportType, includeSparse, allRowsFor),
   );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
+  const [staffOpen, setStaffOpen] = useState(false);
   const isAdmin = useIsAdmin();
   // route_forecast is served by the forecast endpoint, so its own map
   // applies; a report's map counts only once that report's response is the
@@ -223,12 +224,16 @@ export function AnalysisTab({
                 {/* The period's whole list, under the page's scope and the
                     report's own threshold, is for staff; a passenger starts
                     from the lookup above. */}
-                <details className="cert-staff">
+                <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
                   <summary>{t("reports.certificate.all_late")}</summary>
-                  <ReportMeta data={detail.data} />
-                  <p className="cert-staff__summary">{detail.data.text}</p>
-                  <CsvLink href={csvHref(detail.data.report_type)} />
-                  {detail.data.rows.length > 0 && <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />}
+                  {staffOpen && (
+                    <>
+                      <ReportMeta data={detail.data} />
+                      <p className="cert-staff__summary">{detail.data.text}</p>
+                      <CsvLink href={csvHref(detail.data.report_type)} />
+                      {detail.data.rows.length > 0 && <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />}
+                    </>
+                  )}
                 </details>
               </>
             ) : detail.data.rows.length > 0 ? (

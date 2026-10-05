@@ -14,11 +14,18 @@ import "./DelayCertificateLookup.css";
  *  staff reading the whole period. */
 const LOOKUP_OPTIONS: ReportOptions = { thresholdSec: 0, limit: REPORT_ROWS_MAX };
 
-/** A timetable time without seconds when it has none to show; a departure's
- *  actual time keeps them, since it is the scheduled time shifted by the
- *  observed delay in seconds. */
+/** A time without its seconds when they are :00. A timetable time almost
+ *  always is; an actual time is the scheduled time shifted by the delay in
+ *  seconds, so it shows them unless the delay is whole minutes. */
 function clock(time: string): string {
   return /^\d+:\d\d:00$/.test(time) ? time.slice(0, -3) : time;
+}
+
+/** A departure's identity from its own values, so a refetch that adds or
+ *  reorders rows never moves the choice onto another departure. Two rows
+ *  sharing it would print the same certificate. */
+function departureKey(row: DelayCertificateRow): string {
+  return [row[1], row[3], row[4], row[5]].join("|");
 }
 
 /** A passenger's way to the delay certificate: the day and route they
@@ -30,9 +37,8 @@ export function DelayCertificateLookup({ aid }: { aid: number }) {
   const latestDay = defaultPeriod(use(DataEndContext)).to;
   const [pickedDate, setPickedDate] = useState<string | null>(null);
   const [route, setRoute] = useState<string | null>(null);
-  const [chosen, setChosen] = useState<{ key: string; index: number } | null>(null);
+  const [chosen, setChosen] = useState<string | null>(null);
   const date = pickedDate ?? latestDay;
-  const lookupKey = `${date}|${route ?? ""}`;
   const ready = route != null;
   const scope: Scope = {
     ...SCOPE_EXTRAS_NONE,
@@ -48,7 +54,7 @@ export function DelayCertificateLookup({ aid }: { aid: number }) {
     ready && !departures.isPlaceholderData && departures.data?.report_type === "delay_certificate"
       ? departures.data.rows
       : undefined;
-  const row = chosen?.key === lookupKey ? rows?.[chosen.index] : undefined;
+  const row = chosen == null ? undefined : rows?.find((r) => departureKey(r) === chosen);
 
   return (
     <div className="cert-lookup">
@@ -86,13 +92,10 @@ export function DelayCertificateLookup({ aid }: { aid: number }) {
         {rows !== undefined && rows.length > 0 && (
           <label className="cert-lookup__field">
             {t("reports.certificate.departure")}
-            <select
-              value={row && chosen ? String(chosen.index) : ""}
-              onChange={(e) => setChosen(e.target.value === "" ? null : { key: lookupKey, index: Number(e.target.value) })}
-            >
+            <select value={row ? departureKey(row) : ""} onChange={(e) => setChosen(e.target.value || null)}>
               <option value="">{t("reports.certificate.departure_prompt")}</option>
               {rows.map((r, i) => (
-                <option key={i} value={i}>
+                <option key={i} value={departureKey(r)}>
                   {t("reports.certificate.departure_option", { time: clock(r[4]), delay: formatDuration(r[6]) })}
                 </option>
               ))}
