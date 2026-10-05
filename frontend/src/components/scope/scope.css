@@ -270,6 +270,14 @@
   background: var(--border-subtle);
 }
 
+.scope-curve-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
 .scope-readout {
   margin: 0;
   font-family: var(--font-num);
