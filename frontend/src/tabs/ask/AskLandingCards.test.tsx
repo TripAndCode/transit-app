@@ -8,10 +8,10 @@ import { buildCardTemplates, needsRoute } from "../../components/askCardTemplate
 
 const templates = buildCardTemplates();
 
-// buildSummary() output can contain regex metacharacters (e.g. the literal
-// parens in "Top 5 routes (All)"), so escape before feeding it to RegExp —
-// otherwise `(All)` is parsed as a capture group and silently stops matching
-// the literal parens in the rendered text.
+// buildSummary() output can contain regex metacharacters (e.g. the "?" that
+// ends a question card's summary), so escape before feeding it to RegExp —
+// otherwise it is parsed as a quantifier and silently stops matching the
+// literal text.
 function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -132,8 +132,8 @@ describe("AskLandingCards", () => {
 
   it("tells the two ranking cards apart by what they rank", () => {
     setup();
-    expect(screen.getByText(/^Most delayed routes/)).toBeInTheDocument();
-    expect(screen.getByText(/^Least on-time routes/)).toBeInTheDocument();
+    expect(screen.getByText(/most delayed routes$/)).toBeInTheDocument();
+    expect(screen.getByText(/least on-time routes$/)).toBeInTheDocument();
   });
 
   it("cites no route codes in its examples, since they may not exist in this agency", () => {
