@@ -1,6 +1,5 @@
 .focused-overview { gap: 18px; }
 .focused-overview .ops-header { flex-wrap: wrap; }
-.focused-overview .ops-heading h1 { font: 650 28px/1.4 var(--font-body, sans-serif); }
 .focused-overview .ops-freshness { margin-left: auto; }
 .focused-overview .focus-filters { align-items: end; margin: 0; }
 .focused-overview .focus-filters > span { padding: 10px 0; }

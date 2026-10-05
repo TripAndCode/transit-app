@@ -34,6 +34,7 @@ import { FilterContextBar } from "../components/FilterContextBar";
 import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { Spinner } from "../components/Spinner";
+import { PageHeader } from "../components/ui/PageHeader";
 import { Skeleton } from "../components/Skeleton";
 import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
 import { InvestigationCanvas } from "./ask/InvestigationCanvas";
@@ -289,22 +290,23 @@ export function AskTab() {
         minHeight: 0,
       }}
     >
-      <header className="ask-workspace-bar">
-        <span>{t("nav.ask")}</span>
-      {id != null && (
-        <details ref={historyRef} className="ask-thread-menu">
-          <summary>{t("ask.workspace.investigations")}</summary>
-          <div className="ask-thread-menu-content">
-        <ThreadSidebar
-          agencyId={id}
-          activeId={activeId}
-          onSelect={handleSelectThread}
-          onNewThread={handleNewThread}
-        />
-          </div>
-        </details>
-      )}
-      </header>
+      <PageHeader
+        className="ask-workspace-bar"
+        title={t("nav.ask")}
+        actions={id == null ? undefined : (
+          <details ref={historyRef} className="ask-thread-menu">
+            <summary>{t("ask.workspace.investigations")}</summary>
+            <div className="ask-thread-menu-content">
+              <ThreadSidebar
+                agencyId={id}
+                activeId={activeId}
+                onSelect={handleSelectThread}
+                onNewThread={handleNewThread}
+              />
+            </div>
+          </details>
+        )}
+      />
 
       {/* ── Main area ────────────────────────────────────────────────────── */}
       <div

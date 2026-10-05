@@ -20,6 +20,8 @@ import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Toolbar } from "../components/ui/Toolbar";
 import "../styles/focusedAnalysis.css";
 
 export function RouteAnalysisTab() {
@@ -73,13 +75,13 @@ export function RouteAnalysisTab() {
     { header: "comparison_mean_minutes", value: (s) => matchedPrevious(s, prevStops) },
   ];
   return <div className="focus-page">
-    <header className="focus-header"><h1>{t("investigate")}</h1><div className="focus-actions">
+    <PageHeader title={t("investigate")} actions={<Toolbar className="focus-actions">
       <button className="btn-ghost" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
         ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
       <button disabled={!id || !query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id!, `${names.format(route)} · ${ctx.from} – ${ctx.to}`, ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
-    </div></header>
+    </Toolbar>} />
     {notice && <span role="status">{notice}</span>}
     <AnalysisFilters agencyId={id} />
     {!route ? <EmptyState title={t("choose")} hint={t("filterNote")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}

@@ -55,7 +55,9 @@ describe("ReportsHomeTab", () => {
   it("renders the report heading and description", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();
-    expect(screen.getByRole("heading", { name: "Reports" })).toBeInTheDocument();
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Reports");
     expect(screen.getByText("Summarize service performance in one page")).toBeInTheDocument();
   });
 

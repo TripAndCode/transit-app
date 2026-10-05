@@ -9,6 +9,7 @@ import {
   type ServiceFilter,
   type TimeBand,
 } from "../api/rangeContext";
+import { FilterChip } from "./FilterChip";
 import { PresetMenu } from "./PresetMenu";
 import { RangeBadge } from "./RangeBadge";
 import { RoutesPicker } from "./RoutesPicker";
@@ -234,23 +235,23 @@ export function TabFilterBar({ after }: { after?: ReactNode } = {}) {
 
       {/* Inline chips of active filters with × to clear individually */}
       {ctx.dow !== "all" && (
-        <Chip label={`${t("filters.dow.label")}: ${dowLabel(ctx.dow, t)}`} onClear={() => clearChip("dow")} />
+        <FilterChip label={`${t("filters.dow.label")}: ${dowLabel(ctx.dow, t)}`} onClear={() => clearChip("dow")} />
       )}
       {ctx.service !== "all" && (
-        <Chip label={`${t("filters.service.label")}: ${serviceLabel[ctx.service]}`} onClear={() => clearChip("service")} />
+        <FilterChip label={`${t("filters.service.label")}: ${serviceLabel[ctx.service]}`} onClear={() => clearChip("service")} />
       )}
       {ctx.time_band !== "all" && (
-        <Chip label={`${t("filters.time_band.label")}: ${timeBandLabel[ctx.time_band]}`} onClear={() => clearChip("time_band")} />
+        <FilterChip label={`${t("filters.time_band.label")}: ${timeBandLabel[ctx.time_band]}`} onClear={() => clearChip("time_band")} />
       )}
       {routeChips.map((c) =>
         c.kind === "name" ? (
-          <Chip
+          <FilterChip
             key={`name:${c.name}`}
             label={`${c.name} ${t("filters.routes.variant_count", { count: c.codes.length })}`}
             onClear={() => clearNameChip(c.codes)}
           />
         ) : (
-          <Chip
+          <FilterChip
             key={c.code}
             label={routeNameMap.get(c.code) ? `${routeNameMap.get(c.code)} (${c.code})` : t("common.route_code_fallback", { code: c.code })}
             onClear={() => clearChip("route", c.code)}
@@ -396,42 +397,3 @@ function dowLabel(d: DowFilter, t: (key: string) => string): string {
   if (d === "weekend") return t("filters.dow.weekend");
   return t("filters.dow.all");
 }
-
-function Chip({ label, onClear }: { label: string; onClear: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        background: "var(--accent-soft)",
-        color: "var(--accent)",
-        border: "1px solid var(--accent)",
-        borderRadius: 999,
-        padding: "3px 10px 3px 12px",
-        fontSize: 12,
-        fontWeight: 500,
-      }}
-    >
-      {label}
-      <button
-        type="button"
-        onClick={onClear}
-        aria-label={`${label} ${t("filters.chip_remove_suffix")}`}
-        style={{
-          background: "transparent",
-          border: "none",
-          color: "inherit",
-          padding: 0,
-          cursor: "pointer",
-          fontSize: 14,
-          lineHeight: 1,
-        }}
-      >
-        ×
-      </button>
-    </span>
-  );
-}
-

@@ -47,6 +47,21 @@ describe("AnalysisTab", () => {
     vi.restoreAllMocks();
   });
 
+  it("names itself once, through the shared page header", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({
+      data: [reportMeta("ranking")],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderAnalysis("/agencies/1/analysis");
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Reports");
+  });
+
   it("prompts to select a report when none is chosen yet", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({

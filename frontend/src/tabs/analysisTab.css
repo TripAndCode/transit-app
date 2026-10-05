@@ -1,3 +1,7 @@
+/* Layout integration only -- the title is the shared page header's. The
+   filter bar carries its own top spacing below it. */
+.analysis-header { margin-bottom: 12px; }
+
 /* Below the shared mobile breakpoint (MOBILE_BREAKPOINT_PX in
    frontend/src/hooks/useMediaQuery.ts) this row's 280px report list +
    flex:1 report body + 260px InsightPanel force a combined min-width the

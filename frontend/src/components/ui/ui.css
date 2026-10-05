@@ -67,3 +67,11 @@
   gap: 8px;
 }
 .ui-toolbar--end { justify-content: flex-end; }
+
+/* The collapsible form of a section. The marker is left to the browser: a
+   section reads the same open or closed, and a hand-drawn caret is one more
+   thing to keep in step with the native one. */
+.ui-section__summary { cursor: pointer; }
+.ui-section__summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ui-section__summary .ui-section__eyebrow { margin-right: 8px; }
+.ui-section__summary .ui-section__title { display: inline; }

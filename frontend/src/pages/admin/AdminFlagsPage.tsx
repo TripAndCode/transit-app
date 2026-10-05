@@ -4,6 +4,7 @@ import { Modal } from "../../components/Modal";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import { useFeatureFlags, usePatchFeatureFlag, type FeatureFlag } from "../../api/admin";
 import { formatDateTime } from "../../utils/format";
+import { PageHeader } from "../../components/ui/PageHeader";
 import { AdminButton, StatusChip } from "./adminControls";
 
 /** The flag a toggle click opened a reason dialog for, plus the value it
@@ -162,7 +163,7 @@ export function AdminFlagsPage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.flags.title")}</h1>
+      <PageHeader title={t("admin.flags.title")} />
 
       {error && (
         <p

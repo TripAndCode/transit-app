@@ -42,6 +42,15 @@ describe("RouteAnalysisTab", () => {
     expect(screen.getByText("Choose a route and service pattern")).toBeInTheDocument();
   });
 
+  it("names itself once, through the shared page header", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: undefined, isPending: false, error: null, refetch: vi.fn() } as never);
+    renderTab("/agencies/1/route-analysis");
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Where does delay build up?");
+  });
+
   it("shows the empty state when the selected route has no stop observations", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);

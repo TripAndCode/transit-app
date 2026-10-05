@@ -1,5 +1,7 @@
 .focus-page { display: flex; flex-direction: column; gap: 24px; min-width: 0; width: 100%; }
-.focus-page h1 { margin: 0; font: 650 28px/1.4 var(--font-body, sans-serif); }
+/* The page header brings its own trailing space; here the column gap is
+   already that space. */
+.focus-page > .ui-page-header { margin-bottom: 0; }
 .focus-page h2 { font-size: 19px; margin: 0 0 12px; }
 .focus-page p { line-height: 1.7; }
 .focus-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }

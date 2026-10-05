@@ -128,7 +128,12 @@ function PeakHourChart({
     const scaleX = rect.width / W;
     const localX = (e.clientX - rect.left) / scaleX;
     const idx = Math.max(0, Math.min(23, Math.floor((localX - PAD_LEFT) / CELL_W)));
-    if (hourValues[idx] != null) onHourClick(idx);
+    if (hourValues[idx] == null) return;
+    // Picking one hour is the more specific action of the two this element
+    // sits inside: without this the click also reaches the card's own
+    // expand handler, and both drill-downs open at once over each other.
+    e.stopPropagation();
+    onHourClick(idx);
   }
 
   return (

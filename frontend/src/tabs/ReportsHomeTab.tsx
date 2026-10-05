@@ -17,6 +17,7 @@ import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
+import { PageHeader } from "../components/ui/PageHeader";
 import { FILTER_SEPARATOR } from "../utils/format";
 import "../styles/focusedAnalysis.css";
 
@@ -66,8 +67,10 @@ export function ReportsHomeTab() {
     t,
   });
   return <div className="focus-page">
-    <header className="focus-header"><div><h1>{t("reports")}</h1><p>{t("reportTitle")}</p></div>
-      {!savedTab && <ExportMenu
+    <PageHeader
+      title={t("reports")}
+      subtitle={t("reportTitle")}
+      actions={savedTab ? undefined : <ExportMenu
         svgContainerRef={chartWrapRef}
         pngFilenameBase={`trend-${id}`}
         csv={{
@@ -78,7 +81,7 @@ export function ReportsHomeTab() {
           extraRows: [[], ...buildCsv(rows, rankingColumns)],
         }}
       />}
-    </header>
+    />
     <div className="focus-tabs">{(["summary", "saved"] as const).map((v) => <button key={v} aria-pressed={view === v} onClick={() => { setSaved(readAnalyses()); setView(v); }}>{t(v === "saved" ? "savedAnalyses" : "summary")}</button>)}</div>
     {notice && <p role="status">{notice}</p>}
     {savedTab ? <section><p className="focus-muted">{t("localOnly")}</p>

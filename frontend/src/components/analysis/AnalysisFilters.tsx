@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useRoutes } from "../../api/hooks";
 import { useRangeContext, type TimeBand, type DowFilter } from "../../api/rangeContext";
 import { ErrorBanner } from "../ErrorBanner";
+import { FilterChip } from "../FilterChip";
 import { routeGroups, selectedGroup } from "./routeGroups";
 
 export function PatternFilters({ agencyId, codes, onChange }: {
@@ -93,7 +94,7 @@ export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
       {/* Clearing the service chip commits immediately: it is a discard, not
           a selection being built up, and leaving it pending would mean
           pressing Apply to undo something. */}
-      {ctx.service !== "all" && <button type="button" onClick={() => update({ service: "all" })}>{t(ctx.service === "平日" ? "weekday" : "weekend")} ×</button>} {/* i18n-ignore: query contract */}
+      {ctx.service !== "all" && <FilterChip label={t(ctx.service === "平日" ? "weekday" : "weekend")} onClear={() => update({ service: "all" })} />} {/* i18n-ignore: query contract */}
       {dirty && (
         <>
           <button type="submit" className="focus-filters__apply">{t("apply")}</button>

@@ -109,4 +109,11 @@ describe("AskTab layout", () => {
     // Now the dock comes AFTER the conversation area.
     expect(dock!.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
+
+  it("names itself once, through the shared page header", () => {
+    renderAskTab();
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Ask");
+  });
 });

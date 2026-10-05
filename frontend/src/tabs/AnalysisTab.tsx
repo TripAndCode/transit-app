@@ -29,6 +29,7 @@ import { useCappedList } from "../hooks/useCappedList";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { th, td } from "../components/tableStyles";
+import { PageHeader } from "../components/ui/PageHeader";
 import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
@@ -55,11 +56,12 @@ export function AnalysisTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <TabFilterBar />
-      <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
-      <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
-        <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-          {t("reports.list_title")}
+      {/* The list column used to repeat this name as its own heading; the
+          page states it once and keeps the hint beside it. */}
+      <PageHeader
+        className="analysis-header"
+        title={t("reports.list_title")}
+        actions={
           <InsightHint
             title={t("reports.hint.title")}
             body={
@@ -76,7 +78,11 @@ export function AnalysisTab() {
               </>
             }
           />
-        </h3>
+        }
+      />
+      <TabFilterBar />
+      <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
+      <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
         {list.error && <ErrorBanner error={list.error} onRetry={() => list.refetch()} />}
         {list.isLoading && <SkeletonTable rows={6} rowHeight={48} />}
         {list.data && list.data.length === 0 && (

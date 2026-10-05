@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewTab } from "./OverviewTab";
@@ -131,5 +132,56 @@ describe("OverviewTab", () => {
     renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07");
     expect(screen.queryByRole("button", { name: "Clear the route filter" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reset service type to all" })).not.toBeInTheDocument();
+  });
+
+  it("names itself once, through the shared page header", () => {
+    renderOverview(summary());
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Period overview");
+  });
+
+  it("offers the shared export menu", async () => {
+    const user = userEvent.setup();
+    renderOverview(
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
+        service_split: { "平日": 3.1, "土日祝": 2.0 },
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    expect(screen.getByRole("menuitem", { name: "Download CSV" })).toBeInTheDocument();
+  });
+
+  // The drill-down is part of the view a shared link has to reproduce, so it
+  // lives in the query string rather than in component state.
+  it("opens the drill-down named by the card query key", () => {
+    renderOverview(
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }, { route_code: "R2", route_short_name: "Line 2", share_pct: 20 }], rest_share_pct: 20 },
+      }),
+      "/agencies/8/overview?from=2030-01-01&to=2030-01-07&card=concentration",
+    );
+    expect(screen.getByRole("dialog", { name: "Delay concentration (top 20)" })).toBeInTheDocument();
+  });
+
+  it("writes the opened card to the URL and clears it on close", async () => {
+    const user = userEvent.setup();
+    renderOverview(
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }, { route_code: "R2", route_short_name: "Line 2", share_pct: 20 }], rest_share_pct: 20 },
+      }),
+    );
+    await user.click(screen.getAllByRole("button", { name: /Delay concentration/ })[0]);
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("card")).toBe("concentration");
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    const after = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(after.has("card")).toBe(false);
+    // The range the tab was opened with must survive both writes.
+    expect(after.get("from")).toBe("2030-01-01");
   });
 });

@@ -6,21 +6,15 @@
   gap: 10px;
 }
 
+/* Layout integration only -- the title itself is the shared page header's.
+   The page is a flex column with its own gap, so the header's own trailing
+   margin would double it. */
 .ops-header {
-  display: flex;
   align-items: center;
   gap: 18px;
   min-height: 54px;
+  margin-bottom: 0;
 }
-
-.ops-heading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.ops-heading > svg { color: var(--accent); }
-.ops-heading h1 { margin: 0; font-size: 21px; line-height: 1.15; }
 .ops-eyebrow { display: block; color: var(--text-tertiary); font-size: var(--text-xs); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 
 .ops-freshness {
@@ -267,7 +261,7 @@
 /* BP.sm */
 @media (max-width: 640px) {
   .ops-header { gap: 10px; }
-  .ops-heading { width: 100%; }
+  .ops-header .ui-page-header__text { width: 100%; }
   .ops-freshness { margin-left: auto; }
   /* Reserves the same right-side clearance NavigationControl needs (moved
      to top-right, see MapTab.tsx) so the full-width reference panel doesn't

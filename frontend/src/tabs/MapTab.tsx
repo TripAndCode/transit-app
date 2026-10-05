@@ -27,6 +27,8 @@ import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Section } from "../components/ui/Section";
 import { MapReference } from "./map/MapReference";
 import { StatTile } from "../components/StatTile";
 import { signedMin } from "./live/signedMin";
@@ -150,6 +152,10 @@ export function MapTab() {
     patchUrl(patch);
   }
   const [queueWidth, setQueueWidth] = useState(readQueueWidth);
+  // The observed-trips section is part of the view, not a transient
+  // disclosure: a link handed to someone else should land on it as it was
+  // left. "1" rather than a boolean so the absent key is the closed state.
+  const [inspectOpenParam, setInspectOpenParam] = useUrlState<string>("inspect", "");
   const [selectedDirectionKeyParam] = useUrlState<string>("direction", "");
   const selectedDirectionKey = selectedDirectionKeyParam || null;
   const [selectedTripIdParam] = useUrlState<string>("trip", "");
@@ -527,9 +533,15 @@ export function MapTab() {
               {t("common.show_more", { count: cappedDelayedRows.remaining })}
             </button>
           )}
-          {/* FirstRunTour.tsx's second coach mark anchors here -- the panel
-              where an observed trip is actually inspected. */}
-          <details className="focus-queue-inspect" data-tour="map-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
+          {/* FirstRunTour.tsx's second coach mark anchors on this wrapper --
+              the panel where an observed trip is actually inspected. The
+              wrapper exists because the mark is positioned from a real box,
+              and `Section` owns the classes on its own element. */}
+          <div className="focus-queue-inspect" data-tour="map-inspect"><Section
+          title={td("allObserved")}
+          open={inspectOpenParam === "1"}
+          onOpenChange={(next) => setInspectOpenParam(next ? "1" : "")}
+        ><OperationsTripPanel
           routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
           activeRoutes={activeRouteOptions}
           directions={directions}
@@ -547,40 +559,41 @@ export function MapTab() {
             }
           }}
           t={t}
-        /></details>
+        /></Section></div>
         
     </>
   );
 
   return (
     <div className="operations-page focused-overview">
-      <header className="ops-header">
-        <div className="ops-heading">
-          <div>
-            <h1>{td("live")}</h1>
-          </div>
-        </div>
-        <div className={`ops-freshness ops-freshness--${freshness}`}>
-          <span />
-          {liveQuery.data?.latest_captured_at
-            ? t("operations.last_updated", { when: relativeTime(liveQuery.data.latest_captured_at) })
-            : t("operations.no_update")}
-        </div>
-        <button
-          type="button"
-          className="ops-refresh"
-          aria-label={t("operations.refresh")}
-          onClick={() => { void refreshOperations(); }}
-          disabled={isRefreshing || liveQuery.isFetching || summaryQuery.isFetching}
-          aria-busy={isRefreshing}
-        >
-          <RefreshCw size={17} aria-hidden="true" />
-          <span className="ops-refresh__label">{isRefreshing ? t("operations.refreshing") : t("operations.refresh_now")}</span>
-        </button>
-        {refreshMessage && (
-          <span className="ops-refresh-result" aria-live="polite">{refreshMessage}</span>
-        )}
-      </header>
+      <PageHeader
+        className="ops-header"
+        title={td("live")}
+        actions={
+          <>
+            <div className={`ops-freshness ops-freshness--${freshness}`}>
+              <span />
+              {liveQuery.data?.latest_captured_at
+                ? t("operations.last_updated", { when: relativeTime(liveQuery.data.latest_captured_at) })
+                : t("operations.no_update")}
+            </div>
+            <button
+              type="button"
+              className="ops-refresh"
+              aria-label={t("operations.refresh")}
+              onClick={() => { void refreshOperations(); }}
+              disabled={isRefreshing || liveQuery.isFetching || summaryQuery.isFetching}
+              aria-busy={isRefreshing}
+            >
+              <RefreshCw size={17} aria-hidden="true" />
+              <span className="ops-refresh__label">{isRefreshing ? t("operations.refreshing") : t("operations.refresh_now")}</span>
+            </button>
+            {refreshMessage && (
+              <span className="ops-refresh-result" aria-live="polite">{refreshMessage}</span>
+            )}
+          </>
+        }
+      />
 
       {(liveQuery.error || summaryQuery.error) && (
         <ErrorBanner

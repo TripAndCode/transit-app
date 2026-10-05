@@ -10,6 +10,7 @@ import {
   type BoardCollector,
   type BoardFreshnessDay,
 } from "../../api/admin";
+import { PageHeader } from "../../components/ui/PageHeader";
 import { RunTimeline } from "./RunTimeline";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
@@ -148,33 +149,34 @@ export function AdminBoardPage() {
 
   return (
     <div style={{ padding: 24, display: "grid", gap: 16, alignContent: "start" }}>
-      <header style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 22, margin: 0 }}>{t("admin.board.title")}</h1>
-        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("admin.board.poll_note")}</span>
-        <span style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          disabled={trigger.isPending}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 13,
-            fontFamily: "inherit",
-            padding: "6px 13px",
-            borderRadius: 6,
-            border: "1px solid var(--border-subtle)",
-            background: "transparent",
-            color: "var(--text-primary)",
-            cursor: trigger.isPending ? "default" : "pointer",
-            opacity: trigger.isPending ? 0.5 : 1,
-          }}
-        >
-          <RefreshCw size={14} strokeWidth={1.8} aria-hidden="true" />
-          {t("admin.board.reanalyze")}
-        </button>
-      </header>
+      <PageHeader
+        title={t("admin.board.title")}
+        subtitle={t("admin.board.poll_note")}
+        actions={
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            disabled={trigger.isPending}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+              fontFamily: "inherit",
+              padding: "6px 13px",
+              borderRadius: 6,
+              border: "1px solid var(--border-subtle)",
+              background: "transparent",
+              color: "var(--text-primary)",
+              cursor: trigger.isPending ? "default" : "pointer",
+              opacity: trigger.isPending ? 0.5 : 1,
+            }}
+          >
+            <RefreshCw size={14} strokeWidth={1.8} aria-hidden="true" />
+            {t("admin.board.reanalyze")}
+          </button>
+        }
+      />
 
       {confirming && (
         <div

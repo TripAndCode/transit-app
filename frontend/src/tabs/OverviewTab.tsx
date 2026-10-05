@@ -1,5 +1,4 @@
-// frontend/src/tabs/OverviewTab.tsx
-import { useState } from "react";
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
@@ -8,7 +7,9 @@ import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
 import { useRangeContext } from "../api/rangeContext";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { ConcentrationBar } from "../components/ConcentrationBar";
+import { buildCsv, type CsvColumn } from "../components/analysis/csv";
 import { EmptyState } from "../components/EmptyState";
+import { ExportMenu } from "../components/ExportMenu";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { AsyncSection } from "../components/AsyncSection";
 import { OverviewHeroRow } from "../components/OverviewHeroRow";
@@ -20,10 +21,27 @@ import { RoutesToCheckList } from "../components/RoutesToCheckList";
 import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
 import { TabFilterBar } from "../components/TabFilterBar";
+import { PageHeader } from "../components/ui/PageHeader";
 
 import "../styles/overview.css";
 
-type OpenCard = "concentration" | "peak_hour" | "service_split" | null;
+const OPEN_CARDS = ["concentration", "peak_hour", "service_split"] as const;
+type OpenCard = (typeof OPEN_CARDS)[number];
+/** The closed state, written as the absence of the `card` key. */
+type CardParam = OpenCard | "";
+
+/** One row per top route, so the export carries the same shares the
+ *  concentration card draws rather than a re-derivation of them. */
+const concentrationColumns: CsvColumn<{ route_code: string; route_short_name: string | null; share_pct: number }>[] = [
+  { header: "route_code", value: (r) => r.route_code },
+  { header: "route_short_name", value: (r) => r.route_short_name },
+  { header: "share_of_delay_pct", value: (r) => r.share_pct },
+];
+
+const serviceSplitColumns: CsvColumn<[string, number]>[] = [
+  { header: "service_type", value: ([service]) => service },
+  { header: "mean_departure_delay_minutes", value: ([, avgMin]) => avgMin },
+];
 
 export function OverviewTab() {
   const { t } = useTranslation();
@@ -32,7 +50,12 @@ export function OverviewTab() {
   const jumpToLatestData = useJumpToLatestDataRange(agencyId);
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
-  const [open, setOpen] = useState<OpenCard>(null);
+  // The opened drill-down is part of the view a shared link has to
+  // reproduce, so it lives in the query string beside the filters rather
+  // than in component state.
+  const [cardParam, setCardParam] = useUrlState<CardParam>("card", "");
+  const open: OpenCard | null = OPEN_CARDS.includes(cardParam as OpenCard) ? (cardParam as OpenCard) : null;
+  const chartWrapRef = useRef<HTMLDivElement>(null);
   // Two string keys rather than one JSON-shaped one, consistent with the
   // route-analysis stop selection: `peak_dow` is only ever written alongside
   // `peak_hour`, so its presence/absence stays a plain empty-string default.
@@ -69,7 +92,7 @@ export function OverviewTab() {
     summary.concentration.top_routes.length > 0 ||
     Object.keys(summary.service_split).length > 0;
 
-  const modalTitleKey: Record<Exclude<OpenCard, null>, string> = {
+  const modalTitleKey: Record<OpenCard, string> = {
     concentration: "overview.modal.concentration",
     peak_hour: "overview.modal.peak_hour",
     service_split: "overview.modal.service_split",
@@ -77,6 +100,22 @@ export function OverviewTab() {
 
   return (
     <>
+      <PageHeader
+        title={t("design:period_overview")}
+        actions={
+          <ExportMenu
+            svgContainerRef={chartWrapRef}
+            pngFilenameBase={`concentration-${agencyId}`}
+            csv={{
+              filenameBase: `period-overview-${agencyId}-${ctx.from}-${ctx.to}`,
+              rows: data?.concentration.top_routes ?? [],
+              columns: concentrationColumns,
+              ctx,
+              extraRows: [[], ...buildCsv(Object.entries(data?.service_split ?? {}), serviceSplitColumns)],
+            }}
+          />
+        }
+      />
       <TabFilterBar />
       <div className="ov-page">
         <AsyncSection
@@ -118,18 +157,23 @@ export function OverviewTab() {
             <RoutesToCheckList routes={data.top_delayed.routes} />
             {data.concentration.top_routes.length > 0 && (
               <RevealSection>
-                <ConcentrationBar
-                  concentration={data.concentration}
-                  movers={data.movers}
-                  onClick={() => setOpen("concentration")}
-                />
+                {/* The export menu's PNG rasterizes the first `<svg>` under
+                    this ref: the concentration bar is the page's one chart,
+                    the rest of it is figures and lists. */}
+                <div ref={chartWrapRef}>
+                  <ConcentrationBar
+                    concentration={data.concentration}
+                    movers={data.movers}
+                    onClick={() => setCardParam("concentration")}
+                  />
+                </div>
               </RevealSection>
             )}
             {data.peak_hour != null && (
               <RevealSection>
                 <PeakHourRibbon
                   peak_hour={data.peak_hour}
-                  onClick={() => setOpen("peak_hour")}
+                  onClick={() => setCardParam("peak_hour")}
                   onHourClick={(hour) => setPeakHourSel({ hour, dow: null })}
                 />
               </RevealSection>
@@ -138,7 +182,7 @@ export function OverviewTab() {
               <RevealSection>
                 <ServiceSplit
                   service_split={data.service_split}
-                  onClick={() => setOpen("service_split")}
+                  onClick={() => setCardParam("service_split")}
                 />
               </RevealSection>
             )}
@@ -149,7 +193,7 @@ export function OverviewTab() {
 
       <OverviewModal
         isOpen={open !== null}
-        onClose={() => setOpen(null)}
+        onClose={() => setCardParam("")}
         title={open !== null ? t(modalTitleKey[open]) : ""}
       >
         {data && open === "concentration" && (

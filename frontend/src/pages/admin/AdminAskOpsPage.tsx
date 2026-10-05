@@ -12,6 +12,7 @@ import {
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
 import { formatDateTime } from "../../utils/format";
+import { PageHeader } from "../../components/ui/PageHeader";
 import { AdminButton, StatusChip } from "./adminControls";
 
 const ROUTE_ORDER: readonly AskRoute[] = ["rules", "nn", "rag", "no_history"];
@@ -220,7 +221,7 @@ export function AdminAskOpsPage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.ask_ops.title")}</h1>
+      <PageHeader title={t("admin.ask_ops.title")} />
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <select

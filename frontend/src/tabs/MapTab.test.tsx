@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
@@ -33,14 +34,29 @@ function mockCommonHooks() {
   });
 }
 
-function renderMap(agencyId = "1") {
+function SearchProbe() {
+  const [params] = useSearchParams();
+  return <span data-testid="search">{params.toString()}</span>;
+}
+
+function renderMap(agencyId = "1", search = "") {
   renderWithProviders(
-    <MemoryRouter initialEntries={[`/agencies/${agencyId}/map`]}>
+    <MemoryRouter initialEntries={[`/agencies/${agencyId}/map${search}`]}>
       <Routes>
-        <Route path="/agencies/:agencyId/map" element={<MapTab />} />
+        <Route path="/agencies/:agencyId/map" element={<><MapTab /><SearchProbe /></>} />
       </Routes>
     </MemoryRouter>,
   );
+}
+
+function mockEmptyLiveTrips() {
+  vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+    data: liveTrips([]),
+    error: null,
+    isLoading: false,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as never);
 }
 
 describe("MapTab", () => {
@@ -90,5 +106,33 @@ describe("MapTab", () => {
     renderMap();
     expect(screen.queryByText("No current trips to display")).not.toBeInTheDocument();
     expect(screen.getByText("1", { exact: true })).toBeInTheDocument();
+  });
+
+  it("names itself once, through the shared page header", () => {
+    mockCommonHooks();
+    mockEmptyLiveTrips();
+    renderMap();
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Current observations");
+  });
+
+  // The observed-trips panel is a section of the page, not a transient
+  // disclosure: whoever is handed the link should land on it already open.
+  it("opens the observed-trips section from the URL", () => {
+    mockCommonHooks();
+    mockEmptyLiveTrips();
+    renderMap("1", "?inspect=1");
+    expect(screen.getByText("View observed trips").closest("details")).toHaveAttribute("open");
+  });
+
+  it("writes the observed-trips section open state to the URL", async () => {
+    const user = userEvent.setup();
+    mockCommonHooks();
+    mockEmptyLiveTrips();
+    renderMap();
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").has("inspect")).toBe(false);
+    await user.click(screen.getByText("View observed trips"));
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("inspect")).toBe("1");
   });
 });
