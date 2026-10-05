@@ -151,6 +151,7 @@
     "overview_worst_label": "いま見るべき時間帯",
     "overview_worst_phrase": "{{day}}の{{band}}が最も遅れやすい（{{avg}}）",
     "overview_grid_title": "曜日 × 時間帯（全路線）",
+    "route_grid_title": "曜日 × 時間帯（この路線）",
     "overview_grid_caption": "事業者全体で、いつ遅れやすいか — 濃いほど遅延が大きい。",
     "overview_routes_title": "遅れやすい路線",
     "overview_routes_caption": "系統をクリックすると内訳を表示します。小さな線は、データのある直近7日間の日平均です。",
