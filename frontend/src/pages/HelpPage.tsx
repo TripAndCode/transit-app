@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
@@ -29,8 +29,8 @@ async function fetchManual(locale: string, signal: AbortSignal): Promise<string>
 }
 
 type ManualSection = {
-  /** Raw heading text, e.g. `5. Analysis tab — "when and why delays happen"
-   *  [most important]` -- used verbatim as the sidebar label. */
+  /** Raw heading text, e.g. `5. Routes — which routes run late`, used
+   *  verbatim as the sidebar label. */
   title: string;
   /** This section's own markdown, from its `## ` line to (exclusive of) the
    *  next top-level heading. Always starts with that `## ` line -- the
@@ -172,20 +172,33 @@ export function HelpPage() {
   );
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Keeps in-content anchor links (e.g. the manual's own "Table of contents"
-  // section links to `#5-analysis-tab...`) working even though the target
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  /** Shows section `i`. When the reader has scrolled past the start of the
+   *  content pane, its top comes back into view: a long section swapped for
+   *  a short one would otherwise leave them near the new section's end.
+   *  Never on load, where the page's own title belongs in view. */
+  function selectSection(i: number) {
+    setExplicitIndex(i);
+    const pane = contentRef.current;
+    if (pane && pane.getBoundingClientRect().top < 0) pane.scrollIntoView?.({ block: "start" }); // jsdom has no scrollIntoView
+  }
+
+  // Keeps in-content anchor links (e.g. a cross-reference to
+  // `#5-routes--which-routes-run-late`) working even though the target
   // section isn't in the DOM yet when such a link is clicked: the browser
   // still updates location.hash and fires `hashchange`, which this picks up
   // to switch sections. Also covers back/forward through hash history.
+  const onHashChange = useEffectEvent(() => {
+    const hash = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+    const idx = tocAnchors.findIndex((a) => a === hash);
+    if (idx !== -1) selectSection(idx);
+  });
   useEffect(() => {
-    function onHashChange() {
-      const hash = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-      const idx = tocAnchors.findIndex((a) => a === hash);
-      if (idx !== -1) setExplicitIndex(idx);
-    }
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, [tocAnchors]);
+    const listener = () => onHashChange();
+    window.addEventListener("hashchange", listener);
+    return () => window.removeEventListener("hashchange", listener);
+  }, []);
 
   const initialHashIndex = tocAnchors.findIndex((a) => a === initialHash);
   // When a "Table of contents" section exists (tocAnchors[0] is always
@@ -196,7 +209,10 @@ export function HelpPage() {
   const defaultIndex = tocAnchors.length > 0 ? 1 : 0;
   const derivedIndex = explicitIndex ?? (initialHashIndex !== -1 ? initialHashIndex : defaultIndex);
   const safeIndex = sections.length === 0 ? 0 : Math.min(derivedIndex, sections.length - 1);
-  const contentRef = useRef<HTMLDivElement>(null);
+
+  // The manual's own "Table of contents" section only serves the source file
+  // read on its own; on this page the sidebar is the one table of contents.
+  const navIndices = sections.map((_, i) => i).filter((i) => !(tocAnchors.length > 0 && i === 0));
 
   // Client-side filter over the loaded manual's own sections -- title and
   // body text, in whichever locale is currently fetched (see `fetchManual`
@@ -206,15 +222,12 @@ export function HelpPage() {
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const isSearching = normalizedQuery !== "";
   const matchedIndices = isSearching
-    ? sections
-        .map((section, i) => ({ section, i }))
-        .filter(
-          ({ section }) =>
-            section.title.toLowerCase().includes(normalizedQuery) ||
-            section.markdown.toLowerCase().includes(normalizedQuery),
-        )
-        .map(({ i }) => i)
-    : sections.map((_, i) => i);
+    ? navIndices.filter(
+        (i) =>
+          sections[i].title.toLowerCase().includes(normalizedQuery) ||
+          sections[i].markdown.toLowerCase().includes(normalizedQuery),
+      )
+    : navIndices;
   const hasMatches = matchedIndices.length > 0;
   // The user's own selection (`safeIndex`) survives a search that happens to
   // filter it out -- falls back to the first match only for what's on
@@ -227,16 +240,8 @@ export function HelpPage() {
   // output) rather than a second slug computation -- this covers both
   // sidebar clicks and the initial hash-driven selection above. replaceState
   // (not a real navigation) avoids spamming history with one entry per
-  // section switch and doesn't itself fire `hashchange`. Also scrolls the
-  // content pane's own top into view: without this, switching from a long
-  // section to a shorter one left the browser's already-scrolled-down
-  // viewport clamped to the new (shorter) document height, landing the user
-  // near the bottom of the new section instead of its heading.
+  // section switch and doesn't itself fire `hashchange`.
   useEffect(() => {
-    // Optional-called (not just optional-chained on contentRef) because
-    // jsdom's test environment doesn't implement scrollIntoView at all --
-    // this avoids needing a jsdom stub for a call real browsers always have.
-    contentRef.current?.scrollIntoView?.({ block: "start" });
     const heading = contentRef.current?.querySelector("h2[id]");
     if (heading?.id) window.history.replaceState(null, "", `#${heading.id}`);
     // sections.length also gates this: displayIndex can stay unchanged (e.g.
@@ -248,15 +253,6 @@ export function HelpPage() {
     // when displayIndex/sections.length stay the same -- without it the
     // address bar would keep pointing at the previous locale's slug.
   }, [displayIndex, sections.length, content]);
-
-  // Up to 3 real sections (never the "Table of contents" entry itself, index
-  // 0 when tocAnchors.length > 0) as quick-jump category shortcuts -- picks
-  // from the manual's own real taxonomy rather than a hand-authored list
-  // that could drift from it.
-  const categorySections = sections
-    .map((section, i) => ({ section, i }))
-    .filter(({ i }) => !(tocAnchors.length > 0 && i === 0))
-    .slice(0, 3);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 0 64px" }}>
@@ -287,30 +283,6 @@ export function HelpPage() {
           {t("help.search_result_count", { count: matchedIndices.length })}
         </div>
       )}
-      {content != null && categorySections.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 24 }}>
-          {categorySections.map(({ section, i }) => (
-            <button
-              key={i}
-              type="button"
-              aria-label={t("help.category_shortcut_label", { title: section.title })}
-              onClick={() => setExplicitIndex(i)}
-              style={{
-                textAlign: "left",
-                padding: 12,
-                border: "1px solid var(--card-border)",
-                borderRadius: "var(--card-radius)",
-                background: "var(--bg-soft)",
-                color: "var(--text-primary)",
-                fontSize: 12.5,
-                fontWeight: 600,
-              }}
-            >
-              {section.title}
-            </button>
-          ))}
-        </div>
-      )}
       {error != null && <ErrorBanner error={error} onRetry={() => void refetch()} />}
       {content == null && error == null && (
         <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
@@ -332,7 +304,7 @@ export function HelpPage() {
             navStyle={{ position: "sticky", top: 16 }}
             items={matchedIndices.map((i) => ({ key: i, label: sections[i].title }))}
             activeKey={hasMatches ? displayIndex : null}
-            onSelect={setExplicitIndex}
+            onSelect={selectSection}
           />
           {!hasMatches && (
             <div style={{ flex: 1, minWidth: 0, color: "var(--text-tertiary)" }}>{t("common.no_match")}</div>
