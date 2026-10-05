@@ -606,3 +606,44 @@ describe("AnalysisTab Why without arrival times", () => {
     expect(screen.queryByRole("link", { name: /CSV/ })).not.toBeInTheDocument();
   });
 });
+
+describe("AnalysisTab council report", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function showCouncil() {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("council_summary")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: {
+        ...reportResponse("council_summary"),
+        rows: [[22.6, 2.5, 540357, 2130, 2100, 98.6]],
+        text: "Aomori, 9/1 – 9/28\nOn time 22.6%, average delay 2.5 min.\n* On time means within 1 min.",
+      },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    return renderAnalysis("/agencies/1/analysis/reports?report=council_summary", ["council_summary"]);
+  }
+
+  it("lays the council report out as figures and prose, not a one-row table", () => {
+    showCouncil();
+    const figures = screen.getByRole("list", { name: "Headline figures" });
+    expect(figures).toHaveTextContent("22.6%");
+    expect(figures).toHaveTextContent("2.5 min");
+    expect(figures).toHaveTextContent("540,357");
+    expect(figures).toHaveTextContent("2,130");
+    expect(screen.getByText("On time 22.6%, average delay 2.5 min.")).toBeInTheDocument();
+    expect(screen.queryByRole("grid")).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("offers to print the report or save it as a PDF", async () => {
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    showCouncil();
+    await userEvent.click(screen.getByRole("button", { name: "Print / Save as PDF" }));
+    expect(print).toHaveBeenCalledOnce();
+  });
+});

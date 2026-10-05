@@ -952,9 +952,6 @@
       "diff": "Diff",
       "direction": "Direction",
       "confidence": "Data",
-      "planned_trips": "Planned trips",
-      "executed_trips": "Executed trips",
-      "service_delivered_pct": "Service-delivered %",
       "agency_name": "Agency",
       "date": "Date",
       "scheduled_time": "Scheduled",
@@ -1126,7 +1123,15 @@
       "rows_shown": "Showing {{shown}} of {{total}}",
       "show_all": "Show all"
     },
-    "download_csv": "Download CSV"
+    "download_csv": "Download CSV",
+    "council": {
+      "figures": "Headline figures",
+      "on_time": "On time",
+      "avg_delay": "Average delay",
+      "departures": "Departures observed",
+      "planned_trips": "Planned trips",
+      "print": "Print / Save as PDF"
+    }
   },
   "insight_panel": {
     "title": "Worth a look",

@@ -952,9 +952,6 @@
       "diff": "差",
       "direction": "向き",
       "confidence": "データ量",
-      "planned_trips": "計画本数",
-      "executed_trips": "運行本数",
-      "service_delivered_pct": "運行実績率",
       "agency_name": "事業者名",
       "date": "日付",
       "scheduled_time": "定刻",
@@ -1126,7 +1123,15 @@
       "rows_shown": "{{total}}件中{{shown}}件を表示",
       "show_all": "すべて表示"
     },
-    "download_csv": "CSVダウンロード"
+    "download_csv": "CSVダウンロード",
+    "council": {
+      "figures": "主な数値",
+      "on_time": "定時率",
+      "avg_delay": "平均遅延",
+      "departures": "観測した発車",
+      "planned_trips": "計画便数",
+      "print": "印刷 / PDFで保存"
+    }
   },
   "insight_panel": {
     "title": "注目ポイント",
