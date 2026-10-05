@@ -192,8 +192,10 @@ export function OnboardingGate() {
                 )}
                 <div style={{ fontSize: 15, fontWeight: 600 }}>{a.agency_name}</div>
                 <div style={{ fontSize: 12, marginTop: 4, color: "var(--text-tertiary)" }}>
+                  {/* Non-breaking spaces hold the date together: a narrow card
+                      wraps before it, never between "Sep 10," and its year. */}
                   {a.latest_data_date
-                    ? t("onboarding.data_through", { date: formatDate(a.latest_data_date) })
+                    ? t("onboarding.data_through", { date: formatDate(a.latest_data_date).replaceAll(" ", "\u00a0") })
                     : t("onboarding.no_data_yet")}
                 </div>
               </button>
