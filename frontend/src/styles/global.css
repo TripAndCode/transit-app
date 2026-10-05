@@ -831,17 +831,25 @@ summary::-webkit-details-marker { display: none; }
   padding-top: 16px;
   border-top: 1px solid var(--border-soft);
 }
-/* HelpPage now renders one section (and therefore exactly one h2, that
-   section's own heading) at a time instead of the whole manual flowing past
-   each other -- the divider/spacing above was meant to separate consecutive
-   sections in the old flat render and just looks like a stray rule under
-   the page's own <h1> now that the h2 is always the first thing in the
-   content pane. */
+/* A document's first heading sits right under the page's own title, where
+   the divider would read as a stray rule. */
 .user-manual-content h2:first-child {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
 }
+/* The help manual renders each section on its own, so every section's
+   heading is a first child; from the second section on, the divider goes
+   back between them. */
+.user-manual-section + .user-manual-section > h2:first-child {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
+}
+/* A section or heading scrolled to, from the sidebar or a link, stops a
+   little below the top edge. */
+.user-manual-section,
+.user-manual-section [id] { scroll-margin-top: 16px; }
 .user-manual-content h3 {
   font-size: 15px;
   margin: 20px 0 8px;

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { Suspense, lazy } from "react";
 import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, Outlet, RouterProvider } from "react-router-dom";
+import { createMemoryRouter, Outlet, RouterProvider, useLocation } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { decl, ruleBody } from "../test/cssRules";
 import { NavPendingProvider, PendingNavLink } from "./navPending";
@@ -17,10 +17,11 @@ function rect(top: number, height: number, left = 0, width = 200): DOMRect {
 }
 
 function Shell() {
+  const { pathname } = useLocation();
   return (
     <NavPendingProvider>
       <nav aria-label="Destinations">
-        <NavIndicator axis="y" />
+        <NavIndicator axis="y" watch={pathname} />
         <PendingNavLink to="/a">A</PendingNavLink>
         <PendingNavLink to="/b">B</PendingNavLink>
       </nav>

@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { PendingNavLink } from "./navPending";
 import { NavIndicator } from "./NavIndicator";
 import {
@@ -159,6 +159,7 @@ function railLinkStyle(collapsedFlag: boolean) {
 export function Sidebar() {
   const { t } = useTranslation();
   const agencyId = useRailAgencyId();
+  const { pathname } = useLocation();
   const navigate = useNavigate();
   const isAdmin = useIsAdmin();
   // Each screen opens with its own last filters (see api/screenScope), so
@@ -219,7 +220,7 @@ export function Sidebar() {
         )}
         {navItems.length > 0 && agencyId && (
           <nav aria-label={t("nav.destinations_label")} style={{ position: "relative", display: "flex", flexDirection: "column" }}>
-            <NavIndicator axis="y" />
+            <NavIndicator axis="y" watch={pathname} />
             {navItems.map((item) => (
               <RailTooltip key={item.to} collapsed={collapsedFlag} label={t(item.labelKey)}>
                 <PendingNavLink
@@ -510,7 +511,7 @@ export function Sidebar() {
             paddingBottom: "env(safe-area-inset-bottom)",
           }}
         >
-          <NavIndicator axis="x" />
+          <NavIndicator axis="x" watch={pathname} />
           {agencyId &&
             TAB_BAR_ITEMS.map((item) => (
               <PendingNavLink spinner={false}
