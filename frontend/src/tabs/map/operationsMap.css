@@ -306,8 +306,7 @@
    disagree without a banner elbowing the layout around. */
 .ops-dock--dirty { border-color: var(--accent); box-shadow: var(--el-2), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
 /* Visually hidden, not displayed: the Apply button's appearance is the sighted
-   signal, and this is the same fact for a screen reader. Scoped here rather
-   than added as a global utility, since nothing else in this app needs one. */
+   signal, and this is the same fact for a screen reader. */
 .ops-dock__pending { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Export lives with the counts it exports, in the queue panel, not among the
