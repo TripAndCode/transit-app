@@ -417,7 +417,10 @@
     "rel_hours_ago_one": "{{count}} hour ago",
     "rel_hours_ago_other": "{{count}} hours ago",
     "rel_days_ago_one": "{{count}} day ago",
-    "rel_days_ago_other": "{{count}} days ago"
+    "rel_days_ago_other": "{{count}} days ago",
+    "still_working": "Still working on it…",
+    "still_working_period": "Still working: a long period takes longer to count.",
+    "narrow_to_week": "Narrow to the last 7 days of the period"
   },
   "legal": {
     "privacy": "Privacy Policy",

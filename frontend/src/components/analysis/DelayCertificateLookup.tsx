@@ -5,6 +5,7 @@ import { DataEndContext, SCOPE_EXTRAS_NONE, defaultPeriod, isoDaysAgo, type Scop
 import type { DelayCertificateRow } from "../../api/types";
 import { useRouteNames } from "../../api/useRouteNames";
 import { ErrorBanner } from "../ErrorBanner";
+import { StillWorking } from "../StillWorking";
 import { RoutePickerPill } from "../paramPills/RoutePickerPill";
 import { formatDate, formatDuration } from "../../utils/format";
 import "./DelayCertificateLookup.css";
@@ -84,9 +85,12 @@ export function DelayCertificateLookup({ aid }: { aid: number }) {
         </div>
         {ready && departures.error && <ErrorBanner error={departures.error} onRetry={() => departures.refetch()} />}
         {ready && !departures.error && rows === undefined && (
-          <p role="status" className="cert-lookup__note">
-            {t("reports.certificate.loading")}
-          </p>
+          <>
+            <p role="status" className="cert-lookup__note">
+              {t("reports.certificate.loading")}
+            </p>
+            <StillWorking />
+          </>
         )}
         {rows !== undefined && rows.length === 0 && <p className="cert-lookup__note">{t("reports.certificate.none")}</p>}
         {rows !== undefined && rows.length > 0 && (
