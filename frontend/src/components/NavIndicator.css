@@ -11,6 +11,7 @@
   background: var(--accent-soft);
   border-left: 3px solid var(--accent);
 }
+.nav-indicator--rounded { border-radius: var(--radius); }
 .nav-indicator--x {
   height: 2px;
   background: var(--accent);

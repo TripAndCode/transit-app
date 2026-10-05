@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
 import { usePendingNavTarget } from "./navPendingContext";
 import "./NavIndicator.css";
 
@@ -8,10 +7,23 @@ import "./NavIndicator.css";
  *  link and travels to a clicked one at once, while that screen is still
  *  loading, so the click is answered before the screen arrives. `axis="y"`
  *  fills a vertical list's row; `axis="x"` draws a line above a horizontal
- *  tab's. It moves by writing its own style, so a move re-renders nothing. */
-export function NavIndicator({ axis }: { axis: "x" | "y" }) {
+ *  tab's. It moves by writing its own style, so a move re-renders nothing.
+ *
+ *  `watch` is whatever decides the current entry (the pathname, for route
+ *  links), so the highlight moves when it changes; a list whose current
+ *  entry is not a route link names it with the `current` selector. */
+export function NavIndicator({
+  axis,
+  current = "a.active",
+  watch,
+  className,
+}: {
+  axis: "x" | "y";
+  current?: string;
+  watch?: unknown;
+  className?: string;
+}) {
   const ref = useRef<HTMLSpanElement>(null);
-  const { pathname } = useLocation();
   const pendingTo = usePendingNavTarget();
 
   useLayoutEffect(() => {
@@ -24,7 +36,7 @@ export function NavIndicator({ axis }: { axis: "x" | "y" }) {
     function place(glide: boolean) {
       if (!indicator || !box) return;
       const target =
-        box.querySelector<HTMLElement>('a[aria-busy="true"]') ?? box.querySelector<HTMLElement>("a.active");
+        box.querySelector<HTMLElement>('a[aria-busy="true"]') ?? box.querySelector<HTMLElement>(current);
       if (!target) {
         indicator.style.opacity = "0";
         delete indicator.dataset.glide;
@@ -52,7 +64,13 @@ export function NavIndicator({ axis }: { axis: "x" | "y" }) {
     const observer = new ResizeObserver(() => place(false));
     observer.observe(box);
     return () => observer.disconnect();
-  }, [axis, pathname, pendingTo]);
+  }, [axis, current, watch, pendingTo]);
 
-  return <span ref={ref} className={`nav-indicator nav-indicator--${axis}`} aria-hidden="true" />;
+  return (
+    <span
+      ref={ref}
+      className={`nav-indicator nav-indicator--${axis}${className ? ` ${className}` : ""}`}
+      aria-hidden="true"
+    />
+  );
 }
