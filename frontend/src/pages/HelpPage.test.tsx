@@ -1,12 +1,14 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/renderWithProviders";
+import { decl, ruleBody } from "../test/cssRules";
 import { HelpPage } from "./HelpPage";
 
-// Two top-level (`## `) sections -- enough to exercise the sidebar without a
-// "Table of contents" section, so the default (no location.hash) case lands
-// straight on the first real section instead of a ToC page.
+// Two top-level (`## `) sections and no "Table of contents" section, so
+// every section is listed and the first is current on opening.
 const TWO_SECTION_MANUAL =
   "# Delay Dashboard\n\n" +
   "## Section one\n\nSome manual text.\n\n![alt](./01-x.png)\n\n" +
@@ -91,97 +93,23 @@ describe("HelpPage", () => {
     expect(screen.getByRole("button")).toBeInTheDocument();
   });
 
-  it("lists every top-level section in the sidebar with the first section active initially", async () => {
-    renderWithProviders(<HelpPage />);
-    await screen.findByRole("heading", { name: "Section one", level: 2 });
-
-    expect(screen.getByRole("button", { name: "Section one" })).toHaveAttribute("aria-current", "true");
-    const sectionTwoButton = screen.getByRole("button", { name: "Section two" });
-    expect(sectionTwoButton).not.toHaveAttribute("aria-current");
-  });
-
-  it("clicking a different sidebar entry renders only that section's content", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<HelpPage />);
-    await screen.findByRole("heading", { name: "Section one", level: 2 });
-
-    await user.click(screen.getByRole("button", { name: "Section two" }));
-
-    expect(await screen.findByRole("heading", { name: "Section two", level: 2 })).toBeInTheDocument();
-    expect(screen.getByText("Other manual text.")).toBeInTheDocument();
-    // Section one's own content -- not just its (still-visible) sidebar
-    // entry -- must be gone: only the selected section renders.
-    expect(screen.queryByRole("heading", { name: "Section one", level: 2 })).not.toBeInTheDocument();
-    expect(screen.queryByText("Some manual text.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
-  });
-
-  it("updates the active-section sidebar highlight when a different entry is clicked", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<HelpPage />);
-    await screen.findByRole("heading", { name: "Section one", level: 2 });
-
-    await user.click(screen.getByRole("button", { name: "Section two" }));
-    await screen.findByRole("heading", { name: "Section two", level: 2 });
-
-    expect(screen.getByRole("button", { name: "Section two" })).toHaveAttribute("aria-current", "true");
-    expect(screen.getByRole("button", { name: "Section one" })).not.toHaveAttribute("aria-current");
-  });
-
-  it("selects the section matching an existing #anchor deep link on load", async () => {
-    stubManualFetch(MANUAL_WITH_TOC);
-    window.history.replaceState(null, "", "#section-two");
-
-    renderWithProviders(<HelpPage />);
-
-    expect(await screen.findByRole("heading", { name: "Section two", level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Section two" })).toHaveAttribute("aria-current", "true");
-    expect(screen.queryByRole("heading", { name: "Table of contents", level: 2 })).not.toBeInTheDocument();
-  });
-
-  it("follows an in-manual link to another section", async () => {
-    stubManualFetch(MANUAL_WITH_TOC);
-    renderWithProviders(<HelpPage />);
-    await screen.findByRole("heading", { name: "Section one", level: 2 });
-    window.history.replaceState(null, "", "#section-two");
-    window.dispatchEvent(new HashChangeEvent("hashchange"));
-    expect(await screen.findByRole("heading", { name: "Section two", level: 2 })).toBeInTheDocument();
-  });
-
-  it("skips the Table of contents section for the default (no-hash) view, landing on the first real section", async () => {
-    stubManualFetch(MANUAL_WITH_TOC);
-
-    renderWithProviders(<HelpPage />);
-
-    expect(await screen.findByRole("heading", { name: "Section one", level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Section one" })).toHaveAttribute("aria-current", "true");
-    expect(screen.queryByRole("heading", { name: "Table of contents", level: 2 })).not.toBeInTheDocument();
-  });
-
-  it("renders the manual's intro preamble regardless of which section is selected", async () => {
-    const user = userEvent.setup();
+  it("renders the manual's intro above the document", async () => {
     stubManualFetch(MANUAL_WITH_PREAMBLE);
-
     renderWithProviders(<HelpPage />);
     await screen.findByRole("heading", { name: "Section one", level: 2 });
     expect(screen.getByText("Intro paragraph before any section.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Section two" }));
-    await screen.findByRole("heading", { name: "Section two", level: 2 });
-    expect(screen.getByText("Intro paragraph before any section.")).toBeInTheDocument();
   });
 
-  it("has one table of contents: the sidebar, without the manual's own list or shortcut cards", async () => {
-    stubManualFetch(MANUAL_WITH_TOC);
-    renderWithProviders(<HelpPage />);
-    await screen.findByRole("heading", { name: "Section one", level: 2 });
-    const nav = screen.getByRole("navigation", { name: "Manual sections" });
-    expect(Array.from(nav.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["Section one", "Section two"]);
-    expect(screen.queryByRole("button", { name: /^Jump to:/ })).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Section two" })).toHaveLength(1);
+  it("divides the sections from one another, but not the first from the page's title", () => {
+    const css = readFileSync(resolve(__dirname, "../styles/global.css"), "utf8");
+    expect(decl(ruleBody(css, ".user-manual-content h2:first-child"), "border-top")).toBe("none");
+    expect(decl(ruleBody(css, ".user-manual-section + .user-manual-section > h2:first-child"), "border-top")).toBe(
+      "1px solid var(--border-soft)",
+    );
+    expect(decl(ruleBody(css, ".user-manual-section,\n.user-manual-section [id] {"), "scroll-margin-top")).toBe("16px");
   });
 
-  describe("scrolling", () => {
+  describe("one document", () => {
     const scrollIntoView = vi.fn();
     beforeEach(() => {
       scrollIntoView.mockReset();
@@ -191,23 +119,116 @@ describe("HelpPage", () => {
       delete (Element.prototype as Partial<Element>).scrollIntoView;
     });
 
-    it("opens at the top of the page, with the title in view", async () => {
+    /** Places each rendered section at `tops[i]` px from the top of the viewport. */
+    function placeSections(tops: number[]) {
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const i = this.dataset.section == null ? -1 : [...document.querySelectorAll("[data-section]")].indexOf(this);
+        const top = i === -1 ? 0 : tops[i];
+        return { top, bottom: top + 400, height: 400, left: 0, right: 600, width: 600, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+      });
+    }
+
+    function scrollPage() {
+      act(() => {
+        document.dispatchEvent(new Event("scroll"));
+      });
+    }
+
+    function current() {
+      const nav = screen.getByRole("navigation", { name: "Manual sections" });
+      return within(nav).queryByRole("button", { current: true })?.textContent ?? null;
+    }
+
+    it("renders every section, without the manual's own contents list", async () => {
+      stubManualFetch(MANUAL_WITH_TOC);
       renderWithProviders(<HelpPage />);
-      await screen.findByRole("heading", { name: "Section one", level: 2 });
-      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(await screen.findByRole("heading", { name: "Section one", level: 2 })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Section two", level: 2 })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Table of contents", level: 2 })).toBeNull();
+      const nav = screen.getByRole("navigation", { name: "Manual sections" });
+      expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Section one", "Section two"]);
+      expect(screen.queryByRole("button", { name: /^Jump to:/ })).toBeNull();
     });
 
-    it("brings a newly chosen section's start into view only when the reader has scrolled past it", async () => {
+    it("shows a manual of one section, which no table of contents can be", async () => {
+      stubManualFetch("# Delay Dashboard\n\n## Only section\n\nThe whole manual.\n");
+      renderWithProviders(<HelpPage />);
+      expect(await screen.findByRole("heading", { name: "Only section", level: 2 })).toBeInTheDocument();
+      expect(screen.getByText("The whole manual.")).toBeInTheDocument();
+    });
+
+    it("opens at the page's title, with the first section current", async () => {
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section one", level: 2 });
+      expect(current()).toBe("Section one");
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe("");
+    });
+
+    it("marks the section crossing the top third of the screen as the reader scrolls", async () => {
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section two", level: 2 });
+      placeSections([-500, 100]);
+      scrollPage();
+      await waitFor(() => expect(current()).toBe("Section two"));
+      placeSections([-50, 400]);
+      scrollPage();
+      await waitFor(() => expect(current()).toBe("Section one"));
+    });
+
+    it("marks the last section once the page can scroll no further", async () => {
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section two", level: 2 });
+      placeSections([-900, 500]);
+      const root = document.documentElement;
+      const metrics = { scrollHeight: 2000, clientHeight: 800, scrollTop: 1200 };
+      for (const [key, value] of Object.entries(metrics)) Object.defineProperty(root, key, { configurable: true, value });
+      try {
+        scrollPage();
+        await waitFor(() => expect(current()).toBe("Section two"));
+      } finally {
+        for (const key of Object.keys(metrics)) delete (root as unknown as Record<string, unknown>)[key];
+      }
+    });
+
+    it("takes a contents entry to its section, smoothly, and keeps it marked until the scroll ends", async () => {
       const user = userEvent.setup();
       renderWithProviders(<HelpPage />);
-      const heading = await screen.findByRole("heading", { name: "Section one", level: 2 });
-      const content = heading.closest(".user-manual-content")!;
-      vi.spyOn(content, "getBoundingClientRect").mockReturnValue({ top: 120 } as DOMRect);
+      await screen.findByRole("heading", { name: "Section two", level: 2 });
       await user.click(screen.getByRole("button", { name: "Section two" }));
-      expect(scrollIntoView).not.toHaveBeenCalled();
-      vi.spyOn(content, "getBoundingClientRect").mockReturnValue({ top: -400 } as DOMRect);
-      await user.click(screen.getByRole("button", { name: "Section one" }));
-      expect(scrollIntoView).toHaveBeenCalledOnce();
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+      expect(scrollIntoView.mock.contexts[0]).toHaveAttribute("data-section");
+      expect(scrollIntoView.mock.contexts[0]).toHaveTextContent("Other manual text.");
+      expect(current()).toBe("Section two");
+      expect(window.location.hash).toBe("#section-two");
+      placeSections([-50, 400]);
+      scrollPage();
+      expect(current()).toBe("Section two");
+      act(() => {
+        document.dispatchEvent(new Event("scrollend"));
+      });
+      scrollPage();
+      await waitFor(() => expect(current()).toBe("Section one"));
+    });
+
+    it("jumps instead of gliding when the reader asks for reduced motion", async () => {
+      vi.spyOn(window, "matchMedia").mockImplementation(
+        (query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList,
+      );
+      const user = userEvent.setup();
+      renderWithProviders(<HelpPage />);
+      await screen.findByRole("heading", { name: "Section two", level: 2 });
+      await user.click(screen.getByRole("button", { name: "Section two" }));
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "start" });
+    });
+
+    it("opens at a deep-linked heading", async () => {
+      stubManualFetch(MANUAL_WITH_TOC);
+      window.history.replaceState(null, "", "#section-two");
+      renderWithProviders(<HelpPage />);
+      const heading = await screen.findByRole("heading", { name: "Section two", level: 2 });
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" }));
+      expect(scrollIntoView.mock.contexts[0]).toBe(heading);
     });
   });
 
@@ -258,20 +279,18 @@ describe("HelpPage", () => {
       expect(screen.queryByText("Other manual text.")).not.toBeInTheDocument();
     });
 
-    it("clearing the query restores the section the user had selected", async () => {
+    it("shows the whole manual again once the query is cleared", async () => {
       const user = userEvent.setup();
       renderWithProviders(<HelpPage />);
       await screen.findByRole("heading", { name: "Section one", level: 2 });
 
-      await user.click(screen.getByRole("button", { name: "Section two" }));
-      await screen.findByRole("heading", { name: "Section two", level: 2 });
-
       const search = screen.getByRole("searchbox");
       await user.type(search, "Some manual");
-      await screen.findByRole("heading", { name: "Section one", level: 2 });
+      expect(screen.queryByRole("heading", { name: "Section two", level: 2 })).toBeNull();
       await user.clear(search);
 
-      expect(await screen.findByRole("heading", { name: "Section two", level: 2 })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Section one", level: 2 })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Section two", level: 2 })).toBeInTheDocument();
     });
   });
 });
