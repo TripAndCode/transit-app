@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cleanup, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -9,6 +9,7 @@ import { decl, ruleBody } from "../test/cssRules";
 import * as hooks from "../api/hooks";
 import * as adminHook from "../api/useIsAdmin";
 import { AnalysisTab } from "./AnalysisTab";
+import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
 import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType, TrendPayload } from "../api/types";
 
 vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () => <div>headway-panel</div> }));
@@ -698,5 +699,25 @@ describe("AnalysisTab delay certificate", () => {
     expect(decl(ruleBody(print, ".analysis-insights"), "display")).toBe("none !important");
     expect(decl(ruleBody(print, ".cert-staff"), "display")).toBe("none");
     expect(decl(ruleBody(print, ".analysis-tab:has(.cert-card) .scope-sentence"), "display")).toBe("none");
+  });
+});
+
+describe("AnalysisTab slow reports", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("says a slow report is still working, and offers the period's last week", () => {
+    vi.useFakeTimers();
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("ranking")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: true, error: null, refetch: vi.fn() } as never);
+    const { router } = renderAnalysis("/agencies/1/analysis/compare?report=ranking&from=2026-09-01&to=2026-09-30", ["ranking"]);
+    act(() => vi.advanceTimersByTime(STILL_WORKING_AFTER_MS));
+    expect(screen.getByText("Still working: a long period takes longer to count.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Narrow to the last 7 days of the period" }));
+    const params = new URLSearchParams(router.state.location.search);
+    expect([params.get("from"), params.get("to")]).toEqual(["2026-09-24", "2026-09-30"]);
   });
 });

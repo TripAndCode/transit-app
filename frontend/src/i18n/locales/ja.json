@@ -417,7 +417,10 @@
     "rel_hours_ago_one": "{{count}}時間前",
     "rel_hours_ago_other": "{{count}}時間前",
     "rel_days_ago_one": "{{count}}日前",
-    "rel_days_ago_other": "{{count}}日前"
+    "rel_days_ago_other": "{{count}}日前",
+    "still_working": "まだ処理しています…",
+    "still_working_period": "まだ処理しています。期間が長いほど集計に時間がかかります。",
+    "narrow_to_week": "期間の最後の7日間に絞る"
   },
   "legal": {
     "privacy": "プライバシーポリシー",

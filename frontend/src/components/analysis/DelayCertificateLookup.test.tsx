@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { decl, ruleBody } from "../../test/cssRules";
@@ -9,6 +9,7 @@ import * as hooks from "../../api/hooks";
 import { DataEndContext, isoDaysAgo } from "../../api/scope";
 import type { DefinitionMeta, DelayCertificateRow, ReportResponse } from "../../api/types";
 import { DelayCertificateLookup } from "./DelayCertificateLookup";
+import { STILL_WORKING_AFTER_MS } from "../StillWorking";
 
 const ROUTE = { route_id: "r1", route_short_name: "W54", route_long_name: null, route_code: "W54", trip_headsigns: [] };
 
@@ -155,8 +156,22 @@ describe("DelayCertificateLookup", () => {
     mockReport({ data: certificate(ROWS), isPlaceholderData: true });
     renderLookup();
     await chooseRoute();
-    expect(screen.getByRole("status")).toHaveTextContent("Looking up late departures…");
+    expect(screen.getByText("Looking up late departures…")).toBeInTheDocument();
     expect(screen.queryByLabelText("Scheduled departure")).toBeNull();
+  });
+
+  it("says a slow lookup is still working, with nothing narrower to offer for one day", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockReport({});
+      renderLookup();
+      await chooseRoute();
+      act(() => vi.advanceTimersByTime(STILL_WORKING_AFTER_MS));
+      expect(screen.getByText("Still working on it…")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Narrow/ })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("offers a retry when the lookup fails", async () => {
