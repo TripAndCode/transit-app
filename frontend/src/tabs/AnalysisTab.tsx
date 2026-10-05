@@ -45,6 +45,7 @@ import { reportLabel } from "../components/analysis/reportGroups";
 import "./analysisTab.css";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { ServiceNote } from "../components/ServiceNote";
+import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
 import { destHref, reportHref } from "../routes/destinations";
 import { RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 
@@ -231,6 +232,8 @@ export function AnalysisTab({
               <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
               <DwellRunBlock payload={detail.data.rows[0]} />
+            ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
+              <CouncilSummaryBlock row={detail.data.rows[0]} text={detail.data.text} />
             ) : detail.data.rows.length > 0 ? (
               <>
                 <ReportTable

@@ -1126,7 +1126,15 @@
       "rows_shown": "{{total}}件中{{shown}}件を表示",
       "show_all": "すべて表示"
     },
-    "download_csv": "CSVダウンロード"
+    "download_csv": "CSVダウンロード",
+    "council": {
+      "figures": "主な数値",
+      "on_time": "定時率",
+      "avg_delay": "平均遅延",
+      "departures": "観測した発車",
+      "planned_trips": "計画便数",
+      "print": "印刷 / PDFで保存"
+    }
   },
   "insight_panel": {
     "title": "注目ポイント",
