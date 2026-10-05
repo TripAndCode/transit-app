@@ -138,6 +138,26 @@ describe("AnalysisTab", () => {
     expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
   });
 
+  it("counts a chosen route as used on the route forecast, whose route view honours it", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({
+      data: { grid: [], worst: null, routes: [], disclaimer: "", scope_applied: { from: false, to: false, dow: false, time_band: false, routes: false } },
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({
+      data: { route: "44242", cells: [], scope_applied: { from: false, to: false, dow: false, time_band: false, routes: true } },
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderAnalysis("/agencies/1/analysis/when?report=route_forecast&routes=44242", ["route_forecast"]);
+    expect(screen.getByText(/Not used on this screen/)).not.toHaveTextContent("Routes");
+  });
+
   it("greys nothing while a different report's response is still on screen", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("trend"), reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);

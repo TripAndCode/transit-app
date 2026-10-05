@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   REPORT_ROWS_MAX,
   reportQueryString,
+  useForecastHeatmap,
   useForecastOverview,
   useReport,
   useReports,
@@ -123,13 +124,19 @@ export function AnalysisTab({
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
   const [staffOpen, setStaffOpen] = useState(false);
   const isAdmin = useIsAdmin();
-  // route_forecast is served by the forecast endpoint, so its own map
-  // applies; a report's map counts only once that report's response is the
-  // one on screen, not the previous report kept as placeholder data.
+  // route_forecast is served by the forecast endpoints, so their own map
+  // applies: one chosen route opens that route's forecast, which honours the
+  // route; otherwise the agency-wide overview. A report's map counts only
+  // once that report's response is the one on screen, not the previous
+  // report kept as placeholder data.
+  const forecastRoute = reportType === "route_forecast" && ctx.routes.length === 1 ? ctx.routes[0] : null;
   const forecast = useForecastOverview(reportType === "route_forecast" ? id : null);
+  const routeForecast = useForecastHeatmap(forecastRoute != null ? id : null, forecastRoute ?? "");
   const scopeApplied =
     reportType === "route_forecast"
-      ? forecast.data?.scope_applied
+      ? forecastRoute != null
+        ? routeForecast.data?.scope_applied
+        : forecast.data?.scope_applied
       : detail.data?.report_type === reportType
         ? detail.data.scope_applied
         : undefined;
