@@ -5,6 +5,7 @@ import { matchedPrevious } from "./stopSeries";
 import { delayColor } from "../../styles/tokens";
 import { ChartAxis } from "./ChartAxis";
 import { useDrawOn } from "../charts/ChartEnter";
+import { niceAxis } from "../charts/niceAxis";
 
 export function StopChart({ stops, previous, selected, onSelect }: {
   stops: RouteShapeStop[]; previous: RouteShapeStop[]; selected: number; onSelect: (sequence: number) => void;
@@ -19,13 +20,14 @@ export function StopChart({ stops, previous, selected, onSelect }: {
   useDrawOn(lineRef);
   const low = Math.min(0, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
   const high = Math.max(1, ...stops.map((s) => s.avg_min ?? 0), ...previous.map((s) => s.avg_min ?? 0));
+  const axis = niceAxis(low, high, 6);
   const x = (i: number) => 52 + i / Math.max(1, stops.length - 1) * 700;
-  const y = (n: number) => 280 - (n - low) / (high - low) * 240;
+  const y = (n: number) => 280 - (n - axis.low) / (axis.high - axis.low) * 240;
   function path(values: (number | null)[]) {
     return values.map((v, i) => v == null ? "" : `${i === 0 || values[i - 1] == null ? "M" : "L"}${x(i)},${y(v)}`).join(" ");
   }
   return <svg className="focus-chart" viewBox="0 0 780 335" role="group" aria-label={t("stopDelay")}>
-    <ChartAxis low={low} high={high} y={y} />
+    <ChartAxis ticks={axis.ticks} y={y} />
     <path d={path(stops.map((s) => matchedPrevious(s, previous)))} fill="none" stroke="var(--text-secondary)" strokeWidth={2} strokeDasharray="5 5" />
     <path ref={lineRef} d={path(stops.map((s) => s.avg_min))} fill="none" stroke="var(--accent)" strokeWidth={2.5} />
     {stops.map((s, i) => <g key={`${s.stop_sequence}-${s.stop_id}`}>

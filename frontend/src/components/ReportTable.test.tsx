@@ -143,6 +143,21 @@ describe("ReportTable route links", () => {
     expect(link).toHaveAttribute("href", "/agencies/1/routes/39061?from=2026-09-01&dow=weekday");
     expect(link.closest("tr")).toHaveClass("report-row--link");
   });
+
+  it("keeps the chevron on the route code's line, so a narrow cell never wraps it alone", () => {
+    mockRoutes([
+      { route_id: "C12線(21111)", route_short_name: "C12", route_long_name: "造道・八重田線", route_code: "21111", trip_headsigns: [] },
+    ]);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/routes?report=ranking"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="ranking" rows={[["21111", "平日", 0.9, 0.9, 2.0, 245]]} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const chevron = screen.getByRole("link", { name: /C12/ }).querySelector(".report-route-link__chevron");
+    expect(chevron?.textContent).toBe("\u00a0›");
+  });
 });
 
 describe("ReportTable service column", () => {

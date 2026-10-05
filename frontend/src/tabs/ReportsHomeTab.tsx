@@ -95,7 +95,7 @@ export function ReportsHomeTab() {
       </li>)}</ul>
     </section> : <>
       <ScopeSentence applied={trend.data?.scope_applied} />
-      <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name}{FILTER_SEPARATOR}{ctx.from} – {ctx.to}</h2>
+      <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name}{FILTER_SEPARATOR}{formatDateRange(ctx.from, ctx.to)}</h2>
       <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
         ["definition", JSON.stringify(trend.data?.definition)], [], ...buildCsv(days, daysColumns, ctx),
       ])}>{t("csv")}</button></div></div>
@@ -116,7 +116,7 @@ export function ReportsHomeTab() {
       </section>
       <p className="focus-muted">{t("reportNote")}</p>
       {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
-      <details><summary>{t("definitions")}</summary><p>{ctx.from} – {ctx.to}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
+      <details><summary>{t("definitions")}</summary><p>{formatDateRange(ctx.from, ctx.to)}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
         <Link to={reportHref(String(id), "trend", `?${queryString}`)}>{t("advanced")} →</Link>
       </details>
     </>}
