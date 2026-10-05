@@ -1752,7 +1752,7 @@
       "brush_end": "Period end",
       "since_start": "Since collection began",
       "mean_min": "{{n}} min",
-      "share": "{{pct}}%",
+      "share": "{{pct}}% on time",
       "curve_label": "On-time share by tolerance",
       "whole_day": "These figures cover the whole day",
       "no_data": "No data",
@@ -1762,8 +1762,9 @@
       "legend_d3": "3.5–5 min",
       "legend_d4": "5 min or more",
       "whole_day_place": "These figures cover the whole day, every stop and both directions",
-      "readout": "{{n}} min: {{pct}}%",
-      "weekday_colour": "Colour = average delay on that weekday"
+      "readout": "Up to {{n}} min late: {{pct}}% on time",
+      "weekday_colour": "Colour = average delay on that weekday",
+      "axis_lateness": "Allowed lateness"
     },
     "pin": "Show all filters",
     "reset": "Reset conditions",

@@ -1752,7 +1752,7 @@
       "brush_end": "期間の終了日",
       "since_start": "収集開始から",
       "mean_min": "{{n}}分",
-      "share": "{{pct}}%",
+      "share": "定時{{pct}}%",
       "curve_label": "許容幅ごとの定時率",
       "whole_day": "この数値は時間帯の条件を含みません",
       "no_data": "データなし",
@@ -1762,8 +1762,9 @@
       "legend_d3": "3.5〜5分",
       "legend_d4": "5分以上",
       "whole_day_place": "この数値は時間帯・停留所・方向の条件を含みません",
-      "readout": "{{n}}分のとき{{pct}}%",
-      "weekday_colour": "色は曜日ごとの平均遅延"
+      "readout": "{{n}}分までの遅れなら定時{{pct}}%",
+      "weekday_colour": "色は曜日ごとの平均遅延",
+      "axis_lateness": "許容する遅れ"
     },
     "pin": "すべての条件を表示",
     "reset": "条件をリセット",

@@ -144,6 +144,15 @@ describe("scope controls", () => {
       expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
     });
 
+    it("ends the presets where the default period ends, leaving out a partial today", async () => {
+      vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+      vi.setSystemTime(new Date("2026-09-29T03:00:00Z"));
+      mount(PeriodControl, "", { ...SUMMARY, latest: "2026-09-29" });
+      expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
+      await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
+      expect(params().get("to")).toBe("2026-09-28");
+    });
+
     it("anchors a preset on the agency's latest data", async () => {
       mount(PeriodControl);
       await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
@@ -191,9 +200,9 @@ describe("scope controls", () => {
 
     it("names each preset's on-time share once the data is in", () => {
       mount(ToleranceControl, "", SUMMARY);
-      expect(screen.getByRole("button", { name: "1 min 34%" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "3 min 60%" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "5 min 75%" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "1 min 34% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "3 min 60% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "5 min 75% on time" })).toBeInTheDocument();
     });
 
     it("draws the on-time curve with a marker at the current tolerance", () => {
@@ -216,7 +225,13 @@ describe("scope controls", () => {
 
     it("reads out the share at the current tolerance", () => {
       mount(ToleranceControl, "?late=180", SUMMARY);
-      expect(screen.getByText("3 min: 60%")).toBeInTheDocument();
+      expect(screen.getByText("Up to 3 min late: 60% on time")).toBeInTheDocument();
+    });
+
+    it("labels the curve's axis: allowed lateness from 0 to 10 min", () => {
+      mount(ToleranceControl, "", SUMMARY);
+      const axis = document.querySelector(".scope-curve-axis")!;
+      expect([...axis.children].map((c) => c.textContent)).toEqual(["0 min", "Allowed lateness", "10 min"]);
     });
 
     it("leaves out the whole-day note when there are no figures", () => {
