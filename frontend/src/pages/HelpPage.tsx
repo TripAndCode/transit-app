@@ -29,8 +29,8 @@ async function fetchManual(locale: string, signal: AbortSignal): Promise<string>
 }
 
 type ManualSection = {
-  /** Raw heading text, e.g. `5. Analysis tab — "when and why delays happen"
-   *  [most important]` -- used verbatim as the sidebar label. */
+  /** Raw heading text, e.g. `5. Routes — which routes run late`, used
+   *  verbatim as the sidebar label. */
   title: string;
   /** This section's own markdown, from its `## ` line to (exclusive of) the
    *  next top-level heading. Always starts with that `## ` line -- the
@@ -172,11 +172,6 @@ export function HelpPage() {
   );
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Keeps in-content anchor links (e.g. the manual's own "Table of contents"
-  // section links to `#5-analysis-tab...`) working even though the target
-  // section isn't in the DOM yet when such a link is clicked: the browser
-  // still updates location.hash and fires `hashchange`, which this picks up
-  // to switch sections. Also covers back/forward through hash history.
   const contentRef = useRef<HTMLDivElement>(null);
 
   /** Shows section `i`. When the reader has scrolled past the start of the
@@ -189,6 +184,11 @@ export function HelpPage() {
     if (pane && pane.getBoundingClientRect().top < 0) pane.scrollIntoView?.({ block: "start" }); // jsdom has no scrollIntoView
   }
 
+  // Keeps in-content anchor links (e.g. a cross-reference to
+  // `#5-routes--which-routes-run-late`) working even though the target
+  // section isn't in the DOM yet when such a link is clicked: the browser
+  // still updates location.hash and fires `hashchange`, which this picks up
+  // to switch sections. Also covers back/forward through hash history.
   const onHashChange = useEffectEvent(() => {
     const hash = decodeURIComponent(window.location.hash.replace(/^#/, ""));
     const idx = tocAnchors.findIndex((a) => a === hash);
