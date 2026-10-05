@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Suspense, ViewTransition } from "react";
 import { Outlet, useMatch, useLocation } from "react-router-dom";
 import { AgencyDataEndProvider } from "./api/AgencyDataEndProvider";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
@@ -10,9 +10,9 @@ import { FeedHealthBanner } from "./components/FeedHealthBanner";
 import { HelpHint } from "./components/HelpHint";
 import { FirstRunTourOnLive } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
-import { RouteTransition } from "./components/RouteTransition";
 import { Sidebar } from "./components/Sidebar";
 import { NavPendingProvider } from "./components/navPending";
+import "./styles/viewTransitions.css";
 import { TopBar } from "./components/TopBar";
 import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
 import { CommandPalette } from "./components/CommandPalette";
@@ -62,13 +62,16 @@ export default function App() {
                 boundary is newly mounted on arrival and therefore always shows
                 its fallback; this one already holds the outgoing tab, so the
                 router's startTransition (main.tsx) can leave that painted until
-                the incoming chunk resolves. RouteTransition then fades the new
-                content in without remounting this wrapper. */}
-            <RouteTransition style={{ display: "flex", flexDirection: "column", padding: "clamp(16px, 4vw, 24px)", flex: 1, minHeight: 0, boxSizing: "border-box" }}>
-              <Suspense fallback={<ChunkLoading />}>
-                <Outlet key={agencyId ?? "root"} />
-              </Suspense>
-            </RouteTransition>
+                the incoming chunk resolves. A navigation from the rail then
+                commits as a view transition of this pane (navPending.tsx,
+                styles/viewTransitions.css), without remounting it. */}
+            <ViewTransition default={{ nav: "page-nav", default: "none" }}>
+              <div style={{ display: "flex", flexDirection: "column", padding: "clamp(16px, 4vw, 24px)", flex: 1, minHeight: 0, boxSizing: "border-box" }}>
+                <Suspense fallback={<ChunkLoading />}>
+                  <Outlet key={agencyId ?? "root"} />
+                </Suspense>
+              </div>
+            </ViewTransition>
           </main>
           {!focused && <CopilotPanel />}
           {/* Persisted in localStorage (transit.tourSeen); a no-op render

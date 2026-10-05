@@ -1,0 +1,23 @@
+.nav-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.nav-indicator--y {
+  width: 100%;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+}
+.nav-indicator--x {
+  height: 2px;
+  background: var(--accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nav-indicator[data-glide] {
+    transition: transform var(--dur-2) var(--ease-out), height var(--dur-2) var(--ease-out), width var(--dur-2) var(--ease-out);
+  }
+}

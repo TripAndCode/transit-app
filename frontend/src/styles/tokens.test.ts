@@ -669,23 +669,6 @@ describe("surfaceColorResolved()", () => {
   });
 });
 
-describe("route-enter animation", () => {
-  it("is declared once, inside a motion-allowed block, reusing the shared fade keyframes", () => {
-    // Nothing outside a no-preference block may define it: the class is
-    // applied unconditionally by RouteTransition, so the media query is the
-    // only thing standing between it and a reduced-motion user.
-    const allowed = [...globalCss.matchAll(/@media \(prefers-reduced-motion: no-preference\)/g)]
-      .map((m) => ruleBody(globalCss.slice(m.index), "@media (prefers-reduced-motion: no-preference)"))
-      .filter((block) => block.includes(".route-enter"));
-
-    expect(globalCss.match(/\.route-enter/g)).toHaveLength(1);
-    expect(allowed).toHaveLength(1);
-    expect(decl(ruleBody(allowed[0], ".route-enter"), "animation")).toBe(
-      "ov-fade-in var(--dur-2) var(--ease-out)",
-    );
-  });
-});
-
 describe("chart entrance motion (ChartEnter.tsx)", () => {
   function motionAllowedBlocksContaining(selector: string): string[] {
     return [...globalCss.matchAll(/@media \(prefers-reduced-motion: no-preference\)/g)]
