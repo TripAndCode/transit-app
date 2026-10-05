@@ -7,7 +7,7 @@ import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
 import { ToastProvider } from "./ui/Toast";
-import { readLastAgency, writeLastAgency } from "../api/lastAgency";
+import { clearLastAgency, readLastAgency, writeLastAgency } from "../api/lastAgency";
 import * as auth from "../api/auth";
 import * as config from "../api/config";
 import { rememberScreenScope } from "../api/screenScope";
@@ -36,6 +36,7 @@ function renderSidebar(path = "/agencies/1/live") {
           <MemoryRouter initialEntries={[path]}>
             <Routes>
               <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
+              <Route path="/help" element={<Sidebar />} />
             </Routes>
           </MemoryRouter>
         </ToastProvider>
@@ -52,6 +53,17 @@ describe("Sidebar", () => {
     const nav = screen.getByRole("navigation", { name: "Destinations" });
     expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(RAIL_ORDER);
     expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
+  });
+
+  it("keeps its destinations on Help, leading back to the last chosen agency", () => {
+    writeLastAgency(3);
+    try {
+      renderSidebar("/help");
+      const nav = screen.getByRole("navigation", { name: "Destinations" });
+      expect(within(nav).getByRole("link", { name: "Pulse" }).getAttribute("href")).toMatch(/^\/agencies\/3\/pulse/);
+    } finally {
+      clearLastAgency();
+    }
   });
 
   describe("each screen keeps its own filters", () => {

@@ -1,10 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { Suspense, lazy } from "react";
+import { describe, it, expect, vi } from "vitest";
+import { Suspense, addTransitionType, lazy } from "react";
 import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NavPendingProvider, PendingNavLink } from "./navPending";
+
+vi.mock("react", async (importOriginal) => ({ ...(await importOriginal<typeof import("react")>()), addTransitionType: vi.fn() }));
 
 // A chunk that never arrives: the navigation stays pending for the whole test.
 const NeverLoads = lazy(() => new Promise<never>(() => {}));
@@ -54,6 +56,13 @@ describe("PendingNavLink", () => {
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Slow screen/ })).toHaveAttribute("aria-busy", "true");
     expect(screen.getByRole("link", { name: /Other screen/ })).not.toHaveAttribute("aria-busy");
+  });
+
+  it("marks its navigation as one, so only a screen change animates", async () => {
+    renderShell();
+    vi.mocked(addTransitionType).mockClear();
+    await userEvent.click(screen.getByRole("link", { name: /Other screen/ }));
+    expect(addTransitionType).toHaveBeenCalledWith("nav");
   });
 
   it("can leave the busy mark to the progress bar alone", async () => {

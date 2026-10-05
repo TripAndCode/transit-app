@@ -747,18 +747,11 @@ summary::-webkit-details-marker { display: none; }
    them; a lazily-loaded tab sheet would otherwise define the same keyframes
    again, and only for itself. */
 @media (prefers-reduced-motion: no-preference) {
-  @keyframes ov-fade-in {
-    from { opacity: 0; transform: translateY(2px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
   @keyframes ov-modal-in {
     from { opacity: 0; transform: translateY(6px) scale(0.99); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   .ov-modal       { animation: ov-modal-in var(--dur-2) var(--ease-out); }
-  /* Every route change fades its content in over the outgoing tab, which
-     startTransition keeps painted until the next chunk resolves. */
-  .route-enter    { animation: ov-fade-in var(--dur-2) var(--ease-out); }
 
   /* ChartEnter.tsx's useDrawOn(): the element's own JS-measured length
      (getTotalLength()) is written to --len, and .chart-draw-on--active is

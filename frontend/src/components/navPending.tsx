@@ -1,12 +1,9 @@
-import { createContext, use, useState, useTransition, type MouseEvent, type ReactNode } from "react";
+import { addTransitionType, use, useState, useTransition, type MouseEvent, type ReactNode } from "react";
 import { NavLink, useNavigate, type NavLinkProps } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./Spinner";
+import { NavPendingContext } from "./navPendingContext";
 import "./navPending.css";
-
-type NavPending = { pendingTo: string | null; go: (to: string) => void };
-
-const NavPendingContext = createContext<NavPending | null>(null);
 
 /** Shows that a navigation is under way. The app keeps the outgoing screen
  *  painted while the next one's chunk loads, which reads as a click that did
@@ -20,7 +17,10 @@ export function NavPendingProvider({ children }: { children: ReactNode }) {
 
   function go(to: string) {
     setTarget(to);
-    startTransition(() => navigate(to));
+    startTransition(() => {
+      addTransitionType("nav");
+      return navigate(to);
+    });
   }
 
   return (
