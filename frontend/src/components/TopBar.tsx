@@ -5,6 +5,7 @@ import { useAgencyId } from "../api/useAgencyId";
 import { useMediaQuery, COARSE_POINTER_QUERY } from "../hooks/useMediaQuery";
 import { openCommandPalette } from "./commandPaletteEvents";
 import { DataFreshness } from "./DataFreshness";
+import { modifierKeyLabel } from "../utils/platform";
 
 /** The bar above every agency screen: one search-and-ask field that opens
  *  the command palette, and how recent the agency's data is. */
@@ -56,7 +57,7 @@ export function TopBar() {
         </span>
         {!coarsePointer && (
         <span aria-hidden="true" style={{ display: "flex", gap: 3 }}>
-          {["⌘", "K"].map((k) => (
+          {[modifierKeyLabel(), "K"].map((k) => (
             <kbd
               key={k}
               style={{

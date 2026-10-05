@@ -67,7 +67,7 @@ The account menu at the bottom of the sidebar (your name, or **Guest**) holds si
 
 ### Searching and jumping
 
-The field at the top of every agency screen, “Search routes, reports and screens”, opens a search box (shortcut ⌘K, or Ctrl+K). Type to jump to a screen, an agency, a route, a report or a time band.
+The field at the top of every agency screen, “Search routes, reports and screens”, opens a search box (shortcut ⌘K on a Mac, Ctrl+K elsewhere). Type to jump to a screen, an agency, a route, a report or a time band.
 
 Next to it, “Analyzed through …” shows the last service day the reports include. Click it to see “How fresh the data is”: how far the reports reach, when the last live reading arrived, and how many readings were set aside as implausible. Days without readings are left out, not counted as on time.
 
@@ -86,7 +86,7 @@ On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 ## 3. The scope sentence: what a screen shows
 
-**Pulse**, **Routes**, **Time**, **Why** and **Compare** (periods and routes), and the period summary, council report and delay certificate in **Reports**, open with one sentence that says what the screen is counting. With the default conditions it reads like this:
+**Pulse**, **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends), and the period summary, council report and delay certificate in **Reports**, open with one sentence that says what the screen is counting. With the default conditions it reads like this:
 
 > Viewing all routes of (agency), (period), every day, all hours, counting on-time as within 1 min
 
@@ -136,7 +136,7 @@ If the period has no observations, the screen says so and suggests a change to t
 
 ### 5-1. The report screens
 
-**Routes**, **Time**, **Why** and **Compare** (periods and routes) share one layout, as do the council report and the delay certificate in **Reports**.
+**Routes**, **Time**, **Why** and **Compare** (weekdays and weekends) share one layout, as do the council report and the delay certificate in **Reports**.
 
 ![Routes screen](./05-analysis-ranking.en.png)
 
@@ -171,7 +171,7 @@ Click anywhere else, or press Escape, to close it.
 | **Delay ranking** | Which routes run latest, worst first |
 | **Lowest average delay** | Routes with the lowest average delay, best first |
 | **On-time rate** | Share of departures inside the on-time threshold, by route |
-| **≥5-min delays** | Routes with the most departures five minutes or more late |
+| **Delays over 5 min** | Routes with the most departures more than five minutes late |
 
 If you are not sure where to start, open **Delay ranking** to see which routes are worst, then the **Trend** on **Time** to see when.
 
@@ -190,13 +190,13 @@ The columns:
 
 **Download CSV** at the top right of the report downloads the table.
 
-### 5-5. On-time rate and ≥5-min delays
+### 5-5. On-time rate and delays over 5 min
 
 ![On-time rate](./08-analysis-ontime.en.png)
 
 **On-time rate** lists routes with their “On-time %”: the share of departures that left within the on-time tolerance in the scope sentence. Closer to 100% is better. A “few data” mark in the **Data** column means there were too few departures to trust the percentage. Under the table, “Headway quality” covers the routes scheduled every 12 minutes or more often, and “Minimum performance standard” appears when the agency has set targets for its routes.
 
-**≥5-min delays** counts, route by route, the departures that left five minutes or more late (“≥5 min late”).
+**Delays over 5 min** counts, route by route, the departures that left more than five minutes late (“Over 5 min late”).
 
 ### 5-6. A route’s own page
 
@@ -248,11 +248,11 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ## 8. Compare — side by side
 
-Two buttons at the top switch between **Periods and routes** and **Agencies**.
+Two buttons at the top switch between **Weekdays and weekends** and **Agencies**.
 
-### 8-1. Periods and routes
+### 8-1. Weekdays and weekends
 
-**Compare ranking** puts each route’s average delay on weekdays and on weekends and holidays side by side (“Weekday (min)”, “Weekend/Holiday (min)”), with the gap (“Diff (min)”) and which side is higher (“Direction”: “Weekend > Weekday” or “Weekday > Weekend”). Routes with the largest gap come first.
+**Weekday and weekend gap** puts each route’s average delay on weekdays and on weekends and holidays side by side (“Weekday (min)”, “Weekend/Holiday (min)”), with the gap (“Diff (min)”) and which side is higher (“Direction”: “Weekend > Weekday” or “Weekday > Weekend”). Routes with the largest gap come first.
 
 ### 8-2. Agencies
 
@@ -289,7 +289,7 @@ Three tabs along the top: **Period summary**, **Saved analyses** and **Council r
 
 ### 10-1. Period summary
 
-How service ran over the period, on one printable page: the scope sentence, then “Mean delay over time” (a chart) and “Mean delay by service pattern” (a table, where “Open analysis →” opens that route’s page). Each part has its own **Download CSV**. The **Export** menu at the top right offers “Download PNG”, “Download CSV”, “Create share link” and “Print / Save PDF”. At the bottom, “View filters and definitions” links to the detailed reports.
+How service ran over the period, on one printable page: the scope sentence, then “Mean delay over time” (a chart) and “Mean delay by service pattern” (a table, where “Open analysis →” opens that route’s page). Each part has its own **Download CSV**. The **Export** menu at the top right offers “Download PNG”, “Download CSV”, “Create share link” and “Print / Save as PDF”. At the bottom, “View filters and definitions” links to the detailed reports.
 
 Missing observations are not counted as on time; only the periods with observations are shown.
 
