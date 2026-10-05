@@ -174,7 +174,7 @@ describe("NetworkTab", () => {
       fireEvent.focus(link);
     });
     const tip = screen.getByRole("tooltip");
-    expect(tip).toHaveTextContent("View Hiroden overview");
+    expect(tip).toHaveTextContent("Open Hiroden in Live");
     expect(link.getAttribute("aria-describedby")).toBe(tip.id);
   });
 

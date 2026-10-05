@@ -25,7 +25,7 @@
     "other": "Other"
   },
   "compare": {
-    "mode_periods": "Periods and routes",
+    "mode_periods": "Weekdays and weekends",
     "mode_agencies": "Agencies"
   },
   "saved": {
@@ -144,7 +144,7 @@
     },
     "ask": {
       "title": "Search and ask",
-      "body": "Find routes, reports and screens from here. The same field takes you to Ask, where you can put a question about delays in plain language."
+      "body": "Find routes, reports and screens from here. The same field takes you to Ask, which answers common questions about delay with a table or chart."
     }
   },
   "forecast": {
@@ -213,7 +213,7 @@
     "help_coverage": "The date span this agency actually has data for within the window.",
     "col_coverage": "Coverage",
     "no_data_in_range": "no data in range",
-    "view_agency": "View {{name}} overview",
+    "view_agency": "Open {{name}} in Live",
     "delay_unit": "min",
     "you_badge": "YOU",
     "ridership_weighted_toggle": "Weight by ridership",
@@ -761,7 +761,7 @@
       "p90_min": "p90 (min)",
       "samples": "Samples",
       "on_time_pct": "On-time %",
-      "late5_count": "≥5 min late",
+      "late5_count": "Over 5 min late",
       "heijitsu_min": "Weekday (min)",
       "kyujitsu_min": "Weekend (min)",
       "abs_delta": "Δ (abs)",
@@ -810,7 +810,7 @@
       "values": {
         "avg_delay": "Average delay",
         "on_time_rate": "On-time rate",
-        "worst_5min": "5+ min delay count",
+        "worst_5min": "Count of delays over 5 min",
         "weekday": "Weekday",
         "weekend": "Weekend/holiday",
         "all": "All",
@@ -933,9 +933,9 @@
       "ranking": "Delay ranking",
       "ranking_best": "Lowest average delay",
       "on_time": "On-time rate",
-      "worst_5min": "≥5-min delays",
+      "worst_5min": "Delays over 5 min",
       "trend": "Trend",
-      "compare_ranking": "Compare ranking",
+      "compare_ranking": "Weekday and weekend gap",
       "dow_weekday": "Routes on weekdays",
       "dow_weekend": "Routes on weekends and holidays",
       "dwell_run": "Dwell/running time",
@@ -950,7 +950,7 @@
       "p90": "p90",
       "samples": "Samples",
       "on_time_pct": "On-time %",
-      "over_5min_count": "≥5 min late",
+      "over_5min_count": "Over 5 min late",
       "diff": "Diff",
       "direction": "Direction",
       "confidence": "Data",
@@ -1103,9 +1103,9 @@
       "ranking": "Which routes run latest, worst first.",
       "ranking_best": "Routes with the lowest average delay, best first.",
       "on_time": "Share of departures inside the on-time threshold, by route.",
-      "worst_5min": "Routes with the most departures five minutes or more late.",
+      "worst_5min": "Routes with the most departures more than five minutes late.",
       "trend": "How delay moved day by day, by hour and by weekday.",
-      "compare_ranking": "The same ranking against the previous period.",
+      "compare_ranking": "Each route's weekday and weekend delay side by side, widest gap first.",
       "dow_weekday": "Each route's average delay on weekdays.",
       "dow_weekend": "Each route's average delay on weekends and holidays.",
       "dwell_run": "Where time goes: waiting at stops against running between them.",
@@ -1663,7 +1663,7 @@
     "nav_routes_sublabel": "Which routes, at which hours",
     "nav_time_sublabel": "When delay happens across the network",
     "nav_why_sublabel": "What the data can and can't explain",
-    "nav_compare_sublabel": "How two periods or agencies differ",
+    "nav_compare_sublabel": "Weekdays against weekends, and agencies against each other",
     "nav_reports_sublabel": "Documents to hand to someone",
     "nav_ask_sublabel": "Ask about routes, stops, and time bands",
     "group": {

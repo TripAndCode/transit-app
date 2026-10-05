@@ -100,7 +100,7 @@ _RANKING_TYPES = frozenset({"ranking", "ranking_best"})
 _EARLY_TOLERANCE_TYPES = frozenset({"on_time", "council_summary"})
 _LATE_TOLERANCE_TYPES = frozenset({"on_time", "worst_5min", "council_summary"})
 # The scope's `late` is the on-time tolerance. worst_5min's late cutoff is its
-# "≥5 min" threshold, so the scope never moves it.
+# own over-5-min threshold, so the scope never moves it.
 _SCOPE_LATE_TYPES = frozenset({"on_time", "council_summary"})
 
 # What each report's rows actually filter on. compare_ranking and the dow_*
