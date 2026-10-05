@@ -2,9 +2,7 @@
 
 This manual walks through the Delay Dashboard screen by screen, for anyone using it for the first time.
 
-> The screenshots show an earlier design of the app, so some names and layouts in them differ from what you will see. The names in the text are the current ones.
-
-The screenshots use real data from Hiroshima Electric Railway. Every agency’s screens work the same way; where a report needs data that an agency’s feed does not send, the screen says so.
+The screenshots use real data from Aomori City Bus (青森市バス) for 12 August – 10 September 2026, seen on the morning of 11 September. Every agency’s screens work the same way; where a report needs data that an agency’s feed does not send, the screen says so.
 
 ---
 
@@ -90,6 +88,8 @@ On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 > Viewing all routes of (agency), (period), every day, all hours, counting on-time as within 1 min
 
+![The scope sentence with its period open](./03-scope-sentence.en.png)
+
 Each part with a dashed underline is a condition. Click it to change it; the screen updates at once.
 
 | Condition | What you can choose |
@@ -120,7 +120,7 @@ Live, Ask, a route’s page and the agency comparison have their own filters, de
 
 Pulse is the screen an agency opens on. It sums up the period in the scope sentence.
 
-![Pulse](./02-overview.en.png)
+![Pulse](./02-pulse.en.png)
 
 - “Average delay · …”: the average delay in minutes, drawn over a small line of the daily values. A sentence beside it compares the period with the same number of days just before it; the ⓘ icon explains the comparison.
 - “… of … routes”: how many routes averaged a set number of minutes late or more.
@@ -138,7 +138,7 @@ If the period has no observations, the screen says so and suggests a change to t
 
 **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends) share one layout, as do the council report and the delay certificate in **Reports**.
 
-![Routes screen](./05-analysis-ranking.en.png)
+![Routes screen](./05-routes-ranking.en.png)
 
 | Area | Where | What it holds |
 |---|---|---|
@@ -154,7 +154,7 @@ If a report takes a while to count, after a few seconds it says “Still working
 
 Click the small ⓘ next to the “Reports” heading above the list. A popup, “How to read these reports”, explains what each kind of report is for.
 
-![How to read these reports](./06-analysis-hint-popover.en.png)
+![How to read these reports](./06-reports-hint.en.png)
 
 - Rankings find the routes that are chronically late or consistently on time.
 - The trend shows whether things are improving or worsening; a rising line means delays are growing.
@@ -192,7 +192,7 @@ The columns:
 
 ### 5-5. On-time rate and delays over 5 min
 
-![On-time rate](./08-analysis-ontime.en.png)
+![On-time rate](./08-routes-ontime.en.png)
 
 **On-time rate** lists routes with their “On-time %”: the share of departures that left within the on-time tolerance in the scope sentence. Closer to 100% is better. A “few data” mark in the **Data** column means there were too few departures to trust the percentage. Under the table, “Headway quality” covers the routes scheduled every 12 minutes or more often, and “Minimum performance standard” appears when the agency has set targets for its routes.
 
@@ -218,7 +218,7 @@ Time holds **Trend**, **Routes on weekdays**, **Routes on weekends and holidays*
 
 ### 6-1. Trend
 
-![Trend](./07-analysis-trend.en.png)
+![Trend](./07-time-trend.en.png)
 
 - **Usual delay pattern**: a grid of the days of the week against time bands. Darker cells mean more delay, and the sentence above the grid names the day and time band that ran latest over the period.
 - The daily chart: the average delay day by day, with a dashed 7-day average and a “Schedule change” mark where a new timetable took effect. A rising line means delays are growing. Drag across the chart to narrow the period (“Drag across the chart to narrow the period”); “Reset period” undoes it.
@@ -238,6 +238,8 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ## 7. Why — what the data can explain
 
+![Why, for a feed that reports departures only](./09-why.en.png)
+
 **Dwell/running time** splits each route’s delay into the time spent waiting at stops (“Dwell avg”, “Dwell p50”, “Dwell p90”) and the time spent running between them (“Running avg”, “Running p50”, “Running p90”), in seconds, with the number of observations behind each.
 
 - Splitting delay needs arrival times. When an agency’s feed reports departures only, the report says “Splitting delay needs arrival times” and offers **See when delay happens** (the Time screen) and **Compare weekdays and weekends** (the comparison in section 8-1).
@@ -256,7 +258,7 @@ Two buttons at the top switch between **Weekdays and weekends** and **Agencies**
 
 ### 8-2. Agencies
 
-![Compare agencies](./10-network.en.png)
+![Compare agencies](./10-compare-agencies.en.png)
 
 “Compare agencies” lists every agency for the dates in “From” and “To”, latest-running first (“Average delay — lower is better”). Your own agency carries a “YOU” badge.
 
@@ -270,7 +272,7 @@ Click an agency’s name to open that agency’s **Live** screen.
 
 Live shows the trips reporting now, under the heading “Current observations”. It refreshes itself every 30 seconds, and **Refresh now** fetches at once. Beside it, “Last updated …” says how recent the last report is, or “Feed quiet for …” when reports have stopped.
 
-![Live](./03-map.en.png)
+![Live](./11-live.en.png)
 
 - The map places each trip at its last reported stop, not at a GPS position. The legend explains the marks: “Latest report”, “Report trail”, “Delayed” and “Number = overlapping trips”. Hover over a trip for its details; “Pin this trip” keeps them on screen. “Fit all trips in view” moves the map to frame every trip, and **Layers** switches the map style.
 - Filters on the map: choose a “Route” and a “Service pattern”, then press **Apply**.
@@ -304,6 +306,8 @@ The list on the left holds **Council report** and **Delay certificate**.
 **Council report** is a period summary written for a council or board: four headline figures (“On time”, “Average delay”, “Departures observed”, “Planned trips”), a written summary with its notes, and **Print / Save as PDF**.
 
 **Delay certificate** gives a passenger proof of a late departure:
+
+![Delay certificate](./15-reports-certificate.en.png)
 
 1. Choose the “Date” and the “Route” they travelled on (“Search routes”).
 2. Under “Scheduled departure”, pick their departure (“Choose a departure”). Each one shows how late it left.
@@ -339,8 +343,6 @@ Ask answers common questions about delay with a table or chart, so you do not ha
 - Each question becomes a step of the investigation. “Investigation steps” lists them so you can look back; “Return to latest” brings you back to the newest.
 
 ### 11-3. Asking about the result in your own words
-
-![Follow-up box](./14-ask-followup-freetext.en.png)
 
 Where it is available to your account, a box under the latest answer, “Ask about this result...”, takes a question in your own words. Press the send button (the paper-plane icon) for an answer grounded in the result on screen. As the note under the box says, the AI runs only when you send, and it answers from the stored result without fetching new data. For a stop-by-stop answer, select a stop first.
 
