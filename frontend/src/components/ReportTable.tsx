@@ -347,7 +347,7 @@ function RouteCell({
     <Link className="report-route-link" to={routeHref(agencyId, code, search)}>
       <RouteLabel code={code} names={names} />
       <span className="report-route-link__chevron" aria-hidden="true">
-        {" ›"}
+        {"\u00a0›"}
       </span>
     </Link>
   );
