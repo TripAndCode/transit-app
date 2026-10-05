@@ -95,7 +95,8 @@ function splitIntoSections(markdown: string): SplitResult {
  *  up with the sections reads as an ordinary section rather than being
  *  dropped. */
 function hasOwnContents(sections: ManualSection[]): boolean {
-  if (sections.length === 0) return false;
+  // A lone section has nothing else a contents list could point to.
+  if (sections.length < 2) return false;
   return [...sections[0].markdown.matchAll(/]\(#([^)]+)\)/g)].length === sections.length - 1;
 }
 

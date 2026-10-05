@@ -7,9 +7,8 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { decl, ruleBody } from "../test/cssRules";
 import { HelpPage } from "./HelpPage";
 
-// Two top-level (`## `) sections -- enough to exercise the sidebar without a
-// "Table of contents" section, so the default (no location.hash) case lands
-// straight on the first real section instead of a ToC page.
+// Two top-level (`## `) sections and no "Table of contents" section, so
+// every section is listed and the first is current on opening.
 const TWO_SECTION_MANUAL =
   "# Delay Dashboard\n\n" +
   "## Section one\n\nSome manual text.\n\n![alt](./01-x.png)\n\n" +
@@ -149,6 +148,13 @@ describe("HelpPage", () => {
       const nav = screen.getByRole("navigation", { name: "Manual sections" });
       expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Section one", "Section two"]);
       expect(screen.queryByRole("button", { name: /^Jump to:/ })).toBeNull();
+    });
+
+    it("shows a manual of one section, which no table of contents can be", async () => {
+      stubManualFetch("# Delay Dashboard\n\n## Only section\n\nThe whole manual.\n");
+      renderWithProviders(<HelpPage />);
+      expect(await screen.findByRole("heading", { name: "Only section", level: 2 })).toBeInTheDocument();
+      expect(screen.getByText("The whole manual.")).toBeInTheDocument();
     });
 
     it("opens at the page's title, with the first section current", async () => {
