@@ -88,36 +88,32 @@ function splitIntoSections(markdown: string): SplitResult {
   return { preamble, sections };
 }
 
-/** The manual's own first section is its "Table of contents" heading, which
- *  lists one `[title](#anchor)` link per *other* section, in the same order
- *  those sections appear. Those anchors are already exactly what rehype-slug
- *  assigns when the whole thing renders (that's how the flat single-page
- *  version's own table of contents worked) -- reusing them here, positionally,
- *  avoids a second hand-rolled slugify implementation just to answer "does
- *  `location.hash` point at one of our sections". Returns `[]` if the count
- *  doesn't line up with the actual section count, so a future manual edit
- *  that drifts the two out of sync degrades to "no deep-link match" instead
- *  of silently pointing at the wrong section. */
-function tocAnchorsBySectionIndex(sections: ManualSection[]): (string | undefined)[] {
-  if (sections.length === 0) return [];
-  const anchors = [...sections[0].markdown.matchAll(/]\(#([^)]+)\)/g)].map((m) =>
-    decodeURIComponent(m[1]),
-  );
-  if (anchors.length !== sections.length - 1) return [];
-  return [undefined, ...anchors];
+/** Whether the manual's first section is its own "Table of contents": a
+ *  list of one `[title](#anchor)` link per other section. That list serves
+ *  the source file read on its own; on this page the sidebar is the one
+ *  table of contents, so the section is left out. A list that does not line
+ *  up with the sections reads as an ordinary section rather than being
+ *  dropped. */
+function hasOwnContents(sections: ManualSection[]): boolean {
+  if (sections.length === 0) return false;
+  return [...sections[0].markdown.matchAll(/]\(#([^)]+)\)/g)].length === sections.length - 1;
 }
 
-// The "Table of contents" section itself (index 0) has no resolvable anchor
-// above -- `tocAnchorsBySectionIndex` only ever returns anchors the ToC
-// *links to*, not one for the ToC section itself. So reloading or sharing a
-// URL captured while that section was selected falls back to `defaultIndex`
-// below instead of returning to the ToC page, unlike every other section
-// (which round-trips correctly). Deliberately left as-is rather than
-// resolved via a hand-rolled slugify of the ToC heading's own title: the
-// same reasoning that already rejected a second slug implementation for
-// bilingual (en/ja) text elsewhere in this file applies here too, and the
-// ToC page's own navigation purpose is already superseded by the sidebar,
-// so landing on the first real section instead is a reasonable fallback.
+/** How long a contents click waits for the browser's `scrollend` before it
+ *  lets the scroll position decide the current section again; browsers
+ *  without `scrollend`, and clicks that need no scroll, never send one. */
+const SCROLL_SETTLE_MS = 1000;
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
+/** The scrolled element behind a scroll event: the page's scroller for the
+ *  document itself, else the element (the app shell scrolls its main pane). */
+function scrollerOf(target: EventTarget | null): Element | null {
+  if (target instanceof Element) return target;
+  return document.scrollingElement ?? document.documentElement;
+}
 
 /** Renders the in-app user manual, fetched as a static Markdown asset per
  *  locale (public/user-manual/{en,ja}.md) rather than embedded in JSX. This
@@ -126,21 +122,14 @@ function tocAnchorsBySectionIndex(sections: ManualSection[]): (string | undefine
  *  .md asset, never in a .tsx source file, same reasoning that already
  *  exempts images.
  *
- *  The manual is split client-side (in memory, not a second file format) by
- *  its top-level `## ` headings into sections; a fixed left sidebar lists the
- *  section titles and only the selected section renders on the right.
- *
- *  Deep-link decision: the initial section is chosen from `location.hash`
- *  via the manual's own table-of-contents anchors (see
- *  `tocAnchorsBySectionIndex`), so old bookmarks/shared links from the flat-
- *  scrolling page (`#1-choosing-an-agency...` etc., one per top-level
- *  section) still land on the right section. This is NOT preserved for a
- *  `###` subsection anchor (e.g. `#5-3-something`): only top-level section
- *  anchors are matched, so a subsection link falls all the way back to
- *  `defaultIndex` below -- a different, unrelated section, not merely a lost
- *  disambiguating suffix. No current in-repo or external link targets a
- *  subsection anchor (checked both manuals' own cross-references), so this
- *  is a real but so-far-unexercised gap, not an active break. */
+ *  The manual reads as one document. The sidebar lists its top-level
+ *  sections and marks the one being read: the last section whose top has
+ *  passed the upper third of the screen, or the last section once the page
+ *  can scroll no further. A sidebar click scrolls to its section, smoothly
+ *  unless the reader asks for reduced motion, and keeps that entry marked
+ *  until the scroll ends rather than stepping through every section passed
+ *  on the way. The page opens at its title; only a `#heading` in the address
+ *  opens it further down. */
 export function HelpPage() {
   const { t, i18n } = useTranslation();
   // Same fallback chain as api/client.ts's Accept-Language header, not the
@@ -157,68 +146,18 @@ export function HelpPage() {
   // function calls, not useMemo, per repo convention.
   const { preamble, sections } =
     content == null ? { preamble: "", sections: [] } : splitIntoSections(stripLeadingH1(content));
-  const tocAnchors = tocAnchorsBySectionIndex(sections);
+  const navIndices = sections.map((_, i) => i).filter((i) => !(i === 0 && hasOwnContents(sections)));
 
-  // `explicitIndex` is only ever set from a real event -- a sidebar click or
-  // a matched `hashchange` -- each of which simply overwrites it, so the most
-  // recent explicit action always wins. Before either has happened, the
-  // section shown is *derived* (not stored) from `initialHash`, the page's
-  // hash at first mount, so there's no effect synchronously setting state
-  // from other reactive state (only legitimate external-event subscriptions
-  // do that, in their callbacks, below).
-  const [explicitIndex, setExplicitIndex] = useState<number | null>(null);
-  const [initialHash] = useState(() =>
-    typeof window === "undefined" ? "" : decodeURIComponent(window.location.hash.replace(/^#/, "")),
-  );
   const [searchQuery, setSearchQuery] = useState("");
-
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  /** Shows section `i`. When the reader has scrolled past the start of the
-   *  content pane, its top comes back into view: a long section swapped for
-   *  a short one would otherwise leave them near the new section's end.
-   *  Never on load, where the page's own title belongs in view. */
-  function selectSection(i: number) {
-    setExplicitIndex(i);
-    const pane = contentRef.current;
-    if (pane && pane.getBoundingClientRect().top < 0) pane.scrollIntoView?.({ block: "start" }); // jsdom has no scrollIntoView
-  }
-
-  // Keeps in-content anchor links (e.g. a cross-reference to
-  // `#5-routes--which-routes-run-late`) working even though the target
-  // section isn't in the DOM yet when such a link is clicked: the browser
-  // still updates location.hash and fires `hashchange`, which this picks up
-  // to switch sections. Also covers back/forward through hash history.
-  const onHashChange = useEffectEvent(() => {
-    const hash = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-    const idx = tocAnchors.findIndex((a) => a === hash);
-    if (idx !== -1) selectSection(idx);
-  });
-  useEffect(() => {
-    const listener = () => onHashChange();
-    window.addEventListener("hashchange", listener);
-    return () => window.removeEventListener("hashchange", listener);
-  }, []);
-
-  const initialHashIndex = tocAnchors.findIndex((a) => a === initialHash);
-  // When a "Table of contents" section exists (tocAnchors[0] is always
-  // `undefined` in that case -- see tocAnchorsBySectionIndex), the sidebar
-  // already serves the ToC's own navigation purpose, so the default view
-  // (no hash, no sidebar click yet) should land on the first real section
-  // instead of the ToC list of links.
-  const defaultIndex = tocAnchors.length > 0 ? 1 : 0;
-  const derivedIndex = explicitIndex ?? (initialHashIndex !== -1 ? initialHashIndex : defaultIndex);
-  const safeIndex = sections.length === 0 ? 0 : Math.min(derivedIndex, sections.length - 1);
-
-  // The manual's own "Table of contents" section only serves the source file
-  // read on its own; on this page the sidebar is the one table of contents.
-  const navIndices = sections.map((_, i) => i).filter((i) => !(tocAnchors.length > 0 && i === 0));
+  const [current, setCurrent] = useState<number | null>(null);
+  const documentRef = useRef<HTMLDivElement>(null);
+  // Set while a sidebar click's scroll runs, so the sections it passes on
+  // the way don't take the mark from the entry that was clicked.
+  const settlingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Client-side filter over the loaded manual's own sections -- title and
   // body text, in whichever locale is currently fetched (see `fetchManual`
-  // above; only one locale's markdown is ever in memory at a time). Derived
-  // fresh on every render rather than cached, matching this file's existing
-  // "plain function calls, not useMemo" convention.
+  // above; only one locale's markdown is ever in memory at a time).
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const isSearching = normalizedQuery !== "";
   const matchedIndices = isSearching
@@ -229,30 +168,74 @@ export function HelpPage() {
       )
     : navIndices;
   const hasMatches = matchedIndices.length > 0;
-  // The user's own selection (`safeIndex`) survives a search that happens to
-  // filter it out -- falls back to the first match only for what's on
-  // screen, so clearing the search box returns to the same section instead
-  // of whatever the search temporarily landed on.
-  const displayIndex = matchedIndices.includes(safeIndex) ? safeIndex : matchedIndices[0];
+  const activeIndex = current != null && matchedIndices.includes(current) ? current : (matchedIndices[0] ?? null);
 
-  // Keeps the address bar in sync with whichever section is actually on
-  // screen, using the section's real rendered heading id (rehype-slug's own
-  // output) rather than a second slug computation -- this covers both
-  // sidebar clicks and the initial hash-driven selection above. replaceState
-  // (not a real navigation) avoids spamming history with one entry per
-  // section switch and doesn't itself fire `hashchange`.
-  useEffect(() => {
-    const heading = contentRef.current?.querySelector("h2[id]");
+  function sectionElements(): HTMLElement[] {
+    return [...(documentRef.current?.querySelectorAll<HTMLElement>("[data-section]") ?? [])];
+  }
+
+  function stopSettling() {
+    if (settlingRef.current != null) clearTimeout(settlingRef.current);
+    settlingRef.current = null;
+  }
+
+  function goToSection(i: number) {
+    setCurrent(i);
+    const section = sectionElements().find((el) => Number(el.dataset.section) === i);
+    if (!section) return;
+    stopSettling();
+    settlingRef.current = setTimeout(stopSettling, SCROLL_SETTLE_MS);
+    section.scrollIntoView?.({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" }); // jsdom has no scrollIntoView
+    const heading = section.querySelector("h2[id]");
     if (heading?.id) window.history.replaceState(null, "", `#${heading.id}`);
-    // sections.length also gates this: displayIndex can stay unchanged (e.g.
-    // 0 before content loads and 0 is also the eventual default) across the
-    // loading -> loaded transition, so without it this effect would skip
-    // re-running once the real heading exists in the DOM. content is needed
-    // too: switching the UI language re-fetches a differently-worded manual
-    // whose heading ids differ (rehype-slug slugs the translated text), even
-    // when displayIndex/sections.length stay the same -- without it the
-    // address bar would keep pointing at the previous locale's slug.
-  }, [displayIndex, sections.length, content]);
+  }
+
+  const followScroll = useEffectEvent((target: EventTarget | null) => {
+    if (settlingRef.current != null) return;
+    const els = sectionElements();
+    if (els.length === 0) return;
+    const scroller = scrollerOf(target);
+    const atEnd =
+      scroller != null &&
+      scroller.scrollHeight > scroller.clientHeight &&
+      scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+    const line = window.innerHeight / 3;
+    const passed = els.filter((el) => el.getBoundingClientRect().top <= line);
+    const el = atEnd ? els[els.length - 1] : (passed[passed.length - 1] ?? els[0]);
+    setCurrent(Number(el.dataset.section));
+  });
+  useEffect(() => {
+    let frame = 0;
+    const onScroll = (e: Event) => {
+      cancelAnimationFrame(frame);
+      const target = e.target;
+      frame = requestAnimationFrame(() => followScroll(target));
+    };
+    const onScrollEnd = () => stopSettling();
+    // Capturing on the document hears the app shell's scrolling pane as
+    // well as the page itself; scroll events do not bubble.
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    document.addEventListener("scrollend", onScrollEnd, { capture: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("scroll", onScroll, { capture: true });
+      document.removeEventListener("scrollend", onScrollEnd, { capture: true });
+      stopSettling();
+    };
+  }, []);
+
+  // A `#heading` in the address at opening is a deep link: take the reader
+  // there once the manual has rendered. Without one the page stays at its
+  // title.
+  const openedAtHashRef = useRef(false);
+  useEffect(() => {
+    if (content == null || openedAtHashRef.current) return;
+    openedAtHashRef.current = true;
+    const hash = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+    if (!hash) return;
+    const target = document.getElementById(hash);
+    if (target && documentRef.current?.contains(target)) target.scrollIntoView?.({ block: "start" });
+  }, [content]);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 0 64px" }}>
@@ -287,10 +270,7 @@ export function HelpPage() {
       {content == null && error == null && (
         <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
       )}
-      {/* Rendered above the sidebar, unconditionally, regardless of which
-          section is selected -- reuses .user-manual-content for shared
-          p/li/a styling only; it has no <h2> so that class's h2:first-child
-          reset is simply inert here. */}
+      {/* Reuses .user-manual-content for shared p/li/a styling only. */}
       {content != null && sections.length > 0 && preamble.trim() !== "" && (
         <div className="user-manual-content" style={{ marginBottom: 24 }}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{preamble}</ReactMarkdown>
@@ -303,42 +283,42 @@ export function HelpPage() {
             width={240}
             navStyle={{ position: "sticky", top: 16 }}
             items={matchedIndices.map((i) => ({ key: i, label: sections[i].title }))}
-            activeKey={hasMatches ? displayIndex : null}
-            onSelect={selectSection}
+            activeKey={hasMatches ? activeIndex : null}
+            onSelect={goToSection}
           />
           {!hasMatches && (
             <div style={{ flex: 1, minWidth: 0, color: "var(--text-tertiary)" }}>{t("common.no_match")}</div>
           )}
           {hasMatches && (
-          <div className="user-manual-content" style={{ flex: 1, minWidth: 0 }} ref={contentRef}>
-            <ReactMarkdown
-              // GFM adds the table syntax the manual uses (plain CommonMark,
-              // react-markdown's default, treats a pipe table as one text
-              // paragraph). rehype-slug adds heading `id`s matching the
-              // manual's own GitHub-style table-of-contents anchors.
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeSlug]}
-              components={{
-                // Manual images are authored as relative paths (./NN-x.png)
-                // so the source .md also renders correctly viewed directly
-                // on GitHub -- rewrite only those to this page's actual
-                // asset location; leave absolute/data URLs untouched.
-                img: ({ src, alt, title }) => (
-                  <img
-                    src={
-                      typeof src === "string" && src.startsWith("./")
-                        ? `${MANUAL_BASE}/${src.slice(2)}`
-                        : src
-                    }
-                    alt={alt}
-                    title={title}
-                  />
-                ),
-              }}
-            >
-              {sections[displayIndex].markdown}
-            </ReactMarkdown>
-          </div>
+            <div ref={documentRef} style={{ flex: 1, minWidth: 0 }}>
+              {matchedIndices.map((i) => (
+                <section key={i} data-section={i} className="user-manual-content user-manual-section">
+                  <ReactMarkdown
+                    // GFM adds the table syntax the manual uses (plain CommonMark,
+                    // react-markdown's default, treats a pipe table as one text
+                    // paragraph). rehype-slug adds heading `id`s matching the
+                    // manual's own GitHub-style table-of-contents anchors.
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeSlug]}
+                    components={{
+                      // Manual images are authored as relative paths (./NN-x.png)
+                      // so the source .md also renders correctly viewed directly
+                      // on GitHub -- rewrite only those to this page's actual
+                      // asset location; leave absolute/data URLs untouched.
+                      img: ({ src, alt, title }) => (
+                        <img
+                          src={typeof src === "string" && src.startsWith("./") ? `${MANUAL_BASE}/${src.slice(2)}` : src}
+                          alt={alt}
+                          title={title}
+                        />
+                      ),
+                    }}
+                  >
+                    {sections[i].markdown}
+                  </ReactMarkdown>
+                </section>
+              ))}
+            </div>
           )}
         </div>
       )}
