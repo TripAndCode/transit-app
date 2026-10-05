@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
+import { decl, ruleBody } from "../test/cssRules";
 import * as hooks from "../api/hooks";
 import * as adminHook from "../api/useIsAdmin";
 import { AnalysisTab } from "./AnalysisTab";
@@ -645,5 +648,55 @@ describe("AnalysisTab council report", () => {
     showCouncil();
     await userEvent.click(screen.getByRole("button", { name: "Print / Save as PDF" }));
     expect(print).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AnalysisTab delay certificate", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function showCertificate() {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("delay_certificate")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockImplementation(
+      (_aid, reportType) =>
+        (reportType == null
+          ? { data: undefined, isFetching: false, isPlaceholderData: false, error: null, refetch: vi.fn() }
+          : {
+              data: {
+                ...reportResponse("delay_certificate"),
+                rows: [["Aomori City Bus", "W54", "weekday", "2026-09-02", "14:45:00", "14:50:55", 355]],
+                text: "1 departure left more than 300 s late.",
+                ctx: { from: "2026-09-01", to: "2026-09-30" },
+              },
+              isFetching: false,
+              isPlaceholderData: false,
+              error: null,
+              refetch: vi.fn(),
+            }) as never,
+    );
+    return renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", ["delay_certificate"]);
+  }
+
+  it("opens on the passenger's lookup, with the period's full list folded away until asked for", async () => {
+    showCertificate();
+    expect(screen.getByLabelText("Date")).toBeInTheDocument();
+    const summary = screen.getByText("All late departures in the period");
+    const staff = summary.closest("details")!;
+    expect(staff).not.toHaveAttribute("open");
+    expect(screen.queryByRole("table")).toBeNull();
+    await userEvent.click(summary);
+    expect(staff).toContainElement(screen.getByRole("table"));
+    expect(staff).toContainElement(screen.getByRole("link", { name: /CSV/ }));
+    expect(staff).toHaveTextContent("1 departure left more than 300 s late.");
+  });
+
+  it("prints a report without the list, the insights or, beside a certificate, the screen's scope", () => {
+    const print = ruleBody(readFileSync(resolve(__dirname, "./analysisTab.css"), "utf8"), "@media print");
+    expect(decl(ruleBody(print, ".analysis-report-list"), "display")).toBe("none !important");
+    expect(decl(ruleBody(print, ".analysis-insights"), "display")).toBe("none !important");
+    expect(decl(ruleBody(print, ".cert-staff"), "display")).toBe("none");
+    expect(decl(ruleBody(print, ".analysis-tab:has(.cert-card) .scope-sentence"), "display")).toBe("none");
   });
 });

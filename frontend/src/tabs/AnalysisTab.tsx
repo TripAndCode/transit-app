@@ -46,6 +46,7 @@ import "./analysisTab.css";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { ServiceNote } from "../components/ServiceNote";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
+import { DelayCertificateLookup } from "../components/analysis/DelayCertificateLookup";
 import { destHref, reportHref } from "../routes/destinations";
 import { RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 
@@ -119,6 +120,7 @@ export function AnalysisTab({
     rankingOptions(reportType, includeSparse, allRowsFor),
   );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
+  const [staffOpen, setStaffOpen] = useState(false);
   const isAdmin = useIsAdmin();
   // route_forecast is served by the forecast endpoint, so its own map
   // applies; a report's map counts only once that report's response is the
@@ -131,6 +133,11 @@ export function AnalysisTab({
         ? detail.data.scope_applied
         : undefined;
 
+  const isCertificate = detail.data?.report_type === "delay_certificate";
+  function csvHref(type: string): string {
+    return `/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, includeSparse, allRowsFor))}&format=csv`;
+  }
+
   // `route_forecast` is served by its own endpoint, so the reports list never
   // returns it -- it is appended here as list data rather than re-rendered as
   // a second, hand-copied button underneath the list.
@@ -139,7 +146,7 @@ export function AnalysisTab({
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div className="analysis-tab" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <ScopeSentence applied={scopeApplied} />
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
@@ -197,34 +204,11 @@ export function AnalysisTab({
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
-              {hasCsv(detail.data) && (
-                <a
-                  href={`/api/${id}/reports/${detail.data.report_type}?${reportQueryString(
-                    ctx,
-                    rankingOptions(detail.data.report_type, includeSparse, allRowsFor),
-                  )}&format=csv`}
-                  download
-                  style={{
-                    fontSize: 12,
-                    padding: "4px 12px",
-                    background: "transparent",
-                    border: "1px solid var(--border-subtle)",
-                    borderRadius: 4,
-                    color: "var(--text-secondary)",
-                    textDecoration: "none",
-                  }}
-                >
-                  <span aria-hidden="true">⬇ </span>
-                  {t("reports.download_csv")}
-                </a>
+              {hasCsv(detail.data) && !isCertificate && (
+                <CsvLink href={csvHref(detail.data.report_type)} />
               )}
             </div>
-            {detail.data.ctx && (
-              <div style={{ color: "var(--text-tertiary)", fontSize: 13, margin: "8px 0 4px" }}>
-                {t("reports.range_suffix", { range: formatDateRange(detail.data.ctx.from, detail.data.ctx.to) })}
-              </div>
-            )}
-            {detail.data.definition && <DefinitionMetaBlock definition={detail.data.definition} />}
+            {!isCertificate && <ReportMeta data={detail.data} />}
             {detail.data.reliable_min_samples != null && (
               <SparseToggle checked={includeSparse} floor={detail.data.reliable_min_samples} onChange={setIncludeSparse} />
             )}
@@ -234,6 +218,24 @@ export function AnalysisTab({
               <DwellRunBlock payload={detail.data.rows[0]} />
             ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
               <CouncilSummaryBlock row={detail.data.rows[0]} text={detail.data.text} />
+            ) : detail.data.report_type === "delay_certificate" && id != null ? (
+              <>
+                <DelayCertificateLookup aid={id} />
+                {/* The period's whole list, under the page's scope and the
+                    report's own threshold, is for staff; a passenger starts
+                    from the lookup above. */}
+                <details className="cert-staff" onToggle={(e) => setStaffOpen(e.currentTarget.open)}>
+                  <summary>{t("reports.certificate.all_late")}</summary>
+                  {staffOpen && (
+                    <>
+                      <ReportMeta data={detail.data} />
+                      <p className="cert-staff__summary">{detail.data.text}</p>
+                      <CsvLink href={csvHref(detail.data.report_type)} />
+                      {detail.data.rows.length > 0 && <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />}
+                    </>
+                  )}
+                </details>
+              </>
             ) : detail.data.rows.length > 0 ? (
               <>
                 <ReportTable
@@ -321,6 +323,43 @@ export function AnalysisTab({
       <InsightPanel key={id} className="analysis-insights" />
       </div>
     </div>
+  );
+}
+
+function CsvLink({ href }: { href: string }) {
+  const { t } = useTranslation();
+  return (
+    <a
+      href={href}
+      download
+      style={{
+        fontSize: 12,
+        padding: "4px 12px",
+        background: "transparent",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 4,
+        color: "var(--text-secondary)",
+        textDecoration: "none",
+      }}
+    >
+      <span aria-hidden="true">⬇ </span>
+      {t("reports.download_csv")}
+    </a>
+  );
+}
+
+/** The period a report covers and the definitions it was computed under. */
+function ReportMeta({ data }: { data: ReportResponse }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {data.ctx && (
+        <div style={{ color: "var(--text-tertiary)", fontSize: 13, margin: "8px 0 4px" }}>
+          {t("reports.range_suffix", { range: formatDateRange(data.ctx.from, data.ctx.to) })}
+        </div>
+      )}
+      {data.definition && <DefinitionMetaBlock definition={data.definition} />}
+    </>
   );
 }
 
