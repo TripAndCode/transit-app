@@ -28,6 +28,12 @@ describe("FilterContextBar", () => {
     await i18n.changeLanguage("en");
   });
 
+  it("marks the period with a line icon, as the rest of the app does, not an emoji", () => {
+    const { container } = renderBar({ dow: "all", time_band: "all", routes: [] }, "2026-09-28");
+    expect(container.textContent).not.toContain("📅");
+    expect(container.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+  });
+
   it("drafts a dateless filter on the default period, which stops at the data", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-02T14:59:59Z")); // 2026-10-02 23:59:59 JST
