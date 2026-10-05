@@ -40,9 +40,11 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("on_time_row", "ja"): "{rank}位: 路線{route}（{service}）定時率{pct}%、平均{avg}分（{samples}件）",
     ("on_time_row", "en"): "#{rank} route {route} ({service}) on-time {pct}%, mean {avg} min ({samples} samples)",
     ("worst5_header", "ja"): "【{label}5分超遅延ランキング】",
-    ("worst5_header", "en"): "[{label}5+ minute delay ranking]",
+    ("worst5_header", "en"): "[{label}Ranking of delays over 5 min]",
     ("worst5_row", "ja"): "{rank}位: 路線{route}（{service}）5分超 {count}回、平均{avg}分（{samples}件）",
-    ("worst5_row", "en"): "#{rank} route {route} ({service}) 5+ min: {count} times, mean {avg} min ({samples} samples)",
+    ("worst5_row", "en"): (
+        "#{rank} route {route} ({service}) over 5 min: {count} times, mean {avg} min ({samples} samples)"
+    ),
     ("dow_header_weekend", "ja"): "【{label}週末遅延ランキング】",
     ("dow_header_weekend", "en"): "[{label}Weekend delay ranking]",
     ("dow_header_weekday", "ja"): "【{label}平日遅延ランキング】",
