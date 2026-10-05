@@ -887,15 +887,16 @@
       },
       "top_delay": {
         "title": "Top-N delays",
-        "summary": "Top {{k}} routes ({{service}})",
-        "example_answer": "e.g., shows routes like K05 +6.2 min, S12 +5.4 min, A03 +5.1 min — ranked by delay."
+        "summary": "Most delayed routes: top {{k}} ({{service}})",
+        "example_answer": "e.g., lists the routes with the highest average delay, worst first."
       },
       "ontime_rank": {
         "title": "On-time rate ranking",
         "best": "Best first",
         "worst": "Worst first",
-        "summary": "{{dir}}, {{k}} routes",
-        "example_answer": "e.g., lists routes and their on-time rate, ranked best or worst first."
+        "example_answer": "e.g., lists routes and their on-time rate, ranked best or worst first.",
+        "summary_worst": "Least on-time routes: {{k}}",
+        "summary_best": "Most on-time routes: {{k}}"
       },
       "route_trend": {
         "title": "Route delay trend",
