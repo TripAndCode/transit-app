@@ -1390,6 +1390,22 @@
         "llm_approvals_pending": "AI 利用の承認待ち {{count}} 名"
       }
     },
+    "alert_center": {
+      "bell_label": "アラート",
+      "bell_label_unread": "アラート、未確認 {{count}} 件",
+      "title": "アラート",
+      "empty": "対応が必要な項目はありません。",
+      "group": {
+        "warn": "警告",
+        "info": "情報"
+      },
+      "level": {
+        "warn": "警告",
+        "info": "情報"
+      },
+      "ack": "確認済みにする",
+      "acked": "確認済み"
+    },
     "ask_ops": {
       "title": "Ask 運用",
       "filter": {

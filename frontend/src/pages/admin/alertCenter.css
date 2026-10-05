@@ -1,0 +1,186 @@
+/* Self-sufficient styling for AlertCenter.tsx, imported directly here rather
+   than relying on another chunk having loaded first (same reasoning as
+   commandPalette.css). */
+
+.alert-center-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.alert-center-trigger:hover {
+  background: var(--surface-2);
+}
+
+.alert-center-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--delay-severe);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+/* All alerts acknowledged: the badge stays visible (there is a history) but
+   drops to the same neutral tone as the rest of the trigger, rather than
+   disappearing outright. */
+.alert-center-badge--muted {
+  color: var(--text-secondary);
+}
+
+.alert-center-panel {
+  width: min(360px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--el-2);
+  padding: 10px;
+  z-index: var(--z-popover);
+}
+
+.alert-center-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.alert-center-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.alert-center-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius);
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.alert-center-close:hover {
+  background: var(--surface-2);
+}
+
+.alert-center-empty {
+  margin: 8px 2px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.alert-center-group + .alert-center-group {
+  margin-top: 8px;
+}
+
+.alert-center-group-label {
+  margin: 0 0 4px;
+  padding: 0 2px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.alert-center-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.alert-center-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  padding: 7px 2px;
+  border-top: 1px solid var(--surface-2);
+  font-size: var(--text-sm);
+}
+
+.alert-center-item[data-acked="true"] {
+  opacity: 0.62;
+}
+
+.alert-center-pill {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* --color-warning as a soft fill only -- never full-strength, never the pill
+   text color -- so this reads as "worth noting" rather than an alarm. */
+.alert-center-pill--warn {
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  color: var(--delay-severe);
+}
+
+.alert-center-pill--info {
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.alert-center-item-text {
+  flex: 1 1 160px;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.alert-center-link {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+
+.alert-center-link:hover {
+  text-decoration: underline;
+}
+
+.alert-center-ack {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.alert-center-ack:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.alert-center-ack:disabled {
+  cursor: default;
+  color: var(--text-tertiary);
+  border-color: transparent;
+}

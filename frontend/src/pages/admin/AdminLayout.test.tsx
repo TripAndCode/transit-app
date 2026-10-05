@@ -6,6 +6,7 @@ import i18n from "../../i18n";
 import { AdminLayout } from "./AdminLayout";
 
 let mockUsers: { data?: { total: number } };
+let mockBoard: { data?: { alerts: unknown[] } };
 const usersParams = vi.fn();
 
 vi.mock("../../api/admin", () => ({
@@ -13,6 +14,7 @@ vi.mock("../../api/admin", () => ({
     usersParams(params);
     return mockUsers;
   },
+  useAdminBoard: () => mockBoard,
 }));
 
 function wrap(path = "/admin") {
@@ -28,6 +30,7 @@ function wrap(path = "/admin") {
 describe("AdminLayout sub-nav", () => {
   beforeEach(() => {
     mockUsers = { data: { total: 0 } };
+    mockBoard = { data: { alerts: [] } };
   });
 
   it("groups the destinations under section headings", () => {
@@ -84,5 +87,31 @@ describe("AdminLayout sub-nav", () => {
     mockUsers = { data: undefined };
     wrap();
     expect(screen.getByRole("link", { name: new RegExp(i18n.t("admin.nav.users")) })).toBeInTheDocument();
+  });
+});
+
+describe("AdminLayout alert bell", () => {
+  beforeEach(() => {
+    mockUsers = { data: { total: 0 } };
+    localStorage.clear();
+  });
+
+  it("renders the bell with no unread badge when the board has no alerts", () => {
+    mockBoard = { data: { alerts: [] } };
+    wrap();
+    expect(screen.getByRole("button", { name: i18n.t("admin.alert_center.bell_label") })).toBeInTheDocument();
+    expect(screen.queryByTestId("alert-count-badge")).not.toBeInTheDocument();
+  });
+
+  it("derives its unread count from the same board payload the board page polls", () => {
+    mockBoard = {
+      data: {
+        alerts: [{ level: "warn", code: "agency_stale", params: {}, text: "Toyama Bayline behind", href: "/admin/ops" }],
+      },
+    };
+    wrap();
+    expect(
+      screen.getByRole("button", { name: i18n.t("admin.alert_center.bell_label_unread", { count: 1 }) }),
+    ).toBeInTheDocument();
   });
 });

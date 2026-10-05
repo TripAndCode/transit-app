@@ -1390,6 +1390,22 @@
         "llm_approvals_pending": "{{count}} user(s) awaiting AI access approval"
       }
     },
+    "alert_center": {
+      "bell_label": "Alerts",
+      "bell_label_unread": "Alerts, {{count}} unread",
+      "title": "Alerts",
+      "empty": "Nothing needs attention.",
+      "group": {
+        "warn": "Warnings",
+        "info": "Info"
+      },
+      "level": {
+        "warn": "Warning",
+        "info": "Info"
+      },
+      "ack": "Acknowledge",
+      "acked": "Acknowledged"
+    },
     "ask_ops": {
       "title": "Ask ops",
       "filter": {

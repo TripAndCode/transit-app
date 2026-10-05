@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAdminUsers } from "../../api/admin";
+import { AlertCenter } from "./AlertCenter";
 
 type NavItem = { to: string; end?: boolean; labelKey: string; Icon: LucideIcon; badge?: "approvals" };
 
@@ -135,8 +136,22 @@ export function AdminLayout() {
         ))}
       </nav>
       {/* Positioned so a page's Drawer can pin itself to this area's right edge. */}
-      <main style={{ flex: 1, minWidth: 0, position: "relative" }}>
-        <Outlet />
+      <main style={{ flex: 1, minWidth: 0, position: "relative", display: "flex", flexDirection: "column" }}>
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            padding: "8px 20px",
+            borderBottom: "1px solid var(--border-soft)",
+            flexShrink: 0,
+          }}
+        >
+          <AlertCenter />
+        </header>
+        <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+          <Outlet />
+        </div>
       </main>
     </div>
   );
