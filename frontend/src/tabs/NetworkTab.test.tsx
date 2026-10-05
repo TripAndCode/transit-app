@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
+import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
 import { stubReducedMotion } from "../test/reducedMotion";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
@@ -193,6 +194,21 @@ describe("NetworkTab", () => {
     } as never);
     renderTab();
     expect(screen.queryByTestId("network-card-list")).not.toBeInTheDocument();
+  });
+
+  it("says a slow comparison is still working, and offers the period's last week", () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+        data: undefined, isPending: true, error: null, refetch: vi.fn(),
+      } as never);
+      renderTab();
+      act(() => vi.advanceTimersByTime(STILL_WORKING_AFTER_MS));
+      expect(screen.getByText("Still working: a long period takes longer to count.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Narrow to the last 7 days of the period" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the error banner with a retry on error", () => {

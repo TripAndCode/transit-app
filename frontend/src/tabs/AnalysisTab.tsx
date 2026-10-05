@@ -46,6 +46,7 @@ import "./analysisTab.css";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { ServiceNote } from "../components/ServiceNote";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
+import { StillWorking } from "../components/StillWorking";
 import { DelayCertificateLookup } from "../components/analysis/DelayCertificateLookup";
 import { destHref, reportHref } from "../routes/destinations";
 import { RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
@@ -199,7 +200,12 @@ export function AnalysisTab({
         {reportType && reportType !== "route_forecast" && detail.error && (
           <ErrorBanner error={detail.error} onRetry={() => detail.refetch()} />
         )}
-        {reportType && reportType !== "route_forecast" && detail.isFetching && <SkeletonChart height={360} />}
+        {reportType && reportType !== "route_forecast" && detail.isFetching && (
+          <>
+            <SkeletonChart height={360} />
+            <StillWorking scope={ctx} update={update} />
+          </>
+        )}
         {reportType !== "route_forecast" && detail.data && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
