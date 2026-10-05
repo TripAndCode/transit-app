@@ -55,7 +55,7 @@ export const design = {
     csv: "Download CSV",
     empty: "No observations match these filters", choose: "Choose a route and service pattern",
     attention: "Trips to check", onTimePct: "On-time rate",
-    observedLabel: "Observed", delayedLabel: "Delayed 5+ min", resizeQueue: "Resize panel",
+    observedLabel: "Observed", delayedLabel: "5+\u00a0min late", resizeQueue: "Resize panel",
     openAnalysis: "Analyze this pattern's segments →", allObserved: "View observed trips", noDelayed: "No delays of 5+ minutes observed for these filters",
     stopDelay: "Delay by stop", mean: "Mean departure delay (min)", selected: "Selected period", previous: "Same weekdays, one week earlier",
     compare: "Compare with one week earlier", selectedStop: "Selected stop", samples: "Observations", missing: "No observation", service: "Service",

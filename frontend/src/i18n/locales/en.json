@@ -85,7 +85,7 @@
       "queue_title": "Trips to check",
       "kpi": {
         "observed": "Observed",
-        "delayed": "Delayed 5+ min",
+        "delayed": "5+\u00a0min late",
         "on_time": "On-time rate"
       },
       "legend": {
