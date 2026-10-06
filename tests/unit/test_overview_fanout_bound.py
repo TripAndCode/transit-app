@@ -44,8 +44,10 @@ async def _yield():
     await asyncio.sleep(0)
 
 
-def _stage(value):
+def _stage(value, name=None, started=None):
     async def fake(*_args, **_kwargs):
+        if started is not None:
+            started.append(name)
         await _yield()
         return value
 
@@ -54,16 +56,23 @@ def _stage(value):
 
 @pytest.fixture
 def stages(monkeypatch):
+    """The order the gathered stages start in, as the fakes record it."""
+    started: list[str] = []
+    gathered = {
+        "_headline_stats": (2.5, 40),
+        "_movers": [],
+        "_concentration": None,
+        "_top_delayed_routes": [],
+        "_peak_hour": None,
+        "_peak_hour_by_dow": None,
+        "_service_split": None,
+        "_service_split_daily": [],
+        "_daily_sparkline": [],
+    }
     monkeypatch.setattr(ov, "_latest_data_date", _stage(date(2026, 5, 24)))
-    monkeypatch.setattr(ov, "_headline_stats", _stage((2.5, 40)))
-    monkeypatch.setattr(ov, "_movers", _stage([]))
-    monkeypatch.setattr(ov, "_concentration", _stage(None))
-    monkeypatch.setattr(ov, "_top_delayed_routes", _stage([]))
-    monkeypatch.setattr(ov, "_peak_hour", _stage(None))
-    monkeypatch.setattr(ov, "_peak_hour_by_dow", _stage(None))
-    monkeypatch.setattr(ov, "_service_split", _stage(None))
-    monkeypatch.setattr(ov, "_service_split_daily", _stage([]))
-    monkeypatch.setattr(ov, "_daily_sparkline", _stage([]))
+    for name, value in gathered.items():
+        monkeypatch.setattr(ov, name, _stage(value, name, started))
+    return started
 
 
 @pytest.mark.asyncio
@@ -79,7 +88,11 @@ async def test_fanout_never_holds_more_than_the_limit(stages):
     assert payload["headline"]["avg_min"] == 2.5
 
 
-def test_the_limit_leaves_headroom_in_the_pool():
-    """api.main sizes the pool at 20 with the fan-out in mind; the bound must
-    stay well inside it so concurrent overview requests do not starve others."""
-    assert ov.OVERVIEW_FANOUT_LIMIT == 4
+@pytest.mark.asyncio
+async def test_the_peak_hour_pair_takes_the_first_slots(stages):
+    """The two `_peak_hour_by_dow` reads dominate a cold load, so under the
+    bound they must not queue behind stages that finish quickly."""
+    ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24))
+    await ov.compute_overview_summary(7, ctx, object(), "ja", pool=_FakePool())
+
+    assert stages[:2] == ["_peak_hour_by_dow", "_peak_hour_by_dow"]

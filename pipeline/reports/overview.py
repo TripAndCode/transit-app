@@ -75,9 +75,8 @@ _GRAIN_LOOKBACK_DAYS = 7
 # How many pooled connections one overview request may hold at once on its
 # pool-gather path. Eleven stages fan out per request; unbounded, two
 # concurrent cold requests alone would exhaust the pool and queue every other
-# endpoint behind them. Stages take slots in `gather` argument order and the
-# rest start as earlier ones finish, so the bound trades some of one request's
-# overlap for room for several requests at once.
+# endpoint behind them. The bound trades some of one request's overlap for
+# room for several requests at once.
 OVERVIEW_FANOUT_LIMIT = 4
 
 
@@ -1227,11 +1226,11 @@ async def compute_overview_summary(
     service_split / sparkline still aggregate over the full ctx to surface
     broader patterns.
 
-    When ``pool`` is supplied (non-None), the ten stage queries are
-    dispatched as concurrent asyncio tasks, each acquiring its own
-    connection from the pool so they can truly run in parallel.  The two
-    ``_peak_hour_by_dow`` calls — identified as 96 % of cold-load time in
-    the baseline measurement — are the primary beneficiaries.  When
+    When ``pool`` is supplied (non-None), the stage queries are dispatched
+    as concurrent asyncio tasks, each acquiring its own pooled connection,
+    with at most ``OVERVIEW_FANOUT_LIMIT`` holding one at a time.  The two
+    ``_peak_hour_by_dow`` calls dominate a cold load, so they start first
+    and the rest share the remaining slots.  When
     ``pool`` is None (the default) the existing sequential path with
     per-stage timed_blocks is used unchanged, preserving behaviour for
     tests and ad-hoc callers.
@@ -1356,27 +1355,29 @@ async def compute_overview_summary(
             async with fanout, pool.acquire() as c:
                 return await _peak_hour_by_dow(agency_id, ctx, c, group, ch=ch, grain=grain)
 
+        # Stages take fan-out slots in argument order, so the slowest pair
+        # goes first rather than queueing behind stages that finish quickly.
         (
+            peak_weekday,
+            peak_weekend,
             (avg_min, samples),
             (baseline_avg, _),
             movers,
             concentration,
             top_delayed,
             peak,
-            peak_weekday,
-            peak_weekend,
             service_split,
             service_split_daily,
             sparkline_points,
         ) = await asyncio.gather(
+            _peak_dow("weekday"),
+            _peak_dow("weekend"),
             _own_conn(_headline_stats, agency_id, cur_ctx),
             _own_conn(_headline_stats, agency_id, base_ctx),
             _own_conn(_movers, agency_id, cur_ctx, base_ctx),
             _own_conn(_concentration, agency_id, ctx),
             _own_conn(_top_delayed_routes, agency_id, cur_ctx),
             _own_conn(_peak_hour, agency_id, ctx),
-            _peak_dow("weekday"),
-            _peak_dow("weekend"),
             _own_conn(_service_split, agency_id, ctx),
             _own_conn(_service_split_daily, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
