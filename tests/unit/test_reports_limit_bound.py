@@ -35,3 +35,9 @@ def test_get_report_rejects_limit_above_500():
 def test_get_report_rejects_limit_below_1():
     response = _client().get("/api/1/reports/on_time", params={"limit": 0})
     assert response.status_code == 422
+
+
+def test_list_reports_declares_no_connection():
+    import inspect
+
+    assert "conn" not in inspect.signature(reports_router.list_reports).parameters
