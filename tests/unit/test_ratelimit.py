@@ -18,8 +18,6 @@ def test_pro_limit_constant():
 
 
 def test_key_func_free_tier_uses_ip():
-    from unittest.mock import MagicMock
-
     request = MagicMock()
     request.state.tier = "free"
     request.headers = {}
@@ -31,8 +29,6 @@ def test_key_func_free_tier_uses_ip():
 
 
 def test_key_func_pro_tier_uses_api_key():
-    from unittest.mock import MagicMock
-
     request = MagicMock()
     request.state.tier = "pro"
     request.headers.get = lambda k, default=None: "my-api-key" if k == "X-API-Key" else default

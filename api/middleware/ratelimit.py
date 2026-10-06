@@ -26,10 +26,10 @@ ADMIN_ACTION_LIMIT = "20/minute"
 def tier_limit(key: str) -> str:
     """The one limit a caller is held to, chosen from the key `_key_func` built.
 
-    slowapi parses and enforces *every* limit a decorator names, so a single
-    ``"60/minute;600/minute"`` string throttled a pro key at the free ceiling.
-    A provider that declares a ``key`` parameter is called with
-    ``key_func(request)`` instead, and only the tier's own limit is checked.
+    slowapi enforces every limit a decorator names, so naming both tiers' limits
+    in one string would hold every caller to the stricter. A provider that
+    declares a ``key`` parameter is called with ``key_func(request)`` instead,
+    and only the caller's own tier's limit is checked.
     """
     return PRO_LIMIT if key.startswith("pro:") else FREE_LIMIT
 
