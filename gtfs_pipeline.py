@@ -440,22 +440,41 @@ def cmd_restamp_archive(args):
 
     from pipeline.analyze import mark_for_full_rebuild
     from pipeline.clickhouse import ch_conn_kwargs, get_client
-    from pipeline.locks import agency_ingest_lock, try_lock_ingest_analyze
+    from pipeline.locks import INGEST_ANALYZE_LOCK_KEY, agency_ingest_lock, try_lock_ingest_analyze
     from pipeline.restamp_archive import (
         BACKUP_TABLE,
-        LEFTOVER_TABLE,
         interrupted_run,
         leftover_exists,
+        leftover_guidance,
         plan_restamp,
         preflight,
         restamp_archive_rows,
         settle_interrupted_run,
     )
 
-    def next_steps():
+    def next_steps(refused: int = 0):
         logger.info(f"The rows as they were are in {BACKUP_TABLE}.")
+        if refused:
+            logger.info(
+                f"{refused} rows left out as ingest would are only there, until an archive ingest re-reads their files."
+            )
         logger.info("Next: analyze_all (rebuilds every date of the agencies moved), then check_aggs;")
         logger.info(f"drop {BACKUP_TABLE} once the aggregates are right.")
+
+    def still_locked():
+        # The copy leaves `conn` idle for its whole length; a session lost
+        # meanwhile has released every lock, so the swap must not go ahead.
+        assert conn is not None
+        with conn.cursor() as cur:
+            # A one-key lock lists as (classid 0, objid key, objsubid 1); a
+            # two-key one as (classid first key, objid second, objsubid 2).
+            cur.execute(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()"
+                " AND ((objsubid = 1 AND classid = 0 AND objid = %s) OR (objsubid = 2 AND classid = %s))",
+                (INGEST_ANALYZE_LOCK_KEY, INGEST_ANALYZE_LOCK_KEY),
+            )
+            if cur.fetchone()[0] < 1 + len(moved):
+                raise RuntimeError("the pipeline lock was lost during the copy; nothing was swapped")
 
     ch_client = get_client()
     conn = None
@@ -468,7 +487,7 @@ def cmd_restamp_archive(args):
                 logger.error("restamp_archive: an ingest or analyze job holds the pipeline lock; rerun once it ends.")
                 sys.exit(1)
         if leftover_exists(ch_client):
-            logger.error(f"{LEFTOVER_TABLE} exists: restore the rows `updates` lacks from it before restamping.")
+            logger.error(leftover_guidance(ch_client))
             sys.exit(1)
         if args.apply:
             # Settled before planning: once its swap is done, an interrupted
@@ -502,9 +521,9 @@ def cmd_restamp_archive(args):
             # since the rerun finds nothing left to move. A swap that then
             # fails costs only a rebuild that was not needed.
             mark_for_full_rebuild(conn, moved)
-            restamp_archive_rows(ch_client)
+            restamp_archive_rows(ch_client, before_swap=still_locked)
         logger.info("restamped.")
-        next_steps()
+        next_steps(sum(p.rows_refused for p in plan))
     finally:
         if conn is not None:
             conn.close()

@@ -390,3 +390,53 @@ def test_the_command_checks_for_room_before_it_marks_anything(ch_client, pg_conn
     with pg_conn.cursor() as cur:
         cur.execute("SELECT static_fingerprint FROM agg_meta WHERE agency_id = %s", (agency_id,))
         assert cur.fetchone() == ("fp",)
+
+
+def _seed_promoted_day_collision(ch_client) -> None:
+    d, pb = "20260905", "TripUpdate_160000.pb"
+    late = _row(f"{d}/{pb}", _ts(d, pb), "archive", _epoch("2026-09-05T15:59:55+00:00"))
+    insert_updates(ch_client, 1, [late, _oracle_row("20260906", "2026-09-05T15:30:00+00:00")])
+
+
+def test_a_run_with_refused_rows_killed_at_the_swap_resumes_into_the_backup(ch_client):
+    """The mark records the count before refusals, which is what the
+    swapped-out original holds; a resumed run must not take it for a
+    leftover."""
+    _seed_promoted_day_collision(ch_client)
+    with pytest.raises(KeyboardInterrupt):
+        restamp_archive_rows(_DiesAfterSwap(ch_client))
+    restamp_archive_rows(ch_client)
+    assert ch_client.query(f"EXISTS TABLE {LEFTOVER_TABLE}").result_rows == [(0,)]
+    assert set(_stamps(ch_client)) == {"promoted"}
+    assert ch_client.query(f"SELECT trip_id FROM {BACKUP_TABLE} WHERE trip_id = 'archive'").result_rows == [
+        ("archive",)
+    ]
+
+
+def test_the_swap_waits_on_a_check_that_can_still_stop_it(ch_client):
+    """The CLI's locks live on a Postgres session the copy leaves idle; a
+    check right before the swap lets a lost session stop the run."""
+    expected = _seed(ch_client)
+    before = _stamps(ch_client)
+
+    def lost():
+        raise RuntimeError("lock session lost")
+
+    with pytest.raises(RuntimeError, match="lock session lost"):
+        restamp_archive_rows(ch_client, before_swap=lost)
+    assert _stamps(ch_client) == before
+    assert not ch_client.query("EXISTS TABLE updates_restamp_staging").result_rows[0][0]
+    restamp_archive_rows(ch_client)
+    assert _stamps(ch_client) == expected
+
+
+def test_the_command_restamps_end_to_end_holding_its_locks(ch_client, caplog):
+    from argparse import Namespace
+
+    import gtfs_pipeline
+
+    expected = _seed(ch_client)
+    caplog.set_level("INFO")
+    gtfs_pipeline.cmd_restamp_archive(Namespace(apply=True))
+    assert _stamps(ch_client) == expected
+    assert "restamped." in caplog.text

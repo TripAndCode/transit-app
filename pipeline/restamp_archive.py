@@ -15,7 +15,9 @@ LIVE_SOURCED) are never touched.
 Ingest also refuses a file whose stamp lands on a day that has not closed or
 that already holds promoted live rows, since a day in `updates` has one
 source. A row the restamp would move onto such a day is left out the same
-way; it stays in the backup.
+way; it stays in the backup. A row that keeps its day is kept, even on a day
+ingest would now refuse: the restamp moves rows between days, and leaves
+what each day already holds to whoever put it there.
 
 captured_at is in the table's sort and partition keys, so it cannot be
 mutated in place. The corrected rows are written to a copy, the copy is
@@ -25,16 +27,18 @@ swapped in with EXCHANGE TABLES, and the rows as they were stay in
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 
-from pipeline.clickhouse import LIVE_SOURCED
+from pipeline.clickhouse import LIVE_SOURCED, jst_date
 
 _TABLE = "updates"
 _STAGING = "updates_restamp_staging"
 BACKUP_TABLE = "updates_before_restamp"
 # Where the swapped-out table goes when it holds rows the copy never saw,
-# written by something that ignored the pipeline lock. No backup is made then,
-# so it is the only copy of the rows as they were.
+# written by something that ignored the pipeline lock. No new backup is made
+# then, so on a first run it is the only copy of the rows as they were.
 LEFTOVER_TABLE = "updates_restamp_leftover"
 # The copy's table comment: this prefix plus the row count `updates` had
 # when the copy was taken, which a resumed run checks the swapped-out table
@@ -58,10 +62,20 @@ _RESTAMPED = f"""multiIf(
         {_HEADER},
     captured_at)"""
 _NEW_DAY = f"toDate32({_RESTAMPED}, 'Asia/Tokyo')"
-_REFUSED = f"""({_NEW_DAY} != toDate32(captured_at, 'Asia/Tokyo') AND (
-    {_NEW_DAY} >= toDate32(now(), 'Asia/Tokyo')
+
+
+def _refused(today: date) -> str:
+    """The rows left out, given the JST day that has not closed yet. Taken as
+    one value for a whole run, so the count of refusals and the copy agree
+    across a midnight between them."""
+    return f"""({_NEW_DAY} != toDate32(captured_at, 'Asia/Tokyo') AND (
+    {_NEW_DAY} >= toDate32('{today.isoformat()}')
     OR (agency_id, {_NEW_DAY}) IN (
         SELECT DISTINCT agency_id, toDate32(captured_at, 'Asia/Tokyo') FROM {_TABLE} WHERE {LIVE_SOURCED})))"""
+
+
+def _today() -> date:
+    return jst_date(datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True)
@@ -82,6 +96,7 @@ class RestampPlan:
 def plan_restamp(client) -> list[RestampPlan]:
     """Per agency, how many archive rows the restamp would move and how far,
     and how many it would leave out. Reads only."""
+    refused = _refused(_today())
     result = client.query(
         f"""
         SELECT agency_id, count(),
@@ -90,7 +105,7 @@ def plan_restamp(client) -> list[RestampPlan]:
                countIf(refused),
                countIf(NOT match(file_name, '^[0-9]{{8}}/') AND NOT startsWith(file_name, '/'))
         FROM (
-            SELECT agency_id, file_name, dateDiff('second', captured_at, {_RESTAMPED}) AS shift, {_REFUSED} AS refused
+            SELECT agency_id, file_name, dateDiff('second', captured_at, {_RESTAMPED}) AS shift, {refused} AS refused
             FROM {_TABLE}
             WHERE NOT {LIVE_SOURCED}
         )
@@ -141,11 +156,7 @@ def _finish_swap(client, before: int) -> None:
     if _row_count(client, _STAGING) != before:
         client.command(f"RENAME TABLE {_STAGING} TO {LEFTOVER_TABLE}")
         client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
-        raise RuntimeError(
-            f"rows reached {_TABLE} during the swap from a writer that ignores the pipeline lock. The table as it "
-            f"was, those rows included, is kept as {LEFTOVER_TABLE} and no backup was made. Stop that writer and "
-            f"restore the rows {_TABLE} lacks from {LEFTOVER_TABLE} before anything else"
-        )
+        raise RuntimeError(leftover_guidance(client))
     _keep_swapped_out(client)
 
 
@@ -157,6 +168,22 @@ def _marked_count(comment: str | None) -> int | None:
 
 def leftover_exists(client) -> bool:
     return _exists(client, LEFTOVER_TABLE)
+
+
+def leftover_guidance(client) -> str:
+    """What to do about LEFTOVER_TABLE. The rows it holds that `updates` lacks
+    include the run's refusals, which need no restoring: a later run leaves
+    them out again."""
+    keep = (
+        f"then drop {LEFTOVER_TABLE}; {BACKUP_TABLE} already holds the original rows"
+        if _exists(client, BACKUP_TABLE)
+        else f"then rename {LEFTOVER_TABLE} to {BACKUP_TABLE}: it is the only copy of the original rows"
+    )
+    return (
+        f"rows reached {_TABLE} during a swap from a writer that ignores the pipeline lock, and the table as it "
+        f"was, those rows included, is kept as {LEFTOVER_TABLE}. Stop that writer, copy its rows {_TABLE} lacks "
+        f"into {_TABLE} (rows a restamp leaves out may be among them and need not be restored), {keep}"
+    )
 
 
 def interrupted_run(client) -> bool:
@@ -193,7 +220,7 @@ def preflight(client) -> None:
     `updates` lacks, or the disk cannot hold the table twice, which the copy
     needs until the swap and the backup's drop."""
     if leftover_exists(client):
-        raise RuntimeError(f"{LEFTOVER_TABLE} exists; restore the rows {_TABLE} lacks from it first")
+        raise RuntimeError(leftover_guidance(client))
     size = client.query(
         "SELECT sum(bytes_on_disk) FROM system.parts"
         f" WHERE active AND database = currentDatabase() AND table = '{_TABLE}'"
@@ -203,7 +230,7 @@ def preflight(client) -> None:
         raise RuntimeError(f"{free} bytes free, and the copy of {_TABLE} needs about {size}")
 
 
-def restamp_archive_rows(client) -> None:
+def restamp_archive_rows(client, *, before_swap: Callable[[], None] | None = None) -> None:
     """Rewrite `updates` with every archive row restamped, keeping the rows as
     they were in BACKUP_TABLE.
 
@@ -213,12 +240,15 @@ def restamp_archive_rows(client) -> None:
     LEFTOVER_TABLE and the run fails, never dropped. When BACKUP_TABLE already
     holds an earlier run's original rows it is kept and this run's swapped-out
     copy, the same rows, is dropped, so the backup is always the table before
-    any restamp.
+    any restamp. *before_swap* runs last before the swap, where raising
+    still leaves `updates` untouched: the CLI confirms there that it still
+    holds the pipeline lock.
     """
     settle_interrupted_run(client)
     preflight(client)
     before = _row_count(client, _TABLE)
-    refused = int(client.query(f"SELECT countIf({_REFUSED}) FROM {_TABLE}").result_rows[0][0])
+    refusal = _refused(_today())
+    refused = int(client.query(f"SELECT countIf({refusal}) FROM {_TABLE}").result_rows[0][0])
     client.command(f"CREATE TABLE {_STAGING} AS {_TABLE}")
     client.command(f"ALTER TABLE {_STAGING} MODIFY COMMENT '{_COPY_MARK}{before}'")
     try:
@@ -226,13 +256,15 @@ def restamp_archive_rows(client) -> None:
         # the restamped value, so a refusal tested there would see no move.
         client.command(
             f"INSERT INTO {_STAGING} SELECT * REPLACE ({_RESTAMPED} AS captured_at)"
-            f" FROM (SELECT * FROM {_TABLE} WHERE NOT {_REFUSED})"
+            f" FROM (SELECT * FROM {_TABLE} WHERE NOT {refusal})"
         )
         if _row_count(client, _TABLE) != before:
             raise RuntimeError(f"{_TABLE} changed while the copy was written; nothing was swapped")
         staged = _row_count(client, _STAGING)
         if staged != before - refused:
             raise RuntimeError(f"copy holds {staged} rows, expected {before - refused}; nothing was swapped")
+        if before_swap is not None:
+            before_swap()
     except Exception:
         client.command(f"DROP TABLE IF EXISTS {_STAGING}")
         raise
