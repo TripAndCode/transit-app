@@ -75,8 +75,9 @@ _GRAIN_LOOKBACK_DAYS = 7
 # How many pooled connections one overview request may hold at once on its
 # pool-gather path. Eleven stages fan out per request; unbounded, two
 # concurrent cold requests alone would exhaust the pool and queue every other
-# endpoint behind them. Four keeps the peak-hour pair and two more stages in
-# flight, which is where the wall-clock gain of the gather lives.
+# endpoint behind them. Stages take slots in `gather` argument order and the
+# rest start as earlier ones finish, so the bound trades some of one request's
+# overlap for room for several requests at once.
 OVERVIEW_FANOUT_LIMIT = 4
 
 
