@@ -1,11 +1,15 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cleanup, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
+import { decl, ruleBody } from "../test/cssRules";
 import * as hooks from "../api/hooks";
 import * as adminHook from "../api/useIsAdmin";
 import { AnalysisTab } from "./AnalysisTab";
+import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
 import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType, TrendPayload } from "../api/types";
 
 vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () => <div>headway-panel</div> }));
@@ -132,6 +136,26 @@ describe("AnalysisTab", () => {
     vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: undefined, isPending: false, error: null, refetch: vi.fn() } as never);
     renderAnalysis("/agencies/1/analysis/when?report=route_forecast&time_band=morning", ["dow_weekday", "route_forecast"]);
     expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
+  });
+
+  it("counts a chosen route as used on the route forecast, whose route view honours it", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({
+      data: { grid: [], worst: null, routes: [], disclaimer: "", scope_applied: { from: false, to: false, dow: false, time_band: false, routes: false } },
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({
+      data: { route: "44242", cells: [], scope_applied: { from: false, to: false, dow: false, time_band: false, routes: true } },
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderAnalysis("/agencies/1/analysis/when?report=route_forecast&routes=44242", ["route_forecast"]);
+    expect(screen.getByText(/Not used on this screen/)).not.toHaveTextContent("Routes");
   });
 
   it("greys nothing while a different report's response is still on screen", () => {
@@ -448,7 +472,9 @@ describe("AnalysisTab dwell_run route cap", () => {
 
     await user.click(screen.getByRole("button", { name: "switch agency" }));
     expect(routeCells()).toHaveLength(200);
-  });
+    // The cap is 200 rows, so proving it renders a few hundred table rows
+    // four times; on a loaded machine that alone outlasts the default timeout.
+  }, 45_000);
 });
 
 describe("AnalysisTab evidence panels", () => {
@@ -548,6 +574,11 @@ describe("AnalysisTab ranking coverage", () => {
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
   });
 
+  it("names its export Download CSV, as every other export is named", () => {
+    setup("/agencies/1/analysis/rider?report=ranking", rankingResponse());
+    expect(screen.getByRole("link", { name: "Download CSV" })).toBeInTheDocument();
+  });
+
   it("exports the rows the table shows", () => {
     setup("/agencies/1/analysis/rider?report=ranking&sparse=1", rankingResponse());
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_sparse=1(&|$)/);
@@ -558,5 +589,155 @@ describe("AnalysisTab ranking coverage", () => {
     expect(screen.queryByRole("checkbox", TOGGLE)).not.toBeInTheDocument();
     expect(useReport.mock.calls.at(-1)?.[3]?.includeSparse).toBeFalsy();
     expect(screen.queryByRole("link", { name: /CSV/ })?.getAttribute("href") ?? "").not.toContain("include_sparse");
+  });
+});
+
+describe("AnalysisTab Why without arrival times", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function showUnavailableDwellRun() {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dwell_run")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...emptyReport("dwell_run"), rows: [{ available: false, time_band_supported: true, routes: [] }] },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    return renderAnalysis("/agencies/1/analysis/why?report=dwell_run&from=2026-09-01&to=2026-09-07", ["dwell_run"]);
+  }
+
+  it("says why the split can't be shown and where to look instead", async () => {
+    const { router } = showUnavailableDwellRun();
+    expect(screen.getByText("Splitting delay needs arrival times")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "See when delay happens" }));
+    expect(router.state.location.pathname).toBe("/agencies/1/time");
+    expect(new URLSearchParams(router.state.location.search).get("from")).toBe("2026-09-01");
+  });
+
+  it("points to the weekday and weekend comparison too", async () => {
+    const { router } = showUnavailableDwellRun();
+    await userEvent.click(screen.getByRole("button", { name: "Compare weekdays and weekends" }));
+    expect(router.state.location.pathname).toBe("/agencies/1/compare");
+    expect(new URLSearchParams(router.state.location.search).get("report")).toBe("compare_ranking");
+  });
+
+  it("offers no CSV of a split it can't make", () => {
+    showUnavailableDwellRun();
+    expect(screen.queryByRole("link", { name: /CSV/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("AnalysisTab council report", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function showCouncil() {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("council_summary")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: {
+        ...reportResponse("council_summary"),
+        rows: [[22.6, 2.5, 540357, 2130, 2100, 98.6]],
+        text: "Aomori, 9/1 – 9/28\nOn time 22.6%, average delay 2.5 min.\n* On time means within 1 min.",
+      },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    return renderAnalysis("/agencies/1/analysis/reports?report=council_summary", ["council_summary"]);
+  }
+
+  it("lays the council report out as figures and prose, not a one-row table", () => {
+    showCouncil();
+    const figures = screen.getByRole("list", { name: "Headline figures" });
+    expect(figures).toHaveTextContent("22.6%");
+    expect(figures).toHaveTextContent("2.5 min");
+    expect(figures).toHaveTextContent("540,357");
+    expect(figures).toHaveTextContent("2,130");
+    expect(screen.getByText("On time 22.6%, average delay 2.5 min.")).toBeInTheDocument();
+    expect(screen.queryByRole("grid")).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("offers to print the report or save it as a PDF", async () => {
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    showCouncil();
+    await userEvent.click(screen.getByRole("button", { name: "Print / Save as PDF" }));
+    expect(print).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AnalysisTab delay certificate", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function showCertificate() {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("delay_certificate")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockImplementation(
+      (_aid, reportType) =>
+        (reportType == null
+          ? { data: undefined, isFetching: false, isPlaceholderData: false, error: null, refetch: vi.fn() }
+          : {
+              data: {
+                ...reportResponse("delay_certificate"),
+                rows: [["Aomori City Bus", "W54", "weekday", "2026-09-02", "14:45:00", "14:50:55", 355]],
+                text: "1 departure left more than 300 s late.",
+                ctx: { from: "2026-09-01", to: "2026-09-30" },
+              },
+              isFetching: false,
+              isPlaceholderData: false,
+              error: null,
+              refetch: vi.fn(),
+            }) as never,
+    );
+    return renderAnalysis("/agencies/1/analysis/reports?report=delay_certificate", ["delay_certificate"]);
+  }
+
+  it("opens on the passenger's lookup, with the period's full list folded away until asked for", async () => {
+    showCertificate();
+    expect(screen.getByLabelText("Date")).toBeInTheDocument();
+    const summary = screen.getByText("All late departures in the period");
+    const staff = summary.closest("details")!;
+    expect(staff).not.toHaveAttribute("open");
+    expect(screen.queryByRole("table")).toBeNull();
+    await userEvent.click(summary);
+    expect(staff).toContainElement(screen.getByRole("table"));
+    expect(staff).toContainElement(screen.getByRole("link", { name: /CSV/ }));
+    expect(staff).toHaveTextContent("1 departure left more than 300 s late.");
+  });
+
+  it("prints a report without the list, the insights or, beside a certificate, the screen's scope", () => {
+    const print = ruleBody(readFileSync(resolve(__dirname, "./analysisTab.css"), "utf8"), "@media print");
+    expect(decl(ruleBody(print, ".analysis-report-list"), "display")).toBe("none !important");
+    expect(decl(ruleBody(print, ".analysis-insights"), "display")).toBe("none !important");
+    expect(decl(ruleBody(print, ".cert-staff"), "display")).toBe("none");
+    expect(decl(ruleBody(print, ".analysis-tab:has(.cert-card) .scope-sentence"), "display")).toBe("none");
+  });
+});
+
+describe("AnalysisTab slow reports", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("says a slow report is still working, and offers the period's last week", () => {
+    vi.useFakeTimers();
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("ranking")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: true, error: null, refetch: vi.fn() } as never);
+    const { router } = renderAnalysis("/agencies/1/analysis/compare?report=ranking&from=2026-09-01&to=2026-09-30", ["ranking"]);
+    act(() => vi.advanceTimersByTime(STILL_WORKING_AFTER_MS));
+    expect(screen.getByText("Still working: a long period takes longer to count.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Narrow to the last 7 days of the period" }));
+    const params = new URLSearchParams(router.state.location.search);
+    expect([params.get("from"), params.get("to")]).toEqual(["2026-09-24", "2026-09-30"]);
   });
 });

@@ -526,6 +526,19 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
     return sorted(stale)
 
 
+def mark_for_full_rebuild(conn, agency_ids: list[int]) -> None:
+    """Make each agency's next analyze rebuild every date.
+
+    For a change the per-date ledger cannot see: rows moved between service
+    dates, where a date whose moves in and out cancel keeps its count. Clearing
+    the recorded static fingerprint takes the same path a changed schedule
+    does, and leaves the stored aggregates readable until the rebuild.
+    """
+    with conn.cursor() as cur:
+        cur.execute("UPDATE agg_meta SET static_fingerprint = NULL WHERE agency_id = ANY(%s)", (agency_ids,))
+    conn.commit()
+
+
 def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> str:
     """A ClickHouse predicate restricting a builder to *rebuild_dates*.
 

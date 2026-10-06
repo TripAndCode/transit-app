@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
@@ -41,6 +42,7 @@ function renderTab(path = "/agencies/1/reports") {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/agencies/:agencyId/reports" element={<ReportsHomeTab />} />
+        <Route path="/agencies/:agencyId/routes" element={<p>routes-page</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -58,11 +60,29 @@ describe("ReportsHomeTab", () => {
     expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
   });
 
-  it("renders the report heading and description", () => {
+  it("writes its period the way the rest of the page writes dates", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?from=2026-08-12&to=2026-09-10");
+    const title = screen.getByRole("heading", { level: 2, name: /Hiroden/ });
+    expect(title).toHaveTextContent("Aug 12 – Sep 10, 2026");
+    expect(title).not.toHaveTextContent("2026-08-12");
+    const definitions = screen.getByText("View filters and definitions").closest("details") as HTMLElement;
+    expect(definitions).toHaveTextContent("Aug 12 – Sep 10, 2026");
+    expect(definitions).not.toHaveTextContent("2026-08-12");
+  });
+
+  it("leaves the page heading to the Reports shell", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();
-    expect(screen.getByRole("heading", { name: "Reports" })).toBeInTheDocument();
-    expect(screen.getByText("Summarize service performance in one page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("names the routes table's service column and shows its values and counts readably", () => {
+    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 12345] as unknown as RankingRow])); // i18n-ignore: GTFS service name
+    renderTab();
+    expect(screen.getByRole("columnheader", { name: "Service" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Weekday" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
   });
 
   it("shows how the figures are made as its own disclosure, not nested in another", () => {
@@ -111,6 +131,13 @@ describe("ReportsHomeTab", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab("/agencies/1/reports?doc=saved");
     expect(screen.getByText("Save filters on a route's page to see them here")).toBeInTheDocument();
+  });
+
+  it("takes an empty saved view straight to the route pages", async () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?doc=saved");
+    await userEvent.click(screen.getByRole("button", { name: "Go to Routes" }));
+    expect(screen.getByText("routes-page")).toBeInTheDocument();
   });
 
   it.each([

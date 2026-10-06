@@ -108,17 +108,6 @@ const SCHEMAS: Record<string, Schema[]> = {
   ],
   dow_weekend: DOW_COLS,
   dow_weekday: DOW_COLS,
-  // (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips,
-  // service_delivered_pct) -- a single pooled whole-agency row, not a
-  // per-route ranking (see pipeline.reports.council.compute_council_summary).
-  council_summary: [
-    { index: 0, labelKey: "reports.col.on_time_pct", align: "right", format: (v, t) => fmtPct(v, t) },
-    { index: 1, labelKey: "reports.col.avg", align: "right", unit: "min", format: fmtMinutes },
-    { index: 2, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
-    { index: 3, labelKey: "reports.col.planned_trips", align: "right", format: (v, t) => fmtNum(v, t) },
-    { index: 4, labelKey: "reports.col.executed_trips", align: "right", format: (v, t) => fmtNum(v, t) },
-    { index: 5, labelKey: "reports.col.service_delivered_pct", align: "right", format: (v, t) => fmtPct(v, t) },
-  ],
   // (agency_name, route_code, service_type, date, scheduled_time,
   // actual_time, dep_delay_sec) -- one row per over-threshold departure
   // observation (see pipeline.reports.council.compute_delay_certificate).
@@ -358,7 +347,7 @@ function RouteCell({
     <Link className="report-route-link" to={routeHref(agencyId, code, search)}>
       <RouteLabel code={code} names={names} />
       <span className="report-route-link__chevron" aria-hidden="true">
-        {" ›"}
+        {"\u00a0›"}
       </span>
     </Link>
   );

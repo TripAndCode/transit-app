@@ -210,7 +210,10 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
   // flattened so a token can take the punctuation that follows it.
   type Run = { text: string } | { token: ScopeToken };
   const runs: Run[] = [];
-  for (const part of sentenceParts(t("scope.sentence"))) {
+  // A screen that never applies the on-time tolerance gets no clause for it
+  // unless the scope sets one, which then shows greyed like any unused one.
+  const omitTolerance = applied?.late === false && scope.late == null;
+  for (const part of sentenceParts(t(omitTolerance ? "scope.sentence_no_tolerance" : "scope.sentence"))) {
     if ("text" in part) runs.push({ text: part.text });
     else if (part.slot === "extras") {
       for (const tok of tokens) if (!PLACED_KEYS.has(tok.key)) runs.push({ text: separator }, { token: tok });
@@ -241,6 +244,9 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
   const inline = tokens.filter(
     (tok): tok is ScopeToken & { key: ConditionKey } => tok.key !== "agency" && tok.key !== "service",
   );
+  const unused = tokens.filter(
+    (tok): tok is ScopeToken & { key: ConditionKey } => tok.key !== "agency" && isOff({ ...tok, key: tok.key }),
+  );
 
   return (
     <section ref={sectionRef} tabIndex={-1} aria-label={t("scope.label")} className="scope">
@@ -264,6 +270,13 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
           </button>
         </div>
       </div>
+      {/* The struck-through tokens' reason, in words: a title tooltip alone
+          never reaches touch screens. */}
+      {unused.length > 0 && (
+        <p className="scope-note">
+          {t("scope.unapplied_note", { list: unused.map((tok) => t(`scope.popover.${tok.key}`)).join(separator) })}
+        </p>
+      )}
       {pinned && (
         <div className="scope-strip">
           {inline.map((tok) => {

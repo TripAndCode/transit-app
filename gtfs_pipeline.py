@@ -432,6 +432,103 @@ def cmd_analyze_all(args):
     logger.info(f"analyze-all: all {len(agency_ids)} agencies analyzed.")
 
 
+def cmd_restamp_archive(args):
+    """Restamp archive-ingested `updates` rows with the time archive ingest
+    assigns today (pipeline.restamp_archive). Prints the plan and writes
+    nothing unless --apply."""
+    from contextlib import ExitStack
+
+    from pipeline.analyze import mark_for_full_rebuild
+    from pipeline.clickhouse import ch_conn_kwargs, get_client
+    from pipeline.locks import INGEST_ANALYZE_LOCK_KEY, agency_ingest_lock, try_lock_ingest_analyze
+    from pipeline.restamp_archive import (
+        BACKUP_TABLE,
+        interrupted_run,
+        leftover_exists,
+        leftover_guidance,
+        plan_restamp,
+        preflight,
+        restamp_archive_rows,
+        settle_interrupted_run,
+    )
+
+    def next_steps(refused: int = 0):
+        logger.info(f"The rows as they were are in {BACKUP_TABLE}.")
+        if refused:
+            logger.info(
+                f"{refused} rows left out as ingest would are only there, until an archive ingest re-reads their files."
+            )
+        logger.info("Next: analyze_all (rebuilds every date of the agencies moved), then check_aggs;")
+        logger.info(f"drop {BACKUP_TABLE} once the aggregates are right.")
+
+    def still_locked():
+        # The copy leaves `conn` idle for its whole length; a session lost
+        # meanwhile has released every lock, so the swap must not go ahead.
+        assert conn is not None
+        with conn.cursor() as cur:
+            # A one-key lock lists as (classid 0, objid key, objsubid 1); a
+            # two-key one as (classid first key, objid second, objsubid 2).
+            cur.execute(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()"
+                " AND ((objsubid = 1 AND classid = 0 AND objid = %s) OR (objsubid = 2 AND classid = %s))",
+                (INGEST_ANALYZE_LOCK_KEY, INGEST_ANALYZE_LOCK_KEY),
+            )
+            if cur.fetchone()[0] < 1 + len(moved):
+                raise RuntimeError("the pipeline lock was lost during the copy; nothing was swapped")
+
+    ch_client = get_client()
+    conn = None
+    try:
+        if args.apply:
+            conn = _get_conn()
+            # Held until `conn` closes: no ingest, promotion or analyze writes
+            # `updates`, or reads it across the swap, while the run is open.
+            if not try_lock_ingest_analyze(conn):
+                logger.error("restamp_archive: an ingest or analyze job holds the pipeline lock; rerun once it ends.")
+                sys.exit(1)
+        if leftover_exists(ch_client):
+            logger.error(leftover_guidance(ch_client))
+            sys.exit(1)
+        if args.apply:
+            # Settled before planning: once its swap is done, an interrupted
+            # run's `updates` reads as nothing to move.
+            if settle_interrupted_run(ch_client):
+                logger.info("finished an interrupted restamp.")
+                next_steps()
+        elif interrupted_run(ch_client):
+            logger.warning("an earlier --apply run stopped partway; --apply finishes it first.")
+        plan = plan_restamp(ch_client)
+        for p in plan:
+            logger.info(
+                f"agency {p.agency_id}: {p.rows_to_move} of {p.archive_rows} archive rows move "
+                f"({p.min_shift_sec}s to {p.max_shift_sec}s), {p.rows_refused} left out as ingest would; "
+                f"{p.unreadable_names} under names the rule cannot read"
+            )
+        moved = [p.agency_id for p in plan if p.rows_to_move or p.rows_refused]
+        if not args.apply:
+            logger.info("dry run: nothing written. Rerun with --apply.")
+            return
+        if not moved:
+            logger.info("nothing to move.")
+            return
+        preflight(ch_client)
+        kw = ch_conn_kwargs()
+        logger.info(f"restamping {kw['database']} on {kw['host']}:{kw['port']}")
+        with ExitStack() as held:
+            for agency_id in moved:
+                held.enter_context(agency_ingest_lock(conn, agency_id))
+            # Marked first: a mark lost after the swap would never be redone,
+            # since the rerun finds nothing left to move. A swap that then
+            # fails costs only a rebuild that was not needed.
+            mark_for_full_rebuild(conn, moved)
+            restamp_archive_rows(ch_client, before_swap=still_locked)
+        logger.info("restamped.")
+        next_steps(sum(p.rows_refused for p in plan))
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def cmd_check_aggs(args):
     """Report agencies whose aggregates lag their newest completed day.
 
@@ -745,6 +842,10 @@ def main():
 
     sub.add_parser("analyze_all", help="Analyze every agency; nonzero exit if any fails")
     sub.add_parser("check_aggs", help="Report agencies with stale aggregates; nonzero exit if any")
+    p_restamp = sub.add_parser(
+        "restamp_archive", help="Restamp archive-ingested updates rows with the time archive ingest assigns today"
+    )
+    p_restamp.add_argument("--apply", action="store_true", help="Write the restamp (default: print the plan only)")
     sub.add_parser("check_migrations", help="Report unapplied migrations; nonzero exit if the DB schema is behind")
 
     p_digest = sub.add_parser("digest", help="Print the daily network-health digest (Markdown)")
@@ -815,6 +916,8 @@ def main():
         cmd_analyze_all(args)
     elif args.command == "check_aggs":
         cmd_check_aggs(args)
+    elif args.command == "restamp_archive":
+        cmd_restamp_archive(args)
     elif args.command == "check_migrations":
         cmd_check_migrations(args)
     elif args.command == "digest":

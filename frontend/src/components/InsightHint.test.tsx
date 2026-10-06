@@ -43,4 +43,11 @@ describe("InsightHint", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(trigger).toHaveFocus();
   });
+
+  it("gives its button at least a 24 px target", () => {
+    renderHint();
+    const button = screen.getByRole("button", { name: "Hint" });
+    expect(Number.parseFloat(button.style.minWidth)).toBeGreaterThanOrEqual(24);
+    expect(Number.parseFloat(button.style.minHeight)).toBeGreaterThanOrEqual(24);
+  });
 });

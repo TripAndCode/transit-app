@@ -29,6 +29,15 @@ describe("investigation steps", () => {
 });
 
 describe("investigation canvas", () => {
+  it("counts its steps in the singular for one and the plural for more", () => {
+    const { unmount } = renderWithProviders(
+      <InvestigationCanvas agencyId={9} messages={messages.slice(0, 2)} formatRoute={formatRoute} />,
+    );
+    expect(screen.getByText("Investigation steps · 1 question")).toBeInTheDocument();
+    unmount();
+    renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute} />);
+    expect(screen.getByText("Investigation steps · 2 questions")).toBeInTheDocument();
+  });
   it("retains the exact source chart beside a grounded follow-up answer", () => {
     const source: ConvMessage = { ...messages[1], tool: "segment_hotspots",
       result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples"],
