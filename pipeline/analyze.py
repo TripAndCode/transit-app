@@ -545,6 +545,19 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
     return sorted(stale)
 
 
+def mark_for_full_rebuild(conn, agency_ids: list[int]) -> None:
+    """Make each agency's next analyze rebuild every date.
+
+    For a change the per-date ledger cannot see: rows moved between service
+    dates, where a date whose moves in and out cancel keeps its count. Clearing
+    the recorded static fingerprint takes the same path a changed schedule
+    does, and leaves the stored aggregates readable until the rebuild.
+    """
+    with conn.cursor() as cur:
+        cur.execute("UPDATE agg_meta SET static_fingerprint = NULL WHERE agency_id = ANY(%s)", (agency_ids,))
+    conn.commit()
+
+
 def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> str:
     """A ClickHouse predicate restricting a builder to *rebuild_dates*.
 
@@ -851,6 +864,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 label="dedup",
             )
 
+        # Every route-keyed builder filters `route_code IS NOT NULL` in its own
+        # CTE rather than in the dedup load: agg_stop_daily reads the same slice
+        # and must keep a stop's traffic when the route is unknown. A NULL key
+        # would otherwise abort the whole-agency transaction.
         # ── agg_route_stats ──────────────────────────────────────────────
         # No minimum-sample HAVING here — see the module docstring's no-gate
         # policy.
@@ -866,7 +883,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
         late_thr = LEGACY_SEVERE_LATE_TOLERANCE_SEC
         sql = f"""
-            WITH deduped AS (SELECT * FROM _analyze_alltime),
+            WITH deduped AS (SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL),
             grouped AS (
                 SELECT
                     route_code, service_type,
@@ -932,7 +949,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
 
         # ── agg_route_hour ───────────────────────────────────────────────
         sql = """
-            WITH deduped AS (SELECT * FROM _analyze_alltime),
+            WITH deduped AS (
+                SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
+            ),
             grouped AS (
                 SELECT
                     route_code, service_type, scheduled_time,
@@ -986,7 +1005,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # than folded into the early-morning bucket.
         sql = """
             WITH deduped AS (
-                SELECT * FROM _analyze_alltime WHERE scheduled_time IS NOT NULL
+                SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
             )
             SELECT
                 %(agency_id)s AS agency_id,
@@ -1026,7 +1045,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # instead of leaving it to `date::text`'s dependence on the session's
         # DateStyle.
         sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped)
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
             SELECT
                 %(agency_id)s AS agency_id,
                 to_char(date, 'YYYY-MM-DD') AS date, route_code,
@@ -1061,7 +1080,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # today/route-summary no longer reads this table: its own figures are
         # computed live from `updates_live`, against `agg_route_stats` baselines.
         sql = """
-            WITH deduped AS (SELECT * FROM _analyze_deduped)
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
             SELECT
                 %(agency_id)s AS agency_id,
                 date::text, route_code,
@@ -1107,7 +1126,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # A caller wanting a different tolerance reads `hist` instead (same
         # column this table already stores for p50/p90 interpolation).
         sql = f"""
-            WITH deduped AS (SELECT * FROM _analyze_deduped),
+            WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL),
             bucketed AS (
                 SELECT date, route_code,
                     COALESCE(service_type, '') AS service_type,
@@ -1305,9 +1324,13 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     # `.query()`'s result_rows would hit the same unbounded-memory
                     # shape that streaming was introduced to eliminate 40 lines
                     # up, just for a bigger set.
+                    #
+                    # A stop whose only keys lack a route would aggregate to a NULL
+                    # route_codes, which the NOT NULL column rejects for the whole
+                    # agency; such keys name no route to list anyway.
                     ch_keys_sql = (
                         "SELECT DISTINCT route_code, trip_id, stop_sequence FROM updates "
-                        "WHERE agency_id = {agency_id:UInt16}"
+                        "WHERE agency_id = {agency_id:UInt16} AND route_code IS NOT NULL"
                     )
                     with (
                         _step("agg_stop_routes: ClickHouse key scan + load into TEMP"),
@@ -1349,7 +1372,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # sentinel, not the raw NULL.
             band_case = time_band_case_sql("d.scheduled_time")
             sql = f"""
-                WITH deduped AS (SELECT * FROM _analyze_deduped)
+                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE route_code IS NOT NULL)
                 INSERT INTO agg_route_stop_daily
                     (agency_id, route_code, stop_id, date, service_type, time_band, delay_sum, samples)
                 SELECT
@@ -1697,6 +1720,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                         CASE WHEN actual_arr_sec IS NOT NULL AND prev_actual_dep_sec IS NOT NULL
                              THEN actual_arr_sec - prev_actual_dep_sec END AS running_sec
                     FROM with_prev
+                    -- Filtered here, after LAG(), not in `visits`: a no-route
+                    -- visit still anchors the next stop's running time, but
+                    -- cannot enter the NOT NULL route_code key.
+                    WHERE route_code IS NOT NULL
                 ),
                 bucketed AS (
                     SELECT route_code, service_type, date, dwell_sec, running_sec,

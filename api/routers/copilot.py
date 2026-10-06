@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 from api.deps import get_agency, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.security import csrf_guard
 from pipeline.query.copilot import NoInsightAvailable, ais_enabled, generate_proactive_insight
 
@@ -51,7 +51,7 @@ class CopilotInsightResponse(BaseModel):
 
 
 @router.post("/copilot/insight", response_model=CopilotInsightResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def copilot_insight(
     request: Request,
     body: CopilotInsightRequest,

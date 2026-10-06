@@ -13,9 +13,10 @@ export function rangeCtxToFilterCtx(ctx: Scope): FilterCtx {
   };
 }
 
-/** Derive a FilterCtx from a conversation's stored filter_ctx, with defaults. */
-export function resolvedFilterCtx(fc: FilterCtx | undefined | null): FilterCtx {
-  const period = defaultPeriod();
+/** Derive a FilterCtx from a conversation's stored filter_ctx, with defaults.
+ *  `dataEnd` is the agency's latest data day (DataEndContext). */
+export function resolvedFilterCtx(fc: FilterCtx | undefined | null, dataEnd: string | null): FilterCtx {
+  const period = defaultPeriod(dataEnd);
   return {
     from_date: fc?.from_date ?? period.from,
     to_date: fc?.to_date ?? period.to,

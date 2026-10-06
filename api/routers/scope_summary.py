@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_conn
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.routers.reports import ReportCtx
 from api.scope_applied import scope_applied
@@ -66,7 +66,7 @@ class ScopeSummaryResponse(BaseModel):
 
 
 @router.get("/scope/summary", response_model=ScopeSummaryResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def scope_summary(
     request: Request,
     agency_id: int = Depends(get_agency),

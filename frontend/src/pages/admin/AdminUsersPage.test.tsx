@@ -467,11 +467,11 @@ describe("AdminUsersPage", () => {
       const user = userEvent.setup();
       wrap(["/admin/users?role=admin&suspended=true"]);
       useAdminUsersMock.mockClear();
-      await user.click(screen.getByRole("button", { name: /Pending approval/ }));
+      await user.click(screen.getByRole("button", { name: /Awaiting AI access/ }));
       expect(useAdminUsersMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ role: "", ...PENDING_APPROVAL_FILTER }),
       );
-      expect(screen.getByRole("button", { name: /Pending approval/ })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: /Awaiting AI access/ })).toHaveAttribute("aria-pressed", "true");
     });
 
     it("counts the same users in the nav badge, the Pending chip, and the Pending view's rows", async () => {
@@ -513,7 +513,7 @@ describe("AdminUsersPage", () => {
           </QueryClientProvider>
         </I18nextProvider>,
       );
-      const chip = screen.getByRole("button", { name: /Pending approval/ });
+      const chip = screen.getByRole("button", { name: /Awaiting AI access/ });
       await user.click(chip);
 
       const badge = screen.getByTestId("nav-badge").textContent;
@@ -633,26 +633,26 @@ describe("AdminUsersPage", () => {
 
   it("updates the displayed search value when the URL's q changes externally (e.g. browser back/forward)", () => {
     wrapWithExternalNav(["/admin/users?q=foo"]);
-    expect(screen.getByPlaceholderText("Search by email / name")).toHaveValue("foo");
+    expect(screen.getByPlaceholderText("Email or name")).toHaveValue("foo");
     fireEvent.click(screen.getByText("go-bar"));
     // A URL change that didn't come from this component's own debounce
     // commit must still be reflected in the input -- otherwise the box shows
     // a query that no longer matches the results underneath it.
-    expect(screen.getByPlaceholderText("Search by email / name")).toHaveValue("bar");
+    expect(screen.getByPlaceholderText("Email or name")).toHaveValue("bar");
   });
 
   it("keeps focus on the search input once its own debounce commits the typed value", async () => {
     vi.useFakeTimers();
     try {
       wrap();
-      const input = screen.getByPlaceholderText("Search by email / name") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Email or name") as HTMLInputElement;
       input.focus();
       fireEvent.change(input, { target: { value: "foo" } });
       await vi.advanceTimersByTimeAsync(500); // > SEARCH_DEBOUNCE_MS (300ms, not exported)
       // A fix that resyncs the input to the URL by remounting it (e.g.
       // `key={q}`) would recreate the DOM node here and drop focus the
       // moment its own debounce commits -- not just on external navigation.
-      expect(document.activeElement).toBe(screen.getByPlaceholderText("Search by email / name"));
+      expect(document.activeElement).toBe(screen.getByPlaceholderText("Email or name"));
     } finally {
       vi.useRealTimers();
     }
