@@ -13,6 +13,7 @@ import { formatDateTime } from "../../utils/format";
 import { downloadCsv } from "../../components/analysis/csv";
 import { AdminButton, AdminSearchInput } from "./adminControls";
 import { diffEntries, formatDiffValue } from "./auditDiff";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 /** Before→after pills for the fields that actually changed. Renders nothing
  * for a row with no diff data (a merged `login_events` row, or an
@@ -161,7 +162,7 @@ export function AdminAuditPage() {
 
   return (
     <div style={{ padding: 24 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 16 }}>{t("admin.audit.title")}</h1>
+      <PageHeader title={t("admin.audit.title")} />
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
         <AdminSearchInput
           aria-label={t("admin.audit.filter.actor_placeholder")}

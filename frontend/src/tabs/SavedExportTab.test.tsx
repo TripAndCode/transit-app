@@ -33,7 +33,7 @@ describe("SavedExportTab", () => {
     expect(await screen.findByText("reports-home")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Period summary" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Saved analyses" })).not.toHaveAttribute("aria-current");
-    expect(screen.getByRole("link", { name: "Council summary & delay reference" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: "Council report & delay certificate" })).not.toHaveAttribute("aria-current");
   });
 
   it("keeps the shared scope on every document link, but not another document's report", async () => {
@@ -42,7 +42,7 @@ describe("SavedExportTab", () => {
     expect(screen.getByRole("link", { name: "Saved analyses" }).getAttribute("href")).toMatch(/^\/agencies\/9\/reports\?/);
     expect(href("Saved analyses").get("from")).toBe("2026-08-01");
     expect(href("Saved analyses").get("doc")).toBe("saved");
-    expect(href("Council summary & delay reference").get("doc")).toBe("council");
+    expect(href("Council report & delay certificate").get("doc")).toBe("council");
     expect(href("Period summary").get("to")).toBe("2026-08-31");
     expect(href("Period summary").has("doc")).toBe(false);
     expect(href("Period summary").has("report")).toBe(false);
@@ -55,7 +55,7 @@ describe("SavedExportTab", () => {
   ])("opens the export documents for %s", async (search, defaultReport) => {
     open(`/agencies/9/reports${search}`);
     expect(await screen.findByText(`analysis-tab:council_summary,delay_certificate default:${defaultReport}`)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Council summary & delay reference" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Council report & delay certificate" })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows the saved analyses for doc=saved", async () => {
@@ -72,5 +72,17 @@ describe("SavedExportTab", () => {
     expect(params.get("doc")).toBe("saved");
     expect(params.has("view")).toBe(false);
     expect(params.get("from")).toBe("2026-09-01");
+  });
+
+  it("heads every document with Reports once, above the documents, with a line saying what each holds", async () => {
+    open("/agencies/9/reports");
+    expect(await screen.findByRole("heading", { level: 1, name: "Reports" })).toBeInTheDocument();
+    expect(screen.getByText("How service ran over the period, on one printable page.")).toBeInTheDocument();
+  });
+
+  it("says what the council documents are for on their own tab", async () => {
+    open("/agencies/9/reports?doc=council");
+    expect(await screen.findByRole("heading", { level: 1, name: "Reports" })).toBeInTheDocument();
+    expect(screen.getByText("A summary for a council or board, and proof of a late departure.")).toBeInTheDocument();
   });
 });

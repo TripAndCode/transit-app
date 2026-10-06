@@ -48,9 +48,9 @@ describe("ScopeSentence", () => {
   it("says the scope as one sentence whose conditions are buttons", () => {
     mount();
     expect(region().textContent).toContain(
-      "Viewing all routes of Aomori, 9/1 – 9/28, every day, all day, counting on-time as within 1 min",
+      "Viewing all routes of Aomori, 9/1 – 9/28, every day, all hours, counting on-time as within 1 min",
     );
-    for (const name of ["all routes", "9/1 – 9/28", "every day", "all day", "within 1 min"]) {
+    for (const name of ["all routes", "9/1 – 9/28", "every day", "all hours", "within 1 min"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
     expect(screen.queryByRole("button", { name: "Aomori" })).toBeNull();
@@ -69,7 +69,7 @@ describe("ScopeSentence", () => {
 
   it("keeps the popover out of any paragraph, since it holds block content", async () => {
     mount();
-    await userEvent.click(screen.getByRole("button", { name: "all day" }));
+    await userEvent.click(screen.getByRole("button", { name: "all hours" }));
     expect(screen.getByRole("dialog", { name: "Time of day" }).closest("p")).toBeNull();
   });
 
@@ -109,7 +109,7 @@ describe("ScopeSentence", () => {
         </Routes>
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "all day" }));
+    await userEvent.click(screen.getByRole("button", { name: "all hours" }));
     fireEvent.click(screen.getByRole("button", { name: "open-overlay" }));
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onTop).toHaveBeenCalledTimes(1);
@@ -136,7 +136,7 @@ describe("ScopeSentence", () => {
   it("lists the optional conditions in the order the words give them", () => {
     mount("?from=2026-09-01&to=2026-09-28&service=%E5%B9%B3%E6%97%A5&stop=S1&dir=0&early=60");
     expect(region().textContent).toContain(
-      "all day, Weekday timetable, stop S1, direction 0, early by up to 1 min, counting on-time",
+      "all hours, Weekday timetable, stop S1, direction 0, early by up to 1 min, counting on-time",
     );
   });
 
@@ -157,7 +157,7 @@ describe("ScopeSentence", () => {
     try {
       mount();
       expect(screen.getByRole("region", { name: "表示の条件" }).textContent).toContain(
-        "Aomoriの全路線を、9/1〜9/28のすべての曜日・終日で、定時は1分以内として見る",
+        "Aomoriの全路線を、9/1〜9/28のすべての曜日・全時間帯で、定時は1分以内として見る",
       );
     } finally {
       await i18n.changeLanguage("en");
@@ -175,14 +175,14 @@ describe("ScopeSentence", () => {
   it("does not fetch for a control that draws no data", async () => {
     const summary = vi.spyOn(hooks, "useScopeSummary");
     mount();
-    await userEvent.click(screen.getByRole("button", { name: "all day" }));
+    await userEvent.click(screen.getByRole("button", { name: "all hours" }));
     expect(summary.mock.calls.at(-1)?.[2]).toBe(false);
   });
 
   it("fetches while the strip is pinned", async () => {
     const summary = vi.spyOn(hooks, "useScopeSummary");
     mount();
-    await userEvent.click(screen.getByRole("button", { name: "Pin controls" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show all filters" }));
     expect(summary.mock.calls.at(-1)?.[2]).toBe(true);
   });
 
@@ -211,6 +211,27 @@ describe("ScopeSentence", () => {
     expect(screen.getByRole("button", { name: "9/1 – 9/28" })).not.toHaveClass("scope-token--off");
   });
 
+  it("says in words which set conditions this screen doesn't use", () => {
+    mount("?from=2026-09-01&to=2026-09-28&dow=weekday", { dow: false, from: true });
+    expect(screen.getByText("Not used on this screen: Days and timetable")).toBeVisible();
+  });
+
+  it("says nothing extra when every set condition is used", () => {
+    mount("?from=2026-09-01&to=2026-09-28&dow=weekday", { dow: true, from: true });
+    expect(screen.queryByText(/Not used on this screen/)).toBeNull();
+  });
+
+  it("leaves out the on-time clause where the screen doesn't use it and nothing sets it", () => {
+    mount(undefined, { late: false });
+    expect(region().textContent).not.toContain("counting on-time");
+    expect(screen.queryByRole("button", { name: "within 1 min" })).toBeNull();
+  });
+
+  it("keeps a set on-time tolerance in the sentence, greyed where unused", () => {
+    mount("?from=2026-09-01&to=2026-09-28&late=180", { late: false });
+    expect(screen.getByRole("button", { name: "within 3 min" })).toHaveClass("scope-token--off");
+  });
+
   it("leaves a condition at its default ungreyed, since it filters nothing", () => {
     const { container } = mount(undefined, { dow: false, late: false, routes: false, time_band: false });
     expect(container.querySelector(".scope-token--off")).toBeNull();
@@ -218,7 +239,7 @@ describe("ScopeSentence", () => {
 
   it("greys a pinned control the same way", async () => {
     mount("?from=2026-09-01&to=2026-09-28&dow=weekday", { dow: false });
-    await userEvent.click(screen.getByRole("button", { name: "Pin controls" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show all filters" }));
     expect(screen.getByText("Days and timetable")).toHaveClass("scope-strip__label--off");
   });
 
@@ -234,7 +255,7 @@ describe("ScopeSentence", () => {
 
   it("pins every control inline and remembers it", async () => {
     const view = mount();
-    const pin = screen.getByRole("button", { name: "Pin controls" });
+    const pin = screen.getByRole("button", { name: "Show all filters" });
     expect(pin).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("button", { name: "Weekdays" })).toBeNull();
     await userEvent.click(pin);
@@ -243,7 +264,7 @@ describe("ScopeSentence", () => {
     expect(localStorage.getItem("transit.scopePinned")).toBe("1");
     view.unmount();
     mount();
-    expect(screen.getByRole("button", { name: "Pin controls" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Show all filters" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("offers a reset once a condition differs from the default", async () => {
@@ -260,6 +281,6 @@ describe("ScopeSentence", () => {
 
   it("adds a set timetable as its own condition", () => {
     mount("?from=2026-09-01&to=2026-09-28&service=%E5%B9%B3%E6%97%A5");
-    expect(region().textContent).toContain("all day, Weekday timetable, counting");
+    expect(region().textContent).toContain("all hours, Weekday timetable, counting");
   });
 });

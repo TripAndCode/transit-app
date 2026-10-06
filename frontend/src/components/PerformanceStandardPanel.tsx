@@ -51,19 +51,7 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope
     <div style={{ marginTop: 20, background: "var(--bg-surface)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius)", padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <h3 style={{ margin: 0, fontSize: 14 }}>{t("reports.performance_standard.title")}</h3>
-        <span
-          style={{
-            fontSize: "var(--text-xs)",
-            fontWeight: 500,
-            color: "var(--text-secondary)",
-            background: "var(--bg-soft)",
-            border: "1px solid var(--border-soft)",
-            borderRadius: 999,
-            padding: "2px 8px",
-          }}
-        >
-          {t("reports.performance_standard.simulation_badge")}
-        </span>
+        <span className="caveat-badge">{t("reports.performance_standard.simulation_badge")}</span>
       </div>
       <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>
         {t("reports.performance_standard.subtitle")}

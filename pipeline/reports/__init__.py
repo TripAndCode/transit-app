@@ -24,7 +24,9 @@ from pipeline.reports.headway_quality import compute_headway_quality
 from pipeline.reports.overview import compute_overview_summary
 from pipeline.reports.performance_standard import compute_performance_standards, simulation_disclaimer
 from pipeline.reports.rankings import (
+    MIN_GROUP_SAMPLES,
     ON_TIME_PRESETS,
+    RANKING_MIN_SAMPLES,
     compute_compare_ranking,
     compute_dow_ranking,
     compute_hourly_heatmap,
@@ -37,7 +39,9 @@ from pipeline.reports.weather import compute_rain_delay, observation_disclaimer
 
 __all__ = [
     "DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC",
+    "MIN_GROUP_SAMPLES",
     "ON_TIME_PRESETS",
+    "RANKING_MIN_SAMPLES",
     "DefinitionMeta",
     "compute_compare_ranking",
     "compute_council_summary",
