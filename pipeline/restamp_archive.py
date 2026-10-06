@@ -26,7 +26,7 @@ _STAGING = "updates_restamp_staging"
 BACKUP_TABLE = "updates_before_restamp"
 # Where the swapped-out table goes when it holds rows the copy never saw.
 LEFTOVER_TABLE = "updates_restamp_leftover"
-# The copy's table comment: this prefix plus the fingerprint `updates` had
+# The copy's table comment: this prefix plus the row count `updates` had
 # when the copy was taken, which a resumed run checks the swapped-out table
 # against.
 _COPY_MARK = "restamp copy of "
@@ -82,12 +82,11 @@ def plan_restamp(client) -> list[RestampPlan]:
     ]
 
 
-def _fingerprint(client, table: str) -> tuple:
-    return tuple(
-        client.query(
-            f"SELECT count(), sum(cityHash64(agency_id, file_name, trip_id, stop_sequence, captured_at)) FROM {table}"
-        ).result_rows[0]
-    )
+def _row_count(client, table: str) -> int:
+    """What a run checks for concurrent writes. A count is enough: nothing
+    updates or deletes `updates` rows, so a write can only add some, and
+    ClickHouse answers an unfiltered count from part metadata."""
+    return int(client.query(f"SELECT count() FROM {table}").result_rows[0][0])
 
 
 def _exists(client, table: str) -> bool:
@@ -113,11 +112,11 @@ def _keep_swapped_out(client) -> None:
     client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
 
 
-def _finish_swap(client, before: tuple) -> None:
+def _finish_swap(client, before: int) -> None:
     """Keep the swapped-out table, unless it holds rows the copy never saw:
     a write in the instant between the copy's check and the swap. Then it is
     kept as LEFTOVER_TABLE and the run fails, so those rows are never dropped."""
-    if _fingerprint(client, _STAGING) != before:
+    if _row_count(client, _STAGING) != before:
         client.command(f"RENAME TABLE {_STAGING} TO {LEFTOVER_TABLE}")
         client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
         raise RuntimeError(
@@ -127,17 +126,16 @@ def _finish_swap(client, before: tuple) -> None:
     _keep_swapped_out(client)
 
 
-def _marked_fingerprint(comment: str | None) -> tuple | None:
+def _marked_count(comment: str | None) -> int | None:
     if not comment or not comment.startswith(_COPY_MARK):
         return None
-    count, digest = comment[len(_COPY_MARK) :].split(":")
-    return (int(count), int(digest))
+    return int(comment[len(_COPY_MARK) :])
 
 
 def interrupted_run(client) -> bool:
     """Whether an earlier run stopped partway, leaving a copy or a mark.
     Reads only."""
-    return _exists(client, _STAGING) or _marked_fingerprint(_table_comment(client, _TABLE)) is not None
+    return _exists(client, _STAGING) or _marked_count(_table_comment(client, _TABLE)) is not None
 
 
 def settle_interrupted_run(client) -> None:
@@ -147,10 +145,10 @@ def settle_interrupted_run(client) -> None:
     TABLES swaps whole tables, comment and all, so the mark says where a run
     stopped whatever the tables hold: on `updates`, the swap happened and the
     staging table, if still there, holds the rows as they were, checked
-    against the fingerprint the mark records; otherwise the staging table is a
+    against the row count the mark records; otherwise the staging table is a
     copy, possibly partial, and is dropped.
     """
-    before = _marked_fingerprint(_table_comment(client, _TABLE))
+    before = _marked_count(_table_comment(client, _TABLE))
     if before is not None:
         if _exists(client, _STAGING):
             _finish_swap(client, before)
@@ -188,16 +186,16 @@ def restamp_archive_rows(client) -> None:
     """
     settle_interrupted_run(client)
     _check_room(client)
-    before = _fingerprint(client, _TABLE)
+    before = _row_count(client, _TABLE)
     client.command(f"CREATE TABLE {_STAGING} AS {_TABLE}")
-    client.command(f"ALTER TABLE {_STAGING} MODIFY COMMENT '{_COPY_MARK}{before[0]}:{before[1]}'")
+    client.command(f"ALTER TABLE {_STAGING} MODIFY COMMENT '{_COPY_MARK}{before}'")
     try:
         client.command(f"INSERT INTO {_STAGING} SELECT * REPLACE ({_RESTAMPED} AS captured_at) FROM {_TABLE}")
-        if _fingerprint(client, _TABLE) != before:
+        if _row_count(client, _TABLE) != before:
             raise RuntimeError(f"{_TABLE} changed while the copy was written; nothing was swapped")
-        staged = client.query(f"SELECT count() FROM {_STAGING}").result_rows[0][0]
-        if staged != before[0]:
-            raise RuntimeError(f"copy holds {staged} rows, {_TABLE} {before[0]}; nothing was swapped")
+        staged = _row_count(client, _STAGING)
+        if staged != before:
+            raise RuntimeError(f"copy holds {staged} rows, {_TABLE} {before}; nothing was swapped")
     except Exception:
         client.command(f"DROP TABLE IF EXISTS {_STAGING}")
         raise
