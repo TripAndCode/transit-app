@@ -10,7 +10,7 @@ rows. That behavioral proof (JST day bucketing, ISO weekday numbering, band
 placement of 5-char and >= 24h scheduled times) comes from the
 RUN_CH_INTEGRATION=1 tests below, which need a real ClickHouse
 (`make ch-test`) and skip otherwise — the same split
-tests/unit/test_db_dedup_ch.py uses for build_dedup_ch_sql.
+tests/clickhouse/test_db_dedup_ch.py uses for build_dedup_ch_sql.
 """
 
 import os
