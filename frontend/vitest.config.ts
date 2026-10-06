@@ -20,14 +20,12 @@ export default defineConfig({
     // jsdom's CSS-color dependency ships ESM that the default `forks` pool
     // can't `require()` under Node; the worker-thread pool loads it cleanly.
     pool: "threads",
-    // The main process transforms every module the workers import (the React
-    // Compiler's Babel pass included), so past a few workers a run gets no
-    // faster -- it only queues more work behind that one thread. On a busy
-    // machine the queue then holds a starting worker's handshake past
-    // vitest's fixed 60s start timeout, and its test file fails without
-    // running. Three workers keep the run as fast as more would, and match
-    // what a 4-vCPU CI runner already gets by default; a smaller machine
-    // keeps vitest's own default of one fewer than its cores.
+    // The main process transforms every module the workers import, so past
+    // a few workers a run gets no faster, it only queues more work -- and
+    // under load that queue holds a starting worker's handshake past
+    // vitest's fixed 60s start timeout, failing its file unrun. Three is
+    // what a 4-vCPU CI runner gets by default; a smaller machine keeps
+    // vitest's own default of one fewer than its cores.
     maxWorkers: Math.min(3, Math.max(availableParallelism() - 1, 1)),
     // Node 25+ enables its own global localStorage and sessionStorage
     // (localStorage is undefined without --localstorage-file), and the jsdom
