@@ -508,7 +508,7 @@ async def ask_suggest(
     request: Request,
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
-    q: str = Query(default=""),
+    q: str = Query(default="", max_length=MAX_QUESTION_CHARS),
     limit: int = Query(default=8),
 ) -> AskSuggestResponse:
     """Live autocomplete for the Ask input.

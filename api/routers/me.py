@@ -234,6 +234,8 @@ async def create_preset(
         )
     except asyncpg.UniqueViolationError:
         raise HTTPException(409, "name already used") from None
+    except asyncpg.ForeignKeyViolationError:
+        raise HTTPException(404, "unknown agency") from None
     return PresetOut(
         preset_id=row["preset_id"],
         agency_id=row["agency_id"],

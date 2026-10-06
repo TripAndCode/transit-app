@@ -37,13 +37,13 @@ import time
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.admin_audit import record_admin_action
 from api.admin_board import board_alerts, board_freshness, board_window, collector_tiles
@@ -699,11 +699,21 @@ class ApiKeyIssued(ApiKeyOut):
     key: str
 
 
+_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 class ApiKeyCreate(BaseModel):
     owner_user_id: int
-    tier: str = "pro"
-    label: str | None = None
-    expires_at: Any = None
+    # The only tier `_key_func` grants anything to; the column default agrees.
+    tier: Literal["pro"] = "pro"
+    label: str | None = Field(default=None, max_length=120)
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def _utc_when_naive(cls, v: datetime | None) -> datetime | None:
+        # asyncpg reads a naive value for a timestamptz column in the server's local zone.
+        return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
 
 
 class ApiKeyListOut(BaseModel):
@@ -825,9 +835,17 @@ async def revoke_api_key(
 
 
 class InviteCreate(BaseModel):
-    email: str
+    email: str = Field(max_length=254)
     role: str = "user"
     llm_approved: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def _well_formed(cls, v: str) -> str:
+        v = v.strip()
+        if not _EMAIL_SHAPE.fullmatch(v):
+            raise ValueError("email must look like name@domain.tld")
+        return v
 
 
 class InviteOut(BaseModel):

@@ -81,15 +81,37 @@ def _raise_for_followup_error(err: str | None) -> None:
         raise HTTPException(status_code=502, detail=f"llm_error:{err}")
 
 
+# Mirrors the preset range_ctx ceiling: the same filter state, arriving by a
+# different route. Bounded per thread so a 100-thread migration cannot carry
+# an unbounded jsonb payload into Postgres.
+_MAX_FILTER_CTX_BYTES = 64 * 1024
+
+
+def _bounded_filter_ctx(v: dict[str, Any]) -> dict[str, Any]:
+    if len(json.dumps(v).encode()) > _MAX_FILTER_CTX_BYTES:
+        raise ValueError(f"filter_ctx exceeds {_MAX_FILTER_CTX_BYTES} bytes serialized")
+    return v
+
+
 class CreateConversation(BaseModel):
     title: str = Field(..., max_length=200)
     filter_ctx: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("filter_ctx")
+    @classmethod
+    def _bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_filter_ctx(v)
 
 
 class UpdateConversation(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     pinned: bool | None = None
     filter_ctx: dict[str, Any] | None = None
+
+    @field_validator("filter_ctx")
+    @classmethod
+    def _bounded(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return None if v is None else _bounded_filter_ctx(v)
 
 
 class AppendMessage(BaseModel):
@@ -122,12 +144,6 @@ class AppendMessage(BaseModel):
             raise ValueError("One of chip_id or (tool + args) is required")
 
 
-# Mirrors the preset range_ctx ceiling: the same filter state, arriving by a
-# different route. Bounded per thread so a 100-thread migration cannot carry
-# an unbounded jsonb payload into Postgres.
-_MAX_FILTER_CTX_BYTES = 64 * 1024
-
-
 class AnonThread(BaseModel):
     client_id: str
     # The agency the thread belongs to; threads span agencies in localStorage,
@@ -139,9 +155,7 @@ class AnonThread(BaseModel):
     @field_validator("filter_ctx")
     @classmethod
     def _bounded_filter_ctx(cls, v: dict[str, Any]) -> dict[str, Any]:
-        if len(json.dumps(v).encode()) > _MAX_FILTER_CTX_BYTES:
-            raise ValueError(f"filter_ctx exceeds {_MAX_FILTER_CTX_BYTES} bytes serialized")
-        return v
+        return _bounded_filter_ctx(v)
 
     pinned: bool = False
     created_at: str
