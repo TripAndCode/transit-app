@@ -13,6 +13,7 @@ import {
 } from "../../api/admin";
 import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 const ROUTE_ORDER: readonly AskRoute[] = ["rules", "nn", "rag", "no_history"];
 const CACHE_OUTCOMES = new Set(["hit", "miss", "bypass"]);
@@ -224,7 +225,7 @@ export function AdminAskOpsPage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.ask_ops.title")}</h1>
+      <PageHeader title={t("admin.ask_ops.title")} />
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <select

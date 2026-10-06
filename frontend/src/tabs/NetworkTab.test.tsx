@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
+import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
 import { stubReducedMotion } from "../test/reducedMotion";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
@@ -141,7 +142,8 @@ describe("NetworkTab", () => {
     renderTab();
     expect(screen.getByText(/91\.2%/)).toBeInTheDocument();
     const hiroBusCard = screen.getByText("HiroBus").closest(".network-row");
-    expect(hiroBusCard).toHaveTextContent("150");
+    expect(hiroBusCard).toHaveTextContent("Planned trips 150 (vehicle-km not available)");
+    expect(hiroBusCard).not.toHaveTextContent("Vehicle-km delivered %");
     const aomoriCard2 = screen.getByText("Aomori").closest(".network-row");
     expect(aomoriCard2).toHaveTextContent("—");
   });
@@ -173,7 +175,7 @@ describe("NetworkTab", () => {
       fireEvent.focus(link);
     });
     const tip = screen.getByRole("tooltip");
-    expect(tip).toHaveTextContent("View Hiroden overview");
+    expect(tip).toHaveTextContent("Open Hiroden in Live");
     expect(link.getAttribute("aria-describedby")).toBe(tip.id);
   });
 
@@ -193,6 +195,21 @@ describe("NetworkTab", () => {
     } as never);
     renderTab();
     expect(screen.queryByTestId("network-card-list")).not.toBeInTheDocument();
+  });
+
+  it("says a slow comparison is still working, and offers the period's last week", () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+        data: undefined, isPending: true, error: null, refetch: vi.fn(),
+      } as never);
+      renderTab();
+      act(() => vi.advanceTimersByTime(STILL_WORKING_AFTER_MS));
+      expect(screen.getByText("Still working: a long period takes longer to count.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Narrow to the last 7 days of the period" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the error banner with a retry on error", () => {
@@ -432,5 +449,7 @@ describe("NetworkTab", () => {
 
     fireEvent.change(document.querySelector("input[type='date']")!, { target: { value: "2026-03-25" } });
     expect(screen.getAllByTestId("network-row")).toHaveLength(200);
-  });
+    // The cap is 200 rows, so proving it renders a few hundred rows several
+    // times; on a loaded machine that alone outlasts the default timeout.
+  }, 45_000);
 });

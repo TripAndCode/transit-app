@@ -121,7 +121,7 @@ What the user sees/does:
   `frontend/src/components/analysis/StopChart.test.ts`,
   `frontend/src/components/charts/MareyDiagram.test.tsx`,
   `frontend/src/components/charts/mareyLayout.test.ts`.
-- Backend: `tests/api/test_api_map.py`, `tests/unit/test_range_updates_filter_ch.py`,
+- Backend: `tests/api/test_api_map.py`, `tests/clickhouse/test_range_updates_filter_ch.py`,
   `tests/unit/test_response_schema_ratchet.py` (all exercise `/route-shape`
   alongside the Map tab's other endpoints in `api/routers/map.py`).
 

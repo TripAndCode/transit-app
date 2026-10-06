@@ -1,10 +1,8 @@
-import { useId, useState } from "react";
+import { use, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAgencies } from "../../api/hooks";
 import { delayRampVar } from "../../styles/tokens";
-import { WEEKDAYS, isoDaysBefore, lastClosedDayISO, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
+import { DataEndContext, WEEKDAYS, defaultPeriod, isoDaysBefore, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
 import type { ScopeSummary } from "../../api/types";
-import { useAgencyId } from "../../api/useAgencyId";
 import { RoutesPicker } from "../RoutesPicker";
 import { buildTimeBandOptions } from "../timeBandOptions";
 import { sinceStart } from "./brushMath";
@@ -43,13 +41,14 @@ function DelayBar({ minutes }: { minutes: number }) {
   );
 }
 
-/** Presets end on the agency's latest data day, so "last 7 days" is the last
- *  seven days that have data rather than a week that may not have arrived. */
+/** Presets end where the default period ends: the agency's latest data day,
+ *  or the last closed day when the data runs into today. "Last 7 days" is
+ *  then the last seven days that have data, never a week that has not
+ *  arrived or a day still under way, and the default period is one of the
+ *  presets. */
 export function PeriodControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
-  const id = useAgencyId();
-  const { data: agencies } = useAgencies();
-  const anchor = summary?.latest ?? agencies?.find((a) => a.agency_id === id)?.latest_data_date ?? lastClosedDayISO();
+  const anchor = defaultPeriod(use(DataEndContext)).to;
   const collectionStart = summary?.earliest ? sinceStart(summary.earliest, anchor) : null;
   function setDate(edge: "from" | "to", value: string) {
     const next = { from: scope.from, to: scope.to, [edge]: value };
@@ -144,6 +143,7 @@ export function DaysControl({ scope, update, summary }: ControlProps) {
           );
         })}
       </div>
+      {weekdayMeans.size > 0 && <p className="scope-note">{t("scope.control.weekday_colour")}</p>}
       <label htmlFor={serviceId} className="scope-field">
         {t("scope.control.service")}
       </label>
@@ -292,6 +292,11 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
               fill="var(--accent-strong)"
             />
           </svg>
+          <div className="scope-curve-axis" aria-hidden="true">
+            <span>{t("scope.control.minutes", { n: 0 })}</span>
+            <span>{t("scope.control.axis_lateness")}</span>
+            <span>{t("scope.control.minutes", { n: MAX_LATE_SEC / 60 })}</span>
+          </div>
           <p className="scope-readout">
             {t("scope.control.readout", {
               n: Math.round((value / 60) * 10) / 10,

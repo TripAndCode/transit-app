@@ -425,6 +425,14 @@
   flex-direction: column;
   justify-content: flex-end;
 }
+/* The sparkline fades to a faint texture under the figures, which sit at
+   the figure's left edge, so its line never runs across their glyphs.
+   Measured in px rather than %: the text keeps its width while the figure
+   narrows, and on a phone it spans most of the box. */
+.ov-hero-figure > svg {
+  -webkit-mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
+  mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
+}
 /* .label and .val below must stay `position: relative` -- without it they
    are non-positioned in-flow content, which paints BEFORE (under) the
    positioned, absolutely-filled sparkline behind them, regardless of DOM
