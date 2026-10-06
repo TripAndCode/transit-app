@@ -31,6 +31,11 @@ def test_api_key_create_accepts_the_pro_tier_and_a_datetime_expiry():
     assert isinstance(body.expires_at, datetime)
 
 
+def test_api_key_create_reads_an_expiry_without_an_offset_as_utc():
+    body = ApiKeyCreate(owner_user_id=1, expires_at="2027-01-01T09:00:00")
+    assert body.expires_at == datetime(2027, 1, 1, 9, tzinfo=timezone.utc)
+
+
 @pytest.mark.parametrize(
     "payload",
     [

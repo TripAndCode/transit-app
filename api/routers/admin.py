@@ -709,6 +709,12 @@ class ApiKeyCreate(BaseModel):
     label: str | None = Field(default=None, max_length=120)
     expires_at: datetime | None = None
 
+    @field_validator("expires_at")
+    @classmethod
+    def _utc_when_naive(cls, v: datetime | None) -> datetime | None:
+        # asyncpg reads a naive value for a timestamptz column in the server's local zone.
+        return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
+
 
 class ApiKeyListOut(BaseModel):
     """The bounded API-key listing plus whether the cap actually cut rows.
