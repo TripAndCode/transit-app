@@ -58,6 +58,10 @@ export function InsightHint({
           background: "transparent",
           border: "none",
           padding: 2,
+          // WCAG 2.5.8's 24 px minimum target, around a 16 px glyph.
+          minWidth: 24,
+          minHeight: 24,
+          justifyContent: "center",
           cursor: "pointer",
           color: open ? "var(--accent)" : "var(--text-tertiary)",
           display: "inline-flex",
@@ -65,7 +69,7 @@ export function InsightHint({
           transition: "color var(--transition)",
         }}
       >
-        <Info size={14} strokeWidth={1.75} />
+        <Info size={16} strokeWidth={1.75} />
       </button>
       {open &&
         createPortal(

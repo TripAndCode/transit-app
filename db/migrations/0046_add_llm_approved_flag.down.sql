@@ -1,3 +1,4 @@
+-- DESTRUCTIVE: deletes the llm_approved_changed audit rows and drops users.llm_approved.
 DELETE FROM login_events WHERE kind = 'llm_approved_changed';
 ALTER TABLE login_events DROP CONSTRAINT IF EXISTS login_events_kind_check;
 ALTER TABLE login_events ADD CONSTRAINT login_events_kind_check CHECK (

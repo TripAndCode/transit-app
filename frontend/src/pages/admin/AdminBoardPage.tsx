@@ -16,6 +16,7 @@ import { SkeletonChart, SkeletonKpiRow, SkeletonTable } from "../../components/S
 import { Tooltip } from "../../components/Tooltip";
 import { Modal } from "../../components/Modal";
 import { RunTimeline } from "./RunTimeline";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
 
@@ -198,16 +199,13 @@ export function AdminBoardPage() {
       aria-busy={isPending}
       style={{ padding: 24, display: "grid", gap: 16, alignContent: "start" }}
     >
-      <header style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 22, margin: 0 }}>{t("admin.board.title")}</h1>
-        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("admin.board.poll_note")}</span>
-        <span style={{ flex: 1 }} />
-        {reanalyzeBlockedReason === null ? (
-          reanalyzeButton
-        ) : (
-          <Tooltip label={reanalyzeBlockedReason}>{reanalyzeButton}</Tooltip>
-        )}
-      </header>
+      <PageHeader
+        title={t("admin.board.title")}
+        subtitle={t("admin.board.poll_note")}
+        actions={
+          reanalyzeBlockedReason === null ? reanalyzeButton : <Tooltip label={reanalyzeBlockedReason}>{reanalyzeButton}</Tooltip>
+        }
+      />
 
       <Modal
         open={confirming}

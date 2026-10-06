@@ -15,3 +15,17 @@
 .trend-single-day { margin: 12px 0 20px; color: var(--text-secondary); font-size: var(--text-sm); }
 .ranking-sparse-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0; color: var(--text-secondary); font-size: var(--text-sm); }
 .ranking-rows-shown { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; color: var(--text-tertiary); font-size: var(--text-xs); }
+
+.cert-staff { margin-top: 24px; color: var(--text-secondary); }
+.cert-staff > summary { cursor: pointer; font-size: var(--text-sm); }
+.cert-staff__summary { font-size: var(--text-sm); }
+
+/* A printed report is the report alone: the list beside it and the insight
+   panel are the screen's navigation, and beside a certificate the screen's
+   scope would contradict the departure the certificate names. */
+@media print {
+  .analysis-report-list { display: none !important; }
+  .analysis-insights { display: none !important; }
+  .cert-staff { display: none; }
+  .analysis-tab:has(.cert-card) .scope-sentence { display: none; }
+}
