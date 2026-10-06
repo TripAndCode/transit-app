@@ -13,10 +13,11 @@ from tests.fixtures.gtfs_rt import header_only_feed
 
 @pytest.fixture(autouse=True)
 def _no_restamp_tables(ch_client):
-    """The shared ch_client fixture empties `updates` only; the tables a
-    restamp leaves behind would otherwise carry into the next test."""
+    """The shared ch_client fixture empties `updates` only; the tables and
+    the mark a restamp leaves behind would otherwise carry into the next test."""
     for table in ("updates_restamp_staging", BACKUP_TABLE, LEFTOVER_TABLE):
         ch_client.command(f"DROP TABLE IF EXISTS {table}")
+    ch_client.command("ALTER TABLE updates MODIFY COMMENT ''")
 
 
 def _utc(iso: str) -> datetime:
@@ -212,3 +213,31 @@ def test_a_name_without_a_date_directory_takes_any_convertible_header(ch_client,
     insert_updates(ch_client, 1, [_row(f"/{pb}", "2026-09-05T00:00:00+00:00", "undated", header)])
     restamp_archive_rows(ch_client)
     assert _stamps(ch_client)["undated"] == _utc(archive_captured_at(header_only_feed(header), "", pb))
+
+
+def _comment(ch_client, table: str) -> str:
+    return ch_client.query(
+        "SELECT comment FROM system.tables WHERE database = currentDatabase() AND name = {t:String}",
+        parameters={"t": table},
+    ).result_rows[0][0]
+
+
+def test_a_copy_left_before_the_swap_never_becomes_the_backup(ch_client):
+    """Nothing to move does not mean a swap happened: a fresh table whose
+    rows are all stamped right still has its copy dropped, not kept as the
+    backup that a later run would then trust over the real original."""
+    d, pb = "20260913", "TripUpdate_113312.pb"
+    header = _epoch("2026-09-13T11:33:05+00:00")
+    stamp = archive_captured_at(header_only_feed(header), d, pb)
+    insert_updates(ch_client, 1, [_row(f"{d}/{pb}", stamp, "stamped right", header)])
+    ch_client.command("CREATE TABLE updates_restamp_staging AS updates")
+    original = _stamps(ch_client)
+    restamp_archive_rows(ch_client)
+    backup = dict(ch_client.query(f"SELECT trip_id, captured_at FROM {BACKUP_TABLE}").result_rows)
+    assert backup == original
+
+
+def test_a_finished_run_leaves_updates_unmarked(ch_client):
+    _seed(ch_client)
+    restamp_archive_rows(ch_client)
+    assert _comment(ch_client, "updates") == ""

@@ -26,6 +26,7 @@ _STAGING = "updates_restamp_staging"
 BACKUP_TABLE = "updates_before_restamp"
 # Where the swapped-out table goes when it holds rows the copy never saw.
 LEFTOVER_TABLE = "updates_restamp_leftover"
+_COPY_MARK = "restamp copy"
 
 _HEADER = "toDateTime64(assumeNotNull(feed_timestamp), 0, 'UTC')"
 _NAME_DAY = "toDate(parseDateTimeOrNull(substring(file_name, 1, 8), '%Y%m%d'))"
@@ -86,33 +87,51 @@ def _fingerprint(client, table: str) -> tuple:
     )
 
 
-def _rows_to_move(client) -> int:
-    return client.query(
-        f"SELECT countIf(captured_at != {_RESTAMPED}) FROM {_TABLE} WHERE NOT startsWith(file_name, 'live_')"
-    ).result_rows[0][0]
+def _exists(client, table: str) -> bool:
+    return bool(client.query(f"EXISTS TABLE {table}").result_rows[0][0])
 
 
-def _settle_interrupted_run(client) -> None:
-    """Resolve a staging table an interrupted run left behind.
+def _table_comment(client, table: str) -> str | None:
+    rows = client.query(
+        "SELECT comment FROM system.tables WHERE database = currentDatabase() AND name = {t:String}",
+        parameters={"t": table},
+    ).result_rows
+    return rows[0][0] if rows else None
 
-    Killed before its swap, a run leaves a copy that may be partial and
-    `updates` untouched, so rows still to move: the copy is dropped. Killed
-    after it, `updates` is already restamped and the staging table holds the
-    rows as they were: it becomes the backup, unless an earlier run's backup
-    is already the older original.
-    """
-    if not client.query(f"EXISTS TABLE {_STAGING}").result_rows[0][0]:
-        return
-    if _rows_to_move(client) or client.query(f"EXISTS TABLE {BACKUP_TABLE}").result_rows[0][0]:
+
+def _keep_swapped_out(client) -> None:
+    """After a swap the staging table holds the rows as they were. It becomes
+    the backup unless an earlier run's backup, the older original, is already
+    there; then `updates` sheds the copy's mark."""
+    if _exists(client, BACKUP_TABLE):
         client.command(f"DROP TABLE {_STAGING}")
     else:
         client.command(f"RENAME TABLE {_STAGING} TO {BACKUP_TABLE}")
+    client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
+
+
+def _settle_interrupted_run(client) -> None:
+    """Finish or undo whatever an interrupted run left behind.
+
+    The copy is created carrying _COPY_MARK as its table comment, and EXCHANGE
+    TABLES swaps whole tables, comment and all, so the mark says where a run
+    stopped whatever the tables hold: on `updates`, the swap happened and the
+    staging table, if still there, holds the rows as they were; otherwise the
+    staging table is a copy, possibly partial, and is dropped.
+    """
+    if _table_comment(client, _TABLE) == _COPY_MARK:
+        if _exists(client, _STAGING):
+            _keep_swapped_out(client)
+        else:
+            client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
+    elif _exists(client, _STAGING):
+        client.command(f"DROP TABLE {_STAGING}")
 
 
 def _check_room(client) -> None:
     """The copy is written beside the table, so the disk must hold the table
     twice until the swap and the backup's drop."""
-    if client.query(f"EXISTS TABLE {LEFTOVER_TABLE}").result_rows[0][0]:
+    if _exists(client, LEFTOVER_TABLE):
         raise RuntimeError(f"{LEFTOVER_TABLE} exists; move its rows into {_TABLE} and drop it first")
     size = client.query(
         "SELECT sum(bytes_on_disk) FROM system.parts"
@@ -139,6 +158,7 @@ def restamp_archive_rows(client) -> None:
     _check_room(client)
     before = _fingerprint(client, _TABLE)
     client.command(f"CREATE TABLE {_STAGING} AS {_TABLE}")
+    client.command(f"ALTER TABLE {_STAGING} MODIFY COMMENT '{_COPY_MARK}'")
     try:
         client.command(f"INSERT INTO {_STAGING} SELECT * REPLACE ({_RESTAMPED} AS captured_at) FROM {_TABLE}")
         if _fingerprint(client, _TABLE) != before:
@@ -152,11 +172,9 @@ def restamp_archive_rows(client) -> None:
     client.command(f"EXCHANGE TABLES {_TABLE} AND {_STAGING}")
     if _fingerprint(client, _STAGING) != before:
         client.command(f"RENAME TABLE {_STAGING} TO {LEFTOVER_TABLE}")
+        client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
         raise RuntimeError(
             f"rows reached {_TABLE} during the swap; the table as it was is in {LEFTOVER_TABLE}. "
             f"Insert its rows missing from {_TABLE}, then drop it"
         )
-    if client.query(f"EXISTS TABLE {BACKUP_TABLE}").result_rows[0][0]:
-        client.command(f"DROP TABLE {_STAGING}")
-    else:
-        client.command(f"RENAME TABLE {_STAGING} TO {BACKUP_TABLE}")
+    _keep_swapped_out(client)
