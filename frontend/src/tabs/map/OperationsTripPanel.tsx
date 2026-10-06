@@ -10,6 +10,8 @@ export type ActiveRouteOption = { code: string; label: string; trips: number; di
 
 type Props = {
   routeName: string;
+  /** Whether any trip is reporting at all, routed or not. */
+  reporting: boolean;
   activeRoutes: ActiveRouteOption[];
   directions: DirectionOption[];
   selectedDirection: string | null;
@@ -74,6 +76,7 @@ function DelayChart({ progress, t }: { progress: LiveTripProgressResponse; t: TF
 
 export function OperationsTripPanel({
   routeName,
+  reporting,
   activeRoutes,
   directions,
   selectedDirection,
@@ -166,7 +169,9 @@ export function OperationsTripPanel({
           )}
         </section>
       ) : (
-        <div className="ops-trip-panel__empty">{t("operations.trip_panel.select_route")}</div>
+        <div className="ops-trip-panel__empty">
+          {t(reporting ? "operations.trip_panel.select_route" : "operations.trip_panel.none_reporting")}
+        </div>
       )}
 
       {trips.length > 1 && (

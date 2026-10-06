@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit, user_key
 from api.range import (
     MAX_RANGE_DAYS,
     RangeCtx,
@@ -51,7 +51,7 @@ from api.range import (
     time_band_clause_ch_for,
 )
 from api.scope_applied import ALL_SIX, scope_applied
-from api.security import csrf_guard
+from api.security import User, csrf_guard, require_user_when_sign_in_exists
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table, jst_midnight_utc, live_table_for
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
@@ -254,7 +254,7 @@ _LIVE_DELAYS_DEDUP_SQL = f"""
 
 
 @router.get("/delays/live", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -349,12 +349,19 @@ async def live_delays(
 
 
 @router.post("/delays/refresh", response_model=None)
-@limiter.limit("5/minute")
+@limiter.limit("5/minute", key_func=user_key)
 async def refresh_live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
+    _user: User | None = Depends(require_user_when_sign_in_exists),
 ) -> dict[str, Any]:
-    """Fetch the agency's current GTFS-RT feed and persist it before reading."""
+    """Fetch the agency's current GTFS-RT feed and persist it before reading.
+
+    A write against the live table, so while sign-in exists it needs a
+    signed-in caller and is metered per account: an anonymous loop against it
+    would otherwise re-poll the collector on every request. In anonymous-only
+    mode it stays open under the per-address limit.
+    """
     csrf_guard(request)
     try:
         inserted = await asyncio.to_thread(_ingest_live_agency, agency_id)
@@ -367,7 +374,7 @@ async def refresh_live_delays(
 
 
 @router.get("/delays/live-progress", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def live_trip_progress(
     request: Request,
     trip_id: str = Query(min_length=1, max_length=300),
@@ -493,7 +500,7 @@ async def live_trip_progress(
 
 
 @router.get("/route-shape", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def route_shape(
     request: Request,
     route: str = Query(min_length=1, max_length=300),
@@ -660,7 +667,7 @@ def build_today_routes(
 
 
 @router.get("/today/route-summary", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def today_route_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -963,7 +970,7 @@ def attach_headsigns(trips: list[RouteTripRow], headsigns: dict[str, str | None]
 
 
 @router.get("/today/route/{route_code}/trips", response_model=RouteTripsResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def route_trips(
     request: Request,
     route_code: str = Path(min_length=1, max_length=300),
@@ -1093,7 +1100,7 @@ def build_route_stop_profile_sql(table: str) -> str:
 
 
 @router.get("/today/route/{route_code}/stop-profile", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def route_stop_profile(
     request: Request,
     route_code: str = Path(min_length=1, max_length=300),
@@ -1285,7 +1292,7 @@ _HEATMAP_CLUSTER_PROJECTION_SQL = """
 
 
 @router.get("/delays/heatmap", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def delay_heatmap(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -1446,7 +1453,7 @@ def timeline_day_in_range(day: CalendarDate, today: CalendarDate) -> bool:
 
 
 @router.get("/delays/timeline", response_model=DelayTimelineResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def delay_timeline(
     request: Request,
     date_: str | None = Query(default=None, alias="date"),

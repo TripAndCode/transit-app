@@ -18,7 +18,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.query.formatter import (
@@ -32,7 +32,9 @@ from pipeline.query.formatter import (
 )
 from pipeline.reports import (
     DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC,
+    MIN_GROUP_SAMPLES,
     ON_TIME_PRESETS,
+    RANKING_MIN_SAMPLES,
     DefinitionMeta,
     compute_compare_ranking,
     compute_council_summary,
@@ -94,10 +96,11 @@ _REPORT_TYPES = (
     "delay_certificate",
 )
 
+_RANKING_TYPES = frozenset({"ranking", "ranking_best"})
 _EARLY_TOLERANCE_TYPES = frozenset({"on_time", "council_summary"})
 _LATE_TOLERANCE_TYPES = frozenset({"on_time", "worst_5min", "council_summary"})
 # The scope's `late` is the on-time tolerance. worst_5min's late cutoff is its
-# "≥5 min" threshold, so the scope never moves it.
+# own over-5-min threshold, so the scope never moves it.
 _SCOPE_LATE_TYPES = frozenset({"on_time", "council_summary"})
 
 # What each report's rows actually filter on. compare_ranking and the dow_*
@@ -175,6 +178,11 @@ class ReportResponse(BaseModel):
     # instead of assuming it does.
     definition: DefinitionMeta
     scope_applied: dict[str, bool]
+    # ranking/ranking_best only (None elsewhere): how many groups qualified
+    # before `limit` cut the list, and the observation count below which a
+    # group's average is too thin to trust.
+    rows_total: int | None = None
+    reliable_min_samples: int | None = None
 
 
 def _report_ctx(ctx: RangeCtx) -> ReportCtx:
@@ -183,7 +191,7 @@ def _report_ctx(ctx: RangeCtx) -> ReportCtx:
 
 
 @router.get("/reports", response_model=list[ReportMeta])
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def list_reports(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -225,7 +233,7 @@ class HeadwayQualityResponse(BaseModel):
 
 
 @router.get("/headway_quality", response_model=HeadwayQualityResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_headway_quality(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -287,7 +295,7 @@ class PerformanceStandardsResponse(BaseModel):
 
 
 @router.get("/performance_standards", response_model=PerformanceStandardsResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_performance_standards(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -387,7 +395,7 @@ class WeatherDelayResponse(BaseModel):
 
 
 @router.get("/weather_delay", response_model=WeatherDelayResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_weather_delay(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -441,7 +449,7 @@ class SuggestionEnvelope(BaseModel):
 
 
 @router.get("/reports/suggest", response_model=SuggestionEnvelope)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_suggestion(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -484,7 +492,7 @@ class ForecastHeatmapResponse(BaseModel):
 
 
 @router.get("/forecast/heatmap", response_model=ForecastHeatmapResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def forecast_heatmap(
     request: Request,
     route: str = Query(..., min_length=1),
@@ -576,7 +584,7 @@ async def _fetch_recent_daily_rows(conn: asyncpg.Connection, agency_id: int) -> 
 
 
 @router.get("/forecast/overview", response_model=ForecastOverviewResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def forecast_overview(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -727,7 +735,7 @@ def _csv_response(
 
 
 @router.get("/reports/{report_type}", response_model=ReportResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def get_report(
     request: Request,
     report_type: str,
@@ -773,6 +781,11 @@ async def get_report(
         "many seconds to be included. Defaults to "
         "pipeline.reports.council.DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC.",
     ),
+    include_sparse: bool = Query(
+        default=False,
+        description="ranking/ranking_best only: also rank groups observed fewer than "
+        "reliable_min_samples times in the period.",
+    ),
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
@@ -810,6 +823,8 @@ async def get_report(
         )
     if threshold_sec is not None and report_type != "delay_certificate":
         raise HTTPException(status_code=400, detail="threshold_sec only applies to the delay_certificate report")
+    if include_sparse and report_type not in _RANKING_TYPES:
+        raise HTTPException(status_code=400, detail="include_sparse only applies to the ranking reports")
 
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
@@ -819,13 +834,22 @@ async def get_report(
     n = limit or 100
     intent: dict = {}
     rows: list
+    rows_total: int | None = None
 
-    if report_type == "ranking":
-        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order="desc", limit=n)
-        intent = {"query_type": "ranking", "limit": n}
-    elif report_type == "ranking_best":
-        rows = await compute_ranking(agency_id, ctx, conn, ch=ch, sort_order="asc", limit=n)
-        intent = {"query_type": "ranking", "limit": n, "sort_order": "asc"}
+    if report_type in _RANKING_TYPES:
+        sort_order = "asc" if report_type == "ranking_best" else "desc"
+        ranked = await compute_ranking(
+            agency_id,
+            ctx,
+            conn,
+            ch=ch,
+            sort_order=sort_order,
+            limit=None,
+            min_samples=MIN_GROUP_SAMPLES if include_sparse else RANKING_MIN_SAMPLES,
+        )
+        rows_total = len(ranked)
+        rows = ranked[:n]
+        intent = {"query_type": "ranking", "limit": n, "sort_order": sort_order}
     elif report_type == "on_time":
         rows = await compute_on_time(
             agency_id,
@@ -973,4 +997,6 @@ async def get_report(
         ctx=_report_ctx(ctx),
         definition=definition,
         scope_applied=report_scope_applied(report_type),
+        rows_total=rows_total,
+        reliable_min_samples=RANKING_MIN_SAMPLES if report_type in _RANKING_TYPES else None,
     )
