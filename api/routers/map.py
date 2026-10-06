@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 
 from api.clickhouse import max_captured_at
 from api.deps import get_agency, get_ch, get_conn
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import (
     MAX_RANGE_DAYS,
     RangeCtx,
@@ -254,7 +254,7 @@ _LIVE_DELAYS_DEDUP_SQL = f"""
 
 
 @router.get("/delays/live", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -367,7 +367,7 @@ async def refresh_live_delays(
 
 
 @router.get("/delays/live-progress", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def live_trip_progress(
     request: Request,
     trip_id: str = Query(min_length=1, max_length=300),
@@ -493,7 +493,7 @@ async def live_trip_progress(
 
 
 @router.get("/route-shape", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def route_shape(
     request: Request,
     route: str = Query(min_length=1, max_length=300),
@@ -660,7 +660,7 @@ def build_today_routes(
 
 
 @router.get("/today/route-summary", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def today_route_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -963,7 +963,7 @@ def attach_headsigns(trips: list[RouteTripRow], headsigns: dict[str, str | None]
 
 
 @router.get("/today/route/{route_code}/trips", response_model=RouteTripsResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def route_trips(
     request: Request,
     route_code: str = Path(min_length=1, max_length=300),
@@ -1093,7 +1093,7 @@ def build_route_stop_profile_sql(table: str) -> str:
 
 
 @router.get("/today/route/{route_code}/stop-profile", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def route_stop_profile(
     request: Request,
     route_code: str = Path(min_length=1, max_length=300),
@@ -1285,7 +1285,7 @@ _HEATMAP_CLUSTER_PROJECTION_SQL = """
 
 
 @router.get("/delays/heatmap", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def delay_heatmap(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -1446,7 +1446,7 @@ def timeline_day_in_range(day: CalendarDate, today: CalendarDate) -> bool:
 
 
 @router.get("/delays/timeline", response_model=DelayTimelineResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def delay_timeline(
     request: Request,
     date_: str | None = Query(default=None, alias="date"),
