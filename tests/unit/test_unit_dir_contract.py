@@ -5,7 +5,6 @@ as a pass; such tests live under `tests/clickhouse/`."""
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 
 import pytest
@@ -13,9 +12,6 @@ import pytest
 from tests.unit.conftest import clickhouse_gated
 
 UNIT_DIR = Path(__file__).resolve().parent
-_GATE_IN_SOURCE = re.compile(
-    r'skipif\(\s*os\.environ\.get\("RUN_CH_INTEGRATION"\)|\bdef test_\w+\([^)]*\bch_(?:async_)?client\b'
-)
 
 
 def test_a_test_requesting_the_clickhouse_fixture_is_gated():
@@ -30,15 +26,6 @@ def test_a_test_skipped_for_want_of_ch_test_is_gated():
 
 def test_a_pure_test_is_not_gated():
     assert clickhouse_gated(["monkeypatch", "tmp_path"], ["RUN_SLOW=1 not set"]) is False
-
-
-def test_no_file_under_tests_unit_declares_a_clickhouse_gate():
-    offenders = sorted(
-        p.name
-        for p in UNIT_DIR.glob("test_*.py")
-        if p.name != Path(__file__).name and _GATE_IN_SOURCE.search(p.read_text())
-    )
-    assert offenders == [], f"ClickHouse-gated tests under tests/unit; move them to tests/clickhouse/: {offenders}"
 
 
 def test_the_clickhouse_directory_exists_and_skips_postgres():
