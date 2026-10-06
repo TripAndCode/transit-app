@@ -1294,6 +1294,31 @@ def test_analyze_builds_agg_route_daily_dwell_run_for_static_join_agency(pg_conn
     assert hist_run_len == 32
 
 
+def test_analyze_dwell_run_drops_a_no_route_visit_but_keeps_it_as_the_next_anchor(pg_conn, agency_id, ch_client):
+    """Stop 2's poll carries no route_code. Its own dwell and running cannot
+    enter the NOT NULL route key, but its departure still anchors stop 3's
+    running time: 36610 - 36410 = 200s. Filtering it out before `LAG()` would
+    pair stop 3 with stop 1's departure instead (580s)."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_dwell_run_row("T1", day, 1, 30, None),
+        _ch_dwell_run_row("T1", day, 2, 50, 20, route_code=None),
+        _ch_dwell_run_row("T1", day, 3, 10, 10),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT route_code, dwell_samples, dwell_sum_sec, run_samples, run_sum_sec "
+            "FROM agg_route_daily_dwell_run WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert cur.fetchall() == [("R1", 1, 0, 1, 200)]
+
+
 def test_analyze_skips_agg_route_daily_dwell_run_for_non_static_join_agency(pg_conn, agency_id, ch_client):
     """An agency whose ingest_strategy isn't static_join must get zero rows
     in agg_route_daily_dwell_run regardless of static schedule -- the read
@@ -1938,3 +1963,104 @@ def test_the_text_dated_aggregate_stores_iso_dates(pg_conn, agency_id, ch_client
     # keys, which is where a mismatch would surface as a collision.
     analyze(agency_id, pg_conn, ch_client)
     assert _agg_snapshot(pg_conn, agency_id)["agg_daily_trend"]
+
+
+def _seed_null_key_rows(pg_conn, agency_id):
+    """Rows a missed static_join leaves behind: a typed observation with no
+    route_code, one with no scheduled_time, and one with neither route nor
+    service -- the last reaches the UNTYPED builders where only the route
+    filter stands between it and a NOT NULL key."""
+    rows = [
+        ("noroute.pb", "2026-04-03T08:10:00", "trip_noroute", "平日", time(8, 10), None, 90),
+        ("notime.pb", "2026-04-04T08:10:00", "trip_notime", "平日", None, "R1", 120),
+        ("nothing.pb", "2026-04-05T08:10:00", "trip_nothing", None, time(8, 10), None, 150),
+    ]
+    with pg_conn.cursor() as cur:
+        for file_name, captured_at, trip_id, service_type, scheduled_time, route_code, dep_delay in rows:
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) VALUES (%s,%s,%s,%s,%s,%s,%s,1,%s)",
+                (agency_id, file_name, captured_at, trip_id, service_type, scheduled_time, route_code, dep_delay),
+            )
+    pg_conn.commit()
+
+
+def test_analyze_keeps_null_route_code_rows_out_of_route_keyed_aggregates(pg_conn, agency_id, ch_client):
+    """A NULL route_code (or NULL scheduled_time for agg_route_hour) must be
+    skipped by every route-keyed builder, not abort the run; the rows that do
+    carry a key keep their counts."""
+    _seed_route_group(pg_conn, agency_id, "R1", "平日")  # 25 typed R1 rows, one per April day
+    _seed_null_key_rows(pg_conn, agency_id)
+
+    _analyze(agency_id, pg_conn, ch_client)  # must not raise NotNullViolation
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT samples FROM agg_route_stats WHERE agency_id=%s AND route_code='R1'", (agency_id,))
+        # 25 + the no-time row (route_stats has no scheduled_time key); the two no-route rows are gone.
+        assert cur.fetchone()[0] == 26
+        cur.execute("SELECT COUNT(*) FROM agg_route_stats WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 1
+
+        cur.execute("SELECT SUM(samples) FROM agg_route_hour WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 25  # the no-time row has no hour key
+        cur.execute("SELECT SUM(samples) FROM agg_route_hour_dow WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 25
+
+        for table in ("agg_daily_trend", "agg_route_daily", "agg_route_daily_dist"):
+            cur.execute(
+                f"SELECT SUM(samples), COUNT(DISTINCT route_code) FROM {table} WHERE agency_id=%s", (agency_id,)
+            )
+            total, routes = cur.fetchone()
+            assert (total, routes) == (26, 1), f"{table}: {total} samples over {routes} route(s)"
+
+
+def test_stop_aggregates_keep_a_null_route_code_row_that_route_keyed_ones_drop(pg_conn, agency_id, ch_client):
+    """agg_stop_daily is keyed by stop, not route, and must keep counting a
+    stop's traffic when the route is unknown; agg_route_stop_daily cannot."""
+    _seed_for_stop_agg(pg_conn, agency_id)  # trip T, route R1, stop s1, 2026-06-09 (3 polls of one event)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'noroute.pb','2026-06-10T08:10:00','T','平日',%s,NULL,1,240)",
+            (agency_id, time(8, 10)),
+        )
+    pg_conn.commit()
+
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COALESCE(SUM(samples), 0) FROM agg_stop_daily WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 2  # 06-09 (R1) and 06-10 (no route) both count for stop s1
+        cur.execute("SELECT COALESCE(SUM(samples), 0) FROM agg_route_stop_daily WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 1  # only the keyed event
+
+
+def test_agg_stop_routes_skips_a_stop_served_only_by_no_route_keys(pg_conn, agency_id, ch_client):
+    """A stop whose every observed key lacks a route_code has no route to list;
+    it must get no agg_stop_routes row rather than a NULL route_codes that
+    aborts the agency's analyze."""
+    _seed_for_stop_agg(pg_conn, agency_id)  # stop s1 served by R1
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES (%s,'s3','無路線停留所',ST_SetSRID(ST_MakePoint(140.76,40.84),4326))",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES (%s,'TN',1,'s3')",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'tn.pb','2026-06-09T08:10:00','TN','平日',%s,NULL,1,60)",
+            (agency_id, time(8, 10)),
+        )
+    pg_conn.commit()
+
+    _analyze(agency_id, pg_conn, ch_client)  # must not raise NotNullViolation
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT stop_id, route_codes FROM agg_stop_routes WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchall() == [("s1", "R1")]
