@@ -161,14 +161,11 @@ _AGG_TABLES_ORDERED = (
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 
-# Aggregates rebuilt only for the dates whose source rows changed. Membership
-# binds two places that must agree — a listed table has BOTH its purge and its
-# build restricted — and requires that the staleness signal cover what the
-# table reads; see _dates_needing_rebuild for what that signal can and cannot
-# see. Every listed table is keyed by `date`, which is what makes a date-scoped
-# purge able to express "these rows and no others". Tables reading rows without
-# a dep_delay are covered because the ledger's total_rows counts every row of a
-# date, not only the delay-carrying ones.
+# Aggregates rebuilt only for the dates whose source rows changed: a listed
+# table's purge and build are both date-restricted, so the staleness signal must
+# cover all it reads (see _dates_needing_rebuild). Each is keyed by `date`, so the
+# purge removes exactly what is rebuilt, and the ledger's total_rows counts
+# delay-less rows too.
 _INCREMENTAL_AGG_TABLES = frozenset(
     {
         "agg_daily_trend",
@@ -441,7 +438,7 @@ def _static_fingerprint(agency_id: int, conn, has_static: bool, ingest_strategy:
     cannot hold it.
 
     The agency's ``ingest_strategy`` joins them too: it decides whether the
-    RT-field aggregates (service delivered, dwell/run) are built at all, so an
+    RT-field aggregates (service delivered, dwell/run, headway) are built at all, so an
     agency moving off ``static_join`` would otherwise keep every untouched
     date's rows from the old strategy.
 
@@ -1665,8 +1662,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # Requires BOTH a static schedule (arrival_time/departure_time come
         # from static_stop_times, which `has_static` alone confirms rows
         # exist for) AND an ingest strategy confirmed to send `arr_delay`
-        # (today: static_join; reuses `row` from the agg_service_delivered_daily
-        # check just above) -- either missing means zero rows here, same
+        # (today: static_join; the `ingest_strategy` read before the
+        # transaction) -- either missing means zero rows here, same
         # "row presence is not the availability signal, ingest_strategy is"
         # convention as agg_service_delivered_daily. Same read-side-only caveat
         # applies: sharing ingest_strategy doesn't imply confirmed field
@@ -1790,14 +1787,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # field coverage, so pipeline.reports.headway_quality's reader
         # additionally requires a live rt_field_coverage_probes verdict
         # before trusting these rows.
-        with conn.cursor() as cur:
-            cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
-            row = cur.fetchone()
         if _nothing_to_rebuild("agg_route_headway_daily", rebuild_dates):
             # The heaviest of the two incremental scans, so the run where
             # nothing changed is exactly the one worth not paying for.
             logger.info("  agg_route_headway_daily: unchanged, not rebuilt")
-        elif row and row[0] in RT_INGEST_STRATEGIES:
+        elif ingest_strategy in RT_INGEST_STRATEGIES:
             # One row per (route_code, stop_id, service day) with an ARRAY of
             # that group's actual event times (seconds-of-day, scheduled_time
             # parsed + dep_delay) -- cardinality is bounded by routes × stops
