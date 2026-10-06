@@ -48,8 +48,14 @@ async def test_date_column_rejects_text_parameter_and_accepts_date(aconn, aagenc
     assert await aconn.fetchval("SELECT date FROM agg_daily_trend WHERE agency_id = $1", aagency_id) == day
 
 
+def test_the_lossless_down_is_not_marked_destructive():
+    down = migrate._MIGRATIONS_DIR / "0068_agg_daily_trend_date_type.down.sql"
+    assert not migrate.is_destructive_down(down.read_text())
+
+
 def test_down_restores_iso_text_and_up_restores_date(pg_conn, agency_id):
-    """Rolled back without ``force_destructive``: the down is lossless, so it is not marked."""
+    """Rolling back to 0067 also rolls back every later migration, some of which
+    may be marked destructive; this test is about 0068's round trip alone."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples) "
@@ -58,7 +64,7 @@ def test_down_restores_iso_text_and_up_restores_date(pg_conn, agency_id):
         )
     pg_conn.commit()
     try:
-        migrate.migrate_down("0067", pg_conn)
+        migrate.migrate_down("0067", pg_conn, force_destructive=True)
         assert _column_type(pg_conn, "agg_daily_trend", "date") == "text"
         with pg_conn.cursor() as cur:
             cur.execute("SELECT date FROM agg_daily_trend WHERE agency_id = %s", (agency_id,))
