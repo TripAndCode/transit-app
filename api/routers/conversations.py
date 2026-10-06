@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, clamp_range_ctx
 from api.security import User, csrf_guard, require_llm_approved
 from pipeline.query import conversations as _conv
@@ -179,7 +179,7 @@ async def list_conversations(
 
 
 @router.post("/conversations", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def create_conversation(
     request: Request,
     body: CreateConversation,
@@ -210,7 +210,7 @@ async def get_conversation(
 
 
 @router.patch("/conversations/{conversation_id}", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def update_conversation(
     request: Request,
     conversation_id: str,
@@ -228,7 +228,7 @@ async def update_conversation(
 
 
 @router.delete("/conversations/{conversation_id}")
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def delete_conversation(
     request: Request,
     conversation_id: str,
@@ -254,7 +254,7 @@ async def list_messages(
 
 
 @router.post("/conversations/migrate-anon")
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def migrate_anon_endpoint(
     request: Request,
     body: MigrateAnon,
@@ -275,7 +275,7 @@ async def migrate_anon_endpoint(
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def append_message_endpoint(
     request: Request,
     conversation_id: str,
@@ -466,7 +466,7 @@ class FollowupBody(BaseModel):
 
 
 @router.post("/conversations/{conversation_id}/followup", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def followup_endpoint(
     request: Request,
     conversation_id: str,

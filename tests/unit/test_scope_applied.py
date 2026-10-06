@@ -26,7 +26,7 @@ def test_every_report_type_declares_its_scope():
 
 def test_tolerances_are_applied_only_where_the_report_has_them():
     assert report_scope_applied("on_time")["late"] and report_scope_applied("on_time")["early"]
-    # worst_5min's late cutoff is its "≥5 min" threshold, not the scope's on-time tolerance.
+    # worst_5min's late cutoff is its own over-5-min threshold, not the scope's on-time tolerance.
     assert not report_scope_applied("worst_5min")["late"] and not report_scope_applied("worst_5min")["early"]
     assert report_scope_applied("council_summary")["late"]
     assert not report_scope_applied("ranking")["late"]

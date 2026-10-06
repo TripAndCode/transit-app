@@ -37,7 +37,7 @@ import time
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
 import asyncpg
@@ -66,6 +66,9 @@ from pipeline.audit import record_event
 from pipeline.query import admin_audit as _admin_audit
 from pipeline.query import agencies as _agencies
 from pipeline.runs import reap_abandoned_runs_best_effort
+
+if TYPE_CHECKING:
+    from pipeline.health import AgencyFreshness
 
 _log = logging.getLogger(__name__)
 
@@ -1276,6 +1279,7 @@ class CollectorTileOut(BaseModel):
     status: str  # ok | warn | down | unknown
     last_success_at: str | None
     detail: str | None
+    check_failed: bool
     history: list[int]
 
 
@@ -1588,10 +1592,45 @@ async def _maybe_reap_abandoned_runs() -> None:
         _log.warning("board: abandoned-run sweep failed", exc_info=True)
 
 
+#: How long one aggregate-freshness answer serves the board. Staleness
+#: compares whole JST days, while the board polls every few seconds, so a fresh
+#: answer per poll would re-run the Postgres reads and a ClickHouse probe per
+#: agency for nothing. A failed check is held as long, so an outage does not
+#: cost every poll a probe that times out. Ops reads the check live.
+_BOARD_FRESHNESS_TTL_SEC = 300.0
+
+#: Monotonic stamp and answer (``None`` when the check failed) of this
+#: process's last aggregate-freshness check for the board.
+_board_freshness_cache: "tuple[float, list[AgencyFreshness] | None] | None" = None
+
+
+async def _board_agency_freshness(conn: asyncpg.Connection, ch: AsyncClient) -> "list[AgencyFreshness] | None":
+    """``pipeline.health.aggregate_freshness`` for the board, cached per process."""
+    from pipeline.health import aggregate_freshness
+
+    global _board_freshness_cache
+    stamped = time.monotonic()
+    if _board_freshness_cache is not None and stamped - _board_freshness_cache[0] < _BOARD_FRESHNESS_TTL_SEC:
+        return _board_freshness_cache[1]
+    # Stamped before the check, not after, holding the previous answer: polls
+    # that arrive while it runs reuse that answer instead of each starting
+    # their own probe.
+    _board_freshness_cache = (stamped, _board_freshness_cache[1] if _board_freshness_cache else None)
+    answer: list[AgencyFreshness] | None
+    try:
+        answer = await aggregate_freshness(conn, ch)
+    except Exception:
+        _log.warning("board: aggregate freshness unavailable", exc_info=True)  # no staleness alerts
+        answer = None
+    _board_freshness_cache = (stamped, answer)
+    return answer
+
+
 @router.get("/board", response_model=AdminBoard)
 async def admin_board(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
 ) -> AdminBoard:
     """The admin entry page's one snapshot: collectors, freshness, alerts."""
     from pipeline.health import migration_status
@@ -1623,7 +1662,12 @@ async def admin_board(
         _log.warning("board: pending-approvals count failed", exc_info=True)
         pending_llm_approvals = 0
 
-    alerts = board_alerts(freshness=freshness, migrations=migrations, pending_llm_approvals=pending_llm_approvals)
+    alerts = board_alerts(
+        freshness=freshness,
+        agency_freshness=await _board_agency_freshness(conn, ch),
+        migrations=migrations,
+        pending_llm_approvals=pending_llm_approvals,
+    )
     return AdminBoard(
         collectors=[CollectorTileOut(**tile) for tile in collectors],
         freshness=[AgencyFreshnessRowOut(**row) for row in freshness],

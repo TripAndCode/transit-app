@@ -20,6 +20,7 @@ function NarrativeSection({ titleKey, bodyKey, children }: { titleKey: string; b
         <p>{t(bodyKey)}</p>
       </div>
       <div className="landing-narrative-section__figure">{children}</div>
+      <p className="landing-narrative-section__hint">{t("landing.narrative.scroll_hint")}</p>
     </section>
   );
 }

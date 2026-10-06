@@ -6,6 +6,7 @@ import { useAgencyId } from "../api/useAgencyId";
 import { SAVED_REPORT_TYPES, destHref, savedTarget } from "../routes/destinations";
 import { loadAnalysisTab, loadReportsHomeTab } from "../routes/lazyTabs";
 import { SCREEN_STRIP_STYLE, screenStripLinkStyle } from "../components/screenStrip";
+import { PageHeader } from "../components/ui/PageHeader";
 
 const ReportsHomeTab = lazy(loadReportsHomeTab);
 const AnalysisTab = lazy(loadAnalysisTab);
@@ -41,6 +42,9 @@ export function SavedExportTab() {
   const view = viewOf(doc, params.get("report"));
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* One heading for every document, above the strip that picks one; the
+          line under it says what the open document holds. */}
+      <PageHeader title={t("saved.title")} subtitle={t(`saved.subtitle_${view}`)} />
       <nav aria-label={t("saved.title")} style={SCREEN_STRIP_STYLE}>
         {VIEWS.map(([v, key, extra]) => (
           <Link
