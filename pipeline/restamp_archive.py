@@ -27,19 +27,20 @@ BACKUP_TABLE = "updates_before_restamp"
 # Where the swapped-out table goes when it holds rows the copy never saw.
 LEFTOVER_TABLE = "updates_restamp_leftover"
 
-_HEADER = "fromUnixTimestamp(toUInt32(assumeNotNull(feed_timestamp)))"
+_HEADER = "toDateTime64(assumeNotNull(feed_timestamp), 0, 'UTC')"
 _NAME_DAY = "toDate(parseDateTimeOrNull(substring(file_name, 1, 8), '%Y%m%d'))"
 # The header is used only where archive_captured_at would use it: a positive
-# timestamp that converts to a datetime (UInt32 seconds here), on the name's
-# JST day or the next one, or under a name with no date directory at all.
-_HAS_HEADER = "ifNull(feed_timestamp, 0) BETWEEN 1 AND 4294967295"
+# timestamp that converts to a datetime, on the name's JST day or the next
+# one, or under a name with no date directory at all. The upper bound is the
+# column type's last second (2299-12-31); a header past it stays unused.
+_HAS_HEADER = "ifNull(feed_timestamp, 0) BETWEEN 1 AND 10413791999"
 _RESTAMPED = f"""multiIf(
     startsWith(file_name, 'live_') OR NOT ({_HAS_HEADER}), captured_at,
-    startsWith(file_name, '/'), toDateTime64({_HEADER}, 0, 'UTC'),
+    startsWith(file_name, '/'), {_HEADER},
     match(file_name, '^[0-9]{{8}}/')
         AND {_NAME_DAY} IS NOT NULL
         AND dateDiff('day', {_NAME_DAY}, toDate({_HEADER}, 'Asia/Tokyo')) BETWEEN 0 AND 1,
-        toDateTime64({_HEADER}, 0, 'UTC'),
+        {_HEADER},
     captured_at)"""
 
 
@@ -85,6 +86,29 @@ def _fingerprint(client, table: str) -> tuple:
     )
 
 
+def _rows_to_move(client) -> int:
+    return client.query(
+        f"SELECT countIf(captured_at != {_RESTAMPED}) FROM {_TABLE} WHERE NOT startsWith(file_name, 'live_')"
+    ).result_rows[0][0]
+
+
+def _settle_interrupted_run(client) -> None:
+    """Resolve a staging table an interrupted run left behind.
+
+    Killed before its swap, a run leaves a copy that may be partial and
+    `updates` untouched, so rows still to move: the copy is dropped. Killed
+    after it, `updates` is already restamped and the staging table holds the
+    rows as they were: it becomes the backup, unless an earlier run's backup
+    is already the older original.
+    """
+    if not client.query(f"EXISTS TABLE {_STAGING}").result_rows[0][0]:
+        return
+    if _rows_to_move(client) or client.query(f"EXISTS TABLE {BACKUP_TABLE}").result_rows[0][0]:
+        client.command(f"DROP TABLE {_STAGING}")
+    else:
+        client.command(f"RENAME TABLE {_STAGING} TO {BACKUP_TABLE}")
+
+
 def _check_room(client) -> None:
     """The copy is written beside the table, so the disk must hold the table
     twice until the swap and the backup's drop."""
@@ -111,9 +135,9 @@ def restamp_archive_rows(client) -> None:
     copy, the same rows, is dropped, so the backup is always the table before
     any restamp.
     """
+    _settle_interrupted_run(client)
     _check_room(client)
     before = _fingerprint(client, _TABLE)
-    client.command(f"DROP TABLE IF EXISTS {_STAGING}")
     client.command(f"CREATE TABLE {_STAGING} AS {_TABLE}")
     try:
         client.command(f"INSERT INTO {_STAGING} SELECT * REPLACE ({_RESTAMPED} AS captured_at) FROM {_TABLE}")

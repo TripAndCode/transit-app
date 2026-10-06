@@ -170,3 +170,45 @@ def test_refuses_to_start_without_room_for_the_copy(ch_client):
     with pytest.raises(RuntimeError, match="free"):
         restamp_archive_rows(_FullDisk(ch_client))
     assert _stamps(ch_client) == before
+
+
+class _DiesAfterSwap:
+    """A client whose process dies right after the swap, before the
+    swapped-out table is renamed."""
+
+    def __init__(self, client):
+        self._client = client
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def command(self, sql, *args, **kwargs):
+        result = self._client.command(sql, *args, **kwargs)
+        if sql.startswith("EXCHANGE TABLES"):
+            raise KeyboardInterrupt("killed after the swap")
+        return result
+
+
+def test_a_retry_after_a_run_killed_at_the_swap_keeps_the_original_rows(ch_client):
+    _seed(ch_client)
+    original = _stamps(ch_client)
+    with pytest.raises(KeyboardInterrupt):
+        restamp_archive_rows(_DiesAfterSwap(ch_client))
+    restamp_archive_rows(ch_client)
+    backup = dict(ch_client.query(f"SELECT trip_id, captured_at FROM {BACKUP_TABLE}").result_rows)
+    assert backup == original
+
+
+def test_a_retry_after_a_run_killed_during_the_copy_starts_over(ch_client):
+    expected = _seed(ch_client)
+    ch_client.command("CREATE TABLE updates_restamp_staging AS updates")
+    restamp_archive_rows(ch_client)
+    assert _stamps(ch_client) == expected
+
+
+@pytest.mark.parametrize("header", [1757000000, 4300000000])
+def test_a_name_without_a_date_directory_takes_any_convertible_header(ch_client, header):
+    pb = "TripUpdate_010000.pb"
+    insert_updates(ch_client, 1, [_row(f"/{pb}", "2026-09-05T00:00:00+00:00", "undated", header)])
+    restamp_archive_rows(ch_client)
+    assert _stamps(ch_client)["undated"] == _utc(archive_captured_at(header_only_feed(header), "", pb))
