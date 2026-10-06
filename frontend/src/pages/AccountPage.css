@@ -1,0 +1,25 @@
+/* Account deletion sits in its own outlined card, apart from the data
+   download, so the irreversible action never reads as a neighbour of a
+   harmless one. Only its button carries the danger colour, outlined rather
+   than filled. */
+.account-danger {
+  margin-top: 32px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.account-danger__button {
+  padding: 6px 14px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-danger);
+  cursor: pointer;
+}
+
+.account-danger__button:disabled {
+  border-color: var(--border-subtle);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}

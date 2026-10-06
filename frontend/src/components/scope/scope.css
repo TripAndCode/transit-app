@@ -270,9 +270,20 @@
   background: var(--border-subtle);
 }
 
+.scope-curve-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
 .scope-readout {
   margin: 0;
   font-family: var(--font-num);
   font-size: var(--text-xs);
   color: var(--text-secondary);
 }
+
+/* Saved views in the Saved views popover: a plain column of pills. */
+.preset-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }

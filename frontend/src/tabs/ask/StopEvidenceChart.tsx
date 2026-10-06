@@ -6,6 +6,7 @@ import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
 import { Tooltip } from "../../components/Tooltip";
 import { formatNumber } from "../../utils/format";
+import { niceAxis } from "../../components/charts/niceAxis";
 import "./stopEvidence.css";
 
 export function StopEvidenceChart({ messageId, points, onFocus, complete = false, message }: {
@@ -73,13 +74,8 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   const selected = points.find((point) => point.sequence === sequence);
   const rawLow = Math.min(0, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
   const rawHigh = Math.max(1, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
-  const roughStep = (rawHigh - rawLow) / 3;
-  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
-  const step = ([1, 2, 5, 10].find((value) => value * magnitude >= roughStep) ?? 10) * magnitude;
-  const low = Math.floor(rawLow / step) * step;
-  const high = Math.ceil(rawHigh / step) * step;
+  const { low, high, ticks } = niceAxis(rawLow, rawHigh, 3);
   const span = high - low;
-  const ticks = Array.from({ length: Math.round(span / step) + 1 }, (_, index) => low + index * step);
   function select(point: StopEvidence | null) {
     setSequence(point?.sequence ?? null);
     onFocus?.(point ? { messageId, sequence: point.sequence, name: point.name,

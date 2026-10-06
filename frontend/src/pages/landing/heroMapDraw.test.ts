@@ -4,18 +4,24 @@ import type { HeroLabels, HeroPalette } from "./heroCanvas";
 import { drawHeroFrame } from "./heroMapDraw";
 import { DURATION, LOOP_START, frameAt } from "./heroMapTimeline";
 import { WIDE_LAYOUT_MIN_WIDTH, layoutFor } from "./heroPanelDraw";
+import { KPI } from "./heroMapScene";
 
 /** Recording stand-in for CanvasRenderingContext2D (jsdom has none): every
  *  method is a no-op, `fillText` records its text, and gradients/metrics
  *  return plausible stand-ins. */
 function makeFakeCtx() {
   const texts: string[] = [];
+  const fills: [string, unknown][] = [];
   const state: Record<string | symbol, unknown> = {};
   const ctx = new Proxy(state, {
     get(target, prop) {
       if (prop in target) return target[prop];
       if (prop === "measureText") return (s: string) => ({ width: s.length * 7 });
-      if (prop === "fillText") return (s: string) => texts.push(s);
+      if (prop === "fillText")
+        return (s: string) => {
+          texts.push(s);
+          fills.push([s, target.fillStyle]);
+        };
       return () => {};
     },
     set(target, prop, value) {
@@ -23,7 +29,7 @@ function makeFakeCtx() {
       return true;
     },
   });
-  return { ctx: ctx as unknown as CanvasRenderingContext2D, texts };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, texts, fills };
 }
 
 const PALETTE: HeroPalette = {
@@ -38,6 +44,7 @@ const PALETTE: HeroPalette = {
   rule: "#e2e2e0",
   accent: "#187b80",
   delay: { ok: "#2EA87A", mild: "#C99A2E", moderate: "#D4622A", severe: "#A8391F" },
+  warning: "#81631D",
   fontBody: "sans-serif",
   fontMono: "monospace",
 };
@@ -78,6 +85,28 @@ function textsAt(t: number, width = 1440, height = 740) {
 }
 
 describe("drawHeroFrame", () => {
+  it("marks the delayed-trip count in the warning amber, not alarm red", () => {
+    const delayedCount = String(KPI.delayedFivePlus);
+    const styles = new Set<unknown>();
+    for (let t = 0; t < DURATION; t += 0.25) {
+      const { ctx, fills } = makeFakeCtx();
+      drawHeroFrame(ctx, 1440, 740, frameAt(t), PALETTE, LABELS);
+      for (const [text, style] of fills) if (text === delayedCount) styles.add(style);
+    }
+    expect(styles).toEqual(new Set([PALETTE.warning]));
+  });
+
+  it("prints the panel's delay figures in the text colour, leaving the delay colour to the dots", () => {
+    const delayFigure = /^\+\d+$/;
+    const styles = new Set<unknown>();
+    for (let t = 0; t < DURATION; t += 0.25) {
+      const { ctx, fills } = makeFakeCtx();
+      drawHeroFrame(ctx, 1440, 740, frameAt(t), PALETTE, LABELS);
+      for (const [text, style] of fills) if (delayFigure.test(text)) styles.add(style);
+    }
+    expect(styles).toEqual(new Set([PALETTE.text]));
+  });
+
   it("renders every moment of the script, wide and narrow, without throwing", () => {
     for (let t = 0; t <= DURATION; t += 0.1) {
       expect(() => textsAt(t)).not.toThrow();
