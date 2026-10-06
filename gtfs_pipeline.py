@@ -438,9 +438,21 @@ def cmd_restamp_archive(args):
     nothing unless --apply; run --apply with ingest stopped."""
     from pipeline.analyze import mark_for_full_rebuild
     from pipeline.clickhouse import ch_conn_kwargs, get_client
-    from pipeline.restamp_archive import BACKUP_TABLE, plan_restamp, restamp_archive_rows
+    from pipeline.restamp_archive import (
+        BACKUP_TABLE,
+        interrupted_run,
+        plan_restamp,
+        restamp_archive_rows,
+        settle_interrupted_run,
+    )
 
     ch_client = get_client()
+    # Settled before planning: once its swap is done, an interrupted run's
+    # `updates` reads as nothing to move.
+    if args.apply:
+        settle_interrupted_run(ch_client)
+    elif interrupted_run(ch_client):
+        logger.warning("an earlier --apply run stopped partway; --apply finishes it first")
     plan = plan_restamp(ch_client)
     for p in plan:
         logger.info(

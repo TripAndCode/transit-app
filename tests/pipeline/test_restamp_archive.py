@@ -241,3 +241,52 @@ def test_a_finished_run_leaves_updates_unmarked(ch_client):
     _seed(ch_client)
     restamp_archive_rows(ch_client)
     assert _comment(ch_client, "updates") == ""
+
+
+def test_the_command_finishes_a_run_killed_after_its_swap(ch_client):
+    """Once swapped, `updates` reads as nothing to move, so the command must
+    settle the interrupted run before it plans, not after."""
+    from argparse import Namespace
+
+    import gtfs_pipeline
+
+    _seed(ch_client)
+    original = _stamps(ch_client)
+    with pytest.raises(KeyboardInterrupt):
+        restamp_archive_rows(_DiesAfterSwap(ch_client))
+    gtfs_pipeline.cmd_restamp_archive(Namespace(apply=True))
+    backup = dict(ch_client.query(f"SELECT trip_id, captured_at FROM {BACKUP_TABLE}").result_rows)
+    assert backup == original
+    assert _comment(ch_client, "updates") == ""
+
+
+def test_a_dry_run_leaves_an_interrupted_run_as_it_found_it(ch_client):
+    from argparse import Namespace
+
+    import gtfs_pipeline
+
+    _seed(ch_client)
+    with pytest.raises(KeyboardInterrupt):
+        restamp_archive_rows(_DiesAfterSwap(ch_client))
+    marked = _comment(ch_client, "updates")
+    gtfs_pipeline.cmd_restamp_archive(Namespace(apply=False))
+    assert _comment(ch_client, "updates") == marked != ""
+    assert ch_client.query("EXISTS TABLE updates_restamp_staging").result_rows == [(1,)]
+
+
+class _WritesThenDiesAtSwap(_WritesDuringSwap):
+    def command(self, sql, *args, **kwargs):
+        result = super().command(sql, *args, **kwargs)
+        if sql.startswith("EXCHANGE TABLES"):
+            raise KeyboardInterrupt("killed after the swap")
+        return result
+
+
+def test_a_row_written_at_a_swap_the_run_died_in_is_still_never_dropped(ch_client):
+    _seed(ch_client)
+    with pytest.raises(KeyboardInterrupt):
+        restamp_archive_rows(_WritesThenDiesAtSwap(ch_client))
+    with pytest.raises(RuntimeError, match=LEFTOVER_TABLE):
+        restamp_archive_rows(ch_client)
+    leftover = ch_client.query(f"SELECT trip_id FROM {LEFTOVER_TABLE} WHERE trip_id = 'late'").result_rows
+    assert leftover == [("late",)]

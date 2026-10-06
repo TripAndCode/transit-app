@@ -26,7 +26,10 @@ _STAGING = "updates_restamp_staging"
 BACKUP_TABLE = "updates_before_restamp"
 # Where the swapped-out table goes when it holds rows the copy never saw.
 LEFTOVER_TABLE = "updates_restamp_leftover"
-_COPY_MARK = "restamp copy"
+# The copy's table comment: this prefix plus the fingerprint `updates` had
+# when the copy was taken, which a resumed run checks the swapped-out table
+# against.
+_COPY_MARK = "restamp copy of "
 
 _HEADER = "toDateTime64(assumeNotNull(feed_timestamp), 0, 'UTC')"
 _NAME_DAY = "toDate(parseDateTimeOrNull(substring(file_name, 1, 8), '%Y%m%d'))"
@@ -110,18 +113,47 @@ def _keep_swapped_out(client) -> None:
     client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
 
 
-def _settle_interrupted_run(client) -> None:
+def _finish_swap(client, before: tuple) -> None:
+    """Keep the swapped-out table, unless it holds rows the copy never saw:
+    a write in the instant between the copy's check and the swap. Then it is
+    kept as LEFTOVER_TABLE and the run fails, so those rows are never dropped."""
+    if _fingerprint(client, _STAGING) != before:
+        client.command(f"RENAME TABLE {_STAGING} TO {LEFTOVER_TABLE}")
+        client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
+        raise RuntimeError(
+            f"rows reached {_TABLE} during the swap; the table as it was is in {LEFTOVER_TABLE}. "
+            f"Insert its rows missing from {_TABLE}, then drop it"
+        )
+    _keep_swapped_out(client)
+
+
+def _marked_fingerprint(comment: str | None) -> tuple | None:
+    if not comment or not comment.startswith(_COPY_MARK):
+        return None
+    count, digest = comment[len(_COPY_MARK) :].split(":")
+    return (int(count), int(digest))
+
+
+def interrupted_run(client) -> bool:
+    """Whether an earlier run stopped partway, leaving a copy or a mark.
+    Reads only."""
+    return _exists(client, _STAGING) or _marked_fingerprint(_table_comment(client, _TABLE)) is not None
+
+
+def settle_interrupted_run(client) -> None:
     """Finish or undo whatever an interrupted run left behind.
 
     The copy is created carrying _COPY_MARK as its table comment, and EXCHANGE
     TABLES swaps whole tables, comment and all, so the mark says where a run
     stopped whatever the tables hold: on `updates`, the swap happened and the
-    staging table, if still there, holds the rows as they were; otherwise the
-    staging table is a copy, possibly partial, and is dropped.
+    staging table, if still there, holds the rows as they were, checked
+    against the fingerprint the mark records; otherwise the staging table is a
+    copy, possibly partial, and is dropped.
     """
-    if _table_comment(client, _TABLE) == _COPY_MARK:
+    before = _marked_fingerprint(_table_comment(client, _TABLE))
+    if before is not None:
         if _exists(client, _STAGING):
-            _keep_swapped_out(client)
+            _finish_swap(client, before)
         else:
             client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
     elif _exists(client, _STAGING):
@@ -154,11 +186,11 @@ def restamp_archive_rows(client) -> None:
     copy, the same rows, is dropped, so the backup is always the table before
     any restamp.
     """
-    _settle_interrupted_run(client)
+    settle_interrupted_run(client)
     _check_room(client)
     before = _fingerprint(client, _TABLE)
     client.command(f"CREATE TABLE {_STAGING} AS {_TABLE}")
-    client.command(f"ALTER TABLE {_STAGING} MODIFY COMMENT '{_COPY_MARK}'")
+    client.command(f"ALTER TABLE {_STAGING} MODIFY COMMENT '{_COPY_MARK}{before[0]}:{before[1]}'")
     try:
         client.command(f"INSERT INTO {_STAGING} SELECT * REPLACE ({_RESTAMPED} AS captured_at) FROM {_TABLE}")
         if _fingerprint(client, _TABLE) != before:
@@ -170,11 +202,4 @@ def restamp_archive_rows(client) -> None:
         client.command(f"DROP TABLE IF EXISTS {_STAGING}")
         raise
     client.command(f"EXCHANGE TABLES {_TABLE} AND {_STAGING}")
-    if _fingerprint(client, _STAGING) != before:
-        client.command(f"RENAME TABLE {_STAGING} TO {LEFTOVER_TABLE}")
-        client.command(f"ALTER TABLE {_TABLE} MODIFY COMMENT ''")
-        raise RuntimeError(
-            f"rows reached {_TABLE} during the swap; the table as it was is in {LEFTOVER_TABLE}. "
-            f"Insert its rows missing from {_TABLE}, then drop it"
-        )
-    _keep_swapped_out(client)
+    _finish_swap(client, before)
