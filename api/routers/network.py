@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from api.deps import get_ch, get_conn
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import scope_applied
 from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
@@ -73,7 +73,7 @@ class NetworkSummary(BaseModel):
 
 
 @router.get("/summary", response_model=NetworkSummary)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def network_summary(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),

@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import i18n from "../i18n";
+import { isToday } from "./threadDateBuckets";
 
 /** Locale-neutral separator for joining short filter/context fragments
  *  (e.g. route name, date range, service type) into one line. */
@@ -60,6 +61,12 @@ export function formatDateTime(iso: string, opts: Intl.DateTimeFormatOptions = D
   return dateFormat(opts).format(date);
 }
 
+/** When a feed report arrived: its time alone when that was today (JST),
+ *  otherwise its date and time. */
+export function formatReportTime(iso: string): string {
+  return isToday(iso) ? formatDateTime(iso, { timeStyle: "short" }) : formatDateTime(iso);
+}
+
 /** Formats a value already expressed on a 0-100 percent scale (e.g. the
  *  API's `on_time_pct`, `service_delivered_pct`). `t` is unused but kept so
  *  this matches every other column formatter's `(v, t) => string` shape. */
@@ -111,17 +118,23 @@ function parseIsoDate(iso: string): Date | null {
   return isNaN(date.getTime()) ? null : date;
 }
 
-function dayFormat(withYear: boolean): Intl.DateTimeFormat {
+function dayFormat(withYear: boolean, withWeekday = false): Intl.DateTimeFormat {
   // Japanese writes the month as 9月, which is its "long" form; "short" is
   // a bare number there.
   const month = resolvedLocale().startsWith("ja") ? "long" : "short";
-  return dateFormat(withYear ? { year: "numeric", month, day: "numeric" } : { month, day: "numeric" });
+  return dateFormat({
+    ...(withYear && { year: "numeric" }),
+    month,
+    day: "numeric",
+    ...(withWeekday && { weekday: "short" }),
+  });
 }
 
-/** One day in the language's date style ("Sep 29, 2026", "2026年9月29日"). */ // i18n-ignore: JSDoc examples
-export function formatDate(iso: string, { year = true }: { year?: boolean } = {}): string {
+/** One day in the language's date style, optionally with its weekday:
+ *  "Sep 29, 2026", "2026年9月29日", "Tue, Sep 29", "9月29日(火)". */ // i18n-ignore: JSDoc examples
+export function formatDate(iso: string, { year = true, weekday = false }: { year?: boolean; weekday?: boolean } = {}): string {
   const date = parseIsoDate(iso);
-  return date ? dayFormat(year).format(date) : EM_DASH;
+  return date ? dayFormat(year, weekday).format(date) : EM_DASH;
 }
 
 /** A period, with its year written once, on the side the language writes it

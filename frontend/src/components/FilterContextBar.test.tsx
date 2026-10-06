@@ -5,23 +5,43 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { FilterContextBar } from "./FilterContextBar";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
+import { DataEndContext } from "../api/scope";
 import type { FilterCtx } from "../api/types";
 
-function renderBar(value: FilterCtx) {
+function renderBar(value: FilterCtx, dataEnd: string | null = null) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isPending: false } as never);
   return renderWithProviders(
-    <MemoryRouter initialEntries={["/agencies/1/ask"]}>
-      <Routes>
-        <Route path="/agencies/:agencyId/ask" element={<FilterContextBar value={value} onChange={() => {}} />} />
-      </Routes>
-    </MemoryRouter>,
+    <DataEndContext value={dataEnd}>
+      <MemoryRouter initialEntries={["/agencies/1/ask"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/ask" element={<FilterContextBar value={value} onChange={() => {}} />} />
+        </Routes>
+      </MemoryRouter>
+    </DataEndContext>,
   );
 }
 
 describe("FilterContextBar", () => {
   beforeEach(async () => await i18n.changeLanguage("en"));
   afterEach(async () => {
+    vi.useRealTimers();
     await i18n.changeLanguage("en");
+  });
+
+  it("marks the period with a line icon, as the rest of the app does, not an emoji", () => {
+    const { container } = renderBar({ dow: "all", time_band: "all", routes: [] }, "2026-09-28");
+    expect(container.textContent).not.toContain("📅");
+    expect(container.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+  });
+
+  it("drafts a dateless filter on the default period, which stops at the data", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-02T14:59:59Z")); // 2026-10-02 23:59:59 JST
+    renderBar({ dow: "all", time_band: "all", routes: [] }, "2026-09-28");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const [from, to] = Array.from(document.querySelectorAll<HTMLInputElement>("input[type='date']"));
+    expect(from.value).toBe("2026-08-30");
+    expect(to.value).toBe("2026-09-28");
   });
 
   it("renders a custom range in the language's date style", () => {

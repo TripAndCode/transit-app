@@ -12,12 +12,14 @@ from api.admin_board import (
     BOARD_WINDOW_DAYS,
     CLAMP_ALERT_PCT,
     COLLECTOR_ORDER,
+    GROUPED_ALERT_MIN,
     board_alerts,
     board_freshness,
     board_window,
     collector_history,
     collector_tiles,
 )
+from pipeline.health import AgencyFreshness
 
 TODAY = date(2026, 9, 20)
 # Analyzed after 09-18 ended, so 09-18 and earlier are fresh, 09-19 is not.
@@ -120,41 +122,88 @@ def _fresh_agency(states: list[str], clamps: list[float | None] | None = None):
     }
 
 
-def test_no_alerts_when_everything_is_fresh_and_current():
-    alerts = board_alerts(
-        freshness=[_fresh_agency(["fresh"] * BOARD_WINDOW_DAYS)],
-        migrations=_Migrations(0),
-        pending_llm_approvals=0,
+def _af(
+    name: str = "Hokuriku",
+    *,
+    aid: int = 1,
+    stale: bool = False,
+    behind: int = 0,
+    data_to: str | None = "2026-09-19",
+    analyzed: datetime | None = ANALYZED_AT,
+) -> AgencyFreshness:
+    return AgencyFreshness(
+        agency_id=aid,
+        agency_name=name,
+        last_analyzed_at=analyzed,
+        analyze_age_hours=1.0,
+        agg_fresh=not stale,
+        agg_behind_days=behind,
+        is_stale=stale,
+        data_to=data_to,
+        clamp_pct=None,
     )
-    assert alerts == []
 
 
-def test_trailing_non_fresh_days_raise_one_warn_per_agency():
-    states = ["fresh"] * (BOARD_WINDOW_DAYS - 3) + ["stale", "missing", "missing"]
-    alerts = board_alerts(freshness=[_fresh_agency(states)], migrations=_Migrations(0), pending_llm_approvals=0)
-    assert len(alerts) == 1
-    assert alerts[0]["level"] == "warn"
-    assert alerts[0]["code"] == "agency_stale"
-    assert alerts[0]["params"]["days"] == 3
-    assert alerts[0]["params"]["agency"] == "Hokuriku"
-    assert alerts[0]["href"] == "/admin/ops"
+def _alerts(**kwargs):
+    kwargs.setdefault("freshness", [])
+    kwargs.setdefault("agency_freshness", [])
+    kwargs.setdefault("migrations", _Migrations(0))
+    kwargs.setdefault("pending_llm_approvals", 0)
+    return board_alerts(**kwargs)
+
+
+def test_no_alerts_when_everything_is_fresh_and_current():
+    assert _alerts(freshness=[_fresh_agency(["fresh"] * BOARD_WINDOW_DAYS)], agency_freshness=[_af()]) == []
+
+
+def test_an_agency_whose_aggregates_lag_its_collected_data_raises_one_warn():
+    alerts = _alerts(agency_freshness=[_af(stale=True, behind=3)])
+    assert [(a["code"], a["level"], a["params"], a["href"]) for a in alerts] == [
+        ("agency_stale", "warn", {"agency": "Hokuriku", "days": 3}, "/admin/ops")
+    ]
     assert "Hokuriku" in alerts[0]["text"]
 
 
-def test_a_gap_that_is_not_trailing_does_not_alert():
-    states = ["fresh"] * 5 + ["missing"] * 2 + ["fresh"] * (BOARD_WINDOW_DAYS - 7)
-    alerts = board_alerts(freshness=[_fresh_agency(states)], migrations=_Migrations(0), pending_llm_approvals=0)
-    assert alerts == []
+def test_heatmap_days_with_nothing_collected_are_not_lag():
+    states = ["fresh"] * (BOARD_WINDOW_DAYS - 3) + ["missing"] * 3
+    assert _alerts(freshness=[_fresh_agency(states)], agency_freshness=[_af()]) == []
+
+
+def test_lagging_agencies_below_the_grouping_threshold_are_named_one_by_one():
+    agencies = [_af(f"A{i}", aid=i, stale=True, behind=1) for i in range(GROUPED_ALERT_MIN - 1)]
+    assert [a["params"]["agency"] for a in _alerts(agency_freshness=agencies)] == [a.agency_name for a in agencies]
+
+
+def test_many_lagging_agencies_share_one_alert_naming_the_longest_lag():
+    agencies = [_af(f"A{i}", aid=i, stale=True, behind=i + 1) for i in range(GROUPED_ALERT_MIN)]
+    alerts = _alerts(agency_freshness=agencies)
+    assert [(a["code"], a["level"], a["params"], a["href"]) for a in alerts] == [
+        ("agencies_stale", "warn", {"count": GROUPED_ALERT_MIN, "days": GROUPED_ALERT_MIN}, "/admin/ops")
+    ]
+
+
+def test_agencies_never_analyzed_share_one_info_alert():
+    # data_to is None both when nothing was collected and when ClickHouse could
+    # not be read; "never analyzed" is true either way.
+    agencies = [_af(f"A{i}", aid=i, data_to=None, analyzed=None) for i in range(13)]
+    assert [(a["code"], a["level"], a["params"], a["href"]) for a in _alerts(agency_freshness=agencies)] == [
+        ("agencies_never_analyzed", "info", {"count": 13}, "/admin/agencies")
+    ]
+
+
+def test_a_never_analyzed_agency_with_collected_data_is_reported_once_as_lagging():
+    alerts = _alerts(agency_freshness=[_af(stale=True, behind=2, analyzed=None)])
+    assert [a["code"] for a in alerts] == ["agency_stale"]
+
+
+def test_an_unavailable_freshness_check_invents_no_staleness_alert():
+    assert _alerts(agency_freshness=None) == []
 
 
 def test_clamp_above_the_threshold_alerts_on_the_worst_day():
     clamps: list[float | None] = [0.1] * BOARD_WINDOW_DAYS
     clamps[4] = CLAMP_ALERT_PCT + 0.49
-    alerts = board_alerts(
-        freshness=[_fresh_agency(["fresh"] * BOARD_WINDOW_DAYS, clamps)],
-        migrations=_Migrations(0),
-        pending_llm_approvals=0,
-    )
+    alerts = _alerts(freshness=[_fresh_agency(["fresh"] * BOARD_WINDOW_DAYS, clamps)])
     assert [a["code"] for a in alerts] == ["clamp_high"]
     assert alerts[0]["params"]["pct"] == pytest.approx(CLAMP_ALERT_PCT + 0.49)
     assert alerts[0]["params"]["date"] == board_window(TODAY)[4].isoformat()
@@ -162,16 +211,12 @@ def test_clamp_above_the_threshold_alerts_on_the_worst_day():
 
 def test_clamp_exactly_at_the_threshold_does_not_alert():
     clamps: list[float | None] = [CLAMP_ALERT_PCT] * BOARD_WINDOW_DAYS
-    alerts = board_alerts(
-        freshness=[_fresh_agency(["fresh"] * BOARD_WINDOW_DAYS, clamps)],
-        migrations=_Migrations(0),
-        pending_llm_approvals=0,
-    )
+    alerts = _alerts(freshness=[_fresh_agency(["fresh"] * BOARD_WINDOW_DAYS, clamps)])
     assert alerts == []
 
 
 def test_migrations_behind_and_pending_approvals_alert():
-    alerts = board_alerts(freshness=[], migrations=_Migrations(2), pending_llm_approvals=3)
+    alerts = _alerts(migrations=_Migrations(2), pending_llm_approvals=3)
     assert [(a["code"], a["level"]) for a in alerts] == [
         ("migrations_behind", "warn"),
         ("llm_approvals_pending", "info"),
@@ -182,7 +227,7 @@ def test_migrations_behind_and_pending_approvals_alert():
 
 
 def test_unavailable_migration_status_raises_no_migration_alert():
-    assert board_alerts(freshness=[], migrations=None, pending_llm_approvals=0) == []
+    assert _alerts(migrations=None) == []
 
 
 # ── collector tiles ──────────────────────────────────────────────────────
@@ -242,6 +287,21 @@ def test_tile_carries_the_last_success_and_its_reason():
     assert tile["last_success_at"] == "2026-09-20T08:05:00Z"
     assert tile["detail"] == "RT feed is degraded"
     assert tile["history"] == [1] * 24
+
+
+def test_tile_says_when_its_status_check_itself_could_not_run():
+    docs = [
+        {
+            "component": "oracle_crawler",
+            "state": "unknown",
+            "last_success_at": None,
+            "details": {"collector_error": "OracleStatusUnavailable: no heartbeat run found"},
+        },
+        {"component": "r2", "state": "degraded", "last_success_at": None, "details": {}},
+    ]
+    tiles = {t["key"]: t for t in collector_tiles(docs, NOW)}
+    assert tiles["oracle_crawler"]["check_failed"] is True
+    assert tiles["r2"]["check_failed"] is False
 
 
 def test_unparseable_last_success_degrades_to_an_empty_history():

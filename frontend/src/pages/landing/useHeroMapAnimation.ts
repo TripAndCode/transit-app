@@ -36,6 +36,7 @@ function resolvePalette(el: Element): HeroPalette {
       moderate: DELAY_RAMP.moderate,
       severe: color("--delay-severe", "#A8391F"),
     },
+    warning: color("--color-warning-text", "#81631D"),
     fontBody: font("--font-body", "sans-serif"),
     fontMono: font("--font-mono", "monospace"),
   };

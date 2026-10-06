@@ -148,7 +148,7 @@ async def test_reports_get_ranking_reads_agg(reports_client, ch_client):
     day = "2026-05-01"
     await _seed_route(pool, agency_id, "44", "平日", day, [300] * 25)
     _run_analyze(agency_id, ch_client)
-    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}")
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1")
     assert resp.status_code == 200
     data = resp.json()
     assert data["report_type"] == "ranking"
@@ -322,7 +322,7 @@ async def test_reports_without_tolerance_concept_still_carry_dedup_and_exclusion
     await _seed_route(pool, agency_id, "RRANK", "平日", day, [120] * 25)
     _run_analyze(agency_id, ch_client)
 
-    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}")
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1")
     assert resp.status_code == 200
     definition = resp.json()["definition"]
     assert definition["preset"] is None
@@ -480,7 +480,7 @@ async def test_ranking_null_service_route_surfaces(reports_client, ch_client):
 
 
 async def compute_ranking_rows(client, agency_id, day):
-    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}")
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1")
     assert resp.status_code == 200
     return resp.json()["rows"]
 
@@ -559,7 +559,7 @@ async def test_reports_ranking_live_ties_break_by_route_code(reports_client, ch_
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, agency_id)
-    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&time_band=morning")
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1&time_band=morning")
     assert resp.status_code == 200
     rows = resp.json()["rows"]
     codes = [r[0] for r in rows if r[0] in ("RLTIE_A", "RLTIE_B")]
@@ -813,7 +813,7 @@ async def test_reports_ranking_falls_back_to_live_under_time_band(reports_client
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, agency_id)
-    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&time_band=morning")
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1&time_band=morning")
     assert resp.status_code == 200
     rows = resp.json()["rows"]
     r = next(x for x in rows if x[0] == "R_TB")
@@ -855,7 +855,7 @@ async def test_reports_ranking_live_percentile_matches_percent_rank_tie_semantic
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, agency_id)
-    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&time_band=morning")
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1&time_band=morning")
     assert resp.status_code == 200
     rows = resp.json()["rows"]
     r = next(x for x in rows if x[0] == "R_TIE_PR")
@@ -887,7 +887,7 @@ async def test_reports_ranking_half_up_rounding_matches_agg_and_live(reports_cli
     mirror_updates_to_ch(ch_client, agency_id)
 
     # Live path: time_band forces the ClickHouse fallback.
-    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&time_band=morning")
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1&time_band=morning")
     assert resp.status_code == 200
     rows = resp.json()["rows"]
     r_live = next(x for x in rows if x[0] == "R_HALF")
@@ -895,7 +895,7 @@ async def test_reports_ranking_half_up_rounding_matches_agg_and_live(reports_cli
 
     # Fast path: analyze() builds agg_route_daily_dist from the same rows.
     _run_analyze(agency_id, ch_client)
-    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}")
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1")
     assert resp.status_code == 200
     rows = resp.json()["rows"]
     r_agg = next(x for x in rows if x[0] == "R_HALF")
@@ -1957,3 +1957,73 @@ async def test_scope_late_leaves_the_worst_5min_threshold_alone(reports_client):
     body = resp.json()
     assert body["definition"]["late_tolerance_sec"] == 300
     assert body["scope_applied"]["late"] is False
+
+
+@pytest.mark.asyncio
+async def test_ranking_leaves_out_groups_with_few_observations_unless_asked(reports_client, ch_client):
+    """A special-day variant with a few dozen observations must not top a
+    ranking of routes with hundreds; include_sparse brings it back."""
+    from pipeline.reports.rankings import RANKING_MIN_SAMPLES
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-06"
+    await _seed_route(pool, agency_id, "SPARSE", "平日", day, [900] * 30)
+    await _seed_route(pool, agency_id, "SOLID", "平日", day, [60] * RANKING_MIN_SAMPLES)
+    _run_analyze(agency_id, ch_client)
+
+    default = (await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}")).json()
+    assert [r[0] for r in default["rows"]] == ["SOLID"]
+    assert default["rows_total"] == 1
+    assert default["reliable_min_samples"] == RANKING_MIN_SAMPLES
+
+    sparse = (await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1")).json()
+    assert [r[0] for r in sparse["rows"]] == ["SPARSE", "SOLID"]
+    assert sparse["rows_total"] == 2
+
+
+@pytest.mark.asyncio
+async def test_ranking_counts_every_ranked_group_beyond_the_limit(reports_client, ch_client):
+    client, agency_id, pool = reports_client
+    day = "2026-05-07"
+    for code in ("A1", "A2", "A3"):
+        await _seed_route(pool, agency_id, code, "平日", day, [120] * 25)
+    _run_analyze(agency_id, ch_client)
+    data = (await client.get(f"/api/{agency_id}/reports/ranking?from={day}&to={day}&include_sparse=1&limit=2")).json()
+    assert len(data["rows"]) == 2
+    assert data["rows_total"] == 3
+
+
+@pytest.mark.asyncio
+async def test_non_ranking_reports_carry_no_ranking_counts(reports_client):
+    client, agency_id, _ = reports_client
+    data = (await client.get(f"/api/{agency_id}/reports/on_time")).json()
+    assert data["rows_total"] is None
+    assert data["reliable_min_samples"] is None
+
+
+@pytest.mark.asyncio
+async def test_live_ranking_applies_the_same_observation_floor(reports_client, ch_client, ch_async_client):
+    from api.main import app
+    from pipeline.reports.rankings import RANKING_MIN_SAMPLES
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-05-11"
+    await _seed_route_at(pool, agency_id, "SPARSE", "平日", day, "08:00", [900] * 30)
+    await _seed_route_at(pool, agency_id, "SOLID", "平日", day, "08:00", [60] * RANKING_MIN_SAMPLES)
+    mirror_updates_to_ch(ch_client, agency_id)
+
+    url = f"/api/{agency_id}/reports/ranking?from={day}&to={day}&time_band=morning"
+    default = (await client.get(url)).json()
+    assert [r[0] for r in default["rows"]] == ["SOLID"]
+    sparse = (await client.get(url + "&include_sparse=1&limit=1")).json()
+    assert [r[0] for r in sparse["rows"]] == ["SPARSE"]
+    assert sparse["rows_total"] == 2
+
+
+@pytest.mark.asyncio
+async def test_include_sparse_is_rejected_outside_the_rankings(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?include_sparse=1")
+    assert resp.status_code == 400

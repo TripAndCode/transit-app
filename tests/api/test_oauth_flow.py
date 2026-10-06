@@ -8,7 +8,7 @@ database side effects (users, oauth_identities, sessions, login_events).
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import quote
 
 import httpx
@@ -536,6 +536,35 @@ async def test_real_login_then_callback_does_not_raise_duplicate_code_verifier(a
     assert resp.status_code == 302
     assert resp.headers["location"] == "/"
     assert "error=" not in resp.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_a_github_error_body_fails_the_login_like_a_provider_outage(auth_client, aconn):
+    """A rejected GitHub token answers `user` and `user/emails` with an error
+    object. The callback sends the visitor back to /login and records the
+    failure, the same as a failed token exchange."""
+    from api.routers import auth as auth_mod
+
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "github"})
+    error_body = MagicMock()
+    error_body.json.return_value = {"message": "Bad credentials"}
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
+    client_mock.get = AsyncMock(return_value=error_body)
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/github/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith("/login?error=provider_down")
+    row = await aconn.fetchrow(
+        "SELECT provider, meta::text AS meta FROM login_events WHERE kind='login_failed' ORDER BY event_id DESC LIMIT 1"
+    )
+    assert row is not None
+    assert row["provider"] == "github"
+    assert '"provider_down"' in row["meta"]
 
 
 @pytest.mark.asyncio

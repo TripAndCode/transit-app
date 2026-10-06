@@ -72,6 +72,13 @@ _log = logging.getLogger(__name__)
 # :func:`_grain_window` enforces the resulting bound at runtime.
 _GRAIN_LOOKBACK_DAYS = 7
 
+# How many pooled connections one overview request may hold at once on its
+# pool-gather path. Eleven stages fan out per request; unbounded, two
+# concurrent cold requests alone would exhaust the pool and queue every other
+# endpoint behind them. The bound trades some of one request's overlap for
+# room for several requests at once.
+OVERVIEW_FANOUT_LIMIT = 4
+
 
 # ---------------------------------------------------------------------------
 # Shared slow-path grain
@@ -696,12 +703,17 @@ async def _concentration(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _G
     }
 
 
+#: A route averaging at least this late (minutes) over the current window
+#: counts as delayed in the headline's count. The count carries it, so the UI
+#: states the threshold it was counted against instead of keeping its own copy.
+DELAYED_ROUTE_MIN = 2.0
+
+
 async def _top_delayed_routes(
     agency_id: int, cur_ctx: RangeCtx, conn, limit: int = 5, ch=None, grain: _Grain | None = None
 ) -> dict:
     """Routes ranked by absolute current-window avg delay ("routes to check
-    now"), plus a count of routes at/above the DELAY_RAMP "not ok" threshold
-    (2.0 min — frontend/src/styles/tokens.ts's ok/mild boundary).
+    now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN``.
 
     Uses cur_ctx (the same current-window — up to 7 days, narrower only when
     ctx itself is narrower — compute_overview_summary already builds for the
@@ -751,9 +763,9 @@ async def _top_delayed_routes(
         ]
 
     if not rows:
-        return {"routes": [], "delayed_count": 0}
+        return {"routes": [], "delayed_count": 0, "delayed_threshold_min": DELAYED_ROUTE_MIN}
 
-    delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= 2.0)
+    delayed_count = sum(1 for r in rows if r["avg_min"] is not None and r["avg_min"] >= DELAYED_ROUTE_MIN)
     top_n = rows[:limit]
     codes = [r["route_code"] for r in top_n]
     names = await _route_short_names(agency_id, codes, conn)
@@ -767,6 +779,7 @@ async def _top_delayed_routes(
             for r in top_n
         ],
         "delayed_count": delayed_count,
+        "delayed_threshold_min": DELAYED_ROUTE_MIN,
     }
 
 
@@ -1212,11 +1225,11 @@ async def compute_overview_summary(
     service_split / sparkline still aggregate over the full ctx to surface
     broader patterns.
 
-    When ``pool`` is supplied (non-None), the ten stage queries are
-    dispatched as concurrent asyncio tasks, each acquiring its own
-    connection from the pool so they can truly run in parallel.  The two
-    ``_peak_hour_by_dow`` calls — identified as 96 % of cold-load time in
-    the baseline measurement — are the primary beneficiaries.  When
+    When ``pool`` is supplied (non-None), the stage queries are dispatched
+    as concurrent asyncio tasks, each acquiring its own pooled connection,
+    with at most ``OVERVIEW_FANOUT_LIMIT`` holding one at a time.  The two
+    ``_peak_hour_by_dow`` calls dominate a cold load, so they start first
+    and the rest share the remaining slots.  When
     ``pool`` is None (the default) the existing sequential path with
     per-stage timed_blocks is used unchanged, preserving behaviour for
     tests and ad-hoc callers.
@@ -1315,9 +1328,11 @@ async def compute_overview_summary(
 
     else:
         # Pool-gather path — each task acquires its own pooled connection
-        # so all ten queries can run concurrently. A single asyncpg
+        # so the queries can run concurrently. A single asyncpg
         # connection cannot multiplex queries; pool.acquire() queues when
-        # saturated, so concurrency is naturally bounded by pool size. `ch`
+        # saturated, so a per-request `asyncio.Semaphore(OVERVIEW_FANOUT_LIMIT)`
+        # caps how many of the stages hold a connection at once, so two
+        # concurrent overview requests cannot drain the pool between them. `ch`
         # (a single shared ClickHouse client, not pool-backed) is closed
         # over directly rather than threaded through `_own_conn`'s *args.
         # No per-stage timed_blocks here; the top-level reports.overview
@@ -1327,37 +1342,41 @@ async def compute_overview_summary(
         # `_route_short_names`, and every fast-path helper's `agg_*` read (plus
         # `_route_weekly_history`'s live scan, in the narrow-`ctx` case where
         # the grain can't cover its span).
+        fanout = asyncio.Semaphore(OVERVIEW_FANOUT_LIMIT)
+
         async def _own_conn(fn, *args):
-            """Acquire a pool connection, call ``fn(*args, conn, ch=ch, grain=grain)``, release."""
-            async with pool.acquire() as c:
+            """Under the fan-out bound, acquire a connection and call ``fn(*args, conn, ch=ch, grain=grain)``."""
+            async with fanout, pool.acquire() as c:
                 return await fn(*args, c, ch=ch, grain=grain)
 
         async def _peak_dow(group: str) -> dict | None:
-            """Acquire a pool connection and run ``_peak_hour_by_dow`` for ``group``."""
-            async with pool.acquire() as c:
+            """``_peak_hour_by_dow`` for ``group``, through the same bounded acquire."""
+            async with fanout, pool.acquire() as c:
                 return await _peak_hour_by_dow(agency_id, ctx, c, group, ch=ch, grain=grain)
 
+        # Stages take fan-out slots in argument order, so the slowest pair
+        # goes first rather than queueing behind stages that finish quickly.
         (
+            peak_weekday,
+            peak_weekend,
             (avg_min, samples),
             (baseline_avg, _),
             movers,
             concentration,
             top_delayed,
             peak,
-            peak_weekday,
-            peak_weekend,
             service_split,
             service_split_daily,
             sparkline_points,
         ) = await asyncio.gather(
+            _peak_dow("weekday"),
+            _peak_dow("weekend"),
             _own_conn(_headline_stats, agency_id, cur_ctx),
             _own_conn(_headline_stats, agency_id, base_ctx),
             _own_conn(_movers, agency_id, cur_ctx, base_ctx),
             _own_conn(_concentration, agency_id, ctx),
             _own_conn(_top_delayed_routes, agency_id, cur_ctx),
             _own_conn(_peak_hour, agency_id, ctx),
-            _peak_dow("weekday"),
-            _peak_dow("weekend"),
             _own_conn(_service_split, agency_id, ctx),
             _own_conn(_service_split_daily, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
