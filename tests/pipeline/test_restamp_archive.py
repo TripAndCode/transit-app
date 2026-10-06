@@ -207,12 +207,20 @@ def test_a_retry_after_a_run_killed_during_the_copy_starts_over(ch_client):
     assert _stamps(ch_client) == expected
 
 
-@pytest.mark.parametrize("header", [1757000000, 4300000000])
-def test_a_name_without_a_date_directory_takes_any_convertible_header(ch_client, header):
+def test_a_name_without_a_date_directory_takes_any_convertible_header(ch_client):
     pb = "TripUpdate_010000.pb"
-    insert_updates(ch_client, 1, [_row(f"/{pb}", "2026-09-05T00:00:00+00:00", "undated", header)])
+    insert_updates(ch_client, 1, [_row(f"/{pb}", "2026-09-05T00:00:00+00:00", "undated", 1757000000)])
     restamp_archive_rows(ch_client)
-    assert _stamps(ch_client)["undated"] == _utc(archive_captured_at(header_only_feed(header), "", pb))
+    assert _stamps(ch_client)["undated"] == _utc(archive_captured_at(header_only_feed(1757000000), "", pb))
+
+
+def test_a_header_on_a_day_not_yet_closed_is_left_out_as_ingest_leaves_it(ch_client):
+    """An undated name takes even a far-future header, as archive_captured_at
+    does; ingest then refuses that day as not closed, and so does the restamp."""
+    insert_updates(ch_client, 1, [_row("/TripUpdate_010000.pb", "2026-09-05T00:00:00+00:00", "undated", 4300000000)])
+    restamp_archive_rows(ch_client)
+    assert "undated" not in _stamps(ch_client)
+    assert ch_client.query(f"SELECT count() FROM {BACKUP_TABLE}").result_rows == [(1,)]
 
 
 def _comment(ch_client, table: str) -> str:
@@ -243,7 +251,7 @@ def test_a_finished_run_leaves_updates_unmarked(ch_client):
     assert _comment(ch_client, "updates") == ""
 
 
-def test_the_command_finishes_a_run_killed_after_its_swap(ch_client):
+def test_the_command_finishes_a_run_killed_after_its_swap(ch_client, caplog):
     """Once swapped, `updates` reads as nothing to move, so the command must
     settle the interrupted run before it plans, not after."""
     from argparse import Namespace
@@ -254,10 +262,12 @@ def test_the_command_finishes_a_run_killed_after_its_swap(ch_client):
     original = _stamps(ch_client)
     with pytest.raises(KeyboardInterrupt):
         restamp_archive_rows(_DiesAfterSwap(ch_client))
+    caplog.set_level("INFO")
     gtfs_pipeline.cmd_restamp_archive(Namespace(apply=True))
     backup = dict(ch_client.query(f"SELECT trip_id, captured_at FROM {BACKUP_TABLE}").result_rows)
     assert backup == original
     assert _comment(ch_client, "updates") == ""
+    assert BACKUP_TABLE in caplog.text, "the operator is told the interrupted restamp is now finished"
 
 
 def test_a_dry_run_leaves_an_interrupted_run_as_it_found_it(ch_client):
@@ -290,3 +300,93 @@ def test_a_row_written_at_a_swap_the_run_died_in_is_still_never_dropped(ch_clien
         restamp_archive_rows(ch_client)
     leftover = ch_client.query(f"SELECT trip_id FROM {LEFTOVER_TABLE} WHERE trip_id = 'late'").result_rows
     assert leftover == [("late",)]
+
+
+def _oracle_row(day: str, captured_at: str) -> tuple:
+    return _row(f"oracle/{day}/TripUpdate_000000.pb", captured_at, "promoted", _epoch(captured_at))
+
+
+def test_a_row_moving_onto_a_promoted_day_is_left_out_as_ingest_leaves_it(ch_client):
+    """A day in `updates` has one source. Archive ingest refuses a file whose
+    rows would land on a day promoted from the live path, so the restamp
+    leaves such rows out of the table and keeps them only in the backup."""
+    d, pb = "20260905", "TripUpdate_160000.pb"
+    late = _row(f"{d}/{pb}", _ts(d, pb), "archive", _epoch("2026-09-05T15:59:55+00:00"))
+    insert_updates(ch_client, 1, [late, _oracle_row("20260906", "2026-09-05T15:30:00+00:00")])
+    (plan,) = plan_restamp(ch_client)
+    assert (plan.archive_rows, plan.rows_to_move, plan.rows_refused) == (1, 0, 1)
+    restamp_archive_rows(ch_client)
+    assert set(_stamps(ch_client)) == {"promoted"}
+    assert ch_client.query(f"SELECT trip_id FROM {BACKUP_TABLE} WHERE trip_id = 'archive'").result_rows == [
+        ("archive",)
+    ]
+
+
+def test_promoted_rows_are_neither_moved_nor_counted_as_archive_rows(ch_client):
+    insert_updates(ch_client, 1, [_oracle_row("20260906", "2026-09-05T15:30:00+00:00")])
+    assert plan_restamp(ch_client) == []
+
+
+def test_a_dated_name_keeps_its_reading_for_a_header_far_off_its_day(ch_client):
+    """Past 2149 a Date wraps; the window is compared on the true day."""
+    d, pb = "20260905", "TripUpdate_054355.pb"
+    insert_updates(ch_client, 1, [_row(f"{d}/{pb}", _ts(d, pb), "far", 7450880400)])
+    restamp_archive_rows(ch_client)
+    assert _stamps(ch_client)["far"] == _utc(archive_captured_at(header_only_feed(7450880400), d, pb))
+
+
+def test_the_command_waits_out_no_one_and_writes_nothing_while_the_pipeline_lock_is_held(ch_client, pg_conn):
+    from argparse import Namespace
+
+    import gtfs_pipeline
+    from pipeline.locks import INGEST_ANALYZE_LOCK_KEY, try_lock_ingest_analyze
+
+    _seed(ch_client)
+    before = _stamps(ch_client)
+    assert try_lock_ingest_analyze(pg_conn)
+    try:
+        with pytest.raises(SystemExit):
+            gtfs_pipeline.cmd_restamp_archive(Namespace(apply=True))
+    finally:
+        with pg_conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s)", (INGEST_ANALYZE_LOCK_KEY,))
+    assert _stamps(ch_client) == before
+
+
+def test_the_command_stops_at_a_leftover_table_in_either_mode(ch_client):
+    from argparse import Namespace
+
+    import gtfs_pipeline
+
+    _seed(ch_client)
+    before = _stamps(ch_client)
+    ch_client.command(f"CREATE TABLE {LEFTOVER_TABLE} AS updates")
+    for apply in (False, True):
+        with pytest.raises(SystemExit):
+            gtfs_pipeline.cmd_restamp_archive(Namespace(apply=apply))
+    assert _stamps(ch_client) == before
+
+
+def test_the_command_checks_for_room_before_it_marks_anything(ch_client, pg_conn, agency_id, monkeypatch):
+    from argparse import Namespace
+
+    import gtfs_pipeline
+    from pipeline import restamp_archive
+
+    d, pb = "20260905", "TripUpdate_054355.pb"
+    insert_updates(ch_client, agency_id, [_row(f"{d}/{pb}", _ts(d, pb), "t", _epoch("2026-09-05T05:43:50+00:00"))])
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_meta (agency_id, analyzed_at, static_fingerprint) VALUES (%s, now(), 'fp')", (agency_id,)
+        )
+    pg_conn.commit()
+
+    def no_room(client):
+        raise RuntimeError("no room")
+
+    monkeypatch.setattr(restamp_archive, "preflight", no_room)
+    with pytest.raises(RuntimeError, match="no room"):
+        gtfs_pipeline.cmd_restamp_archive(Namespace(apply=True))
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT static_fingerprint FROM agg_meta WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchone() == ("fp",)

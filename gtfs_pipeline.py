@@ -435,49 +435,79 @@ def cmd_analyze_all(args):
 def cmd_restamp_archive(args):
     """Restamp archive-ingested `updates` rows with the time archive ingest
     assigns today (pipeline.restamp_archive). Prints the plan and writes
-    nothing unless --apply; run --apply with ingest stopped."""
+    nothing unless --apply."""
+    from contextlib import ExitStack
+
     from pipeline.analyze import mark_for_full_rebuild
     from pipeline.clickhouse import ch_conn_kwargs, get_client
+    from pipeline.locks import agency_ingest_lock, try_lock_ingest_analyze
     from pipeline.restamp_archive import (
         BACKUP_TABLE,
+        LEFTOVER_TABLE,
         interrupted_run,
+        leftover_exists,
         plan_restamp,
+        preflight,
         restamp_archive_rows,
         settle_interrupted_run,
     )
 
+    def next_steps():
+        logger.info(f"The rows as they were are in {BACKUP_TABLE}.")
+        logger.info("Next: analyze_all (rebuilds every date of the agencies moved), then check_aggs;")
+        logger.info(f"drop {BACKUP_TABLE} once the aggregates are right.")
+
     ch_client = get_client()
-    # Settled before planning: once its swap is done, an interrupted run's
-    # `updates` reads as nothing to move.
-    if args.apply:
-        settle_interrupted_run(ch_client)
-    elif interrupted_run(ch_client):
-        logger.warning("an earlier --apply run stopped partway; --apply finishes it first")
-    plan = plan_restamp(ch_client)
-    for p in plan:
-        logger.info(
-            f"agency {p.agency_id}: {p.rows_to_move} of {p.archive_rows} archive rows move "
-            f"({p.min_shift_sec}s to {p.max_shift_sec}s); {p.unreadable_names} under names the rule cannot read"
-        )
-    moved = [p.agency_id for p in plan if p.rows_to_move]
-    if not args.apply:
-        logger.info("dry run: nothing written. Rerun with --apply, with ingest stopped.")
-        return
-    if not moved:
-        logger.info("nothing to move.")
-        return
-    kw = ch_conn_kwargs()
-    logger.info(f"restamping {kw['database']} on {kw['host']}:{kw['port']}")
-    # Marked first: a mark lost after the swap would never be redone, since
-    # the rerun finds nothing left to move. A swap that then fails costs only
-    # a rebuild that was not needed.
-    conn = _get_conn()
-    mark_for_full_rebuild(conn, moved)
-    conn.close()
-    restamp_archive_rows(ch_client)
-    logger.info(f"restamped. The rows as they were are in {BACKUP_TABLE}.")
-    logger.info("Next: analyze_all (rebuilds every date of the agencies above), then check_aggs;")
-    logger.info(f"drop {BACKUP_TABLE} once the aggregates are right.")
+    conn = None
+    try:
+        if args.apply:
+            conn = _get_conn()
+            # Held until `conn` closes: no ingest, promotion or analyze writes
+            # `updates`, or reads it across the swap, while the run is open.
+            if not try_lock_ingest_analyze(conn):
+                logger.error("restamp_archive: an ingest or analyze job holds the pipeline lock; rerun once it ends.")
+                sys.exit(1)
+        if leftover_exists(ch_client):
+            logger.error(f"{LEFTOVER_TABLE} exists: restore the rows `updates` lacks from it before restamping.")
+            sys.exit(1)
+        if args.apply:
+            # Settled before planning: once its swap is done, an interrupted
+            # run's `updates` reads as nothing to move.
+            if settle_interrupted_run(ch_client):
+                logger.info("finished an interrupted restamp.")
+                next_steps()
+        elif interrupted_run(ch_client):
+            logger.warning("an earlier --apply run stopped partway; --apply finishes it first.")
+        plan = plan_restamp(ch_client)
+        for p in plan:
+            logger.info(
+                f"agency {p.agency_id}: {p.rows_to_move} of {p.archive_rows} archive rows move "
+                f"({p.min_shift_sec}s to {p.max_shift_sec}s), {p.rows_refused} left out as ingest would; "
+                f"{p.unreadable_names} under names the rule cannot read"
+            )
+        moved = [p.agency_id for p in plan if p.rows_to_move or p.rows_refused]
+        if not args.apply:
+            logger.info("dry run: nothing written. Rerun with --apply.")
+            return
+        if not moved:
+            logger.info("nothing to move.")
+            return
+        preflight(ch_client)
+        kw = ch_conn_kwargs()
+        logger.info(f"restamping {kw['database']} on {kw['host']}:{kw['port']}")
+        with ExitStack() as held:
+            for agency_id in moved:
+                held.enter_context(agency_ingest_lock(conn, agency_id))
+            # Marked first: a mark lost after the swap would never be redone,
+            # since the rerun finds nothing left to move. A swap that then
+            # fails costs only a rebuild that was not needed.
+            mark_for_full_rebuild(conn, moved)
+            restamp_archive_rows(ch_client)
+        logger.info("restamped.")
+        next_steps()
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def cmd_check_aggs(args):
