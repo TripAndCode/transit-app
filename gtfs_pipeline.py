@@ -432,6 +432,37 @@ def cmd_analyze_all(args):
     logger.info(f"analyze-all: all {len(agency_ids)} agencies analyzed.")
 
 
+def cmd_restamp_archive(args):
+    """Restamp archive-ingested `updates` rows with the time archive ingest
+    assigns today (pipeline.restamp_archive). Prints the plan and writes
+    nothing unless --apply; run --apply with ingest stopped."""
+    from pipeline.analyze import mark_for_full_rebuild
+    from pipeline.clickhouse import get_client
+    from pipeline.restamp_archive import BACKUP_TABLE, plan_restamp, restamp_archive_rows
+
+    ch_client = get_client()
+    plan = plan_restamp(ch_client)
+    for p in plan:
+        logger.info(
+            f"agency {p.agency_id}: {p.rows_to_move} of {p.archive_rows} archive rows move "
+            f"({p.min_shift_sec}s to {p.max_shift_sec}s); {p.unreadable_names} under names the rule cannot read"
+        )
+    moved = [p.agency_id for p in plan if p.rows_to_move]
+    if not args.apply:
+        logger.info("dry run: nothing written. Rerun with --apply, with ingest stopped.")
+        return
+    if not moved:
+        logger.info("nothing to move.")
+        return
+    restamp_archive_rows(ch_client)
+    conn = _get_conn()
+    mark_for_full_rebuild(conn, moved)
+    conn.close()
+    logger.info(f"restamped. The rows as they were are in {BACKUP_TABLE}.")
+    logger.info("Next: analyze_all (rebuilds every date of the agencies above), then check_aggs;")
+    logger.info(f"drop {BACKUP_TABLE} once the aggregates are right.")
+
+
 def cmd_check_aggs(args):
     """Report agencies whose aggregates lag their newest completed day.
 
@@ -745,6 +776,10 @@ def main():
 
     sub.add_parser("analyze_all", help="Analyze every agency; nonzero exit if any fails")
     sub.add_parser("check_aggs", help="Report agencies with stale aggregates; nonzero exit if any")
+    p_restamp = sub.add_parser(
+        "restamp_archive", help="Restamp archive-ingested updates rows with the time archive ingest assigns today"
+    )
+    p_restamp.add_argument("--apply", action="store_true", help="Write the restamp (default: print the plan only)")
     sub.add_parser("check_migrations", help="Report unapplied migrations; nonzero exit if the DB schema is behind")
 
     p_digest = sub.add_parser("digest", help="Print the daily network-health digest (Markdown)")
@@ -815,6 +850,8 @@ def main():
         cmd_analyze_all(args)
     elif args.command == "check_aggs":
         cmd_check_aggs(args)
+    elif args.command == "restamp_archive":
+        cmd_restamp_archive(args)
     elif args.command == "check_migrations":
         cmd_check_migrations(args)
     elif args.command == "digest":
