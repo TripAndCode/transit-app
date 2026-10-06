@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { defineConfig } from "vitest/config";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
@@ -25,8 +26,9 @@ export default defineConfig({
     // machine the queue then holds a starting worker's handshake past
     // vitest's fixed 60s start timeout, and its test file fails without
     // running. Three workers keep the run as fast as more would, and match
-    // what a 4-vCPU CI runner already gets by default.
-    maxWorkers: 3,
+    // what a 4-vCPU CI runner already gets by default; a smaller machine
+    // keeps vitest's own default of one fewer than its cores.
+    maxWorkers: Math.min(3, Math.max(availableParallelism() - 1, 1)),
     // Node 25+ enables its own global localStorage and sessionStorage
     // (localStorage is undefined without --localstorage-file), and the jsdom
     // environment keeps a global it already finds, so tests would never see
