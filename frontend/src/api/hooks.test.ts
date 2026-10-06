@@ -148,6 +148,22 @@ describe("useReport's ranking options", () => {
     expect(url).toMatch(/[?&]include_sparse=1(&|$)/);
     expect(url).toMatch(/[?&]limit=500(&|$)/);
   });
+
+  it("asks the certificate for departures past a threshold, zero included, as a separate query", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({
+        a: useReport(1, "delay_certificate", baseCtx()),
+        b: useReport(1, "delay_certificate", baseCtx(), { thresholdSec: 0 }),
+      }),
+      withProviders(queryClient),
+    );
+    await waitFor(() => expect(result.current.a.isSuccess && result.current.b.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    expect(String(mockApiGet.mock.calls[0][0])).not.toContain("threshold_sec");
+    expect(String(mockApiGet.mock.calls[1][0])).toMatch(/[?&]threshold_sec=0(&|$)/);
+  });
 });
 
 // ─── builderSummary: also private to hooks.ts. Exercised through the one

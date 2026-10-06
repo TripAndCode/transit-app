@@ -20,8 +20,10 @@ const mockSession = {
   identities: [],
 };
 
+let mockSessionLoading = false;
+
 vi.mock("../api/auth", () => ({
-  useSession: () => ({ data: mockSession, isLoading: false }),
+  useSession: () => (mockSessionLoading ? { data: undefined, isLoading: true } : { data: mockSession, isLoading: false }),
   useLogout: () => ({ mutate: mockMutate, ...mockLogoutState }),
 }));
 
@@ -84,12 +86,25 @@ describe("AccountPage logout", () => {
 
   it("formats the session's last-seen timestamp in the active UI language, not a hardcoded ja-JP", async () => {
     mockApiGet.mockResolvedValue([
-      { sid_prefix: "abc123", user_agent: "Chrome", ip: "1.2.3.4", created_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-01-02T03:04:00Z" },
+      { sid_prefix: "abc123", user_agent: "Chrome", ip: "1.2.3.4", created_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-01-02T03:04:00Z", current: false },
     ]);
     await i18n.changeLanguage("en");
     renderAccount();
-    await screen.findByText("Chrome");
+    await screen.findByText("Unknown device");
     const expected = formatDateTime("2026-01-02T03:04:00Z");
     expect(document.body.textContent).toContain(expected);
+  });
+});
+
+describe("AccountPage while the session loads", () => {
+  it("holds the page's shape instead of a bare loading line", () => {
+    mockSessionLoading = true;
+    try {
+      const { container } = renderAccount();
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+      expect(container.querySelectorAll(".skeleton").length).toBeGreaterThan(2);
+    } finally {
+      mockSessionLoading = false;
+    }
   });
 });

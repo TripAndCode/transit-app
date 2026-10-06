@@ -54,6 +54,15 @@ describe("TopBar", () => {
     expect(screen.getByText("K")).toBeInTheDocument();
   });
 
+  it.each([
+    ["MacIntel", "⌘"],
+    ["Win32", "Ctrl"],
+  ])("names the shortcut's modifier for the platform (%s → %s)", (platform, modifier) => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
+    renderBar();
+    expect(screen.getByText(modifier)).toBeInTheDocument();
+  });
+
   it("drops the ⌘K shortcut on a touch screen, where it cannot be pressed", () => {
     vi.spyOn(window, "matchMedia").mockImplementation(
       (query: string) =>

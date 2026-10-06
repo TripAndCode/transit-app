@@ -1,0 +1,28 @@
+/* Screen changes from the rail run as view transitions: App.tsx's
+   <ViewTransition> names the routed pane only for a "nav" transition (see
+   navPending.tsx), so filter changes and refetches never animate. Only that
+   pane is captured; the rail and top bar stay live, and clicks pass through
+   the transition's overlay to them. */
+html { view-transition-name: none; }
+::view-transition { pointer-events: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes page-nav-in {
+    from { opacity: 0; transform: translateY(4px); }
+  }
+  @keyframes page-nav-out {
+    to { opacity: 0; }
+  }
+  ::view-transition-group(.page-nav) { animation-duration: var(--dur-2); }
+  ::view-transition-old(.page-nav) { animation: page-nav-out var(--dur-1) var(--ease-out) both; }
+  ::view-transition-new(.page-nav) { animation: page-nav-in var(--dur-2) var(--ease-out) both; }
+}
+
+/* The blanket reduced-motion rule in global.css does not reach
+   view-transition pseudo-elements, so they are set here: the browser's own
+   crossfade, short, with nothing moving. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(.page-nav),
+  ::view-transition-old(.page-nav),
+  ::view-transition-new(.page-nav) { animation-duration: 150ms; }
+}

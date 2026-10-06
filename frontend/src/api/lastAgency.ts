@@ -22,9 +22,9 @@ export function writeLastAgency(id: number): void {
   }
 }
 
-/** Clear the persisted last-chosen agency id. No-ops if localStorage is
- *  unavailable. Used by the dev-only "force onboarding" prototype link to
- *  make OnboardingGate re-show its agency-picker overlay on next visit to "/". */
+/** Clear the persisted last-chosen agency id, so OnboardingGate shows its
+ *  agency picker on the next visit to "/" instead of returning to that
+ *  agency. No-ops if localStorage is unavailable. */
 export function clearLastAgency(): void {
   try {
     localStorage.removeItem(KEY);

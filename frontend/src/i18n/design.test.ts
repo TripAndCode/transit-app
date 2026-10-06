@@ -8,4 +8,8 @@ describe("design translation namespace", () => {
     const enKeys = Object.keys(design.en).sort();
     expect(enKeys).toEqual(jaKeys);
   });
+
+  it("keeps a figure and its unit together in a narrow KPI tile's label", () => {
+    expect(design.en.delayedLabel).toContain("5+\u00a0min");
+  });
 });
