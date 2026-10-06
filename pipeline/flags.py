@@ -332,10 +332,12 @@ def _join_owed_refresh() -> concurrent.futures.Future[None]:
 
 def _run_owed_refresh(done: concurrent.futures.Future[None]) -> None:
     # Settled whatever happens: a future left pending would be joined, and
-    # waited on forever, by every later reader of this generation.
+    # waited on forever, by every later reader of this generation. Logged as
+    # well, because a synchronous reader never collects the result.
     try:
         _refresh()
     except BaseException as exc:
+        _log.exception("flags: owed re-read failed")
         done.set_exception(exc)
     else:
         done.set_result(None)

@@ -214,6 +214,25 @@ def test_a_failed_owed_re_read_keeps_the_override_for_the_ttl(monkeypatch):
     assert flags._peek("weather_ingest_enabled")[1] == flags._FRESH
 
 
+def test_a_crashed_owed_re_read_is_logged_when_no_reader_waits_on_it(monkeypatch, caplog):
+    """A synchronous reader never collects the shared re-read's result, so in
+    a process with no async reader a crash inside it would otherwise vanish
+    with the future."""
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {})
+    flags.warm()
+
+    def broken_load() -> dict:
+        raise RuntimeError("unexpected override shape")
+
+    monkeypatch.setattr(flags, "_load_overrides", broken_load)
+    flags.invalidate()
+    with caplog.at_level("ERROR", logger=flags.__name__):
+        flags.get_flag_state("weather_ingest_enabled")
+        assert flags._owed_refresh is not None
+        assert isinstance(flags._owed_refresh[1].exception(timeout=_HANG_GUARD_SECONDS), RuntimeError)
+    assert any(record.exc_info and "unexpected override shape" in str(record.exc_info[1]) for record in caplog.records)
+
+
 def test_a_sync_read_with_nothing_cached_still_reads_inline(monkeypatch):
     """Nothing cached means nothing to serve; the first read of a process is
     the one place the synchronous path may block."""
