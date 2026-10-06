@@ -113,7 +113,8 @@ def test_marks_an_agency_for_a_rebuild_of_every_date(pg_conn, ch_client, agency_
             "INSERT INTO agg_meta (agency_id, analyzed_at, static_fingerprint) VALUES (%s, now(), 'fp')", (agency_id,)
         )
         cur.execute(
-            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES (%s, '2026-09-05', 1, 0)",
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, total_rows, clamp_count) "
+            "VALUES (%s, '2026-09-05', 1, 1, 0)",
             (agency_id,),
         )
     pg_conn.commit()
