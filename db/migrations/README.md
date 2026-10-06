@@ -42,7 +42,7 @@ migration unless called with `force_destructive=True`; the CLI exposes this as
 accidental or scripted rollback cannot discard data as a side effect — a
 destructive rollback has to be asked for explicitly, migration by migration.
 
-`tests/unit/test_migration_destructive_markers.py` holds every down file to this: one that drops a table or column, or deletes rows, outside the `agg_*` tables analyze rebuilds must carry the line. It reads only top-level `DROP TABLE`, `DELETE FROM`, `TRUNCATE` and `ALTER TABLE … DROP COLUMN` statements. Data loss through a `DO` block, `DROP SCHEMA`/`DROP EXTENSION`/`DROP TYPE … CASCADE`, or a narrowing `ALTER COLUMN … TYPE` goes undetected, so mark those by hand.
+`tests/unit/test_migration_destructive_markers.py` holds every down file to this: one that drops a table or column, or deletes rows, outside the `agg_*` tables analyze rebuilds must carry the line. Its classifier reads only some statement shapes, listed in `data_losing_tables`'s docstring; data loss through any other shape needs the line by hand.
 
 ## `CONCURRENTLY` is not available here
 
