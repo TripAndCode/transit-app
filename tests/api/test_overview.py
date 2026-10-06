@@ -27,8 +27,8 @@ async def _seed_agg_daily(
 ):
     """Insert (or upsert) one ``agg_daily_trend`` row.
 
-    ``date_`` may be a :class:`datetime.date` or an ISO string;
-    ``agg_daily_trend.date`` is TEXT per schema, so we coerce both shapes.
+    ``date_`` may be a :class:`datetime.date` or an ISO string; either is
+    bound as a ``date``, because asyncpg refuses ISO text for the DATE column.
 
     ``sum_delay_sec`` is back-derived as ``round(avg_min * 60 * samples)`` —
     the exact raw-seconds sum a real analyze() run would have stored for an
