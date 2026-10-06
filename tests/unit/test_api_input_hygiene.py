@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import asyncpg
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -17,7 +17,7 @@ from api.deps import get_conn
 from api.routers import me as me_router
 from api.routers.admin import ApiKeyCreate, InviteCreate
 from api.routers.ask import ask_suggest
-from api.routers.auth import _fetch_userinfo
+from api.routers.auth import ProviderRejected, _fetch_userinfo
 from api.routers.conversations import _MAX_FILTER_CTX_BYTES, CreateConversation, UpdateConversation
 from api.security import require_user
 from pipeline.query.followup import MAX_QUESTION_CHARS
@@ -132,11 +132,10 @@ class _GitHub:
         return _Resp(self._user if url == "user" else self._emails)
 
 
-async def test_a_github_error_body_becomes_a_502_not_a_keyerror():
+async def test_a_github_error_body_is_a_rejection_not_a_keyerror():
     bad = {"message": "Bad credentials", "documentation_url": "https://docs.github.com"}
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(ProviderRejected):
         await _fetch_userinfo(_GitHub(bad, bad), {"access_token": "x"}, "github")
-    assert excinfo.value.status_code == 502
 
 
 async def test_a_well_formed_github_body_still_resolves():

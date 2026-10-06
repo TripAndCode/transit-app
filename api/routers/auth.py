@@ -218,6 +218,10 @@ async def login(provider: str, request: Request, next: str = "/") -> RedirectRes
     return auth_url_resp
 
 
+class ProviderRejected(Exception):
+    """The provider answered the userinfo request without a user record."""
+
+
 async def _fetch_userinfo(client: Any, token: dict[str, Any], provider: str) -> dict[str, Any]:
     """Normalize provider userinfo to {sub, email, email_verified, name, avatar_url}."""
     if provider == "google":
@@ -236,10 +240,9 @@ async def _fetch_userinfo(client: Any, token: dict[str, Any], provider: str) -> 
     user = user_resp.json()
     emails_resp = await client.get("user/emails", token=token)
     emails = emails_resp.json()
-    # GitHub answers a rejected token with `{"message": ...}` on both routes;
-    # indexing that as a user record would surface as a 500 KeyError.
+    # GitHub answers a rejected token with `{"message": ...}` on both routes.
     if not isinstance(user, dict) or "id" not in user or not isinstance(emails, list):
-        raise HTTPException(status_code=502, detail="provider_error")
+        raise ProviderRejected(provider)
     primary = next(
         (e for e in emails if isinstance(e, dict) and e.get("primary") and e.get("verified")),
         None,
@@ -503,7 +506,11 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
         _log.exception("OAuth token exchange failed for provider=%s", provider)
         return await _fail_login(conn, request, provider, "provider_down", tx.get("next"))
 
-    info = await _fetch_userinfo(client, token, provider)
+    try:
+        info = await _fetch_userinfo(client, token, provider)
+    except ProviderRejected:
+        _log.warning("OAuth userinfo rejected for provider=%s", provider)
+        return await _fail_login(conn, request, provider, "provider_down", tx.get("next"))
     if not info["email"] or not info["email_verified"]:
         code = "unverified_email" if info["email"] else "no_email"
         return await _fail_login(conn, request, provider, code, tx.get("next"))
