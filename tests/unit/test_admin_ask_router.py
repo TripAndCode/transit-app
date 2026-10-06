@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from api.deps import get_conn
 from api.routers import admin_ask
 from api.security import require_admin
+from tests.fixtures.pool import CountingPool
 from tests.fixtures.users import admin_user
 
 _ADMIN = admin_user()
@@ -51,36 +52,12 @@ class _PromoteConn:
         raise AssertionError(f"unexpected fetchrow: {sql}")
 
 
-class _Pool:
-    """Hands out the one fake connection and counts how many are held."""
-
-    def __init__(self, conn):
-        self._conn = conn
-        self.held = 0
-        self.peak = 0
-
-    def acquire(self):
-        pool = self
-
-        class _Ctx:
-            async def __aenter__(self):
-                pool.held += 1
-                pool.peak = max(pool.peak, pool.held)
-                return pool._conn
-
-            async def __aexit__(self, *exc):
-                pool.held -= 1
-                return False
-
-        return _Ctx()
-
-
-def _client(conn) -> tuple[TestClient, _Pool]:
+def _client(conn) -> tuple[TestClient, CountingPool]:
     app = FastAPI()
     app.include_router(admin_ask.router)
     app.dependency_overrides[require_admin] = lambda: _ADMIN
     app.dependency_overrides[get_conn] = lambda: conn
-    pool = _Pool(conn)
+    pool = CountingPool(conn)
     app.state.pool = pool
     return TestClient(app), pool
 
