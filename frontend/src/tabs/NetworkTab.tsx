@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { scopeToQueryString, useScope } from "../api/scope";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
+import { StillWorking } from "../components/StillWorking";
 import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
@@ -155,15 +156,14 @@ function AgencyRow({
               : null
           }
         >
+          {/* The planned-trip fallback carries its own label: after the
+              vehicle-km label, a trip count would read as that percentage. */}
           <span>
-            {t("network.col_vehicle_km_delivered")}{" "}
-            {a.vehicle_km_delivered_pct != null
-              ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
-              : a.planned_trip_count != null
-                ? t("network.planned_trip_count_fallback", {
-                    count: formatNumber(a.planned_trip_count),
-                  })
-                : "—"}
+            {a.vehicle_km_delivered_pct == null && a.planned_trip_count != null
+              ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
+              : `${t("network.col_vehicle_km_delivered")} ${
+                  a.vehicle_km_delivered_pct != null ? `${a.vehicle_km_delivered_pct.toFixed(1)}%` : "—"
+                }`}
           </span>
         </ScheduleVersionTooltip>
         <span>
@@ -281,7 +281,12 @@ export function NetworkTab() {
         data={data}
         hasContent={(summary) => summary.agencies.length > 0}
         empty={<p style={{ color: "var(--text-secondary)" }}>{t("network.empty")}</p>}
-        skeleton={<Skeleton height={320} />}
+        skeleton={
+          <>
+            <Skeleton height={320} />
+            <StillWorking scope={ctx} update={update} />
+          </>
+        }
       >
         {() => (
           <div className="network-rows" data-testid="network-card-list" ref={rowsRef}>
