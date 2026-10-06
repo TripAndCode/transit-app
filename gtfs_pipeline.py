@@ -437,7 +437,7 @@ def cmd_restamp_archive(args):
     assigns today (pipeline.restamp_archive). Prints the plan and writes
     nothing unless --apply; run --apply with ingest stopped."""
     from pipeline.analyze import mark_for_full_rebuild
-    from pipeline.clickhouse import get_client
+    from pipeline.clickhouse import ch_conn_kwargs, get_client
     from pipeline.restamp_archive import BACKUP_TABLE, plan_restamp, restamp_archive_rows
 
     ch_client = get_client()
@@ -454,10 +454,15 @@ def cmd_restamp_archive(args):
     if not moved:
         logger.info("nothing to move.")
         return
-    restamp_archive_rows(ch_client)
+    kw = ch_conn_kwargs()
+    logger.info(f"restamping {kw['database']} on {kw['host']}:{kw['port']}")
+    # Marked first: a mark lost after the swap would never be redone, since
+    # the rerun finds nothing left to move. A swap that then fails costs only
+    # a rebuild that was not needed.
     conn = _get_conn()
     mark_for_full_rebuild(conn, moved)
     conn.close()
+    restamp_archive_rows(ch_client)
     logger.info(f"restamped. The rows as they were are in {BACKUP_TABLE}.")
     logger.info("Next: analyze_all (rebuilds every date of the agencies above), then check_aggs;")
     logger.info(f"drop {BACKUP_TABLE} once the aggregates are right.")

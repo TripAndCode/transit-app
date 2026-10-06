@@ -24,6 +24,8 @@ from dataclasses import dataclass
 _TABLE = "updates"
 _STAGING = "updates_restamp_staging"
 BACKUP_TABLE = "updates_before_restamp"
+# Where the swapped-out table goes when it holds rows the copy never saw.
+LEFTOVER_TABLE = "updates_restamp_leftover"
 
 _HEADER = "fromUnixTimestamp(toUInt32(assumeNotNull(feed_timestamp)))"
 _NAME_DAY = "toDate(parseDateTimeOrNull(substring(file_name, 1, 8), '%Y%m%d'))"
@@ -83,16 +85,33 @@ def _fingerprint(client, table: str) -> tuple:
     )
 
 
+def _check_room(client) -> None:
+    """The copy is written beside the table, so the disk must hold the table
+    twice until the swap and the backup's drop."""
+    if client.query(f"EXISTS TABLE {LEFTOVER_TABLE}").result_rows[0][0]:
+        raise RuntimeError(f"{LEFTOVER_TABLE} exists; move its rows into {_TABLE} and drop it first")
+    size = client.query(
+        "SELECT sum(bytes_on_disk) FROM system.parts"
+        f" WHERE active AND database = currentDatabase() AND table = '{_TABLE}'"
+    ).result_rows[0][0]
+    free = client.query("SELECT min(free_space) FROM system.disks").result_rows[0][0]
+    if free < size:
+        raise RuntimeError(f"{free} bytes free, and the copy of {_TABLE} needs about {size}")
+
+
 def restamp_archive_rows(client) -> None:
     """Rewrite `updates` with every archive row restamped, keeping the rows as
     they were in BACKUP_TABLE.
 
-    Refuses to swap if `updates` changed while the copy was being written:
-    rows appended during that window would exist only in the old table. Run it
-    with ingest stopped. When BACKUP_TABLE already holds an earlier run's
-    original rows, it is kept and this run's pre-swap copy is dropped, so the
-    backup is always the table before any restamp.
+    Run it with ingest stopped. A write while the copy is made aborts before
+    the swap. One in the instant between that check and the swap leaves the
+    swapped-out table with a row `updates` lacks; it is kept as
+    LEFTOVER_TABLE and the run fails, never dropped. When BACKUP_TABLE already
+    holds an earlier run's original rows it is kept and this run's swapped-out
+    copy, the same rows, is dropped, so the backup is always the table before
+    any restamp.
     """
+    _check_room(client)
     before = _fingerprint(client, _TABLE)
     client.command(f"DROP TABLE IF EXISTS {_STAGING}")
     client.command(f"CREATE TABLE {_STAGING} AS {_TABLE}")
@@ -107,6 +126,12 @@ def restamp_archive_rows(client) -> None:
         client.command(f"DROP TABLE IF EXISTS {_STAGING}")
         raise
     client.command(f"EXCHANGE TABLES {_TABLE} AND {_STAGING}")
+    if _fingerprint(client, _STAGING) != before:
+        client.command(f"RENAME TABLE {_STAGING} TO {LEFTOVER_TABLE}")
+        raise RuntimeError(
+            f"rows reached {_TABLE} during the swap; the table as it was is in {LEFTOVER_TABLE}. "
+            f"Insert its rows missing from {_TABLE}, then drop it"
+        )
     if client.query(f"EXISTS TABLE {BACKUP_TABLE}").result_rows[0][0]:
         client.command(f"DROP TABLE {_STAGING}")
     else:

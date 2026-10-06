@@ -3,10 +3,20 @@ ingest assigns today (pipeline.strategies._pb.archive_captured_at)."""
 
 from datetime import datetime, timezone
 
+import pytest
+
 from pipeline.clickhouse import insert_updates
-from pipeline.restamp_archive import plan_restamp, restamp_archive_rows
+from pipeline.restamp_archive import BACKUP_TABLE, LEFTOVER_TABLE, plan_restamp, restamp_archive_rows
 from pipeline.strategies._pb import _ts, archive_captured_at
 from tests.fixtures.gtfs_rt import header_only_feed
+
+
+@pytest.fixture(autouse=True)
+def _no_restamp_tables(ch_client):
+    """The shared ch_client fixture empties `updates` only; the tables a
+    restamp leaves behind would otherwise carry into the next test."""
+    for table in ("updates_restamp_staging", BACKUP_TABLE, LEFTOVER_TABLE):
+        ch_client.command(f"DROP TABLE IF EXISTS {table}")
 
 
 def _utc(iso: str) -> datetime:
@@ -86,7 +96,7 @@ def test_keeps_the_old_rows_aside_and_every_row(ch_client):
     total = ch_client.query("SELECT count() FROM updates").result_rows[0][0]
     restamp_archive_rows(ch_client)
     assert ch_client.query("SELECT count() FROM updates").result_rows[0][0] == total
-    assert ch_client.query("SELECT count() FROM updates_before_restamp").result_rows[0][0] == total
+    assert ch_client.query(f"SELECT count() FROM {BACKUP_TABLE}").result_rows[0][0] == total
 
 
 def test_marks_an_agency_for_a_rebuild_of_every_date(pg_conn, ch_client, agency_id):
@@ -110,3 +120,53 @@ def test_marks_an_agency_for_a_rebuild_of_every_date(pg_conn, ch_client, agency_
 
     mark_for_full_rebuild(pg_conn, [agency_id])
     assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, "fp") is None
+
+
+class _WritesDuringSwap:
+    """A client whose `updates` gains a row just before the swap, the instant
+    the copy check can no longer see."""
+
+    def __init__(self, client):
+        self._client = client
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def command(self, sql, *args, **kwargs):
+        if sql.startswith("EXCHANGE TABLES"):
+            insert_updates(
+                self._client,
+                2,
+                [_row("20260909/TripUpdate_010000.pb", _ts("20260909", "TripUpdate_010000.pb"), "late", None)],
+            )
+        return self._client.command(sql, *args, **kwargs)
+
+
+def test_never_drops_a_row_written_during_the_swap(ch_client):
+    _seed(ch_client)
+    restamp_archive_rows(ch_client)
+    with pytest.raises(RuntimeError, match=LEFTOVER_TABLE):
+        restamp_archive_rows(_WritesDuringSwap(ch_client))
+    leftover = ch_client.query(f"SELECT trip_id FROM {LEFTOVER_TABLE} WHERE trip_id = 'late'").result_rows
+    assert leftover == [("late",)]
+
+
+class _FullDisk:
+    def __init__(self, client):
+        self._client = client
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def query(self, sql, *args, **kwargs):
+        if "system.disks" in sql:
+            return type("R", (), {"result_rows": [(0,)]})()
+        return self._client.query(sql, *args, **kwargs)
+
+
+def test_refuses_to_start_without_room_for_the_copy(ch_client):
+    _seed(ch_client)
+    before = _stamps(ch_client)
+    with pytest.raises(RuntimeError, match="free"):
+        restamp_archive_rows(_FullDisk(ch_client))
+    assert _stamps(ch_client) == before
