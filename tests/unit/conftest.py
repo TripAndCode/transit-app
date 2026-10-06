@@ -39,6 +39,23 @@ def _clear_compute_caches():
     reset_cache()
 
 
+@pytest.fixture(autouse=True)
+def _no_clickhouse_client(monkeypatch):
+    """No test here may reach ClickHouse, however its gate is worded. CI runs
+    the whole suite with RUN_CH_INTEGRATION=1, so a test that only skipped for
+    want of a server runs there, and the first client it builds fails it here.
+    A test that stubs a client factory itself replaces this refusal."""
+    import clickhouse_connect
+
+    def refuse(*args, **kwargs):
+        pytest.fail(
+            "tests/unit runs with no database; a test that builds a ClickHouse client belongs in tests/clickhouse/"
+        )
+
+    for name in ("get_client", "create_client", "get_async_client", "create_async_client"):
+        monkeypatch.setattr(clickhouse_connect, name, refuse)
+
+
 def clickhouse_gated(fixturenames: Iterable[str], skip_reasons: Iterable[str]) -> bool:
     """Whether a test needs the throwaway ClickHouse: it asks for the client
     fixture, or it skips itself for want of `make ch-test`. Pure, so the rule
