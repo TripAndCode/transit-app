@@ -1294,6 +1294,31 @@ def test_analyze_builds_agg_route_daily_dwell_run_for_static_join_agency(pg_conn
     assert hist_run_len == 32
 
 
+def test_analyze_dwell_run_drops_a_no_route_visit_but_keeps_it_as_the_next_anchor(pg_conn, agency_id, ch_client):
+    """Stop 2's poll carries no route_code. Its own dwell and running cannot
+    enter the NOT NULL route key, but its departure still anchors stop 3's
+    running time: 36610 - 36410 = 200s. Filtering it out before `LAG()` would
+    pair stop 3 with stop 1's departure instead (580s)."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_dwell_run_row("T1", day, 1, 30, None),
+        _ch_dwell_run_row("T1", day, 2, 50, 20, route_code=None),
+        _ch_dwell_run_row("T1", day, 3, 10, 10),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT route_code, dwell_samples, dwell_sum_sec, run_samples, run_sum_sec "
+            "FROM agg_route_daily_dwell_run WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert cur.fetchall() == [("R1", 1, 0, 1, 200)]
+
+
 def test_analyze_skips_agg_route_daily_dwell_run_for_non_static_join_agency(pg_conn, agency_id, ch_client):
     """An agency whose ingest_strategy isn't static_join must get zero rows
     in agg_route_daily_dwell_run regardless of static schedule -- the read

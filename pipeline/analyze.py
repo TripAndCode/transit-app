@@ -1295,6 +1295,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 # `.query()`'s result_rows would hit the same unbounded-memory
                 # shape that streaming was introduced to eliminate 40 lines
                 # up, just for a bigger set.
+                #
                 # A stop whose only keys lack a route would aggregate to a NULL
                 # route_codes, which the NOT NULL column rejects for the whole
                 # agency; such keys name no route to list anyway.
