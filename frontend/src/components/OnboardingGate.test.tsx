@@ -153,6 +153,16 @@ describe("OnboardingGate", () => {
     expect(screen.getByRole("button", { name: /^Never collected/ })).toHaveTextContent("No data collected yet");
   });
 
+  it("keeps the date in one piece, so a narrow card wraps before it and never inside it", () => {
+    mockAgencies([
+      agency({ agency_id: 1, agency_name: "Collected", latest_data_date: "2026-09-10" }),
+      agency({ agency_id: 2, agency_name: "Never collected" }),
+    ]);
+    renderGate();
+    const caption = screen.getByRole("button", { name: /^Collected/ }).lastElementChild;
+    expect(caption?.textContent).toBe("Data through Sep\u00a010,\u00a02026");
+  });
+
   it("lists the agencies with data first", () => {
     mockAgencies([
       agency({ agency_id: 1, agency_name: "Empty one" }),
