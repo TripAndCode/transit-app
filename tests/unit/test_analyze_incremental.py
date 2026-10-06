@@ -151,7 +151,9 @@ def _run(ledger, *, stored=None, ingest_strategy=None, has_static=False):
         ingest_strategy=ingest_strategy,
         has_static=has_static,
     )
-    conn._fingerprint = analyze_mod._static_fingerprint(AGENCY_ID, conn, has_static=has_static)
+    conn._fingerprint = analyze_mod._static_fingerprint(
+        AGENCY_ID, conn, has_static=has_static, ingest_strategy=ingest_strategy
+    )
     ch = FakeClickHouse(ledger)
     analyze(AGENCY_ID, conn, ch)
     return conn, ch
@@ -312,20 +314,47 @@ def test_a_noop_run_still_records_this_build_in_agg_meta():
 def test_the_fingerprint_changes_when_the_plausibility_clamp_changes(monkeypatch):
     """The clamp decides which rows reach every aggregate, so moving it makes
     every already-built date wrong while no row anywhere changed."""
-    before = analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False)
+    before = analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None)
     monkeypatch.setattr(analyze_mod, "MAX_PLAUSIBLE_DELAY_SEC", analyze_mod.MAX_PLAUSIBLE_DELAY_SEC + 1)
 
-    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False) != before
+    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None) != before
 
 
 def test_the_fingerprint_changes_when_the_builder_logic_version_changes(monkeypatch):
-    before = analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False)
+    before = analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None)
     monkeypatch.setattr(analyze_mod, "ANALYZE_LOGIC_VERSION", analyze_mod.ANALYZE_LOGIC_VERSION + 1)
 
-    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False) != before
+    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None) != before
+
+
+def test_the_fingerprint_changes_when_the_ingest_strategy_changes():
+    """The strategy decides whether the RT-field aggregates are built at all,
+    so an agency moving off static_join must not keep its old dates' rows."""
+    before = analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy="static_join")
+
+    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy="gtfs_rt") != before
+
+
+def test_a_strategy_change_alone_rebuilds_every_date():
+    """No date gained a row, but the aggregates were built for another
+    strategy: the old dates' service-delivered rows must not survive."""
+    ledger = [(LEDGER_DATE, LEDGER_SAMPLES, LEDGER_TOTAL)]
+    conn = FakeConn(ledger_rows=ledger, ingest_strategy="gtfs_rt")
+    conn._fingerprint = analyze_mod._static_fingerprint(
+        AGENCY_ID, conn, has_static=False, ingest_strategy="static_join"
+    )
+    ch = FakeClickHouse(ledger)
+    analyze(AGENCY_ID, conn, ch)
+
+    assert len(ch.alltime_scans) == 1
+    assert [
+        s
+        for s in conn.executed
+        if "DELETE FROM agg_service_delivered_daily WHERE agency_id = %s" in s and "ANY" not in s
+    ]
 
 
 def test_the_fingerprint_is_never_empty_without_a_static_schedule():
     """An agency with no schedule still has a clamp and a builder version to
     invalidate against; an empty value would leave it with neither."""
-    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False) != ""
+    assert analyze_mod._static_fingerprint(AGENCY_ID, None, has_static=False, ingest_strategy=None) != ""

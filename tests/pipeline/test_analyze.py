@@ -1003,16 +1003,18 @@ def test_service_delivered_rebuilds_only_the_changed_day(pg_conn, agency_id, ch_
         agency_id,
         [
             _ch_service_delivered_row("T1", day1, file_name="t1.pb", schedule_relationship_trip=3),
-            _ch_service_delivered_row("T2", day2, file_name="t2.pb", schedule_relationship_trip=0),
+            _ch_service_delivered_row("T2", day2, file_name="t2.pb", schedule_relationship_trip=3),
         ],
     )
     analyze(agency_id, pg_conn, ch_client)
-    # A value no build would produce, on the day that does not change: it
-    # survives only if the next run leaves that day alone.
+    # Values no build would produce. day1's survives only if the next run
+    # leaves that day alone; day2's is replaced by 2 only if the rebuild reads
+    # the whole day (T2 and T3), not just the new row (which would give 1).
     with pg_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agg_service_delivered_daily SET non_executed_trips = 99 WHERE agency_id = %s AND date = %s",
-            (agency_id, day1.date()),
+            "UPDATE agg_service_delivered_daily SET non_executed_trips = "
+            "CASE WHEN date = %s THEN 99 ELSE 77 END WHERE agency_id = %s",
+            (day1.date(), agency_id),
         )
     pg_conn.commit()
     # A new cancellation lands on day2 only. day2 is 11:00 JST, so the UTC
@@ -1029,7 +1031,7 @@ def test_service_delivered_rebuilds_only_the_changed_day(pg_conn, agency_id, ch_
             "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s ORDER BY date",
             (agency_id,),
         )
-        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 99, "2026-04-02": 1}
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 99, "2026-04-02": 2}
 
 
 def _seed_route_headway_schedule(pg_conn, agency_id, route_id, service_id, stop_id, departure_times):
@@ -1720,24 +1722,19 @@ def test_schedule_revision_rebuilds_only_the_changed_day(pg_conn, agency_id, ch_
         [
             _ch_schedule_revision_row("T1", day1, "v1", file_name="d1t1.pb"),
             _ch_schedule_revision_row("T2", day2, "v1", file_name="d2t1.pb"),
+            _ch_schedule_revision_row("T3", day2, "v1", file_name="d2t2.pb"),
         ],
     )
     analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agg_schedule_revision_daily SET static_version_id = 'sentinel' WHERE agency_id = %s AND date = %s",
-            (agency_id, day1.date()),
+            "UPDATE agg_schedule_revision_daily SET static_version_id = 'sentinel' WHERE agency_id = %s",
+            (agency_id,),
         )
     pg_conn.commit()
-    # Two v2 rows outvote day2's earlier v1 row only if the rebuild reads all three.
-    insert_updates(
-        ch_client,
-        agency_id,
-        [
-            _ch_schedule_revision_row("T3", day2, "v2", file_name="d2t2.pb"),
-            _ch_schedule_revision_row("T4", day2, "v2", file_name="d2t3.pb"),
-        ],
-    )
+    # One new v2 row on day2: reading only the new rows would give v2, and
+    # skipping day2 would leave the sentinel. The whole day's mode is v1.
+    insert_updates(ch_client, agency_id, [_ch_schedule_revision_row("T4", day2, "v2", file_name="d2t3.pb")])
     analyze(agency_id, pg_conn, ch_client)
 
     with pg_conn.cursor() as cur:
@@ -1746,7 +1743,7 @@ def test_schedule_revision_rebuilds_only_the_changed_day(pg_conn, agency_id, ch_
             (agency_id,),
         )
         by_date = {str(d): v for d, v in cur.fetchall()}
-    assert by_date == {"2026-05-01": "sentinel", "2026-05-02": "v2"}
+    assert by_date == {"2026-05-01": "sentinel", "2026-05-02": "v1"}
 
 
 def test_analyze_skips_agg_schedule_revision_daily_when_static_version_id_always_null(pg_conn, agency_id, ch_client):
@@ -1828,7 +1825,10 @@ def _fingerprint(pg_conn, agency_id):
     """
     from pipeline.analyze import _static_fingerprint, _static_loaded
 
-    return _static_fingerprint(agency_id, pg_conn, _static_loaded(pg_conn, agency_id))
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        (strategy,) = cur.fetchone()
+    return _static_fingerprint(agency_id, pg_conn, _static_loaded(pg_conn, agency_id), strategy)
 
 
 def _feed_health(pg_conn, agency_id):

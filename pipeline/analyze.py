@@ -379,7 +379,7 @@ _STATIC_DEPENDENCY_COLUMNS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _static_fingerprint(agency_id: int, conn, has_static: bool) -> str:
+def _static_fingerprint(agency_id: int, conn, has_static: bool, ingest_strategy: str | None) -> str:
     """A value that changes whenever anything but the RT rows themselves does.
 
     The date ledger below sees rows arriving in ClickHouse and nothing else,
@@ -440,6 +440,11 @@ def _static_fingerprint(agency_id: int, conn, has_static: bool) -> str:
     only flipped between them. NUL itself is not available — Postgres `text`
     cannot hold it.
 
+    The agency's ``ingest_strategy`` joins them too: it decides whether the
+    RT-field aggregates (service delivered, dwell/run) are built at all, so an
+    agency moving off ``static_join`` would otherwise keep every untouched
+    date's rows from the old strategy.
+
     Without a loaded schedule the schedule half is simply absent: every
     aggregate that reads the static tables is inside a ``has_static`` branch
     of :func:`analyze`, so a schedule change has nothing to invalidate, and
@@ -449,7 +454,11 @@ def _static_fingerprint(agency_id: int, conn, has_static: bool) -> str:
     schedule crosses it in either direction and rebuilds in full — while the
     constants above keep invalidating an agency that never had one.
     """
-    parts = [f"logic:{ANALYZE_LOGIC_VERSION}", f"clamp:{MAX_PLAUSIBLE_DELAY_SEC}"]
+    parts = [
+        f"logic:{ANALYZE_LOGIC_VERSION}",
+        f"clamp:{MAX_PLAUSIBLE_DELAY_SEC}",
+        f"strategy:{ingest_strategy}",
+    ]
     if not has_static:
         return "|".join(parts)
     with conn.cursor() as cur:
@@ -775,7 +784,11 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
     # lock). Reading once, first, can only err toward recording an older
     # schedule than was built with — which makes the next run rebuild
     # everything, the safe direction.
-    static_fingerprint = _static_fingerprint(agency_id, conn, has_static)
+    with conn.cursor() as cur:
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        strategy_row = cur.fetchone()
+    ingest_strategy = strategy_row[0] if strategy_row else None
+    static_fingerprint = _static_fingerprint(agency_id, conn, has_static, ingest_strategy)
     # Resolved before the txn, like has_static: it reads the ledger this run is
     # about to overwrite, and a rollback must leave that ledger describing the
     # aggregates that actually survived — so the next run reaches the same
@@ -1540,10 +1553,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # that confirmed-agency gate before returning data; any new
         # direct reader of agg_service_delivered_daily must do the same or it
         # will treat an unconfirmed agency's rows as trustworthy.
-        with conn.cursor() as cur:
-            cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
-            row = cur.fetchone()
-        if row and row[0] in RT_INGEST_STRATEGIES:
+        if ingest_strategy in RT_INGEST_STRATEGIES:
             # ClickHouse's argMax(arg, val) silently SKIPS a row whose `arg`
             # is NULL when picking the max -- it does not return NULL just
             # because the true latest (captured_at, file_name) row happens to
@@ -1663,7 +1673,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # coverage, so pipeline.reports.dwell_run's reader additionally
         # requires a live rt_field_coverage_probes verdict before trusting
         # these rows.
-        if has_static and row and row[0] in RT_INGEST_STRATEGIES:
+        if has_static and ingest_strategy in RT_INGEST_STRATEGIES:
             dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
             run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
             dwell_hist_expr = hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
