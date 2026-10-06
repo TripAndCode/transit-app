@@ -350,7 +350,11 @@ def test_every_step_that_pipes_through_tee_declares_bash_so_the_pipe_fails_loud(
     """GitHub's default `run` shell is `bash -e {0}` without `pipefail`: a
     `pytest | tee log` step exits with tee's 0 whatever pytest returned, and
     the job stays green over a failing suite. `shell: bash` switches to
-    `bash --noprofile --norc -eo pipefail {0}`."""
+    `bash --noprofile --norc -eo pipefail {0}`.
+
+    `shell: bash`, on the step or as a job/workflow default, is the one spelling
+    accepted. An inline `set -o pipefail` would work as well, but recognising it
+    means reading the script as shell, which this check deliberately does not."""
     checked = 0
     for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
         doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
@@ -361,6 +365,7 @@ def test_every_step_that_pipes_through_tee_declares_bash_so_the_pipe_fails_loud(
                 checked += 1
                 assert _run_shell(doc, job, step) == "bash", (
                     f"{workflow.name} / {job_name} / {step.get('name', step['run'][:40])!r} pipes through tee "
-                    "without `shell: bash`, so a failing left-hand command cannot fail the step"
+                    "without `shell: bash` (the one spelling this check accepts), so a failing left-hand command "
+                    "cannot fail the step"
                 )
     assert checked >= 1, "expected at least one `| tee` step (nightly-extended.yml); the probe found none"
