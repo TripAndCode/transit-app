@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fireEvent, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
 import { MapTab } from "./MapTab";
 import { stubReducedMotion } from "../test/reducedMotion";
+import { decl, ruleBody } from "../test/cssRules";
+import { formatDateTime } from "../utils/format";
 import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse } from "../api/types";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
@@ -64,7 +69,7 @@ describe("MapTab", () => {
     } as never);
     renderMap();
     expect(screen.getByRole("heading", { name: "Current observations" })).toBeInTheDocument();
-    expect(screen.getByText("No current trips to display")).toBeInTheDocument();
+    expect(screen.getByText("No vehicles are reporting right now")).toBeInTheDocument();
   });
 
   it("does not show the empty state and counts observed trips once live rows arrive", () => {
@@ -93,8 +98,79 @@ describe("MapTab", () => {
       refetch: vi.fn(),
     } as never);
     renderMap();
-    expect(screen.queryByText("No current trips to display")).not.toBeInTheDocument();
+    expect(screen.queryByText("No vehicles are reporting right now")).not.toBeInTheDocument();
     expect(screen.getByText("1", { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Download CSV/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Fit all trips in view/ })).toBeInTheDocument();
+  });
+});
+
+describe("MapTab when no trip is reporting", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+    mockCommonHooks();
+    vi.spyOn(hooks, "useTimeline").mockReturnValue({ data: undefined, isLoading: true } as never);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function mockLive(latest: string | null) {
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      data: { latest_captured_at: latest, rows: [] },
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+  }
+
+  it("says how long the feed has been quiet and when it last reported", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
+    mockLive("2026-10-03T12:41:00Z");
+    renderMap();
+    const time = formatDateTime("2026-10-03T12:41:00Z", { timeStyle: "short" });
+    const status = screen.getByText(`Feed quiet for 43 min · last report ${time}`);
+    expect(status.closest(".ops-freshness")).toHaveClass("ops-freshness--stale");
+  });
+
+  it("counts a feed quiet since an earlier day in days, and dates its last report", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
+    mockLive("2026-09-29T00:59:00Z");
+    renderMap();
+    expect(screen.getByText(`Feed quiet for 4 days · last report ${formatDateTime("2026-09-29T00:59:00Z")}`)).toBeInTheDocument();
+  });
+
+  it("marks a quiet feed in amber, not alarm red", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/tabs/map/operationsMap.css"), "utf8");
+    expect(decl(ruleBody(css, ".ops-freshness--stale > span"), "background")).toBe("var(--color-warning)");
+  });
+
+  it("explains the empty map and offers the day's replay, which then has the map to itself", async () => {
+    mockLive(null);
+    renderMap();
+    const empty = screen.getByText("No vehicles are reporting right now").closest(".ops-map__empty") as HTMLElement;
+    expect(empty).toHaveTextContent("This is normal late at night");
+    await userEvent.click(within(empty).getByRole("button", { name: "Play the day" }));
+    expect(screen.queryByText("No vehicles are reporting right now")).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to current observations" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("offers no export and no framing while there is nothing to export or frame", () => {
+    mockLive(null);
+    renderMap();
+    expect(screen.queryByRole("button", { name: /Download CSV/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Fit all trips in view/ })).toBeNull();
+  });
+
+  it("claims no absence of delays while nothing is observed", () => {
+    mockLive(null);
+    renderMap();
+    expect(screen.queryByText("No delays of 5+ minutes observed for these filters")).toBeNull();
   });
 });
 

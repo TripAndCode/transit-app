@@ -31,6 +31,11 @@ describe("ScrollNarrative", () => {
     expect(screen.getByText("Highest average departure delays")).toBeTruthy();
   });
 
+  it("tells a phone visitor each chart scrolls sideways", () => {
+    renderNarrative();
+    expect(screen.getAllByText("Scroll sideways to see the whole chart.")).toHaveLength(3);
+  });
+
   it("renders one of the real fixture stop names inside the route section", () => {
     renderNarrative();
     expect(screen.getAllByText("Riverside Sta.").length).toBeGreaterThan(0);
@@ -68,6 +73,23 @@ describe("landing reveal CSS", () => {
   );
 
   /** Body of the first rule whose selector text starts at `selector`. */
+
+  it("sizes the column so the fixed-width sample trend chart fills its card", () => {
+    // DailyChart draws at a fixed 760px; the card's inner width is the
+    // column, less its side padding and the card's padding and border.
+    const column = Number.parseFloat(decl(ruleBody(css, ".landing-narrative {"), "max-width") ?? "");
+    const inner = column - 2 * 24 - 2 * 20 - 2 * 1;
+    expect(inner).toBeGreaterThanOrEqual(760);
+    expect(inner).toBeLessThan(760 + 24);
+  });
+
+  it("keeps the stop chart at a readable size on a phone, scrolling sideways instead", () => {
+    const phone = ruleBody(css, "@media (max-width: 640px)");
+    const minWidth = Number.parseFloat(decl(ruleBody(phone, ".landing-narrative-section__figure .focus-chart"), "min-width") ?? "");
+    expect(minWidth).toBeGreaterThanOrEqual(720);
+    expect(decl(ruleBody(phone, ".landing-narrative-section__hint"), "display")).toBe("block");
+    expect(decl(ruleBody(css, ".landing-narrative-section__hint {"), "display")).toBe("none");
+  });
 
   it("never parks a narrative section at opacity: 0 -- the offset is the whole animation", () => {
     const pending = ruleBody(css, ".landing-reveal.landing-reveal--pending {");

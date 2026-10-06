@@ -3,6 +3,7 @@ import i18n from "../i18n";
 import {
   formatNumber,
   formatDateTime,
+  formatReportTime,
   formatDate,
   formatDateRange,
   formatDuration,
@@ -173,6 +174,24 @@ describe("formatDate and formatShortDate", () => {
     expect(formatShortDate("2026-09-28")).toBe("9/28");
     await i18n.changeLanguage("ja");
     expect(formatDate("2026-09-29")).toBe("2026年9月29日");
+  });
+
+  it("names the weekday on request, the way each language writes it", async () => {
+    await i18n.changeLanguage("en");
+    expect(formatDate("2026-09-29", { year: false, weekday: true })).toBe("Tue, Sep 29");
+    await i18n.changeLanguage("ja");
+    expect(formatDate("2026-09-29", { year: false, weekday: true })).toBe("9月29日(火)");
+  });
+});
+
+describe("formatReportTime", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("gives a report from today its time alone, and an older one its date too", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-03T13:24:00Z")); // 22:24 JST
+    expect(formatReportTime("2026-10-03T12:41:00Z")).toBe(formatDateTime("2026-10-03T12:41:00Z", { timeStyle: "short" }));
+    expect(formatReportTime("2026-09-29T00:59:00Z")).toBe(formatDateTime("2026-09-29T00:59:00Z"));
   });
 });
 
