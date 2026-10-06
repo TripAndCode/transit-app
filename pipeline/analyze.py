@@ -200,9 +200,10 @@ _ALLTIME_AGG_TABLES = frozenset({"agg_route_stats", "agg_route_hour", "agg_route
 
 # Aggregates keyed by something other than date whose value spans all of
 # history. They cannot be rebuilt in part, but a run where no row of any date
-# changed would rebuild them to what already stands; the ledger's total_rows
-# is what makes "no row changed" knowable, because these read rows with and
-# without a dep_delay alike.
+# changed and the fingerprint matched (they join static_stop_times) would
+# rebuild them to what already stands; the ledger's total_rows is what makes
+# "no row changed" knowable, because these read rows with and without a
+# dep_delay alike.
 _KEYSET_AGG_TABLES = frozenset({"agg_stop_routes"})
 
 # What a run with no changed date may leave standing: a date-scoped table with
@@ -350,15 +351,15 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn, rebu
     logger.info(f"  {table}: {len(rows)} rows")
 
 
-# Exactly the static-schedule columns the per-date aggregates read, directly or
-# through an aggregate they read back. Too narrow silently keeps stale rows;
-# too wide forces full rebuilds a reader would not have noticed, so the set
-# tracks actual reads rather than whole tables:
+# Exactly the static-schedule columns read by the aggregates a run may scope
+# or skip, directly or through an aggregate they read back. Too narrow silently
+# keeps stale rows; too wide forces full rebuilds a reader would not have
+# noticed, so the set tracks actual reads rather than whole tables:
 #
 #   static_stop_times  which physical stop a trip visit maps to
-#     (agg_stop_daily, agg_route_stop_daily), its scheduled arrival/departure
-#     (agg_route_daily_dwell_run), and the departures agg_route_headway's
-#     scheduled median is built from.
+#     (agg_stop_daily, agg_route_stop_daily, agg_stop_routes), its scheduled
+#     arrival/departure (agg_route_daily_dwell_run), and the departures
+#     agg_route_headway's scheduled median is built from.
 #   static_trips       the route_id bridge to that median, plus the service_id
 #     it picks each route's dominant calendar by — a reimport that only
 #     re-calendars existing trips moves the median without adding or removing
@@ -502,11 +503,11 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
     The static schedule is the other half of the signal, and the ledger cannot
     see it at all — see :func:`_static_fingerprint`.
 
-    Neither half watches this module. Changing a builder's SQL, a bucket
-    width, or a threshold constant makes every already-built date wrong
-    without touching a row anywhere, so a logic change still calls for a
-    deliberate full rebuild (``make analyze-all``, with ``make check-aggs`` to
-    confirm) rather than waiting for a run to notice.
+    Neither half sees a builder change on its own. Changing a builder's SQL,
+    a bucket width, or a threshold constant makes every already-built date
+    wrong without touching a row anywhere; bumping ``ANALYZE_LOGIC_VERSION``,
+    which the fingerprint folds in, is what makes the next run rebuild every
+    date.
     """
     # Both Postgres-side reads come before the ClickHouse scan, so a run that
     # already knows it must rebuild everything never pays for a full-history
@@ -525,7 +526,7 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, static_fingerprint: 
     # A missing record predates this column, so what the stored aggregates were
     # built against is unknown — the same answer as "it changed".
     if meta is None or meta[0] is None or meta[0] != static_fingerprint:
-        logger.info("  incremental: static schedule changed since the last build")
+        logger.info("  incremental: fingerprint missing or changed (schedule, strategy, clamp or logic version)")
         return None
     if any(total is None for _, total in stored.values()):
         logger.info("  incremental: ledger predates total_rows; rebuilding every date")
@@ -1788,7 +1789,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # additionally requires a live rt_field_coverage_probes verdict
         # before trusting these rows.
         if _nothing_to_rebuild("agg_route_headway_daily", rebuild_dates):
-            # The heaviest of the two incremental scans, so the run where
+            # The heaviest of the incremental ClickHouse scans, so the run where
             # nothing changed is exactly the one worth not paying for.
             logger.info("  agg_route_headway_daily: unchanged, not rebuilt")
         elif ingest_strategy in RT_INGEST_STRATEGIES:
