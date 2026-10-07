@@ -1,5 +1,6 @@
 import { Suspense, lazy, use, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { RouteTitleTransition } from "../components/RouteTitleTransition";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
@@ -132,7 +133,13 @@ export function RouteAnalysisTab() {
     <header className="focus-header"><div>
       {/* A route's page is named by its route; the question it answers sits
           beneath. Without a route the question is all there is to say. */}
-      <h1>{route ? names.format(route) : t("investigate")}</h1>
+      {route ? (
+        <RouteTitleTransition>
+          <h1>{names.format(route)}</h1>
+        </RouteTitleTransition>
+      ) : (
+        <h1>{t("investigate")}</h1>
+      )}
       {route && <p className="focus-muted focus-subtitle">{t("investigate")}</p>}
     </div><div className="focus-actions">
       <button className="btn-ghost" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [

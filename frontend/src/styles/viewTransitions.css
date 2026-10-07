@@ -16,6 +16,12 @@ html { view-transition-name: none; }
   ::view-transition-group(.page-nav) { animation-duration: var(--dur-2); }
   ::view-transition-old(.page-nav) { animation: page-nav-out var(--dur-1) var(--ease-out) both; }
   ::view-transition-new(.page-nav) { animation: page-nav-in var(--dur-2) var(--ease-out) both; }
+  /* A report row's route label travelling into the dossier title
+     (RouteTitleTransition); never named under reduced motion. */
+  ::view-transition-group(.route-title) {
+    animation-duration: var(--dur-2);
+    animation-timing-function: var(--ease-out);
+  }
 }
 
 /* The blanket reduced-motion rule in global.css does not reach

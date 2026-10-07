@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import { decl, ruleBody } from "../test/cssRules";
 
 const css = readFileSync(resolve(__dirname, "./viewTransitions.css"), "utf-8");
+const reportTableCss = readFileSync(resolve(__dirname, "../components/ReportTable.css"), "utf-8");
 
 describe("screen transitions", () => {
   it("animate only the routed pane, leaving the rail and top bar live and clickable", () => {
@@ -21,6 +22,16 @@ describe("screen transitions", () => {
     expect(decl(ruleBody(allowed, "::view-transition-old(.page-nav)"), "animation")).toBe(
       "page-nav-out var(--dur-1) var(--ease-out) both",
     );
+  });
+
+  it("carry a clicked route label into the dossier title on --dur-2, only where motion is welcome", () => {
+    const allowed = ruleBody(css, "@media (prefers-reduced-motion: no-preference)");
+    const group = ruleBody(allowed, "::view-transition-group(.route-title)");
+    expect(decl(group, "animation-duration")).toBe("var(--dur-2)");
+    expect(decl(group, "animation-timing-function")).toBe("var(--ease-out)");
+    expect(css.replace(allowed, "")).not.toContain("route-title");
+    // A named element split across line boxes skips the whole transition.
+    expect(decl(ruleBody(reportTableCss, ".report-route-link__label {"), "display")).toBe("inline-block");
   });
 
   it("keep only a short crossfade under reduced motion, which the blanket rule cannot reach", () => {

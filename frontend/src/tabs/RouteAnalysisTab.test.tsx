@@ -11,6 +11,10 @@ import { RouteAnalysisTab } from "./RouteAnalysisTab";
 import { readAnalyses } from "../components/analysis/savedAnalyses";
 import type { RouteShapeResponse } from "../api/types";
 
+vi.mock("../components/RouteTitleTransition", () => ({
+  RouteTitleTransition: ({ children }: { children: React.ReactNode }) => <div data-testid="route-title-transition">{children}</div>,
+}));
+
 vi.mock("../components/analysis/AnalysisMap", () => ({
   AnalysisMap: () => <div data-testid="analysis-map" />,
 }));
@@ -55,6 +59,21 @@ describe("RouteAnalysisTab", () => {
     vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
     renderTab("/agencies/1/route-analysis?routes=R1");
     expect(screen.getByText("No observations match these filters")).toBeInTheDocument();
+  });
+
+  it("the dossier title is where a clicked route label travels to, and only while a route is on the page", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1");
+    expect(screen.getByTestId("route-title-transition")).toContainElement(screen.getByRole("heading", { level: 1 }));
+  });
+
+  it("the choose-a-route heading is not a travel target", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: undefined, isPending: false, error: null, refetch: vi.fn() } as never);
+    renderTab("/agencies/1/route-analysis");
+    expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
+    expect(screen.queryByTestId("route-title-transition")).toBeNull();
   });
 
   it("offers no route-clearing recovery on a route's own page, where the route is the page", () => {

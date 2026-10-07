@@ -61,4 +61,7 @@
 .report-route-link:hover .route-label__code,
 .report-route-link:focus-visible .route-label__code { color: var(--text-secondary); }
 .report-route-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* One box even when the name wraps: a named view-transition element split
+   across line boxes makes the browser skip the whole transition. */
+.report-route-link__label { display: inline-block; max-width: 100%; }
 .report-route-link__chevron { color: var(--text-tertiary); }

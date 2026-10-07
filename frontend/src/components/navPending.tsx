@@ -1,6 +1,7 @@
-import { addTransitionType, use, useState, useTransition, type MouseEvent, type ReactNode } from "react";
+import { addTransitionType, use, useState, useTransition, type ReactNode } from "react";
 import { NavLink, useNavigate, type NavLinkProps } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { isPlainLeftClick } from "../utils/clicks";
 import { Spinner } from "./Spinner";
 import { NavPendingContext } from "./navPendingContext";
 import "./navPending.css";
@@ -34,10 +35,6 @@ export function NavPendingProvider({ children }: { children: ReactNode }) {
       {children}
     </NavPendingContext>
   );
-}
-
-function isPlainLeftClick(e: MouseEvent<HTMLAnchorElement>): boolean {
-  return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
 }
 
 /** A NavLink that navigates through the nearest NavPendingProvider, marking

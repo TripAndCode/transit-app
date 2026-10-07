@@ -1,9 +1,14 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import type { TFunction } from "i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "./RouteLabel";
+import { PendingNavLink } from "./navPending";
+import { RouteTitleTransition } from "./RouteTitleTransition";
+import { isPlainLeftClick } from "../utils/clicks";
+import { prefersReducedMotion } from "../utils/motion";
 import { ServiceName } from "./ServiceName";
 import { serviceValueLabel } from "../utils/filterValueLabels";
 import { routeHref } from "../routes/destinations";
@@ -177,6 +182,9 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
   const names = useRouteNames(id);
   const { search } = useLocation();
   const schema = SCHEMAS[reportType];
+  // The visible row whose label travels into the dossier title; by row, not
+  // route, since a route listed once per service would otherwise name two.
+  const [travelling, setTravelling] = useState<number | null>(null);
 
   const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   const cappedRows = useCappedList(
@@ -215,7 +223,7 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
                 <span className="report-cards__rank">{i + 1}</span>
                 {titleCol && (
                   <span className="report-cards__route">
-                    <RouteCell agencyId={id} code={String(row[titleCol.index] ?? "")} names={names} search={search} />
+                    <RouteCell agencyId={id} code={String(row[titleCol.index] ?? "")} names={names} search={search} travels={travelling === i} onTravel={() => setTravelling(i)} />
                   </span>
                 )}
                 {headline && (
@@ -286,7 +294,7 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
                       // width it breaks onto a third line.
                       style={{ ...td(), ...(c === ROUTE_COL ? STICKY_CELL : null), minWidth: "16em", fontWeight: 500, wordBreak: "keep-all" }}
                     >
-                      <RouteCell agencyId={id} code={String(row[c.index] ?? "")} names={names} search={search} />
+                      <RouteCell agencyId={id} code={String(row[c.index] ?? "")} names={names} search={search} travels={travelling === i} onTravel={() => setTravelling(i)} />
                     </td>
                   );
                 }
@@ -330,26 +338,47 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
 
 /** A row's route, as a link to its page: rows are where a route is found,
  *  so they are how it is opened. The scope carries over; routeHref drops what
- *  only chose this screen's report. */
+ *  only chose this screen's report.
+ *
+ *  It opens as a screen navigation, and a plain click also lends the row's
+ *  label the dossier title's transition name so the label travels into the
+ *  title. Under reduced motion nothing travels; a modified click stays the
+ *  browser's. */
 function RouteCell({
   agencyId,
   code,
   names,
   search,
+  travels,
+  onTravel,
 }: {
   agencyId: number | null;
   code: string;
   names: ReturnType<typeof useRouteNames>;
   search: string;
+  travels: boolean;
+  onTravel: () => void;
 }) {
   if (agencyId == null || !code) return <RouteLabel code={code} names={names} />;
-  return (
-    <Link className="report-route-link" to={routeHref(agencyId, code, search)}>
+  const label = (
+    <span className="report-route-link__label">
       <RouteLabel code={code} names={names} />
+    </span>
+  );
+  return (
+    <PendingNavLink
+      className="report-route-link"
+      to={routeHref(agencyId, code, search)}
+      spinner={false}
+      onClick={(e) => {
+        if (isPlainLeftClick(e) && !prefersReducedMotion()) onTravel();
+      }}
+    >
+      {travels ? <RouteTitleTransition>{label}</RouteTitleTransition> : label}
       <span className="report-route-link__chevron" aria-hidden="true">
         {"\u00a0›"}
       </span>
-    </Link>
+    </PendingNavLink>
   );
 }
 
