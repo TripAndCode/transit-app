@@ -784,6 +784,8 @@
     "low_confidence_mark": "幅あり",
     "more_rows": "…他{{count}}件",
     "build_labels": {
+      "summary": "🛠 {{tool}}",
+      "summary_with_args": "🛠 {{tool}} ({{args}})",
       "metric": "指標",
       "n": "件数",
       "best_first": "良い順に並べる",
@@ -1000,7 +1002,7 @@
       "legend_explainer": "・行 → 時間帯 ・列 → 日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
       "tooltip_hour": "{{hour}}時 ・ 平均",
-      "tooltip_metrics": "{{min}}分 ・ {{count, number}}件",
+      "tooltip_metrics": "{{min}} ・ {{count}}件",
       "ramp_max": "{{min}}分以上",
       "severe_outline": "枠線 = {{min}}分以上"
     },
@@ -1013,11 +1015,11 @@
     "daily": {
       "empty": "期間内にデータがありません。",
       "svg_aria": "日次平均遅延チャート",
-      "tooltip_metrics": "平均{{min}}分 / {{count}}件",
-      "smoothed_tooltip": "7日移動平均{{min}}分",
+      "tooltip_metrics": "平均{{min}} / {{count}}件",
+      "smoothed_tooltip": "7日移動平均{{min}}",
       "smoothed_label": "- - - 7日移動平均",
       "worst_label": "悪化:",
-      "offender": "路線{{code}}({{min}}分)",
+      "offender": "路線{{code}}({{min}})",
       "revision_boundary_label": "ダイヤ改正",
       "revision_boundary_aria": "{{date}}にダイヤ改正が反映されました",
       "brush_hint": "ドラッグで期間を絞り込み",

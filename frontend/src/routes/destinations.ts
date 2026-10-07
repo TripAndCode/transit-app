@@ -45,7 +45,10 @@ export function mergeSearch(search: string, extra: Record<string, string>): stri
 }
 
 /** The params that pick which screen a URL shows rather than what it
- *  filters. An agency switch keeps these even where it drops the rest. */
+ *  filters. An agency switch keeps these even where it drops the rest.
+ *  `report` and `sort` are dropped on purpose: they name a report and an
+ *  ordering of the previous agency's data, and the destination's default
+ *  report is the right landing for the new one. */
 export function screenParams(search: string): Record<string, string> {
   const params = new URLSearchParams(search);
   const kept: Record<string, string> = {};

@@ -90,9 +90,9 @@ function directionOptions(trips: LiveTrip[], t: ReturnType<typeof useTranslation
   }));
 }
 
-function freshnessFor(timestamp: string | null | undefined): Freshness {
+function freshnessFor(timestamp: string | null | undefined, now: number): Freshness {
   if (!timestamp) return "unknown";
-  const age = Date.now() - new Date(timestamp).getTime();
+  const age = now - new Date(timestamp).getTime();
   if (!Number.isFinite(age) || age < 0) return "unknown";
   if (age <= 2 * 60_000) return "normal";
   if (age <= MAX_REPORT_AGE_MS) return "delayed";
@@ -248,7 +248,7 @@ export function MapTab() {
   const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
   const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
   const latestReport = liveQuery.data?.latest_captured_at ?? null;
-  const freshness = freshnessFor(latestReport);
+  const freshness = freshnessFor(latestReport, now);
 
   const onTripClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
     const tripId = event.features?.[0]?.properties?.trip_id;
@@ -581,7 +581,7 @@ export function MapTab() {
             ? t("operations.no_update")
             : freshness === "stale"
               ? t("operations.feed_quiet", { duration: quietFor(now - Date.parse(latestReport), t), time: formatReportTime(latestReport) })
-              : t("operations.last_updated", { when: relativeTime(latestReport) })}
+              : t("operations.last_updated", { when: relativeTime(latestReport, now) })}
         </div>
         <button
           type="button"

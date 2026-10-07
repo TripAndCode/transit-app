@@ -87,4 +87,8 @@ describe("destinations", () => {
     expect(agencySwitchHref(4, "time", "", "from=2026-09-01&routes=5&stop=S1")).toBe("/agencies/4/time?from=2026-09-01");
     expect(agencySwitchHref(4, undefined, "")).toBe("/agencies/4/pulse");
   });
+
+  it("keeps only the params that pick a screen on an agency switch", () => {
+    expect(screenParams("?by=periods&report=ranking&sort=avg&doc=council&routes=1")).toEqual({ by: "periods", doc: "council" });
+  });
 });
