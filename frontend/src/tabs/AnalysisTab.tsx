@@ -63,12 +63,15 @@ function hasCsv(data: ReportResponse): boolean {
 }
 
 /** A ranking's coverage options; every other report takes none, and the API
- *  refuses them there. */
+ *  refuses them there. The compare report is drawn re-ranked by one period's
+ *  delay, so it asks for every route: the API's default length keeps the
+ *  widest gaps, which would drop a route that is slow in both periods. */
 function rankingOptions(
   reportType: string | null | undefined,
   includeSparse: boolean,
   allRowsFor: string | null,
 ): ReportOptions | undefined {
+  if (reportType === "compare_ranking") return { limit: REPORT_ROWS_MAX };
   if (reportType == null || !RANKING_TYPES.has(reportType)) return undefined;
   return { includeSparse, limit: allRowsFor === reportType ? REPORT_ROWS_MAX : undefined };
 }

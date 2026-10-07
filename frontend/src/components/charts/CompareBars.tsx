@@ -15,8 +15,6 @@ import { COMPARE_AXIS_MAX_MIN, PERIODS, barScale, deltaFor, orderByPeriod, other
 import "./compareBars.css";
 
 const ROWS_CAP = 200;
-/** Below this the two periods read as the same; the delta stays neutral. */
-const DELTA_DEAD_ZONE_MIN = 0.05;
 
 function Figure({ value }: { value: number }) {
   const shown = useCountUp(value, { decimals: 1 });
@@ -62,7 +60,7 @@ export function CompareBars({ rows }: { rows: readonly unknown[][] }) {
         {capped.visible.map((row) => {
           const v = row[period];
           const d = deltaFor(row, period);
-          const tone = d == null || Math.abs(d) <= DELTA_DEAD_ZONE_MIN ? "" : d > 0 ? " compare-bar__delta--up" : " compare-bar__delta--down";
+          const tone = d == null || d === 0 ? "" : d > 0 ? " compare-bar__delta--up" : " compare-bar__delta--down";
           return (
             <div key={row.route_code} role="listitem" className="compare-bar-row" data-flip-key={row.route_code} data-testid="compare-bar-row">
               <span className="compare-bar__route">

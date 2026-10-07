@@ -590,6 +590,14 @@ describe("AnalysisTab ranking coverage", () => {
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_sparse=1(&|$)/);
   });
 
+  it("asks for the whole compare set, since the bars re-rank it by period rather than by gap", () => {
+    const { useReport } = setup("/agencies/1/analysis/rider?report=compare_ranking", reportResponse("compare_ranking"), ["compare_ranking"]);
+    expect(useReport.mock.calls.at(-1)?.[3]).toEqual({ limit: 500 });
+    const href = screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "";
+    expect(href).toMatch(/[?&]limit=500(&|$)/);
+    expect(href).not.toContain("include_sparse");
+  });
+
   it("asks a report without a ranking floor for nothing extra", () => {
     const { useReport } = setup("/agencies/1/analysis/rider?report=on_time&sparse=1", reportResponse("on_time"));
     expect(screen.queryByRole("checkbox", TOGGLE)).not.toBeInTheDocument();

@@ -41,8 +41,12 @@ export function barScale(value: number | null, axisMax: number = COMPARE_AXIS_MA
   return Math.min(1, Math.max(0, value / axisMax));
 }
 
+/** The shown period minus the other, rounded to the tenth the bars print, so
+ *  the sign and tone always agree with the figure: a gap under 0.05 is 0. */
 export function deltaFor(row: CompareRow, period: Period): number | null {
   const a = row[period];
   const b = row[otherPeriod(period)];
-  return a == null || b == null ? null : a - b;
+  if (a == null || b == null) return null;
+  const tenths = Math.round((a - b) * 10);
+  return tenths === 0 ? 0 : tenths / 10;
 }
