@@ -1,0 +1,2 @@
+.still-working { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; color: var(--text-tertiary); font-size: var(--text-sm); }
+.still-working:empty { margin: 0; }

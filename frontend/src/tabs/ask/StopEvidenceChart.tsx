@@ -6,6 +6,9 @@ import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
 import { Tooltip } from "../../components/Tooltip";
 import { formatNumber } from "../../utils/format";
+import { useTopmostEscape } from "../../hooks/useFocusTrap";
+import { niceAxis } from "../../components/charts/niceAxis";
+import { coalesceToFrame } from "../../utils/frameCoalesce";
 import "./stopEvidence.css";
 
 export function StopEvidenceChart({ messageId, points, onFocus, complete = false, message }: {
@@ -31,6 +34,11 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [sequence, setSequence] = useState<number | null>(null);
   const [detailLeft, setDetailLeft] = useState(0);
+  useTopmostEscape(sequence !== null, () => {
+    setSequence(null);
+    onFocus?.(null);
+    selectedButtonRef.current?.focus();
+  });
   useEffect(() => {
     if (sequence === null) return;
     const container = scrollRef.current;
@@ -52,19 +60,13 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
       }
     }
     updateDetailLeft();
-    container?.addEventListener("scroll", updateDetailLeft);
-    function dismiss(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setSequence(null);
-      onFocus?.(null);
-      selectedButtonRef.current?.focus();
-    }
-    document.addEventListener("keydown", dismiss);
+    const frame = coalesceToFrame(updateDetailLeft);
+    container?.addEventListener("scroll", frame.schedule);
     return () => {
-      document.removeEventListener("keydown", dismiss);
-      container?.removeEventListener("scroll", updateDetailLeft);
+      frame.cancel();
+      container?.removeEventListener("scroll", frame.schedule);
     };
-  }, [sequence, onFocus]);
+  }, [sequence]);
   const [windowSize, setWindowSize] = useState(Math.min(8, points.length));
   const [windowStart, setWindowStart] = useState(0);
   const size = complete ? Math.min(windowSize, points.length) : points.length;
@@ -73,13 +75,8 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   const selected = points.find((point) => point.sequence === sequence);
   const rawLow = Math.min(0, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
   const rawHigh = Math.max(1, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
-  const roughStep = (rawHigh - rawLow) / 3;
-  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
-  const step = ([1, 2, 5, 10].find((value) => value * magnitude >= roughStep) ?? 10) * magnitude;
-  const low = Math.floor(rawLow / step) * step;
-  const high = Math.ceil(rawHigh / step) * step;
+  const { low, high, ticks } = niceAxis(rawLow, rawHigh, 3);
   const span = high - low;
-  const ticks = Array.from({ length: Math.round(span / step) + 1 }, (_, index) => low + index * step);
   function select(point: StopEvidence | null) {
     setSequence(point?.sequence ?? null);
     onFocus?.(point ? { messageId, sequence: point.sequence, name: point.name,

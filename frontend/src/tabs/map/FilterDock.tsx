@@ -69,7 +69,9 @@ export function FilterDock({ agencyId, applied, onApply, playback }: {
           onClick={playback.onToggle}
         >
           <Clapperboard size={14} aria-hidden="true" />
-          {tc(playback.active ? "operations.playback.toggle_off" : "operations.playback.toggle_on")}
+          <span className="ops-dock__playback-label">
+            {tc(playback.active ? "operations.playback.toggle_off" : "operations.playback.toggle_on")}
+          </span>
         </button>
       )}
       {dirty && (

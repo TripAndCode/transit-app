@@ -10,7 +10,6 @@
 .network-howto-list li { min-width: 0; padding: 9px 10px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); }
 .network-howto-list strong { display: block; margin-bottom: 2px; color: var(--text-primary); font-size: var(--text-xs); }
 
-.network-definition summary { display: inline-flex; padding: 4px 0; font-size: var(--text-sm); font-weight: 600; cursor: pointer; color: var(--accent); }
 
 .network-controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; font-size: var(--text-sm); color: var(--text-secondary); }
 .network-controls label { display: inline-flex; align-items: center; gap: 6px; }

@@ -11,8 +11,7 @@ vi.mock("./auth", () => ({
 
 
 // Probe shares the same router context as the hook so it reactively sees
-// whatever setSearchParams call the hook makes, mirroring
-// defaultRangeAnchor.test.tsx's own probe pattern.
+// whatever setSearchParams call the hook makes.
 function Probe({ agencyId }: { agencyId: number | null }) {
   useAnonymousFilterPersistence(agencyId);
   const [params] = useSearchParams();
@@ -67,17 +66,6 @@ describe("useAnonymousFilterPersistence", () => {
   beforeEach(() => {
     localStorage.clear();
     useSessionMock.mockReturnValue({ data: null, isLoading: false });
-    // The hook now also reads useAgencies (to defer to useDefaultRangeAnchor
-    // via the shared computeAnchorRange — see anonymousFilterPersistence.ts's
-    // docstring); mock it as resolved-but-empty (no agency data to anchor on)
-    // so computeAnchorRange is always a no-op here and these tests keep
-    // exercising restore/persist in isolation. Must be resolved (isPending:
-    // false), not pending — the hook now withholds all action while agencies
-    // is still pending (see the cold-load race test in
-    // _combinedHooksProbe.test.tsx), which would otherwise block every test
-    // in this file. The dedicated interaction coverage lives in
-    // defaultRangeAnchor.test.tsx.
-    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -136,6 +124,16 @@ describe("useAnonymousFilterPersistence", () => {
     expect(params.get("dow")).toBe("weekend");
     expect(params.get("time_band")).toBe("evening");
     expect(params.get("routes")).toBe("A1,B2");
+  });
+
+  it("restores a stored filter however old the agency's data is", () => {
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [{ agency_id: 1, agency_name: "Test", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
+      isPending: false,
+    } as never);
+    localStorage.setItem("transit.lastFilter.1.pulse", JSON.stringify({ dow: "weekend" }));
+    renderProbe(1, "/agencies/1/pulse");
+    expect(screen.getByTestId("params")).toHaveTextContent("dow=weekend");
   });
 
   it("does not restore when the URL already has an explicit filter param", () => {

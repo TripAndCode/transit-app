@@ -16,7 +16,7 @@ import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
 import { useTapToExpandBanner } from "../hooks/useTapToExpandBanner";
 
-export const STALE_THRESHOLD_HOURS = 24;
+const STALE_THRESHOLD_HOURS = 24;
 const SESSION_DISMISS_KEY = "ds_banner_dismissed_at";
 
 function relativeAgeHours(iso: string): number {

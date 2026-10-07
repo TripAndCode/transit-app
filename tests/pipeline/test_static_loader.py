@@ -200,3 +200,38 @@ def test_load_static_updates_static_version_id_on_reload(pg_conn, agency_id, tmp
         )
         rows = cur.fetchall()
     assert rows == [("gtfs_static_20260201",)]
+
+
+def test_load_static_builds_stop_clusters_for_same_named_nearby_platforms(pg_conn, agency_id, tmp_path):
+    """Two platforms of one named stop ~170 m apart share a cluster; a
+    same-named stop ~840 m away and an unnamed stop each stand alone."""
+    zip_path = _make_zip(
+        tmp_path,
+        stops_rows=[
+            "SA,境界前,40.0,139.974",
+            "SB,境界前,40.0,139.976",
+            "SC,境界前,40.0,139.985",
+            "SU,,40.5,140.5",
+            "SN,無座標,,",
+        ],
+    )
+    load_static(zip_path, agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT stop_id, name_key, cluster_id FROM stop_clusters WHERE agency_id = %s ORDER BY stop_id",
+            (agency_id,),
+        )
+        rows = {stop_id: (name_key, cluster_id) for stop_id, name_key, cluster_id in cur.fetchall()}
+    assert set(rows) == {"SA", "SB", "SC", "SU"}, "a stop without geometry has no cluster row"
+    assert rows["SA"] == rows["SB"]
+    assert rows["SC"][0] == "境界前" and rows["SC"][1] != rows["SA"][1]
+    assert rows["SU"][0] == "unnamed:SU"
+
+
+def test_load_static_replaces_stop_clusters_on_reload(pg_conn, agency_id, tmp_path):
+    load_static(_make_zip(tmp_path, stops_rows=["S1,駅前,40.0,140.0", "S2,駅前,40.0,140.001"]), agency_id, pg_conn)
+    second = _make_zip(tmp_path, stops_rows=["S1,駅前,40.0,140.0"], filename="second_static.zip")
+    load_static(second, agency_id, pg_conn)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT stop_id FROM stop_clusters WHERE agency_id = %s", (agency_id,))
+        assert [r[0] for r in cur.fetchall()] == ["S1"]

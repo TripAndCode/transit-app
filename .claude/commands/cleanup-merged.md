@@ -1,6 +1,6 @@
 ---
 name: cleanup-merged
-description: Sync main, then safely remove proven-stale local branches and worktrees; optionally repeat in a persistent VPS clone.
+description: Sync main, then safely remove proven-stale local branches, worktrees and their orphaned poetry venvs; optionally repeat in a persistent VPS clone.
 ---
 
 Run the standard post-merge cleanup. Local cleanup is the default. Optional arguments:
@@ -36,15 +36,18 @@ Run from the target repository:
 ```bash
 python3 scripts/cleanup_git_state.py
 python3 scripts/cleanup_git_state.py --apply
+python3 scripts/daily_git_hygiene.py --venvs-only
+python3 scripts/daily_git_hygiene.py --venvs-only --apply
 ```
 
-The first command is the inspectable dry run. The second may run without another
-interactive confirmation when cleanup was the requested task: it rechecks each tip
-and worktree immediately before deletion. Stop on any error; never substitute
-`--force` worktree removal or hand-delete a directory.
+Each pair is a dry run followed by its apply. The applies may run without another
+interactive confirmation when cleanup was the requested task: the first rechecks each
+tip and worktree immediately before deletion, and the second removes only poetry venvs
+that no remaining worktree owns, after the same recheck. Stop on any error; never substitute
+`--force` worktree removal or hand-delete a directory or venv.
 
 Verify with `git status --porcelain`, `git branch --list`, and `git worktree list
---porcelain`. Report deleted and retained state separately.
+--porcelain`. Report deleted and retained state separately, including pruned venvs.
 
 ## 4. Optional VPS clone
 
@@ -55,7 +58,8 @@ remote clone must already contain `scripts/cleanup_git_state.py`; if it does not
 
 ## Boundaries
 
-- Delete only entries marked `DELETE` by `cleanup_git_state.py`.
+- Delete only entries marked `DELETE` by `cleanup_git_state.py` or by
+  `daily_git_hygiene.py --venvs-only`.
 - Never delete remote/GitHub branches, push, force-push, reset, stash, or discard files.
 - `main`, `production`, the invoking and primary worktrees, `/review-pr` worktrees
   (`.worktrees/review-*`), open PRs, dirty/locked worktrees, and unmerged work are

@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { Fragment, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Z_INDEX } from "../../styles/zIndex";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import { useSearchParams } from "react-router-dom";
 import type { ReactNode } from "react";
 import { td, th } from "../tableStyles";
@@ -200,8 +201,10 @@ export function DataTable<Row>({
   const shortcuts: ShortcutHint[] = [
     { keys: "j", description: t("admin.table.shortcuts.next") },
     { keys: "k", description: t("admin.table.shortcuts.prev") },
-    { keys: "x", description: t("admin.table.shortcuts.select") },
-    { keys: "Enter", description: t("admin.table.shortcuts.open") },
+    // Only the keys this table answers: `x` needs a selection handler and
+    // Enter a row to open.
+    ...(onSelectionChange ? [{ keys: "x", description: t("admin.table.shortcuts.select") }] : []),
+    ...(onOpen ? [{ keys: "Enter", description: t("admin.table.shortcuts.open") }] : []),
     ...(extraShortcuts ?? []),
   ];
   const hasSavedViews = savedViews != null && savedViews.length > 0;
@@ -357,23 +360,10 @@ function ShortcutHintChip({ shortcuts }: { shortcuts: readonly ShortcutHint[] })
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
 
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      triggerRef.current?.focus();
-    }
-    function onPointerDown(event: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("mousedown", onPointerDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, rootRef, (reason) => {
+    setOpen(false);
+    if (reason === "escape") triggerRef.current?.focus();
+  });
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>

@@ -40,9 +40,11 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("on_time_row", "ja"): "{rank}位: 路線{route}（{service}）定時率{pct}%、平均{avg}分（{samples}件）",
     ("on_time_row", "en"): "#{rank} route {route} ({service}) on-time {pct}%, mean {avg} min ({samples} samples)",
     ("worst5_header", "ja"): "【{label}5分超遅延ランキング】",
-    ("worst5_header", "en"): "[{label}5+ minute delay ranking]",
+    ("worst5_header", "en"): "[{label}Ranking of delays over 5 min]",
     ("worst5_row", "ja"): "{rank}位: 路線{route}（{service}）5分超 {count}回、平均{avg}分（{samples}件）",
-    ("worst5_row", "en"): "#{rank} route {route} ({service}) 5+ min: {count} times, mean {avg} min ({samples} samples)",
+    ("worst5_row", "en"): (
+        "#{rank} route {route} ({service}) over 5 min: {count} times, mean {avg} min ({samples} samples)"
+    ),
     ("dow_header_weekend", "ja"): "【{label}週末遅延ランキング】",
     ("dow_header_weekend", "en"): "[{label}Weekend delay ranking]",
     ("dow_header_weekday", "ja"): "【{label}平日遅延ランキング】",
@@ -88,10 +90,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
     ("council_header", "ja"): "【運行実績月次・年次報告（{agency}、{from_date} 〜 {to_date}）】",
     ("council_header", "en"): "[Monthly/annual performance report ({agency}, {from_date} to {to_date})]",
-    ("council_headline", "ja"): "定時率 {on_time}%、平均遅延 {avg}分（観測{samples}件）、運行実績率 {delivered}%",
-    ("council_headline", "en"): (
-        "On-time rate {on_time}%, mean delay {avg} min ({samples} samples), service-delivered rate {delivered}%"
-    ),
+    ("council_headline", "ja"): "定時率 {on_time}%、平均遅延 {avg}分（観測{samples}件）",
+    ("council_headline", "en"): "On-time rate {on_time}%, mean delay {avg} min ({samples} samples)",
+    ("council_headline_delivered", "ja"): "、運行実績率 {delivered}%",
+    ("council_headline_delivered", "en"): ", service-delivered rate {delivered}%",
     ("council_stale_caveat", "ja"): "集計が最新の完了日に追いついていない可能性があります（集計遅延）。",
     ("council_stale_caveat", "en"): "Aggregates may lag the most recently completed day (processing delay).",
     ("council_quality_caveat", "ja"): "データ品質: 観測値の{clamp_pct}%が異常値として除外されています。",
@@ -387,8 +389,9 @@ def format_council_summary_text(
     locale: str = "ja",
 ) -> str:
     """Locale-aware prose body for the monthly/annual council report
-    template: a headline (on-time rate, average delay, service-delivered
-    rate) over ``[from_date, to_date]``, footnoted with the definition
+    template: a headline (on-time rate, average delay, and the
+    service-delivered rate where the feed measures it) over
+    ``[from_date, to_date]``, footnoted with the definition
     metadata and this agency's freshness/quality caveats
     (:func:`format_council_summary_footnotes`). ``payload`` is
     ``pipeline.reports.council.compute_council_summary``'s own dict shape.
@@ -402,9 +405,13 @@ def format_council_summary_text(
             locale,
             on_time=_r(payload.get("on_time_pct")),
             avg=_r(payload.get("avg_delay_min")),
-            samples=payload.get("samples", 0),
-            delivered=_r(payload.get("service_delivered_pct")),
+            samples=f"{payload['samples']:,}",
         )
+        # A rate the feed cannot measure is left out of the headline; the
+        # footnotes say why, which a bare "—%" would not.
+        delivered = payload.get("service_delivered_pct")
+        if delivered is not None:
+            body += _t("council_headline_delivered", locale, delivered=_r(delivered))
     footnote_mark = "※" if locale != "en" else "* "
     footnotes = "\n".join(f"{footnote_mark}{f}" for f in format_council_summary_footnotes(definition, payload, locale))
     return f"{header}\n{body}\n{footnotes}"
