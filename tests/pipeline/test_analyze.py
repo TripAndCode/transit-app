@@ -2103,29 +2103,36 @@ def test_the_static_fingerprint_notices_a_recalendared_trip(pg_conn, agency_id):
     assert _fingerprint(pg_conn, agency_id) != before
 
 
-def test_the_text_dated_aggregate_stores_iso_dates(pg_conn, agency_id, ch_client):
-    """agg_daily_trend stores its service date as text, and text has a format.
+def test_the_trend_aggregate_stores_dates_and_purges_by_them(pg_conn, agency_id, ch_client):
+    """agg_daily_trend's service date is a DATE, the type the per-date purge binds.
 
-    The per-date purge matches this column against an ISO string, and every
-    reader parses it as one, so the format is a contract rather than an
-    incidental rendering. Nothing else in the suite would notice it drifting:
-    the column is text, so a differently-formatted value stores and reads
-    back perfectly happily, and only the purge quietly stops matching.
+    The purge compares the column against the rebuild list's dates as-is; a
+    column of any other type would need a cast on one side, and a cast on the
+    column side costs it the primary-key prefix the purge narrows by. A purge
+    that matched nothing would surface on the reinsert as a primary-key
+    collision.
     """
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
+    before = _agg_snapshot(pg_conn, agency_id)
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT DISTINCT date FROM agg_daily_trend WHERE agency_id = %s", (agency_id,))
         stored = [r[0] for r in cur.fetchall()]
     assert stored, "fixture produced no rows, so this would pass vacuously"
-    for value in stored:
-        date.fromisoformat(value)
+    assert all(type(value) is date for value in stored), stored
 
-    # A second run purges by that string and reinserts the same primary
-    # keys, which is where a mismatch would surface as a collision.
+    # Moving one date's ledger count makes the next run purge and rebuild
+    # exactly that date (see test_dates_needing_rebuild_names_only_what_moved).
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_feed_health SET raw_samples = raw_samples + 1 WHERE agency_id = %s AND date = %s",
+            (agency_id, max(stored)),
+        )
+        assert cur.rowcount == 1
+    pg_conn.commit()
     analyze(agency_id, pg_conn, ch_client)
-    assert _agg_snapshot(pg_conn, agency_id)["agg_daily_trend"]
+    assert _agg_snapshot(pg_conn, agency_id) == before
 
 
 def _seed_null_key_rows(pg_conn, agency_id):

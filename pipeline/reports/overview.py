@@ -333,7 +333,7 @@ async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None, grain:
     if ctx.time_band == "all":
         where, params, _ = _agg_filter(ctx, next_param=2)
         where_clause = f" AND ({where})" if where else ""
-        sql = f"SELECT MAX(date::date) AS d FROM agg_daily_trend WHERE agency_id=$1{where_clause}"
+        sql = f"SELECT MAX(date) AS d FROM agg_daily_trend WHERE agency_id=$1{where_clause}"
         row = await conn.fetchrow(sql, agency_id, *params)
         return row["d"] if row and row["d"] else None
 
@@ -1009,8 +1009,7 @@ async def _service_split_daily(agency_id: int, ctx: RangeCtx, conn, ch=None, gra
         ]
     by_date: dict[str, dict[str, float | None]] = {}
     for r in rows:
-        d_raw = r["date"]
-        d = d_raw if isinstance(d_raw, str) else d_raw.isoformat()
+        d = r["date"].isoformat()
         st = r["service_type"]
         # 2dp, half-up — matches the sibling _service_split's rounding so the
         # two report the same precision for the same underlying metric.
