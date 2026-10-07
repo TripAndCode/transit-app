@@ -1,10 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { describe, it, expect } from "vitest";
+import { screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RoutesToCheckList } from "./RoutesToCheckList";
-import * as scopeModule from "../api/scope";
-import { SCOPE_EXTRAS_NONE } from "../api/scope";
 import type { OverviewTopDelayedRoute } from "../api/types";
 
 function routes(): OverviewTopDelayedRoute[] {
@@ -15,30 +13,35 @@ function routes(): OverviewTopDelayedRoute[] {
   ];
 }
 
-// RoutesToCheckList calls useScope (react-router-dom's useSearchParams
-// under the hood), so — matching the existing pattern in
-// RouteForecastSection.test.tsx — every render needs a <MemoryRouter>.
 function renderList(rs: OverviewTopDelayedRoute[]) {
   return renderWithProviders(
-    <MemoryRouter>
-      <RoutesToCheckList routes={rs} />
+    <MemoryRouter initialEntries={["/agencies/1/pulse?from=2026-09-01&to=2026-09-30"]}>
+      <Routes>
+        <Route path="/agencies/:agencyId/pulse" element={<RoutesToCheckList routes={rs} />} />
+      </Routes>
     </MemoryRouter>,
   );
 }
 
 describe("RoutesToCheckList", () => {
-  it("groups routes into severity bands with a worst-first header, count, and no empty bands", () => {
+  it("heads each severity band with a sentence that counts its routes, worst band first, no empty bands", () => {
     renderList(routes());
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
-    // K31 (6.6) and K37 (5.7) are both >= 5min -> "severe" band, header first
-    expect(screen.getByText("> 5 min")).toBeInTheDocument();
-    // W53 (2.1) is 1.5-3min -> "mild" band. Note: the real i18n string uses an
-    // en-dash with NO surrounding spaces ("1.5–3 min", "3–5 min") -- verified
-    // against frontend/src/i18n/locales/en.json, not guessed.
-    expect(screen.getByText("1.5–3 min")).toBeInTheDocument();
-    // no routes fall in 3-5min ("moderate") or <1.5min ("ok") -- their headers must be absent
-    expect(screen.queryByText("3–5 min")).not.toBeInTheDocument();
-    expect(screen.queryByText("< 1.5 min")).not.toBeInTheDocument();
+    const headers = Array.from(document.querySelectorAll(".ov-check-band-hd")).map((h) => h.textContent);
+    expect(headers).toEqual(["2 routes averaging more than 5 min late", "1 route averaging 1.5–3 min late"]);
+  });
+
+  it("gives each route's average its unit", () => {
+    renderList(routes());
+    expect(screen.getByText("6.6 min")).toBeInTheDocument();
+  });
+
+  it("opens the route's own page, keeping the period", () => {
+    renderList(routes());
+    const link = screen.getByText("K31").closest("a")!;
+    const url = new URL(link.getAttribute("href")!, "http://x");
+    expect(url.pathname).toBe("/agencies/1/routes/K31");
+    expect(url.searchParams.get("from")).toBe("2026-09-01");
   });
 
   it("shows the route's name with its code de-emphasized, not as a separate raw-code column", () => {
@@ -81,38 +84,5 @@ describe("RoutesToCheckList", () => {
     renderList([{ route_code: "A", route_short_name: null, avg_min: 0.5 }]);
     expect(screen.getByText("No routes need attention")).toBeInTheDocument();
     expect(document.querySelector(".ov-check-row")).not.toBeInTheDocument();
-  });
-
-  it("narrows the shared route filter to the clicked route", () => {
-    const update = vi.fn();
-    vi.spyOn(scopeModule, "useScope").mockReturnValue([
-      { ...SCOPE_EXTRAS_NONE, from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
-      update,
-    ]);
-    renderList(routes());
-    // K31 (6.6) sorts before K37 (5.7) within the "severe" band (worst-first),
-    // so the first "観光通り線" match is K31's row.
-    fireEvent.click(screen.getAllByText("観光通り線")[0]);
-    expect(update).toHaveBeenCalledWith({ routes: ["K31"] });
-  });
-
-  it("narrows the filter on Enter and Space, but not on other keys", () => {
-    const update = vi.fn();
-    vi.spyOn(scopeModule, "useScope").mockReturnValue([
-      { ...SCOPE_EXTRAS_NONE, from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
-      update,
-    ]);
-    renderList(routes());
-    const row = screen.getByText("K31").closest('[role="button"]')!;
-
-    fireEvent.keyDown(row, { key: "Tab" });
-    expect(update).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(row, { key: "Enter" });
-    expect(update).toHaveBeenCalledWith({ routes: ["K31"] });
-
-    update.mockClear();
-    fireEvent.keyDown(row, { key: " " });
-    expect(update).toHaveBeenCalledWith({ routes: ["K31"] });
   });
 });

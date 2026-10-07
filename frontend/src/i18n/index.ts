@@ -9,6 +9,10 @@ import jaJsonUrl from "./locales/ja.json?url";
 export const SUPPORTED_LOCALES = ["ja", "en"] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
+/** Each language named in itself, so a reader who can't read the current one
+ *  still finds theirs. */
+export const LOCALE_NAMES: Record<Locale, string> = { ja: "日本語", en: "English" }; // i18n-ignore: each language names itself
+
 /** Loads one language's strings; `attempt` counts from 0 for that language. */
 type TranslationLoader = (attempt: number) => Promise<ResourceKey>;
 type TranslationLoaders = Record<Locale, TranslationLoader>;

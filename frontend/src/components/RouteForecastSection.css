@@ -1,0 +1,2 @@
+.forecast-route-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; color: var(--text-secondary); font-size: var(--text-sm); }
+.forecast-route-picker select { max-width: 100%; }

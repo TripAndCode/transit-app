@@ -1,6 +1,7 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
-import { computeTooltipPosition, type TooltipPlacement } from "./tooltipPosition";
+import type { TooltipPlacement } from "./tooltipPosition";
+import { usePortalPlacement } from "./usePortalPlacement";
 import { useTopmostEscape } from "../hooks/useFocusTrap";
 
 /** Pointer dwell required before a tooltip appears. Short enough to feel
@@ -72,33 +73,7 @@ export function Tooltip({ label, placement = "top", children }: Props) {
     return () => trigger.removeAttribute("aria-describedby");
   }, [open, id]);
 
-  // Position is written straight to the node instead of held in state: the
-  // measurement only exists to place an element that is already mounted, and
-  // a state round-trip would re-render the trigger for it.
-  useLayoutEffect(() => {
-    if (!open) return;
-    function place() {
-      const trigger = anchorRef.current?.firstElementChild;
-      const tip = tipRef.current;
-      if (!trigger || !tip) return;
-      const pos = computeTooltipPosition(
-        trigger.getBoundingClientRect(),
-        tip.getBoundingClientRect(),
-        placement,
-        { width: window.innerWidth, height: window.innerHeight },
-      );
-      tip.style.left = `${pos.left}px`;
-      tip.style.top = `${pos.top}px`;
-      tip.dataset.placement = pos.placement;
-    }
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-    };
-  }, [open, placement, label]);
+  usePortalPlacement(open, () => anchorRef.current?.firstElementChild?.getBoundingClientRect(), tipRef, placement, label);
 
   function cancelPending() {
     if (timerRef.current !== null) {

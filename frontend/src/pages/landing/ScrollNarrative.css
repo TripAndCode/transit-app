@@ -1,10 +1,13 @@
 /* Landing page: the post-hero scroll narrative (ScrollNarrative.tsx). */
 
+/* Sized to the sample trend chart, which DailyChart draws at a fixed 760px:
+   the column less its padding and the card's padding and border leaves the
+   chart its card's full width instead of two thirds of it. */
 .landing-narrative {
   display: flex;
   flex-direction: column;
   gap: 64px;
-  max-width: 1040px;
+  max-width: 850px;
   margin: 0 auto;
   padding: 64px 24px 96px;
 }
@@ -38,6 +41,21 @@
   box-shadow: var(--el-1);
   padding: 20px;
   overflow-x: auto;
+}
+
+.landing-narrative-section__hint {
+  display: none;
+  margin: -12px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* A phone keeps each chart at its drawn size and scrolls it sideways:
+   scaled to the screen, the stop chart's labels shrink past reading. */
+@media (max-width: 640px) {
+  .landing-narrative-section__figure { padding: 12px; }
+  .landing-narrative-section__figure .focus-chart { min-width: 760px; }
+  .landing-narrative-section__hint { display: block; }
 }
 
 /* Base state: at rest, in place. A reduced-motion viewer, an environment

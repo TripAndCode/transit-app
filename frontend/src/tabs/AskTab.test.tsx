@@ -110,3 +110,60 @@ describe("AskTab layout", () => {
     expect(dock!.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 });
+
+describe("AskTab investigations", () => {
+  beforeEach(() => {
+    mockAllHooks();
+    Element.prototype.scrollTo = vi.fn();
+  });
+
+  function openInvestigation(messages: ConvMessage[]) {
+    vi.spyOn(hooks, "useConversation").mockReturnValue({
+      data: {
+        conversation: {
+          conversation_id: "t1",
+          user_id: null,
+          agency_id: 5,
+          title: "Morning delays",
+          filter_ctx: {},
+          pinned: false,
+          created_at: "",
+          updated_at: "",
+        },
+        messages,
+      },
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as never);
+    return renderAskTab("/agencies/5/ask?conversation=t1");
+  }
+
+  it("says an opened investigation has no questions yet, instead of looking unopened", () => {
+    openInvestigation([]);
+    expect(screen.getByText("This investigation has no questions yet. Pick one to start.")).toBeInTheDocument();
+  });
+
+  it("offers to start an analysis, not another one, before the first", () => {
+    const { container } = renderAskTab();
+    expect(container.querySelector(".ask-tool-menu summary")).toHaveTextContent(/^Start an analysis$/);
+  });
+
+  it("offers another analysis once there is one", () => {
+    const { container } = openInvestigation([
+      {
+        message_id: 1,
+        conversation_id: "t1",
+        role: "user",
+        chip_id: null,
+        tool: null,
+        args: null,
+        signature_hash: null,
+        result: null,
+        rendered_summary: "Hi",
+        created_at: "2026-09-01T00:00:00Z",
+      },
+    ]);
+    expect(container.querySelector(".ask-tool-menu summary")).toHaveTextContent(/^Start another analysis$/);
+  });
+});

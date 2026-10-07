@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import (
     RangeCtx,
     clamp_range_ctx,
@@ -140,7 +140,7 @@ def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
 
 
 @router.post("/ask", response_model=AskResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def ask(
     request: Request,
     body: AskRequest,
@@ -503,12 +503,12 @@ def _log_suggest_failure(stage: str) -> None:
 
 
 @router.get("/ask/suggest", response_model=AskSuggestResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def ask_suggest(
     request: Request,
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
-    q: str = Query(default=""),
+    q: str = Query(default="", max_length=MAX_QUESTION_CHARS),
     limit: int = Query(default=8),
 ) -> AskSuggestResponse:
     """Live autocomplete for the Ask input.
@@ -575,7 +575,7 @@ class EditActionRequest(BaseModel):
 
 
 @router.post("/ask/edit-action")
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def ask_edit_action(
     request: Request,
     body: EditActionRequest,

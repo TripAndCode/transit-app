@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import type { TFunction } from "i18next";
-import { delayColor, delayTextColor } from "../styles/tokens";
+import { DELAY_THRESHOLDS, delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "./RouteLabel";
 import { ServiceName } from "./ServiceName";
@@ -14,6 +14,7 @@ import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
 import { formatNumber, fmtPct, formatDuration } from "../utils/format";
 import "./ReportTable.css";
+import { ServiceNote } from "./ServiceNote";
 
 const ROWS_CAP = 200;
 // A phone list item is several times a table row's height, so the first
@@ -37,6 +38,11 @@ type Schema = {
   service?: true;
   /** The cell holds a route_code, shown as the route's label. */
   route?: true;
+  /** A non-empty cell is a caveat, shown as a muted badge. */
+  badge?: true;
+  /** The cell is the row's observation count; under the report's floor it
+   *  carries the few-data badge. */
+  samples?: true;
 };
 
 // The route column of every per-route report. Kept in view while a wide table
@@ -50,14 +56,15 @@ const RANKING_COLS: Schema[] = [
   { index: 2, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
   { index: 3, labelKey: "reports.col.median", align: "right", unit: "min", format: fmtMinutes },
   { index: 4, labelKey: "reports.col.p90", align: "right", unit: "min", format: fmtMinutes },
-  { index: 5, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
+  { index: 5, labelKey: "reports.col.samples", align: "right", samples: true, format: (v, t) => fmtNum(v, t) },
 ];
 
-// dow_weekend + dow_weekday share columns; the API splits the rows by DOW group.
+// dow_weekend + dow_weekday share columns; the API splits the rows by DOW
+// group. The group itself (row index 2) is the report's own title, so it is
+// not repeated as a column.
 const DOW_COLS: Schema[] = [
   ROUTE_COL,
   { index: 1, labelKey: "reports.col.service", align: "left", service: true },
-  { index: 2, labelKey: "reports.col.dow", align: "left", service: true },
   { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes },
   { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
 ];
@@ -74,7 +81,7 @@ const SCHEMAS: Record<string, Schema[]> = {
     // 95% Wilson interval too wide to trust the percentage (see
     // pipeline/stats.py) — a caveat marker, not a plain value, so it's
     // blank rather than "false" for the common (confident) case.
-    { index: 5, labelKey: "reports.col.confidence", align: "left", format: (v, t) => fmtConfidence(v, t) },
+    { index: 5, labelKey: "reports.col.confidence", align: "left", badge: true, format: (v, t) => fmtConfidence(v, t) },
   ],
   worst_5min: [
     ROUTE_COL,
@@ -101,17 +108,6 @@ const SCHEMAS: Record<string, Schema[]> = {
   ],
   dow_weekend: DOW_COLS,
   dow_weekday: DOW_COLS,
-  // (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips,
-  // service_delivered_pct) -- a single pooled whole-agency row, not a
-  // per-route ranking (see pipeline.reports.council.compute_council_summary).
-  council_summary: [
-    { index: 0, labelKey: "reports.col.on_time_pct", align: "right", format: (v, t) => fmtPct(v, t) },
-    { index: 1, labelKey: "reports.col.avg", align: "right", unit: "min", format: fmtMinutes },
-    { index: 2, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
-    { index: 3, labelKey: "reports.col.planned_trips", align: "right", format: (v, t) => fmtNum(v, t) },
-    { index: 4, labelKey: "reports.col.executed_trips", align: "right", format: (v, t) => fmtNum(v, t) },
-    { index: 5, labelKey: "reports.col.service_delivered_pct", align: "right", format: (v, t) => fmtPct(v, t) },
-  ],
   // (agency_name, route_code, service_type, date, scheduled_time,
   // actual_time, dep_delay_sec) -- one row per over-threshold departure
   // observation (see pipeline.reports.council.compute_delay_certificate).
@@ -171,9 +167,11 @@ const STICKY_HEAD = { position: "sticky", left: 0, zIndex: Z_INDEX.raised, backg
 type Props = {
   reportType: string;
   rows: unknown[][];
+  /** The observation count below which a row is badged as thinly observed. */
+  minSamples?: number | null;
 };
 
-export function ReportTable({ reportType, rows }: Props) {
+export function ReportTable({ reportType, rows, minSamples }: Props) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const names = useRouteNames(id);
@@ -192,6 +190,9 @@ export function ReportTable({ reportType, rows }: Props) {
     return null;
   }
 
+  const serviceNote = schema.some((c) => c.service) && <ServiceNote />;
+  const caveatOf = (c: Schema, raw: unknown) =>
+    c.samples && minSamples != null && Number(raw) < minSamples ? t("reports.confidence_low_mark") : undefined;
   const showMore = cappedRows.remaining > 0 && (
     <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
       {t("common.show_more", { count: cappedRows.remaining })}
@@ -218,11 +219,9 @@ export function ReportTable({ reportType, rows }: Props) {
                   </span>
                 )}
                 {headline && (
-                  <span
-                    className="report-cards__headline"
-                    style={headline.bar === "delay" ? { color: delayTextColor(Number(row[headline.index])) } : undefined}
-                  >
+                  <span className="report-cards__headline">
                     <span className="report-cards__label">{t(headline.labelKey)}</span>{" "}
+                    {headline.bar === "delay" && isSevere(row[headline.index]) && <DelayMarker />}
                     <span>{cardValue(headline, row[headline.index], t)}</span>
                   </span>
                 )}
@@ -242,7 +241,7 @@ export function ReportTable({ reportType, rows }: Props) {
                             <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
                           </>
                         )}
-                        <span>{c.service && row[c.index] != null ? <ServiceName value={String(row[c.index])} /> : text}</span>
+                        <CellValue column={c} raw={row[c.index]} text={text} caveat={caveatOf(c, row[c.index])} />
                       </span>
                     );
                   })}
@@ -251,6 +250,7 @@ export function ReportTable({ reportType, rows }: Props) {
           ))}
         </ol>
         {showMore}
+        {serviceNote}
       </div>
     );
   }
@@ -296,20 +296,25 @@ export function ReportTable({ reportType, rows }: Props) {
                   const max = maxes.get(c.index) ?? 1;
                   const v = Number(raw);
                   const ratio = isFinite(v) ? Math.min(1, Math.abs(v) / max) : 0;
-                  // The bar fill can stay the plain ramp colour (it's a mark, not
-                  // text); the label sitting on top needs the text-safe variant,
-                  // since delayColor()'s ok/mild/moderate fall short of AA as text.
-                  const color = c.bar === "delay" ? delayColor(v) : "var(--accent)";
-                  const textColor = c.bar === "delay" ? delayTextColor(v) : "var(--accent)";
+                  // The bar carries the ramp colour; the figure stays in the text
+                  // colour, with an amber marker only past the severe threshold,
+                  // so colour flags the few that need attention instead of all.
+                  const isDelay = c.bar === "delay";
                   return (
                     <td key={c.labelKey} style={td({ align: c.align ?? "right" })}>
-                      <BarCell text={text} ratio={ratio} color={color} textColor={textColor} />
+                      <BarCell
+                        text={text}
+                        ratio={ratio}
+                        color={isDelay ? delayColor(v) : "var(--accent)"}
+                        textColor={isDelay ? undefined : "var(--accent)"}
+                        marked={isDelay && isSevere(raw)}
+                      />
                     </td>
                   );
                 }
                 return (
                   <td key={c.labelKey} style={td({ align: c.align ?? "left" })}>
-                    {c.service && raw != null ? <ServiceName value={String(raw)} /> : text}
+                    <CellValue column={c} raw={raw} text={text} caveat={caveatOf(c, raw)} />
                   </td>
                 );
               })}
@@ -318,6 +323,7 @@ export function ReportTable({ reportType, rows }: Props) {
         </tbody>
       </table>
       {showMore}
+      {serviceNote}
     </div>
   );
 }
@@ -341,7 +347,7 @@ function RouteCell({
     <Link className="report-route-link" to={routeHref(agencyId, code, search)}>
       <RouteLabel code={code} names={names} />
       <span className="report-route-link__chevron" aria-hidden="true">
-        {" ›"}
+        {"\u00a0›"}
       </span>
     </Link>
   );
@@ -359,16 +365,44 @@ function cardValue(c: Schema, raw: unknown, t: TFunction): string {
   return c.unit && raw != null ? t("reports.card.value_with_unit", { value: text, unit: t("common.unit_min") }) : text;
 }
 
+/** A plain cell: a service in the UI's language where it has copy, a caveat
+ *  as a muted badge, anything else as its formatted text, followed by the
+ *  row's own caveat when it has one. */
+function CellValue({ column, raw, text, caveat }: { column: Schema; raw: unknown; text: string; caveat?: string }) {
+  if (column.service && raw != null) return <ServiceName value={String(raw)} />;
+  if (column.badge && text) return <span className="caveat-badge">{text}</span>;
+  if (caveat) {
+    return (
+      <>
+        {text} <span className="caveat-badge">{caveat}</span>
+      </>
+    );
+  }
+  return <>{text}</>;
+}
+
+/** At or past the colour ramp's severe threshold. */
+function isSevere(raw: unknown): boolean {
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= DELAY_THRESHOLDS.severe;
+}
+
+function DelayMarker() {
+  return <span data-testid="delay-marker" className="delay-marker" aria-hidden="true" />;
+}
+
 function BarCell({
   text,
   ratio,
   color,
   textColor,
+  marked,
 }: {
   text: string;
   ratio: number;
   color: string;
-  textColor: string;
+  textColor?: string;
+  marked: boolean;
 }) {
   return (
     // The bar has its own track beside the figure: drawn under the text, it
@@ -381,7 +415,8 @@ function BarCell({
       >
         <div style={{ width: `${ratio * 100}%`, height: "100%", borderRadius: 3, background: color, opacity: 0.6 }} />
       </div>
-      <span style={{ color: textColor }}>{text}</span>
+      {marked && <DelayMarker />}
+      <span style={textColor ? { color: textColor } : undefined}>{text}</span>
     </div>
   );
 }

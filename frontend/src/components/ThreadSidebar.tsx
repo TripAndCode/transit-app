@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
+import { useRouteNames } from "../api/useRouteNames";
 import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
@@ -30,9 +31,10 @@ function isThisWeek(iso: string): boolean {
 
 function conversationScopeParts(
   conv: Conversation,
-  t: (key: string, opts?: Record<string, unknown>) => string
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  formatRoute: (code: string) => string,
 ): string[] {
-  return [...(conv.filter_ctx.routes ?? []), filterSummary(conv.filter_ctx, t)];
+  return [...(conv.filter_ctx.routes ?? []).map(formatRoute), filterSummary(conv.filter_ctx, t)];
 }
 
 function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -75,6 +77,7 @@ type Props = {
 export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Props) {
   const { t } = useTranslation();
   const { data: conversations = [], isLoading } = useConversations(agencyId);
+  const routeNames = useRouteNames(agencyId);
   const updateConv = useUpdateConversation(agencyId);
   const deleteConv = useDeleteConversation(agencyId);
 
@@ -177,7 +180,8 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   // Filter by the search query, then group the surviving conversations
   const query = search.normalize("NFKC").trim().toLocaleLowerCase();
   const matching = conversations.filter((c) =>
-    [c.title, ...conversationScopeParts(c, t)]
+    // Codes stay searchable beside the labels shown.
+    [c.title, ...(c.filter_ctx.routes ?? []), ...conversationScopeParts(c, t, routeNames.format)]
       .join(" ").normalize("NFKC").toLocaleLowerCase().includes(query),
   );
   const pinned = matching.filter((c) => c.pinned);
@@ -289,7 +293,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameBlur={commitRename}
                   onSelect={() => onSelect(conv.conversation_id)}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(FILTER_SEPARATOR)}
+                  filterSummaryText={conversationScopeParts(conv, t, routeNames.format).filter(Boolean).join(FILTER_SEPARATOR)}
                 />
               ))}
             </section>

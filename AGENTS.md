@@ -46,8 +46,8 @@ to the same files for Codex discovery. They are plain Markdown any agent can rea
 - Ask routing is rules → embedding nearest-neighbour → RAG LLM. Only the third stage
   calls an LLM.
 - Admin control room: `api/routers/admin*.py` (board, agencies, users, audit, flags,
-  ask ops) behind `RequireAdmin`/`require_admin`. See `docs/features/admin-control-
-  room.md` for routes, endpoints, and tables per section.
+  ask ops) behind `RequireAdmin`/`require_admin`. See
+  `docs/features/admin-control-room.md` for routes, endpoints, and tables per section.
 - `pipeline/flags.py` is the one read path for feature kill switches. A DB
   `feature_flags` override wins over the env default. The result is cached
   process-wide for 30s and invalidated immediately on a PATCH. Never read a flag's
@@ -125,7 +125,8 @@ to the same files for Codex discovery. They are plain Markdown any agent can rea
 ## Frontend and user-facing text
 
 - React Compiler is enabled.
-  - Do not add `useMemo`, `useCallback`, or `React.memo` as performance fixes.
+  - Do not use `useMemo`, `useCallback`, or `React.memo`. The compiler memoizes, and
+    ESLint rejects all three.
   - Use `useEffectEvent` for fresh props in stable handlers.
   - Never write refs during render.
 - `react-hooks/set-state-in-effect` and `react-hooks/purity` are errors. Prefer

@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Outlet } from "react-router-dom";
+import { PendingNavLink } from "../../components/navPending";
 import { useTranslation } from "react-i18next";
 import {
   Building2,
@@ -84,7 +85,7 @@ export function AdminLayout() {
                 const count = badge === "approvals" ? approvals : 0;
                 return (
                   <li key={to}>
-                    <NavLink
+                    <PendingNavLink
                       to={to}
                       end={end}
                       style={({ isActive }) => ({
@@ -118,7 +119,7 @@ export function AdminLayout() {
                           {count}
                         </span>
                       )}
-                    </NavLink>
+                    </PendingNavLink>
                   </li>
                 );
               })}

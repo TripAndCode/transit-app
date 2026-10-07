@@ -1,5 +1,7 @@
 import { useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
-import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { PendingNavLink } from "./navPending";
+import { NavIndicator } from "./NavIndicator";
 import {
   HelpCircle,
   Info,
@@ -14,14 +16,13 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useSession } from "../api/auth";
-import { useConfig } from "../api/config";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { useScreenQuery, withQuery } from "../api/screenScope";
 import { clearLastAgency } from "../api/lastAgency";
+import { useRailAgencyId } from "../api/railAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
 import { SettingsDrawer } from "./SettingsDrawer";
-import { CompactDataStatus } from "./analysis/CompactDataStatus";
 import { Tooltip } from "./Tooltip";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { OverlayBase } from "./ui/OverlayBase";
@@ -138,28 +139,29 @@ function MoreSheet({
   );
 }
 
+/** The current destination's fill and accent bar are the shared
+ *  NavIndicator behind the links; a link itself only changes colour. */
 function railLinkStyle(collapsedFlag: boolean) {
   return ({ isActive }: { isActive: boolean }): CSSProperties => ({
+    position: "relative",
     display: "flex",
     alignItems: collapsedFlag ? "center" : "flex-start",
     justifyContent: collapsedFlag ? "center" : "flex-start",
     gap: 12,
     padding: collapsedFlag ? "10px 0" : "10px 22px",
     color: isActive ? "var(--accent-strong)" : "var(--text-primary)",
-    background: isActive ? "var(--accent-soft)" : "transparent",
-    borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
+    borderLeft: "3px solid transparent",
     textDecoration: "none",
-    transition: "background var(--transition)",
+    transition: "color var(--transition)",
   });
 }
 
 export function Sidebar() {
   const { t } = useTranslation();
-  const { agencyId } = useParams();
+  const agencyId = useRailAgencyId();
+  const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { data: config } = useConfig();
-  const { data: session } = useSession();
-  const isAdmin = Boolean(config?.auth_enabled && session?.role === "admin");
+  const isAdmin = useIsAdmin();
   // Each screen opens with its own last filters (see api/screenScope), so
   // nothing set on the screen being left follows the visitor elsewhere.
   const screenQuery = useScreenQuery();
@@ -217,10 +219,11 @@ export function Sidebar() {
           </div>
         )}
         {navItems.length > 0 && agencyId && (
-          <nav aria-label={t("nav.destinations_label")} style={{ display: "flex", flexDirection: "column" }}>
+          <nav aria-label={t("nav.destinations_label")} style={{ position: "relative", display: "flex", flexDirection: "column" }}>
+            <NavIndicator axis="y" watch={pathname} />
             {navItems.map((item) => (
               <RailTooltip key={item.to} collapsed={collapsedFlag} label={t(item.labelKey)}>
-                <NavLink
+                <PendingNavLink
                   to={screenHref(item.to)}
                   aria-label={collapsedFlag ? t(item.labelKey) : undefined}
                   onMouseEnter={() => prefetchRouteChunk(item.to)}
@@ -234,7 +237,7 @@ export function Sidebar() {
                       <span>{t(item.labelKey)}</span>
                     </span>
                   )}
-                </NavLink>
+                </PendingNavLink>
               </RailTooltip>
             ))}
           </nav>
@@ -244,7 +247,7 @@ export function Sidebar() {
             sheet: Ask has its own bottom tab there. */}
         {agencyId && !inSheet && (
           <RailTooltip collapsed={collapsedFlag} label={t("nav.ask")}>
-            <NavLink
+            <PendingNavLink
               to={screenHref("ask")}
               aria-label={collapsedFlag ? t("nav.ask") : undefined}
               onMouseEnter={() => prefetchRouteChunk("ask")}
@@ -267,7 +270,7 @@ export function Sidebar() {
             >
               <MessageCircleQuestion size={16} strokeWidth={1.5} aria-hidden="true" />
               {!collapsedFlag && t("nav.ask")}
-            </NavLink>
+            </PendingNavLink>
           </RailTooltip>
         )}
         <nav aria-label={t("nav.other")} style={{ display: "flex", flexDirection: "column", marginTop: 16 }}>
@@ -285,7 +288,7 @@ export function Sidebar() {
             </div>
           )}
           <RailTooltip collapsed={collapsedFlag} label={t("nav.help")}>
-            <NavLink
+            <PendingNavLink
               to="/help"
               aria-label={collapsedFlag ? t("nav.help") : undefined}
               onClick={() => onNavigate?.()}
@@ -293,7 +296,7 @@ export function Sidebar() {
             >
               <HelpCircle size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
               {!collapsedFlag && <span>{t("nav.help")}</span>}
-            </NavLink>
+            </PendingNavLink>
           </RailTooltip>
           <RailTooltip collapsed={collapsedFlag} label={t("nav.about")}>
             <NavLink
@@ -308,7 +311,7 @@ export function Sidebar() {
           </RailTooltip>
           {isAdmin && (
             <RailTooltip collapsed={collapsedFlag} label={t("account.admin_link")}>
-              <NavLink
+              <PendingNavLink
                 to="/admin"
                 aria-label={collapsedFlag ? t("account.admin_link") : undefined}
                 onClick={() => onNavigate?.()}
@@ -316,7 +319,7 @@ export function Sidebar() {
               >
                 <Shield size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
                 {!collapsedFlag && <span>{t("account.admin_link")}</span>}
-              </NavLink>
+              </PendingNavLink>
             </RailTooltip>
           )}
         </nav>
@@ -405,7 +408,6 @@ export function Sidebar() {
             )}
           </>
         )}
-        {!collapsedFlag && <CompactDataStatus />}
         {!collapsedFlag && !inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
       </>
     );
@@ -465,6 +467,7 @@ export function Sidebar() {
 
   if (isMobile) {
     const tabItemStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
+      position: "relative",
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
@@ -508,9 +511,10 @@ export function Sidebar() {
             paddingBottom: "env(safe-area-inset-bottom)",
           }}
         >
+          <NavIndicator axis="x" watch={pathname} />
           {agencyId &&
             TAB_BAR_ITEMS.map((item) => (
-              <NavLink
+              <PendingNavLink spinner={false}
                 key={item.to}
                 to={screenHref(item.to)}
                 onMouseEnter={() => prefetchRouteChunk(item.to)}
@@ -519,10 +523,10 @@ export function Sidebar() {
               >
                 <item.Icon size={20} strokeWidth={1.5} aria-hidden="true" />
                 <span>{t(item.labelKey)}</span>
-              </NavLink>
+              </PendingNavLink>
             ))}
           {agencyId && (
-            <NavLink
+            <PendingNavLink spinner={false}
               to={screenHref("ask")}
               onMouseEnter={() => prefetchRouteChunk("ask")}
               onFocus={() => prefetchRouteChunk("ask")}
@@ -530,7 +534,7 @@ export function Sidebar() {
             >
               <HelpCircle size={20} strokeWidth={1.5} aria-hidden="true" />
               <span>{t("nav.ask")}</span>
-            </NavLink>
+            </PendingNavLink>
           )}
           <button
             type="button"

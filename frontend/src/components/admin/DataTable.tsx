@@ -201,8 +201,10 @@ export function DataTable<Row>({
   const shortcuts: ShortcutHint[] = [
     { keys: "j", description: t("admin.table.shortcuts.next") },
     { keys: "k", description: t("admin.table.shortcuts.prev") },
-    { keys: "x", description: t("admin.table.shortcuts.select") },
-    { keys: "Enter", description: t("admin.table.shortcuts.open") },
+    // Only the keys this table answers: `x` needs a selection handler and
+    // Enter a row to open.
+    ...(onSelectionChange ? [{ keys: "x", description: t("admin.table.shortcuts.select") }] : []),
+    ...(onOpen ? [{ keys: "Enter", description: t("admin.table.shortcuts.open") }] : []),
     ...(extraShortcuts ?? []),
   ];
   const hasSavedViews = savedViews != null && savedViews.length > 0;
