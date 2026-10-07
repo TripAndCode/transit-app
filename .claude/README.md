@@ -85,14 +85,15 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   `hooks/guard-dev-db.sh` (a thin wrapper around `hooks/guard_dev_db.py`) is a
   partial net, not a guarantee: it shlex-tokenizes the command and blocks only
   when a dev-store target — a dev Postgres/ClickHouse port or container name,
-  `docker compose exec`/`run` against the dev service, a `$DATABASE_URL`
-  expansion, or a `migrate-down` Make target with no throwaway port in the same
-  command — appears alongside a write/DDL keyword, or a `psql -f`/`--file`
-  invocation whose script contents it can't read. A volume teardown is
-  blocked on its own: `compose down -v`, `docker volume rm` of a
-  `transit_*data` volume, any `docker volume prune` or `docker system prune
-  --volumes`, and docker's own `rm -v` of a dev container. `docker-compose`
-  counts as `docker compose`. It has no visibility into a script's
+  `docker compose exec`/`run` against the dev service, any `$DATABASE_URL`
+  expansion (an inline `DATABASE_URL=…` assignment does not reach it, so name
+  a throwaway URL itself), or a `migrate-down` Make target with no throwaway
+  port in the same command — appears alongside a write/DDL keyword, or a
+  `psql -f`/`--file` invocation whose script contents it can't read. A volume
+  teardown is blocked on its own: `compose down -v`, `docker volume rm` of a
+  `transit_*data` volume or of a list computed at run time, any `docker volume
+  prune` or `docker system prune --volumes`, and docker's own `rm -v` of a dev
+  container. `docker-compose` counts as `docker compose`. It has no visibility into a script's
   contents beyond that, or into a `DATABASE_URL` set outside the command line
   it sees, and it deliberately still blocks prose that merely names a dev
   store next to a write-sounding word — a false block only costs a rephrase,

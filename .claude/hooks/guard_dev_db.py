@@ -37,9 +37,10 @@ import sys
 
 DEV_PORTS = ("5433", "5543", "8123")
 DEV_SERVICES = {"db", "clickhouse"}
-# Pinned container names, from before compose.yml dropped `container_name`.
-# Still carried by any container created back then, and both are live today.
-DEV_CONTAINERS = {"transit-pg", "transit-ch"}
+# Container names compose did not derive: the pinned names from before
+# compose.yml dropped `container_name`, and the dev Postgres recreated by hand
+# on a newer major.
+DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
 # Throwaway stacks. Naming one is the signal that a command was pointed away
 # from the dev stores on purpose.
 TEST_PORTS = (":5544", ":8124")
@@ -76,9 +77,10 @@ VOLUME_FLAG = re.compile(r"--volumes|-[a-z]*v[a-z]*")
 # Docker CLI global options that take their value as the next token, so the
 # subcommand is read after the value rather than mistaken for it.
 DOCKER_VALUE_FLAGS = {"-c", "--context", "-h", "--host", "--config", "-l", "--log-level"}
-# The Makefile's DATABASE_URL default is the dev database, and so is the shell's
-# in a `make serve` session: a command that expands the variable is aimed there
-# unless it also names a throwaway port.
+# The shell's DATABASE_URL is the dev database. A command that expands it is
+# aimed there whatever else it says: an inline `DATABASE_URL=<throwaway> cmd
+# "$DATABASE_URL"` assignment does not reach the expansion, which the shell
+# performs first. Naming the throwaway URL itself is the way to write to it.
 DATABASE_URL_REF = re.compile(r"\$\{?DATABASE_URL\b")
 
 
@@ -119,7 +121,9 @@ def destroys_dev_volume(lowered: list[str]) -> bool:
     if "compose" in lowered and "down" in lowered:
         return bool({"-v", "--volumes"} & set(lowered))
     if "volume" in lowered and {"rm", "remove"} & set(lowered):
-        return any(DEV_VOLUME.fullmatch(tok) for tok in lowered)
+        # A list computed at run time can name the dataset without spelling it.
+        computed = "xargs" in lowered or any("$(" in tok or "`" in tok for tok in lowered)
+        return computed or any(DEV_VOLUME.fullmatch(tok) for tok in lowered)
     if "prune" in lowered:
         return "volume" in lowered or "--volumes" in lowered
     # Docker's own `rm`, not an `rm` run inside a container by `docker exec`.
@@ -150,7 +154,7 @@ def targets_dev_db(tokens: list[str], cmd: str) -> bool:
         if not any(port in cmd for port in TEST_PORTS):
             return True
 
-    if DATABASE_URL_REF.search(cmd) and not any(port in cmd for port in TEST_PORTS):
+    if DATABASE_URL_REF.search(cmd):
         return True
 
     for i, tok in enumerate(lowered):

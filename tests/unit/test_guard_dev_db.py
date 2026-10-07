@@ -89,6 +89,20 @@ BLOCKED = [
     # The shell's DATABASE_URL is the dev database unless the command says otherwise.
     pytest.param('psql "$DATABASE_URL" -c "DELETE FROM agencies WHERE agency_id = 9"', id="database-url-write"),
     pytest.param('psql "${DATABASE_URL}" -f fix.sql', id="database-url-braced-script"),
+    # The shell expands "$DATABASE_URL" before the inline assignment applies, so
+    # psql receives the shell's own value: the dev database.
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        'psql "${DATABASE_URL}" -c "DROP TABLE x"',
+        id="inline-assignment-does-not-reach-the-expansion",
+    ),
+    # A volume list computed at run time can name the dataset without spelling it.
+    pytest.param("docker volume rm $(docker volume ls -q)", id="volume-rm-computed-list"),
+    pytest.param("docker volume ls -q | xargs docker volume rm", id="volume-rm-via-xargs"),
+    # The dev Postgres container as it runs today, created outside compose.
+    pytest.param(
+        'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
+    ),
 ]
 
 ALLOWED = [
@@ -125,9 +139,8 @@ ALLOWED = [
     pytest.param("docker-compose down", id="hyphenated-compose-down-keeps-volumes"),
     pytest.param('psql "$DATABASE_URL" -c "SELECT count(*) FROM agencies"', id="database-url-read"),
     pytest.param(
-        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
-        'psql "${DATABASE_URL}" -c "DROP TABLE x"',
-        id="database-url-braced-pointed-at-test-db",
+        'psql "postgresql://transit:transit@localhost:5544/transit_test" -c "DROP TABLE x"',
+        id="explicit-test-url-write",
     ),
 ]
 
