@@ -1,3 +1,4 @@
+-- DESTRUCTIVE: deletes every stored gemini key.
 -- Rolling back removes gemini from the allowed set; a key for a provider
 -- the app can no longer call is dead data and would violate the restored
 -- CHECK anyway, so discard it rather than block the rollback.

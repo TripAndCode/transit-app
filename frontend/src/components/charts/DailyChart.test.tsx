@@ -5,6 +5,7 @@ import i18n from "../../i18n";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { DailyChart } from "./DailyChart";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
+import { formatMinutes } from "../../utils/format";
 import type { TrendDay } from "../../api/types";
 
 function day(overrides: Partial<TrendDay> & { date: string }): TrendDay {
@@ -124,6 +125,16 @@ describe("DailyChart tooltip", () => {
     fireEvent.mouseEnter(dayRects(container)[0]);
     expect(screen.getByText("7-day avg 1.3 min")).toBeInTheDocument();
     expect(screen.getByText(/Route R1 \(4\.8 min\)/)).toBeInTheDocument();
+  });
+});
+
+describe("DailyChart axis", () => {
+  it("labels its gridlines with round values", () => {
+    const { container } = renderChart(
+      <DailyChart days={[2.4, 2.79, 1.9].map((avg_min, i) => day({ date: WEEK_DAYS[i], avg_min }))} />,
+    );
+    const labels = Array.from(container.querySelectorAll("[data-testid='daily-grid-label']")).map((n) => n.textContent);
+    expect(labels).toEqual([1, 2, 3].map((min) => formatMinutes(min)));
   });
 });
 

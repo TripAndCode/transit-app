@@ -1,12 +1,19 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useTopmostEscape } from "../hooks/useFocusTrap";
 import { Z_INDEX } from "../styles/zIndex";
+import { usePortalPlacement } from "./usePortalPlacement";
 
 /**
  * Small (?) info icon that opens a quiet popover with a paragraph or two
  * explaining what insights the surrounding chart or tab is for. Click the
- * icon to open; click anywhere else to close. Calm, non-modal.
+ * icon to open; click anywhere else, or press Escape, to close. Calm,
+ * non-modal.
+ *
+ * The popover renders into <body> and is placed against the viewport, so a
+ * neighbouring column or a clipping ancestor never cuts it off.
  */
 export function InsightHint({
   title,
@@ -17,38 +24,44 @@ export function InsightHint({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [anchorRight, setAnchorRight] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useTopmostEscape(open, () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  });
 
   useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  // Layout effect, not a plain effect: this measures the trigger's position
-  // to decide anchor side before the popover paints, so the popover never
-  // flashes on the wrong side for a frame.
-  useLayoutEffect(() => {
-    if (!open || !ref.current) return;
-    const rect = ref.current.getBoundingClientRect();
-    const popoverWidth = 320;
-    setAnchorRight(rect.left + popoverWidth > window.innerWidth);
-  }, [open]);
+  usePortalPlacement(open, () => triggerRef.current?.getBoundingClientRect(), popoverRef, "bottom");
 
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex" }}>
+    <div style={{ display: "inline-flex" }}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={t("common.hint_aria")}
+        aria-expanded={open}
         style={{
           background: "transparent",
           border: "none",
           padding: 2,
+          // WCAG 2.5.8's 24 px minimum target, around a 16 px glyph.
+          minWidth: 24,
+          minHeight: 24,
+          justifyContent: "center",
           cursor: "pointer",
           color: open ? "var(--accent)" : "var(--text-tertiary)",
           display: "inline-flex",
@@ -56,41 +69,46 @@ export function InsightHint({
           transition: "color var(--transition)",
         }}
       >
-        <Info size={14} strokeWidth={1.75} />
+        <Info size={16} strokeWidth={1.75} />
       </button>
-      {open && (
-        <div
-          role="dialog"
-          style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            ...(anchorRight ? { right: 0 } : { left: 0 }),
-            zIndex: Z_INDEX.popover,
-            width: 320,
-            maxWidth: "calc(100vw - 24px)",
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-lg)",
-            boxShadow: "var(--el-2)",
-            padding: "12px 14px",
-            color: "var(--text-primary)",
-            fontSize: 12,
-            lineHeight: 1.6,
-          }}
-        >
+      {open &&
+        createPortal(
           <div
+            ref={popoverRef}
+            role="dialog"
+            aria-labelledby={titleId}
             style={{
-              fontWeight: 600,
-              fontSize: 12,
-              marginBottom: 6,
+              position: "fixed",
+              left: 0,
+              top: 0,
+              zIndex: Z_INDEX.popover,
+              width: 320,
+              maxWidth: "calc(100vw - 24px)",
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: "var(--radius-lg)",
+              boxShadow: "var(--el-2)",
+              padding: "12px 14px",
               color: "var(--text-primary)",
+              fontSize: 12,
+              lineHeight: 1.6,
             }}
           >
-            {title}
-          </div>
-          <div style={{ color: "var(--text-secondary)" }}>{body}</div>
-        </div>
-      )}
+            <div
+              id={titleId}
+              style={{
+                fontWeight: 600,
+                fontSize: 12,
+                marginBottom: 6,
+                color: "var(--text-primary)",
+              }}
+            >
+              {title}
+            </div>
+            <div style={{ color: "var(--text-secondary)" }}>{body}</div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

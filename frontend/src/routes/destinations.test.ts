@@ -42,7 +42,7 @@ describe("destinations", () => {
     expect(routeHref(9, "50", "?routes=50&from=2026-09-01")).toBe("/agencies/9/routes/50?from=2026-09-01");
     expect(routeHref(9, "a/b", "", "stops")).toBe("/agencies/9/routes/a%2Fb?tab=stops");
     // Which report or document the list was showing says nothing about a route.
-    expect(routeHref(9, "50", "?report=worst_5min&sort=ranking&doc=council&by=periods&dow=weekday")).toBe(
+    expect(routeHref(9, "50", "?report=worst_5min&sort=ranking&doc=council&by=periods&sparse=1&dow=weekday")).toBe(
       "/agencies/9/routes/50?dow=weekday",
     );
   });

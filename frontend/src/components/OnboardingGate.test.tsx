@@ -5,6 +5,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { OnboardingGate } from "./OnboardingGate";
 import * as hooks from "../api/hooks";
 import type { Agency } from "../api/types";
+import { formatDate } from "../utils/format";
 
 function agency(over: Partial<Agency>): Agency {
   return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, latest_data_date: null, ...over };
@@ -139,5 +140,63 @@ describe("OnboardingGate", () => {
     renderGate();
     expect(screen.getByText("First")).toBeTruthy();
     expect(screen.queryByText("landed:welcome")).toBeNull();
+  });
+
+  it("says which agencies have data, and through when", () => {
+    mockAgencies([
+      agency({ agency_id: 1, agency_name: "Collected", latest_data_date: "2026-10-03" }),
+      agency({ agency_id: 2, agency_name: "Never collected" }),
+    ]);
+    renderGate();
+    const collected = screen.getByRole("button", { name: /^Collected/ });
+    expect(collected).toHaveTextContent(`Data through ${formatDate("2026-10-03")}`);
+    expect(screen.getByRole("button", { name: /^Never collected/ })).toHaveTextContent("No data collected yet");
+  });
+
+  it("keeps the date in one piece, so a narrow card wraps before it and never inside it", () => {
+    mockAgencies([
+      agency({ agency_id: 1, agency_name: "Collected", latest_data_date: "2026-09-10" }),
+      agency({ agency_id: 2, agency_name: "Never collected" }),
+    ]);
+    renderGate();
+    const caption = screen.getByRole("button", { name: /^Collected/ }).lastElementChild;
+    expect(caption?.textContent).toBe("Data through Sep\u00a010,\u00a02026");
+  });
+
+  it("lists the agencies with data first", () => {
+    mockAgencies([
+      agency({ agency_id: 1, agency_name: "Empty one" }),
+      agency({ agency_id: 2, agency_name: "Full one", latest_data_date: "2026-10-03" }),
+      agency({ agency_id: 3, agency_name: "Empty two" }),
+    ]);
+    renderGate();
+    const names = screen.getAllByRole("button").map((b) => b.textContent ?? "").filter((n) => /one|two/.test(n));
+    expect(names[0]).toMatch(/^Full one/);
+  });
+
+  it("offers a search once the list is long, and none for a short one", () => {
+    mockAgencies(Array.from({ length: 9 }, (_, i) => agency({ agency_id: i + 1, agency_name: `Agency ${i + 1}` })));
+    renderGate();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "agency 9" } });
+    expect(screen.getAllByRole("button", { name: /^Agency/ })).toHaveLength(1);
+  });
+
+  it("says when a search matches no agency", () => {
+    mockAgencies(Array.from({ length: 9 }, (_, i) => agency({ agency_id: i + 1, agency_name: `Agency ${i + 1}` })));
+    renderGate();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
+    expect(screen.getByRole("status")).toHaveTextContent("No agency matches. Try another name.");
+  });
+
+  it("has no search for a short list", () => {
+    mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
+    renderGate();
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+  });
+
+  it("lets a visitor switch language before choosing", () => {
+    mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
+    renderGate();
+    expect(screen.getByRole("group", { name: "Language" })).toBeInTheDocument();
   });
 });

@@ -7,10 +7,11 @@ driven through the shell entry point settings.json actually registers, so the
 wrapper and the Python body are both covered rather than only the importable
 half.
 
-Each blocked case pairs a dev target with a mutating statement; each allowed
-case keeps one of the two away, since it takes both to justify blocking. The
-commands are only ever JSON string payloads fed to the hook's stdin parser —
-nothing here executes them.
+A blocked case either pairs a dev target with a mutating statement or tears
+down a dev volume, which needs no SQL keyword; an allowed case keeps one half of
+the pair away or tears down only throwaway state. An unreadable payload is
+refused. The commands are only ever JSON string payloads fed to the hook's stdin
+parser — nothing here executes them.
 """
 
 from __future__ import annotations
@@ -71,6 +72,77 @@ BLOCKED = [
     # when the command only searches text. Blocking is the cheap direction:
     # this costs a rephrase, the alternative costs the dataset.
     pytest.param("grep -R 'transit-ch' docs/ | grep INSERT", id="mention-without-intent-still-blocks"),
+    # Volume teardown removes the dataset without a SQL keyword in sight.
+    pytest.param("docker compose down -v", id="compose-down-volumes"),
+    pytest.param("docker compose down --volumes --remove-orphans", id="compose-down-volumes-long"),
+    pytest.param("docker volume rm transit-app_transit_pgdata", id="volume-rm-project-prefixed"),
+    pytest.param("docker volume rm transit_chdata", id="volume-rm-bare"),
+    pytest.param("docker volume prune -f", id="volume-prune"),
+    pytest.param("docker system prune --volumes -f", id="system-prune-volumes"),
+    pytest.param("docker rm -v transit-pg", id="rm-legacy-container-with-volume"),
+    pytest.param("docker rm -fv transit-app-db-1", id="rm-derived-container-clustered-flags"),
+    pytest.param("docker container rm -fv transit-pg", id="container-rm"),
+    pytest.param("docker --context default rm -v transit-pg", id="rm-after-global-option"),
+    # The standalone v1 binary and a path-invoked one are the same commands.
+    pytest.param("docker-compose down -v", id="hyphenated-compose-down-volumes"),
+    pytest.param('docker-compose exec db psql -U transit -c "DROP TABLE updates"', id="hyphenated-compose-exec"),
+    pytest.param("/usr/local/bin/docker volume rm transit_pgdata", id="path-invoked-docker"),
+    # Any expansion of the shell's DATABASE_URL counts as the dev database; name a
+    # throwaway URL literally.
+    pytest.param('psql "$DATABASE_URL" -c "DELETE FROM agencies WHERE agency_id = 9"', id="database-url-write"),
+    pytest.param('psql "${DATABASE_URL}" -f fix.sql', id="database-url-braced-script"),
+    # The shell expands "$DATABASE_URL" before the inline assignment applies, so
+    # psql receives the shell's own value: the dev database.
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        'psql "${DATABASE_URL}" -c "DROP TABLE x"',
+        id="inline-assignment-does-not-reach-the-expansion",
+    ),
+    # A volume list computed at run time can name the dataset without spelling it.
+    pytest.param("docker volume rm $(docker volume ls -q)", id="volume-rm-computed-list"),
+    pytest.param("docker volume ls -q | xargs docker volume rm", id="volume-rm-via-xargs"),
+    pytest.param("docker rm -v $(docker ps -aq --filter name=transit-pg)", id="rm-v-computed-list"),
+    pytest.param("docker ps -q --filter name=transit-pg | xargs docker rm -v", id="rm-v-via-xargs"),
+    # Every check runs over the whole command, so a harmless first statement
+    # cannot end the evaluation before a later statement's teardown is read.
+    pytest.param("docker compose down\ndocker volume rm transit_pgdata", id="teardown-after-a-newline"),
+    pytest.param("docker compose down && docker volume rm transit-app_transit_pgdata", id="teardown-after-and"),
+    pytest.param("docker volume ls; docker rm -v transit-pg", id="rm-v-after-a-volume-statement"),
+    pytest.param("docker compose down \\\n  -v", id="down-v-across-a-line-continuation"),
+    pytest.param(
+        "docker compose down && docker volume rm transit_pgdata  # don't keep it", id="teardown-beside-an-apostrophe"
+    ),
+    # Parentheses glued to a word still leave the word itself readable.
+    pytest.param("(cd /srv/app && docker compose down -v)", id="down-v-in-a-subshell"),
+    pytest.param("(docker volume rm transit_pgdata)", id="volume-rm-in-a-subshell"),
+    pytest.param("x=$(docker volume rm transit_pgdata)", id="volume-rm-in-a-substitution"),
+    pytest.param("docker compose down --volumes=true", id="down-volumes-with-a-value"),
+    pytest.param("docker --tlscacert ca.pem rm -v transit-pg", id="rm-after-a-tls-option"),
+    # Shell operators glued to the last word, and teardowns inside quotes.
+    pytest.param("docker compose down -v; docker compose up -d", id="down-v-before-a-semicolon"),
+    pytest.param("docker volume rm transit_pgdata;", id="volume-rm-before-a-semicolon"),
+    pytest.param("docker rm -fv transit-pg>/dev/null", id="rm-v-before-a-redirect"),
+    pytest.param("docker compose down -v&&docker compose up -d", id="down-v-before-an-unspaced-and"),
+    pytest.param('bash -c "docker compose down -v"', id="down-v-inside-bash-c"),
+    pytest.param('x="$(docker volume rm transit_pgdata)"', id="volume-rm-in-a-quoted-substitution"),
+    pytest.param(
+        "# don't keep it\ndocker volume rm transit_pgdata\n# it's gone", id="teardown-between-two-apostrophes"
+    ),
+    pytest.param('docker volume rm "transit_pgdata"  # don\'t keep it', id="quoted-volume-beside-an-apostrophe"),
+    # Flag spellings with a value or folded into a cluster.
+    pytest.param("docker rm --volumes=true transit-pg", id="rm-volumes-with-a-value"),
+    pytest.param("docker system prune --volumes=true -f", id="prune-volumes-with-a-value"),
+    pytest.param("docker compose down -vt 5", id="down-v-in-a-flag-cluster"),
+    # Docker Desktop's CLI location on macOS.
+    pytest.param("$HOME/.docker/bin/docker volume rm transit_pgdata", id="docker-desktop-cli-path"),
+    # A URL whose path ends in `docker` is not the docker binary.
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/docker -c "DROP TABLE x"', id="url-ending-in-docker"
+    ),
+    # The dev Postgres container as it runs today, created outside compose.
+    pytest.param(
+        'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
+    ),
 ]
 
 ALLOWED = [
@@ -100,6 +172,17 @@ ALLOWED = [
     ),
     pytest.param("clickhouse-client --host transit-ch --query 'SELECT count() FROM updates'", id="ch-read"),
     pytest.param("curl -s 'http://localhost:8124/' --data-binary 'INSERT INTO updates VALUES (1)'", id="test-ch"),
+    pytest.param("docker compose down", id="compose-down-keeps-volumes"),
+    pytest.param("docker rm -f -v transit-test-pg transit-test-ch", id="test-containers-with-volume"),
+    pytest.param("docker volume rm transit-test-pgdata", id="volume-rm-throwaway"),
+    pytest.param("docker compose down && docker compose up -d", id="compose-restart-keeps-volumes"),
+    pytest.param("docker exec transit-pg rm -rfv /tmp/x", id="rm-inside-a-container-is-not-docker-rm"),
+    pytest.param("docker-compose down", id="hyphenated-compose-down-keeps-volumes"),
+    pytest.param('psql "$DATABASE_URL" -c "SELECT count(*) FROM agencies"', id="database-url-read"),
+    pytest.param(
+        'psql "postgresql://transit:transit@localhost:5544/transit_test" -c "DROP TABLE x"',
+        id="explicit-test-url-write",
+    ),
 ]
 
 
@@ -118,6 +201,25 @@ def test_safe_command_is_allowed(command):
     assert _run(command) == 0, f"guard blocked a safe command: {command}"
 
 
-def test_malformed_input_does_not_block():
-    """A payload the hook can't parse must not wedge every Bash call."""
-    assert subprocess.run([str(HOOK)], input="not json", text=True, capture_output=True).returncode == 0
+@pytest.mark.parametrize(
+    "payload", ["not json", '{"tool_input": {"command": 5}}', '{"tool_input": "docker compose down -v"}']
+)
+def test_unreadable_input_is_refused(payload):
+    """A payload the hook cannot parse is a hook that cannot see the command.
+    Waving it through would make a broken harness the one way past the guard;
+    refusing costs one visible failure."""
+    assert subprocess.run([str(HOOK)], input=payload, text=True, capture_output=True).returncode == 2
+
+
+def test_every_destructive_target_is_a_makefile_target():
+    """The guard must not advertise a target it cannot gate."""
+    import importlib.util
+    import re
+
+    spec = importlib.util.spec_from_file_location("guard_dev_db", HOOK.with_name("guard_dev_db.py"))
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    makefile = (HOOK.parents[2] / "Makefile").read_text()
+    for target in module.DESTRUCTIVE_TARGETS:
+        assert re.search(rf"^{re.escape(target)}:", makefile, re.MULTILINE), target

@@ -122,7 +122,10 @@ jobs:
 
       # -ra: a one-line reason for every non-passing test, including
       # skips — the input the fail-if-still-skipped step below greps.
+      # `shell: bash` selects `-o pipefail`, so pytest's exit status survives
+      # the pipe into tee instead of being replaced by tee's.
       - name: Run extended pytest suites
+        shell: bash
         run: poetry run pytest -ra | tee pytest-extended.log
         env:
           DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit

@@ -5,6 +5,8 @@ import remarkGfm from "remark-gfm";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { LanguageToggle } from "../components/LanguageToggle";
+import { useDocumentLocale } from "../i18n/useDocumentLocale";
 import "./LegalPage.css";
 
 type LegalDoc = "privacy" | "terms";
@@ -24,6 +26,7 @@ async function fetchLegalDoc(doc: LegalDoc, locale: string, signal: AbortSignal)
  *  it in favour of its own heading. */
 export function LegalPage({ doc }: { doc: LegalDoc }) {
   const { t, i18n } = useTranslation();
+  useDocumentLocale();
   const resolved = i18n.resolvedLanguage ?? i18n.language ?? "ja";
   const locale = resolved.startsWith("en") ? "en" : "ja";
   const { data, error, refetch } = useQuery({
@@ -35,7 +38,11 @@ export function LegalPage({ doc }: { doc: LegalDoc }) {
   return (
     <div className="legal-page">
       <header className="legal-page__header">
-        <Link to="/">{t("legal.back")}</Link>
+        <Link to="/welcome">
+          <span aria-hidden="true">← </span>
+          {t("header.app_title")}
+        </Link>
+        <LanguageToggle />
       </header>
       <main className="legal-page__main">
         <h1 className="legal-page__title">{doc === "privacy" ? t("legal.privacy") : t("legal.terms")}</h1>

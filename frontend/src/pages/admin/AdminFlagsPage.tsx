@@ -11,6 +11,7 @@ import {
 } from "../../api/admin";
 import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 /** The flag a toggle click opened a reason dialog for, plus the value it
  * would move to if confirmed -- captured at click time so a slow query
@@ -203,7 +204,7 @@ export function AdminFlagsPage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.flags.title")}</h1>
+      <PageHeader title={t("admin.flags.title")} />
 
       {clear.error !== null && <ErrorBanner error={clear.error} message={t("admin.flags.clear_error")} />}
       {error != null && <ErrorBanner error={error} onRetry={refetch} />}

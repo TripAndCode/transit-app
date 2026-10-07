@@ -4,7 +4,7 @@ import { useAgencies } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { useMediaQuery, COARSE_POINTER_QUERY } from "../hooks/useMediaQuery";
 import { openCommandPalette } from "./commandPaletteEvents";
-import { formatDate } from "../utils/format";
+import { DataFreshness } from "./DataFreshness";
 import { modifierKeyLabel } from "../utils/platform";
 
 /** The bar above every agency screen: one search-and-ask field that opens
@@ -76,11 +76,7 @@ export function TopBar() {
         </span>
         )}
       </button>
-      {through && (
-        <span style={{ marginLeft: "auto", fontSize: "var(--text-xs)", color: "var(--text-secondary)", fontFamily: "var(--font-num)" }}>
-          {t("topbar.data_through", { date: formatDate(through) })}
-        </span>
-      )}
+      {id != null && through && <DataFreshness agencyId={id} through={through} />}
     </div>
   );
 }
