@@ -141,6 +141,27 @@ def destroys_dev_volume(lowered: list[str]) -> bool:
     return False
 
 
+_STATEMENT_SEPARATORS = ";&|\n"
+
+
+def statements(cmd: str) -> list[list[str]]:
+    """The command's statements, split at `;`, `&`, `|` and newlines outside
+    quotes, so a check reads each statement's words together rather than one
+    statement's trigger beside another's arguments. A backslash-newline
+    continues the statement."""
+    lexer = shlex.shlex(cmd.replace("\\\n", " "), posix=True, punctuation_chars=_STATEMENT_SEPARATORS)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    found: list[list[str]] = [[]]
+    for tok in lexer:
+        if tok and all(c in _STATEMENT_SEPARATORS for c in tok):
+            found.append([])
+        else:
+            found[-1].append(tok)
+    return [words for words in found if words]
+
+
 def runs_a_sql_script(lowered: list[str]) -> bool:
     """`psql -f file.sql` carries its statements in a file this hook can't read.
 
@@ -188,7 +209,15 @@ def should_block(cmd: str) -> bool:
         tokens = cmd.split()
     tokens = normalise_docker(tokens)
     lowered = [t.lower() for t in tokens]
-    if destroys_dev_volume(lowered):
+    try:
+        parts = statements(cmd)
+    except ValueError:
+        parts = [line.split() for line in cmd.splitlines()]
+    # The whole command is checked too: a `$(...)` list spans the separators,
+    # and adding the per-statement reading can only block more.
+    if destroys_dev_volume(lowered) or any(
+        destroys_dev_volume([t.lower() for t in normalise_docker(words)]) for words in parts
+    ):
         return True
     if not targets_dev_db(tokens, cmd):
         return False

@@ -101,6 +101,12 @@ BLOCKED = [
     pytest.param("docker volume ls -q | xargs docker volume rm", id="volume-rm-via-xargs"),
     pytest.param("docker rm -v $(docker ps -aq --filter name=transit-pg)", id="rm-v-computed-list"),
     pytest.param("docker ps -q --filter name=transit-pg | xargs docker rm -v", id="rm-v-via-xargs"),
+    # Each statement is judged on its own tokens: a harmless first statement must
+    # not satisfy a check that then inspects the wrong statement's arguments.
+    pytest.param("docker compose down\ndocker volume rm transit_pgdata", id="teardown-after-a-newline"),
+    pytest.param("docker compose down && docker volume rm transit-app_transit_pgdata", id="teardown-after-and"),
+    pytest.param("docker volume ls; docker rm -v transit-pg", id="rm-v-after-a-volume-statement"),
+    pytest.param("docker compose down \\\n  -v", id="down-v-across-a-line-continuation"),
     # The dev Postgres container as it runs today, created outside compose.
     pytest.param(
         'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
@@ -137,6 +143,7 @@ ALLOWED = [
     pytest.param("docker compose down", id="compose-down-keeps-volumes"),
     pytest.param("docker rm -f -v transit-test-pg transit-test-ch", id="test-containers-with-volume"),
     pytest.param("docker volume rm transit-test-pgdata", id="volume-rm-throwaway"),
+    pytest.param("docker compose down && docker compose up -d", id="compose-restart-keeps-volumes"),
     pytest.param("docker exec transit-pg rm -rfv /tmp/x", id="rm-inside-a-container-is-not-docker-rm"),
     pytest.param("docker-compose down", id="hyphenated-compose-down-keeps-volumes"),
     pytest.param('psql "$DATABASE_URL" -c "SELECT count(*) FROM agencies"', id="database-url-read"),
