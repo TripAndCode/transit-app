@@ -7,6 +7,10 @@ platforms merge when they share a ``name_key`` and lie within
 so clusters chain transitively within the name partition). An unnamed stop
 gets a key unique to itself and therefore never merges; a stop without
 geometry has no row.
+
+Rows are only rebuilt when an agency's ``stops.txt`` loads, so changing
+``STOP_CLUSTER_EPS_DEG`` or the ``name_key`` rule needs a migration that
+rebuilds every agency's rows; otherwise the heatmap mixes old and new rules.
 """
 
 #: ~550 m at Japan's latitudes. Sized as a merge radius for platforms of one
