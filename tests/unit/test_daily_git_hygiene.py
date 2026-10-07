@@ -319,6 +319,8 @@ def test_main_marks_today_succeeded_only_after_a_fully_clean_apply_run(
             str(log_path),
             "--state-file",
             str(state_path),
+            "--venv-root",
+            str(tmp_path / "virtualenvs"),
             "--apply",
         ]
     )
@@ -344,12 +346,10 @@ def test_main_does_not_mark_today_succeeded_on_a_dry_run(
     # venv to be a real, enumerable candidate under --venv-root, so this test
     # gives it a real (but otherwise irrelevant to this test's own assertions)
     # venv directory to find, pinned like every other dependency here (lock/
-    # log/state) rather than left at DEFAULT_POETRY_VENV_ROOT: that real,
-    # absolute host path may exist and be populated on the exact machine this
-    # script targets, which would make this test's outcome depend on the
-    # machine running it.
+    # log/state) rather than left to poetry's own virtualenvs.path, which may
+    # be populated on the machine running it.
     venv_root = tmp_path / "virtualenvs"
-    main_venv = _make_fake_venv(venv_root, "transit-delay-app-main-py3.12", age_hours=1)
+    main_venv = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=1)
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: main_venv.resolve())
 
     lock_path = tmp_path / "hygiene.lock"
@@ -383,7 +383,7 @@ def test_main_marks_today_succeeded_after_a_fully_clean_apply_run_with_nothing_t
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
 
     venv_root = tmp_path / "virtualenvs"
-    main_venv = _make_fake_venv(venv_root, "transit-delay-app-main-py3.12", age_hours=1)
+    main_venv = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=1)
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: main_venv.resolve())
 
     lock_path = tmp_path / "hygiene.lock"
@@ -419,11 +419,11 @@ def test_main_actually_prunes_an_orphaned_venv_end_to_end(
     stage's very first no-op early-return, so none of them would notice if it were ever
     dropped from main()'s own `stages` tuple entirely. The main checkout's own venv is given
     an OLD mtime here specifically -- a fresh one would be protected by the age margin alone,
-    never actually exercising the in-use correlation this stage depends on to keep it safe."""
+    never actually exercising the ownership check this stage depends on to keep it safe."""
 
     venv_root = tmp_path / "virtualenvs"
     monkeypatch.setattr(cleanup, "load_pull_requests", lambda _repo: {})
-    main_venv = _make_fake_venv(venv_root, "transit-delay-app-main-py3.12", age_hours=100)
+    main_venv = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=100)
     monkeypatch.setattr(
         hygiene,
         "poetry_env_path",
@@ -456,7 +456,7 @@ def test_main_actually_prunes_an_orphaned_venv_end_to_end(
 
     assert exit_code == 0
     assert not orphan.exists()
-    assert main_venv.is_dir()  # protected by the in-use correlation, not merely by age
+    assert main_venv.is_dir()  # protected by the ownership check, not merely by age
 
 
 def test_main_does_not_mark_today_succeeded_when_a_stage_has_a_per_item_failure(
@@ -480,6 +480,8 @@ def test_main_does_not_mark_today_succeeded_when_a_stage_has_a_per_item_failure(
             str(log_path),
             "--state-file",
             str(state_path),
+            "--venv-root",
+            str(tmp_path / "virtualenvs"),
             "--apply",
         ]
     )
@@ -488,9 +490,118 @@ def test_main_does_not_mark_today_succeeded_when_a_stage_has_a_per_item_failure(
     assert not state_path.exists()
 
 
+def test_main_venvs_only_prunes_venvs_without_the_git_stage_or_the_completion_marker(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The post-merge path (`make git-cleanup-apply`) runs after `cleanup_git_state.py` already
+    did the git stage, and can follow several merges a day: it must neither repeat that stage
+    nor be skipped, or skip a later run, because of the once-per-day marker."""
+
+    def _no_git_stage(*_args: object, **_kwargs: object) -> bool:
+        raise AssertionError("--venvs-only must not run the branch/worktree stage")
+
+    monkeypatch.setattr(hygiene, "run_local_cleanup", _no_git_stage)
+    venv_root = tmp_path / "virtualenvs"
+    main_venv = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=100)
+    orphan = _make_fake_venv(venv_root, _main_venv_name(tmp_path / "removed-worktree"), age_hours=100)
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: main_venv.resolve())
+    state_path = tmp_path / "last-success"
+    hygiene.mark_succeeded_today(state_path, tmp_path / "git-hygiene.log")
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(tmp_path / "hygiene.lock"),
+            "--log-file",
+            str(tmp_path / "git-hygiene.log"),
+            "--state-file",
+            str(state_path),
+            "--venv-root",
+            str(venv_root),
+            "--venvs-only",
+            "--apply",
+        ]
+    )
+
+    assert exit_code == 0
+    assert not orphan.exists()
+    assert main_venv.is_dir()
+
+
+def test_main_reads_the_default_venv_root_from_poetry(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Without --venv-root, the stage prunes within poetry's own `virtualenvs.path`, which is
+    right on every platform, instead of a hardcoded host path."""
+
+    venv_root = tmp_path / "poetry-virtualenvs"
+    monkeypatch.setattr(hygiene, "poetry_virtualenvs_path", lambda: venv_root)
+    seen: list[Path] = []
+
+    def _record(_repo: Path, *, venv_root: Path, **_kwargs: object) -> bool:
+        seen.append(venv_root)
+        return True
+
+    monkeypatch.setattr(hygiene, "run_orphaned_venv_pruning", _record)
+
+    exit_code = hygiene.main(
+        [
+            "--repo",
+            str(repository),
+            "--lock-file",
+            str(tmp_path / "hygiene.lock"),
+            "--log-file",
+            str(tmp_path / "git-hygiene.log"),
+            "--venvs-only",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen == [venv_root]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        subprocess.CompletedProcess((), returncode=1, stdout="", stderr="poetry broke"),
+        subprocess.CompletedProcess((), returncode=0, stdout="\n", stderr=""),
+    ],
+)
+def test_poetry_virtualenvs_path_raises_instead_of_guessing(
+    result: subprocess.CompletedProcess[str], monkeypatch: pytest.MonkeyPatch
+):
+    """A wrong root would silently enumerate nothing, so an unanswerable `poetry config` stops
+    the stage rather than falling back to some default."""
+
+    monkeypatch.setattr(hygiene.subprocess, "run", lambda *_a, **_k: result)
+
+    with pytest.raises(hygiene.HygieneError, match="--venv-root"):
+        hygiene.poetry_virtualenvs_path()
+
+
+def test_poetry_virtualenvs_path_expands_the_configured_path(monkeypatch: pytest.MonkeyPatch):
+    """`poetry config virtualenvs.path` can report a `~`-relative path."""
+
+    monkeypatch.setattr(
+        hygiene.subprocess,
+        "run",
+        lambda *_a, **_k: subprocess.CompletedProcess((), returncode=0, stdout="~/venvs\n", stderr=""),
+    )
+
+    assert hygiene.poetry_virtualenvs_path() == Path.home() / "venvs"
+
+
 # ---------------------------------------------------------------------------
 # Orphaned poetry venv pruning
 # ---------------------------------------------------------------------------
+
+
+def _main_venv_name(checkout: Path, python: str = "3.12") -> str:
+    """The venv directory name Poetry gives `checkout` for one interpreter."""
+
+    return f"{hygiene.poetry_venv_name_prefix(checkout)}{python}"
 
 
 def _make_fake_venv(root: Path, name: str, *, age_hours: float) -> Path:
@@ -520,7 +631,7 @@ def test_poetry_env_path_returns_none_on_timeout(monkeypatch: pytest.MonkeyPatch
     never left to hold the hygiene lock indefinitely."""
 
     def _hangs(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
-        raise subprocess.TimeoutExpired(cmd="poetry", timeout=hygiene.POETRY_ENV_INFO_TIMEOUT_SECONDS)
+        raise subprocess.TimeoutExpired(cmd="poetry", timeout=hygiene.POETRY_COMMAND_TIMEOUT_SECONDS)
 
     monkeypatch.setattr(hygiene.subprocess, "run", _hangs)
     assert hygiene.poetry_env_path(Path("/unused")) is None
@@ -539,332 +650,149 @@ def test_poetry_env_path_returns_resolved_path_on_success(tmp_path: Path, monkey
     assert hygiene.poetry_env_path(Path("/unused")) == venv.resolve()
 
 
-def test_compute_in_use_poetry_venvs_raises_when_an_old_worktree_venv_unresolvable(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A worktree past the age grace period whose venv can't be resolved must also abort, not
-    be silently treated as having no venv -- `poetry env info --path` cannot tell "no venv
-    installed yet" apart from "poetry failed for an unrelated, possibly transient reason"
-    (confirmed live: both produce exit 1 with empty stdout/stderr), and every worktree of this
-    repo always has a checked-in pyproject.toml, so a real, in-use venv could be the one that
-    failed to resolve."""
-
-    worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
-
-    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)  # the worktree's venv fails to resolve
-
-    # min_age_hours=0: the freshly-created worktree is already "past" a zero-hour
-    # grace period, so this exercises the "old enough, still raise" branch.
-    with pytest.raises(hygiene.HygieneError):
-        hygiene.compute_in_use_poetry_venvs(repository, tmp_path / "venv-main", min_age_hours=0)
-
-
-def test_compute_in_use_poetry_venvs_skips_a_young_worktree_with_no_resolvable_venv(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A worktree younger than min_age_hours whose venv can't be resolved is benign, not an
-    error -- a freshly-dispatched worker (e.g. a frontend-only task) may simply not have run
-    any poetry/backend command yet. Without this grace period, this stage (and this job's
-    once-daily completion marker) would be permanently unable to complete for as long as any
-    such perfectly ordinary worktree exists."""
-
-    worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
-
-    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)  # the worktree's venv fails to resolve
-
-    # The worktree was just created, well within a generous grace period.
-    main_venv = tmp_path / "venv-main"
-    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=24)
-
-    assert in_use == {main_venv}
-
-
-def test_compute_in_use_poetry_venvs_ages_a_worktree_by_its_git_file_not_its_directory_mtime(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A worktree's own top-level directory mtime resets on any root-level create/delete inside
-    it (a .mypy_cache/, an untracked file, a branch switch) -- all routine activity for an
-    actively-used worktree. Using that as the age signal would make a genuinely old, in-use
-    worktree look "young" right after such an event, silently skipping the very check meant to
-    protect its real venv from deletion. The linked worktree's `.git` FILE (written once by
-    `git worktree add`, never touched again) must be what's aged instead."""
-
-    worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
-
-    old_stamp = time.time() - 100 * 3600  # 100h ago -- well past any grace period
-    os.utime(worktree_path / ".git", (old_stamp, old_stamp))
-
-    # Simulate routine activity in an old, actively-used worktree: a root-level directory
-    # created just now bumps the worktree's own top-level directory mtime to "brand new".
-    (worktree_path / ".mypy_cache").mkdir()
-    assert (time.time() - worktree_path.stat().st_mtime) < 60  # the directory itself now looks freshly touched
-
-    # The worktree's own venv fails to resolve (simulated transient failure).
-    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)
-
-    # If age were read from the worktree directory's own mtime, this would incorrectly skip
-    # (looks "young") instead of raising -- silently treating an active worktree as orphaned.
-    with pytest.raises(hygiene.HygieneError):
-        hygiene.compute_in_use_poetry_venvs(repository, tmp_path / "venv-main", min_age_hours=24)
-
-
-def test_compute_in_use_poetry_venvs_skips_a_prunable_worktree_entry(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A worktree whose administrative entry outlived its actual directory (removed out-of-band
-    instead of via `git worktree remove`) is unambiguously "nothing runs out of here" -- unlike
-    a genuine poetry resolution failure, this is skipped without ever calling `poetry_env_path`
-    on it, and without needing the age grace period."""
-
-    worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
-    shutil.rmtree(worktree_path)  # remove the directory directly, bypassing `git worktree remove`
-    assert "prunable" in git(repository, "worktree", "list", "--porcelain")
-
-    queried: list[Path] = []
-
-    def _fake_env_path(location: Path) -> Path | None:
-        queried.append(location.resolve())
-        return None
-
-    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
-
-    main_venv = tmp_path / "venv-main"
-    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
-
-    assert in_use == {main_venv}
-    assert worktree_path.resolve() not in queried
-
-
 @pytest.mark.parametrize(
-    ("path", "expected"),
+    ("location", "expected"),
     [
-        (Path("/repo/.worktrees/review-main"), True),
-        (Path("/repo/.worktrees/review-fix/item-85"), True),
-        (Path("/anywhere/.worktrees/review-main"), True),  # structural, not anchored to a particular checkout
-        (Path("/repo/.worktrees/other"), False),
-        (Path("/repo/.claude/worktrees/agent-a85e93fb4ec1fbec1"), False),
-        (Path("/repo/review-main"), False),
-        (Path("/repo/.worktrees-old/review-main"), False),  # exact segment match, not a substring
-        (Path("/repo/x.worktrees/review-main"), False),
-        (Path("/repo/.worktrees"), False),  # `.worktrees` with nothing after it to match `review-*`
-        (Path("/repo/.worktrees/review-main/.claude/worktrees/agent-abc"), False),  # nested worktree, not this shape
-        # An extra segment with no worktree marker in it is indistinguishable from more of
-        # a slash-containing head ref (same shape as the `review-fix/item-85` case
-        # above) -- matching it is what makes the slash-containing case work at all.
-        (Path("/repo/.worktrees/review-main/subdir"), True),
+        # Generated by Poetry's own `EnvManager.generate_env_name("transit-delay-app", location)`,
+        # identical under Poetry 1.8 and 2.x.
+        ("/srv/transit-app", "transit-delay-app-aO8oPM_b-py"),
+        ("/srv/transit-app/.worktrees/fix-item-1", "transit-delay-app-kBygU0lo-py"),
     ],
 )
-def test_is_review_worktree_matches_only_the_review_pr_convention(path: Path, expected: bool):
-    """A `.worktrees` segment immediately followed by a `review-`-prefixed one, anywhere in
-    the path (not just the last two components, since a reviewed branch's own head ref can
-    contain slashes) and with nothing shaped like a further nested worktree after it --
-    `/review-pr`'s own naming -- matches, regardless of which checkout it sits under."""
+def test_poetry_venv_name_prefix_matches_poetrys_own_naming(location: str, expected: str):
+    """Ownership rests entirely on reproducing Poetry's venv naming, so it is pinned to names
+    Poetry itself produced rather than to a re-derivation of the same formula."""
 
-    assert hygiene.is_review_worktree(path) is expected
+    assert hygiene.poetry_venv_name_prefix(Path(location)) == expected
 
 
-def test_review_worktree_naming_matches_review_pr_md():
-    """Upgrades the naming coupling `REVIEW_WORKTREE_PARENT_DIR`'s own comment calls
-    "greppable" into an enforced check: if `/review-pr` ever renames its worktree
-    convention without updating these constants, this fails loudly instead of the
-    exemption silently stopping firing and review worktrees filling the disk."""
-
-    review_pr_doc = (ROOT / ".claude" / "commands" / "review-pr.md").read_text(encoding="utf-8")
-
-    assert f"{hygiene.REVIEW_WORKTREE_PARENT_DIR}/{hygiene.REVIEW_WORKTREE_PREFIX}" in review_pr_doc
-
-
-def test_compute_in_use_poetry_venvs_skips_an_unresolvable_review_worktree_without_raising(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A `/review-pr` worktree with no resolvable venv is exempted from the fail-closed
-    raise, with no age grace period needed -- but `poetry_env_path` IS still attempted for
-    it first, same as any other worktree, so a real venv there (see the sibling test below)
-    is never silently dropped from `in_use`."""
-
-    worktree_path = repository / ".worktrees" / "review-main"
-    worktree_path.parent.mkdir()
-    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(worktree_path), "main")
-
-    queried: list[Path] = []
-
-    def _fake_env_path(location: Path) -> Path | None:
-        queried.append(location.resolve())
-        return None
-
-    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
-
-    main_venv = repository.parent / "venv-main"
-    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
-
-    assert in_use == {main_venv}
-    assert worktree_path.resolve() in queried  # resolution was attempted, just not required to succeed
-
-
-def test_compute_in_use_poetry_venvs_keeps_a_review_worktrees_venv_if_one_actually_exists(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """The review-worktree exemption only waives the fail-closed raise on an unresolved
-    venv -- it must never suppress a venv that DOES resolve there (e.g. a human or a
-    reviewer ran a poetry command despite `/review-pr`'s read-only design), which would
-    otherwise be the exact false "not in use" this function exists to prevent."""
-
-    worktree_path = repository / ".worktrees" / "review-main"
-    worktree_path.parent.mkdir()
-    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(worktree_path), "main")
-
-    real_venv = repository.parent / "venv-review-main"
-
-    def _fake_env_path(location: Path) -> Path | None:
-        return real_venv if location.resolve() == worktree_path.resolve() else None
-
-    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
-
-    main_venv = repository.parent / "venv-main"
-    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
-
-    assert in_use == {main_venv, real_venv}
-
-
-def test_compute_in_use_poetry_venvs_exempts_a_review_worktree_created_under_a_linked_worktree(
+def test_compute_in_use_poetry_venvs_keeps_a_worktrees_venv_by_name_without_asking_poetry(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """`/review-pr` runs its `git worktree add` relative to whichever checkout invokes it --
-    normally but not necessarily the main one. `repo` here is the MAIN checkout, while the
-    review worktree sits under a *different*, linked worktree entirely -- not a descendant
-    of `repo` at all -- so this only passes if the exemption is genuinely structural rather
-    than anchored to whichever path `repo` happens to be."""
+    """A worktree's venv is in use because its name carries the worktree's path hash; poetry is
+    never spawned per worktree, so a poetry hiccup there can no longer hide a real venv."""
 
-    linked_path = tmp_path / "linked-worktree"
-    git(repository, "worktree", "add", "-b", "linked-branch", str(linked_path), "main")
-    review_path = linked_path / ".worktrees" / "review-main"
-    review_path.parent.mkdir()
-    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(review_path), "main")
+    worktree_path = tmp_path / "extra-worktree"
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
+    venv_root = tmp_path / "virtualenvs"
+    main_venv = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=100)
+    worktree_venvs = {
+        _make_fake_venv(venv_root, _main_venv_name(worktree_path, python), age_hours=100).resolve()
+        for python in ("3.12", "3.14")
+    }
+    orphan = _make_fake_venv(venv_root, _main_venv_name(tmp_path / "removed-worktree"), age_hours=100)
 
-    linked_venv = tmp_path / "venv-linked"
+    def _no_poetry(_location: Path) -> Path | None:
+        raise AssertionError("ownership must not depend on spawning poetry in a worktree")
 
-    def _fake_env_path(location: Path) -> Path | None:
-        return linked_venv if location.resolve() == linked_path.resolve() else None
+    monkeypatch.setattr(hygiene, "poetry_env_path", _no_poetry)
 
-    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
+    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv.resolve(), venv_root=venv_root)
 
-    main_venv = tmp_path / "venv-main"
-    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=0)
-
-    assert in_use == {main_venv, linked_venv}
+    assert in_use == {main_venv.resolve(), *worktree_venvs}
+    assert orphan.resolve() not in in_use
 
 
-def test_compute_in_use_poetry_venvs_still_raises_for_a_non_review_shaped_worktree_in_repo(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
+def test_compute_in_use_poetry_venvs_does_not_raise_for_a_worktree_that_never_created_a_venv(
+    tmp_path: Path, repository: Path
 ):
-    """The exemption's scope is enforced at the call site, not just in `is_review_worktree`
-    alone: an in-repo worktree that is NOT `.worktrees/review-*` -- e.g. an agent
-    worktree's `.claude/worktrees/agent-*` shape -- must still hit the fail-closed raise past
-    the grace period, proving the gate itself (not only the pure predicate) rejects a
-    broader match than the stated policy."""
+    """A worktree that routes `poetry run` to the main checkout's venv owns nothing and blocks
+    nothing, however old it is."""
 
-    worktree_path = repository / ".claude" / "worktrees" / "agent-a85e93fb4ec1fbec1"
-    worktree_path.parent.mkdir(parents=True)
-    git(repository, "worktree", "add", "-b", "fix/item-88", str(worktree_path), "main")
+    worktree_path = tmp_path / "extra-worktree"
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
+    old_stamp = time.time() - 1000 * 3600
+    os.utime(worktree_path / ".git", (old_stamp, old_stamp))
+    venv_root = tmp_path / "virtualenvs"
+    main_venv = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=100).resolve()
 
-    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)
-
-    with pytest.raises(hygiene.HygieneError):
-        hygiene.compute_in_use_poetry_venvs(repository, repository.parent / "venv-main", min_age_hours=0)
+    assert hygiene.compute_in_use_poetry_venvs(repository, main_venv, venv_root=venv_root) == {main_venv}
 
 
-def test_compute_in_use_poetry_venvs_raises_for_a_locked_review_worktree_whose_directory_is_absent(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
+def test_compute_in_use_poetry_venvs_releases_a_prunable_worktrees_venv(tmp_path: Path, repository: Path):
+    """A worktree whose directory was removed out-of-band (git marks the entry `prunable`) owns
+    nothing any more, so its venv is an orphan."""
+
+    worktree_path = tmp_path / "extra-worktree"
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
+    venv_root = tmp_path / "virtualenvs"
+    main_venv = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=100).resolve()
+    stale_venv = _make_fake_venv(venv_root, _main_venv_name(worktree_path), age_hours=100)
+    shutil.rmtree(worktree_path)
+    assert "prunable" in git(repository, "worktree", "list", "--porcelain")
+
+    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, venv_root=venv_root)
+
+    assert stale_venv.resolve() not in in_use
+
+
+def test_compute_in_use_poetry_venvs_keeps_a_locked_worktrees_venv_when_its_directory_is_absent(
+    tmp_path: Path, repository: Path
 ):
-    """The review-worktree exemption requires the worktree to actually exist -- `/review-pr`
-    leaves it in place indefinitely by design, so a locked-but-absent one is not that shape
-    at all, and must hit the same fail-closed raise a locked-absent non-review worktree
-    does (the sibling test below), not be silently skipped."""
-
-    worktree_path = repository / ".worktrees" / "review-main"
-    worktree_path.parent.mkdir()
-    git(repository, "worktree", "add", "-b", "review-worktree-branch", str(worktree_path), "main")
-    git(repository, "worktree", "lock", str(worktree_path))
-    shutil.rmtree(worktree_path)  # remove the directory directly while still locked
-    listing = git(repository, "worktree", "list", "--porcelain")
-    assert "locked" in listing
-    assert "prunable" not in listing
-
-    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)
-
-    with pytest.raises(hygiene.HygieneError):
-        hygiene.compute_in_use_poetry_venvs(repository, repository.parent / "venv-main", min_age_hours=0)
-
-
-def test_compute_in_use_poetry_venvs_raises_for_a_locked_worktree_whose_directory_is_absent(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A locked worktree whose directory is gone must NOT be silently skipped like a prunable
-    one: git itself refuses to mark a locked worktree prunable even when its directory is
-    missing (locking exists specifically to protect it from this class of cleanup, confirmed
-    live), so this falls through to the fail-closed path instead of being treated as
-    unambiguously "nothing runs out of here"."""
+    """Git never marks a locked worktree prunable, even with its directory gone: locking exists
+    to protect it (e.g. on a detached drive) from exactly this kind of cleanup."""
 
     worktree_path = tmp_path / "extra-worktree"
     git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
     git(repository, "worktree", "lock", str(worktree_path))
-    shutil.rmtree(worktree_path)  # remove the directory directly while still locked
+    venv_root = tmp_path / "virtualenvs"
+    main_venv = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=100).resolve()
+    locked_venv = _make_fake_venv(venv_root, _main_venv_name(worktree_path), age_hours=100)
+    shutil.rmtree(worktree_path)
     listing = git(repository, "worktree", "list", "--porcelain")
     assert "locked" in listing
     assert "prunable" not in listing
 
-    monkeypatch.setattr(hygiene, "poetry_env_path", lambda _location: None)
+    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, venv_root=venv_root)
 
-    with pytest.raises(hygiene.HygieneError):
-        hygiene.compute_in_use_poetry_venvs(repository, tmp_path / "venv-main", min_age_hours=0)
+    assert locked_venv.resolve() in in_use
 
 
-def test_compute_in_use_poetry_venvs_includes_main_and_every_worktree(
-    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+def test_compute_in_use_poetry_venvs_refuses_when_the_main_venv_does_not_carry_the_predicted_hash(
+    tmp_path: Path, repository: Path
 ):
-    """The in-use set covers the given `main_venv` plus each worktree's own venv path,
-    by whatever `poetry_env_path` reports for that location."""
+    """If poetry's own venv for the main checkout does not match the name this module predicts
+    for it, Poetry's naming has changed and every ownership answer would be wrong."""
 
-    worktree_path = tmp_path / "extra-worktree"
-    git(repository, "worktree", "add", "-b", "fix/item-99", str(worktree_path), "main")
+    venv_root = tmp_path / "virtualenvs"
+    main_venv = _make_fake_venv(venv_root, "transit-delay-app-NotAHash-py3.12", age_hours=100).resolve()
 
-    main_venv = tmp_path / "venv-main"
-    worktree_venv = tmp_path / "venv-item-99"
-    queried: list[Path] = []
-
-    def _fake_env_path(location: Path) -> Path | None:
-        queried.append(location.resolve())
-        if location.resolve() == worktree_path.resolve():
-            return worktree_venv
-        return None
-
-    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
-
-    in_use = hygiene.compute_in_use_poetry_venvs(repository, main_venv, min_age_hours=24)
-
-    assert in_use == {main_venv, worktree_venv}
-    # `git worktree list` already includes the main checkout itself -- must be
-    # de-duplicated so `poetry_env_path` is never spawned for it a second time
-    # (main_venv is provided by the caller, not re-resolved here).
-    assert repository.resolve() not in queried
+    with pytest.raises(hygiene.HygieneError, match="path hashing predicts"):
+        hygiene.compute_in_use_poetry_venvs(repository, main_venv, venv_root=venv_root)
 
 
 def test_run_orphaned_venv_pruning_raises_when_the_checkouts_own_venv_is_unresolvable(
     tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """If poetry can't resolve this checkout's own venv at all (not on PATH, a poetry config
-    problem), that's reported as a poetry/environment issue -- distinct from a --venv-root
-    misconfiguration -- rather than silently treated as "nothing to do" (this stage's own
-    original bug: --venv-root simply not existing took an early no-op return before this
-    self-check ever ran, letting the exact misconfiguration it exists to catch through)."""
+    """If poetry can't resolve this checkout's own venv while this project's venvs do exist
+    under --venv-root, nothing anchors the naming check, so the stage refuses rather than
+    treating them all as orphans."""
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: None)
+    venv_root = tmp_path / "virtualenvs"
+    unattributable = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=100)
+
+    with pytest.raises(hygiene.HygieneError, match="could not resolve"):
+        hygiene.run_orphaned_venv_pruning(
+            repository,
+            venv_root=venv_root,
+            min_age_hours=24,
+            max_deletes_per_run=10,
+            apply=True,
+            log_file=tmp_path / "log",
+        )
+    assert unattributable.is_dir()
+
+
+def test_run_orphaned_venv_pruning_is_a_no_op_for_a_clone_with_no_venv_at_all(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A clone where nothing ever ran poetry (no venv for the checkout, none of this project's
+    under the root) has nothing to prune, so a post-merge cleanup there must not fail."""
 
     monkeypatch.setattr(hygiene, "poetry_env_path", lambda *_a, **_k: None)
 
-    with pytest.raises(hygiene.HygieneError, match="could not resolve"):
+    assert (
         hygiene.run_orphaned_venv_pruning(
             repository,
             venv_root=tmp_path / "does-not-exist",
@@ -873,6 +801,38 @@ def test_run_orphaned_venv_pruning_raises_when_the_checkouts_own_venv_is_unresol
             apply=True,
             log_file=tmp_path / "log",
         )
+        is True
+    )
+    assert not (tmp_path / "log").exists()
+
+
+def test_run_orphaned_venv_pruning_anchors_on_the_primary_worktree_when_invoked_from_a_linked_one(
+    tmp_path: Path, repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`make git-cleanup` may run from any worktree, but only the primary one owns a real venv
+    when worktrees route `poetry run` to it, so that is where the anchoring venv is resolved."""
+
+    linked = tmp_path / "linked-worktree"
+    git(repository, "worktree", "add", "-b", "fix/item-99", str(linked), "main")
+    venv_root = tmp_path / "virtualenvs"
+    main_venv = _make_fake_venv(venv_root, _main_venv_name(repository), age_hours=100)
+    orphan = _make_fake_venv(venv_root, _main_venv_name(tmp_path / "removed-worktree"), age_hours=100)
+    queried: list[Path] = []
+
+    def _fake_env_path(location: Path) -> Path | None:
+        queried.append(location.resolve())
+        return main_venv.resolve() if location.resolve() == repository.resolve() else None
+
+    monkeypatch.setattr(hygiene, "poetry_env_path", _fake_env_path)
+
+    all_clean = hygiene.run_orphaned_venv_pruning(
+        linked, venv_root=venv_root, min_age_hours=24, max_deletes_per_run=10, apply=True, log_file=tmp_path / "log"
+    )
+
+    assert all_clean is True
+    assert queried == [repository.resolve()]
+    assert main_venv.is_dir()
+    assert not orphan.exists()
 
 
 def test_run_orphaned_venv_pruning_raises_when_venv_root_does_not_exist_but_a_real_venv_exists_elsewhere(
