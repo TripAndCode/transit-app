@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { useId, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout, useSession } from "../api/auth";
@@ -10,6 +10,7 @@ import { useLocaleSwitch } from "../i18n/useLocaleSwitch";
 import { Z_INDEX } from "../styles/zIndex";
 import { Spinner } from "./Spinner";
 import { useToast } from "./ui/toastContext";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 
 const THEME_OPTIONS = ["system", "light", "dark"] as const satisfies readonly Theme[];
 const THEME_OPTION_LABEL_KEYS: Record<(typeof THEME_OPTIONS)[number], string> = {
@@ -71,24 +72,10 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  usePopoverDismiss(open, ref, (reason) => {
+    setOpen(false);
+    if (reason === "escape") triggerRef.current?.focus();
+  });
 
   if (sessionLoading || configLoading) return null;
 

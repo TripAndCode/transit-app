@@ -6,6 +6,7 @@ import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
 import { Tooltip } from "../../components/Tooltip";
 import { formatNumber } from "../../utils/format";
+import { useTopmostEscape } from "../../hooks/useFocusTrap";
 import { niceAxis } from "../../components/charts/niceAxis";
 import { coalesceToFrame } from "../../utils/frameCoalesce";
 import "./stopEvidence.css";
@@ -33,6 +34,11 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [sequence, setSequence] = useState<number | null>(null);
   const [detailLeft, setDetailLeft] = useState(0);
+  useTopmostEscape(sequence !== null, () => {
+    setSequence(null);
+    onFocus?.(null);
+    selectedButtonRef.current?.focus();
+  });
   useEffect(() => {
     if (sequence === null) return;
     const container = scrollRef.current;
@@ -56,19 +62,11 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
     updateDetailLeft();
     const frame = coalesceToFrame(updateDetailLeft);
     container?.addEventListener("scroll", frame.schedule);
-    function dismiss(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setSequence(null);
-      onFocus?.(null);
-      selectedButtonRef.current?.focus();
-    }
-    document.addEventListener("keydown", dismiss);
     return () => {
-      document.removeEventListener("keydown", dismiss);
       frame.cancel();
       container?.removeEventListener("scroll", frame.schedule);
     };
-  }, [sequence, onFocus]);
+  }, [sequence]);
   const [windowSize, setWindowSize] = useState(Math.min(8, points.length));
   const [windowStart, setWindowStart] = useState(0);
   const size = complete ? Math.min(windowSize, points.length) : points.length;

@@ -180,6 +180,27 @@ describe("ThreadSidebar", () => {
       expect(kebab).toHaveFocus();
     });
 
+    it("closes when its kebab is pressed again", async () => {
+      const user = userEvent.setup();
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      await user.click(kebab);
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      await user.click(kebab);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+
+    it("closes on a press outside without pulling focus back to the kebab", async () => {
+      const user = userEvent.setup();
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      await user.click(screen.getByRole("button", { name: "More options" }));
+      await user.click(screen.getByRole("searchbox"));
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(screen.getByRole("searchbox")).toHaveFocus();
+    });
+
     it("returns focus to the control that opened it when an item is chosen", () => {
       // Choosing an item unmounts the menuitem that had focus. Escape is not
       // the only exit that has to put the operator back on the kebab.

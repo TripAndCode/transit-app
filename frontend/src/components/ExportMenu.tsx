@@ -6,6 +6,7 @@ import type { Scope } from "../api/scope";
 import { buildCsv, downloadCsv, triggerBlobDownload, type CsvColumn } from "./analysis/csv";
 import { svgToPngBlob } from "./exportPng";
 import { menuItems, nextMenuItem } from "./menuKeys";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 
 type CsvExportSpec<T> = {
   filenameBase: string;
@@ -48,23 +49,10 @@ export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint
 
   const currentUrl = `${window.location.origin}${location.pathname}${location.search}`;
 
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      triggerRef.current?.focus();
-    }
-    function onPointerDown(event: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("mousedown", onPointerDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, rootRef, (reason) => {
+    setOpen(false);
+    if (reason === "escape") triggerRef.current?.focus();
+  });
 
   // A menu that opens without taking focus strands a keyboard user behind
   // the trigger, tabbing through the rest of the page to reach items that
