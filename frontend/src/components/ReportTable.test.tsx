@@ -84,9 +84,9 @@ describe("ReportTable route link travel", () => {
     const shared = screen.getAllByTestId("route-title-transition");
     expect(shared).toHaveLength(1);
     expect(shared[0]).toHaveTextContent("Route 3");
-    // Only the travelling label is one box; the rest wrap as text.
-    expect(shared[0].querySelector(".report-route-link__label--travelling")).not.toBeNull();
-    expect(document.querySelectorAll(".report-route-link__label--travelling")).toHaveLength(1);
+    // The travelling link is one box, chevron included; the rest wrap as text.
+    expect(shared[0].firstElementChild).toHaveClass("report-route-link", "report-route-link--travelling");
+    expect(document.querySelectorAll(".report-route-link--travelling")).toHaveLength(1);
   });
 
   it("holds the name only while that row's navigation is pending, so a superseded one leaves nothing named", async () => {

@@ -62,9 +62,9 @@ export default function App() {
                 boundary is newly mounted on arrival and therefore always shows
                 its fallback; this one already holds the outgoing tab, so the
                 router's startTransition (main.tsx) can leave that painted until
-                the incoming chunk resolves. A navigation from the rail then
-                commits as a view transition of this pane (navPending.tsx,
-                styles/viewTransitions.css), without remounting it. */}
+                the incoming chunk resolves. A navigation started through
+                navPending.tsx then commits as a view transition of this pane
+                (styles/viewTransitions.css), without remounting it. */}
             <ViewTransition default={{ nav: "page-nav", default: "none" }}>
               <div style={{ display: "flex", flexDirection: "column", padding: "clamp(16px, 4vw, 24px)", flex: 1, minHeight: 0, boxSizing: "border-box" }}>
                 <Suspense fallback={<ChunkLoading />}>

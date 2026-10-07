@@ -1,8 +1,8 @@
-/* Screen changes from the rail run as view transitions: App.tsx's
-   <ViewTransition> names the routed pane only for a "nav" transition (see
-   navPending.tsx), so filter changes and refetches never animate. Only that
-   pane is captured; the rail and top bar stay live, and clicks pass through
-   the transition's overlay to them. */
+/* Screen changes started through navPending.tsx (the rail, report rows) run
+   as view transitions: App.tsx's <ViewTransition> names the routed pane only
+   for a "nav" transition, so filter changes and refetches never animate. Only
+   that pane is captured; the rail and top bar stay live, and clicks pass
+   through the transition's overlay to them. */
 html { view-transition-name: none; }
 ::view-transition { pointer-events: none; }
 

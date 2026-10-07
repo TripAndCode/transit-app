@@ -366,26 +366,22 @@ function RouteCell({
   if (agencyId == null || !code) return <RouteLabel code={code} names={names} />;
   const href = routeHref(agencyId, code, search);
   const travelling = travels && pendingTo === href;
-  const label = (
-    <span className={travelling ? "report-route-link__label--travelling" : undefined}>
-      <RouteLabel code={code} names={names} />
-    </span>
-  );
-  return (
+  const link = (
     <PendingNavLink
-      className="report-route-link"
+      className={travelling ? "report-route-link report-route-link--travelling" : "report-route-link"}
       to={href}
       spinner={false}
       onClick={(e) => {
         if (isPlainLeftClick(e) && !prefersReducedMotion()) onTravel();
       }}
     >
-      {travelling ? <RouteTitleTransition>{label}</RouteTitleTransition> : label}
+      <RouteLabel code={code} names={names} />
       <span className="report-route-link__chevron" aria-hidden="true">
         {"\u00a0›"}
       </span>
     </PendingNavLink>
   );
+  return travelling ? <RouteTitleTransition>{link}</RouteTitleTransition> : link;
 }
 
 function cellText(c: Schema, raw: unknown, t: TFunction): string {

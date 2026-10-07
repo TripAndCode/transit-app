@@ -4,11 +4,11 @@ import { RouteTitleTransition } from "./RouteTitleTransition";
 
 describe("RouteTitleTransition", () => {
   it("renders what it wraps; outside a transition it adds nothing to the page", () => {
-    render(
+    const { container } = render(
       <RouteTitleTransition>
         <h1>Route 3</h1>
       </RouteTitleTransition>,
     );
-    expect(screen.getByRole("heading", { level: 1, name: "Route 3" }).parentElement?.tagName).toBe("DIV");
+    expect(container.firstElementChild).toBe(screen.getByRole("heading", { level: 1, name: "Route 3" }));
   });
 });

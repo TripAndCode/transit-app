@@ -31,10 +31,10 @@ describe("screen transitions", () => {
     expect(decl(group, "animation-timing-function")).toBe("var(--ease-out)");
     expect(css.replace(allowed, "")).not.toContain("route-title");
     // A named element split across line boxes skips the whole transition.
-    // Only on the travelling label: a whole-label box elsewhere would stop the
-    // hover underline and detach the chevron from the last word.
-    expect(decl(ruleBody(reportTableCss, ".report-route-link__label--travelling {"), "display")).toBe("inline-block");
-    expect(reportTableCss).not.toMatch(/\.report-route-link__label\s*\{/);
+    // The whole travelling link, so its chevron stays after the last word;
+    // every other link stays inline.
+    expect(decl(ruleBody(reportTableCss, ".report-route-link--travelling {"), "display")).toBe("inline-block");
+    expect(decl(ruleBody(reportTableCss, ".report-route-link {"), "display")).not.toBe("inline-block");
   });
 
   it("keep only a short crossfade under reduced motion, which the blanket rule cannot reach", () => {
