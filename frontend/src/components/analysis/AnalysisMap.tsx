@@ -82,8 +82,10 @@ export function AnalysisMap({ data, selected, height = 210, visible = true, posi
         return;
       }
       instance.addSource(ROUTE_SOURCE, { type: "geojson", data: collection });
-      instance.addLayer({ id: ROUTE_LINE_LAYER, type: "line", source: ROUTE_SOURCE, filter: ["==", "$type", "LineString"], paint: { "line-color": accentColorResolved(), "line-width": 3 } });
-      instance.addLayer({ id: SELECTED_STOP_LAYER, type: "circle", source: ROUTE_SOURCE, filter: ["==", "$type", "Point"], paint: { "circle-radius": 8, "circle-color": severeColorResolved(), "circle-stroke-width": 3, "circle-stroke-color": surfaceColorResolved() } });
+      // Beneath the trip positions whichever effect re-attaches first.
+      const beneath = instance.getLayer(SCRUB_LAYER) ? SCRUB_LAYER : undefined;
+      instance.addLayer({ id: ROUTE_LINE_LAYER, type: "line", source: ROUTE_SOURCE, filter: ["==", "$type", "LineString"], paint: { "line-color": accentColorResolved(), "line-width": 3 } }, beneath);
+      instance.addLayer({ id: SELECTED_STOP_LAYER, type: "circle", source: ROUTE_SOURCE, filter: ["==", "$type", "Point"], paint: { "circle-radius": 8, "circle-color": severeColorResolved(), "circle-stroke-width": 3, "circle-stroke-color": surfaceColorResolved() } }, beneath);
     });
   }, [data, selected, styleEpoch, theme]);
   // The caller builds `positions` afresh each render, so the effect keys on

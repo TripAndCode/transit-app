@@ -67,6 +67,10 @@
 .marey-cursor { stroke: var(--accent); stroke-width: 1.5; pointer-events: none; }
 .marey-scrub { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; margin: 0 0 10px; }
 .marey-scrub__clock { font-size: var(--text-lg); font-weight: 600; min-width: 4.2ch; }
+/* The shared scrubber chrome leaves the track to its caller; this rail draws
+   a plain one so the slider's range is visible. */
+.marey-scrub .scrub-input::-webkit-slider-runnable-track { background: var(--track-bg); border-radius: 4px; }
+.marey-scrub .scrub-input::-moz-range-track { background: var(--track-bg); border-radius: 4px; }
 .stop-ribbon__pos { stroke: var(--bg-surface); stroke-width: 2; transition: cx var(--dur-2) var(--ease-out); }
 /* Each trip group is in the tab order, so the keyboard ring has to survive
    the SVG's own default of no visible focus style. */

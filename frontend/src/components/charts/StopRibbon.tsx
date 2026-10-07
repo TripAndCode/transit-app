@@ -23,7 +23,8 @@ export function StopRibbon({
   selectedSequence?: number | null;
   onSelect?: (stopSequence: number) => void;
   height?: number;
-  /** Moving positions drawn over the bands, as a fraction of the axis. */
+  /** Moving positions drawn over the bands, as a fraction of the axis: 0 is
+   *  the first stop's band centre, 1 the last's. */
   markers?: { fraction: number; color: string; key: string }[];
 }) {
   const { t } = useTranslation("design");
@@ -70,7 +71,7 @@ export function StopRibbon({
         );
       })}
       {markers?.map((m) => (
-        <circle key={m.key} className="stop-ribbon__pos" cx={m.fraction * RIBBON_WIDTH} cy={1 + height / 2} r={7} fill={m.color} />
+        <circle key={m.key} className="stop-ribbon__pos" cx={(m.fraction * (segments.length - 1) + 0.5) * bandWidth} cy={1 + height / 2} r={7} fill={m.color} />
       ))}
     </svg>
   );

@@ -14,7 +14,7 @@ import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { MareyDiagram } from "../components/charts/MareyDiagram";
-import { interpolateLngLat, positionsAt } from "../components/charts/mareyScrub";
+import { interpolateLngLat, scrubPositions } from "../components/charts/mareyScrub";
 import { timeWindowForBand } from "../components/charts/mareyLayout";
 import { SkeletonChart } from "../components/Skeleton";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
@@ -121,11 +121,11 @@ export function RouteAnalysisTab() {
   // so it is ignored (derived, not reset) until the band widens again.
   const bandWindow = timeWindowForBand(ctx.time_band);
   const effectiveScrub = scrubSec != null && scrubSec >= bandWindow.startSec && scrubSec <= bandWindow.endSec ? scrubSec : null;
-  const scrubPositions =
+  const mapPositions =
     effectiveScrub == null || !trips.data || !query.data
       ? []
-      : positionsAt(trips.data.trips, effectiveScrub, axis).flatMap((p) => {
-          const at = interpolateLngLat(query.data.stops, p);
+      : scrubPositions(trips.data.trips, bandWindow, effectiveScrub, axis).flatMap((p) => {
+          const at = interpolateLngLat(stops, p);
           return at ? [{ key: p.trip_id, lon: at[0], lat: at[1], delaySec: p.delaySec }] : [];
         });
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
@@ -213,7 +213,7 @@ export function RouteAnalysisTab() {
             </div>}
             {mapVisited && <div className={`focus-tab-panel${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`} role="tabpanel" id={panelId("map")} aria-labelledby={tabId("map")}>
               <Suspense fallback={<SkeletonChart height={420} />}>
-                <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} positions={scrubPositions} />
+                <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} positions={mapPositions} />
               </Suspense>
             </div>}
             {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>

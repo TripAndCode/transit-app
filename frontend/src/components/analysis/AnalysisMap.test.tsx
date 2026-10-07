@@ -45,8 +45,10 @@ vi.mock("maplibre-gl", () => {
     addSource(id: string, def: Record<string, unknown>) {
       recorder.sources[id] = { ...def, setData: (data: unknown) => recorder.setData.push({ id, data }) };
     }
-    addLayer(layer: { id: string; paint?: Record<string, unknown> }) {
-      recorder.layers.push(layer);
+    addLayer(layer: { id: string; paint?: Record<string, unknown> }, beforeId?: string) {
+      const at = beforeId == null ? -1 : recorder.layers.findIndex((l) => l.id === beforeId);
+      if (at < 0) recorder.layers.push(layer);
+      else recorder.layers.splice(at, 0, layer);
     }
     setPaintProperty(layerId: string, prop: string, value: unknown) {
       recorder.paint[`${layerId}|${prop}`] = value;
@@ -137,6 +139,17 @@ describe("AnalysisMap", () => {
     expect(recorder.paint["analysis-stop|circle-color"]).toBe(severeColorResolved());
     expect(recorder.paint["analysis-stop|circle-stroke-color"]).toBe(surfaceColorResolved());
   });
+  it("re-adds the route layers beneath the trip positions, whichever is attached first", () => {
+    const pos = [{ key: "a", lon: 132.4, lat: 34.4, delaySec: 120 }];
+    const { rerender } = renderWithProviders(<AnalysisMap data={shape()} selected={undefined} positions={pos} />);
+    // The route source and layers are gone (a style swap re-attaching in a
+    // different order) while the positions layer is already back.
+    recorder.layers = recorder.layers.filter((l) => l.id === "analysis-scrub-positions");
+    delete recorder.sources["analysis-route"];
+    rerender(<AnalysisMap data={shape()} selected={{ ...shape().stops[0] }} positions={pos} />);
+    expect(recorder.layers.map((l) => l.id).at(-1)).toBe("analysis-scrub-positions");
+  });
+
   it("draws the scrubbed trip positions as one circle layer fed by setData", () => {
     const { rerender } = renderWithProviders(
       <AnalysisMap data={shape()} selected={undefined} positions={[{ key: "a", lon: 132.4, lat: 34.4, delaySec: 120 }]} />,

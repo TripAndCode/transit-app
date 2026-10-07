@@ -1,11 +1,11 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TimeBand } from "../../api/scope";
 import type { RouteTrip } from "../../api/types";
 import { MOBILE_BREAKPOINT_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import "../../styles/scrubber.css";
 import { StopRibbon } from "./StopRibbon";
-import { defaultScrubSec, positionsAt, scrubBounds, tripsCrossing } from "./mareyScrub";
+import { defaultScrubSec, scrubBounds, scrubPositions, tripsCrossing } from "./mareyScrub";
 import {
   MUTED_OPACITY,
   formatClock,
@@ -142,11 +142,13 @@ export function MareyDiagram({
   const chartShown = !narrow || chartRevealed;
   const rows = drawn.map((trip) => tripRow(trip, axis));
   const crossing = scrubSec == null ? null : new Set(tripsCrossing(drawn, scrubSec).map((trip) => trip.trip_id));
-  const positions = scrubSec == null ? [] : positionsAt(drawn, scrubSec, axis);
+  const positions = scrubSec == null ? [] : scrubPositions(trips, viewWindow, scrubSec, axis);
   const bounds = scrubBounds(viewWindow);
   const scrubValue = scrubSec ?? defaultScrubSec(viewWindow, peak);
+  // A trip pointed at or stepped to wins over the scrub: it is the one being read.
   const tripOpacity = (id: string) =>
-    crossing ? (crossing.has(id) ? 1 : MUTED_OPACITY) : active !== null && active !== id ? MUTED_OPACITY : 1;
+    active !== null ? (active === id ? 1 : MUTED_OPACITY) : crossing && !crossing.has(id) ? MUTED_OPACITY : 1;
+  const scrubInput = useRef<HTMLInputElement | null>(null);
 
   return (
     <div className="marey">
@@ -181,6 +183,7 @@ export function MareyDiagram({
                 {formatClock(scrubValue)}
               </output>
               <input
+                ref={scrubInput}
                 id="marey-scrub-input"
                 type="range"
                 className="scrub-input"
@@ -192,11 +195,19 @@ export function MareyDiagram({
                 aria-valuetext={formatClock(scrubValue)}
                 onChange={(e) => onScrub(Number(e.target.value))}
               />
-              {scrubSec != null && (
-                <button type="button" className="btn-ghost" onClick={() => onScrub(null)}>
-                  {t("mareyScrubClear")}
-                </button>
-              )}
+              {/* Always mounted, so the rail keeps its width when the first
+                  drag sets a scrub; clearing hands focus back to the slider. */}
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={scrubSec == null}
+                onClick={() => {
+                  onScrub(null);
+                  scrubInput.current?.focus();
+                }}
+              >
+                {t("mareyScrubClear")}
+              </button>
             </div>
           )}
           {chartShown && (
@@ -342,10 +353,10 @@ export function MareyDiagram({
           )}
           {chartShown && (
             <p className="focus-muted marey__readout" data-testid="marey-readout" aria-live="polite">
-              {crossing
-                ? t("mareyScrubCrossing", { n: crossing.size })
-                : activeTrip
-                  ? tripSummary(activeTrip, t)
+              {activeTrip
+                ? tripSummary(activeTrip, t)
+                : crossing
+                  ? t("mareyScrubCrossing", { count: crossing.size })
                   : t("mareyHover")}
             </p>
           )}

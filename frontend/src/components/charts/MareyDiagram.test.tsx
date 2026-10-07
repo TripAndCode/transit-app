@@ -249,7 +249,15 @@ describe("MareyDiagram scrubber", () => {
     expect(container.querySelector('[data-trip-id="T2"]')!.classList.contains("marey-trip--cross")).toBe(false);
     expect(container.querySelector('[data-trip-id="T2"]')!.getAttribute("opacity")).toBe(String(MUTED_OPACITY));
     expect(container.querySelector(".marey-cursor")).not.toBeNull();
-    expect(screen.getByTestId("marey-readout").textContent).toContain("1 trips under way");
+    expect(screen.getByTestId("marey-readout").textContent).toContain("1 trip under way");
+  });
+
+  it("a trip stepped to by keyboard is read out and lit even while a scrub is set", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    fireEvent.focus(container.querySelector('[data-trip-id="T2"]')!);
+    expect(screen.getByTestId("marey-readout").textContent).toContain("Departure 07:30");
+    expect(container.querySelector('[data-trip-id="T2"]')!.getAttribute("opacity")).toBe("1");
+    expect(container.querySelector('[data-trip-id="T1"]')!.getAttribute("opacity")).toBe(String(MUTED_OPACITY));
   });
 
   it("puts a position marker on the ribbon for each crossing trip", () => {
@@ -257,11 +265,17 @@ describe("MareyDiagram scrubber", () => {
     expect(container.querySelectorAll(".stop-ribbon__pos")).toHaveLength(1);
   });
 
-  it("clears the scrub from the rail", () => {
+  it("clears the scrub from the rail and hands focus back to the slider", () => {
     const onScrub = vi.fn();
     show({ scrubSec: AT_T1, onScrub });
     fireEvent.click(screen.getByRole("button", { name: "Clear scrub" }));
     expect(onScrub).toHaveBeenCalledWith(null);
+    expect(document.activeElement).toBe(screen.getByRole("slider", { name: "Scrub the clock" }));
+  });
+
+  it("keeps the clear control in place, disabled, before any scrub, so the rail does not resize mid-drag", () => {
+    show({ onScrub: vi.fn() });
+    expect(screen.getByRole("button", { name: "Clear scrub" })).toBeDisabled();
   });
 
   it("without a scrub second, no cursor is drawn", () => {

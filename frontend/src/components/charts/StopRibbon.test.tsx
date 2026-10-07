@@ -12,6 +12,24 @@ const SEGMENTS: StopRibbonSegment[] = [
 ];
 
 describe("StopRibbon", () => {
+  it("puts a position marker at its stop's band centre, interpolating between centres", () => {
+    const { container } = render(
+      <StopRibbon
+        segments={SEGMENTS}
+        label="Delay by stop"
+        markers={[
+          { key: "first", fraction: 0, color: "red" },
+          { key: "last", fraction: 1, color: "red" },
+          { key: "between", fraction: 0.5, color: "red" },
+        ]}
+      />,
+    );
+    const cx = [...container.querySelectorAll(".stop-ribbon__pos")].map((c) => Number(c.getAttribute("cx")));
+    // Four bands of 195 across 780: centres at 97.5 and 682.5, and halfway
+    // along the axis is between the second and third centres.
+    expect(cx).toEqual([97.5, 682.5, 390]);
+  });
+
   it("draws one band per stop, in sequence order", () => {
     const { container } = render(<StopRibbon segments={SEGMENTS} label="Delay by stop" />);
     const bands = [...container.querySelectorAll("[data-stop-sequence]")];
