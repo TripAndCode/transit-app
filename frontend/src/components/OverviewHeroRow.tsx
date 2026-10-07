@@ -29,8 +29,10 @@ type Props = {
 // the component body trips react-hooks/purity's "impure function during
 // render" check. NaN for an unparseable timestamp, so it reads as "no age"
 // rather than as a fresh report. The compiler caches a call per argument, not
-// per clock, so a render reads the age once per report: crossing a window's
-// edge needs a timer and state, as the breath and live windows below have.
+// per clock, so a render reads the age once per report: closing a window
+// needs a timer and state, as the breath and live windows below have. (A
+// report further ahead than the skew allowance never breathes; nothing times
+// its way into the window.)
 function reportAgeMs(iso: string): number {
   const captured = Date.parse(iso);
   return Number.isFinite(captured) ? Date.now() - captured : NaN;
