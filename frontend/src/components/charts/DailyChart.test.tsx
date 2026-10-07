@@ -128,6 +128,13 @@ describe("DailyChart tooltip", () => {
   });
 });
 
+describe("DailyChart bars outside the stylesheet", () => {
+  it("keeps the bars' resting opacity as an attribute, for an exported SVG", () => {
+    renderChart(<DailyChart days={[day({ date: "2026-05-18", avg_min: 2.5, samples: 40 })]} />);
+    expect(screen.getByTestId("daily-bar").getAttribute("opacity")).toBe("0.7");
+  });
+});
+
 describe("DailyChart axis", () => {
   it("labels its gridlines with round values", () => {
     const { container } = renderChart(

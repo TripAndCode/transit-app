@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { formatDate, formatNumber, formatMinutes, formatShortDate } from "../../utils/format";
@@ -7,7 +7,7 @@ import { useScope } from "../../api/scope";
 import { useDrawOn } from "./ChartEnter";
 import { ShadedDays, ThresholdBand, VerticalMarker } from "./annotations";
 import { brushIndices, brushRange } from "./brush";
-import { DIM_OPACITY, isFocusDimmed, isoDow, useTrendFocus } from "./trendFocus";
+import { isoDow, useTrendFocus } from "./trendFocus";
 import type { RevisionBoundaries, TrendDay } from "../../api/types";
 
 type Props = {
@@ -30,7 +30,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
   const [rawDrag, setDrag] = useState<Drag | null>(null);
   const [brushed, setBrushed] = useState(false);
   const [, updateRange] = useScope();
-  const { focus, setFocus } = useTrendFocus();
+  const { setFocus } = useTrendFocus();
   const lineRef = useRef<SVGPolylineElement | null>(null);
   useDrawOn(lineRef);
 
@@ -164,7 +164,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
   const cursor = drag ? drag.head : hover;
 
   return (
-    <div style={{ position: "relative", width: "100%" }}>
+    <div data-focus-viewer="daily" style={{ position: "relative", width: "100%" }}>
       {brushable && (
         <div
           style={{
@@ -256,19 +256,23 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
             const w = Math.max(2, stepX * 0.8);
             const h = ((d.samples ?? 0) / stats.maxSamples) * innerH * 0.3;
             const y = padT + innerH - h;
-            const dimmed = isFocusDimmed(focus, { date: d.date, dow: isoDow(d.date) }, "daily");
             return (
               <rect
                 key={`bar-${i}`}
                 data-testid="daily-bar"
                 data-index={i}
-                className="chart-focus-dimmable"
+                data-mark-date={d.date}
+                data-mark-dow={isoDow(d.date)}
+                className="chart-focus-dimmable focus-dim-opacity"
                 x={x}
                 y={y}
                 width={w}
                 height={h}
                 fill="var(--accent-soft)"
-                opacity={dimmed ? DIM_OPACITY : 0.7}
+                // The attribute is what an exported SVG, which carries no
+                // stylesheet, falls back to; in the page the class wins.
+                opacity={0.7}
+                style={{ "--mark-opacity": 0.7 } as CSSProperties}
               />
             );
           })}
@@ -316,7 +320,6 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
           {days.map((d, i) => {
             const [x, y] = linePts[i];
             const c = delayColor(d.avg_min ?? 0);
-            const dimmed = isFocusDimmed(focus, { date: d.date, dow: isoDow(d.date) }, "daily");
             return (
               <g key={`pt-${i}`}>
                 {/* `fill` goes in `style`, not the SVG presentation attribute:
@@ -325,11 +328,12 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
                 <circle
                   data-testid="daily-dot"
                   data-index={i}
-                  className="chart-focus-dimmable"
+                  data-mark-date={d.date}
+                  data-mark-dow={isoDow(d.date)}
+                  className="chart-focus-dimmable focus-dim-opacity"
                   cx={x}
                   cy={y}
                   r={cursor === i ? 5 : 3}
-                  opacity={dimmed ? DIM_OPACITY : 1}
                   style={{ fill: c, stroke: "var(--bg-surface)" }}
                   strokeWidth="1.5"
                 />
