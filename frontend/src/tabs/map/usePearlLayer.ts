@@ -4,16 +4,17 @@ import type { LiveTripProgressResponse } from "../../api/types";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { whenStyleReady } from "./styleReady";
 import { useFlowTick } from "./useFlowTick";
-import { FLOW_PAINT_INTERVAL_MS, LIVE_TRIPS_LAYER, TRIP_PROGRESS_STOPS_LAYER } from "./useOperationsMapLayers";
+import { FLOW_PAINT_INTERVAL_MS, LIVE_TRIPS_LAYER, TRIP_PROGRESS_LINE_WIDTH, TRIP_PROGRESS_STOPS_LAYER } from "./useOperationsMapLayers";
 import { PEARL_LAYER, PEARL_SOURCE, pearlGradient, pearlLine, pearlPhase } from "./pearl";
 
 /**
  * A shimmer that travels only along the reported segments of the selected
  * trip. It highlights where reports exist; it is not a vehicle. The chip's
  * hint says so, and the geometry enforces it: the source is the progress
- * response's located stops and nothing else. Advanced on a 100 ms tick like
- * the route's flow dash; under reduced motion the layer stays but paints the
- * hidden gradient and no loop runs.
+ * response's located stops and nothing else. Advanced on the flow dash's
+ * `FLOW_PAINT_INTERVAL_MS` tick; under reduced motion there is no highlight
+ * at all, since one left still mid-trail would read as a vehicle standing
+ * there.
  */
 export function usePearlLayer(
   mapRef: React.MutableRefObject<MLMap | null>,
@@ -31,7 +32,7 @@ export function usePearlLayer(
     const map = mapRef.current;
     if (!map) return;
     return whenStyleReady(map, () => {
-      if (!on || !lineKey) {
+      if (!on || reducedMotion || !lineKey) {
         if (map.getLayer(PEARL_LAYER)) map.removeLayer(PEARL_LAYER);
         if (map.getSource(PEARL_SOURCE)) map.removeSource(PEARL_SOURCE);
         return;
@@ -58,23 +59,15 @@ export function usePearlLayer(
           source: PEARL_SOURCE,
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            // No wider than the 6 px trail it lies on.
-            "line-width": ["interpolate", ["linear"], ["zoom"], 11, 3, 15, 6],
+            // No wider than the trail it lies on.
+            "line-width": ["interpolate", ["linear"], ["zoom"], 11, 3, 15, TRIP_PROGRESS_LINE_WIDTH],
             "line-gradient": pearlGradient(-1) as never,
           },
         },
         beforeId,
       );
     });
-  }, [lineKey, mapRef, on, styleEpoch]);
-
-  // The loop stops under reduced motion; a highlight left mid-trail would read
-  // as a vehicle standing there, so it is hidden instead.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!reducedMotion || !map?.getLayer(PEARL_LAYER)) return;
-    map.setPaintProperty(PEARL_LAYER, "line-gradient", pearlGradient(-1));
-  }, [mapRef, reducedMotion]);
+  }, [lineKey, mapRef, on, reducedMotion, styleEpoch]);
 
   useFlowTick(on && line != null && !reducedMotion, FLOW_PAINT_INTERVAL_MS, (elapsed) => {
     const map = mapRef.current;

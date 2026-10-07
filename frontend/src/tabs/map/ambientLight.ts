@@ -24,8 +24,7 @@ export function frameHour(t: string): number | null {
 
 /** A tint for the hour of a playback frame: cool before 07:00, nothing
  *  through the day, amber toward 18:00, indigo after 19:30. Every branch is
- *  capped so the basemap stays a map; the light is a paint property on one
- *  layer, never a redraw. */
+ *  capped so the basemap stays a map. */
 export function lightFor(hour: number | null, enabled: boolean): AmbientLight {
   if (!enabled || hour == null) return LIGHT_OFF;
   if (hour < DAWN_END) {

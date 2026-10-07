@@ -15,16 +15,13 @@ const BASEMAP_LAYER = "basemap";
 // in at -- so dots/route pop without a louder basemap. Paint props on a raster
 // layer accept zoom expressions.
 //
-// startZoom is 12 for the default heatmap-dot view (unchanged from the
-// original tuning) but widens to 6 in route mode: a focused route is often
-// viewed much more zoomed out than the heatmap's per-stop detail view, and at
-// zoom < 12 the ramp was fully inactive (value 0), so the route line's
-// severity colors competed with a fully-saturated basemap (measured ~2.1:1
-// contrast for the "ok" green against typical OSM land-green -- under the
-// WCAG 3:1 floor for meaningful graphics).
-// Each function's literal is the mute at dimAmount = 1 (full strength — the
-// only strength this hook offered before it gained a caller-supplied
-// amount). Scaling linearly by dimAmount makes 0 a true no-op mute and any
+// startZoom is 12 for the default heatmap-dot view but widens to 6 in route
+// mode: a focused route is viewed much further out than the heatmap's
+// per-stop detail, and an unmuted basemap there lets its saturated land
+// colours compete with the route line's severity colours, below the WCAG 3:1
+// floor for meaningful graphics.
+// Each function's literal is the mute at dimAmount = 1 (full strength).
+// Scaling linearly by dimAmount makes 0 a true no-op mute and any
 // intermediate amount interpolate smoothly between it and this design.
 function dimSaturation(startZoom: number, dimAmount: number): ExpressionSpecification {
   return ["interpolate", ["linear"], ["zoom"], startZoom, 0, 14, -0.5 * dimAmount];

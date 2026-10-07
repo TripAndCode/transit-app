@@ -28,6 +28,8 @@ const ACTIVE_ROUTE_LAYER = "active-route-line";
 export const ACTIVE_ROUTE_FLOW_LAYER = "active-route-flow";
 const TRIP_PROGRESS_SOURCE = "trip-progress";
 const TRIP_PROGRESS_LINE_LAYER = "trip-progress-line";
+/** The reported trail's width, which anything laid on it stays within. */
+export const TRIP_PROGRESS_LINE_WIDTH = 6;
 const TRIP_PROGRESS_DIRECTION_LAYER = "trip-progress-direction";
 export const TRIP_PROGRESS_STOPS_LAYER = "trip-progress-stops";
 const TRIP_PROGRESS_LABELS_LAYER = "trip-progress-labels";
@@ -122,7 +124,7 @@ export function labelPaint(): SymbolPaint {
 }
 
 function tripProgressLinePaint(): LinePaint {
-  return { "line-color": accentColorResolved(), "line-width": 6, "line-opacity": 0.9 };
+  return { "line-color": accentColorResolved(), "line-width": TRIP_PROGRESS_LINE_WIDTH, "line-opacity": 0.9 };
 }
 
 function tripProgressDirectionPaint(): SymbolPaint {

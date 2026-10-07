@@ -2,8 +2,9 @@ import { renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { makeMockMap, type MockMap } from "../../test/mockMap";
-import { PEARL_LAYER, PEARL_SOURCE, pearlGradient } from "./pearl";
+import { PEARL_LAYER, PEARL_SOURCE } from "./pearl";
 import { usePearlLayer } from "./usePearlLayer";
+import { TRIP_PROGRESS_LINE_WIDTH } from "./useOperationsMapLayers";
 import { stubReducedMotion } from "../../test/reducedMotion";
 import type { LiveTripProgressResponse } from "../../api/types";
 
@@ -39,29 +40,29 @@ describe("usePearlLayer", () => {
     expect(map.getLayer(PEARL_LAYER)).toBeUndefined();
     expect(raf).not.toHaveBeenCalled();
   });
-  it("hides the highlight when reduced motion turns on mid-session, rather than freezing it part-way", () => {
+  it("removes the highlight when reduced motion turns on mid-session, rather than freezing it part-way", () => {
     vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
     const map = makeMockMap();
     const { rerender } = mount(map, true);
-    map.setPaintProperty(PEARL_LAYER, "line-gradient", pearlGradient(0.4));
+    expect(map.getLayer(PEARL_LAYER)).toBeDefined();
     stubReducedMotion();
     rerender({ o: true, p: PROGRESS });
-    expect(map.getPaintProperty(PEARL_LAYER, "line-gradient")).toEqual(pearlGradient(-1));
+    expect(map.getLayer(PEARL_LAYER)).toBeUndefined();
+    expect(map.getSource(PEARL_SOURCE)).toBeUndefined();
   });
   it("is no wider than the reported trail it sits on", () => {
     const map = makeMockMap();
     mount(map, true);
     const width = (map.getLayer(PEARL_LAYER)!.paint as Record<string, unknown>)["line-width"] as unknown[];
     const stops = width.slice(3).filter((_, i) => i % 2 === 1) as number[];
-    expect(Math.max(...stops)).toBeLessThanOrEqual(6);
+    expect(Math.max(...stops)).toBeLessThanOrEqual(TRIP_PROGRESS_LINE_WIDTH);
   });
-  it("under reduced motion keeps the layer but never advances it", () => {
+  it("under reduced motion adds no highlight and runs no loop", () => {
     stubReducedMotion();
     const raf = vi.spyOn(window, "requestAnimationFrame");
     const map = makeMockMap();
     mount(map, true);
-    expect(map.getLayer(PEARL_LAYER)).toBeDefined();
-    expect(map.getPaintProperty(PEARL_LAYER, "line-gradient") ?? (map.getLayer(PEARL_LAYER)!.paint as Record<string, unknown>)["line-gradient"]).toEqual(pearlGradient(-1));
+    expect(map.getLayer(PEARL_LAYER)).toBeUndefined();
     expect(raf).not.toHaveBeenCalled();
   });
 });

@@ -442,7 +442,8 @@ describe("active route line: gradient, casing and the calm flow overlay", () => 
       useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
     });
 
-    vi.spyOn(performance, "now").mockReturnValue(500);
+    // The clock starts on the first frame, so 500 ms later the dash is 500 ms on.
+    tick(0);
     tick(500);
     expect(map.getPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray")).toEqual(flowDashArrayAtPhase(500));
   });
@@ -458,6 +459,7 @@ describe("active route line: gradient, casing and the calm flow overlay", () => 
       const mapRef = useRef(map as never);
       useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
     });
+    tick(0);
     painted.mockClear();
 
     tick(1000);
