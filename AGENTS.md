@@ -197,7 +197,8 @@ to the same files for Codex discovery. They are plain Markdown any agent can rea
   GitHub otherwise closes them.
 - After a PR merge, clean up persistent local/VPS clones with `make git-cleanup`
   (dry run) and then `make git-cleanup-apply`. Both use `scripts/cleanup_git_state.py`,
-  whose dry run is the deletion authority.
+  whose dry run is the deletion authority, then prune the poetry venvs that no
+  remaining worktree owns.
   - Only clean local worktrees (with or without a branch) may be removed, and only
     when proven recoverable from `main` or from a merged PR's permanent head ref: the
     tip is that head or an ancestor of it.

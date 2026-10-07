@@ -133,19 +133,13 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   output, and any step that ran out of time. A timeout
   with no test failure is an infrastructure limitation, not evidence that
   tests failed; resolve it before weakening the gate.
-- An hourly crontab entry (`15 * * * *`, JST — the VPS's system timezone; see
-  `crontab -l` for the current interval) runs
-  `python3 /root/transit-app/scripts/daily_git_hygiene.py --apply`, appending to
-  `/root/git-hygiene.log`. The script performs its real cleanup at most once per
-  calendar day (a same-day completion marker, default
-  `/root/.daily_git_hygiene_last_success`); the trigger is hourly so a failed or
-  lock-skipped run retries within the hour instead of waiting a full day. Two
-  stages: local worktree/branch cleanup through `scripts/cleanup_git_state.py`,
-  and orphaned poetry virtualenvs — poetry names a project's venv by hashing
-  its absolute path, so every deleted worktree leaves a several-GB venv behind
-  that poetry never revisits. This requires `poetry` on the cron shell's
-  `PATH` (see the non-interactive-shell note above), and it assumes
-  `/root/transit-app` is the only clone of this project on the host — an
-  independent second clone's venv isn't detectable as in-use and would
-  eventually be pruned. The crontab wiring itself is VPS-local installation
-  state, not tracked in this repo — only the script it invokes is.
+- `scripts/daily_git_hygiene.py` prunes orphaned poetry virtualenvs: poetry
+  names a project's venv by hashing its absolute path, so every deleted worktree
+  leaves its venv behind, and poetry never revisits it. `make git-cleanup` and
+  `make git-cleanup-apply` run it with `--venvs-only` after
+  `scripts/cleanup_git_state.py`. It recognises a worktree's venvs by that same
+  path hash, so a worktree that never ran poetry blocks nothing. It assumes one
+  clone of this project per host, since an independent second clone's venvs
+  look orphaned. Without `--venvs-only` it also runs the branch/worktree stage
+  and keeps a once-per-day completion marker, so a scheduler can call it
+  hourly; any such schedule is host-local state, not tracked here.

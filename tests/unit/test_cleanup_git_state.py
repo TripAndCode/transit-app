@@ -579,3 +579,42 @@ def test_stale_base_is_rejected(repository: Path):
 
     with pytest.raises(cleanup.CleanupError, match="does not match origin/main"):
         cleanup.validate_base(repository, "main", "origin")
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (Path("/repo/.worktrees/review-main"), True),
+        (Path("/repo/.worktrees/review-fix/item-85"), True),
+        (Path("/anywhere/.worktrees/review-main"), True),  # structural, not anchored to a particular checkout
+        (Path("/repo/.worktrees/other"), False),
+        (Path("/repo/.claude/worktrees/agent-a85e93fb4ec1fbec1"), False),
+        (Path("/repo/review-main"), False),
+        (Path("/repo/.worktrees-old/review-main"), False),  # exact segment match, not a substring
+        (Path("/repo/x.worktrees/review-main"), False),
+        (Path("/repo/.worktrees"), False),  # `.worktrees` with nothing after it to match `review-*`
+        (Path("/repo/.worktrees/review-main/.claude/worktrees/agent-abc"), False),  # nested worktree, not this shape
+        # An extra segment with no worktree marker in it is indistinguishable from more of
+        # a slash-containing head ref (same shape as the `review-fix/item-85` case
+        # above) -- matching it is what makes the slash-containing case work at all.
+        (Path("/repo/.worktrees/review-main/subdir"), True),
+    ],
+)
+def test_is_review_worktree_matches_only_the_review_pr_convention(path: Path, expected: bool):
+    """A `.worktrees` segment immediately followed by a `review-`-prefixed one, anywhere in
+    the path (not just the last two components, since a reviewed branch's own head ref can
+    contain slashes) and with nothing shaped like a further nested worktree after it --
+    `/review-pr`'s own naming -- matches, regardless of which checkout it sits under."""
+
+    assert cleanup.is_review_worktree(path) is expected
+
+
+def test_review_worktree_naming_matches_review_pr_md():
+    """Upgrades the naming coupling `REVIEW_WORKTREE_PARENT_DIR`'s own comment calls
+    "greppable" into an enforced check: if `/review-pr` ever renames its worktree
+    convention without updating these constants, this fails loudly instead of cleanup
+    silently ceasing to recognise the review worktrees `/follow-up-pr-review` still needs."""
+
+    review_pr_doc = (ROOT / ".claude" / "commands" / "review-pr.md").read_text(encoding="utf-8")
+
+    assert f"{cleanup.REVIEW_WORKTREE_PARENT_DIR}/{cleanup.REVIEW_WORKTREE_PREFIX}" in review_pr_doc
