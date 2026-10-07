@@ -143,6 +143,20 @@ describe("useOperationsMapLayers", () => {
     expect(map.getLayer("trip-progress-stops")).toBeDefined();
   });
 
+  it("a change of rest pitch alone (the relief toggling) does not re-feed the live layers", () => {
+    const map = makeMockMap();
+    const { rerender } = renderHook(
+      ({ pitch }: { pitch: number }) => {
+        const mapRef = useRef(map as never);
+        useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, null, undefined, undefined, pitch);
+      },
+      { initialProps: { pitch: 0 } },
+    );
+    const setData = vi.spyOn(map.getSource("live-trips") as unknown as { setData: (d: unknown) => void }, "setData");
+    rerender({ pitch: 35 });
+    expect(setData).not.toHaveBeenCalled();
+  });
+
   it("removes the route overlay when all routes are selected", () => {
     const map = makeMockMap();
     const { rerender } = renderHook(

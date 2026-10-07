@@ -103,22 +103,30 @@ export function revealAgency(map: MLMap, bounds: LngLatBoundsLike, restPitch = 0
   map.flyTo({ center, zoom, pitch: restPitch, duration: MOTION.reveal, easing: easeOutCamera });
 }
 
+/** The rest pitch a framing move ends on, when the caller names one. A move
+ *  without one keeps whatever pitch is current, so a move that lands during
+ *  the relief tilt would freeze the camera halfway. */
+function restingAt(pitch: number | undefined): { pitch?: number } {
+  return pitch == null ? {} : { pitch };
+}
+
 /** Frames one route's shape. */
-export function focusRoute(map: MLMap, bounds: LngLatBoundsLike): void {
-  map.fitBounds(bounds, { padding: ROUTE_PADDING, maxZoom: ROUTE_MAX_ZOOM, ...timing(MOTION.move) });
+export function focusRoute(map: MLMap, bounds: LngLatBoundsLike, restPitch?: number): void {
+  map.fitBounds(bounds, { padding: ROUTE_PADDING, maxZoom: ROUTE_MAX_ZOOM, ...restingAt(restPitch), ...timing(MOTION.move) });
 }
 
 /** Frames every located trip currently on screen. */
-export function fitAll(map: MLMap, bounds: LngLatBoundsLike): void {
-  map.fitBounds(bounds, { padding: FIT_ALL_PADDING, maxZoom: FIT_ALL_MAX_ZOOM, ...timing(MOTION.move) });
+export function fitAll(map: MLMap, bounds: LngLatBoundsLike, restPitch?: number): void {
+  map.fitBounds(bounds, { padding: FIT_ALL_PADDING, maxZoom: FIT_ALL_MAX_ZOOM, ...restingAt(restPitch), ...timing(MOTION.move) });
 }
 
 /** Steps in on one reported position. `zoom` is for callers with their own
  *  target — a cluster expanding by a fixed step rather than to a floor. */
-export function inspectTrip(map: MLMap, lngLat: LngLatLike, zoom?: number): void {
+export function inspectTrip(map: MLMap, lngLat: LngLatLike, { zoom, pitch }: { zoom?: number; pitch?: number } = {}): void {
   map.easeTo({
     center: lngLat,
     zoom: zoom ?? Math.max(map.getZoom(), INSPECT_ZOOM),
+    ...restingAt(pitch),
     ...timing(MOTION.move),
   });
 }

@@ -122,6 +122,15 @@ describe("the flat moves", () => {
     }
   });
 
+  it("ends on the caller's rest pitch when given one, so a move during the relief tilt cannot freeze it halfway", () => {
+    const map = fakeMap();
+    focusRoute(asMap(map), BOUNDS, 35);
+    fitAll(asMap(map), BOUNDS, 35);
+    inspectTrip(asMap(map), [140.8, 40.85], { pitch: 35 });
+    for (const [, options] of map.fitBounds.mock.calls) expect(options).toMatchObject({ pitch: 35 });
+    expect(map.easeTo.mock.calls[0][0]).toMatchObject({ pitch: 35 });
+  });
+
   it("eases to a trip without zooming back out, and never pitches", () => {
     const map = fakeMap();
     inspectTrip(asMap(map), [140.8, 40.85]);
@@ -142,7 +151,7 @@ describe("the flat moves", () => {
 
   it("accepts an explicit zoom, for stepping into a cluster", () => {
     const map = fakeMap();
-    inspectTrip(asMap(map), [140.8, 40.85], 13.5);
+    inspectTrip(asMap(map), [140.8, 40.85], { zoom: 13.5 });
 
     expect(map.easeTo.mock.calls[0][0]).toMatchObject({ zoom: 13.5 });
   });

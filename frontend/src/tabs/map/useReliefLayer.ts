@@ -15,11 +15,13 @@ import {
   type ReliefPoint,
 } from "./reliefLayer";
 import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
+import { TIMELINE_LAYER } from "./useTimelineLayers";
 
-/** The live layers, bottom first. The columns go under the lowest one present
- *  so the vehicle dots, clusters and labels draw over them and keep every
- *  click and hover they had: the columns themselves are not interactive. */
-const LIVE_LAYERS_BOTTOM_FIRST = [LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER];
+/** The live and playback layers, bottom first. The columns go under the
+ *  lowest one present so the vehicle dots, clusters, labels and playback dots
+ *  draw over them and keep every click and hover they had: the columns
+ *  themselves are not interactive. */
+const MARK_LAYERS_BOTTOM_FIRST = [LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER, TIMELINE_LAYER];
 
 /** `setData` writes per tween. Enough for the eye to read a rise rather than
  *  a jump; few enough that a few hundred polygons re-tessellate well inside a
@@ -79,7 +81,7 @@ export function useReliefLayer(
         // reading to tween from.
         cancelTween(rafRef);
         map.addSource(RELIEF_SOURCE, { type: "geojson", data: next });
-        const beforeId = LIVE_LAYERS_BOTTOM_FIRST.find((id) => map.getLayer(id));
+        const beforeId = MARK_LAYERS_BOTTOM_FIRST.find((id) => map.getLayer(id));
         map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint(crossFadeMs) }, beforeId);
         shownRef.current = next;
         targetRef.current = next;
@@ -99,7 +101,9 @@ export function useReliefLayer(
       let start: number | null = null;
       let lastWrite = 0;
       const tick = (now: number) => {
-        start ??= now;
+        // Started one step back, so the first frame already writes: a
+        // reading replaced every frame (a scrub) still moves the columns.
+        start ??= now - stepMs;
         const elapsed = now - start;
         const done = elapsed >= crossFadeMs;
         if (done || elapsed - lastWrite >= stepMs) {

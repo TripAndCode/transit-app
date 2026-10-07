@@ -113,6 +113,26 @@ describe("useReliefLayer", () => {
     expect(heights.at(-1)).toBe(reliefHeight(6));
   });
 
+  it("moves the columns on the first frame of every tween, so a reading replaced each frame (a scrub) still follows", () => {
+    const map = liveMap();
+    const { rerender } = mount(map, true);
+    const setData = vi.spyOn(source(map), "setData");
+    for (let i = 0; i < 5; i += 1) {
+      rerender({ o: true, p: [{ ...POINTS[0], delay_min: 3 + i }], c: 600 });
+      frame(i * 20);
+    }
+    const heights = setData.mock.calls.map(([d]) => heightOf(d));
+    expect(heights).toHaveLength(5);
+    for (let i = 1; i < heights.length; i += 1) expect(heights[i]).toBeGreaterThan(heights[i - 1]);
+  });
+
+  it("goes beneath the playback dots too when no live layer is on the map yet", () => {
+    const map = makeMockMap([{ id: "basemap", type: "raster" }, { id: TIMELINE_LAYER, type: "circle" }]);
+    mount(map, true);
+    const ids = map.layers.map((l) => l.id);
+    expect(ids.indexOf(RELIEF_LAYER)).toBeLessThan(ids.indexOf(TIMELINE_LAYER));
+  });
+
   it("does not restart a running tween for a re-render carrying the same reading", () => {
     const map = liveMap();
     const { rerender } = mount(map, true);
