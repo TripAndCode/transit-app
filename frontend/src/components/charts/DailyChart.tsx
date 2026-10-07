@@ -32,7 +32,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
   const [, updateRange] = useScope();
   const { setFocus } = useTrendFocus();
   const lineRef = useRef<SVGPolylineElement | null>(null);
-  useDrawOn(lineRef);
+  useDrawOn(lineRef, days.length > 0);
 
   // If the data shrinks (filter narrowed), a stale hover index would
   // dereference out-of-bounds — clamp during render instead of an effect.

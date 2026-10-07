@@ -144,3 +144,14 @@
   }
   .ui-overlay-scrim { animation: ui-overlay-scrim-in var(--dur-1) var(--ease-out); }
 }
+
+/* Spinner.tsx. A loop, so it lives inside the motion-allowed block like the
+   skeleton pulse: reduced motion leaves the static arc, which still reads as
+   "busy" without turning. 0.75 × --dur-4 keeps the turn on the ambient-loop
+   token rather than a literal second count. */
+.ui-spinner { display: inline-block; }
+.ui-spinner svg { transform-box: fill-box; transform-origin: 50% 50%; }
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ui-spinner-rotate { to { transform: rotate(360deg); } }
+  .ui-spinner svg { animation: ui-spinner-rotate calc(var(--dur-4) * 0.75) linear infinite; }
+}

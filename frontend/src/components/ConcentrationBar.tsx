@@ -99,6 +99,7 @@ export function ConcentrationBar({
               forceAccent
               showLabels={false}
               showEndDot
+              drawOn={false}
             />
           </div>
         )}

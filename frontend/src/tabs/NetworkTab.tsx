@@ -64,7 +64,7 @@ function ScheduleVersionTooltip({
  *  refetches. */
 function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
   const { t } = useTranslation();
-  const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1, entrance: false });
+  const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1 });
   if (avgDelayMin == null) return <>—</>;
   return (
     <span>

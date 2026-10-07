@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { BandGrid, Legend } from "./DowBandGrid";
 import { BAND_ORDER, type ForecastOverviewGridCell } from "../../api/types";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
@@ -72,6 +72,29 @@ describe("BandGrid", () => {
     // stylesheet rule -- not a plain inline `opacity`, which would always
     // outrank that rule and leave nothing for the entrance fade to animate.
     expect((populated as HTMLElement).style.getPropertyValue("--cell-opacity")).toBe("0.5");
+  });
+
+  it("starts its staggered fade on the first frame after real data, not on an empty mount", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    const props = {
+      bandLabel: (b: string) => b,
+      dayLabel: (d: number) => String(d),
+      colorFor: () => "#000",
+      onTip: vi.fn(),
+      onLeave: vi.fn(),
+    };
+    const { rerender } = render(<BandGrid grid={[]} {...props} />);
+    act(() => frames.splice(0).forEach((cb) => cb(0)));
+    expect(screen.getAllByTestId("ov-band-cell")[0].classList.contains("chart-cell-enter--in")).toBe(false);
+
+    rerender(<BandGrid grid={fullGrid([{ dow: 1, band: "midday", v: 6.8 }])} {...props} />);
+    act(() => frames.splice(0).forEach((cb) => cb(0)));
+    expect(screen.getAllByTestId("ov-band-cell")[0].classList.contains("chart-cell-enter--in")).toBe(true);
+    vi.restoreAllMocks();
   });
 
   it("marks every cell with the staggered-fade entrance class", () => {
