@@ -122,21 +122,126 @@ def test_invalidate_is_honoured_by_the_next_async_read(monkeypatch):
     assert asyncio.run(flags.aflag("weather_ingest_enabled")) is False
 
 
-def test_a_sync_read_after_invalidate_serves_the_cached_value_without_a_db_read(monkeypatch):
+def test_a_sync_read_after_invalidate_serves_the_cached_value_and_schedules_the_re_read(monkeypatch):
     """The synchronous path never blocks the caller on Postgres when it has
-    something to serve -- the documented trade-off being that a sync caller
-    may keep seeing the pre-invalidate value."""
+    something to serve, but it must not leave the owed re-read to an async
+    caller that a pipeline or CLI process never has."""
+    monkeypatch.setattr(flags, "_refresh_thread", None)
     monkeypatch.setenv("WEATHER_INGEST_ENABLED", "true")
     assert flags.flag("weather_ingest_enabled", False) is True
 
-    def _must_not_be_called():
-        raise AssertionError("the synchronous path read the database")
-
-    monkeypatch.setattr(flags, "_load_overrides", _must_not_be_called)
     monkeypatch.setenv("WEATHER_INGEST_ENABLED", "false")
     flags.invalidate()
-    assert flags.flag("weather_ingest_enabled", False) is True
-    assert flags.get_flag_state("weather_ingest_enabled").value is True
+    assert flags.flag("weather_ingest_enabled", False) is True, "the reader waited on the refresh"
+
+    assert flags._owed_refresh is not None, "no re-read was scheduled behind the synchronous reader"
+    flags._owed_refresh[1].result(timeout=_HANG_GUARD_SECONDS)
+    assert flags.flag("weather_ingest_enabled", False) is False
+    assert flags._refresh_owed is False
+
+
+def test_sync_readers_in_the_owed_window_share_one_background_re_read(monkeypatch):
+    """A burst of synchronous readers right after a write must not each start
+    a thread; the first one's refresh is still running and absorbs the rest."""
+    monkeypatch.setattr(flags, "_refresh_thread", None)
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {})
+    flags.warm()
+
+    release = threading.Event()
+    calls = 0
+
+    def slow_load() -> dict:
+        nonlocal calls
+        calls += 1
+        assert release.wait(_HANG_GUARD_SECONDS)
+        return {}
+
+    monkeypatch.setattr(flags, "_load_overrides", slow_load)
+    flags.invalidate()
+    for _ in range(5):
+        flags.get_flag_state("weather_ingest_enabled")
+    release.set()
+    assert flags._owed_refresh is not None
+    flags._owed_refresh[1].result(timeout=_HANG_GUARD_SECONDS)
+    assert calls == 1
+
+
+def test_sync_and_async_readers_in_one_owed_window_share_one_re_read(monkeypatch):
+    """The synchronous reader joins the same re-read the async readers wait
+    on, rather than starting a second `feature_flags` query beside it."""
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {})
+    flags.warm()
+
+    release = threading.Event()
+    calls = 0
+
+    def slow_load() -> dict:
+        nonlocal calls
+        calls += 1
+        assert release.wait(_HANG_GUARD_SECONDS)
+        return {}
+
+    monkeypatch.setattr(flags, "_load_overrides", slow_load)
+    flags.invalidate()
+    flags.get_flag_state("weather_ingest_enabled")
+
+    async def async_reader_joins_then_release() -> None:
+        reader = asyncio.ensure_future(flags.aget_flag_state("weather_ingest_enabled"))
+        await asyncio.sleep(0)
+        release.set()
+        await reader
+
+    asyncio.run(async_reader_joins_then_release())
+    assert calls == 1
+
+
+def test_a_failed_owed_re_read_keeps_the_override_for_the_ttl(monkeypatch):
+    """The documented cost of failing closed: when the re-read an
+    `invalidate()` owes cannot reach the database, the last-known override is
+    carried forward and the TTL re-armed, so readers keep the pre-write value
+    until the next refresh rather than retrying on every read."""
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {"weather_ingest_enabled": (False, "incident", 1, None)})
+    flags.warm()
+
+    monkeypatch.setattr(flags, "_load_overrides", lambda: None)
+    flags.invalidate()
+    flags.get_flag_state("weather_ingest_enabled")
+    assert flags._owed_refresh is not None
+    flags._owed_refresh[1].result(timeout=_HANG_GUARD_SECONDS)
+
+    state = flags.get_flag_state("weather_ingest_enabled")
+    assert (state.value, state.source) == (False, "override")
+    assert flags._peek("weather_ingest_enabled")[1] == flags._FRESH
+
+
+def test_a_crashed_owed_re_read_is_logged_when_no_reader_waits_on_it(monkeypatch, caplog):
+    """A synchronous reader never collects the shared re-read's result, so in
+    a process with no async reader a crash inside it would otherwise vanish
+    with the future."""
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {})
+    flags.warm()
+
+    def broken_load() -> dict:
+        raise RuntimeError("unexpected override shape")
+
+    monkeypatch.setattr(flags, "_load_overrides", broken_load)
+    flags.invalidate()
+    with caplog.at_level("ERROR", logger=flags.__name__):
+        flags.get_flag_state("weather_ingest_enabled")
+        assert flags._owed_refresh is not None
+        assert isinstance(flags._owed_refresh[1].exception(timeout=_HANG_GUARD_SECONDS), RuntimeError)
+    assert any(record.exc_info and "unexpected override shape" in str(record.exc_info[1]) for record in caplog.records)
+
+
+def test_a_sync_read_with_nothing_cached_still_reads_inline(monkeypatch):
+    """Nothing cached means nothing to serve; the first read of a process is
+    the one place the synchronous path may block."""
+    monkeypatch.setattr(flags, "_refresh_thread", None)
+    monkeypatch.setattr(flags, "_load_overrides", lambda: {"weather_ingest_enabled": (True, "set", 1, None)})
+    owed_before = flags._owed_refresh
+    assert flags.get_flag_state("weather_ingest_enabled").source == "override"
+    assert flags._refresh_thread is None
+    assert flags._owed_refresh is owed_before
 
 
 def test_a_forced_refresh_runs_in_a_worker_thread_not_on_the_event_loop(monkeypatch):

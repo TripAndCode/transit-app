@@ -1,5 +1,6 @@
 -- DESTRUCTIVE: deletes the login_events audit rows of the five kinds this
--- migration introduced, and drops user_invites and its rows entirely.
+-- migration introduced, drops user_invites and its rows entirely, and drops
+-- api_keys' label, owner_user_id and id columns with their values.
 --
 -- api_keys.id is BIGSERIAL: dropping and later re-adding it (a down/up
 -- cycle) restarts the sequence from 1, so any admin-UI reference built from

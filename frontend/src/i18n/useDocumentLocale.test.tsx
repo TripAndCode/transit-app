@@ -19,4 +19,16 @@ describe("useDocumentLocale", () => {
     expect(document.title).toBe("遅延ダッシュボード");
     expect(document.documentElement.lang).toBe("ja");
   });
+
+  it("leads the title with the page and its agency, separated as the app separates them", async () => {
+    await i18n.changeLanguage("en");
+    renderHook(() => useDocumentLocale(["Routes", "Aomori City Bus"]));
+    expect(document.title).toBe("Routes · Aomori City Bus · Delay Dashboard");
+  });
+
+  it("leaves out parts it doesn't have", async () => {
+    await i18n.changeLanguage("en");
+    renderHook(() => useDocumentLocale(["Account", null]));
+    expect(document.title).toBe("Account · Delay Dashboard");
+  });
 });

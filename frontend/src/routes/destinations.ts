@@ -45,7 +45,10 @@ export function mergeSearch(search: string, extra: Record<string, string>): stri
 }
 
 /** The params that pick which screen a URL shows rather than what it
- *  filters. An agency switch keeps these even where it drops the rest. */
+ *  filters. An agency switch keeps these even where it drops the rest.
+ *  `report` and `sort` are dropped on purpose: they name a report and an
+ *  ordering of the previous agency's data, and the destination's default
+ *  report is the right landing for the new one. */
 export function screenParams(search: string): Record<string, string> {
   const params = new URLSearchParams(search);
   const kept: Record<string, string> = {};
@@ -66,11 +69,12 @@ export function destHref(
 }
 
 /** A route dossier's route lives in its path; a `routes` param would only
- *  contradict it. The params that picked another screen's report or document
- *  (`report`, `sort`, `doc`, `by`) mean nothing on a route's page either. */
+ *  contradict it. The params that picked another screen's report, document
+ *  or ranking coverage (`report`, `sort`, `doc`, `by`, `sparse`) mean nothing
+ *  on a route's page either. */
 export function routeHref(agencyId: number | string, code: string, search = "", tab?: RouteTab): string {
   const params = new URLSearchParams(search);
-  for (const key of ["routes", "report", "sort", "doc", "by"]) params.delete(key);
+  for (const key of ["routes", "report", "sort", "doc", "by", "sparse"]) params.delete(key);
   return `/agencies/${agencyId}/routes/${encodeURIComponent(code)}${mergeSearch(params.toString(), tab ? { tab } : {})}`;
 }
 

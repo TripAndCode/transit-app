@@ -9,7 +9,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.deps import get_agency, get_conn
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, clamp_range_ctx
 from pipeline.dashboard_queries import anomaly_timeline, delay_heatmap, movers
 
@@ -43,7 +43,7 @@ def _resolve_ctx(
 
 
 @router.get("/heatmap", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def heatmap_endpoint(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -65,7 +65,7 @@ async def heatmap_endpoint(
 
 
 @router.get("/anomalies", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def anomalies_endpoint(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -85,7 +85,7 @@ async def anomalies_endpoint(
 
 
 @router.get("/movers", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def movers_endpoint(
     request: Request,
     agency_id: int = Depends(get_agency),

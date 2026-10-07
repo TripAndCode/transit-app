@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import type { Destination } from "./destinations";
 
 /**
  * The one place the routed tabs are dynamically imported.
@@ -43,7 +44,7 @@ export const loadCompareTab: TabLoader = () =>
  * segment rather than the full path because that is what a nav link knows
  * about its own destination before the router has resolved it.
  */
-export const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
+export const ROUTE_CHUNK_LOADERS: Record<Destination | "ask", () => Promise<unknown>> = {
   pulse: loadOverviewTab,
   // A thin destination only hosts a report screen, which is a chunk of its own.
   routes: () => Promise.all([loadRoutesIndex(), loadAnalysisTab()]),
@@ -62,5 +63,6 @@ export const ROUTE_CHUNK_LOADERS: Record<string, () => Promise<unknown>> = {
  * navigation will surface the error through the route's own error boundary.
  */
 export function prefetchRouteChunk(segment: string): void {
-  void ROUTE_CHUNK_LOADERS[segment]?.().catch(() => {});
+  if (!Object.hasOwn(ROUTE_CHUNK_LOADERS, segment)) return;
+  void ROUTE_CHUNK_LOADERS[segment as Destination | "ask"]().catch(() => {});
 }

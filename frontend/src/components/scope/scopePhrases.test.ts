@@ -31,7 +31,7 @@ describe("scopeTokens", () => {
       "routes=全路線",
       "period=9/1〜9/28",
       "days=すべての曜日",
-      "time=終日",
+      "time=全時間帯",
       "tolerance=1分以内",
     ]);
     expect(labels("en")).toEqual([
@@ -39,7 +39,7 @@ describe("scopeTokens", () => {
       "routes=all routes",
       "period=9/1 – 9/28",
       "days=every day",
-      "time=all day",
+      "time=all hours",
       "tolerance=within 1 min",
     ]);
   });
@@ -132,7 +132,7 @@ describe("scopeTitle", () => {
   it("joins the conditions for a saved-analysis title", () => {
     const t = i18n.getFixedT("ja");
     expect(scopeTitle({ ...base, routes: ["50"] }, { t, agencyName: "x", routeLabel: (c) => `R${c}` })).toBe(
-      "R50・9/1〜9/28・すべての曜日・終日・1分以内",
+      "R50・9/1〜9/28・すべての曜日・全時間帯・1分以内",
     );
   });
 });

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { computeTooltipPosition, type TooltipPlacement } from "./tooltipPosition";
 import { readTourSeen, writeTourSeen } from "../api/tourSeen";
+import { coalesceToFrame } from "../utils/frameCoalesce";
 import "./FirstRunTour.css";
 
 type Step = { selector: string; placement: TooltipPlacement; titleKey: string; bodyKey: string };
@@ -36,6 +37,13 @@ const FIND_RETRY_MS = 250;
  * React state (the same trick `Tooltip.tsx` uses): a poll that hasn't found
  * anything new yet never re-renders this component.
  */
+/** The element a coach mark points at: a `display: contents` marker draws
+ *  no box (its rect is all zeros), so its first child stands in for it. */
+function boxOf(marker: Element | null): Element | null {
+  if (marker && getComputedStyle(marker).display === "contents") return marker.firstElementChild;
+  return marker;
+}
+
 export function FirstRunTour() {
   const { t } = useTranslation();
   // "unavailable" as well as "seen": a store that cannot be read or written
@@ -90,20 +98,21 @@ export function FirstRunTour() {
     // a remounted anchor is a new node that gets observed afresh.
     let observed: Element | null = null;
     let intervalId = 0;
+    const frame = coalesceToFrame(() => place());
     const anchorResize =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => place());
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(frame.schedule);
 
     function place({ mayAnnounce = true } = {}) {
       // A poll that forces layout on a tab nobody is looking at buys
       // nothing; the anchor cannot have moved under the visitor.
       if (document.hidden) return;
-      const target = document.querySelector(step.selector);
+      const target = boxOf(document.querySelector(step.selector));
       if (!target || !panel) {
         if (panel) panel.hidden = true;
         if (observed) {
           anchorResize?.disconnect();
           observed = null;
-          if (!intervalId) intervalId = window.setInterval(reposition, FIND_RETRY_MS);
+          if (!intervalId) intervalId = window.setInterval(() => place(), FIND_RETRY_MS);
         }
         return;
       }
@@ -131,16 +140,16 @@ export function FirstRunTour() {
         if (mayAnnounce) panel.querySelector<HTMLElement>("button")?.focus();
       }
     }
-    const reposition = () => place();
     place({ mayAnnounce: false });
-    if (!observed) intervalId = window.setInterval(reposition, FIND_RETRY_MS);
-    window.addEventListener("resize", reposition);
-    window.addEventListener("scroll", reposition, true);
+    if (!observed) intervalId = window.setInterval(() => place(), FIND_RETRY_MS);
+    window.addEventListener("resize", frame.schedule);
+    window.addEventListener("scroll", frame.schedule, true);
     return () => {
+      frame.cancel();
       if (intervalId) window.clearInterval(intervalId);
       anchorResize?.disconnect();
-      window.removeEventListener("resize", reposition);
-      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", frame.schedule);
+      window.removeEventListener("scroll", frame.schedule, true);
     };
   }, [dismissed, step.selector, step.placement]);
 

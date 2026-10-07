@@ -119,6 +119,53 @@ describe("ctxKey (observed via useReport's cache identity)", () => {
   });
 });
 
+describe("useReport's ranking options", () => {
+  afterEach(() => mockApiGet.mockReset());
+
+  it("asks for the default ranking unless told otherwise", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useReport(1, "ranking", baseCtx()), withProviders(queryClient));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const url = String(mockApiGet.mock.calls[0][0]);
+    expect(url).not.toContain("include_sparse");
+    expect(url).not.toContain("limit=");
+  });
+
+  it("asks for thinly observed groups and more rows as a separate query", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({
+        a: useReport(1, "ranking", baseCtx()),
+        b: useReport(1, "ranking", baseCtx(), { includeSparse: true, limit: 500 }),
+      }),
+      withProviders(queryClient),
+    );
+    await waitFor(() => expect(result.current.a.isSuccess && result.current.b.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    const url = String(mockApiGet.mock.calls[1][0]);
+    expect(url).toMatch(/[?&]include_sparse=1(&|$)/);
+    expect(url).toMatch(/[?&]limit=500(&|$)/);
+  });
+
+  it("asks the certificate for departures past a threshold, zero included, as a separate query", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({
+        a: useReport(1, "delay_certificate", baseCtx()),
+        b: useReport(1, "delay_certificate", baseCtx(), { thresholdSec: 0 }),
+      }),
+      withProviders(queryClient),
+    );
+    await waitFor(() => expect(result.current.a.isSuccess && result.current.b.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    expect(String(mockApiGet.mock.calls[0][0])).not.toContain("threshold_sec");
+    expect(String(mockApiGet.mock.calls[1][0])).toMatch(/[?&]threshold_sec=0(&|$)/);
+  });
+});
+
 // ─── builderSummary: also private to hooks.ts. Exercised through the one
 // caller that falls back to it — useAppendMessage's anonymous path, when no
 // explicit user_summary is supplied. ─────────────────────────────────────────
