@@ -1,8 +1,10 @@
-import type { RouteShapeStop, RouteTrip } from "../../api/types";
+import type { RouteShapeResponse, RouteShapeStop, RouteTrip } from "../../api/types";
+import { orderedStops } from "../analysis/stopSeries";
 import { tripsInWindow, type MareyStop, type TimeWindow } from "./mareyLayout";
 
 export type TripSpan = { startSec: number; endSec: number };
 export type ScrubPosition = { trip_id: string; fromSeq: number; toSeq: number; f: number; axisFraction: number; delaySec: number };
+export type ScrubMapPosition = { key: string; lon: number; lat: number; delaySec: number };
 
 type Placed = { seq: number; sec: number; delaySec: number };
 
@@ -46,7 +48,7 @@ export function positionsAt(trips: RouteTrip[], sec: number, axis: MareyStop[]):
       if (sec < a.sec || sec > b.sec) continue;
       const ia = index.get(a.seq);
       const ib = index.get(b.seq);
-      if (ia == null || ib == null) break;
+      if (ia == null || ib == null) continue;
       const f = b.sec === a.sec ? 1 : (sec - a.sec) / (b.sec - a.sec);
       out.push({ trip_id: trip.trip_id, fromSeq: a.seq, toSeq: b.seq, f, axisFraction: (ia + (ib - ia) * f) / denom, delaySec: b.delaySec });
       break;
@@ -57,7 +59,7 @@ export function positionsAt(trips: RouteTrip[], sec: number, axis: MareyStop[]):
 
 /** The positions both the diagram and the map show: only trips the diagram
  *  draws, those departing inside `viewWindow`, so the two never disagree. */
-export function scrubPositions(trips: RouteTrip[], viewWindow: TimeWindow, sec: number, axis: MareyStop[]): ScrubPosition[] {
+function scrubPositions(trips: RouteTrip[], viewWindow: TimeWindow, sec: number, axis: MareyStop[]): ScrubPosition[] {
   return positionsAt(tripsInWindow(trips, viewWindow), sec, axis);
 }
 
@@ -69,13 +71,25 @@ export function defaultScrubSec(viewWindow: TimeWindow, peak: TimeWindow | null)
   return peak?.startSec ?? viewWindow.startSec;
 }
 
-/** The position on the route's shape: a straight interpolation between the
- *  two stops' coordinates. Straight, not along the shape polyline -- the
- *  trips response carries no distance-along-shape, and a point a few metres
- *  off a curve is honest about that; a point snapped to the curve would not be. */
+/** A straight-line position between the two stops' coordinates, not snapped
+ *  to the shape polyline: the trips response carries no distance along the
+ *  shape, and a point off a curve is honest about that where a snapped one
+ *  would not be. */
 export function interpolateLngLat(stops: RouteShapeStop[], pos: ScrubPosition): [number, number] | null {
   const a = stops.find((s) => s.stop_sequence === pos.fromSeq);
   const b = stops.find((s) => s.stop_sequence === pos.toSeq);
   if (!a || !b || ![a.lon, a.lat, b.lon, b.lat].every(Number.isFinite)) return null;
   return [a.lon + (b.lon - a.lon) * pos.f, a.lat + (b.lat - a.lat) * pos.f];
+}
+
+/** The map's positions at `sec`: the diagram's trips placed on the route's
+ *  coordinates, over every stop the axis shows, observed in the range or not.
+ *  Self-contained, so a caller derives it from the responses alone. */
+export function scrubMapPositions(trips: RouteTrip[], shape: RouteShapeResponse, viewWindow: TimeWindow, sec: number): ScrubMapPosition[] {
+  const stops = orderedStops(shape);
+  const axis = stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }));
+  return scrubPositions(trips, viewWindow, sec, axis).flatMap((p) => {
+    const at = interpolateLngLat(stops, p);
+    return at ? [{ key: p.trip_id, lon: at[0], lat: at[1], delaySec: p.delaySec }] : [];
+  });
 }

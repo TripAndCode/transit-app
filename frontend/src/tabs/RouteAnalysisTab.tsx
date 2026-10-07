@@ -14,7 +14,7 @@ import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { MareyDiagram } from "../components/charts/MareyDiagram";
-import { interpolateLngLat, scrubPositions } from "../components/charts/mareyScrub";
+import { scrubMapPositions, type ScrubMapPosition } from "../components/charts/mareyScrub";
 import { timeWindowForBand } from "../components/charts/mareyLayout";
 import { SkeletonChart } from "../components/Skeleton";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
@@ -38,6 +38,7 @@ const AnalysisMap = lazy(() =>
 /** Sub-tabs in the order they are rendered — also the order the arrow keys
  *  walk, and the closed set `sub_tab` may hold. */
 const SUB_TABS = ["trend", "marey", "map", "byStop"] as const;
+const NO_MAP_POSITIONS: ScrubMapPosition[] = [];
 type SubTab = (typeof SUB_TABS)[number];
 
 const SUB_TAB_LABEL_KEYS: Record<SubTab, string> = {
@@ -115,19 +116,19 @@ export function RouteAnalysisTab() {
   // Nothing on this page is answerable without an agency, and every query
   // above is already disabled for a null id.
   if (id == null) return null;
-  const stops = query.data ? orderedStops(query.data) : [];
-  const axis = stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }));
   // A scrub outside the chosen band's window means nothing to the diagram,
-  // so it is ignored (derived, not reset) until the band widens again.
+  // so it is ignored (derived, not reset) until a band whose window holds it
+  // is chosen again.
   const bandWindow = timeWindowForBand(ctx.time_band);
   const effectiveScrub = scrubSec != null && scrubSec >= bandWindow.startSec && scrubSec <= bandWindow.endSec ? scrubSec : null;
+  // Only the map tab shows positions, and the scrub cannot move while it is on
+  // screen, so they are derived there alone rather than on every scrub step.
   const mapPositions =
-    effectiveScrub == null || !trips.data || !query.data
-      ? []
-      : scrubPositions(trips.data.trips, bandWindow, effectiveScrub, axis).flatMap((p) => {
-          const at = interpolateLngLat(stops, p);
-          return at ? [{ key: p.trip_id, lon: at[0], lat: at[1], delaySec: p.delaySec }] : [];
-        });
+    activeTab === "map" && effectiveScrub != null && trips.data && query.data
+      ? scrubMapPositions(trips.data.trips, query.data, bandWindow, effectiveScrub)
+      : NO_MAP_POSITIONS;
+  const stops = query.data ? orderedStops(query.data) : [];
+  const axis = stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }));
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? stops.find((s) => s.avg_min != null) ?? stops[0];
   const stopColumns: CsvColumn<RouteShapeStop>[] = [

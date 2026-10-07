@@ -337,6 +337,20 @@ describe("RouteAnalysisTab Marey scrubber", () => {
     expect(mapProps.last?.positions).toEqual([]);
   });
 
+  it("feeds the map only while it is the tab on screen, not on every scrub step behind it", async () => {
+    renderTrips([TRIP("T1", 25_200, 25_800)], shape([
+      { stop_sequence: 1, stop_name: "A", lon: 132, lat: 34, avg_min: 1, samples: 5 },
+      { stop_sequence: 2, stop_name: "B", lon: 134, lat: 36, avg_min: 2, samples: 5 },
+    ]));
+    fireEvent.click(screen.getByRole("tab", { name: "Map" }));
+    expect(await screen.findByTestId("analysis-map")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Trips over time" }));
+    fireEvent.change(screen.getByRole("slider", { name: "Scrub the clock" }), { target: { value: "25500" } });
+    expect(mapProps.last?.positions).toEqual([]);
+    fireEvent.click(screen.getByRole("tab", { name: "Map" }));
+    expect(mapProps.last?.positions).toHaveLength(1);
+  });
+
   it("places a trip on the map on a leg that runs to a stop unobserved in the range", async () => {
     renderTrips([TRIP("T1", 25_200, 25_800)], {
       ...shape([{ stop_sequence: 1, stop_name: "A", lon: 132, lat: 34, avg_min: 1, samples: 5 }]),

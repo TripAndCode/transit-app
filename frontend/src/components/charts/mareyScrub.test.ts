@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { defaultScrubSec, interpolateLngLat, positionsAt, scrubBounds, tripSpan, tripsCrossing } from "./mareyScrub";
-import type { RouteShapeStop, RouteTrip } from "../../api/types";
+import { defaultScrubSec, interpolateLngLat, positionsAt, scrubBounds, scrubMapPositions, tripSpan, tripsCrossing } from "./mareyScrub";
+import type { RouteShapeResponse, RouteShapeStop, RouteTrip } from "../../api/types";
 
 const trip = (id: string, legs: [seq: number, sec: number | null, delay?: number][]): RouteTrip => ({
   trip_id: id, scheduled_time: null, headsign: null, avg_delay_sec: 0, samples: legs.length,
@@ -32,6 +32,11 @@ describe("positionsAt", () => {
   it("skips legs off the axis", () => {
     expect(positionsAt([trip("a", [[1, 100], [9, 200]])], 150, AXIS)).toEqual([]);
   });
+  it("passes over a leg from a stop off the axis to the next leg, rather than dropping the trip", () => {
+    // At 200 the trip is exactly at stop 1, reached from stop 0, which the axis lacks.
+    const [pos] = positionsAt([trip("a", [[0, 100], [1, 200], [2, 300]])], 200, AXIS);
+    expect(pos).toMatchObject({ fromSeq: 1, toSeq: 2, f: 0, axisFraction: 0 });
+  });
   it("sits exactly on a stop when the second equals its time", () => {
     const [pos] = positionsAt([trip("a", [[1, 100], [2, 200]])], 200, AXIS);
     expect(pos.axisFraction).toBe(0.5);
@@ -54,5 +59,20 @@ describe("interpolateLngLat", () => {
   });
   it("is null when either stop has no coordinates on the shape", () => {
     expect(interpolateLngLat(stops, { trip_id: "a", fromSeq: 2, toSeq: 3, f: 0.5, axisFraction: 0, delaySec: 0 })).toBeNull();
+  });
+});
+
+describe("scrubMapPositions", () => {
+  const shape = {
+    route: "R1",
+    geometry: null,
+    stops: [{ stop_sequence: 1, stop_name: "A", lon: 132, lat: 34, avg_min: 1, samples: 5 }],
+    unobserved_stops: [{ stop_sequence: 2, stop_name: "B", lon: 134, lat: 36 }],
+  } as unknown as RouteShapeResponse;
+  const viewWindow = { startSec: 21_600, endSec: 36_000 };
+
+  it("places the trips the diagram draws, interpolating over observed and unobserved stops alike", () => {
+    const trips = [trip("T1", [[1, 25_200], [2, 25_800]]), trip("EARLY", [[1, 20_700], [2, 25_800]])];
+    expect(scrubMapPositions(trips, shape, viewWindow, 25_500)).toEqual([{ key: "T1", lon: 133, lat: 35, delaySec: 0 }]);
   });
 });

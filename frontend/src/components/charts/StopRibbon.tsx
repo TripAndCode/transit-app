@@ -71,7 +71,8 @@ export function StopRibbon({
         );
       })}
       {markers?.map((m) => (
-        <circle key={m.key} className="stop-ribbon__pos" cx={(m.fraction * (segments.length - 1) + 0.5) * bandWidth} cy={1 + height / 2} r={7} fill={m.color} />
+        <circle key={m.key} className="stop-ribbon__pos" cx={0}
+          style={{ transform: `translateX(${(m.fraction * (segments.length - 1) + 0.5) * bandWidth}px)` }} cy={1 + height / 2} r={7} fill={m.color} />
       ))}
     </svg>
   );

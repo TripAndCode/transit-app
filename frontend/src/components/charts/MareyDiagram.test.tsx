@@ -273,6 +273,24 @@ describe("MareyDiagram scrubber", () => {
     expect(document.activeElement).toBe(screen.getByRole("slider", { name: "Scrub the clock" }));
   });
 
+  it("marks the diagram as scrubbing only while a scrub is set", () => {
+    const { container, rerender } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(true);
+    rerender(<MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" onScrub={vi.fn()} />);
+    expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(false);
+  });
+
+  it("gives each diagram's rail its own id, so each clock reads its own slider", () => {
+    render(
+      <>
+        <MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" onScrub={vi.fn()} />
+        <MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" onScrub={vi.fn()} />
+      </>,
+    );
+    const ids = screen.getAllByRole("slider").map((s) => s.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it("keeps the clear control in place, disabled, before any scrub, so the rail does not resize mid-drag", () => {
     show({ onScrub: vi.fn() });
     expect(screen.getByRole("button", { name: "Clear scrub" })).toBeDisabled();

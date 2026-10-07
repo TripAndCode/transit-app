@@ -5,7 +5,7 @@ import type { RouteTrip } from "../../api/types";
 import { MOBILE_BREAKPOINT_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import "../../styles/scrubber.css";
 import { StopRibbon } from "./StopRibbon";
-import { defaultScrubSec, scrubBounds, scrubPositions, tripsCrossing } from "./mareyScrub";
+import { defaultScrubSec, positionsAt, scrubBounds, tripsCrossing } from "./mareyScrub";
 import {
   MUTED_OPACITY,
   formatClock,
@@ -112,7 +112,7 @@ export function MareyDiagram({
   band: TimeBand;
   truncated?: boolean;
   date?: string | null;
-  /** The scrubbed second of day, or null when the rail is untouched. */
+  /** The scrubbed second of day, or null when no scrub applies. */
   scrubSec?: number | null;
   onScrub?: (sec: number | null) => void;
 }) {
@@ -125,7 +125,9 @@ export function MareyDiagram({
   const [chartRevealed, setChartRevealed] = useState(false);
   const narrow = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
   // useId's own value contains colons, which are not usable inside url(#...).
-  const clipId = `marey-clip-${useId().replace(/:/g, "")}`;
+  const instanceId = useId().replace(/:/g, "");
+  const clipId = `marey-clip-${instanceId}`;
+  const scrubId = `marey-scrub-${instanceId}`;
 
   const viewWindow = timeWindowForBand(band);
   const drawn = tripsInWindow(trips, viewWindow);
@@ -142,7 +144,8 @@ export function MareyDiagram({
   const chartShown = !narrow || chartRevealed;
   const rows = drawn.map((trip) => tripRow(trip, axis));
   const crossing = scrubSec == null ? null : new Set(tripsCrossing(drawn, scrubSec).map((trip) => trip.trip_id));
-  const positions = scrubSec == null ? [] : scrubPositions(trips, viewWindow, scrubSec, axis);
+  // `drawn` is the window's trips, the same set scrubMapPositions places on the map.
+  const positions = scrubSec == null ? [] : positionsAt(drawn, scrubSec, axis);
   const bounds = scrubBounds(viewWindow);
   const scrubValue = scrubSec ?? defaultScrubSec(viewWindow, peak);
   // A trip pointed at or stepped to wins over the scrub: it is the one being read.
@@ -151,7 +154,7 @@ export function MareyDiagram({
   const scrubInput = useRef<HTMLInputElement | null>(null);
 
   return (
-    <div className="marey">
+    <div className={scrubSec == null ? "marey" : "marey marey--scrubbing"}>
       <p className="focus-muted marey__caption">
         {t("mareyWindow", { from: formatClock(viewWindow.startSec), to: formatClock(viewWindow.endSec) })} ·{" "}
         {t("mareyTripCount", { n: drawn.length })}
@@ -179,12 +182,12 @@ export function MareyDiagram({
           )}
           {chartShown && onScrub && (
             <div className="marey-scrub">
-              <output className="marey-scrub__clock num" htmlFor="marey-scrub-input">
+              <output className="marey-scrub__clock num" htmlFor={scrubId}>
                 {formatClock(scrubValue)}
               </output>
               <input
                 ref={scrubInput}
-                id="marey-scrub-input"
+                id={scrubId}
                 type="range"
                 className="scrub-input"
                 min={bounds.min}

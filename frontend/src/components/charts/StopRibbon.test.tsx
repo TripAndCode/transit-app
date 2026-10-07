@@ -24,10 +24,12 @@ describe("StopRibbon", () => {
         ]}
       />,
     );
-    const cx = [...container.querySelectorAll(".stop-ribbon__pos")].map((c) => Number(c.getAttribute("cx")));
-    // Four bands of 195 across 780: centres at 97.5 and 682.5, and halfway
-    // along the axis is between the second and third centres.
-    expect(cx).toEqual([97.5, 682.5, 390]);
+    const circles = [...container.querySelectorAll<SVGCircleElement>(".stop-ribbon__pos")];
+    // Moved by transform from x=0, so a scrub step animates a transform,
+    // not geometry. Four bands of 195 across 780: centres at 97.5 and 682.5,
+    // and halfway along the axis is between the second and third centres.
+    expect(circles.map((c) => c.getAttribute("cx"))).toEqual(["0", "0", "0"]);
+    expect(circles.map((c) => c.style.transform)).toEqual(["translateX(97.5px)", "translateX(682.5px)", "translateX(390px)"]);
   });
 
   it("draws one band per stop, in sequence order", () => {
