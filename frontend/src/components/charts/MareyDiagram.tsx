@@ -153,8 +153,9 @@ export function MareyDiagram({
     active !== null ? (active === id ? 1 : MUTED_OPACITY) : crossing && !crossing.has(id) ? MUTED_OPACITY : 1;
   const scrubInput = useRef<HTMLInputElement | null>(null);
 
+  // Scrubbing pace only while no trip is pointed at: a hover keeps the quick tier.
   return (
-    <div className={scrubSec == null ? "marey" : "marey marey--scrubbing"}>
+    <div className={scrubSec != null && active === null ? "marey marey--scrubbing" : "marey"}>
       <p className="focus-muted marey__caption">
         {t("mareyWindow", { from: formatClock(viewWindow.startSec), to: formatClock(viewWindow.endSec) })} ·{" "}
         {t("mareyTripCount", { n: drawn.length })}
@@ -197,6 +198,11 @@ export function MareyDiagram({
                 aria-label={t("mareyScrub")}
                 aria-valuetext={formatClock(scrubValue)}
                 onChange={(e) => onScrub(Number(e.target.value))}
+                // The thumb rests on a minute before any scrub; pressing it there
+                // fires no change, so the press itself starts the scrub.
+                onPointerDown={() => {
+                  if (scrubSec == null) onScrub(scrubValue);
+                }}
               />
               {/* Always mounted, so the rail keeps its width when the first
                   drag sets a scrub; clearing hands focus back to the slider. */}

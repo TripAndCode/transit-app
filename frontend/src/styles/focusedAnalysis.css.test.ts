@@ -17,7 +17,7 @@ describe("focusedAnalysis.css Marey scrubber", () => {
 
   it("draws the rail's track, which the shared scrubber chrome leaves to its caller", () => {
     for (const track of [".marey-scrub .scrub-input::-webkit-slider-runnable-track {", ".marey-scrub .scrub-input::-moz-range-track {"]) {
-      expect(decl(ruleBody(css, track), "background")).toBe("var(--track-bg)");
+      expect(decl(ruleBody(css, track), "background")).toBe("var(--border-soft)");
     }
   });
 });

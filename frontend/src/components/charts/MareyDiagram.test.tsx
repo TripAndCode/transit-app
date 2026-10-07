@@ -280,6 +280,20 @@ describe("MareyDiagram scrubber", () => {
     expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(false);
   });
 
+  it("a trip pointed at during a scrub fades the rest on the quick tier, not the scrub's", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    fireEvent.focus(container.querySelector('[data-trip-id="T2"]')!);
+    expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(false);
+  });
+
+  it("pressing the slider where it rests starts a scrub at that minute", () => {
+    const onScrub = vi.fn();
+    show({ onScrub });
+    const slider = screen.getByRole("slider", { name: "Scrub the clock" });
+    fireEvent.pointerDown(slider);
+    expect(onScrub).toHaveBeenCalledWith(Number(slider.getAttribute("value")));
+  });
+
   it("gives each diagram's rail its own id, so each clock reads its own slider", () => {
     render(
       <>
