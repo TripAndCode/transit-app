@@ -27,7 +27,8 @@ describe("pulsePaths", () => {
 describe("pulseGradientStops", () => {
   it("samples five hours onto the v2 ramp variables, in offset order", () => {
     const stops = pulseGradientStops(flat.map((_, h) => (h === 8 ? 6 : 0.5)));
-    expect(stops.map((s) => s.offset)).toEqual([0, 0.34, 0.55, 0.75, 1]);
+    // Each sampled hour sits at its own x, the same place the paths draw it.
+    expect(stops.map((s) => s.offset)).toEqual([3 / 23, 8 / 23, 13 / 23, 18 / 23, 1]);
     expect(stops[0].color).toBe("var(--d0)");
     expect(stops[1].color).toBe("var(--d4)");
   });

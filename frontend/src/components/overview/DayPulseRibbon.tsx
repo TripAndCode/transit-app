@@ -18,7 +18,10 @@ export function DayPulseRibbon({ byHour }: { byHour: readonly (number | null)[] 
       focusable="false"
     >
       <defs>
-        <linearGradient id={gradientId} x1="0" x2="1">
+        {/* In user space, so the area and a line that starts late or runs
+            flat share one horizontal axis; a bounding-box gradient would
+            stretch over the line's own extent and drop a zero-height one. */}
+        <linearGradient id={gradientId} gradientUnits="userSpaceOnUse" x1={0} x2={RIBBON_W} y1={0} y2={0}>
           {pulseGradientStops(byHour).map((s) => (
             <stop key={s.offset} offset={s.offset} stopColor={s.color} />
           ))}

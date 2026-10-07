@@ -6,14 +6,8 @@ export const RIBBON_H = 160;
 const RIBBON_MAX_MIN = 5.5;
 const PAD_TOP = 12;
 const PAD_BOTTOM = 8;
-/** Hours the gradient samples, spread across the day, with their offsets. */
-const GRADIENT_SAMPLES: [hour: number, offset: number][] = [
-  [3, 0],
-  [8, 0.34],
-  [13, 0.55],
-  [18, 0.75],
-  [23, 1],
-];
+/** Hours the gradient samples, spread across the day. */
+const GRADIENT_HOURS = [3, 8, 13, 18, 23];
 
 export type PulsePaths = { area: string; line: string };
 
@@ -55,8 +49,10 @@ export function pulsePaths(
 }
 
 /** Gradient stops for the ribbon: five hours sampled onto the delay ramp, so
- *  the colour drifts across the day with the profile. A missing hour reads as
- *  no delay rather than as a gap -- a gradient has no way to draw one. */
+ *  the colour drifts across the day with the profile. Each stop sits at its
+ *  hour's x, where `pulsePaths` draws that hour. A missing hour reads as no
+ *  delay rather than as a gap -- a gradient has no way to draw one. */
 export function pulseGradientStops(byHour: readonly (number | null)[]): { offset: number; color: string }[] {
-  return GRADIENT_SAMPLES.map(([hour, offset]) => ({ offset, color: delayRampVar(byHour[hour] ?? 0) }));
+  const n = Math.max(1, byHour.length - 1);
+  return GRADIENT_HOURS.map((hour) => ({ offset: hour / n, color: delayRampVar(byHour[hour] ?? 0) }));
 }

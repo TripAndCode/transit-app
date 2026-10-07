@@ -5,6 +5,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { RoutesToCheckList } from "./RoutesToCheckList";
 import type { OverviewTopDelayedRoute } from "../api/types";
 import { stubReducedMotion } from "../test/reducedMotion";
+import * as flipModule from "../hooks/useFlipRows";
 
 function routes(): OverviewTopDelayedRoute[] {
   return [
@@ -91,6 +92,21 @@ describe("RoutesToCheckList", () => {
     expect(fill.style.getPropertyValue("--check-share")).toBe("1");
     expect(fill.style.width).toBe("");
     expect(rows[1].querySelector<HTMLElement>(".ov-check-fill")!.style.getPropertyValue("--check-share")).toBe("0.5");
+  });
+
+  it("keeps a route's row, and so its count-up and bar slide, when it crosses into another band", () => {
+    const { rerender } = renderList([route("A", 6.0), route("B", 4.0)]);
+    const before = screen.getByText("Route A").closest("a");
+    rerender(list([route("A", 4.5), route("B", 4.0)]));
+    expect(screen.getByText("Route A").closest("a")).toBe(before);
+  });
+
+  it("re-measures for FLIP when a band header appears or goes, even if the route order holds", () => {
+    const flip = vi.spyOn(flipModule, "useFlipRows");
+    const { rerender } = renderList([route("A", 6.0), route("B", 4.0)]);
+    const first = flip.mock.calls.at(-1)?.[1];
+    rerender(list([route("A", 4.5), route("B", 4.0)]));
+    expect(flip.mock.calls.at(-1)?.[1]).not.toBe(first);
   });
 
   it("prints the figure with the numeric face and travels on change (reduced motion prints)", () => {

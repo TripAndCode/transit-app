@@ -39,18 +39,31 @@ function breathingNow(iso: string): boolean {
   return isBreathing(iso, Date.now());
 }
 
-/** The feed-status line, by the same rule as Live's freshness badge: a feed
- *  whose newest report is older than the live window is quiet, however recent
- *  the aggregates are. Nothing is claimed while the status is unread or its
- *  timestamp unreadable. */
-function describeFeedStatus(summary: RouteSummaryResponse | undefined, t: TFunction): string {
-  if (!summary) return EM_DASH;
-  if (!summary.latest_captured_at) return t("overview.hero_row.feed_status_none");
+type FeedState = { kind: "unknown" } | { kind: "none" } | { kind: "live" } | { kind: "quiet"; ageMs: number };
+
+/** The feed's state, by the same rule as Live's freshness badge: a feed whose
+ *  newest report is older than the live window is quiet, however recent the
+ *  aggregates are. Unknown while the status is unread or its timestamp
+ *  unreadable, so nothing is claimed then. */
+function readFeed(summary: RouteSummaryResponse | undefined): FeedState {
+  if (!summary) return { kind: "unknown" };
+  if (!summary.latest_captured_at) return { kind: "none" };
   const ageMs = reportAgeMs(summary.latest_captured_at);
-  if (!Number.isFinite(ageMs)) return EM_DASH;
-  return ageMs > MAX_REPORT_AGE_MS
-    ? t("overview.hero_row.feed_status_quiet", { duration: quietFor(ageMs, t) })
-    : t("overview.hero_row.feed_status_live");
+  if (!Number.isFinite(ageMs)) return { kind: "unknown" };
+  return ageMs > MAX_REPORT_AGE_MS ? { kind: "quiet", ageMs } : { kind: "live" };
+}
+
+function describeFeedStatus(feed: FeedState, t: TFunction): string {
+  switch (feed.kind) {
+    case "unknown":
+      return EM_DASH;
+    case "none":
+      return t("overview.hero_row.feed_status_none");
+    case "quiet":
+      return t("overview.hero_row.feed_status_quiet", { duration: quietFor(feed.ageMs, t) });
+    case "live":
+      return t("overview.hero_row.feed_status_live");
+  }
 }
 
 export function OverviewHeroRow({
@@ -69,10 +82,10 @@ export function OverviewHeroRow({
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
 
-  const feedStatus = describeFeedStatus(feedSummary, t);
+  const feed = readFeed(feedSummary);
+  const feedStatus = describeFeedStatus(feed, t);
   const captured = feedSummary?.latest_captured_at;
   const lastReport = captured && Number.isFinite(Date.parse(captured)) ? formatReportTime(captured) : null;
-  const feedQuiet = captured != null && reportAgeMs(captured) > MAX_REPORT_AGE_MS;
 
   // The dot breathes while the latest report is under two minutes old.
   // Nothing refetches this summary on its own, so the window's close is
@@ -155,10 +168,14 @@ export function OverviewHeroRow({
           </div>
           <div className="ov-hero-sub-item">
             <span className="ov-hero-sub-value">
-              <i
-                className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${feedQuiet ? " ov-fresh-dot--stale" : ""}`}
-                aria-hidden="true"
-              />
+              {/* Green only for a live feed; a quiet or never-reporting one
+                  keeps a neutral dot, and an unread status shows none. */}
+              {feed.kind !== "unknown" && (
+                <i
+                  className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${feed.kind === "live" ? "" : " ov-fresh-dot--stale"}`}
+                  aria-hidden="true"
+                />
+              )}
               {feedStatus}
             </span>
             {lastReport && t("overview.hero_row.feed_status_last", { time: lastReport })}

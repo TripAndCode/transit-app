@@ -282,6 +282,18 @@ describe("OverviewHeroRow", () => {
     expect(document.querySelector(".ov-fresh-dot--stale")).toBeNull();
   });
 
+  it("claims no live green for a feed that has never reported, and no dot at all before the status is read", () => {
+    mockFeedSummary(null);
+    renderHero();
+    expect(screen.getByText("No reports yet")).toBeInTheDocument();
+    expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
+    cleanup();
+    mockHooks(38, null);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: undefined, isPending: true } as never);
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot")).toBeNull();
+  });
+
   it("prints the delayed-route count in the numeric face", () => {
     mockHooks(38, 0.1);
     renderHero();
