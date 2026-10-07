@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useRef } from "react";
 import { ChevronLeft, ChevronRight, Pause, Play, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import "../../styles/scrubber.css";
 import { delayColor } from "../../styles/tokens";
 import type { PlaybackController } from "./useDayPlayback";
 
@@ -112,7 +113,7 @@ export function PlaybackRail({
           </div>
           <input
             type="range"
-            className="ops-playback__scrub"
+            className="scrub-input"
             min={0}
             max={frames.length - 1}
             step={1}

@@ -34,8 +34,8 @@ saved-analysis bookmarks — scoped to exactly one selected route.
   saved analyses.
 - Top-level component: `frontend/src/tabs/RouteAnalysisTab.tsx` — owns the
   compare-with-previous-week toggle (`?compare=1` search param), the
-  selected stop, and which of the four sub-tabs (trend / marey / map /
-  by-stop) is active.
+  selected stop, which of the four sub-tabs (trend / marey / map /
+  by-stop) is active, and the Marey scrub second.
 
 What the user sees/does:
 
@@ -61,8 +61,13 @@ What the user sees/does:
   diagram: each trip on the route's latest observed day is one polyline
   across stop sequence (y) vs. time (x); when compare is on, the same day one
   week earlier draws behind it at reduced opacity as ghost context, not a
-  second reading), Map (`frontend/src/components/analysis/AnalysisMap.tsx`,
-  mounted only after first visited, hidden rather than unmounted afterward),
+  second reading; a one-minute scrubber over the diagram's window keeps the
+  trips under way at that second bright, recedes the rest, and marks each
+  one's position on the stop ribbon), Map
+  (`frontend/src/components/analysis/AnalysisMap.tsx`, mounted only after
+  first visited, hidden rather than unmounted afterward; while a scrub is
+  set it draws the same trips' positions, interpolated between stops and
+  coloured by delay),
   and By stop (a plain stop/mean/samples table). The Marey tab reads for the
   route's own latest observed day regardless of the shared date-range filter
   — the filter's end date is routinely a day the route did not run, and a
@@ -87,13 +92,15 @@ What the user sees/does:
 | File | Role |
 |---|---|
 | `frontend/src/tabs/RouteDossier.tsx` | Dossier route: provides the path's route through `ScopeRouteContext`, follows a different single route, hands several to the Routes list |
-| `frontend/src/tabs/RouteAnalysisTab.tsx` | Tab shell: compare toggle, stop selection, sub-tab state |
+| `frontend/src/tabs/RouteAnalysisTab.tsx` | Tab shell: compare toggle, stop selection, sub-tab state, scrub second |
 | `frontend/src/components/analysis/AnalysisFilters.tsx` | Route/keito filter UI |
 | `frontend/src/components/analysis/StopChart.tsx` | Per-stop delay chart (current + optional previous-week overlay) |
 | `frontend/src/components/charts/MareyDiagram.tsx` | Time-distance diagram of one day's trips, with optional previous-week ghost trips |
 | `frontend/src/components/charts/mareyLayout.ts` | Pure layout/geometry math (axes, time windows, trip polylines) behind the Marey diagram |
-| `frontend/src/components/charts/StopRibbon.tsx` | Stop-axis labels alongside the Marey diagram |
-| `frontend/src/components/analysis/AnalysisMap.tsx` | Small map view of the selected route's stops |
+| `frontend/src/components/charts/StopRibbon.tsx` | Stop-axis labels alongside the Marey diagram, with the scrubbed trips' position markers |
+| `frontend/src/components/charts/mareyScrub.ts` | Pure scrub math: which trips are under way at a second, where each is on the stop axis and on the map |
+| `frontend/src/styles/scrubber.css` | Slider chrome shared by the Marey scrubber and Live's day-playback rail |
+| `frontend/src/components/analysis/AnalysisMap.tsx` | Small map view of the selected route's stops, and the scrubbed trips' positions |
 | `frontend/src/components/analysis/stopSeries.ts` | `orderedStops()` / `matchedPrevious()` — stop ordering and week-over-week matching |
 | `frontend/src/components/analysis/savedAnalyses.ts` | Browser-local saved-analysis read/write/delete |
 | `frontend/src/components/analysis/csv.ts` | `downloadCsv()` shared by every analysis/report screen |
@@ -120,7 +127,9 @@ What the user sees/does:
   `analysis/where` redirects),
   `frontend/src/components/analysis/StopChart.test.ts`,
   `frontend/src/components/charts/MareyDiagram.test.tsx`,
-  `frontend/src/components/charts/mareyLayout.test.ts`.
+  `frontend/src/components/charts/mareyLayout.test.ts`,
+  `frontend/src/components/charts/mareyScrub.test.ts`,
+  `frontend/src/styles/focusedAnalysis.css.test.ts`.
 - Backend: `tests/api/test_api_map.py`, `tests/clickhouse/test_range_updates_filter_ch.py`,
   `tests/unit/test_response_schema_ratchet.py` (all exercise `/route-shape`
   alongside the Map tab's other endpoints in `api/routers/map.py`).

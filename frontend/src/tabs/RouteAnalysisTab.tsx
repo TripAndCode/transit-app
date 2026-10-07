@@ -14,6 +14,8 @@ import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { MareyDiagram } from "../components/charts/MareyDiagram";
+import { scrubMapPositions, type ScrubMapPosition } from "../components/charts/mareyScrub";
+import { timeWindowForBand } from "../components/charts/mareyLayout";
 import { SkeletonChart } from "../components/Skeleton";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
 import { scopeTitle } from "../components/scope/scopePhrases";
@@ -36,6 +38,7 @@ const AnalysisMap = lazy(() =>
 /** Sub-tabs in the order they are rendered — also the order the arrow keys
  *  walk, and the closed set `sub_tab` may hold. */
 const SUB_TABS = ["trend", "marey", "map", "byStop"] as const;
+const NO_MAP_POSITIONS: ScrubMapPosition[] = [];
 type SubTab = (typeof SUB_TABS)[number];
 
 const SUB_TAB_LABEL_KEYS: Record<SubTab, string> = {
@@ -76,6 +79,7 @@ export function RouteAnalysisTab() {
     patchUrl({ stop_route: next.route, stop_seq: String(next.sequence) });
   }
   const [notice, setNotice] = useState("");
+  const [scrubSec, setScrubSec] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useUrlState<SubTab>("sub_tab", "trend", SUB_TABS);
   // Seeded from the URL so `?sub_tab=map` restores the map, and sticky
   // afterwards so leaving the sub-tab doesn't tear down the WebGL context.
@@ -112,7 +116,19 @@ export function RouteAnalysisTab() {
   // Nothing on this page is answerable without an agency, and every query
   // above is already disabled for a null id.
   if (id == null) return null;
+  // A scrub outside the chosen band's window means nothing to the diagram,
+  // so it is ignored (derived, not reset) until a band whose window holds it
+  // is chosen again.
+  const bandWindow = timeWindowForBand(ctx.time_band);
+  const effectiveScrub = scrubSec != null && scrubSec >= bandWindow.startSec && scrubSec <= bandWindow.endSec ? scrubSec : null;
+  // Only the map tab shows positions, and the scrub cannot move while it is on
+  // screen, so they are derived there alone rather than on every scrub step.
+  const mapPositions =
+    activeTab === "map" && effectiveScrub != null && trips.data && query.data
+      ? scrubMapPositions(trips.data.trips, query.data, bandWindow, effectiveScrub)
+      : NO_MAP_POSITIONS;
   const stops = query.data ? orderedStops(query.data) : [];
+  const axis = stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }));
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? stops.find((s) => s.avg_min != null) ?? stops[0];
   const stopColumns: CsvColumn<RouteShapeStop>[] = [
@@ -193,12 +209,12 @@ export function RouteAnalysisTab() {
             </div>}
             {activeTab === "marey" && <div className="focus-tab-panel" role="tabpanel" id={panelId("marey")} aria-labelledby={tabId("marey")}>
               <AsyncSection loading={trips.isPending} error={trips.error} onRetry={() => void trips.refetch()} data={trips.data} hasContent={(d) => d.trips.length > 0} empty={<EmptyState title={t("empty")} />} skeleton={<SkeletonChart height={320} />}>
-                {(d) => <MareyDiagram trips={d.trips} previousTrips={previousTrips.data?.trips ?? []} axis={stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }))} band={ctx.time_band} truncated={d.truncated} date={d.date} />}
+                {(d) => <MareyDiagram trips={d.trips} previousTrips={previousTrips.data?.trips ?? []} axis={axis} band={ctx.time_band} truncated={d.truncated} date={d.date} scrubSec={effectiveScrub} onScrub={setScrubSec} />}
               </AsyncSection>
             </div>}
             {mapVisited && <div className={`focus-tab-panel${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`} role="tabpanel" id={panelId("map")} aria-labelledby={tabId("map")}>
               <Suspense fallback={<SkeletonChart height={420} />}>
-                <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} />
+                <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} positions={mapPositions} />
               </Suspense>
             </div>}
             {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>

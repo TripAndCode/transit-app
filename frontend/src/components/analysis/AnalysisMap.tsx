@@ -3,17 +3,35 @@ import { useTranslation } from "react-i18next";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { buildStyle, getMapStyleOverride, readMapStylePref } from "../../styles/mapStyle";
+import type { LayerSpecification } from "maplibre-gl";
 import type { RouteShapeResponse, RouteShapeStop } from "../../api/types";
+import type { ScrubMapPosition } from "../charts/mareyScrub";
 import { whenStyleReady } from "../../tabs/map/styleReady";
 import { createSafeMap } from "../../tabs/map/createSafeMap";
-import { accentColorResolved, severeColorResolved, surfaceColorResolved } from "../../styles/tokens";
+import { accentColorResolved, severeColorResolved, severityStepColors, surfaceColorResolved } from "../../styles/tokens";
+import { repaintLayer } from "../../tabs/map/repaintLayer";
 import { useThemeSignal } from "../../styles/theme";
 
 const ROUTE_SOURCE = "analysis-route";
 const ROUTE_LINE_LAYER = "analysis-line";
 const SELECTED_STOP_LAYER = "analysis-stop";
+const SCRUB_SOURCE = "analysis-scrub";
+const SCRUB_LAYER = "analysis-scrub-positions";
 
-export function AnalysisMap({ data, selected, height = 210, visible = true }: { data: RouteShapeResponse; selected: RouteShapeStop | undefined; height?: number; visible?: boolean }) {
+type CirclePaint = NonNullable<Extract<LayerSpecification, { type: "circle" }>["paint"]>;
+
+const NO_POSITIONS: ScrubMapPosition[] = [];
+
+function scrubPositionPaint(): CirclePaint {
+  return {
+    "circle-radius": 7,
+    "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
+    "circle-stroke-width": 2,
+    "circle-stroke-color": surfaceColorResolved(),
+  };
+}
+
+export function AnalysisMap({ data, selected, height = 210, visible = true, positions = NO_POSITIONS }: { data: RouteShapeResponse; selected: RouteShapeStop | undefined; height?: number; visible?: boolean; positions?: ScrubMapPosition[] }) {
   const { t, i18n } = useTranslation("design");
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -75,10 +93,35 @@ export function AnalysisMap({ data, selected, height = 210, visible = true }: { 
         return;
       }
       instance.addSource(ROUTE_SOURCE, { type: "geojson", data: collection });
-      instance.addLayer({ id: ROUTE_LINE_LAYER, type: "line", source: ROUTE_SOURCE, filter: ["==", "$type", "LineString"], paint: { "line-color": accentColorResolved(), "line-width": 3 } });
-      instance.addLayer({ id: SELECTED_STOP_LAYER, type: "circle", source: ROUTE_SOURCE, filter: ["==", "$type", "Point"], paint: { "circle-radius": 8, "circle-color": severeColorResolved(), "circle-stroke-width": 3, "circle-stroke-color": surfaceColorResolved() } });
+      // Beneath the trip positions whichever effect re-attaches first.
+      const beneath = instance.getLayer(SCRUB_LAYER) ? SCRUB_LAYER : undefined;
+      instance.addLayer({ id: ROUTE_LINE_LAYER, type: "line", source: ROUTE_SOURCE, filter: ["==", "$type", "LineString"], paint: { "line-color": accentColorResolved(), "line-width": 3 } }, beneath);
+      instance.addLayer({ id: SELECTED_STOP_LAYER, type: "circle", source: ROUTE_SOURCE, filter: ["==", "$type", "Point"], paint: { "circle-radius": 8, "circle-color": severeColorResolved(), "circle-stroke-width": 3, "circle-stroke-color": surfaceColorResolved() } }, beneath);
     });
   }, [data, selected, styleEpoch, theme]);
+  // The caller can re-derive positions with identical content (a stop
+  // selection, a refetch), so the effect keys on content, not identity.
+  const positionsKey = JSON.stringify(positions);
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const live = JSON.parse(positionsKey) as ScrubMapPosition[];
+    const collection: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: live.map((p) => ({ type: "Feature", properties: { delay_sec: p.delaySec }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } })),
+    };
+    return whenStyleReady(instance, () => {
+      const paint = scrubPositionPaint();
+      const source = instance.getSource(SCRUB_SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (source) {
+        source.setData(collection);
+        repaintLayer(instance, SCRUB_LAYER, paint);
+        return;
+      }
+      instance.addSource(SCRUB_SOURCE, { type: "geojson", data: collection });
+      instance.addLayer({ id: SCRUB_LAYER, type: "circle", source: SCRUB_SOURCE, paint });
+    });
+  }, [positionsKey, styleEpoch, theme]);
   useEffect(() => {
     const instance = map.current;
     if (!instance || !visible) return;
