@@ -11,6 +11,8 @@ Two tables get geometry-aware handling: ``static_stops`` builds a
 ``geometry(Point)`` per row, and ``static_shapes`` groups points by
 ``shape_id`` and builds a ``geometry(LineString)`` per shape via PostGIS
 ``ST_MakeLine``. Other tables use a plain ``execute_values`` bulk insert.
+Loading ``stops.txt`` also rebuilds ``stop_clusters`` (the heatmap's
+same-named-platform grouping) from the new rows in the same transaction.
 """
 
 import csv
@@ -21,6 +23,8 @@ import zipfile
 from collections import defaultdict
 
 from psycopg2.extras import execute_values
+
+from pipeline.stop_clusters import rebuild_stop_clusters
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +125,8 @@ def load_static(path: str, agency_id: int, conn) -> None:
                         "stop_code=EXCLUDED.stop_code, platform_code=EXCLUDED.platform_code",
                         [agency_id, stop_id, stop_name, lat, lon, lon, lat, stop_code, platform_code],
                     )
+                clustered = rebuild_stop_clusters(cur, agency_id)
+                logger.info(f"  stop_clusters: {clustered:,} rows")
             elif table == "static_shapes":
                 by_shape: dict[str, list[tuple[int, float, float]]] = defaultdict(list)
                 skipped = 0
