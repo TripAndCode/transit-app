@@ -26,7 +26,12 @@
   },
   "compare": {
     "mode_periods": "Weekdays and weekends",
-    "mode_agencies": "Agencies"
+    "mode_agencies": "Agencies",
+    "bars": {
+      "period_label": "Period",
+      "ghost_legend": "Dashed = {{period}}",
+      "aria": "Average delay by route ({{period}}, axis to {{max}} min)"
+    }
   },
   "saved": {
     "title": "Reports",
@@ -1123,7 +1128,7 @@
       "on_time": "Share of departures inside the on-time threshold, by route.",
       "worst_5min": "Routes with the most departures more than five minutes late.",
       "trend": "How delay moved day by day, by hour and by weekday.",
-      "compare_ranking": "Each route's weekday and weekend delay side by side, widest gap first.",
+      "compare_ranking": "Each route's weekday or weekend delay, worst first for the period you pick, with the other period as a dashed outline.",
       "dow_weekday": "Each route's average delay on weekdays.",
       "dow_weekend": "Each route's average delay on weekends and holidays.",
       "dwell_run": "Where time goes: waiting at stops against running between them.",

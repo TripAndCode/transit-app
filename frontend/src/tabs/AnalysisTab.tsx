@@ -24,6 +24,7 @@ import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
 import { HeatSurface } from "../components/charts/HeatSurface";
 import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
+import { CompareBars } from "../components/charts/CompareBars";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
@@ -61,13 +62,16 @@ function hasCsv(data: ReportResponse): boolean {
   return true;
 }
 
-/** A ranking's coverage options; every other report takes none, and the API
- *  refuses them there. */
+/** A ranking's coverage options; the API refuses `include_sparse` on every
+ *  other report. The compare report is drawn re-ranked by one period's delay,
+ *  so it asks for the API's maximum length: the default length keeps only the
+ *  widest gaps, which would drop a route that is slow in both periods. */
 function rankingOptions(
   reportType: string | null | undefined,
   includeSparse: boolean,
   allRowsFor: string | null,
 ): ReportOptions | undefined {
+  if (reportType === "compare_ranking") return { limit: REPORT_ROWS_MAX };
   if (reportType == null || !RANKING_TYPES.has(reportType)) return undefined;
   return { includeSparse, limit: allRowsFor === reportType ? REPORT_ROWS_MAX : undefined };
 }
@@ -245,6 +249,8 @@ export function AnalysisTab({
                   )}
                 </details>
               </>
+            ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
+              <CompareBars rows={detail.data.rows} resetKey={`${id ?? "none"}:${scopeToQueryString(ctx)}`} />
             ) : detail.data.rows.length > 0 ? (
               <>
                 <ReportTable

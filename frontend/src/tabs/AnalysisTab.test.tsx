@@ -507,6 +507,12 @@ describe("AnalysisTab evidence panels", () => {
     expect(screen.getByText("standards-panel")).toBeInTheDocument();
     expect(screen.queryByText("weather-panel")).toBeNull();
   });
+
+  it("draws compare_ranking as morphing bars rather than a table", () => {
+    show("/agencies/1/analysis/rider", "compare_ranking", [["3", 3.4, 2.7, 0.7, 0.7], ["12", 3.8, 3.1, 0.7, 0.7]]);
+    expect(screen.getAllByTestId("compare-bar-row")).toHaveLength(2);
+    expect(screen.queryByRole("table")).toBeNull();
+  });
 });
 
 describe("AnalysisTab ranking coverage", () => {
@@ -582,6 +588,14 @@ describe("AnalysisTab ranking coverage", () => {
   it("exports the rows the table shows", () => {
     setup("/agencies/1/analysis/rider?report=ranking&sparse=1", rankingResponse());
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_sparse=1(&|$)/);
+  });
+
+  it("asks for the API's longest compare list, since the bars re-rank it by period rather than by gap", () => {
+    const { useReport } = setup("/agencies/1/analysis/rider?report=compare_ranking", reportResponse("compare_ranking"), ["compare_ranking"]);
+    expect(useReport.mock.calls.at(-1)?.[3]).toEqual({ limit: 500 });
+    const href = screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "";
+    expect(href).toMatch(/[?&]limit=500(&|$)/);
+    expect(href).not.toContain("include_sparse");
   });
 
   it("asks a report without a ranking floor for nothing extra", () => {

@@ -49,8 +49,7 @@ describe("useFlipRows", () => {
 
     // a and b swap places: each moves 40px in the opposite direction.
     rect.mockImplementation(function (this: HTMLElement) {
-      const id = this.dataset.flipKey ?? "";
-      return { top: id === "b" ? 0 : 40 } as DOMRect;
+      return { top: { b: 0, a: 40 }[this.dataset.flipKey ?? ""] ?? 0 } as DOMRect;
     });
     rerender(<List order={["b", "a"]} keyOf="2" />);
 
@@ -69,8 +68,7 @@ describe("useFlipRows", () => {
     const rect = stubTops({ a: 0, b: 40 });
     const { container, rerender } = render(<List order={["a", "b"]} keyOf="1" />);
     rect.mockImplementation(function (this: HTMLElement) {
-      const id = this.dataset.flipKey ?? "";
-      return { top: id === "b" ? 0 : 40 } as DOMRect;
+      return { top: { b: 0, a: 40 }[this.dataset.flipKey ?? ""] ?? 0 } as DOMRect;
     });
     rerender(<List order={["b", "a"]} keyOf="2" />);
     expect(container.querySelector<HTMLElement>('[data-flip-key="a"]')!.style.transform).toBe("");
@@ -81,5 +79,49 @@ describe("useFlipRows", () => {
     const { container, rerender } = render(<List order={["a", "b"]} keyOf="1" />);
     rerender(<List order={["a", "b"]} keyOf="2" />);
     expect(container.querySelector<HTMLElement>('[data-flip-key="b"]')!.style.transform).toBe("");
+  });
+
+  it("measures every row before offsetting any, so a long re-sort forces one style pass, not one per row", () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const rect = stubTops({ a: 0, b: 40, c: 80 });
+    const { container, rerender } = render(<List order={["a", "b", "c"]} keyOf="1" />);
+    let readAfterWrite = false;
+    rect.mockImplementation(function (this: HTMLElement) {
+      const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-flip-key]"));
+      if (this.dataset.flipKey != null && rows.some((row) => row.style.transform !== "")) readAfterWrite = true;
+      const id = this.dataset.flipKey ?? "";
+      return { top: { c: 0, b: 40, a: 80 }[id] ?? 0 } as DOMRect;
+    });
+    rerender(<List order={["c", "b", "a"]} keyOf="2" />);
+    expect(container.querySelector<HTMLElement>('[data-flip-key="a"]')!.style.transform).toBe("translateY(-80px)");
+    expect(readAfterWrite).toBe(false);
+  });
+
+  it("flushes style once after offsetting, so a re-sort committed outside an input event still plays", () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const rect = stubTops({ a: 0, b: 40, c: 80 });
+    const { container, rerender } = render(<List order={["a", "b", "c"]} keyOf="1" />);
+    let flushesAfterWrite = 0;
+    rect.mockImplementation(function (this: HTMLElement) {
+      const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-flip-key]"));
+      if (rows.some((row) => row.style.transform !== "")) flushesAfterWrite++;
+      return { top: { c: 0, b: 40, a: 80 }[this.dataset.flipKey ?? ""] ?? 0 } as DOMRect;
+    });
+    rerender(<List order={["c", "b", "a"]} keyOf="2" />);
+    expect(flushesAfterWrite).toBe(1);
+  });
+
+  it("measures rows against the list, so a scroll between re-sorts leaves rows that kept their place alone", () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    let scroll = 0;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const key = this.dataset.flipKey;
+      const top = key == null ? 90 : { a: 100, b: 140 }[key] ?? 0;
+      return { top: top - scroll } as DOMRect;
+    });
+    const { container, rerender } = render(<List order={["a", "b"]} keyOf="1" />);
+    scroll = 50;
+    rerender(<List order={["a", "b"]} keyOf="2" />);
+    for (const row of container.querySelectorAll<HTMLElement>("[data-flip-key]")) expect(row.style.transform).toBe("");
   });
 });
