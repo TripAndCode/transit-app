@@ -42,8 +42,8 @@ DEV_SERVICES = {"db", "clickhouse"}
 # compose.yml dropped `container_name`, and the dev Postgres recreated by hand
 # on a newer major.
 DEV_CONTAINERS = {"transit-pg", "transit-ch", "transit-pg-latest-main"}
-# Throwaway stacks. Naming one is the signal that a command was pointed away
-# from the dev stores on purpose.
+# Throwaway stacks. Naming one exempts a destructive Make target, which names
+# no host of its own; it exempts nothing else.
 TEST_PORTS = (":5544", ":8124")
 # Make targets that take the Makefile's own DATABASE_URL default -- the real
 # dev database -- when the caller overrides nothing. They name no host, port or
@@ -72,9 +72,15 @@ WRITE = re.compile(
 # literal project.
 CONTAINER = re.compile(r"[a-z0-9_.-]*-(db|clickhouse)-\d+")
 # compose.yml's named volumes, as compose publishes them: `<project>_<name>`.
+# The hand-made dev Postgres container mounts the compose `transit_pgdata` too.
 DEV_VOLUME = re.compile(r"(?:[a-z0-9_.-]+_)?transit_(?:pgdata|chdata)")
 # `-v`/`--volumes` on `docker rm`, alone or folded into a short-flag cluster (`-fv`).
-VOLUME_FLAG = re.compile(r"--volumes|-[a-z]*v[a-z]*")
+VOLUME_FLAG = re.compile(r"--volumes(=\S*)?|-[a-z]*v[a-z]*")
+LONG_VOLUME_FLAG = re.compile(r"--volumes(=\S*)?")
+# What separates words for the teardown checks: whitespace, quotes and shell
+# punctuation. Shell grammar is deliberately ignored, so a teardown inside
+# quotes, after `bash -c`, or glued to `;` or `>` is read like any other.
+_WORD_SPLIT = re.compile(r"[\s;&|<>()`'\"]+")
 # Docker CLI global options that take their value as the next token, so the
 # subcommand is read after the value rather than mistaken for it.
 DOCKER_VALUE_FLAGS = {
@@ -89,22 +95,23 @@ DOCKER_VALUE_FLAGS = {
     "--tlscert",
     "--tlskey",
 }
-# The shell's DATABASE_URL is the dev database. A command that expands it is
-# aimed there whatever else it says: an inline `DATABASE_URL=<throwaway> cmd
+# The shell's DATABASE_URL is the dev database, so a command that expands it is
+# treated as aimed there. An inline `DATABASE_URL=<throwaway> cmd
 # "$DATABASE_URL"` assignment does not reach the expansion, which the shell
-# performs first. Naming the throwaway URL itself is the way to write to it.
+# performs first, and a preceding `export` is not told apart either; naming the
+# throwaway URL itself is the way to write to it.
 DATABASE_URL_REF = re.compile(r"\$\{?DATABASE_URL\b")
 
 
 def normalise_docker(tokens: list[str]) -> list[str]:
     """Spell the standalone `docker-compose` binary as `docker compose`, and a
     path-invoked binary by its bare name, so one set of checks covers every
-    spelling of the same command. Only a bare name or a filesystem path counts:
-    a URL whose path ends in `docker` is an argument, not the binary."""
+    spelling of the same command. A URL whose path ends in `docker` is an
+    argument, not the binary."""
     out: list[str] = []
     for tok in tokens:
         name = tok.rsplit("/", 1)[-1]
-        if name != tok and not tok.startswith(("/", "./", "../", "~/")):
+        if "://" in tok:
             out.append(tok)
         elif name == "docker-compose":
             out += ["docker", "compose"]
@@ -128,56 +135,36 @@ def docker_subcommands(lowered: list[str]) -> list[list[str]]:
     return found
 
 
-def names_a_computed_list(lowered: list[str]) -> bool:
-    """Targets resolved at run time can name the dataset without spelling it."""
-    return "xargs" in lowered or any("$(" in tok or "`" in tok for tok in lowered)
-
-
-def words_of(lowered: list[str]) -> list[str]:
-    """The tokens with subshell and substitution parentheses peeled off, plus the
-    word a `$(` or `(` opens, so `(docker` and `x=$(docker` still read as
-    `docker` and `-v)` as `-v`."""
-    out: list[str] = []
-    for tok in lowered:
-        out.append(tok.strip("()"))
-        if "(" in tok:
-            out.append(tok.rsplit("(", 1)[1].strip("()"))
-    return [tok for tok in out if tok]
-
-
-def destroys_dev_volume(lowered: list[str]) -> bool:
+def destroys_dev_volume(cmd: str) -> bool:
     """A teardown that removes the dataset's volume carries no SQL keyword, so
     it is a block on its own rather than a target waiting for a mutation.
 
-    Judged over the whole command, every check evaluated: a check that read one
-    statement's trigger and returned early would let a later statement's
-    teardown through, so an unrelated `-v` elsewhere in the command can block
-    instead, the cheap direction.
+    Read as a bag of words over the whole command, every check evaluated: a
+    check that stopped at one statement's trigger would let a later statement's
+    teardown through. An unrelated `-v` elsewhere in the command, or a quoted
+    mention of a teardown, can block instead, the cheap direction.
     """
-    words = words_of(lowered)
+    words = normalise_docker([w for w in _WORD_SPLIT.split(cmd.lower()) if w])
     if "docker" not in words:
         return False
     present = set(words)
-    computed = names_a_computed_list(lowered)
-    compose_down_v = (
-        "compose" in present
-        and "down" in present
-        and any(tok in ("-v", "--volumes") or tok.startswith("--volumes=") for tok in words)
-    )
+    # Targets resolved at run time can name the dataset without spelling it.
+    computed = "xargs" in present or "$" in cmd or "`" in cmd
+    compose_down_v = "compose" in present and "down" in present and any(VOLUME_FLAG.fullmatch(w) for w in words)
     volume_rm = (
         "volume" in present
         and bool({"rm", "remove"} & present)
-        and (computed or any(DEV_VOLUME.fullmatch(tok) for tok in words))
+        and (computed or any(DEV_VOLUME.fullmatch(w) for w in words))
     )
-    prune = "prune" in present and ("volume" in present or "--volumes" in present)
+    prune = "prune" in present and ("volume" in present or any(LONG_VOLUME_FLAG.fullmatch(w) for w in words))
     # Docker's own `rm`, not an `rm` run inside a container by `docker exec`.
     rm_v = (
         any(
             sub[:1] == ["rm"] or sub in (["container", "rm"], ["container", "remove"])
             for sub in docker_subcommands(words)
         )
-        and (computed or any(tok in DEV_CONTAINERS or CONTAINER.fullmatch(tok) for tok in words))
-        and any(VOLUME_FLAG.fullmatch(tok) for tok in words)
+        and (computed or any(w in DEV_CONTAINERS or CONTAINER.fullmatch(w) for w in words))
+        and any(VOLUME_FLAG.fullmatch(w) for w in words)
     )
     return compose_down_v or volume_rm or prune or rm_v
 
@@ -229,7 +216,7 @@ def should_block(cmd: str) -> bool:
         tokens = cmd.split()
     tokens = normalise_docker(tokens)
     lowered = [t.lower() for t in tokens]
-    if destroys_dev_volume(lowered):
+    if destroys_dev_volume(cmd):
         return True
     if not targets_dev_db(tokens, cmd):
         return False
@@ -256,7 +243,8 @@ def main() -> int:
         sys.stderr.write(
             "BLOCKED: write or volume teardown against a dev store (Postgres :5433/:5543 / ClickHouse :8123 / "
             "the transit_pgdata and transit_chdata volumes) — both hold real production data and are read-only. "
-            "Use the throwaway :5544 / :8124 pair. See AGENTS.md.\n"
+            "Use the throwaway :5544 / :8124 pair; a volume teardown is judged over the whole command, "
+            "so run it as its own call. See AGENTS.md.\n"
         )
         return 2
     return 0

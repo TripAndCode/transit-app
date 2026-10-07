@@ -93,14 +93,15 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   is blocked on its own: `compose down -v`, `docker volume rm` of a
   `transit_*data` volume or of a list computed at run time, any `docker volume
   prune` or `docker system prune --volumes`, and docker's own `rm -v` of a dev
-  container or of a computed list. Teardown is judged over the whole command, so
-  an unrelated `-v` in the same command blocks too: run the teardown as its own
-  call. `docker-compose` counts as `docker compose`. It has no visibility into a
-  script's contents beyond that, or into a `DATABASE_URL` set outside the
-  command line it sees, and it deliberately still blocks prose that merely names
-  a dev store next to a write-sounding word — a false block only costs a
-  rephrase, a missed write costs the dataset. Treat the rule in `AGENTS.md` as
-  the protection, not the hook.
+  container or of a computed list. Teardown is matched on the command's words
+  with quotes and shell punctuation ignored, so a quoted mention blocks too, and
+  judged over the whole command, so an unrelated `-v` in the same command blocks
+  too: run the teardown as its own call. `docker-compose` counts as `docker
+  compose`. It has no visibility into a script's contents beyond that, or into a
+  `DATABASE_URL` set outside the command line it sees, and it deliberately still
+  blocks prose that merely names a dev store next to a write-sounding word — a
+  false block only costs a rephrase, a missed write costs the dataset. Treat the
+  rule in `AGENTS.md` as the protection, not the hook.
 - No command here commits or pushes without explicit user go-ahead.
 - Neither `/address-my-pr-comments` nor `/follow-up-pr-review` calls the GraphQL
   `resolveReviewThread` mutation — resolving is always a manual step in the GitHub UI.

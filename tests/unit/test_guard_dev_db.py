@@ -87,7 +87,8 @@ BLOCKED = [
     pytest.param("docker-compose down -v", id="hyphenated-compose-down-volumes"),
     pytest.param('docker-compose exec db psql -U transit -c "DROP TABLE updates"', id="hyphenated-compose-exec"),
     pytest.param("/usr/local/bin/docker volume rm transit_pgdata", id="path-invoked-docker"),
-    # The shell's DATABASE_URL is the dev database unless the command says otherwise.
+    # Any expansion of the shell's DATABASE_URL counts as the dev database; name a
+    # throwaway URL literally.
     pytest.param('psql "$DATABASE_URL" -c "DELETE FROM agencies WHERE agency_id = 9"', id="database-url-write"),
     pytest.param('psql "${DATABASE_URL}" -f fix.sql', id="database-url-braced-script"),
     # The shell expands "$DATABASE_URL" before the inline assignment applies, so
@@ -102,8 +103,8 @@ BLOCKED = [
     pytest.param("docker volume ls -q | xargs docker volume rm", id="volume-rm-via-xargs"),
     pytest.param("docker rm -v $(docker ps -aq --filter name=transit-pg)", id="rm-v-computed-list"),
     pytest.param("docker ps -q --filter name=transit-pg | xargs docker rm -v", id="rm-v-via-xargs"),
-    # Each statement is judged on its own tokens: a harmless first statement must
-    # not satisfy a check that then inspects the wrong statement's arguments.
+    # Every check runs over the whole command, so a harmless first statement
+    # cannot end the evaluation before a later statement's teardown is read.
     pytest.param("docker compose down\ndocker volume rm transit_pgdata", id="teardown-after-a-newline"),
     pytest.param("docker compose down && docker volume rm transit-app_transit_pgdata", id="teardown-after-and"),
     pytest.param("docker volume ls; docker rm -v transit-pg", id="rm-v-after-a-volume-statement"),
@@ -117,6 +118,23 @@ BLOCKED = [
     pytest.param("x=$(docker volume rm transit_pgdata)", id="volume-rm-in-a-substitution"),
     pytest.param("docker compose down --volumes=true", id="down-volumes-with-a-value"),
     pytest.param("docker --tlscacert ca.pem rm -v transit-pg", id="rm-after-a-tls-option"),
+    # Shell operators glued to the last word, and teardowns inside quotes.
+    pytest.param("docker compose down -v; docker compose up -d", id="down-v-before-a-semicolon"),
+    pytest.param("docker volume rm transit_pgdata;", id="volume-rm-before-a-semicolon"),
+    pytest.param("docker rm -fv transit-pg>/dev/null", id="rm-v-before-a-redirect"),
+    pytest.param("docker compose down -v&&docker compose up -d", id="down-v-before-an-unspaced-and"),
+    pytest.param('bash -c "docker compose down -v"', id="down-v-inside-bash-c"),
+    pytest.param('x="$(docker volume rm transit_pgdata)"', id="volume-rm-in-a-quoted-substitution"),
+    pytest.param(
+        "# don't keep it\ndocker volume rm transit_pgdata\n# it's gone", id="teardown-between-two-apostrophes"
+    ),
+    pytest.param('docker volume rm "transit_pgdata"  # don\'t keep it', id="quoted-volume-beside-an-apostrophe"),
+    # Flag spellings with a value or folded into a cluster.
+    pytest.param("docker rm --volumes=true transit-pg", id="rm-volumes-with-a-value"),
+    pytest.param("docker system prune --volumes=true -f", id="prune-volumes-with-a-value"),
+    pytest.param("docker compose down -vt 5", id="down-v-in-a-flag-cluster"),
+    # Docker Desktop's CLI location on macOS.
+    pytest.param("$HOME/.docker/bin/docker volume rm transit_pgdata", id="docker-desktop-cli-path"),
     # A URL whose path ends in `docker` is not the docker binary.
     pytest.param(
         'psql postgresql://transit:transit@localhost:5433/docker -c "DROP TABLE x"', id="url-ending-in-docker"
