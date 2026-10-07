@@ -38,12 +38,12 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  function close() {
+  function close(refocus = true) {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (refocus) triggerRef.current?.focus();
   }
 
-  usePopoverDismiss(open, ref, close);
+  usePopoverDismiss(open, ref, (reason) => close(reason === "escape"));
 
   /** Clamp and emit a numeric value; no-op for non-finite inputs. */
   function commit(next: number) {

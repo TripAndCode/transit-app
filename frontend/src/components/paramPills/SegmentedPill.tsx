@@ -29,12 +29,12 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
   const triggerRef = useRef<HTMLButtonElement>(null);
   const current = options.find((o) => o.value === value) ?? options[0];
 
-  function close() {
+  function close(refocus = true) {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (refocus) triggerRef.current?.focus();
   }
 
-  usePopoverDismiss(open, ref, close);
+  usePopoverDismiss(open, ref, (reason) => close(reason === "escape"));
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>

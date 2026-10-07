@@ -360,9 +360,9 @@ function ShortcutHintChip({ shortcuts }: { shortcuts: readonly ShortcutHint[] })
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
 
-  usePopoverDismiss(open, rootRef, () => {
+  usePopoverDismiss(open, rootRef, (reason) => {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (reason === "escape") triggerRef.current?.focus();
   });
 
   return (

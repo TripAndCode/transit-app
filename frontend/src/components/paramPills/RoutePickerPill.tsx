@@ -63,10 +63,10 @@ export function RoutePickerPill({
   const { t } = useTranslation();
   const { data: routes = [], isLoading } = useRoutes(agencyId);
 
-  function close() {
+  function close(refocus = true) {
     setQ("");
     setOpen(false);
-    triggerRef.current?.focus();
+    if (refocus) triggerRef.current?.focus();
   }
 
   // Decide open direction once, right when the popover mounts — measuring the
@@ -79,7 +79,7 @@ export function RoutePickerPill({
     setOpenUp(spaceBelow < POPOVER_HEIGHT_ESTIMATE && spaceAbove > spaceBelow);
   }, [open]);
 
-  usePopoverDismiss(open, ref, close);
+  usePopoverDismiss(open, ref, (reason) => close(reason === "escape"));
 
   const ql = q.trim().toLowerCase();
   const filteredList = (ql

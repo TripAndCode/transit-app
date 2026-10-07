@@ -99,7 +99,15 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     menuTriggerRef.current?.focus();
   }
 
-  usePopoverDismiss(menu !== null, menuRef, closeMenu);
+  // The menu renders only while its conversation still exists; a refetch that
+  // drops it must not leave an invisible layer answering the next Escape.
+  const activeConv = menu ? conversations.find((c) => c.conversation_id === menu.convId) : undefined;
+  usePopoverDismiss(
+    menu !== null && activeConv !== undefined,
+    menuRef,
+    (reason) => (reason === "escape" ? closeMenu() : setMenu(null)),
+    menuTriggerRef,
+  );
 
   // Focus enters the menu as it opens: an operator who reached the kebab by
   // keyboard must not have to Tab through the rest of the sidebar to get to
@@ -204,7 +212,6 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     { labelKey: "ask.sidebar.earlier", items: earlierList },
   ];
 
-  const activeConv = menu ? conversations.find((c) => c.conversation_id === menu.convId) : null;
 
   // ── sidebar content ──────────────────────────────────────────────────────
   const sidebarContent = (

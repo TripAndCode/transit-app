@@ -66,7 +66,7 @@ export function useFocusTrap(
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (ACTIVE_TRAPS[ACTIVE_TRAPS.length - 1] !== token) return;
+        if (ACTIVE_TRAPS[ACTIVE_TRAPS.length - 1] !== token || isImeKey(e)) return;
         e.stopPropagation();
         escape();
         return;
@@ -112,6 +112,12 @@ export function useFocusTrap(
  * `stopPropagation` from the topmost trap does not reach a sibling listener
  * on the same target.
  */
+/** An Escape that ends an IME composition belongs to the input method, not to
+ *  the overlay: cancelling a kana conversion must not close what it is typed in. */
+function isImeKey(e: KeyboardEvent): boolean {
+  return e.isComposing || e.keyCode === 229;
+}
+
 export function useTopmostEscape(active: boolean, onEscape: () => void): void {
   const escape = useEffectEvent(() => onEscape());
 
@@ -122,7 +128,7 @@ export function useTopmostEscape(active: boolean, onEscape: () => void): void {
 
     function onKeyDown(e: KeyboardEvent) {
       if (ACTIVE_TRAPS[ACTIVE_TRAPS.length - 1] !== token) return;
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || isImeKey(e)) return;
       e.stopPropagation();
       escape();
     }

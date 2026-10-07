@@ -72,9 +72,9 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  usePopoverDismiss(open, ref, () => {
+  usePopoverDismiss(open, ref, (reason) => {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (reason === "escape") triggerRef.current?.focus();
   });
 
   if (sessionLoading || configLoading) return null;

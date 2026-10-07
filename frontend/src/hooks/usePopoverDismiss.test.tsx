@@ -4,16 +4,25 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { usePopoverDismiss } from "./usePopoverDismiss";
 import { useFocusTrap } from "./useFocusTrap";
 
-function Popover({ onClose }: { onClose: () => void }) {
+function Popover({ onClose }: { onClose: (reason: "escape" | "outside") => void }) {
   const [open, setOpen] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
-  usePopoverDismiss(open, rootRef, () => {
-    setOpen(false);
-    onClose();
-  });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  usePopoverDismiss(
+    open,
+    rootRef,
+    (reason) => {
+      setOpen(false);
+      onClose(reason);
+    },
+    triggerRef,
+  );
   return (
     <div>
       <button type="button">outside</button>
+      <button type="button" ref={triggerRef}>
+        trigger
+      </button>
       {open && (
         <div ref={rootRef} data-testid="popover">
           <button type="button">inside</button>
@@ -39,7 +48,23 @@ describe("usePopoverDismiss", () => {
     render(<Popover onClose={onClose} />);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith("escape");
     expect(screen.queryByTestId("popover")).toBeNull();
+  });
+
+  it("keeps an Escape that ends an IME composition", () => {
+    const onClose = vi.fn();
+    render(<Popover onClose={onClose} />);
+    fireEvent.keyDown(document, { key: "Escape", isComposing: true });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("popover")).toBeInTheDocument();
+  });
+
+  it("leaves a pointer-down on its trigger to the trigger's own toggle", () => {
+    const onClose = vi.fn();
+    render(<Popover onClose={onClose} />);
+    fireEvent.mouseDown(screen.getByText("trigger"));
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("closes on a pointer-down outside its root and ignores one inside", () => {
@@ -49,6 +74,7 @@ describe("usePopoverDismiss", () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.mouseDown(screen.getByText("outside"));
     expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith("outside");
   });
 
   it("leaves Escape to a focus trap opened over it", () => {

@@ -28,13 +28,15 @@ export function AgencyPicker() {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const currentId = useAgencyId();
   const current = agencies?.find((a) => a.agency_id === currentId);
 
-  usePopoverDismiss(open, ref, () => {
+  usePopoverDismiss(open, ref, (reason) => {
     setOpen(false);
     setFilter("");
+    if (reason === "escape") triggerRef.current?.focus();
   });
 
   const filtered = filterAgencies(agencies, filter);
@@ -61,6 +63,7 @@ export function AgencyPicker() {
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         style={{

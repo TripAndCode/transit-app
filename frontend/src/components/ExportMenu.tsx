@@ -49,9 +49,9 @@ export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint
 
   const currentUrl = `${window.location.origin}${location.pathname}${location.search}`;
 
-  usePopoverDismiss(open, rootRef, () => {
+  usePopoverDismiss(open, rootRef, (reason) => {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (reason === "escape") triggerRef.current?.focus();
   });
 
   // A menu that opens without taking focus strands a keyboard user behind
