@@ -1,16 +1,16 @@
-// Custom properties that are genuinely set per-instance at runtime (an
-// inline `style.setProperty`/style-object write), never declared in
-// global.css by design — DailyChart/ChartEnter's measured stroke length,
-// HourlyHeatmap/DowBandGrid's per-cell data-driven opacity,
-// ConcentrationBar's per-row rank opacity, MapTab's resizable queue-column
-// width, RevealSection's place in its tab's one entrance group,
-// HeatSurface's per-cell inset ring (--heat-ring), and a compare bar's share
-// of its fixed axis (--bar-share). A literal fallback on one of these means
-// "the instance hasn't set it yet", not "this design token is missing", so
-// check-css-tokens exempts them even though nothing in global.css defines
-// them. Anything else with an unresolved name and a literal fallback is
-// presumed to be a typo'd or renamed design token (e.g. `var(--radius-md,
-// 10px)` when only `--radius-lg` was ever defined) and must still resolve.
+// Custom properties that are genuinely set per-instance at runtime (an inline
+// `style.setProperty`/style-object write), never declared in global.css by
+// design — DailyChart/ChartEnter's measured stroke length,
+// HourlyHeatmap/DowBandGrid's per-cell data-driven opacity, ConcentrationBar's
+// per-row rank opacity, MapTab's resizable queue-column width, RevealSection's
+// place in its tab's one entrance group, HeatSurface's per-cell inset ring
+// (--heat-ring), and a bar's share of its axis (--bar-share: the compare bars,
+// the routes-to-check bars). A literal fallback on one of these means "the
+// instance hasn't set it yet", not "this design token is missing", so
+// check-css-tokens exempts them even though nothing in global.css defines them.
+// Anything else with an unresolved name and a literal fallback is presumed to
+// be a typo'd or renamed design token (e.g. `var(--radius-md, 10px)` when only
+// `--radius-lg` was ever defined) and must still resolve.
 //
 // This list is the one hole in that check, so it lives here rather than
 // inside the checker: its exact membership is pinned by a test, and a name

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewHeroRow } from "./OverviewHeroRow";
 import { stubReducedMotion } from "../test/reducedMotion";
@@ -46,6 +46,16 @@ function mockHooks(routeCount: number, feedAgeHours: number | null) {
   } as never);
 }
 
+// The feed's latest report at an exact instant, for a test that pins the
+// clock rather than offsetting from the real one.
+function mockFeedSummary(capturedAt: string | null) {
+  mockHooks(38, null);
+  vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+    data: { latest_captured_at: capturedAt, date: null, routes: [], raw_samples: 0, clamp_count: 0 },
+    isPending: false,
+  } as never);
+}
+
 function renderHero(overrides: {
   headline?: OverviewHeadline;
   delayedCount?: number;
@@ -72,6 +82,7 @@ describe("OverviewHeroRow", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -164,6 +175,8 @@ describe("OverviewHeroRow", () => {
     mockHooks(38, 30 * 24);
     renderHero();
     expect(screen.getByText("Feed quiet for 30 days")).toBeInTheDocument();
+    // A quiet feed keeps the dot but not the live green.
+    expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
   });
 
   it("says the feed is reporting live while its newest report is minutes old", () => {
@@ -238,5 +251,76 @@ describe("OverviewHeroRow", () => {
     const { container } = renderHero({ sparklinePoints: [] });
     expect(container.querySelector('[data-testid="sparkline-baseline"]')).toBeNull();
     expect(screen.queryByText(/Selected period's average/)).toBeNull();
+  });
+
+  it("draws the day-pulse ribbon behind the hero from peak_hour.by_hour", () => {
+    mockHooks(38, 0.1);
+    renderHero({ peakHour: { by_hour: Array.from({ length: 24 }, (_, h) => h / 4), peak_hour: 8, peak_avg_min: 5.75 } });
+    // First child: the two columns after it are positioned, so they paint
+    // over it by DOM order.
+    expect(document.querySelector(".ov-hero > .ov-pulse-ribbon:first-child")).not.toBeNull();
+    expect(document.querySelector(".ov-hero > .ov-hero-text")).not.toBeNull();
+  });
+
+  it("draws no ribbon without an hourly profile", () => {
+    mockHooks(38, 0.1);
+    renderHero({ peakHour: null });
+    expect(document.querySelector(".ov-pulse-ribbon")).toBeNull();
+  });
+
+  it("breathes only while the latest report is under two minutes old", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-03T08:00:00Z") });
+    mockFeedSummary("2026-10-03T07:59:00Z");
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot--live")).not.toBeNull();
+    cleanup();
+    mockFeedSummary("2026-10-03T07:55:00Z");
+    renderHero();
+    expect(screen.getByText("Reporting live")).toBeInTheDocument();
+    expect(document.querySelector(".ov-fresh-dot")).not.toBeNull();
+    expect(document.querySelector(".ov-fresh-dot--live")).toBeNull();
+    expect(document.querySelector(".ov-fresh-dot--stale")).toBeNull();
+  });
+
+  it("claims no live green for a feed that has never reported, and no dot at all before the status is read", () => {
+    mockFeedSummary(null);
+    renderHero();
+    expect(screen.getByText("No reports yet")).toBeInTheDocument();
+    expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
+    cleanup();
+    mockHooks(38, null);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({ data: undefined, isPending: true } as never);
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot")).toBeNull();
+  });
+
+  it("drops the live green when the live window closes, without a refetch", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-03T08:00:00Z") });
+    mockFeedSummary("2026-10-03T07:55:00Z");
+    renderHero();
+    expect(screen.getByText("Reporting live")).toBeInTheDocument();
+    expect(document.querySelector(".ov-fresh-dot--stale")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(5 * 60_000 + 1_000);
+    });
+    expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
+    expect(screen.queryByText("Reporting live")).toBeNull();
+  });
+
+  it("prints the delayed-route count in the numeric face", () => {
+    mockHooks(38, 0.1);
+    renderHero();
+    expect(screen.getByText("3 of 38 routes")).toHaveClass("num");
+  });
+
+  it("stops breathing when the two-minute window closes, without a refetch", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-03T08:00:00Z") });
+    mockFeedSummary("2026-10-03T07:59:00Z");
+    renderHero();
+    expect(document.querySelector(".ov-fresh-dot--live")).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(document.querySelector(".ov-fresh-dot--live")).toBeNull();
   });
 });

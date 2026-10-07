@@ -1,9 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RoutesToCheckList } from "./RoutesToCheckList";
 import type { OverviewTopDelayedRoute } from "../api/types";
+import { stubReducedMotion } from "../test/reducedMotion";
+import * as flipModule from "../hooks/useFlipRows";
 
 function routes(): OverviewTopDelayedRoute[] {
   return [
@@ -13,17 +15,29 @@ function routes(): OverviewTopDelayedRoute[] {
   ];
 }
 
-function renderList(rs: OverviewTopDelayedRoute[]) {
-  return renderWithProviders(
+function route(code: string, avgMin: number): OverviewTopDelayedRoute {
+  return { route_code: code, route_short_name: null, avg_min: avgMin };
+}
+
+function list(rs: OverviewTopDelayedRoute[]) {
+  return (
     <MemoryRouter initialEntries={["/agencies/1/pulse?from=2026-09-01&to=2026-09-30"]}>
       <Routes>
         <Route path="/agencies/:agencyId/pulse" element={<RoutesToCheckList routes={rs} />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
+function renderList(rs: OverviewTopDelayedRoute[]) {
+  return renderWithProviders(list(rs));
+}
+
 describe("RoutesToCheckList", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("heads each severity band with a sentence that counts its routes, worst band first, no empty bands", () => {
     renderList(routes());
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
@@ -67,7 +81,46 @@ describe("RoutesToCheckList", () => {
     renderList(routes());
     const bars = document.querySelectorAll(".ov-check-fill");
     expect(bars).toHaveLength(3);
-    expect((bars[0] as HTMLElement).style.width).toBe("100%");
+    expect((bars[0] as HTMLElement).style.getPropertyValue("--bar-share")).toBe("1");
+  });
+
+  it("keys every row for FLIP and sizes the bar with a transform, not a width", () => {
+    renderList([route("3", 4.2), route("12", 2.1)]);
+    const rows = screen.getAllByRole("link");
+    expect(rows.map((r) => r.getAttribute("data-flip-key"))).toEqual(["3", "12"]);
+    const fill = rows[0].querySelector<HTMLElement>(".ov-check-fill")!;
+    expect(fill.style.getPropertyValue("--bar-share")).toBe("1");
+    expect(fill.style.width).toBe("");
+    expect(rows[1].querySelector<HTMLElement>(".ov-check-fill")!.style.getPropertyValue("--bar-share")).toBe("0.5");
+  });
+
+  it("keeps a route's row, and so its count-up and bar slide, when it crosses into another band", () => {
+    const { rerender } = renderList([route("A", 6.0), route("B", 4.0)]);
+    const before = screen.getByText("Route A").closest("a");
+    rerender(list([route("A", 4.5), route("B", 4.0)]));
+    expect(screen.getByText("Route A").closest("a")).toBe(before);
+  });
+
+  it("keys band headers for FLIP too, so a header slides with the rows around it", () => {
+    renderList([route("A", 6.0), route("B", 4.0)]);
+    const keys = Array.from(document.querySelectorAll("[data-flip-key]")).map((el) => el.getAttribute("data-flip-key"));
+    expect(keys).toEqual(["band:severe", "A", "band:moderate", "B"]);
+  });
+
+  it("re-measures for FLIP when a band header appears or goes, even if the route order holds", () => {
+    const flip = vi.spyOn(flipModule, "useFlipRows");
+    const { rerender } = renderList([route("A", 6.0), route("B", 4.0)]);
+    const first = flip.mock.calls.at(-1)?.[1];
+    rerender(list([route("A", 4.5), route("B", 4.0)]));
+    expect(flip.mock.calls.at(-1)?.[1]).not.toBe(first);
+  });
+
+  it("prints the figure with the numeric face and travels on change (reduced motion prints)", () => {
+    stubReducedMotion();
+    const { rerender } = renderList([route("3", 4.2)]);
+    expect(screen.getByText("4.2 min")).toHaveClass("num");
+    rerender(list([route("3", 3.0)]));
+    expect(screen.getByText("3.0 min")).toBeInTheDocument();
   });
 
   it("shows the empty-state message when there are no routes", () => {
