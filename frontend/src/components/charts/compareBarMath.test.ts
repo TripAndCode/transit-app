@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { COMPARE_AXIS_MAX_MIN, barScale, deltaFor, orderByPeriod, otherPeriod, parseCompareRows } from "./compareBarMath";
+import { deltaFor, orderByPeriod, otherPeriod, parseCompareRows } from "./compareBarMath";
 
 const rows = parseCompareRows([["3", 3.4, "2.7", 0.7, 0.7], ["12", 3.8, 3.1, 0.7, 0.7], ["885", null, 1.1, "", ""], ["2", 2.2, 3.5, 1.3, 1.3]]);
 
@@ -23,14 +23,7 @@ describe("orderByPeriod", () => {
   });
 });
 
-describe("barScale / deltaFor / otherPeriod", () => {
-  it("scales against the fixed 6-minute axis and clamps", () => {
-    expect(barScale(3)).toBe(0.5);
-    expect(barScale(9)).toBe(1);
-    expect(barScale(-1)).toBe(0);
-    expect(barScale(null)).toBe(0);
-    expect(COMPARE_AXIS_MAX_MIN).toBe(6);
-  });
+describe("deltaFor / otherPeriod", () => {
   it("delta is the shown period minus the ghost to the printed tenth, null when either is missing", () => {
     expect(deltaFor(rows[0], "weekday")).toBe(0.7);
     expect(deltaFor(rows[0], "weekend")).toBe(-0.7);

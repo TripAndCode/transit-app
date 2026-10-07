@@ -590,7 +590,7 @@ describe("AnalysisTab ranking coverage", () => {
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toMatch(/[?&]include_sparse=1(&|$)/);
   });
 
-  it("asks for the whole compare set, since the bars re-rank it by period rather than by gap", () => {
+  it("asks for the API's longest compare list, since the bars re-rank it by period rather than by gap", () => {
     const { useReport } = setup("/agencies/1/analysis/rider?report=compare_ranking", reportResponse("compare_ranking"), ["compare_ranking"]);
     expect(useReport.mock.calls.at(-1)?.[3]).toEqual({ limit: 500 });
     const href = screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "";

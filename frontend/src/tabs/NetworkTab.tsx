@@ -11,6 +11,7 @@ import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { PageHeader } from "../components/ui/PageHeader";
 import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
+import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "../components/charts/delayAxis";
 import { formatNumber, fmtPct, formatDateRange } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
@@ -20,12 +21,6 @@ import "./NetworkTab.css";
 
 const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
 
-/** Every agency's bar is drawn against this fixed span, never against the
- *  current maximum: a bar whose axis moves with the data says nothing about
- *  how one agency compares to another, or to the same agency last week.
- *  A delay past the top of the axis fills it and keeps its exact figure in
- *  the value column beside it. */
-const AXIS_MAX_MIN = 6;
 /** The severity threshold the product treats as "late", marked on the axis so
  *  a bar can be read against it without a legend. */
 const AXIS_MARK_MIN = 5;
@@ -89,8 +84,7 @@ function AgencyRow({
   const { t } = useTranslation();
   const a = agency;
   const displayedOnTimePct = weightedView ? a.weighted_on_time_pct : a.on_time_pct;
-  const axisPct =
-    a.avg_delay_min == null ? 0 : Math.min(Math.max(a.avg_delay_min, 0) / AXIS_MAX_MIN, 1) * 100;
+  const axisPct = delayAxisShare(a.avg_delay_min) * 100;
   const coverage =
     a.data_to == null
       ? t("network.no_data_in_range")
@@ -131,7 +125,7 @@ function AgencyRow({
         />
         <span
           className="network-row__axis-mark"
-          style={{ left: `${(AXIS_MARK_MIN / AXIS_MAX_MIN) * 100}%` }}
+          style={{ left: `${delayAxisShare(AXIS_MARK_MIN) * 100}%` }}
         />
       </div>
 
@@ -293,7 +287,7 @@ export function NetworkTab() {
             <div className="network-row network-row--head" aria-hidden="true">
               <span>{t("network.col_agency")}</span>
               <span style={{ textAlign: "right" }}>{t("network.col_avg_delay")}</span>
-              <span>{t("network.axis_caption", { max: AXIS_MAX_MIN })}</span>
+              <span>{t("network.axis_caption", { max: DELAY_AXIS_MAX_MIN })}</span>
               <span style={{ textAlign: "right" }}>{t("network.col_on_time")}</span>
             </div>
             {cappedAgencies.visible.map((a) => (

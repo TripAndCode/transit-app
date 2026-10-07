@@ -62,9 +62,9 @@ function hasCsv(data: ReportResponse): boolean {
   return true;
 }
 
-/** A ranking's coverage options; every other report takes none, and the API
- *  refuses them there. The compare report is drawn re-ranked by one period's
- *  delay, so it asks for every route: the API's default length keeps the
+/** A ranking's coverage options; the API refuses `include_sparse` on every
+ *  other report. The compare report is drawn re-ranked by one period's delay,
+ *  so it asks for the API's maximum length: the default length keeps only the
  *  widest gaps, which would drop a route that is slow in both periods. */
 function rankingOptions(
   reportType: string | null | undefined,
@@ -250,7 +250,7 @@ export function AnalysisTab({
                 </details>
               </>
             ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
-              <CompareBars rows={detail.data.rows} />
+              <CompareBars rows={detail.data.rows} resetKey={`${id ?? "none"}:${scopeToQueryString(ctx)}`} />
             ) : detail.data.rows.length > 0 ? (
               <>
                 <ReportTable

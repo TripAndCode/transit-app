@@ -11,7 +11,8 @@ import { useFlipRows } from "../../hooks/useFlipRows";
 import { delayColor, delayTextColor } from "../../styles/tokens";
 import { dowValueLabel } from "../../utils/filterValueLabels";
 import { RouteLabel } from "../RouteLabel";
-import { COMPARE_AXIS_MAX_MIN, PERIODS, barScale, deltaFor, orderByPeriod, otherPeriod, parseCompareRows, type Period } from "./compareBarMath";
+import { PERIODS, deltaFor, orderByPeriod, otherPeriod, parseCompareRows, type Period } from "./compareBarMath";
+import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "./delayAxis";
 import "./compareBars.css";
 
 const ROWS_CAP = 200;
@@ -22,12 +23,15 @@ function Figure({ value }: { value: number }) {
 }
 
 /**
- * The compare report as bars that morph. Switching the period scales every
- * bar from its previous length (transform, never width), re-sorts the rows
- * and lets FLIP carry each to its new rank, while the other period stays as
- * a dashed ghost so the comparison is on screen rather than in memory.
+ * The compare report as bars that morph. Switching the period slides every
+ * bar to its new length (translateX, never width or scaleX), re-sorts the
+ * rows and lets FLIP carry each to its new rank, while the other period stays
+ * as a dashed ghost so the comparison is on screen rather than in memory.
+ *
+ * `resetKey` names the list (its scope): "show more" holds across a period
+ * switch, which re-ranks the same routes, and resets for a different list.
  */
-export function CompareBars({ rows }: { rows: readonly unknown[][] }) {
+export function CompareBars({ rows, resetKey }: { rows: readonly unknown[][]; resetKey: string }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const names = useRouteNames(id);
@@ -36,7 +40,7 @@ export function CompareBars({ rows }: { rows: readonly unknown[][] }) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const ordered = orderByPeriod(parseCompareRows(rows), period);
   useFlipRows(listRef, ordered.map((r) => r.route_code).join(","));
-  const capped = useCappedList(ordered, ROWS_CAP, period);
+  const capped = useCappedList(ordered, ROWS_CAP, resetKey);
   const ghost = otherPeriod(period);
 
   return (
@@ -55,7 +59,7 @@ export function CompareBars({ rows }: { rows: readonly unknown[][] }) {
         ref={listRef}
         className="compare-bars__list"
         role="list"
-        aria-label={t("compare.bars.aria", { period: dowValueLabel(period, t), max: COMPARE_AXIS_MAX_MIN })}
+        aria-label={t("compare.bars.aria", { period: dowValueLabel(period, t), max: DELAY_AXIS_MAX_MIN })}
       >
         {capped.visible.map((row) => {
           const v = row[period];
@@ -73,8 +77,8 @@ export function CompareBars({ rows }: { rows: readonly unknown[][] }) {
                 )}
               </span>
               <span className="compare-bar__track" aria-hidden="true">
-                <i className="compare-bar__ghost" style={{ "--bar-share": barScale(row[ghost]) } as CSSProperties} />
-                <i className="compare-bar__fill" style={{ "--bar-share": barScale(v), background: v == null ? "transparent" : delayColor(v) } as CSSProperties} />
+                <i className="compare-bar__ghost" style={{ "--bar-share": delayAxisShare(row[ghost]) } as CSSProperties} />
+                <i className="compare-bar__fill" style={{ "--bar-share": delayAxisShare(v), background: v == null ? "transparent" : delayColor(v) } as CSSProperties} />
               </span>
               <span className="compare-bar__value num" style={{ color: v == null ? undefined : delayTextColor(v) }}>
                 {v == null ? "—" : <Figure value={v} />}

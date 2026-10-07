@@ -16,7 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 const mount = (search = "", rows: unknown[][] = ROWS) =>
-  renderWithProviders(<MemoryRouter initialEntries={[`/agencies/1/compare${search}`]}><CompareBars rows={rows} /></MemoryRouter>);
+  renderWithProviders(<MemoryRouter initialEntries={[`/agencies/1/compare${search}`]}><CompareBars rows={rows} resetKey="scope-a" /></MemoryRouter>);
 
 describe("CompareBars", () => {
   it("shows weekday first, worst on top, each row keyed for FLIP with a scaled bar and a ghost of the other period", () => {
@@ -46,6 +46,22 @@ describe("CompareBars", () => {
     await userEvent.click(screen.getByRole("button", { name: "Weekend/Holiday" }));
     expect(delta().textContent).toBe("0.0");
     expect(delta().className).toBe("compare-bar__delta num");
+  });
+  it("a raised cap holds across a period switch, which re-ranks the same routes, and resets for a new list", async () => {
+    const many = Array.from({ length: 250 }, (_, i) => [`r${i}`, 1 + i / 100, 2 - i / 100, 0, 0]);
+    const ui = (resetKey: string) => (
+      <MemoryRouter initialEntries={["/agencies/1/compare"]}>
+        <CompareBars rows={many} resetKey={resetKey} />
+      </MemoryRouter>
+    );
+    const { rerender } = renderWithProviders(ui("scope-a"));
+    expect(screen.getAllByTestId("compare-bar-row")).toHaveLength(200);
+    await userEvent.click(screen.getByRole("button", { name: /Show 50 more/ }));
+    expect(screen.getAllByTestId("compare-bar-row")).toHaveLength(250);
+    await userEvent.click(screen.getByRole("button", { name: "Weekend/Holiday" }));
+    expect(screen.getAllByTestId("compare-bar-row")).toHaveLength(250);
+    rerender(ui("scope-b"));
+    expect(screen.getAllByTestId("compare-bar-row")).toHaveLength(200);
   });
   it("reads the period from the URL and the value carries the numeric face", () => {
     mount("?period=weekend");

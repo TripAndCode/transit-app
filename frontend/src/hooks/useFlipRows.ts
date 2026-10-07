@@ -36,15 +36,19 @@ export function useFlipRows(containerRef: RefObject<HTMLElement | null>, signal:
     const previous = FLIP_POSITIONS.get(container);
     const current = new Map<string, number>();
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    // Every row is measured before any is offset: a read after a write forces
+    // a fresh style pass, so interleaving them costs one per moved row.
+    const moves: [HTMLElement, number][] = [];
     for (const row of rows) {
       const key = row.dataset.flipKey;
       if (key == null) continue;
       const top = row.getBoundingClientRect().top;
       current.set(key, top);
       const before = previous?.get(key);
-      if (before == null || reduced) continue;
-      const dy = before - top;
-      if (dy === 0) continue;
+      if (before == null || reduced || before === top) continue;
+      moves.push([row, before - top]);
+    }
+    for (const [row, dy] of moves) {
       row.style.transition = "none";
       row.style.transform = `translateY(${dy}px)`;
       frames.push(

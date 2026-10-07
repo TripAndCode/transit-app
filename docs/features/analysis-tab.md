@@ -80,6 +80,12 @@ What the user sees/does:
   `route_forecast` instead renders `frontend/src/components/RouteForecastSection.tsx`
   (agency-wide landing view, or a per-route detail view when exactly one
   route is selected in the shared filter - see its own file-header comment).
+  `compare_ranking` instead renders
+  `frontend/src/components/charts/CompareBars.tsx`: one bar per route on the
+  fixed delay axis, ranked worst first by the period a URL-backed `period`
+  toggle (`weekday`/`weekend`) shows, with the other period as a dashed ghost
+  and the signed gap beside it. The API orders this report by gap, so the tab
+  asks for its maximum length rather than the default widest-gap top.
 - **Insight Panel** (right column) —
   `frontend/src/components/InsightPanel.tsx`: a single proactive suggestion
   ("this route's trend just shifted", "on-time rate dropped", etc.),
@@ -252,6 +258,8 @@ the scope as one sentence above their content
 | `frontend/src/components/charts/HourlyHeatmap.tsx` | Trend report's hourly heatmap |
 | `frontend/src/components/charts/DowBandGrid.tsx` | `BandGrid`/`Legend` — dow x time-band grid used by `RouteForecastSection` |
 | `frontend/src/components/charts/HeatSurface.tsx`, `heatSurfaceModel.ts` | The trend report's dow x hour surface: the two profiles, the faint low-confidence cells, and the generated row/column dim rules |
+| `frontend/src/components/charts/CompareBars.tsx`, `compareBarMath.ts` | `compare_ranking` report body: per-period ranking, ghost bar, and rounded gap |
+| `frontend/src/components/charts/delayAxis.ts` | The fixed delay axis shared by the compare bars and the Network screen's agency bars |
 | `frontend/src/components/RouteForecastSection.tsx` | `route_forecast` report body (agency-wide + per-route views) |
 | `frontend/src/components/InsightPanel.tsx` | Proactive single-suggestion panel |
 | `frontend/src/components/InsightHint.tsx` | `?` hint popover explaining each report type |
@@ -291,6 +299,8 @@ the scope as one sentence above their content
   `frontend/src/components/charts/DowBandGrid.test.tsx`,
   `frontend/src/components/charts/HeatSurface.test.tsx`,
   `frontend/src/components/charts/heatSurfaceModel.test.ts`,
+  `frontend/src/components/charts/CompareBars.test.tsx`,
+  `frontend/src/components/charts/compareBarMath.test.ts`,
   `frontend/src/components/RouteForecastSection.test.tsx`,
   `frontend/src/components/InsightPanel.test.tsx`,
   `frontend/src/tabs/destinationTabs.test.tsx` and

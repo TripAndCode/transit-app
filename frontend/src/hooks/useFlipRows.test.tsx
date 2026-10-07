@@ -82,4 +82,20 @@ describe("useFlipRows", () => {
     rerender(<List order={["a", "b"]} keyOf="2" />);
     expect(container.querySelector<HTMLElement>('[data-flip-key="b"]')!.style.transform).toBe("");
   });
+
+  it("measures every row before offsetting any, so a long re-sort forces one style pass, not one per row", () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const rect = stubTops({ a: 0, b: 40, c: 80 });
+    const { container, rerender } = render(<List order={["a", "b", "c"]} keyOf="1" />);
+    let readAfterWrite = false;
+    rect.mockImplementation(function (this: HTMLElement) {
+      const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-flip-key]"));
+      if (rows.some((row) => row.style.transform !== "")) readAfterWrite = true;
+      const id = this.dataset.flipKey ?? "";
+      return { top: { c: 0, b: 40, a: 80 }[id] ?? 0 } as DOMRect;
+    });
+    rerender(<List order={["c", "b", "a"]} keyOf="2" />);
+    expect(container.querySelector<HTMLElement>('[data-flip-key="a"]')!.style.transform).toBe("translateY(-80px)");
+    expect(readAfterWrite).toBe(false);
+  });
 });

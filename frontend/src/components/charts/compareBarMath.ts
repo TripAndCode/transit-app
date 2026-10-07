@@ -1,8 +1,5 @@
 export type Period = "weekday" | "weekend";
 export const PERIODS: readonly Period[] = ["weekday", "weekend"];
-/** Fixed axis, never the current maximum: a bar whose axis moves with the
- *  data says nothing about how one period compares to the other. */
-export const COMPARE_AXIS_MAX_MIN = 6;
 
 export type CompareRow = { route_code: string; weekday: number | null; weekend: number | null };
 
@@ -34,11 +31,6 @@ export function orderByPeriod(rows: CompareRow[], period: Period): CompareRow[] 
     if (bv == null) return -1;
     return bv - av || a.route_code.localeCompare(b.route_code);
   });
-}
-
-export function barScale(value: number | null, axisMax: number = COMPARE_AXIS_MAX_MIN): number {
-  if (value == null) return 0;
-  return Math.min(1, Math.max(0, value / axisMax));
 }
 
 /** The shown period minus the other, rounded to the tenth the bars print, so
