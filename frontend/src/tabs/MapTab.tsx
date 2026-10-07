@@ -20,10 +20,10 @@ import type { LiveTrip } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { ApiError, apiPost } from "../api/client";
-import { hhmm } from "./map/format";
+import { hhmm, quietFor } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
-import { FILTER_SEPARATOR } from "../utils/format";
-import { buildStyle, getMapStyleOverride, MAP_STYLE_IDS, readMapDimPref, readMapStylePref, writeMapDimPref } from "../styles/mapStyle";
+import { FILTER_SEPARATOR, formatReportTime } from "../utils/format";
+import { buildStyle, getMapStyleOverride, MAP_STYLE_IDS, readMapDimPref, writeMapDimPref } from "../styles/mapStyle";
 import { useMapStylePref } from "./map/useMapStylePref";
 import { MapStyleControl } from "./map/MapStyleControl";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -171,6 +171,10 @@ export function MapTab() {
   const refreshAbortRef = useRef<AbortController | null>(null);
   const fittedRouteRef = useRef<string | null>(null);
   const firstStyleRunRef = useRef(true);
+  // Snapshots for the one-time map construction below: the effect runs once,
+  // and the URL's `style` (or the persisted default it falls back to) is what
+  // the first frame must show. Later changes go through the style effect.
+  const initialStyleIdRef = useRef(styleId);
   const initialLanguageRef = useRef(i18n.language);
 
   const liveQuery = useLiveTrips(id);
@@ -243,7 +247,8 @@ export function MapTab() {
   const progressQuery = useLiveTripProgress(id, effectiveTrip?.trip_id ?? null);
   const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
   const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
-  const freshness = freshnessFor(liveQuery.data?.latest_captured_at);
+  const latestReport = liveQuery.data?.latest_captured_at ?? null;
+  const freshness = freshnessFor(latestReport);
 
   const onTripClick = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
     const tripId = event.features?.[0]?.properties?.trip_id;
@@ -284,7 +289,7 @@ export function MapTab() {
     const created = createSafeMap(
       {
         container: mapContainerRef.current,
-        style: getMapStyleOverride() ?? buildStyle(readMapStylePref(), initialLanguageRef.current),
+        style: getMapStyleOverride() ?? buildStyle(initialStyleIdRef.current, initialLanguageRef.current),
         center: [140.7474, 40.8246],
         zoom: 11,
       },
@@ -463,9 +468,12 @@ export function MapTab() {
         : t("operations.refresh_unchanged");
       showRefreshMessage(message);
     } catch (error) {
-      showRefreshMessage(error instanceof ApiError && error.status === 429
+      const status = error instanceof ApiError ? error.status : null;
+      showRefreshMessage(status === 429
         ? t("operations.refresh_rate_limited")
-        : t("operations.refresh_failed"));
+        : status === 401
+          ? t("operations.refresh_sign_in")
+          : t("operations.refresh_failed"));
     } finally {
       setIsRefreshing(false);
     }
@@ -517,8 +525,10 @@ export function MapTab() {
           {/* Directly under the tiles, because the CSV is exactly the rows
               they count -- and above the delay list, so a long list can't
               push the export below the panel's scroll. */}
-          <button type="button" className="btn-ghost ops-queue__export" disabled={!liveRows.length || !!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
-          {!liveQuery.isLoading && !liveQuery.error && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
+          {liveRows.length > 0 && (
+            <button type="button" className="btn-ghost ops-queue__export" disabled={!!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
+          )}
+          {!liveQuery.isLoading && !liveQuery.error && liveRows.length > 0 && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
           {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { focusTripRow(trip); }}>
               <span>{routeNames.format(trip.route_code)}<small>{hhmm(trip)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
@@ -535,6 +545,7 @@ export function MapTab() {
               where an observed trip is actually inspected. */}
           <details className="focus-queue-inspect" data-tour="map-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
           routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
+          reporting={liveRows.length > 0}
           activeRoutes={activeRouteOptions}
           directions={directions}
           selectedDirection={effectiveDirection}
@@ -566,9 +577,11 @@ export function MapTab() {
         </div>
         <div className={`ops-freshness ops-freshness--${freshness}`}>
           <span />
-          {liveQuery.data?.latest_captured_at
-            ? t("operations.last_updated", { when: relativeTime(liveQuery.data.latest_captured_at) })
-            : t("operations.no_update")}
+          {!latestReport
+            ? t("operations.no_update")
+            : freshness === "stale"
+              ? t("operations.feed_quiet", { duration: quietFor(now - Date.parse(latestReport), t), time: formatReportTime(latestReport) })
+              : t("operations.last_updated", { when: relativeTime(latestReport) })}
         </div>
         <button
           type="button"
@@ -609,9 +622,15 @@ export function MapTab() {
             />
           )}
           {(liveQuery.isLoading || summaryQuery.isLoading) && <div className="ops-map__loading">{t("operations.loading")}</div>}
-          {!mapUnavailable && !liveQuery.isLoading && liveRows.length === 0 && (
+          {/* Playback draws the day's frames on this same map, so the empty
+              overlay steps aside while it runs. */}
+          {!mapUnavailable && !liveQuery.isLoading && !playbackOn && liveRows.length === 0 && (
             <div className="ops-map__empty">
-              <EmptyState title={t("operations.empty.title")} hint={t("operations.empty.hint")} />
+              <EmptyState
+                title={t("operations.empty.title")}
+                hint={t("operations.empty.hint")}
+                recoveries={[{ label: t("operations.playback.toggle_on"), onClick: () => setPlaybackOn(true) }]}
+              />
             </div>
           )}
           {inspected && (
@@ -657,21 +676,18 @@ export function MapTab() {
               t={t}
             />
           )}
-          {/* Disabled rather than silently doing nothing when there is
-              nothing to frame: fitBounds only moves the camera, so with no
-              located trip a press is indistinguishable from a broken button.
-              The tooltip carries the part the label can't -- that this moves
-              the map and changes nothing about which trips are shown. */}
-          <Tooltip label={t("operations.map.fit_all_hint")}>
-            <button
-              type="button"
-              className="ops-map-fit"
-              onClick={fitAllTrips}
-              disabled={locatedTrips === 0}
-            >
-              <Maximize2 size={14} />{t("operations.map.fit_all")}
-            </button>
-          </Tooltip>
+          {/* Offered only when there is a located trip to frame: fitBounds
+              only moves the camera, so with nothing located a press would do
+              nothing. The tooltip carries the part the label can't -- that
+              this moves the map and changes nothing about which trips are
+              shown. */}
+          {locatedTrips > 0 && (
+            <Tooltip label={t("operations.map.fit_all_hint")}>
+              <button type="button" className="ops-map-fit" onClick={fitAllTrips}>
+                <Maximize2 size={14} />{t("operations.map.fit_all")}
+              </button>
+            </Tooltip>
+          )}
         </section>
 
         {!isMobile && (

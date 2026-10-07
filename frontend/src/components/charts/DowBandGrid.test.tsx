@@ -23,6 +23,22 @@ function fullGrid(populate: { dow: number; band: string; v: number; n?: number }
 }
 
 describe("BandGrid", () => {
+  it("sizes its weekday column to the labels, so none breaks mid-word", () => {
+    const { container } = render(
+      <BandGrid
+        grid={fullGrid([])}
+        bandLabel={(b) => b}
+        dayLabel={() => "Wed"}
+        colorFor={() => "#000"}
+        onTip={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+    const grid = container.querySelector<HTMLElement>("[style*='grid-template-columns']")!;
+    expect(grid.style.gridTemplateColumns.startsWith("auto ")).toBe(true);
+    expect(screen.getAllByText("Wed")[0]).toHaveStyle({ whiteSpace: "nowrap" });
+  });
+
   it("renders all 35 cells", () => {
     render(
       <BandGrid

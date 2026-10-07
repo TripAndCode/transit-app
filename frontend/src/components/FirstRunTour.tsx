@@ -37,6 +37,13 @@ const FIND_RETRY_MS = 250;
  * React state (the same trick `Tooltip.tsx` uses): a poll that hasn't found
  * anything new yet never re-renders this component.
  */
+/** The element a coach mark points at: a `display: contents` marker draws
+ *  no box (its rect is all zeros), so its first child stands in for it. */
+function boxOf(marker: Element | null): Element | null {
+  if (marker && getComputedStyle(marker).display === "contents") return marker.firstElementChild;
+  return marker;
+}
+
 export function FirstRunTour() {
   const { t } = useTranslation();
   // "unavailable" as well as "seen": a store that cannot be read or written
@@ -99,7 +106,7 @@ export function FirstRunTour() {
       // A poll that forces layout on a tab nobody is looking at buys
       // nothing; the anchor cannot have moved under the visitor.
       if (document.hidden) return;
-      const target = document.querySelector(step.selector);
+      const target = boxOf(document.querySelector(step.selector));
       if (!target || !panel) {
         if (panel) panel.hidden = true;
         if (observed) {

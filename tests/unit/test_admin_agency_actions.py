@@ -18,6 +18,7 @@ from api.deps import get_conn
 from api.routers import admin_agencies
 from api.security import require_admin
 from pipeline.url_guard import FeedURLError
+from tests.fixtures.pool import CountingPool
 from tests.fixtures.users import admin_user
 
 _ADMIN = admin_user()
@@ -79,12 +80,14 @@ class _Conn:
         return "INSERT 1"
 
 
-def _client(conn: _Conn) -> TestClient:
+def _client(conn: _Conn) -> tuple[TestClient, CountingPool]:
     app = FastAPI()
     app.include_router(admin_agencies.router)
     app.dependency_overrides[require_admin] = lambda: _ADMIN
     app.dependency_overrides[get_conn] = lambda: conn
-    return TestClient(app)
+    pool = CountingPool(conn)
+    app.state.pool = pool
+    return TestClient(app), pool
 
 
 @pytest.fixture(autouse=True)
@@ -111,7 +114,7 @@ def test_reanalyzing_a_disabled_agency_is_refused_rather_than_reported_started(q
     """The runner selects on ``deleted_at IS NULL``, so a queued run would
     find no agency and do nothing while the operator was told it started."""
     conn = _Conn(deleted_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
-    response = _client(conn).post("/api/admin/agencies/1/reanalyze")
+    response = _client(conn)[0].post("/api/admin/agencies/1/reanalyze")
 
     assert response.status_code == 409
     assert queued == []
@@ -119,7 +122,7 @@ def test_reanalyzing_a_disabled_agency_is_refused_rather_than_reported_started(q
 
 def test_reanalyzing_a_live_agency_is_accepted(queued):
     conn = _Conn(deleted_at=None)
-    response = _client(conn).post("/api/admin/agencies/1/reanalyze")
+    response = _client(conn)[0].post("/api/admin/agencies/1/reanalyze")
     assert response.status_code == 202
     assert response.json() == {"status": "started"}
     assert [call["agency_ids"] for call in queued] == [[1]]
@@ -130,7 +133,7 @@ def test_reanalyzing_opens_one_umbrella_run_and_hands_the_runner_its_id(queued):
     """Without a row opened here the drawer's action draws no bar at all, and
     the per-agency rows the sweep writes have no run to belong to."""
     conn = _Conn(deleted_at=None)
-    _client(conn).post("/api/admin/agencies/1/reanalyze")
+    _client(conn)[0].post("/api/admin/agencies/1/reanalyze")
 
     assert conn.inserted == [("ingest", 1, _ADMIN.user_id)]
     assert queued[0]["run_id"] == 77
@@ -138,7 +141,7 @@ def test_reanalyzing_opens_one_umbrella_run_and_hands_the_runner_its_id(queued):
 
 def test_a_reanalyze_that_cannot_be_recorded_is_refused_rather_than_run_blind(queued):
     conn = _Conn(deleted_at=None, insert_unrecordable=True)
-    response = _client(conn).post("/api/admin/agencies/1/reanalyze")
+    response = _client(conn)[0].post("/api/admin/agencies/1/reanalyze")
 
     assert response.status_code == 503
     assert queued == []
@@ -156,7 +159,7 @@ def test_probe_rejects_a_disallowed_feed_url(monkeypatch):
         raise FeedURLError("feed_url resolves to a private address")
 
     monkeypatch.setattr(admin_agencies, "_fetch_and_measure", _boom)
-    response = _client(conn).post("/api/admin/agencies/1/probe")
+    response = _client(conn)[0].post("/api/admin/agencies/1/probe")
 
     assert response.status_code == 422
     assert "private address" in response.json()["detail"]
@@ -172,7 +175,7 @@ def test_probe_reports_502_on_a_generic_fetch_failure(monkeypatch):
         raise TimeoutError("feed took too long")
 
     monkeypatch.setattr(admin_agencies, "_fetch_and_measure", _boom)
-    response = _client(conn).post("/api/admin/agencies/1/probe")
+    response = _client(conn)[0].post("/api/admin/agencies/1/probe")
 
     assert response.status_code == 502
     assert conn.audit == []
@@ -189,7 +192,7 @@ def test_probe_rejects_an_empty_poll_as_409(monkeypatch):
 
     monkeypatch.setattr(admin_agencies, "_fetch_and_measure", lambda feed_url: cov)
     monkeypatch.setattr("pipeline.strategies.static_join.record_field_coverage_probe", _empty)
-    response = _client(conn).post("/api/admin/agencies/1/probe")
+    response = _client(conn)[0].post("/api/admin/agencies/1/probe")
 
     assert response.status_code == 409
     assert conn.audit == []
@@ -207,8 +210,29 @@ def test_probe_success_records_verdicts_and_audits_the_action(monkeypatch):
 
     monkeypatch.setattr(admin_agencies, "_fetch_and_measure", lambda feed_url: cov)
     monkeypatch.setattr("pipeline.strategies.static_join.record_field_coverage_probe", _recorded)
-    response = _client(conn).post("/api/admin/agencies/1/probe")
+    response = _client(conn)[0].post("/api/admin/agencies/1/probe")
 
     assert response.status_code == 202
     assert response.json() == {"status": "recorded", "sample_size": 42, "fields": verdicts}
+    assert [call[1] for call in conn.audit] == ["agency.probed"]
+
+
+def test_probe_holds_no_connection_while_the_feed_is_fetched(monkeypatch):
+    conn = _Conn(deleted_at=None)
+    client, pool = _client(conn)
+    seen_held: list[int] = []
+
+    def _measure(feed_url: str) -> dict[str, Any]:
+        seen_held.append(pool.held)
+        return {"stop_time_updates": 12, "arrival_delay": 1.0}
+
+    async def _record(conn_, agency_id, cov, feed_url):
+        return {"arrival_delay": True}
+
+    monkeypatch.setattr(admin_agencies, "_fetch_and_measure", _measure)
+    monkeypatch.setattr("pipeline.strategies.static_join.record_field_coverage_probe", _record)
+    response = client.post("/api/admin/agencies/1/probe")
+    assert response.status_code == 202, response.text
+    assert seen_held == [0], "the pool connection must be released before the fetch"
+    assert pool.peak == 1
     assert [call[1] for call in conn.audit] == ["agency.probed"]

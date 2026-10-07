@@ -53,10 +53,12 @@ export function MapReference({ located, total, t }: {
       {/* States what the markers are, and nothing else: the reading's age is
           the header freshness dot's job, and repeating it here put the same
           fact on screen three times. */}
-      <p className="ops-map-ref__note">
-        <Radio size={13} aria-hidden="true" />
-        <span>{t("operations.map.disclosure", { located, total })}</span>
-      </p>
+      {total > 0 && (
+        <p className="ops-map-ref__note">
+          <Radio size={13} aria-hidden="true" />
+          <span>{t("operations.map.disclosure", { located, total })}</span>
+        </p>
+      )}
       <Tooltip label={t("operations.map.reference_hide")} placement="bottom">
         <button
           type="button"

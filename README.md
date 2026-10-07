@@ -173,8 +173,8 @@ scripts/run_full_ci.sh
 Frontend checks: see `AGENTS.md`'s Verification commands section for the
 full required list to run before opening a PR.
 
-The React Compiler is enabled. Do not add `useMemo`, `useCallback`, or
-`React.memo` as performance fixes. User-visible strings require matching `ja`
+The React Compiler is enabled, and ESLint rejects `useMemo`, `useCallback`, and
+`React.memo`. User-visible strings require matching `ja`
 and `en` translation keys.
 
 ## API
