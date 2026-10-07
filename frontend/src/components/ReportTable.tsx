@@ -6,6 +6,7 @@ import { DELAY_THRESHOLDS, delayColor } from "../styles/tokens";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "./RouteLabel";
 import { PendingNavLink } from "./navPending";
+import { usePendingNavTarget } from "./navPendingContext";
 import { RouteTitleTransition } from "./RouteTitleTransition";
 import { isPlainLeftClick } from "../utils/clicks";
 import { prefersReducedMotion } from "../utils/motion";
@@ -182,8 +183,8 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
   const names = useRouteNames(id);
   const { search } = useLocation();
   const schema = SCHEMAS[reportType];
-  // The visible row whose label travels into the dossier title; by row, not
-  // route, since a route listed once per service would otherwise name two.
+  // The visible row last clicked to travel; by row, not route, since a route
+  // listed once per service would otherwise name two.
   const [travelling, setTravelling] = useState<number | null>(null);
 
   const compact = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
@@ -342,7 +343,9 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
  *
  *  It opens as a screen navigation, and a plain click also lends the row's
  *  label the dossier title's transition name so the label travels into the
- *  title. Under reduced motion nothing travels; a modified click stays the
+ *  title. The name lasts only while that navigation is pending, so one that
+ *  is superseded leaves no stale name for a later transition to pair with.
+ *  Under reduced motion nothing travels; a modified click stays the
  *  browser's. */
 function RouteCell({
   agencyId,
@@ -359,22 +362,25 @@ function RouteCell({
   travels: boolean;
   onTravel: () => void;
 }) {
+  const pendingTo = usePendingNavTarget();
   if (agencyId == null || !code) return <RouteLabel code={code} names={names} />;
+  const href = routeHref(agencyId, code, search);
+  const travelling = travels && pendingTo === href;
   const label = (
-    <span className="report-route-link__label">
+    <span className={travelling ? "report-route-link__label--travelling" : undefined}>
       <RouteLabel code={code} names={names} />
     </span>
   );
   return (
     <PendingNavLink
       className="report-route-link"
-      to={routeHref(agencyId, code, search)}
+      to={href}
       spinner={false}
       onClick={(e) => {
         if (isPlainLeftClick(e) && !prefersReducedMotion()) onTravel();
       }}
     >
-      {travels ? <RouteTitleTransition>{label}</RouteTitleTransition> : label}
+      {travelling ? <RouteTitleTransition>{label}</RouteTitleTransition> : label}
       <span className="report-route-link__chevron" aria-hidden="true">
         {"\u00a0›"}
       </span>

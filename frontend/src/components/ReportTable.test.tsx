@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -32,15 +33,36 @@ function renderTable(rows: unknown[][], reportType = "ranking", minSamples?: num
   );
 }
 
+/** A pending-nav provider whose navigation stays pending until "settle". */
+function TestNav({ go, children }: { go: (to: string) => void; children: React.ReactNode }) {
+  const [pendingTo, setPendingTo] = useState<string | null>(null);
+  return (
+    <NavPendingContext
+      value={{
+        pendingTo,
+        go: (to) => {
+          go(to);
+          setPendingTo(to);
+        },
+      }}
+    >
+      <button type="button" onClick={() => setPendingTo(null)}>
+        settle
+      </button>
+      {children}
+    </NavPendingContext>
+  );
+}
+
 function renderWithNav(rows: unknown[][], go: (to: string) => void) {
   return renderWithProviders(
-    <NavPendingContext value={{ pendingTo: null, go }}>
+    <TestNav go={go}>
       <MemoryRouter initialEntries={["/agencies/1/analysis?from=2026-09-01"]}>
         <Routes>
           <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType="ranking" rows={rows} />} />
         </Routes>
       </MemoryRouter>
-    </NavPendingContext>,
+    </TestNav>,
   );
 }
 
@@ -62,6 +84,18 @@ describe("ReportTable route link travel", () => {
     const shared = screen.getAllByTestId("route-title-transition");
     expect(shared).toHaveLength(1);
     expect(shared[0]).toHaveTextContent("Route 3");
+    // Only the travelling label is one box; the rest wrap as text.
+    expect(shared[0].querySelector(".report-route-link__label--travelling")).not.toBeNull();
+    expect(document.querySelectorAll(".report-route-link__label--travelling")).toHaveLength(1);
+  });
+
+  it("holds the name only while that row's navigation is pending, so a superseded one leaves nothing named", async () => {
+    mockRoutes([]);
+    renderWithNav(rows, vi.fn());
+    await userEvent.click(screen.getByRole("link", { name: /Route 3/ }));
+    expect(screen.getByTestId("route-title-transition")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "settle" }));
+    expect(screen.queryByTestId("route-title-transition")).toBeNull();
   });
 
   it("a route listed once per service still lends its name to only the clicked row", async () => {
