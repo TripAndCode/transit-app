@@ -14,14 +14,14 @@
 .heat-surface__row { display: contents; }
 .heat-surface__lab { font-size: var(--text-xs); color: var(--text-tertiary); display: flex; align-items: center; }
 .heat-surface__hl { font-size: var(--text-xs); color: var(--text-tertiary); text-align: center; }
-/* --c and --ring are set per cell. Colour and inset depth morph on the
+/* --c and --heat-ring are set per cell. Colour and inset depth morph on the
    data-change token; the dim is feedback and rides --dur-1. Nothing here
    changes a size: the ring is an inset shadow, hover is an outline. */
 .heat-surface__cell {
   aspect-ratio: 1.4;
   border-radius: 4px;
   background: var(--c, var(--none));
-  box-shadow: inset 0 0 0 var(--ring, 0px) color-mix(in srgb, var(--text-primary) 12%, transparent);
+  box-shadow: inset 0 0 0 var(--heat-ring, 0px) color-mix(in srgb, var(--text-primary) 12%, transparent);
   transition: background-color var(--dur-3) var(--ease-out), box-shadow var(--dur-3) var(--ease-out), opacity var(--dur-1) var(--ease-out);
 }
 .heat-surface__cell:hover,

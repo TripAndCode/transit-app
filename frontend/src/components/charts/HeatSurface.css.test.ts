@@ -8,7 +8,7 @@ describe("HeatSurface.css", () => {
   it("cells morph colour and ring on --dur-3 and dim on --dur-1; never a size", () => {
     const cell = ruleBody(css, ".heat-surface__cell {");
     expect(decl(cell, "background")).toBe("var(--c, var(--none))");
-    expect(decl(cell, "box-shadow")).toMatch(/inset 0 0 0 var\(--ring, 0px\)/);
+    expect(decl(cell, "box-shadow")).toMatch(/inset 0 0 0 var\(--heat-ring, 0px\)/);
     expect(decl(cell, "transition")).toBe("background-color var(--dur-3) var(--ease-out), box-shadow var(--dur-3) var(--ease-out), opacity var(--dur-1) var(--ease-out)");
     expect(cell).not.toMatch(/transition:[^;]*(width|height)/);
   });

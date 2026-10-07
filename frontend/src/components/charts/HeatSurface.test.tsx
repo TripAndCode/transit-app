@@ -65,9 +65,9 @@ describe("HeatSurface", () => {
   it("paints the observed profile by default and rings a moderate cell", () => {
     mount();
     expect(cellAt(1, 8).style.getPropertyValue("--c")).toBe("var(--d3)");
-    expect(cellAt(1, 8).style.getPropertyValue("--ring")).toBe("1px");
+    expect(cellAt(1, 8).style.getPropertyValue("--heat-ring")).toBe("1px");
     expect(cellAt(1, 9).style.getPropertyValue("--c")).toBe("var(--none)");
-    expect(cellAt(1, 9).style.getPropertyValue("--ring")).toBe("0px");
+    expect(cellAt(1, 9).style.getPropertyValue("--heat-ring")).toBe("0px");
     expect(screen.getByRole("button", { name: "By hour" }).getAttribute("aria-pressed")).toBe("true");
   });
   it("switching the profile recolours cells in place -- same nodes, new --c", async () => {
@@ -77,7 +77,7 @@ describe("HeatSurface", () => {
     const after = cellAt(1, 8);
     expect(after).toBe(before);
     expect(after.style.getPropertyValue("--c")).toBe("var(--d1)");
-    expect(after.style.getPropertyValue("--ring")).toBe("0px");
+    expect(after.style.getPropertyValue("--heat-ring")).toBe("0px");
     expect(cellAt(7, 20).style.getPropertyValue("--c")).toBe("var(--none)");
     expect(screen.getByRole("button", { name: "By band" }).getAttribute("aria-pressed")).toBe("true");
   });

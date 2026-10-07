@@ -241,7 +241,7 @@ export function HeatSurface({
                 style={
                   {
                     "--c": v == null ? "var(--none)" : delayRampVar(v),
-                    "--ring": ringFor(v),
+                    "--heat-ring": ringFor(v),
                     ...(thin[di][h] ? { "--mark-opacity": THIN_OPACITY } : {}),
                   } as CSSProperties
                 }
