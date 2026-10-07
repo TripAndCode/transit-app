@@ -81,7 +81,7 @@ describe("easeOutCamera", () => {
 describe("revealAgency", () => {
   it("pitches in from a wider start and flies for the reveal duration", () => {
     const map = fakeMap({ center: [140.75, 40.82], zoom: 12 });
-    revealAgency(asMap(map), BOUNDS);
+    revealAgency(asMap(map), BOUNDS, 0);
 
     expect(map.jumpTo).toHaveBeenCalledWith(
       expect.objectContaining({ center: [140.75, 40.82], zoom: 11.4, pitch: 30 }),
@@ -93,7 +93,7 @@ describe("revealAgency", () => {
 
   it("falls back to a framed fit when the camera cannot be derived", () => {
     const map = fakeMap(undefined);
-    revealAgency(asMap(map), BOUNDS);
+    revealAgency(asMap(map), BOUNDS, 0);
 
     expect(map.flyTo).not.toHaveBeenCalled();
     expect(map.jumpTo).not.toHaveBeenCalled();
@@ -103,22 +103,22 @@ describe("revealAgency", () => {
   it("lands flat and instantly under reduced motion", () => {
     setReducedMotion(true);
     const map = fakeMap({ center: [140.75, 40.82], zoom: 12 });
-    revealAgency(asMap(map), BOUNDS);
+    revealAgency(asMap(map), BOUNDS, 0);
 
     expect(map.flyTo).not.toHaveBeenCalled();
     expect(map.jumpTo).toHaveBeenCalledWith({ center: [140.75, 40.82], zoom: 12, pitch: 0 });
   });
 });
 
-describe("the flat moves", () => {
-  it("frames a route and every trip over the move duration, never pitching", () => {
+describe("the framing moves", () => {
+  it("frames a route and every trip over the move duration, resting at the pitch it is given", () => {
     const map = fakeMap();
-    focusRoute(asMap(map), BOUNDS);
-    fitAll(asMap(map), BOUNDS);
+    focusRoute(asMap(map), BOUNDS, 0);
+    fitAll(asMap(map), BOUNDS, 0);
 
     for (const [, options] of map.fitBounds.mock.calls) {
       expect(options).toMatchObject({ duration: MOTION.move, easing: easeOutCamera });
-      expect(options).not.toHaveProperty("pitch");
+      expect(options).toMatchObject({ pitch: 0 });
     }
   });
 
@@ -131,27 +131,27 @@ describe("the flat moves", () => {
     expect(map.easeTo.mock.calls[0][0]).toMatchObject({ pitch: 35 });
   });
 
-  it("eases to a trip without zooming back out, and never pitches", () => {
+  it("eases to a trip without zooming back out, resting at the pitch it is given", () => {
     const map = fakeMap();
-    inspectTrip(asMap(map), [140.8, 40.85]);
+    inspectTrip(asMap(map), [140.8, 40.85], { pitch: 0 });
 
     expect(map.easeTo).toHaveBeenCalledWith(
       expect.objectContaining({ center: [140.8, 40.85], zoom: 13, duration: MOTION.move }),
     );
-    expect(map.easeTo.mock.calls[0][0]).not.toHaveProperty("pitch");
+    expect(map.easeTo.mock.calls[0][0]).toMatchObject({ pitch: 0 });
   });
 
   it("keeps the current zoom when it is already closer than the inspect floor", () => {
     const map = fakeMap();
     map.getZoom.mockReturnValue(15);
-    inspectTrip(asMap(map), [140.8, 40.85]);
+    inspectTrip(asMap(map), [140.8, 40.85], { pitch: 0 });
 
     expect(map.easeTo.mock.calls[0][0]).toMatchObject({ zoom: 15 });
   });
 
   it("accepts an explicit zoom, for stepping into a cluster", () => {
     const map = fakeMap();
-    inspectTrip(asMap(map), [140.8, 40.85], { zoom: 13.5 });
+    inspectTrip(asMap(map), [140.8, 40.85], { zoom: 13.5, pitch: 0 });
 
     expect(map.easeTo.mock.calls[0][0]).toMatchObject({ zoom: 13.5 });
   });
@@ -161,10 +161,10 @@ describe("reduced motion", () => {
   it("drives every move to zero duration", () => {
     setReducedMotion(true);
     const map = fakeMap({ center: [140.75, 40.82], zoom: 12 });
-    revealAgency(asMap(map), BOUNDS);
-    focusRoute(asMap(map), BOUNDS);
-    fitAll(asMap(map), BOUNDS);
-    inspectTrip(asMap(map), [140.8, 40.85]);
+    revealAgency(asMap(map), BOUNDS, 0);
+    focusRoute(asMap(map), BOUNDS, 0);
+    fitAll(asMap(map), BOUNDS, 0);
+    inspectTrip(asMap(map), [140.8, 40.85], { pitch: 0 });
 
     const calls = cameraCalls(map);
     expect(calls.length).toBeGreaterThan(0);
@@ -176,12 +176,12 @@ describe("reduced motion", () => {
 
   it("is the only thing that removes the reveal's pitch", () => {
     const moving = fakeMap({ center: [140.75, 40.82], zoom: 12 });
-    revealAgency(asMap(moving), BOUNDS);
+    revealAgency(asMap(moving), BOUNDS, 0);
     expect(cameraCalls(moving).some((options) => options.pitch === 30)).toBe(true);
 
     setReducedMotion(true);
     const still = fakeMap({ center: [140.75, 40.82], zoom: 12 });
-    revealAgency(asMap(still), BOUNDS);
+    revealAgency(asMap(still), BOUNDS, 0);
     expect(cameraCalls(still).every((options) => (options.pitch ?? 0) === 0)).toBe(true);
   });
 });
@@ -205,5 +205,10 @@ describe("reliefPitch", () => {
     const map = fakeMap({ center: [140.75, 40.82], zoom: 12 });
     revealAgency(asMap(map), BOUNDS, RELIEF_PITCH);
     expect(map.flyTo.mock.calls[0][0]).toMatchObject({ pitch: RELIEF_PITCH });
+  });
+  it("revealAgency's framed fallback settles on the rest pitch too", () => {
+    const map = fakeMap(undefined);
+    revealAgency(asMap(map), BOUNDS, RELIEF_PITCH);
+    expect(map.fitBounds.mock.calls[0][1]).toMatchObject({ pitch: RELIEF_PITCH });
   });
 });

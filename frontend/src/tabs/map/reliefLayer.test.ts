@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   RELIEF_BASE_M, RELIEF_CAP_MIN, RELIEF_HEIGHT_M_PER_MIN,
-  reliefFeatures, reliefHeight, reliefPaint, reliefPointsFromFrame, reliefPointsFromLive, tweenFeatures,
+  reliefFeatures, reliefHeight, reliefPaint, reliefPointsFromFrame, reliefPointsFromLive, reliefTweenMs, tweenFeatures,
 } from "./reliefLayer";
 import { severityStepColors } from "../../styles/tokens";
 import type { LiveTrip, TimelineFrame } from "../../api/types";
@@ -39,17 +39,21 @@ describe("reliefFeatures", () => {
 });
 
 describe("reliefPaint", () => {
-  it("colours by the shared severity ramp, extrudes `h` from the ground, and eases height and colour over the cross-fade", () => {
-    const paint = reliefPaint(600);
+  it("colours by the shared severity ramp and extrudes `h` from the ground, with no paint transition to ease data-driven values", () => {
+    const paint = reliefPaint();
     expect(paint["fill-extrusion-color"]).toEqual(["step", ["get", "delay_min"], ...severityStepColors()]);
     expect(paint["fill-extrusion-height"]).toEqual(["get", "h"]);
     expect(paint["fill-extrusion-base"]).toBe(0);
-    expect(paint["fill-extrusion-vertical-gradient"]).toBe(true);
-    expect(paint["fill-extrusion-height-transition"]).toEqual({ duration: 600, delay: 0 });
-    expect(paint["fill-extrusion-color-transition"]).toEqual({ duration: 600, delay: 0 });
+    expect(Object.keys(paint).some((k) => k.endsWith("-transition"))).toBe(false);
   });
-  it("steps instead of easing when the caller passes 0 (reduced motion)", () => {
-    expect(reliefPaint(0)["fill-extrusion-height-transition"]).toEqual({ duration: 0, delay: 0 });
+});
+
+describe("reliefTweenMs", () => {
+  it("is the whole cross-fade outside playback, and ends well inside a frame's dwell during it", () => {
+    expect(reliefTweenMs(600, null)).toBe(600);
+    expect(reliefTweenMs(600, 450)).toBeLessThanOrEqual(450 * 0.6);
+    expect(reliefTweenMs(600, 900)).toBeLessThanOrEqual(600);
+    expect(reliefTweenMs(0, 450)).toBe(0);
   });
 });
 

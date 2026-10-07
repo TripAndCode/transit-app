@@ -24,8 +24,8 @@ import { TIMELINE_LAYER } from "./useTimelineLayers";
 const MARK_LAYERS_BOTTOM_FIRST = [LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER, TIMELINE_LAYER];
 
 /** `setData` writes per tween. Enough for the eye to read a rise rather than
- *  a jump; few enough that a few hundred polygons re-tessellate well inside a
- *  frame budget. */
+ *  a jump; few enough that the per-write cost -- serialising every column to
+ *  the worker and reloading the source -- stays occasional, not per frame. */
 const TWEEN_STEPS = 16;
 
 type ReliefSource = { setData: (data: ReliefCollection) => void };
@@ -82,12 +82,11 @@ export function useReliefLayer(
         cancelTween(rafRef);
         map.addSource(RELIEF_SOURCE, { type: "geojson", data: next });
         const beforeId = MARK_LAYERS_BOTTOM_FIRST.find((id) => map.getLayer(id));
-        map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint(crossFadeMs) }, beforeId);
+        map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint() }, beforeId);
         shownRef.current = next;
         targetRef.current = next;
         return;
       }
-      repaintLayer(map, RELIEF_LAYER, reliefPaint(crossFadeMs));
       if (targetRef.current && sameReliefReading(targetRef.current, next)) return;
       cancelTween(rafRef);
       targetRef.current = next;
@@ -103,7 +102,7 @@ export function useReliefLayer(
       const tick = (now: number) => {
         // Started one step back, so the first frame already writes: a
         // reading replaced every frame (a scrub) still moves the columns.
-        start ??= now - stepMs;
+        if (start == null) start = now - stepMs;
         const elapsed = now - start;
         const done = elapsed >= crossFadeMs;
         if (done || elapsed - lastWrite >= stepMs) {
@@ -116,7 +115,17 @@ export function useReliefLayer(
       };
       rafRef.current = requestAnimationFrame(tick);
     });
-  }, [crossFadeMs, mapRef, on, points, styleEpoch, theme]);
+  }, [crossFadeMs, mapRef, on, points, styleEpoch]);
+
+  // Colour tokens are resolved when the paint is written, so a theme change
+  // re-writes it; a reading never needs to.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !on) return;
+    return whenStyleReady(map, () => {
+      if (map.getLayer(RELIEF_LAYER)) repaintLayer(map, RELIEF_LAYER, reliefPaint());
+    });
+  }, [mapRef, on, styleEpoch, theme]);
 
   useEffect(() => () => cancelTween(rafRef), []);
 }

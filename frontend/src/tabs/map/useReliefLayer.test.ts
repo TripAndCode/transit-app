@@ -94,7 +94,6 @@ describe("useReliefLayer", () => {
     expect(heightOf(setData.mock.calls[0][0])).toBe(5.5 * 55 + 6);
     expect(queued).toBeNull();
     expect(map.layers.filter((l) => l.id === RELIEF_LAYER)).toHaveLength(1);
-    expect(map.getPaintProperty(RELIEF_LAYER, "fill-extrusion-height-transition")).toEqual({ duration: 0, delay: 0 });
   });
 
   it("tweens a changed reading over the cross-fade in at most 16 throttled steps, landing exactly on the new height", () => {

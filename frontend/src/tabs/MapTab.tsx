@@ -51,10 +51,13 @@ import { createSafeMap } from "./map/createSafeMap";
 import { useCappedList } from "../hooks/useCappedList";
 import { fitAll, focusRoute as frameRoute, inspectTrip, RELIEF_PITCH, reliefPitch } from "./map/cameraChoreography";
 import { useReliefLayer } from "./map/useReliefLayer";
-import { reliefPointsFromFrame, reliefPointsFromLive } from "./map/reliefLayer";
+import { RELIEF_CAP_MIN, reliefPointsFromFrame, reliefPointsFromLive, reliefTweenMs, type ReliefPoint } from "./map/reliefLayer";
 import { RELIEF_PREF_KEY, useBoolPref } from "./map/mapLayerPrefs";
-import { CROSS_FADE_MS } from "./map/playbackFrames";
+import { CROSS_FADE_MS, FRAME_MS } from "./map/playbackFrames";
 import { InspectCard } from "./map/InspectCard";
+
+/** The relief's input while it is off: one stable empty reading. */
+const NO_RELIEF_POINTS: ReliefPoint[] = [];
 
 const DELAYED_TRIPS_CAP = 200;
 
@@ -180,8 +183,6 @@ export function MapTab() {
     setPersistedRelief(next);
     setReliefParam(next ? "1" : "0");
   }
-  // The map is created flat, so a relief that starts off has nothing to undo.
-  const reliefPitchRef = useRef(false);
   const [sheetSnap, setSheetSnap] = useState<SnapPoint>("peek");
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -354,8 +355,6 @@ export function MapTab() {
       map.remove();
       mapRef.current = null;
       firstStyleRunRef.current = true;
-      // A new map is built flat, so the relief's tilt has to be re-applied.
-      reliefPitchRef.current = false;
     };
   }, []);
 
@@ -426,14 +425,20 @@ export function MapTab() {
   useTimelineLayers(mapRef, styleEpoch, playback.frames, playback.index, playbackOn, playback.steppingOnly, playback.pause);
   // During playback the columns follow the frame on screen; otherwise the
   // live readings.
-  const reliefPoints = playbackOn ? reliefPointsFromFrame(playback.frames[playback.index]) : reliefPointsFromLive(liveRows);
-  useReliefLayer(mapRef, styleEpoch, reliefOn, reliefPoints, playback.steppingOnly ? 0 : CROSS_FADE_MS);
+  const reliefPoints = !reliefOn
+    ? NO_RELIEF_POINTS
+    : playbackOn
+      ? reliefPointsFromFrame(playback.frames[playback.index])
+      : reliefPointsFromLive(liveRows);
+  const reliefFadeMs = playback.steppingOnly ? 0 : reliefTweenMs(CROSS_FADE_MS, playbackOn ? FRAME_MS / playback.speed : null);
+  useReliefLayer(mapRef, styleEpoch, reliefOn, reliefPoints, reliefFadeMs);
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || reliefPitchRef.current === reliefOn) return;
-    reliefPitchRef.current = reliefOn;
+    // The map knows its own pitch: a rebuilt map is flat, a tilt in flight
+    // is not yet at rest, and either way only a mismatch moves the camera.
+    if (!map || map.getPitch() === restPitch) return;
     reliefPitch(map, reliefOn);
-  }, [reliefOn]);
+  }, [reliefOn, restPitch]);
 
   /** Focus a row's route and select that row's own run in one write. */
   function focusTripRow(trip: LiveTrip) {
@@ -652,7 +657,7 @@ export function MapTab() {
               layers={[{
                 id: "relief",
                 label: t("map.style.relief"),
-                hint: t("map.style.relief_hint"),
+                hint: t("map.style.relief_hint", { cap: RELIEF_CAP_MIN, pitch: RELIEF_PITCH }),
                 on: reliefOn,
                 onToggle: () => setReliefOn(!reliefOn),
                 icon: (

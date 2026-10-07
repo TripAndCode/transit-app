@@ -25,13 +25,12 @@ type ReliefOptions = { capMin?: number; metresPerMin?: number; baseM?: number; h
 type ReliefProps = { stop_id: string; delay_min: number; h: number };
 export type ReliefCollection = GeoJSON.FeatureCollection<GeoJSON.Polygon, ReliefProps>;
 type FillExtrusionPaint = NonNullable<Extract<LayerSpecification, { type: "fill-extrusion" }>["paint"]>;
-/** MapLibre accepts `<property>-transition` beside every paint property but
- *  the bundle's types do not declare them; the two this layer sets are
- *  spelled out rather than cast at the call site. */
-type ReliefPaint = FillExtrusionPaint & {
-  "fill-extrusion-height-transition": { duration: number; delay: number };
-  "fill-extrusion-color-transition": { duration: number; delay: number };
-};
+/** The share of a playback frame's dwell a reading's tween may take. Each
+ *  write reloads the source, and while it reloads the map is not "style
+ *  loaded", so a tween still running at the next frame would hold back the
+ *  playback dots' own update; ending well inside the dwell leaves room for
+ *  the last reload to land. */
+const RELIEF_DWELL_SHARE = 0.6;
 
 export function reliefHeight(delayMin: number, opts: ReliefOptions = {}): number {
   const { capMin = RELIEF_CAP_MIN, metresPerMin = RELIEF_HEIGHT_M_PER_MIN, baseM = RELIEF_BASE_M } = opts;
@@ -72,23 +71,23 @@ export function reliefFeatures(points: ReliefPoint[], opts: ReliefOptions = {}):
  * one the live and playback circles use, so the column and the dot standing
  * on it always agree.
  *
- * The `-transition` entries carry the playback cross-fade (0 under reduced
- * motion) but do not move the columns: MapLibre interpolates only between
- * two constant values, and both properties here read feature data. Height
- * and colour are eased by `tweenFeatures` instead, one `setData` per step.
+ * Neither property has a paint transition: MapLibre does not ease paint
+ * that reads feature data, so height and colour are eased by
+ * `tweenFeatures` instead, one `setData` per step.
  */
-export function reliefPaint(crossFadeMs: number): ReliefPaint {
+export function reliefPaint(): FillExtrusionPaint {
   return {
     "fill-extrusion-color": ["step", ["get", "delay_min"], ...severityStepColors()],
     "fill-extrusion-height": ["get", "h"],
     "fill-extrusion-base": 0,
     "fill-extrusion-opacity": 0.92,
-    // Lit faces: the gradient is what separates a column from a flat tile
-    // when the camera is tilted; it is a shader flag, not extra geometry.
-    "fill-extrusion-vertical-gradient": true,
-    "fill-extrusion-height-transition": { duration: crossFadeMs, delay: 0 },
-    "fill-extrusion-color-transition": { duration: crossFadeMs, delay: 0 },
-  } as ReliefPaint;
+  };
+}
+
+/** How long a new reading's tween runs: the cross-fade, or during playback
+ *  no more than `RELIEF_DWELL_SHARE` of a frame's dwell (`frameDwellMs`). */
+export function reliefTweenMs(crossFadeMs: number, frameDwellMs: number | null): number {
+  return frameDwellMs == null ? crossFadeMs : Math.min(crossFadeMs, frameDwellMs * RELIEF_DWELL_SHARE);
 }
 
 /** One column per stop from the live rows: the mean of every vehicle's
