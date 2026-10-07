@@ -8,6 +8,7 @@ from httpx import ASGITransport
 from api.middleware.ratelimit import limiter
 from pipeline.clickhouse import LIVE_TABLE
 from tests.conftest import _test_pool
+from tests.fixtures.stop_clusters import rebuild_stop_clusters
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +32,7 @@ async def map_app(apply_schema):
     yield app, agency_id
     async with pool.acquire() as conn:
         await conn.execute(
-            "TRUNCATE agencies, updates, static_stops, static_stop_times, "
+            "TRUNCATE agencies, updates, static_stops, stop_clusters, static_stop_times, "
             "static_trips, static_routes, static_calendar_dates, static_shapes, "
             "agg_route_stats, agg_route_hour, "
             "agg_daily_trend, agg_route_daily, agg_stop_daily, agg_stop_routes, "
@@ -442,6 +443,7 @@ async def test_heatmap_route_filter_from_aggregate(map_app):
             "VALUES ($1, 'S1', '駅前', 40.0, 140.0, ST_SetSRID(ST_MakePoint(140.0, 40.0), 4326))",
             agency_id,
         )
+        await rebuild_stop_clusters(conn, agency_id)
         # Two agg rows for R1/S1 on the same date/band: 60s/1 and 120s/1 -> avg 90s = 1.5min
         await conn.execute(
             "INSERT INTO agg_route_stop_daily "
@@ -489,6 +491,7 @@ async def test_heatmap_merges_same_name_stops_across_a_grid_boundary(map_app):
             "       ($1, 'SB', '境界前', 40.0, 139.976, ST_SetSRID(ST_MakePoint(139.976, 40.0), 4326))",
             agency_id,
         )
+        await rebuild_stop_clusters(conn, agency_id)
         await conn.execute(
             "INSERT INTO agg_stop_daily (agency_id, stop_id, date, service_type, time_band, delay_sum, samples) "
             "VALUES ($1,'SA','2026-06-06','weekday','morning',60,1), "
@@ -526,6 +529,7 @@ async def test_heatmap_does_not_merge_same_name_stops_far_apart(map_app):
             "       ($1, 'FB', '遠方前', 41.0, 141.010, ST_SetSRID(ST_MakePoint(141.010, 41.0), 4326))",
             agency_id,
         )
+        await rebuild_stop_clusters(conn, agency_id)
         await conn.execute(
             "INSERT INTO agg_stop_daily (agency_id, stop_id, date, service_type, time_band, delay_sum, samples) "
             "VALUES ($1,'FA','2026-06-06','weekday','morning',60,1), "
@@ -537,6 +541,28 @@ async def test_heatmap_does_not_merge_same_name_stops_far_apart(map_app):
     assert resp.status_code == 200
     feats = resp.json()["features"]
     assert len(feats) == 2, feats  # would be 1 under an oversized eps
+
+
+@pytest.mark.asyncio
+async def test_heatmap_omits_a_stop_without_a_cluster_row(map_app):
+    """stop_clusters is the dot set. A stop that reached static_stops outside
+    load_static has no row and no dot — never a 500."""
+    app, agency_id = map_app
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'S_ORPHAN', '孤立', 40.0, 140.0, ST_SetSRID(ST_MakePoint(140.0, 40.0), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO agg_stop_daily (agency_id, stop_id, date, service_type, time_band, delay_sum, samples) "
+            "VALUES ($1,'S_ORPHAN','2026-06-06','weekday','morning',60,1)",
+            agency_id,
+        )
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/delays/heatmap?from=2026-06-06&to=2026-06-06")
+    assert resp.status_code == 200
+    assert resp.json()["features"] == []
 
 
 async def _seed_route_existence(conn, agency_id, route_code, service_type="weekday"):
@@ -1679,6 +1705,7 @@ async def _seed_heatmap(pool, agency_id):
             "VALUES ($1,'s1','駅前',ST_SetSRID(ST_MakePoint(140.74,40.82),4326))",
             agency_id,
         )
+        await rebuild_stop_clusters(c, agency_id)
         await c.execute(
             "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES ($1,'T',1,'s1')",
             agency_id,
@@ -1747,6 +1774,7 @@ async def test_heatmap_agg_path_averages_deduped_observations(map_app, ch_client
             "VALUES ($1,'s1','駅前',ST_SetSRID(ST_MakePoint(140.74,40.82),4326))",
             agency_id,
         )
+        await rebuild_stop_clusters(c, agency_id)
         for trip, d in [("T1", 60), ("T2", 90), ("T3", 121)]:
             await c.execute(
                 "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES ($1,$2,1,'s1')",

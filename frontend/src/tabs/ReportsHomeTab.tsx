@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { reportHref, routeHref, routesHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { useAgencies, useReport } from "../api/hooks";
@@ -19,7 +19,8 @@ import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
-import { FILTER_SEPARATOR, formatDateRange } from "../utils/format";
+import { FILTER_SEPARATOR, formatDateRange, formatNumber } from "../utils/format";
+import { ServiceName } from "../components/ServiceName";
 import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import "../styles/focusedAnalysis.css";
 
@@ -45,6 +46,7 @@ export function ReportsHomeTab() {
   const jumpToLatestData = useJumpToLatestDataRange(id);
   const [doc] = useUrlState<string>("doc", "");
   const savedTab = doc === "saved";
+  const navigate = useNavigate();
   const trend = useReport(id, savedTab ? null : "trend", ctx);
   const ranking = useReport(id, savedTab ? null : "ranking", ctx);
   const agencies = useAgencies();
@@ -69,8 +71,8 @@ export function ReportsHomeTab() {
     t,
   });
   return <div className="focus-page">
-    <header className="focus-header"><div><h1>{t("reports")}</h1><p>{t("reportTitle")}</p></div>
-      {!savedTab && <ExportMenu
+    {!savedTab && <div className="focus-header" style={{ justifyContent: "flex-end" }}>
+      <ExportMenu
         svgContainerRef={chartWrapRef}
         pngFilenameBase={`trend-${id}`}
         csv={{
@@ -80,18 +82,20 @@ export function ReportsHomeTab() {
           ctx,
           extraRows: [[], ...buildCsv(rows, rankingColumns)],
         }}
-      />}
-    </header>
+      />
+    </div>}
     {notice && <p role="status">{notice}</p>}
     {savedTab ? <section><p className="focus-muted">{t("localOnly")}</p>
-      {!saved.some((s) => s.agencyId === id) && <EmptyState title={t("noSaved")} />}
+      {!saved.some((s) => s.agencyId === id) && (
+        <EmptyState title={t("noSaved")} recoveries={[{ label: t("goToRoutes"), onClick: () => navigate(routesHref(String(id), `?${queryString}`)) }]} />
+      )}
       <ul className="focus-saved">{saved.filter((s) => s.agencyId === id).map((s) => <li key={s.id}>
         <Link to={routesHref(String(id), `?${s.query}`)}>{s.title}</Link>
         <button aria-label={`${t("remove")}: ${s.title}`} onClick={() => { if (deleteAnalysis(s.id)) setSaved(readAnalyses()); else setNotice(t("saveFailed")); }}>{t("remove")}</button>
       </li>)}</ul>
     </section> : <>
       <ScopeSentence applied={trend.data?.scope_applied} />
-      <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name}{FILTER_SEPARATOR}{ctx.from} – {ctx.to}</h2>
+      <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name}{FILTER_SEPARATOR}{formatDateRange(ctx.from, ctx.to)}</h2>
       <section><div className="focus-header"><h2>{t("trend")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!days.length || !!trend.error || trend.isFetching} onClick={() => downloadCsv(`trend-${id}-${ctx.from}-${ctx.to}`, [
         ["definition", JSON.stringify(trend.data?.definition)], [], ...buildCsv(days, daysColumns, ctx),
       ])}>{t("csv")}</button></div></div>
@@ -102,8 +106,8 @@ export function ReportsHomeTab() {
         ["definition", JSON.stringify(ranking.data?.definition)], [], ...buildCsv(rows, rankingColumns, ctx),
       ])}>{t("csv")}</button></div></div>
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
-        {() => <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("days")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th><th style={th()} /></tr></thead><tbody>
-          {rows.map((row, i) => <tr key={`${row[0]}-${row[1]}-${i}`}><td style={td()}><RouteLabel code={String(row[0])} names={names} /></td><td style={td()}>{String(row[1] ?? "—")}</td><td style={td()}>{row[2] == null ? "—" : Number(row[2]).toFixed(1)}</td><td style={td()}>{String(row[5] ?? "—")}</td><td style={td()}>
+        {() => <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("service")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th><th style={th()} /></tr></thead><tbody>
+          {rows.map((row, i) => <tr key={`${row[0]}-${row[1]}-${i}`}><td style={td()}><RouteLabel code={String(row[0])} names={names} /></td><td style={td()}>{row[1] ? <ServiceName value={String(row[1])} /> : "—"}</td><td style={td()}>{row[2] == null ? "—" : Number(row[2]).toFixed(1)}</td><td style={td()}>{row[5] == null ? "—" : formatNumber(Number(row[5]))}</td><td style={td()}>
             <Link to={routeHref(String(id), String(row[0]), `?${(() => { const next = new URLSearchParams(queryString); if (row[1] === "平日" || row[1] === "土日祝") next.set("service", row[1]); return next.toString(); })()}`)}>{t("open")}</Link>{/* i18n-ignore: query contract */}
           </td></tr>)}
         </tbody></table></div>}
@@ -112,7 +116,7 @@ export function ReportsHomeTab() {
       </section>
       <p className="focus-muted">{t("reportNote")}</p>
       {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
-      <details><summary>{t("definitions")}</summary><p>{ctx.from} – {ctx.to}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
+      <details><summary>{t("definitions")}</summary><p>{formatDateRange(ctx.from, ctx.to)}{FILTER_SEPARATOR}{ctx.routes.join(", ") || t("allPatterns")}</p>
         <Link to={reportHref(String(id), "trend", `?${queryString}`)}>{t("advanced")} →</Link>
       </details>
     </>}

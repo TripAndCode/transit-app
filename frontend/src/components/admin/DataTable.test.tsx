@@ -95,7 +95,7 @@ describe("DataTable", () => {
 
   it("lists the row shortcuts behind a toolbar hint chip", async () => {
     const user = userEvent.setup();
-    wrap(<Harness />);
+    wrap(<Harness onOpen={vi.fn()} />);
     const chip = screen.getByRole("button", { name: "Shortcuts" });
     expect(chip).toHaveAttribute("aria-expanded", "false");
 
@@ -109,9 +109,17 @@ describe("DataTable", () => {
     expect(chip).toHaveFocus();
   });
 
+  it("lists only the shortcuts the table answers", async () => {
+    const user = userEvent.setup();
+    wrap(<DataTable caption="Agencies" rows={ROWS} columns={COLUMNS} rowKey={(r) => r.id} />);
+    await user.click(screen.getByRole("button", { name: "Shortcuts" }));
+    const panel = screen.getByRole("group", { name: "Keyboard shortcuts" });
+    expect(within(panel).getAllByRole("term").map((k) => k.textContent)).toEqual(["j", "k"]);
+  });
+
   it("appends the caller's own shortcuts to the hint chip", async () => {
     const user = userEvent.setup();
-    wrap(<Harness extraShortcuts={[{ keys: "a", description: "Approve" }]} />);
+    wrap(<Harness onOpen={vi.fn()} extraShortcuts={[{ keys: "a", description: "Approve" }]} />);
     await user.click(screen.getByRole("button", { name: "Shortcuts" }));
     const panel = screen.getByRole("group", { name: "Keyboard shortcuts" });
     expect(within(panel).getAllByRole("term").map((k) => k.textContent)).toEqual(["j", "k", "x", "Enter", "a"]);
