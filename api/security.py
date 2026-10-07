@@ -17,6 +17,8 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
+from api.sso import sso_status
+
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P, _SCRYPT_DKLEN = 2**14, 8, 1, 32
 
 
@@ -114,6 +116,16 @@ def require_user(request: Request) -> User:
     if user is None:
         raise HTTPException(status_code=401, detail="auth required")
     return user
+
+
+def require_user_when_sign_in_exists(request: Request) -> User | None:
+    """``require_user`` while SSO is configured; otherwise the caller, if any.
+
+    In anonymous-only mode nobody can sign in, so a signed-in requirement
+    would refuse every caller for good instead of gating anyone.
+    """
+    enabled, _ = sso_status()
+    return require_user(request) if enabled else current_user(request)
 
 
 def require_admin(request: Request) -> User:

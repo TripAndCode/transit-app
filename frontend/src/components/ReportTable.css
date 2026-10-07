@@ -61,5 +61,4 @@
 .report-route-link:hover .route-label__code,
 .report-route-link:focus-visible .route-label__code { color: var(--text-secondary); }
 .report-route-link:hover { text-decoration: underline; text-underline-offset: 2px; }
-.report-route-link__label { display: inline; }
 .report-route-link__chevron { color: var(--text-tertiary); }

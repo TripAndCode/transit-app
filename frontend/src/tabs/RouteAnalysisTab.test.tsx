@@ -78,20 +78,6 @@ describe("RouteAnalysisTab", () => {
     expect(screen.queryByRole("button", { name: "Clear the route filter" })).toBeNull();
   });
 
-  it("the dossier title is the shared element only while a route is on the page", () => {
-    mockSupportHooks();
-    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
-    renderTab("/agencies/1/route-analysis?routes=R1");
-    expect(screen.getByRole("heading", { level: 1 }).style.viewTransitionName).toBe("route-title");
-  });
-
-  it("the choose-a-route heading carries no transition name", () => {
-    mockSupportHooks();
-    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: undefined, isPending: false, error: null, refetch: vi.fn() } as never);
-    renderTab("/agencies/1/route-analysis");
-    expect(screen.getByRole("heading", { level: 1 }).style.viewTransitionName).toBe("");
-  });
-
   it("renders the investigate heading and stop-delay content once a route has data", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useRouteShape").mockReturnValue({
@@ -128,6 +114,21 @@ describe("RouteAnalysisTab", () => {
     expect(crumbs).toHaveTextContent("W54 沖舘・新田線 · for 新田");
   });
 
+  it("writes the chart's periods the way the rest of the page writes dates", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: shape([{ stop_sequence: 1, stop_name: "Stop A", lon: 140.7, lat: 40.8, avg_min: 2.4, samples: 10 }]),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1&from=2026-08-12&to=2026-09-10&compare=1");
+    const periods = screen.getByText(/^Selected period /);
+    expect(periods).toHaveTextContent("Selected period Aug 12 – Sep 10, 2026");
+    expect(periods).toHaveTextContent("Same weekdays, one week earlier Aug 5 – Sep 3, 2026");
+    expect(periods).not.toHaveTextContent("2026-08-12");
+  });
+
   it("titles a saved analysis with its scope in words", () => {
     localStorage.clear();
     mockSupportHooks();
@@ -139,7 +140,7 @@ describe("RouteAnalysisTab", () => {
     } as never);
     renderTab("/agencies/1/route-analysis?routes=R1&from=2026-09-01&to=2026-09-28");
     fireEvent.click(screen.getByRole("button", { name: "Save analysis" }));
-    expect(readAnalyses()[0].title).toBe("R1, 9/1 – 9/28, every day, all day, within 1 min");
+    expect(readAnalyses()[0].title).toBe("R1, 9/1 – 9/28, every day, all hours, within 1 min");
   });
 });
 

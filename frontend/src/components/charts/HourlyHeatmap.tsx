@@ -2,10 +2,10 @@ import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useScope, type TimeBand } from "../../api/scope";
 import { DELAY_THRESHOLDS, HEAT_RAMP, heatOpacity } from "../../styles/tokens";
-import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
+import { useFirstData } from "../../hooks/useFirstData";
 import { staggerDelay } from "./ChartEnter";
-import { DIM_OPACITY, isFocusDimmed, isoDow, useTrendFocus } from "./trendFocus";
-import { formatShortDate } from "../../utils/format";
+import { isoDow, useTrendFocus } from "./trendFocus";
+import { formatDate, formatMinutes, formatNumber, formatShortDate } from "../../utils/format";
 
 export type HourlyCell = {
   date: string;
@@ -59,8 +59,8 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const [hover, setHover] = useState<HourlyCell | null>(null);
   const [showLegend, setShowLegend] = useState(false);
   const [, setCtx] = useScope();
-  const { focus, setFocus } = useTrendFocus();
-  const entered = useEnteredOnMount();
+  const { setFocus } = useTrendFocus();
+  const entered = useFirstData(cells.length > 0);
 
   const dates = Array.from(new Set(cells.map((c) => c.date))).sort();
 
@@ -84,7 +84,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const cellW = innerW / dates.length;
 
   return (
-    <div style={{ position: "relative", width: "100%", marginTop: 16 }}>
+    <div data-focus-viewer="hourly" style={{ position: "relative", width: "100%", marginTop: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 13 }}>{t("reports.heatmap.title")}</strong>
         <span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
@@ -201,7 +201,6 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             const value = c?.avg_min ?? null;
             const fill = value != null ? "var(--accent)" : "var(--bg-soft)";
             const opacity = value != null ? heatOpacity(value) : 0.35;
-            const dimmed = isFocusDimmed(focus, { date: d, hour: h, dow: isoDow(d) }, "hourly");
             const handleCellClick = () => {
               if (!c) return;
               const b = bandFor(c.hour);
@@ -209,23 +208,24 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             };
             // Two independent channels, deliberately: `opacity` carries the
             // magnitude ramp (and is what the staggered entrance fades to via
-            // --cell-opacity), `fill-opacity` carries the crossfilter dim.
-            // Sharing one channel would make a hover response inherit the
-            // entrance transition's per-cell delay, which on a grid this size
-            // is most of a second.
+            // --cell-opacity), `fill-opacity` carries the crossfilter dim,
+            // which `.focus-dim-fill` reads from --focus-dim. The dim is not
+            // transitioned: the inline per-cell delay would apply to it too,
+            // and on a grid this size that is most of a second.
             const cell = (
               <rect
                 key={`${d}|${h}`}
                 data-testid="heat-cell"
                 data-date={d}
                 data-hour={h}
+                data-mark-date={d}
+                data-mark-dow={isoDow(d)}
                 x={x + 0.5}
                 y={y + 0.5}
                 width={Math.max(1, cellW - 1)}
                 height={Math.max(1, cellH - 1)}
                 opacity={opacity}
-                fillOpacity={dimmed ? DIM_OPACITY : 1}
-                className={`chart-cell-enter${entered ? " chart-cell-enter--in" : ""} chart-focus-dimmable`}
+                className={`chart-cell-enter${entered ? " chart-cell-enter--in" : ""} chart-focus-dimmable focus-dim-fill`}
                 style={
                   {
                     fill,
@@ -254,6 +254,9 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
               <rect
                 key={`severe-${d}|${h}`}
                 data-testid="heat-severe-outline"
+                data-mark-date={d}
+                data-mark-dow={isoDow(d)}
+                className="chart-focus-dimmable focus-dim-stroke"
                 pointerEvents="none"
                 x={x + 0.5}
                 y={y + 0.5}
@@ -262,7 +265,6 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                 fill="none"
                 stroke="var(--delay-severe)"
                 strokeWidth="1"
-                strokeOpacity={dimmed ? DIM_OPACITY : 0.9}
               />,
             ];
           }),
@@ -284,9 +286,9 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             pointerEvents: "none",
           }}
         >
-          {hover.date} {t("reports.heatmap.tooltip_hour", { hour: String(hover.hour).padStart(2, "0") })}
+          {formatDate(hover.date)} {t("reports.heatmap.tooltip_hour", { hour: String(hover.hour).padStart(2, "0") })}
           {" "}
-          {t("reports.heatmap.tooltip_metrics", { min: (hover.avg_min ?? 0).toFixed(1), count: hover.samples })}
+          {t("reports.heatmap.tooltip_metrics", { min: formatMinutes(hover.avg_min ?? 0), count: formatNumber(hover.samples) })}
         </div>
       )}
     </div>

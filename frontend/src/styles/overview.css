@@ -88,10 +88,12 @@
   border-radius: var(--radius);
   outline: 1px solid var(--border-soft);
   outline-offset: -1px;
-  transition: height 200ms ease;
+  /* Rank intensity arrives as a custom property rather than an inline
+     opacity, which would outrank the hover rule below. */
+  opacity: var(--rank-opacity, 1);
+  transition: opacity var(--dur-1) var(--ease-out);
 }
-.ov-pareto-row:hover .ov-pareto-track { height: 10px; }
-.ov-pareto-row:hover .ov-pareto-fill  { height: 100%; }
+.ov-pareto-row:hover .ov-pareto-fill { opacity: calc(var(--rank-opacity, 1) * 0.85); }
 .ov-pareto-pct {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -123,10 +125,8 @@
   margin-bottom: 8px;
   font-weight: 600;
   font-size: 13px;
-}
-.ov-check-band-count {
-  font-weight: 400;
-  color: var(--text-tertiary);
+  /* A header moves with the rows when a band appears or goes (useFlipRows). */
+  transition: transform var(--dur-3) var(--ease-out);
 }
 .ov-check-row {
   display: flex;
@@ -137,14 +137,18 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius);
   margin-bottom: 5px;
+  color: inherit;
+  text-decoration: none;
   cursor: pointer;
-  transition: background var(--transition);
+  /* A re-ranked row travels to its new place (useFlipRows) rather than
+     teleporting; background is the only other thing that moves. */
+  transition: transform var(--dur-3) var(--ease-out), background var(--transition);
 }
 .ov-check-row:hover {
   background: var(--bg-soft);
 }
 .ov-check-name {
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   flex: 1;
   overflow: hidden;
@@ -160,15 +164,20 @@
   overflow: hidden;
 }
 .ov-check-fill {
+  display: block;
+  width: 100%;
   height: 100%;
   border-radius: 2px;
+  /* --bar-share is the row's share of the worst route, set inline per row,
+     slid like the compare bars (compareBars.css). */
+  transform: translateX(calc((var(--bar-share, 0) - 1) * 100%));
+  transition: transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out);
 }
+/* The face and tabular figures come from .num on the element. */
 .ov-check-value {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  width: 48px;
+  width: 60px;
   text-align: right;
   flex-shrink: 0;
 }
@@ -190,6 +199,11 @@
 /* Plain fallback first: an engine without color-mix() would otherwise
    resolve `fill` to its initial value (black), not transparent. */
 .ov-peak-spread { fill: rgba(180, 83, 9, 0.06); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
+.ov-peak-legend {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
 
 /* ---------- Service split ---------- */
 .ov-svc-list {
@@ -328,11 +342,11 @@
 /* Card hover affordance for the clickable summary cards. */
 .ov-card.ov-clickable {
   cursor: pointer;
-  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+  transition: background var(--dur-1) var(--ease-out);
 }
 .ov-card.ov-clickable:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--el-2);
+  background: var(--bg-soft);
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-surface));
 }
 .ov-card.ov-clickable:focus-visible {
   outline: 2px solid var(--accent);
@@ -410,11 +424,35 @@
    one only below the shared 640px breakpoint (BP.sm), not at a wider
    off-scale breakpoint, since 880px already reads fine as two columns. */
 .ov-hero {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
   gap: 20px 40px;
   align-items: end;
   margin-bottom: 24px;
+}
+/* The day's hourly profile across both hero columns, bottom-anchored. It
+   takes no pointer and no grid cell (absolutely positioned). It is the
+   hero's first child and both columns are positioned, so they paint over it
+   by DOM order -- no z-index rung needed. */
+.ov-pulse-ribbon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 160px;
+  display: block;
+  pointer-events: none;
+}
+/* A new profile reshapes in place where the engine can interpolate `d`;
+   elsewhere it snaps, which is the honest fallback for a data change. */
+.ov-pulse-ribbon path {
+  transition: d var(--dur-3) var(--ease-out);
+}
+/* Positioned only so it paints over the ribbon (see .ov-pulse-ribbon). */
+.ov-hero-text {
+  position: relative;
 }
 .ov-hero-figure {
   position: relative;
@@ -422,6 +460,14 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+}
+/* The sparkline fades to a faint texture under the figures, which sit at
+   the figure's left edge, so its line never runs across their glyphs.
+   Measured in px rather than %: the text keeps its width while the figure
+   narrows, and on a phone it spans most of the box. */
+.ov-hero-figure > svg {
+  -webkit-mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
+  mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
 }
 /* .label and .val below must stay `position: relative` -- without it they
    are non-positioned in-flow content, which paints BEFORE (under) the
@@ -497,6 +543,23 @@
   color: var(--text-primary);
   font-weight: 700;
 }
+/* Feed-status dot: still by default; it breathes (motion block at the end
+   of this file) only inside BREATH_WINDOW_MS (overview/freshness.ts). */
+.ov-fresh-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--delay-text-ok);
+  vertical-align: middle;
+  opacity: 0.55;
+}
+/* A quiet or never-reporting feed keeps the dot but drops the live green;
+   the label beside it says which. */
+.ov-fresh-dot--stale {
+  background: var(--text-tertiary);
+}
 
 /* BP.sm. Kept after the hero's base rules: an override of equal specificity
    placed earlier in the file loses to them at every width. */
@@ -505,4 +568,14 @@
   .ov-hero-figure { min-height: 150px; }
   .ov-hero-story { font-size: var(--text-lg); line-height: 1.45; }
   .ov-hero-sub-value { white-space: nowrap; }
+}
+
+/* The freshness dot's breath: a symmetric loop (the place --ease-in-out
+   belongs), never for a reduced-motion viewer. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ov-breath {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1; }
+  }
+  .ov-fresh-dot--live { animation: ov-breath calc(var(--dur-4) * 3) var(--ease-in-out) infinite; }
 }

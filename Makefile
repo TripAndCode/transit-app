@@ -131,12 +131,15 @@ typecheck:
 check: fmt-check lint typecheck test
 
 # Post-merge local maintenance. Planning is the default; apply rechecks every
-# candidate immediately before removing local refs/worktrees.
+# candidate immediately before removing local refs/worktrees, then prunes the
+# poetry venvs no remaining worktree owns.
 git-cleanup:
 	python3 scripts/cleanup_git_state.py
+	python3 scripts/daily_git_hygiene.py --venvs-only
 
 git-cleanup-apply:
 	python3 scripts/cleanup_git_state.py --apply
+	python3 scripts/daily_git_hygiene.py --venvs-only --apply
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 # Runs against the throwaway :5544/:8124 stack via scripts/run_integration_tests.sh,

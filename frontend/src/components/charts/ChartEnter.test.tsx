@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render } from "@testing-library/react";
-import { useRef } from "react";
+import { act, render } from "@testing-library/react";
+import { StrictMode, useRef } from "react";
 import { useDrawOn, staggerDelay } from "./ChartEnter";
 
 function setReducedMotion(reduce: boolean) {
@@ -119,6 +119,61 @@ describe("useDrawOn", () => {
     expect(path.style.getPropertyValue("--len")).toBe("");
   });
 
+  it("useDrawOn waits for `ready` and then draws exactly once", () => {
+    setReducedMotion(false);
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    function Line({ ready }: { ready: boolean }) {
+      const ref = useRef<SVGPolylineElement | null>(null);
+      useDrawOn(ref, ready);
+      return <svg><polyline ref={ref} points="0,0 10,10" /></svg>;
+    }
+    mockGetTotalLength(() => 14);
+    const { container, rerender } = render(<Line ready={false} />);
+    const line = container.querySelector("polyline")!;
+    expect(line.classList.contains("chart-draw-on")).toBe(false);
+    rerender(<Line ready />);
+    expect(line.classList.contains("chart-draw-on")).toBe(true);
+    expect(raf).toHaveBeenCalledTimes(1);
+    rerender(<Line ready={false} />);
+    rerender(<Line ready />);
+    expect(raf).toHaveBeenCalledTimes(1);
+  });
+
+  it("still lands drawn when its effect is torn down before the activating frame (StrictMode, data emptied)", () => {
+    // StrictMode replays every effect once at mount, and `ready` can drop
+    // before the next frame. Either way the line must not stay parked at its
+    // undrawn dashoffset with the activating class never added.
+    setReducedMotion(false);
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+      frames[id - 1] = () => {};
+    });
+    mockGetTotalLength(() => 14);
+    function Line({ ready }: { ready: boolean }) {
+      const ref = useRef<SVGPolylineElement | null>(null);
+      useDrawOn(ref, ready);
+      return <svg><polyline ref={ref} points="0,0 10,10" /></svg>;
+    }
+    const { container, rerender } = render(
+      <StrictMode>
+        <Line ready />
+      </StrictMode>,
+    );
+    rerender(
+      <StrictMode>
+        <Line ready={false} />
+      </StrictMode>,
+    );
+    act(() => frames.splice(0).forEach((cb) => cb(0)));
+    const line = container.querySelector("polyline")!;
+    expect(line.classList.contains("chart-draw-on")).toBe(true);
+    expect(line.classList.contains("chart-draw-on--active")).toBe(true);
+  });
+
   it("degrades quietly when getTotalLength is unavailable (e.g. unrendered jsdom geometry)", () => {
     setReducedMotion(false);
     // No mock installed at all -- exercises the real jsdom gap.
@@ -127,18 +182,19 @@ describe("useDrawOn", () => {
 });
 
 describe("staggerDelay", () => {
-  it("steps the delay linearly with the index", () => {
+  it("staggerDelay caps so that the last cell's delay plus a --dur-2 fade stays inside --dur-3", () => {
     expect(staggerDelay(0)).toEqual({ transitionDelay: "0ms" });
-    expect(staggerDelay(1)).toEqual({ transitionDelay: "6ms" });
-    expect(staggerDelay(10)).toEqual({ transitionDelay: "60ms" });
+    expect(staggerDelay(10)).toEqual({ transitionDelay: "40ms" });
+    expect(staggerDelay(10_000)).toEqual({ transitionDelay: "360ms" });
   });
 
-  it("respects a custom step", () => {
+  it("steps the delay linearly with the index", () => {
+    expect(staggerDelay(1)).toEqual({ transitionDelay: "4ms" });
+    expect(staggerDelay(2)).toEqual({ transitionDelay: "8ms" });
+  });
+
+  it("respects a custom step and cap", () => {
     expect(staggerDelay(3, { step: 10 })).toEqual({ transitionDelay: "30ms" });
-  });
-
-  it("caps the delay so a large grid does not stagger forever", () => {
-    expect(staggerDelay(1000)).toEqual({ transitionDelay: "900ms" });
     expect(staggerDelay(1000, { cap: 300 })).toEqual({ transitionDelay: "300ms" });
   });
 });

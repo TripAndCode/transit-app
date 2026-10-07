@@ -9,7 +9,6 @@ from api.range import (
     RangeCtx,
     build_agg_daily_trend_filter,
     build_updates_filter_ch,
-    dow_clause,
 )
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
@@ -85,18 +84,18 @@ def _ch_rows(result) -> list[dict]:
     return [dict(zip(cols, r, strict=True)) for r in result.result_rows]
 
 
-def _agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
-    """WHERE fragment for ``agg_daily_trend`` covering date + DOW + service + routes.
+def _dated_agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
+    """WHERE fragment for a per-day aggregate keyed by (agency_id, date, route, service).
 
-    Wraps :func:`api.range.build_agg_daily_trend_filter` (which only emits date
-    + DOW) and tacks on optional ``service_type`` + ``route_code`` predicates
-    so every Overview helper that reads ``agg_daily_trend`` shares the same
-    filter shape.
+    Date and DOW come from :func:`api.range.build_agg_daily_trend_filter`
+    (which keeps the DATE column bare so the primary-key prefix serves the
+    range scan); optional ``service_type`` and ``route_code`` predicates are
+    added here so every reader of ``agg_daily_trend`` and
+    ``agg_route_daily_dist`` shares one filter shape.
 
-    The ``time_band`` filter is silently dropped — the agg tables roll up to
-    (date, route, service) granularity and have no hour-of-day column. When
-    ``ctx.time_band != 'all'`` callers must fall back to the live-updates path
-    so the filter actually applies.
+    ``time_band`` is silently dropped — these tables roll up to (date, route,
+    service) and have no hour-of-day column. When ``ctx.time_band != 'all'``
+    callers must fall back to the live-updates path so the filter applies.
     """
     frag, params, n = build_agg_daily_trend_filter(ctx, next_param)
     parts: list[str] = [frag] if frag else []
@@ -111,34 +110,14 @@ def _agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
     return " AND ".join(parts), params, n
 
 
+def _agg_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
+    """:func:`_dated_agg_filter` for ``agg_daily_trend``."""
+    return _dated_agg_filter(ctx, next_param)
+
+
 def _dist_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, int]:
-    """WHERE fragment for ``agg_route_daily_dist`` (date + DOW + service + routes).
-
-    Like :func:`_agg_filter` but the date predicate is kept **sargable on the
-    real DATE column** — ``date >= $a AND date <= $b`` with the cast on the
-    *parameter* side, not the column. ``agg_daily_trend`` stores ISO date
-    *text* (forcing a ``date::date`` cast), but this table's ``date`` is a true
-    DATE, so leaving the column uncast lets the ``(agency_id, date)`` PK prefix
-    serve the range scan. ``time_band`` is unrepresentable here — callers fall
-    back to the live path when ``ctx.time_band != 'all'``.
-    """
-    parts: list[str] = [f"date >= (${next_param}::text)::date AND date <= (${next_param + 1}::text)::date"]
-    params: list = [str(ctx.from_date), str(ctx.to_date)]
-    n = next_param + 2
-
-    frag, p, n = dow_clause("date", ctx, n)
-    if frag != "TRUE":
-        parts.append(frag)
-        params.extend(p)
-    if ctx.service != "all":
-        parts.append(f"service_type = ${n}")
-        params.append(ctx.service)
-        n += 1
-    if ctx.routes:
-        parts.append(f"route_code = ANY(${n}::text[])")
-        params.append(list(ctx.routes))
-        n += 1
-    return " AND ".join(parts), params, n
+    """:func:`_dated_agg_filter` for ``agg_route_daily_dist``."""
+    return _dated_agg_filter(ctx, next_param)
 
 
 def _time_band_sql_on(column: str, time_band: str, next_param: int) -> tuple[str, list, int]:
