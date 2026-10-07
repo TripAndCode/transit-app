@@ -19,6 +19,9 @@ export function makeMockMap(
   const layout: Record<string, unknown> = {};
   let styleLoadedFlag = styleLoaded;
   const map = {
+    /** As MapLibre does: a GeoJSON `setData` leaves the style "not loaded"
+     *  until the source's reload lands (settleStyle / settleViaIdle). */
+    reloadsOnSetData: false,
     layers,
     sources,
     paint,
@@ -31,7 +34,13 @@ export function makeMockMap(
     getSource: (id: string) => sources[id],
     addSource: (id: string, def: Record<string, unknown>) => {
       // mirror maplibre: getSource(id) returns an object with setData()
-      sources[id] = { ...def, setData: (d: unknown) => { (sources[id] as Record<string, unknown>).data = d; } };
+      sources[id] = {
+        ...def,
+        setData: (d: unknown) => {
+          (sources[id] as Record<string, unknown>).data = d;
+          if (map.reloadsOnSetData) styleLoadedFlag = false;
+        },
+      };
     },
     removeSource: (id: string) => {
       delete sources[id];

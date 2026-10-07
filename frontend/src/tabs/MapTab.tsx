@@ -51,9 +51,9 @@ import { createSafeMap } from "./map/createSafeMap";
 import { useCappedList } from "../hooks/useCappedList";
 import { fitAll, focusRoute as frameRoute, inspectTrip, RELIEF_PITCH, reliefPitch } from "./map/cameraChoreography";
 import { useReliefLayer } from "./map/useReliefLayer";
-import { RELIEF_CAP_MIN, reliefPointsFromFrame, reliefPointsFromLive, reliefTweenMs, type ReliefPoint } from "./map/reliefLayer";
+import { RELIEF_CAP_MIN, reliefPointsFromFrame, reliefPointsFromLive, type ReliefPoint } from "./map/reliefLayer";
 import { RELIEF_PREF_KEY, useBoolPref } from "./map/mapLayerPrefs";
-import { CROSS_FADE_MS, FRAME_MS } from "./map/playbackFrames";
+import { CROSS_FADE_MS } from "./map/playbackFrames";
 import { InspectCard } from "./map/InspectCard";
 
 /** The relief's input while it is off: one stable empty reading. */
@@ -430,8 +430,7 @@ export function MapTab() {
     : playbackOn
       ? reliefPointsFromFrame(playback.frames[playback.index])
       : reliefPointsFromLive(liveRows);
-  const reliefFadeMs = playback.steppingOnly ? 0 : reliefTweenMs(CROSS_FADE_MS, playbackOn ? FRAME_MS / playback.speed : null);
-  useReliefLayer(mapRef, styleEpoch, reliefOn, reliefPoints, reliefFadeMs);
+  useReliefLayer(mapRef, styleEpoch, reliefOn, reliefPoints, playback.steppingOnly ? 0 : CROSS_FADE_MS);
   useEffect(() => {
     const map = mapRef.current;
     // The map knows its own pitch: a rebuilt map is flat, a tilt in flight

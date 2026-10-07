@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   RELIEF_BASE_M, RELIEF_CAP_MIN, RELIEF_HEIGHT_M_PER_MIN,
-  reliefFeatures, reliefHeight, reliefPaint, reliefPointsFromFrame, reliefPointsFromLive, reliefTweenMs, tweenFeatures,
+  reliefFeatures, reliefHeight, reliefPaint, reliefPointsFromFrame, reliefPointsFromLive, tweenFeatures,
 } from "./reliefLayer";
 import { severityStepColors } from "../../styles/tokens";
 import type { LiveTrip, TimelineFrame } from "../../api/types";
@@ -48,14 +48,6 @@ describe("reliefPaint", () => {
   });
 });
 
-describe("reliefTweenMs", () => {
-  it("is the whole cross-fade outside playback, and ends well inside a frame's dwell during it", () => {
-    expect(reliefTweenMs(600, null)).toBe(600);
-    expect(reliefTweenMs(600, 450)).toBeLessThanOrEqual(450 * 0.6);
-    expect(reliefTweenMs(600, 900)).toBeLessThanOrEqual(600);
-    expect(reliefTweenMs(0, 450)).toBe(0);
-  });
-});
 
 describe("reliefPointsFromLive", () => {
   const row = (o: Partial<LiveTrip>): LiveTrip => ({

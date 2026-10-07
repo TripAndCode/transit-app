@@ -82,6 +82,21 @@ describe("useTimelineLayers", () => {
     expect(map.getLayer(TIMELINE_LAYER)).toBeTruthy();
   });
 
+  it("feeds the next frame at once even while another source's reload holds the style unloaded", () => {
+    const map = makeMockMap();
+    map.reloadsOnSetData = true;
+    const { rerender } = renderHook(({ index }) => {
+      const mapRef = useRef(map as never);
+      useTimelineLayers(mapRef, 0, FRAMES, index, true, false, vi.fn());
+    }, { initialProps: { index: 0 } });
+    map.addSource("relief", { type: "geojson" });
+    (map.getSource("relief") as { setData: (d: unknown) => void }).setData({});
+    expect(map.isStyleLoaded()).toBe(false);
+    rerender({ index: 1 });
+    const source = map.getSource(TIMELINE_SOURCE) as { data: GeoJSON.FeatureCollection };
+    expect(source.data.features.map((f) => f.properties!.age)).toEqual([1, 0]);
+  });
+
   it("hides the live layers while playing and shows them again on exit", () => {
     const map = makeMockMap([
       { id: LIVE_TRIPS_LAYER },

@@ -125,6 +125,20 @@ describe("useReliefLayer", () => {
     for (let i = 1; i < heights.length; i += 1) expect(heights[i]).toBeGreaterThan(heights[i - 1]);
   });
 
+  it("writes a new reading on the first frame even while another source's reload holds the style unloaded", () => {
+    const map = liveMap();
+    map.reloadsOnSetData = true;
+    const { rerender } = mount(map, true);
+    // The playback dots' own write in the same commit leaves the style unloaded.
+    map.addSource("other", { type: "geojson" });
+    (map.getSource("other") as Source).setData({});
+    expect(map.isStyleLoaded()).toBe(false);
+    const setData = vi.spyOn(source(map), "setData");
+    rerender({ o: true, p: LATER, c: 600 });
+    frame(0);
+    expect(setData).toHaveBeenCalledTimes(1);
+  });
+
   it("goes beneath the playback dots too when no live layer is on the map yet", () => {
     const map = makeMockMap([{ id: "basemap", type: "raster" }, { id: TIMELINE_LAYER, type: "circle" }]);
     mount(map, true);

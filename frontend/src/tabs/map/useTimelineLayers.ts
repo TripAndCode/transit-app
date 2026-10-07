@@ -106,16 +106,23 @@ export function useTimelineLayers(
     }
 
     const data = timelineFeatures(frames, index);
-    return whenStyleReady(map, () => {
+    const hideLive = () => {
       for (const id of LIVE_LAYERS) {
         if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
       }
-      const existing = map.getSource(TIMELINE_SOURCE) as { setData: (d: unknown) => void } | undefined;
-      if (existing) {
-        existing.setData(data);
-        repaintLayer(map, TIMELINE_LAYER, timelineCirclePaint(crossFadeMs));
-        return;
-      }
+    };
+    // An existing source belongs to the style that is loaded now, so it takes
+    // the frame at once: waiting for the whole style to read as loaded would
+    // hold the dots back behind any other source's reload (the relief's).
+    const existing = map.getSource(TIMELINE_SOURCE) as { setData: (d: unknown) => void } | undefined;
+    if (existing) {
+      hideLive();
+      existing.setData(data);
+      repaintLayer(map, TIMELINE_LAYER, timelineCirclePaint(crossFadeMs));
+      return;
+    }
+    return whenStyleReady(map, () => {
+      hideLive();
       map.addSource(TIMELINE_SOURCE, { type: "geojson", data });
       map.addLayer({
         id: TIMELINE_LAYER,

@@ -74,19 +74,11 @@ export function useReliefLayer(
       });
     }
     const next = reliefFeatures(points);
-    return whenStyleReady(map, () => {
-      const source = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
-      if (!source) {
-        // First show, or a style reload wiped the layer: no on-screen
-        // reading to tween from.
-        cancelTween(rafRef);
-        map.addSource(RELIEF_SOURCE, { type: "geojson", data: next });
-        const beforeId = MARK_LAYERS_BOTTOM_FIRST.find((id) => map.getLayer(id));
-        map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint() }, beforeId);
-        shownRef.current = next;
-        targetRef.current = next;
-        return;
-      }
+    // A new reading on an existing source eases from what is on screen. It
+    // runs at once: the source belongs to the style loaded now, and waiting
+    // for the whole style to read as loaded would hold it behind any other
+    // source's reload (the playback dots').
+    const follow = (source: ReliefSource) => {
       if (targetRef.current && sameReliefReading(targetRef.current, next)) return;
       cancelTween(rafRef);
       targetRef.current = next;
@@ -114,6 +106,26 @@ export function useReliefLayer(
         rafRef.current = done ? null : requestAnimationFrame(tick);
       };
       rafRef.current = requestAnimationFrame(tick);
+    };
+    const existing = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
+    if (existing) {
+      follow(existing);
+      return;
+    }
+    return whenStyleReady(map, () => {
+      const source = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
+      if (source) {
+        follow(source);
+        return;
+      }
+      // First show, or a style reload wiped the layer: no on-screen reading
+      // to tween from.
+      cancelTween(rafRef);
+      map.addSource(RELIEF_SOURCE, { type: "geojson", data: next });
+      const beforeId = MARK_LAYERS_BOTTOM_FIRST.find((id) => map.getLayer(id));
+      map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint() }, beforeId);
+      shownRef.current = next;
+      targetRef.current = next;
     });
   }, [crossFadeMs, mapRef, on, points, styleEpoch]);
 
