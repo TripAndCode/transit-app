@@ -7,10 +7,11 @@ driven through the shell entry point settings.json actually registers, so the
 wrapper and the Python body are both covered rather than only the importable
 half.
 
-Each blocked case pairs a dev target with a mutating statement; each allowed
-case keeps one of the two away, since it takes both to justify blocking. The
-commands are only ever JSON string payloads fed to the hook's stdin parser —
-nothing here executes them.
+A blocked case either pairs a dev target with a mutating statement or tears
+down a dev volume, which needs no SQL keyword; an allowed case keeps one half of
+the pair away or tears down only throwaway state. An unreadable payload is
+refused. The commands are only ever JSON string payloads fed to the hook's stdin
+parser — nothing here executes them.
 """
 
 from __future__ import annotations
@@ -107,6 +108,19 @@ BLOCKED = [
     pytest.param("docker compose down && docker volume rm transit-app_transit_pgdata", id="teardown-after-and"),
     pytest.param("docker volume ls; docker rm -v transit-pg", id="rm-v-after-a-volume-statement"),
     pytest.param("docker compose down \\\n  -v", id="down-v-across-a-line-continuation"),
+    pytest.param(
+        "docker compose down && docker volume rm transit_pgdata  # don't keep it", id="teardown-beside-an-apostrophe"
+    ),
+    # Parentheses glued to a word still leave the word itself readable.
+    pytest.param("(cd /srv/app && docker compose down -v)", id="down-v-in-a-subshell"),
+    pytest.param("(docker volume rm transit_pgdata)", id="volume-rm-in-a-subshell"),
+    pytest.param("x=$(docker volume rm transit_pgdata)", id="volume-rm-in-a-substitution"),
+    pytest.param("docker compose down --volumes=true", id="down-volumes-with-a-value"),
+    pytest.param("docker --tlscacert ca.pem rm -v transit-pg", id="rm-after-a-tls-option"),
+    # A URL whose path ends in `docker` is not the docker binary.
+    pytest.param(
+        'psql postgresql://transit:transit@localhost:5433/docker -c "DROP TABLE x"', id="url-ending-in-docker"
+    ),
     # The dev Postgres container as it runs today, created outside compose.
     pytest.param(
         'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"
@@ -179,13 +193,15 @@ def test_unreadable_input_is_refused(payload):
     assert subprocess.run([str(HOOK)], input=payload, text=True, capture_output=True).returncode == 2
 
 
-def test_db_reset_is_no_longer_a_recognised_target():
-    """The Makefile has no `db-reset`; the guard must not advertise a target it cannot gate."""
+def test_every_destructive_target_is_a_makefile_target():
+    """The guard must not advertise a target it cannot gate."""
     import importlib.util
+    import re
 
     spec = importlib.util.spec_from_file_location("guard_dev_db", HOOK.with_name("guard_dev_db.py"))
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
-    assert "db-reset" not in module.DESTRUCTIVE_TARGETS
-    assert "db-reset" not in module.WRITE.pattern
+    makefile = (HOOK.parents[2] / "Makefile").read_text()
+    for target in module.DESTRUCTIVE_TARGETS:
+        assert re.search(rf"^{re.escape(target)}:", makefile, re.MULTILINE), target

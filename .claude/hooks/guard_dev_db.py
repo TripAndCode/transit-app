@@ -19,9 +19,10 @@ written for, so `-h localhost -p 5433`, an inserted `docker compose
 --project-name x exec db`, or `compose run` in place of `compose exec` all reach
 the dev database untouched while looking like they are covered.
 
-Blocking takes both a dev target and a mutation, and nothing beyond that: a
-command that merely names a dev store next to a write keyword is blocked even
-when it is only searching text. That direction is deliberate — a false block
+A command is blocked when it pairs a dev target with a mutation, or when it
+tears down a dev volume, which needs no SQL keyword; a payload the hook cannot
+read is refused. A command that merely names a dev store next to a write keyword
+is blocked even when it is only searching text. That direction is deliberate — a false block
 costs a rephrase, a missed write costs the dataset. The case that actually
 bites is prose *about* this guard: a heredoc commit message naming a dev
 container beside a keyword is a Bash command like any other. Put the text in a
@@ -76,7 +77,18 @@ DEV_VOLUME = re.compile(r"(?:[a-z0-9_.-]+_)?transit_(?:pgdata|chdata)")
 VOLUME_FLAG = re.compile(r"--volumes|-[a-z]*v[a-z]*")
 # Docker CLI global options that take their value as the next token, so the
 # subcommand is read after the value rather than mistaken for it.
-DOCKER_VALUE_FLAGS = {"-c", "--context", "-h", "--host", "--config", "-l", "--log-level"}
+DOCKER_VALUE_FLAGS = {
+    "-c",
+    "--context",
+    "-h",
+    "--host",
+    "--config",
+    "-l",
+    "--log-level",
+    "--tlscacert",
+    "--tlscert",
+    "--tlskey",
+}
 # The shell's DATABASE_URL is the dev database. A command that expands it is
 # aimed there whatever else it says: an inline `DATABASE_URL=<throwaway> cmd
 # "$DATABASE_URL"` assignment does not reach the expansion, which the shell
@@ -87,11 +99,14 @@ DATABASE_URL_REF = re.compile(r"\$\{?DATABASE_URL\b")
 def normalise_docker(tokens: list[str]) -> list[str]:
     """Spell the standalone `docker-compose` binary as `docker compose`, and a
     path-invoked binary by its bare name, so one set of checks covers every
-    spelling of the same command."""
+    spelling of the same command. Only a bare name or a filesystem path counts:
+    a URL whose path ends in `docker` is an argument, not the binary."""
     out: list[str] = []
     for tok in tokens:
         name = tok.rsplit("/", 1)[-1]
-        if name == "docker-compose":
+        if name != tok and not tok.startswith(("/", "./", "../", "~/")):
+            out.append(tok)
+        elif name == "docker-compose":
             out += ["docker", "compose"]
         elif name == "docker":
             out.append(name)
@@ -118,48 +133,53 @@ def names_a_computed_list(lowered: list[str]) -> bool:
     return "xargs" in lowered or any("$(" in tok or "`" in tok for tok in lowered)
 
 
+def words_of(lowered: list[str]) -> list[str]:
+    """The tokens with subshell and substitution parentheses peeled off, plus the
+    word a `$(` or `(` opens, so `(docker` and `x=$(docker` still read as
+    `docker` and `-v)` as `-v`."""
+    out: list[str] = []
+    for tok in lowered:
+        out.append(tok.strip("()"))
+        if "(" in tok:
+            out.append(tok.rsplit("(", 1)[1].strip("()"))
+    return [tok for tok in out if tok]
+
+
 def destroys_dev_volume(lowered: list[str]) -> bool:
     """A teardown that removes the dataset's volume carries no SQL keyword, so
-    it is a block on its own rather than a target waiting for a mutation."""
-    if "docker" not in lowered:
+    it is a block on its own rather than a target waiting for a mutation.
+
+    Judged over the whole command, every check evaluated: a check that read one
+    statement's trigger and returned early would let a later statement's
+    teardown through, so an unrelated `-v` elsewhere in the command can block
+    instead, the cheap direction.
+    """
+    words = words_of(lowered)
+    if "docker" not in words:
         return False
-    if "compose" in lowered and "down" in lowered:
-        return bool({"-v", "--volumes"} & set(lowered))
-    if "volume" in lowered and {"rm", "remove"} & set(lowered):
-        return names_a_computed_list(lowered) or any(DEV_VOLUME.fullmatch(tok) for tok in lowered)
-    if "prune" in lowered:
-        return "volume" in lowered or "--volumes" in lowered
+    present = set(words)
+    computed = names_a_computed_list(lowered)
+    compose_down_v = (
+        "compose" in present
+        and "down" in present
+        and any(tok in ("-v", "--volumes") or tok.startswith("--volumes=") for tok in words)
+    )
+    volume_rm = (
+        "volume" in present
+        and bool({"rm", "remove"} & present)
+        and (computed or any(DEV_VOLUME.fullmatch(tok) for tok in words))
+    )
+    prune = "prune" in present and ("volume" in present or "--volumes" in present)
     # Docker's own `rm`, not an `rm` run inside a container by `docker exec`.
-    if any(
-        words[:1] == ["rm"] or words in (["container", "rm"], ["container", "remove"])
-        for words in docker_subcommands(lowered)
-    ):
-        names_dev = names_a_computed_list(lowered) or any(
-            tok in DEV_CONTAINERS or CONTAINER.fullmatch(tok) for tok in lowered
+    rm_v = (
+        any(
+            sub[:1] == ["rm"] or sub in (["container", "rm"], ["container", "remove"])
+            for sub in docker_subcommands(words)
         )
-        return names_dev and any(VOLUME_FLAG.fullmatch(tok) for tok in lowered)
-    return False
-
-
-_STATEMENT_SEPARATORS = ";&|\n"
-
-
-def statements(cmd: str) -> list[list[str]]:
-    """The command's statements, split at `;`, `&`, `|` and newlines outside
-    quotes, so a check reads each statement's words together rather than one
-    statement's trigger beside another's arguments. A backslash-newline
-    continues the statement."""
-    lexer = shlex.shlex(cmd.replace("\\\n", " "), posix=True, punctuation_chars=_STATEMENT_SEPARATORS)
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    found: list[list[str]] = [[]]
-    for tok in lexer:
-        if tok and all(c in _STATEMENT_SEPARATORS for c in tok):
-            found.append([])
-        else:
-            found[-1].append(tok)
-    return [words for words in found if words]
+        and (computed or any(tok in DEV_CONTAINERS or CONTAINER.fullmatch(tok) for tok in words))
+        and any(VOLUME_FLAG.fullmatch(tok) for tok in words)
+    )
+    return compose_down_v or volume_rm or prune or rm_v
 
 
 def runs_a_sql_script(lowered: list[str]) -> bool:
@@ -209,15 +229,7 @@ def should_block(cmd: str) -> bool:
         tokens = cmd.split()
     tokens = normalise_docker(tokens)
     lowered = [t.lower() for t in tokens]
-    try:
-        parts = statements(cmd)
-    except ValueError:
-        parts = [line.split() for line in cmd.splitlines()]
-    # The whole command is checked too: a `$(...)` list spans the separators,
-    # and adding the per-statement reading can only block more.
-    if destroys_dev_volume(lowered) or any(
-        destroys_dev_volume([t.lower() for t in normalise_docker(words)]) for words in parts
-    ):
+    if destroys_dev_volume(lowered):
         return True
     if not targets_dev_db(tokens, cmd):
         return False
