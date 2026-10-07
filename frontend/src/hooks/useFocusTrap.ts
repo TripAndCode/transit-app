@@ -104,6 +104,12 @@ export function useFocusTrap(
   }, [active, containerRef, initialFocusRef]);
 }
 
+/** An Escape that ends an IME composition belongs to the input method, not to
+ *  the overlay: cancelling a kana conversion must not close what it is typed in. */
+function isImeKey(e: KeyboardEvent): boolean {
+  return e.isComposing || e.keyCode === 229;
+}
+
 /**
  * Escape for a surface that owns dismissal but deliberately traps nothing --
  * a non-modal overlay that leaves the page behind usable. It shares the stack
@@ -112,12 +118,6 @@ export function useFocusTrap(
  * `stopPropagation` from the topmost trap does not reach a sibling listener
  * on the same target.
  */
-/** An Escape that ends an IME composition belongs to the input method, not to
- *  the overlay: cancelling a kana conversion must not close what it is typed in. */
-function isImeKey(e: KeyboardEvent): boolean {
-  return e.isComposing || e.keyCode === 229;
-}
-
 export function useTopmostEscape(active: boolean, onEscape: () => void): void {
   const escape = useEffectEvent(() => onEscape());
 

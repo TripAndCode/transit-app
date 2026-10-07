@@ -145,6 +145,11 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     e.preventDefault();
     e.stopPropagation();
     const trigger = e.currentTarget as HTMLElement;
+    // Pressing the control that opened the menu closes it, as a toggle should.
+    if (menu?.convId === convId && menuTriggerRef.current === trigger) {
+      closeMenu();
+      return;
+    }
     menuTriggerRef.current = trigger;
     const rect = trigger.getBoundingClientRect();
     setMenu({ convId, x: rect.right, y: rect.top });
@@ -323,9 +328,10 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
       // Tab past the last item and the menu is gone. Escape and an outside
       // click already close it, but neither fires when focus simply walks off
       // the end, leaving a mounted `role="menu"` behind the user.
+      // Focus moving to the kebab is a press on it, which its click toggles.
       onBlur={(event) => {
         const next = event.relatedTarget;
-        if (next instanceof Node && menuRef.current?.contains(next)) return;
+        if (next instanceof Node && (menuRef.current?.contains(next) || menuTriggerRef.current?.contains(next))) return;
         setMenu(null);
       }}
       style={{
