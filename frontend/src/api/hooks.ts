@@ -552,7 +552,9 @@ function builderSummary(tool: string, args: Record<string, unknown>): string {
     }
     pairs.push(`${keyLabel}: ${valLabel}`);
   }
-  return `🛠 ${toolLabel}` + (pairs.length ? ` (${pairs.join(", ")})` : "");
+  return pairs.length
+    ? t("ask.build_labels.summary_with_args", { tool: toolLabel, args: pairs.join(", ") })
+    : t("ask.build_labels.summary", { tool: toolLabel });
 }
 
 type AppendMessageVars = {
