@@ -49,8 +49,15 @@ import { filterLiveRows, MAX_REPORT_AGE_MS } from "./map/liveRowsFilter";
 import { nextBoundaryMs } from "./map/staleness";
 import { createSafeMap } from "./map/createSafeMap";
 import { useCappedList } from "../hooks/useCappedList";
-import { fitAll, focusRoute as frameRoute, inspectTrip } from "./map/cameraChoreography";
+import { fitAll, focusRoute as frameRoute, inspectTrip, RELIEF_PITCH, reliefPitch } from "./map/cameraChoreography";
+import { useReliefLayer } from "./map/useReliefLayer";
+import { RELIEF_CAP_MIN, reliefPointsFromFrame, reliefPointsFromLive, type ReliefPoint } from "./map/reliefLayer";
+import { RELIEF_PREF_KEY, useBoolPref } from "./map/mapLayerPrefs";
+import { CROSS_FADE_MS } from "./map/playbackFrames";
 import { InspectCard } from "./map/InspectCard";
+
+/** The relief's input while it is off: one stable empty reading. */
+const NO_RELIEF_POINTS: ReliefPoint[] = [];
 
 const DELAYED_TRIPS_CAP = 200;
 
@@ -164,6 +171,18 @@ export function MapTab() {
   const [playbackOn, setPlaybackOn] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+  // The relief is opt-in and follows the style's URL-over-localStorage rule:
+  // a fresh visit starts flat, and the chip remembers the operator's choice.
+  const [persistedRelief, setPersistedRelief] = useBoolPref(RELIEF_PREF_KEY, false);
+  const [reliefParam, setReliefParam] = useUrlState("relief", persistedRelief ? "1" : "0", ["1", "0"] as const);
+  const reliefOn = reliefParam === "1";
+  // Every camera move ends on this pitch, so a move that lands during the
+  // relief's tilt cannot freeze the camera halfway.
+  const restPitch = reliefOn ? RELIEF_PITCH : 0;
+  function setReliefOn(next: boolean) {
+    setPersistedRelief(next);
+    setReliefParam(next ? "1" : "0");
+  }
   const [sheetSnap, setSheetSnap] = useState<SnapPoint>("peek");
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -260,7 +279,7 @@ export function MapTab() {
       trip: trip.trip_id,
     });
     setHoveredTripId(null);
-    if (mapRef.current) inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat]);
+    if (mapRef.current) inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat], { pitch: restPitch });
   });
 
   const onTripHover = useEffectEvent((event: maplibregl.MapLayerMouseEvent) => {
@@ -277,11 +296,10 @@ export function MapTab() {
     // floor: the operator is asking "what is inside this puck", and jumping
     // straight to street level would lose the surrounding clusters they are
     // comparing it against.
-    inspectTrip(
-      mapRef.current,
-      coordinates.coordinates as [number, number],
-      Math.min(mapRef.current.getZoom() + 2, CLUSTER_STEP_MAX_ZOOM),
-    );
+    inspectTrip(mapRef.current, coordinates.coordinates as [number, number], {
+      zoom: Math.min(mapRef.current.getZoom() + 2, CLUSTER_STEP_MAX_ZOOM),
+      pitch: restPitch,
+    });
   });
 
   useEffect(() => {
@@ -369,6 +387,7 @@ export function MapTab() {
     map.once("style.load", () => setStyleEpoch((epoch) => epoch + 1));
   }, [i18n.language, styleId]);
 
+  const frameRouteAtRest = useEffectEvent((map: maplibregl.Map, bounds: maplibregl.LngLatBounds) => frameRoute(map, bounds, restPitch));
   useEffect(() => {
     if (!effectiveRoute) {
       fittedRouteRef.current = null;
@@ -380,7 +399,7 @@ export function MapTab() {
     if (coordinates.length === 0) return;
     const bounds = new maplibregl.LngLatBounds();
     for (const coordinate of coordinates) bounds.extend(coordinate as [number, number]);
-    frameRoute(mapRef.current, bounds);
+    frameRouteAtRest(mapRef.current, bounds);
     fittedRouteRef.current = effectiveRoute;
   }, [effectiveRoute, shapeQuery.data]);
 
@@ -398,11 +417,27 @@ export function MapTab() {
     effectiveTrip?.trip_id ?? null,
     progressQuery.data,
     stopProfileQuery.data?.stops,
+    restPitch,
   );
   // Declared after useOperationsMapLayers: effects run in declaration order,
   // so on a style reload (which wipes every imperatively-added layer) the live
   // layers are re-added before playback hides them again.
   useTimelineLayers(mapRef, styleEpoch, playback.frames, playback.index, playbackOn, playback.steppingOnly, playback.pause);
+  // During playback the columns follow the frame on screen; otherwise the
+  // live readings.
+  const reliefPoints = !reliefOn
+    ? NO_RELIEF_POINTS
+    : playbackOn
+      ? reliefPointsFromFrame(playback.frames[playback.index])
+      : reliefPointsFromLive(liveRows);
+  useReliefLayer(mapRef, styleEpoch, reliefOn, reliefPoints, playback.steppingOnly ? 0 : CROSS_FADE_MS);
+  useEffect(() => {
+    const map = mapRef.current;
+    // The map knows its own pitch: a rebuilt map is flat, a tilt in flight
+    // is not yet at rest, and either way only a mismatch moves the camera.
+    if (!map || map.getPitch() === restPitch) return;
+    reliefPitch(map, reliefOn);
+  }, [reliefOn, restPitch]);
 
   /** Focus a row's route and select that row's own run in one write. */
   function focusTripRow(trip: LiveTrip) {
@@ -412,7 +447,7 @@ export function MapTab() {
       trip: trip.trip_id,
     });
     if (trip.stop_lon != null && trip.stop_lat != null && mapRef.current) {
-      inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat]);
+      inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat], { pitch: restPitch });
     }
   }
 
@@ -422,7 +457,7 @@ export function MapTab() {
       .filter((row) => row.route_code === routeCode && row.stop_lon != null && row.stop_lat != null)
       .sort((a, b) => b.dep_delay - a.dep_delay)[0];
     if (trip && mapRef.current) {
-      inspectTrip(mapRef.current, [trip.stop_lon!, trip.stop_lat!]);
+      inspectTrip(mapRef.current, [trip.stop_lon!, trip.stop_lat!], { pitch: restPitch });
     }
   }
 
@@ -431,7 +466,7 @@ export function MapTab() {
     if (!mapRef.current || located.length === 0) return;
     const bounds = new maplibregl.LngLatBounds();
     for (const trip of located) bounds.extend([trip.stop_lon!, trip.stop_lat!]);
-    fitAll(mapRef.current, bounds);
+    fitAll(mapRef.current, bounds, restPitch);
   }
 
   async function refreshOperations() {
@@ -558,7 +593,7 @@ export function MapTab() {
           onSelectTrip={(trip) => {
             setSelectedTripId(trip.trip_id);
             if (trip.stop_lon != null && trip.stop_lat != null && mapRef.current) {
-              inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat]);
+              inspectTrip(mapRef.current, [trip.stop_lon, trip.stop_lat], { pitch: restPitch });
             }
           }}
           t={t}
@@ -618,6 +653,18 @@ export function MapTab() {
               onDimChange={(amount) => { writeMapDimPref(amount); setDimAmountState(amount); }}
               mapRef={mapRef}
               lang={i18n.language}
+              layers={[{
+                id: "relief",
+                label: t("map.style.relief"),
+                hint: t("map.style.relief_hint", { cap: RELIEF_CAP_MIN, pitch: RELIEF_PITCH }),
+                on: reliefOn,
+                onToggle: () => setReliefOn(!reliefOn),
+                icon: (
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <path d="M2 13 6 5l3 5 2-3 3 6Z" />
+                  </svg>
+                ),
+              }]}
               t={t}
             />
           )}

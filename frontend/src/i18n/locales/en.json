@@ -659,7 +659,9 @@
       "std": "Standard",
       "photo": "Satellite",
       "layers": "Layers",
-      "dim_label": "Basemap dim"
+      "dim_label": "Basemap dim",
+      "relief": "Relief",
+      "relief_hint": "A column per stop. Height = average delay (capped at {{cap}} min). Tilts the map to {{pitch}}°."
     }
   },
   "ask": {

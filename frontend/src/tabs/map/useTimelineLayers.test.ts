@@ -14,6 +14,9 @@ import {
 } from "./useTimelineLayers";
 import type { TimelineFrame } from "../../api/types";
 
+/** What MapLibre hands a camera-event listener when a person moved the map. */
+const GESTURE = { originalEvent: new MouseEvent("mousedown") };
+
 const FRAMES: TimelineFrame[] = [
   {
     t: "05:00",
@@ -79,6 +82,21 @@ describe("useTimelineLayers", () => {
     expect(map.getLayer(TIMELINE_LAYER)).toBeTruthy();
   });
 
+  it("feeds the next frame at once even while another source's reload holds the style unloaded", () => {
+    const map = makeMockMap();
+    map.reloadsOnSetData = true;
+    const { rerender } = renderHook(({ index }) => {
+      const mapRef = useRef(map as never);
+      useTimelineLayers(mapRef, 0, FRAMES, index, true, false, vi.fn());
+    }, { initialProps: { index: 0 } });
+    map.addSource("relief", { type: "geojson" });
+    (map.getSource("relief") as { setData: (d: unknown) => void }).setData({});
+    expect(map.isStyleLoaded()).toBe(false);
+    rerender({ index: 1 });
+    const source = map.getSource(TIMELINE_SOURCE) as { data: GeoJSON.FeatureCollection };
+    expect(source.data.features.map((f) => f.properties!.age)).toEqual([1, 0]);
+  });
+
   it("hides the live layers while playing and shows them again on exit", () => {
     const map = makeMockMap([
       { id: LIVE_TRIPS_LAYER },
@@ -105,9 +123,20 @@ describe("useTimelineLayers", () => {
     const map = makeMockMap();
     const onInteract = vi.fn();
     mount(map, [0, FRAMES, 0, true, false, onInteract]);
-    map.fire("dragstart");
-    map.fire("zoomstart");
+    map.fire("dragstart", GESTURE);
+    map.fire("zoomstart", GESTURE);
     expect(onInteract).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps playing through a camera move the app made itself, such as the relief tilt", () => {
+    const map = makeMockMap();
+    const onInteract = vi.fn();
+    mount(map, [0, FRAMES, 0, true, false, onInteract]);
+    map.fire("pitchstart", {});
+    map.fire("zoomstart");
+    expect(onInteract).not.toHaveBeenCalled();
+    map.fire("pitchstart", GESTURE);
+    expect(onInteract).toHaveBeenCalledTimes(1);
   });
 
   it("stops listening for gestures once playback mode is left", () => {
@@ -121,7 +150,7 @@ describe("useTimelineLayers", () => {
       { initialProps: { active: true } },
     );
     rerender({ active: false });
-    map.fire("dragstart");
+    map.fire("dragstart", GESTURE);
     expect(onInteract).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -14,6 +14,7 @@ import { stubReducedMotion } from "../test/reducedMotion";
 import { decl, ruleBody } from "../test/cssRules";
 import { formatDateTime } from "../utils/format";
 import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse } from "../api/types";
+import { MockMap } from "../test/maplibreMock";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
 
@@ -359,5 +360,80 @@ describe("MapTab manual refresh", () => {
     vi.setSystemTime(mounted + 30_000);
     fireEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
     expect(await screen.findByText("Live data loaded: 3 rows (just now)")).toBeInTheDocument();
+  });
+});
+
+describe("MapTab relief layer", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  /** Reduced motion always (so camera moves are instant cuts); `phone`
+   *  additionally matches the mobile breakpoint query. */
+  function stubViewport(phone: boolean) {
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query.includes("prefers-reduced-motion") || (phone && query.includes("max-width")),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList);
+  }
+
+  function renderAndOpenPanel(search = "") {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    renderMap("1", search);
+    fireEvent.click(screen.getByRole("button", { name: "Map style" }));
+    return screen.getByRole("button", { name: /Relief/ });
+  }
+
+  function pitches(easeTo: { mock: { calls: unknown[][] } }) {
+    return easeTo.mock.calls.map(([options]) => (options as { pitch?: number }).pitch);
+  }
+
+  it("starts off at every width and never tilts the map unasked", () => {
+    for (const phone of [false, true]) {
+      stubViewport(phone);
+      const easeTo = vi.spyOn(MockMap.prototype, "easeTo");
+      const chip = renderAndOpenPanel();
+      expect(chip).toHaveAttribute("aria-pressed", "false");
+      expect(easeTo).not.toHaveBeenCalled();
+      cleanup();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("switching on tilts through the camera module and persists; switching off lays the map flat", () => {
+    stubViewport(false);
+    const easeTo = vi.spyOn(MockMap.prototype, "easeTo");
+    fireEvent.click(renderAndOpenPanel());
+    expect(screen.getByRole("button", { name: /Relief/ })).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem("transit.mapRelief")).toBe("1");
+    expect(pitches(easeTo)).toEqual([35]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Relief/ }));
+    expect(localStorage.getItem("transit.mapRelief")).toBe("0");
+    expect(pitches(easeTo)).toEqual([35, 0]);
+  });
+
+  it("lets the URL override the stored preference", () => {
+    stubViewport(false);
+    localStorage.setItem("transit.mapRelief", "0");
+    expect(renderAndOpenPanel("?relief=1")).toHaveAttribute("aria-pressed", "true");
   });
 });

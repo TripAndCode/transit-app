@@ -130,6 +130,14 @@
 .ops-style-control__dim { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--card-border); font-size: var(--text-xs); color: var(--text-secondary); }
 .ops-style-control__dim input[type="range"] { flex: 1 1 auto; accent-color: var(--accent); }
 .ops-style-control__dim output { min-width: 3ch; text-align: right; }
+/* Overlay toggles: pill buttons whose pressed state changes fill and colour
+   only, so toggling never reflows the panel. */
+.ops-style-control__layers { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px solid var(--card-border); }
+.ops-style-control__chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-surface); color: var(--text-primary); font-size: var(--text-sm); cursor: pointer; transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out); }
+.ops-style-control__chip:hover { background: var(--bg-soft); }
+.ops-style-control__chip[aria-pressed="true"] { background: var(--accent-soft); border-color: transparent; color: var(--accent-strong); }
+.ops-style-control__chip-icon { display: inline-flex; width: 14px; height: 14px; }
+.ops-style-control__chip-icon svg { width: 14px; height: 14px; }
 
 /* Trip panel. Every colour here resolves through a token, and deliberately so:
    this block used to carry its own dark theme -- a navy gradient plus dozens
