@@ -55,4 +55,14 @@ describe("AgencyPicker", () => {
     await user.click(screen.getByRole("option", { name: "Hiroshima Bus" }));
     expect(screen.getByTestId("location").textContent).toBe(to);
   });
+
+  it("closes on Escape and puts focus back on its trigger", async () => {
+    renderPicker("/agencies/1/pulse");
+    const trigger = screen.getByRole("button", { name: /Aomori City Bus/ });
+    await userEvent.click(trigger);
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
 });

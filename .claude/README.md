@@ -85,15 +85,23 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   `hooks/guard-dev-db.sh` (a thin wrapper around `hooks/guard_dev_db.py`) is a
   partial net, not a guarantee: it shlex-tokenizes the command and blocks only
   when a dev-store target — a dev Postgres/ClickHouse port or container name,
-  `docker compose exec`/`run` against the dev service, or a `migrate-down`/
-  `db-reset` Make target with no throwaway port in the same command — appears
-  alongside a write/DDL keyword, or a `psql -f`/`--file` invocation whose
-  script contents it can't read. It has no visibility into a script's
-  contents beyond that, or into a `DATABASE_URL` set outside the command line
-  it sees, and it deliberately still blocks prose that merely names a dev
-  store next to a write-sounding word — a false block only costs a rephrase,
-  a missed write costs the dataset. Treat the rule in `AGENTS.md` as the
-  protection, not the hook.
+  `docker compose exec`/`run` against the dev service, any `$DATABASE_URL`
+  expansion (an inline `DATABASE_URL=…` assignment does not reach it, so name a
+  throwaway URL itself), or a `migrate-down` Make target with no throwaway port
+  in the same command — appears alongside a write/DDL keyword, or a `psql
+  -f`/`--file` invocation whose script contents it can't read. A volume teardown
+  is blocked on its own: `compose down -v`, `docker volume rm` of a
+  `transit_*data` volume or of a list computed at run time, any `docker volume
+  prune` or `docker system prune --volumes`, and docker's own `rm -v` of a dev
+  container or of a computed list. Teardown is matched on the command's words
+  with quotes and shell punctuation ignored, so a quoted mention blocks too, and
+  judged over the whole command, so an unrelated `-v` in the same command blocks
+  too: run the teardown as its own call. `docker-compose` counts as `docker
+  compose`. It has no visibility into a script's contents beyond that, or into a
+  `DATABASE_URL` set outside the command line it sees, and it deliberately still
+  blocks prose that merely names a dev store next to a write-sounding word — a
+  false block only costs a rephrase, a missed write costs the dataset. Treat the
+  rule in `AGENTS.md` as the protection, not the hook.
 - No command here commits or pushes without explicit user go-ahead.
 - Neither `/address-my-pr-comments` nor `/follow-up-pr-review` calls the GraphQL
   `resolveReviewThread` mutation — resolving is always a manual step in the GitHub UI.
@@ -125,19 +133,13 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   output, and any step that ran out of time. A timeout
   with no test failure is an infrastructure limitation, not evidence that
   tests failed; resolve it before weakening the gate.
-- An hourly crontab entry (`15 * * * *`, JST — the VPS's system timezone; see
-  `crontab -l` for the current interval) runs
-  `python3 /root/transit-app/scripts/daily_git_hygiene.py --apply`, appending to
-  `/root/git-hygiene.log`. The script performs its real cleanup at most once per
-  calendar day (a same-day completion marker, default
-  `/root/.daily_git_hygiene_last_success`); the trigger is hourly so a failed or
-  lock-skipped run retries within the hour instead of waiting a full day. Two
-  stages: local worktree/branch cleanup through `scripts/cleanup_git_state.py`,
-  and orphaned poetry virtualenvs — poetry names a project's venv by hashing
-  its absolute path, so every deleted worktree leaves a several-GB venv behind
-  that poetry never revisits. This requires `poetry` on the cron shell's
-  `PATH` (see the non-interactive-shell note above), and it assumes
-  `/root/transit-app` is the only clone of this project on the host — an
-  independent second clone's venv isn't detectable as in-use and would
-  eventually be pruned. The crontab wiring itself is VPS-local installation
-  state, not tracked in this repo — only the script it invokes is.
+- `scripts/daily_git_hygiene.py` prunes orphaned poetry virtualenvs: poetry
+  names a project's venv by hashing its absolute path, so every deleted worktree
+  leaves its venv behind, and poetry never revisits it. `make git-cleanup` and
+  `make git-cleanup-apply` run it with `--venvs-only` after
+  `scripts/cleanup_git_state.py`. It recognises a worktree's venvs by that same
+  path hash, so a worktree that never ran poetry blocks nothing. It assumes one
+  clone of this project per host, since an independent second clone's venvs
+  look orphaned. Without `--venvs-only` it also runs the branch/worktree stage
+  and keeps a once-per-day completion marker, so a scheduler can call it
+  hourly; any such schedule is host-local state, not tracked here.

@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { NavIndicator } from "./NavIndicator";
 
 type SidebarNavItem<K extends string | number = string> = {
   key: K;
@@ -21,12 +22,11 @@ type SidebarNavListProps<K extends string | number = string> = {
   navStyle?: CSSProperties;
 };
 
-/** Shared vertical sidebar nav list: one `<button>` per item, styled
- *  identically to whichever item is "active" via `activeKey`. Extracted from
- *  near-identical hand-rolled copies in `HelpPage.tsx` (manual section list)
- *  and `AdminArchitecturePage.tsx` (feature-doc list) -- same structure and
- *  byte-for-byte identical inline styles, differing only in what drives
- *  "active" and what a click does. */
+/** Shared vertical sidebar nav list: one `<button>` per item, the one
+ *  matching `activeKey` marked current. Its fill is one NavIndicator that
+ *  glides between entries; the entry itself changes colour only, never
+ *  weight, so a two-line title keeps its line breaks as the mark moves.
+ *  Used by the help manual and the admin architecture page. */
 export function SidebarNavList<K extends string | number = string>({
   items,
   activeKey,
@@ -36,7 +36,8 @@ export function SidebarNavList<K extends string | number = string>({
   navStyle,
 }: SidebarNavListProps<K>) {
   return (
-    <nav aria-label={ariaLabel} style={{ width, flexShrink: 0, ...navStyle }}>
+    <nav aria-label={ariaLabel} style={{ position: "relative", width, flexShrink: 0, ...navStyle }}>
+      <NavIndicator axis="y" current='[aria-current="true"]' watch={activeKey} className="nav-indicator--rounded" />
       <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
         {items.map((item) => {
           const isActive = item.key === activeKey;
@@ -47,14 +48,15 @@ export function SidebarNavList<K extends string | number = string>({
                 onClick={() => onSelect(item.key)}
                 aria-current={isActive ? "true" : undefined}
                 style={{
+                  position: "relative",
                   display: "block",
                   width: "100%",
                   textAlign: "left",
-                  background: isActive ? "var(--accent-soft)" : "transparent",
+                  background: "transparent",
                   border: "none",
-                  borderLeft: `3px solid ${isActive ? "var(--accent)" : "transparent"}`,
-                  color: "var(--text-primary)",
-                  fontWeight: isActive ? 600 : 400,
+                  borderLeft: "3px solid transparent",
+                  color: isActive ? "var(--accent-strong)" : "var(--text-primary)",
+                  fontWeight: 400,
                   fontSize: 13,
                   lineHeight: 1.4,
                   padding: "8px 12px",

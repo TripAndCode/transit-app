@@ -37,13 +37,13 @@ import time
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.admin_audit import record_admin_action
 from api.admin_board import board_alerts, board_freshness, board_window, collector_tiles
@@ -66,6 +66,9 @@ from pipeline.audit import record_event
 from pipeline.query import admin_audit as _admin_audit
 from pipeline.query import agencies as _agencies
 from pipeline.runs import reap_abandoned_runs_best_effort
+
+if TYPE_CHECKING:
+    from pipeline.health import AgencyFreshness
 
 _log = logging.getLogger(__name__)
 
@@ -696,11 +699,21 @@ class ApiKeyIssued(ApiKeyOut):
     key: str
 
 
+_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 class ApiKeyCreate(BaseModel):
     owner_user_id: int
-    tier: str = "pro"
-    label: str | None = None
-    expires_at: Any = None
+    # The only tier `_key_func` grants anything to; the column default agrees.
+    tier: Literal["pro"] = "pro"
+    label: str | None = Field(default=None, max_length=120)
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def _utc_when_naive(cls, v: datetime | None) -> datetime | None:
+        # asyncpg reads a naive value for a timestamptz column in the server's local zone.
+        return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
 
 
 class ApiKeyListOut(BaseModel):
@@ -822,9 +835,17 @@ async def revoke_api_key(
 
 
 class InviteCreate(BaseModel):
-    email: str
+    email: str = Field(max_length=254)
     role: str = "user"
     llm_approved: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def _well_formed(cls, v: str) -> str:
+        v = v.strip()
+        if not _EMAIL_SHAPE.fullmatch(v):
+            raise ValueError("email must look like name@domain.tld")
+        return v
 
 
 class InviteOut(BaseModel):
@@ -1264,6 +1285,7 @@ class CollectorTileOut(BaseModel):
     status: str  # ok | warn | down | unknown
     last_success_at: str | None
     detail: str | None
+    check_failed: bool
     history: list[int]
 
 
@@ -1576,10 +1598,45 @@ async def _maybe_reap_abandoned_runs() -> None:
         _log.warning("board: abandoned-run sweep failed", exc_info=True)
 
 
+#: How long one aggregate-freshness answer serves the board. Staleness
+#: compares whole JST days, while the board polls every few seconds, so a fresh
+#: answer per poll would re-run the Postgres reads and a ClickHouse probe per
+#: agency for nothing. A failed check is held as long, so an outage does not
+#: cost every poll a probe that times out. Ops reads the check live.
+_BOARD_FRESHNESS_TTL_SEC = 300.0
+
+#: Monotonic stamp and answer (``None`` when the check failed) of this
+#: process's last aggregate-freshness check for the board.
+_board_freshness_cache: "tuple[float, list[AgencyFreshness] | None] | None" = None
+
+
+async def _board_agency_freshness(conn: asyncpg.Connection, ch: AsyncClient) -> "list[AgencyFreshness] | None":
+    """``pipeline.health.aggregate_freshness`` for the board, cached per process."""
+    from pipeline.health import aggregate_freshness
+
+    global _board_freshness_cache
+    stamped = time.monotonic()
+    if _board_freshness_cache is not None and stamped - _board_freshness_cache[0] < _BOARD_FRESHNESS_TTL_SEC:
+        return _board_freshness_cache[1]
+    # Stamped before the check, not after, holding the previous answer: polls
+    # that arrive while it runs reuse that answer instead of each starting
+    # their own probe.
+    _board_freshness_cache = (stamped, _board_freshness_cache[1] if _board_freshness_cache else None)
+    answer: list[AgencyFreshness] | None
+    try:
+        answer = await aggregate_freshness(conn, ch)
+    except Exception:
+        _log.warning("board: aggregate freshness unavailable", exc_info=True)  # no staleness alerts
+        answer = None
+    _board_freshness_cache = (stamped, answer)
+    return answer
+
+
 @router.get("/board", response_model=AdminBoard)
 async def admin_board(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
 ) -> AdminBoard:
     """The admin entry page's one snapshot: collectors, freshness, alerts."""
     from pipeline.health import migration_status
@@ -1611,7 +1668,12 @@ async def admin_board(
         _log.warning("board: pending-approvals count failed", exc_info=True)
         pending_llm_approvals = 0
 
-    alerts = board_alerts(freshness=freshness, migrations=migrations, pending_llm_approvals=pending_llm_approvals)
+    alerts = board_alerts(
+        freshness=freshness,
+        agency_freshness=await _board_agency_freshness(conn, ch),
+        migrations=migrations,
+        pending_llm_approvals=pending_llm_approvals,
+    )
     return AdminBoard(
         collectors=[CollectorTileOut(**tile) for tile in collectors],
         freshness=[AgencyFreshnessRowOut(**row) for row in freshness],

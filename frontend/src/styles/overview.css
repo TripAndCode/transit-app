@@ -126,10 +126,6 @@
   font-weight: 600;
   font-size: 13px;
 }
-.ov-check-band-count {
-  font-weight: 400;
-  color: var(--text-tertiary);
-}
 .ov-check-row {
   display: flex;
   align-items: center;
@@ -139,6 +135,8 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius);
   margin-bottom: 5px;
+  color: inherit;
+  text-decoration: none;
   cursor: pointer;
   transition: background var(--transition);
 }
@@ -166,11 +164,10 @@
   border-radius: 2px;
 }
 .ov-check-value {
-  font-family: var(--font-mono);
   font-size: 12.5px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  width: 48px;
+  width: 60px;
   text-align: right;
   flex-shrink: 0;
 }
@@ -192,6 +189,11 @@
 /* Plain fallback first: an engine without color-mix() would otherwise
    resolve `fill` to its initial value (black), not transparent. */
 .ov-peak-spread { fill: rgba(180, 83, 9, 0.06); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
+.ov-peak-legend {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
 
 /* ---------- Service split ---------- */
 .ov-svc-list {
@@ -424,6 +426,14 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+}
+/* The sparkline fades to a faint texture under the figures, which sit at
+   the figure's left edge, so its line never runs across their glyphs.
+   Measured in px rather than %: the text keeps its width while the figure
+   narrows, and on a phone it spans most of the box. */
+.ov-hero-figure > svg {
+  -webkit-mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
+  mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
 }
 /* .label and .val below must stay `position: relative` -- without it they
    are non-positioned in-flow content, which paints BEFORE (under) the

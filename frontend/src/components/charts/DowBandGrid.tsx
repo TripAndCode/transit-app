@@ -3,7 +3,7 @@ import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { BAND_ORDER, type Band, type ForecastOverviewGridCell } from "../../api/types";
 import { useEnteredOnMount } from "../../hooks/useEnteredOnMount";
 import { staggerDelay } from "./ChartEnter";
-import { DIM_OPACITY, isFocusDimmed, useTrendFocus } from "./trendFocus";
+import { useTrendFocus } from "./trendFocus";
 import { formatMinutes } from "../../utils/format";
 
 const RAMP_STOPS = 5;
@@ -30,9 +30,8 @@ export function Legend({ min, max, unit, colorFor = delayColor }: { min: number;
  * the per-route detail (route cells collapsed to bands client-side).
  *
  * Hovering a cell publishes its weekday to `TrendFocusContext` when one is
- * mounted, so the trend view's other charts narrow to that weekday; outside a
- * provider (the forecast tab) the focus is inert and the grid behaves as
- * before. A cell at or beyond the severe threshold is outlined rather than
+ * mounted above it; outside a provider, which is where every grid renders
+ * today, the focus is inert. A cell at or beyond the severe threshold is outlined rather than
  * recoloured, so the outline survives whatever ramp `colorFor` applies. */
 export function BandGrid({
   grid,
@@ -50,15 +49,17 @@ export function BandGrid({
   onLeave: () => void;
 }) {
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
-  const cols = `34px repeat(${BAND_ORDER.length}, 1fr)`;
+  const cols = `auto repeat(${BAND_ORDER.length}, 1fr)`;
   const entered = useEnteredOnMount();
-  const { focus, setFocus } = useTrendFocus();
+  const { setFocus } = useTrendFocus();
   // .chart-cell-opacity gives a reduced-motion viewer (who gets none of the
   // entrance classes) the same --cell-opacity the fade would have landed on,
-  // so the low-confidence dimming and the crossfilter both still apply.
-  const cellClass = `chart-cell-opacity chart-cell-enter${entered ? " chart-cell-enter--in" : ""}`;
+  // so the low-confidence dimming still applies; the crossfilter rides
+  // `filter` through .focus-dim-filter and needs no entrance class at all.
+  const cellClass = `chart-cell-opacity chart-cell-enter${entered ? " chart-cell-enter--in" : ""} focus-dim-filter`;
   return (
     <div
+      data-focus-viewer="dow"
       onMouseLeave={() => {
         onLeave();
         setFocus(null);
@@ -74,7 +75,7 @@ export function BandGrid({
         {Array.from({ length: 7 }, (_, di) => {
           const dow = di + 1;
           return [
-            <div key={`l${dow}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+            <div key={`l${dow}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
               {dayLabel(dow)}
             </div>,
             ...BAND_ORDER.map((b, bi) => {
@@ -86,9 +87,10 @@ export function BandGrid({
               // `opacity` -- an inline style always wins over the
               // .chart-cell-enter class's own opacity rule, which would
               // permanently pin every cell at its final value and leave
-              // nothing for the fade-in to animate.
-              const dimmed = isFocusDimmed(focus, { dow }, "dow");
-              const targetOpacity = dimmed ? DIM_OPACITY : c?.low_confidence ? 0.5 : 1;
+              // nothing for the fade-in to animate. The crossfilter dim stays
+              // off `opacity` entirely: it rides `filter` (--focus-dim), so a
+              // hover never waits out this cell's staggered entrance delay.
+              const targetOpacity = c?.low_confidence ? 0.5 : 1;
               const staggerStyle = { ...staggerDelay(di * BAND_ORDER.length + bi), "--cell-opacity": targetOpacity } as CSSProperties;
               const onEnter = (e: React.MouseEvent) => {
                 onTip(e, tipText);
@@ -106,6 +108,7 @@ export function BandGrid({
                     key={b}
                     data-testid="ov-band-cell"
                     data-dow={dow}
+                    data-mark-dow={dow}
                     className={cellClass}
                     onMouseEnter={onEnter}
                     onMouseMove={(e) => onTip(e, tipText)}
@@ -123,6 +126,7 @@ export function BandGrid({
                   key={b}
                   data-testid="ov-band-cell"
                   data-dow={dow}
+                  data-mark-dow={dow}
                   className={cellClass}
                   onMouseEnter={onEnter}
                   onMouseMove={(e) => onTip(e, tipText)}
