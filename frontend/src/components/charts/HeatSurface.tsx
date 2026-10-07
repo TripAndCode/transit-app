@@ -5,7 +5,7 @@ import { DELAY_THRESHOLDS, delayRampVar } from "../../styles/tokens";
 import { WEEK } from "../../utils/week";
 import { formatMinutes } from "../../utils/format";
 import { avgDelayText } from "../../utils/delayPhrase";
-import { DOWS, HOURS, THIN_OPACITY, bandSurface, bandThin, heatSurfaceDimRules, observedSurface, observedThin, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
+import { DOWS, HOURS, THIN_OPACITY, bandSurface, bandThin, heatSurfaceDimRules, observedProfile, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
 import { useTrendFocus } from "./trendFocus";
 import "./HeatSurface.css";
 
@@ -74,10 +74,9 @@ export function HeatSurface({
   const hoveredRef = useRef<HTMLElement | null>(null);
   const pointerPressRef = useRef(false);
   const keyboardFocusRef = useRef(false);
-  const observed = observedSurface(hourly);
-  const banded = bandSurface(grid, observed);
-  const surface = profile === "hourly" ? observed : banded;
-  const thin = profile === "hourly" ? observedThin(hourly) : bandThin(grid, observed);
+  const { surface: observed, thin: observedThin } = observedProfile(hourly);
+  const surface = profile === "hourly" ? observed : bandSurface(grid, observed);
+  const thin = profile === "hourly" ? observedThin : bandThin(grid, observed);
   const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
   const cellLabel = (dow: number, hour: number, v: number | null) =>
     v == null

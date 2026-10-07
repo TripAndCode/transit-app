@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DOWS, HOURS, SURFACE_DIM, THIN_OPACITY, bandSurface, bandThin, emptySurface, heatSurfaceDimRules, observedSurface, observedThin, ringFor, surfaceHasData } from "./heatSurfaceModel";
+import { DOWS, HOURS, SURFACE_DIM, THIN_OPACITY, bandSurface, bandThin, emptySurface, heatSurfaceDimRules, observedProfile, observedSurface, ringFor, surfaceHasData } from "./heatSurfaceModel";
 
 describe("observedSurface", () => {
   it("pools cells of the same weekday and hour, weighted by samples", () => {
@@ -30,9 +30,9 @@ describe("observedSurface", () => {
   });
 });
 
-describe("observedThin", () => {
+describe("observedProfile thin cells", () => {
   it("marks a weekday-hour pooled from fewer than the low-confidence floor of samples", () => {
-    const thin = observedThin([
+    const { thin } = observedProfile([
       { date: "2026-10-05", hour: 8, avg_min: 2, samples: 10 },
       { date: "2026-10-12", hour: 8, avg_min: 2, samples: 10 },
       { date: "2026-10-05", hour: 9, avg_min: 2, samples: 40 },

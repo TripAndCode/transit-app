@@ -38,13 +38,18 @@ function pooled(cells: readonly HourlyCell[]): { sec: number; n: number }[][] {
 }
 
 /** Mean delay per (weekday, hour) over the range, weighted by samples so a
- *  busy Monday does not count the same as a quiet one. */
-export function observedSurface(cells: readonly HourlyCell[]): Surface {
-  return pooled(cells).map((row) => row.map((b) => (b.n > 0 ? b.sec / b.n / 60 : null)));
+ *  busy Monday does not count the same as a quiet one, and which of those
+ *  cells rest on too few samples to trust -- both from one pass. */
+export function observedProfile(cells: readonly HourlyCell[]): { surface: Surface; thin: Thin } {
+  const totals = pooled(cells);
+  return {
+    surface: totals.map((row) => row.map((b) => (b.n > 0 ? b.sec / b.n / 60 : null))),
+    thin: totals.map((row) => row.map((b) => b.n > 0 && b.n < LOW_CONFIDENCE_SAMPLES)),
+  };
 }
 
-export function observedThin(cells: readonly HourlyCell[]): Thin {
-  return pooled(cells).map((row) => row.map((b) => b.n > 0 && b.n < LOW_CONFIDENCE_SAMPLES));
+export function observedSurface(cells: readonly HourlyCell[]): Surface {
+  return observedProfile(cells).surface;
 }
 
 function eachBandHour(grid: readonly BandCell[], paint: (cell: BandCell, d: number, h: number) => void): void {
