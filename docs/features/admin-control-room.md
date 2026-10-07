@@ -16,6 +16,11 @@ Endpoint: `GET /api/admin/board`. Reads `agencies`, `agg_meta`, and
 `agg_feed_health` for the collector tiles and freshness heatmap, plus
 `pipeline_runs` for the day's run timeline (empty, not an error, when any of
 these tables is absent or unreadable — each panel degrades on its own).
+Its staleness alerts come from `pipeline.health.aggregate_freshness`, the
+check `GET /api/admin/ops` reads, so the board and Ops always name the same
+agencies as behind; agencies never analyzed share one alert. The board holds
+that answer for a few minutes per process, since staleness moves by whole
+days and the page polls every few seconds; Ops reads it live.
 The three ops collectors (`github`, `oracle_crawler`, `r2`, run
 via `scripts/ops_status_page.py`) run off the request path in a worker
 thread under a wall-clock budget; `github` reads a git

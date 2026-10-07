@@ -88,10 +88,12 @@
   border-radius: var(--radius);
   outline: 1px solid var(--border-soft);
   outline-offset: -1px;
-  transition: height 200ms ease;
+  /* Rank intensity arrives as a custom property rather than an inline
+     opacity, which would outrank the hover rule below. */
+  opacity: var(--rank-opacity, 1);
+  transition: opacity var(--dur-1) var(--ease-out);
 }
-.ov-pareto-row:hover .ov-pareto-track { height: 10px; }
-.ov-pareto-row:hover .ov-pareto-fill  { height: 100%; }
+.ov-pareto-row:hover .ov-pareto-fill { opacity: calc(var(--rank-opacity, 1) * 0.85); }
 .ov-pareto-pct {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -124,10 +126,6 @@
   font-weight: 600;
   font-size: 13px;
 }
-.ov-check-band-count {
-  font-weight: 400;
-  color: var(--text-tertiary);
-}
 .ov-check-row {
   display: flex;
   align-items: center;
@@ -137,6 +135,8 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius);
   margin-bottom: 5px;
+  color: inherit;
+  text-decoration: none;
   cursor: pointer;
   /* A re-ranked row travels to its new place (useFlipRows) rather than
      teleporting; background is the only other thing that moves. */
@@ -166,17 +166,17 @@
   width: 100%;
   height: 100%;
   border-radius: 2px;
-  transform-origin: left;
-  /* --w is the row's share of the worst route, set inline per row. The bar
-     grows by transform, never by width, so a re-sort costs no layout. */
-  transform: scaleX(var(--w, 0));
+  /* --check-share is the row's share of the worst route, set inline per row.
+     The bar is the track's full width slid left by the rest: a transform, so
+     a change costs no layout, and a slide, so the corners keep their radius. */
+  transform: translateX(calc((var(--check-share, 0) - 1) * 100%));
   transition: transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out);
 }
 /* The face and tabular figures come from .num on the element. */
 .ov-check-value {
   font-size: var(--text-sm);
   font-weight: 600;
-  width: 48px;
+  width: 60px;
   text-align: right;
   flex-shrink: 0;
 }
@@ -198,6 +198,11 @@
 /* Plain fallback first: an engine without color-mix() would otherwise
    resolve `fill` to its initial value (black), not transparent. */
 .ov-peak-spread { fill: rgba(180, 83, 9, 0.06); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
+.ov-peak-legend {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
 
 /* ---------- Service split ---------- */
 .ov-svc-list {
@@ -336,11 +341,11 @@
 /* Card hover affordance for the clickable summary cards. */
 .ov-card.ov-clickable {
   cursor: pointer;
-  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+  transition: background var(--dur-1) var(--ease-out);
 }
 .ov-card.ov-clickable:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--el-2);
+  background: var(--bg-soft);
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-surface));
 }
 .ov-card.ov-clickable:focus-visible {
   outline: 2px solid var(--accent);
@@ -454,6 +459,14 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+}
+/* The sparkline fades to a faint texture under the figures, which sit at
+   the figure's left edge, so its line never runs across their glyphs.
+   Measured in px rather than %: the text keeps its width while the figure
+   narrows, and on a phone it spans most of the box. */
+.ov-hero-figure > svg {
+  -webkit-mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
+  mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
 }
 /* .label and .val below must stay `position: relative` -- without it they
    are non-positioned in-flow content, which paints BEFORE (under) the

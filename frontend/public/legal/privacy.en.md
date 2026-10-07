@@ -2,7 +2,7 @@
 
 Last updated: September 30, 2026
 
-Transit Delay App ("the Service") is run by TripAndCode, an individual. This page explains what information about you the Service handles and how. The Japanese version of this policy is the authoritative one.
+Delay Dashboard (“the Service”) is run by TripAndCode, an individual. This page explains what information about you the Service handles and how. The Japanese version of this policy is the authoritative one.
 
 ## Operator
 

@@ -1,6 +1,9 @@
+import time
+
 from fastapi import HTTPException, Request
 
 from api.security import current_user, require_user
+from pipeline.cache import _REGISTERED_CLEARS
 
 
 async def get_conn(request: Request):
@@ -50,8 +53,35 @@ async def get_ch(request: Request):
     return _CH_UNAVAILABLE if ch_client is None else ch_client
 
 
+#: How long a positive agency lookup is trusted. The same window
+#: pipeline.flags uses: long enough that the hottest dependency in the API
+#: costs one pool acquire per agency per half-minute instead of one per
+#: request, short enough that a disabled agency falls out on its own even if
+#: the writer forgot to invalidate.
+AGENCY_CACHE_TTL_SECONDS = 30.0
+_agency_cache: dict[int, float] = {}
+
+
+def invalidate_agency(agency_id: int) -> None:
+    """Forget one agency, so the next request re-reads its row. Called by the
+    writes that flip ``agencies.deleted_at``."""
+    _agency_cache.pop(agency_id, None)
+
+
+def reset_agency_cache() -> None:
+    _agency_cache.clear()
+
+
+_REGISTERED_CLEARS.append(reset_agency_cache)
+
+
 async def get_agency(agency_id: int, request: Request):
     """Validate the path's agency and return it as the request's auth scope.
+
+    Only a positive answer is cached (for ``AGENCY_CACHE_TTL_SECONDS``): a
+    miss is never remembered, so an agency created a moment ago validates on
+    its next request, and a disabled one is dropped by
+    :func:`invalidate_agency` at the write.
 
     Acquires its own connection for the one SELECT instead of taking
     ``Depends(get_conn)``: a ``yield`` dependency stays open until the request
@@ -62,10 +92,15 @@ async def get_agency(agency_id: int, request: Request):
     Routes that do declare ``Depends(get_conn)`` list it after this
     dependency, so the two acquisitions are sequential, not concurrent.
     """
+    now = time.monotonic()
+    expires_at = _agency_cache.get(agency_id)
+    if expires_at is not None and now < expires_at:
+        return agency_id
     async with request.app.state.pool.acquire() as conn:
         row = await conn.fetchrow("SELECT agency_id FROM agencies WHERE agency_id=$1 AND deleted_at IS NULL", agency_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
+    _agency_cache[agency_id] = now + AGENCY_CACHE_TTL_SECONDS
     return agency_id
 
 

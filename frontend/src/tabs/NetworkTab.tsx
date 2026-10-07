@@ -4,12 +4,14 @@ import { Link, useParams } from "react-router-dom";
 import { scopeToQueryString, useScope } from "../api/scope";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
+import { StillWorking } from "../components/StillWorking";
 import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { PageHeader } from "../components/ui/PageHeader";
-import { delayColor, delayTextColor } from "../styles/tokens";
+import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
+import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "../components/charts/delayAxis";
 import { formatNumber, fmtPct, formatDateRange } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
@@ -19,12 +21,6 @@ import "./NetworkTab.css";
 
 const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
 
-/** Every agency's bar is drawn against this fixed span, never against the
- *  current maximum: a bar whose axis moves with the data says nothing about
- *  how one agency compares to another, or to the same agency last week.
- *  A delay past the top of the axis fills it and keeps its exact figure in
- *  the value column beside it. */
-const AXIS_MAX_MIN = 6;
 /** The severity threshold the product treats as "late", marked on the axis so
  *  a bar can be read against it without a legend. */
 const AXIS_MARK_MIN = 5;
@@ -66,7 +62,7 @@ function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
   const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1 });
   if (avgDelayMin == null) return <>—</>;
   return (
-    <span style={{ color: delayTextColor(avgDelayMin) }}>
+    <span>
       {avgDelayMin >= 0 ? "+" : ""}
       {displayed.toFixed(1)}
       <span className="network-row__unit">{t("network.delay_unit")}</span>
@@ -88,8 +84,7 @@ function AgencyRow({
   const { t } = useTranslation();
   const a = agency;
   const displayedOnTimePct = weightedView ? a.weighted_on_time_pct : a.on_time_pct;
-  const axisPct =
-    a.avg_delay_min == null ? 0 : Math.min(Math.max(a.avg_delay_min, 0) / AXIS_MAX_MIN, 1) * 100;
+  const axisPct = delayAxisShare(a.avg_delay_min) * 100;
   const coverage =
     a.data_to == null
       ? t("network.no_data_in_range")
@@ -130,7 +125,7 @@ function AgencyRow({
         />
         <span
           className="network-row__axis-mark"
-          style={{ left: `${(AXIS_MARK_MIN / AXIS_MAX_MIN) * 100}%` }}
+          style={{ left: `${delayAxisShare(AXIS_MARK_MIN) * 100}%` }}
         />
       </div>
 
@@ -155,15 +150,14 @@ function AgencyRow({
               : null
           }
         >
+          {/* The planned-trip fallback carries its own label: after the
+              vehicle-km label, a trip count would read as that percentage. */}
           <span>
-            {t("network.col_vehicle_km_delivered")}{" "}
-            {a.vehicle_km_delivered_pct != null
-              ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
-              : a.planned_trip_count != null
-                ? t("network.planned_trip_count_fallback", {
-                    count: formatNumber(a.planned_trip_count),
-                  })
-                : "—"}
+            {a.vehicle_km_delivered_pct == null && a.planned_trip_count != null
+              ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
+              : `${t("network.col_vehicle_km_delivered")} ${
+                  a.vehicle_km_delivered_pct != null ? `${a.vehicle_km_delivered_pct.toFixed(1)}%` : "—"
+                }`}
           </span>
         </ScheduleVersionTooltip>
         <span>
@@ -269,15 +263,10 @@ export function NetworkTab() {
         )}
       </div>
 
-      {/* Behind a disclosure: the aggregation rules are what you check once a
-          comparison has raised a question, not what you read before making
-          one. */}
-      {data && (
-        <details className="network-definition" style={{ marginBottom: 12 }}>
-          <summary>{t("network.definition_disclosure")}</summary>
-          <DefinitionMetaBlock definition={data.definition} />
-        </details>
-      )}
+      {/* DefinitionMetaBlock is its own disclosure: the aggregation rules are
+          what you check once a comparison has raised a question, not what you
+          read before making one. */}
+      {data && <DefinitionMetaBlock definition={data.definition} />}
 
       <AsyncSection
         loading={isPending}
@@ -286,14 +275,19 @@ export function NetworkTab() {
         data={data}
         hasContent={(summary) => summary.agencies.length > 0}
         empty={<p style={{ color: "var(--text-secondary)" }}>{t("network.empty")}</p>}
-        skeleton={<Skeleton height={320} />}
+        skeleton={
+          <>
+            <Skeleton height={320} />
+            <StillWorking scope={ctx} update={update} />
+          </>
+        }
       >
         {() => (
           <div className="network-rows" data-testid="network-card-list" ref={rowsRef}>
             <div className="network-row network-row--head" aria-hidden="true">
               <span>{t("network.col_agency")}</span>
               <span style={{ textAlign: "right" }}>{t("network.col_avg_delay")}</span>
-              <span>{t("network.axis_caption", { max: AXIS_MAX_MIN })}</span>
+              <span>{t("network.axis_caption", { max: DELAY_AXIS_MAX_MIN })}</span>
               <span style={{ textAlign: "right" }}>{t("network.col_on_time")}</span>
             </div>
             {cappedAgencies.visible.map((a) => (

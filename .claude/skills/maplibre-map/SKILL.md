@@ -10,8 +10,8 @@ Mapbox. Ignore Mapbox style-spec / token / Studio guidance.
 
 ## Conventions
 - Keep MapLibre out of the entry chunk: map routes/pages are `React.lazy`.
-- React 19 compiler is on — no `useMemo`/`useCallback`/`React.memo`. For
-  fresh-props-in-stable-handlers use `useEffectEvent` (see `MapTab`).
+- React Compiler rules live in `AGENTS.md`. `MapTab` is the reference for
+  `useEffectEvent` in stable handlers that need fresh props.
 
 ## Known gotchas
 - `setStyle` drops custom layers/sources. Re-attach them after a style switch —

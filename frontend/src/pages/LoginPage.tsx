@@ -5,7 +5,9 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import { loginUrl } from "../api/auth";
 import { useConfig } from "../api/config";
 import { ApiError, apiPost } from "../api/client";
+import { LanguageToggle } from "../components/LanguageToggle";
 import { Card } from "../components/ui/Card";
+import { useDocumentLocale } from "../i18n/useDocumentLocale";
 import "./LoginPage.css";
 
 // `next` comes straight from the URL query string, so it's attacker-suppliable
@@ -46,6 +48,7 @@ const ERROR_KEYS: Record<string, string> = {
 
 export function LoginPage() {
   const { t } = useTranslation();
+  useDocumentLocale();
   const [params] = useSearchParams();
   const next = sanitizeNext(params.get("next"));
   const error = params.get("error");
@@ -122,6 +125,7 @@ export function LoginPage() {
     <div className="login-shell">
       <div className="login-shell__grid" aria-hidden="true" />
       <Card as="main" padded={false} className="login-card">
+        <LanguageToggle />
         <div className="login-card__brand">
           <Link to="/welcome" className="login-card__brand-title">
             {t("header.app_title")}
@@ -130,7 +134,11 @@ export function LoginPage() {
         </div>
 
         <h1 className="login-card__h1">{t("account.login.welcome_back")}</h1>
-        <p className="login-card__sub">{t("account.login.choose_provider")}</p>
+        <p className="login-card__sub">
+          {config?.local_admin_enabled && !config.auth_enabled
+            ? t("account.login.username_prompt")
+            : t("account.login.choose_provider")}
+        </p>
 
         {error && (
           <div className="login-card__error" role="alert">

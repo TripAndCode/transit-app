@@ -49,11 +49,11 @@ def _exact_sum_delay_sec(avg_min, samples):
 
 
 async def _seed_trend(pool, agency_id, rows):
-    """rows: (date_iso, route_code, service_type, avg_min, samples[, sum_delay_sec])."""
+    """rows: (date or ISO date string, route_code, service_type, avg_min, samples[, sum_delay_sec])."""
     expanded = []
     for d, rc, st, av, n, *rest in rows:
         sds = rest[0] if rest else _exact_sum_delay_sec(av, n)
-        expanded.append((d, rc, st, av, n, sds))
+        expanded.append((date.fromisoformat(d) if isinstance(d, str) else d, rc, st, av, n, sds))
     async with pool.acquire() as c:
         await c.executemany(
             "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples, "

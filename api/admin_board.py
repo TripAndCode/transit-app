@@ -20,8 +20,11 @@ Two invariants the helpers encode:
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 from zoneinfo import ZoneInfo
+
+if TYPE_CHECKING:
+    from pipeline.health import AgencyFreshness
 
 BOARD_WINDOW_DAYS = 14
 COLLECTOR_HISTORY_HOURS = 24
@@ -30,6 +33,11 @@ COLLECTOR_HISTORY_HOURS = 24
 #: data-quality alert. Clamping a handful of rows is routine; a percent of a
 #: day's samples means the upstream feed is reporting something wrong.
 CLAMP_ALERT_PCT = 1.0
+
+#: From this many lagging agencies on, one grouped alert replaces the
+#: per-agency ones, so a stalled analysis run cannot bury the board's other
+#: alerts under a line per agency.
+GROUPED_ALERT_MIN = 4
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -112,20 +120,10 @@ def board_freshness(rows: Iterable[Mapping[str, Any]], today: date) -> list[dict
     return out
 
 
-def _trailing_non_fresh(days: Sequence[Mapping[str, Any]]) -> int:
-    """How many of the most recent completed days are not aggregated. One is
-    already more than 24 h behind, since the window holds completed days only."""
-    count = 0
-    for day in reversed(days):
-        if day["state"] == "fresh":
-            break
-        count += 1
-    return count
-
-
 def board_alerts(
     *,
     freshness: Sequence[Mapping[str, Any]],
+    agency_freshness: Sequence[AgencyFreshness] | None,
     migrations: Any,
     pending_llm_approvals: int,
 ) -> list[dict[str, Any]]:
@@ -133,23 +131,54 @@ def board_alerts(
 
     Each alert carries a ``code`` plus ``params`` for the UI to translate, and
     a plain ``text`` summary for consumers with no locale (logs, exports).
-    ``migrations`` is a ``pipeline.health.MigrationStatus`` or ``None`` when
-    that check could not run — an unavailable check never invents an alert.
+    ``agency_freshness`` is ``pipeline.health.aggregate_freshness``'s answer,
+    the check the Ops page reads, so both pages call the same agencies stale.
+    It and ``migrations`` (a ``pipeline.health.MigrationStatus``) are ``None``
+    when their check could not run — an unavailable check never invents an
+    alert. ``freshness`` is the heatmap, which feeds only the clamp alert.
     """
     alerts: list[dict[str, Any]] = []
 
-    for row in freshness:
-        behind = _trailing_non_fresh(row["days"])
-        if behind:
+    lagging = [af for af in agency_freshness or [] if af.is_stale]
+    if len(lagging) >= GROUPED_ALERT_MIN:
+        longest = max(af.agg_behind_days for af in lagging)
+        alerts.append(
+            {
+                "level": "warn",
+                "code": "agencies_stale",
+                "params": {"count": len(lagging), "days": longest},
+                "text": f"{len(lagging)} agencies' aggregates are behind (up to {longest} day(s))",
+                "href": "/admin/ops",
+            }
+        )
+    else:
+        for af in lagging:
             alerts.append(
                 {
                     "level": "warn",
                     "code": "agency_stale",
-                    "params": {"agency": row["agency_name"], "days": behind},
-                    "text": f"{row['agency_name']}: aggregates {behind} day(s) behind",
+                    "params": {"agency": af.agency_name, "days": af.agg_behind_days},
+                    "text": f"{af.agency_name}: aggregates {af.agg_behind_days} day(s) behind",
                     "href": "/admin/ops",
                 }
             )
+
+    # Never analyzed is a set-up state, not lag: one line for all of them,
+    # pointing where an agency is set up. Keyed on the Postgres fact alone,
+    # because a ClickHouse outage blanks every agency's collected-data probe,
+    # and "nothing collected" would then be a claim the board cannot back. One
+    # whose collected data is known to be waiting is already lagging above.
+    never_analyzed = [af for af in agency_freshness or [] if af.last_analyzed_at is None and not af.is_stale]
+    if never_analyzed:
+        alerts.append(
+            {
+                "level": "info",
+                "code": "agencies_never_analyzed",
+                "params": {"count": len(never_analyzed)},
+                "text": f"{len(never_analyzed)} agency(ies) never analyzed",
+                "href": "/admin/agencies",
+            }
+        )
 
     for row in freshness:
         scored = [d for d in row["days"] if d["clamp_pct"] is not None]
@@ -160,7 +189,10 @@ def board_alerts(
                     "level": "warn",
                     "code": "clamp_high",
                     "params": {"agency": row["agency_name"], "pct": worst["clamp_pct"], "date": worst["date"]},
-                    "text": f"{row['agency_name']}: {worst['clamp_pct']}% of samples clamped on {worst['date']}",
+                    "text": (
+                        f"{row['agency_name']}: {worst['clamp_pct']}% of readings set aside as implausible"
+                        f" on {worst['date']}"
+                    ),
                     "href": "/admin/ops",
                 }
             )
@@ -243,6 +275,10 @@ def collector_tiles(
                 "status": _TILE_STATUS.get(str(doc.get("state") or "unknown"), "unknown"),
                 "last_success_at": last_success_at if isinstance(last_success_at, str) else None,
                 "detail": reasons.get(key),
+                # The status collector failed for this component, so its state
+                # is not known at all — a different fact from a component that
+                # reported itself unhealthy.
+                "check_failed": bool((doc.get("details") or {}).get("collector_error")),
                 "history": collector_history(_parse_iso(last_success_at), now),
             }
         )

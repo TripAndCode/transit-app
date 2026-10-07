@@ -17,18 +17,14 @@
 import { delayBand } from "../styles/tokens";
 import type { OverviewTopDelayedRoute } from "../api/types";
 
-const BAND_ORDER: { band: "severe" | "moderate" | "mild"; labelKey: string }[] = [
-  { band: "severe", labelKey: "map.legend.band_gt_5" },
-  { band: "moderate", labelKey: "map.legend.band_3_5" },
-  { band: "mild", labelKey: "map.legend.band_1_5_3" },
-];
+const BAND_ORDER = ["severe", "moderate", "mild"] as const;
 
-type BandGroup = { band: "severe" | "moderate" | "mild"; labelKey: string; routes: OverviewTopDelayedRoute[] };
+type Band = (typeof BAND_ORDER)[number];
+type BandGroup = { band: Band; routes: OverviewTopDelayedRoute[] };
 
 export function groupBySeverityBand(routes: OverviewTopDelayedRoute[]): BandGroup[] {
-  return BAND_ORDER.map(({ band, labelKey }) => ({
+  return BAND_ORDER.map((band) => ({
     band,
-    labelKey,
     routes: routes.filter((r) => delayBand(r.avg_min) === band).sort((a, b) => b.avg_min - a.avg_min),
   })).filter((g) => g.routes.length > 0);
 }

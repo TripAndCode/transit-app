@@ -190,6 +190,17 @@ jobs:
       - name: Install dependencies
         run: poetry install
 
+      # This persistent runner keeps every venv Poetry makes for the checkout,
+      # one per Python minor version, and Poetry never removes one when the
+      # pinned version moves on. Keep only the venv this job just installed;
+      # an empty answer stops the step rather than matching every venv.
+      - name: Remove this checkout's venvs for other Python versions
+        run: |
+          active="$(poetry env info --path)"
+          active="${active##*/}"
+          test -n "$active"
+          poetry env list | awk '{print $1}' | { grep -vxF "$active" || true; } | xargs -r -n1 poetry env remove
+
       - name: Start Postgres from db/Dockerfile
         id: postgres
         uses: ./.github/actions/start-test-postgres

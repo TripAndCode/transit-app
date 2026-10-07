@@ -18,7 +18,7 @@ export function pill(active: boolean, size: PillSize = "md"): CSSProperties {
     fontSize: "var(--text-xs)",
     fontWeight: active ? 600 : 400,
     cursor: "pointer",
-    transition: "all var(--transition)",
+    transition: "background var(--transition), color var(--transition), border-color var(--transition)",
   };
 }
 
