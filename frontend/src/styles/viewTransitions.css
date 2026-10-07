@@ -1,8 +1,8 @@
-/* Screen changes from the rail run as view transitions: App.tsx's
-   <ViewTransition> names the routed pane only for a "nav" transition (see
-   navPending.tsx), so filter changes and refetches never animate. Only that
-   pane is captured; the rail and top bar stay live, and clicks pass through
-   the transition's overlay to them. */
+/* Screen changes started through navPending.tsx (the rail, report rows) run
+   as view transitions: App.tsx's <ViewTransition> names the routed pane only
+   for a "nav" transition, so filter changes and refetches never animate. Only
+   that pane is captured; the rail and top bar stay live, and clicks pass
+   through the transition's overlay to them. */
 html { view-transition-name: none; }
 ::view-transition { pointer-events: none; }
 
@@ -16,6 +16,12 @@ html { view-transition-name: none; }
   ::view-transition-group(.page-nav) { animation-duration: var(--dur-2); }
   ::view-transition-old(.page-nav) { animation: page-nav-out var(--dur-1) var(--ease-out) both; }
   ::view-transition-new(.page-nav) { animation: page-nav-in var(--dur-2) var(--ease-out) both; }
+  /* A report row's route label travelling into the dossier title
+     (RouteTitleTransition); never named under reduced motion. */
+  ::view-transition-group(.route-title) {
+    animation-duration: var(--dur-2);
+    animation-timing-function: var(--ease-out);
+  }
 }
 
 /* The blanket reduced-motion rule in global.css does not reach

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,6 +7,14 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { ReportTable } from "./ReportTable";
 import * as hooks from "../api/hooks";
 import type { Route as RouteRecord } from "../api/types";
+import { NavPendingContext } from "./navPendingContext";
+import { stubReducedMotion } from "../test/reducedMotion";
+
+// jsdom runs no view transitions, so the shared-element wrapper is swapped for
+// a marker that shows which label wears the title's name.
+vi.mock("./RouteTitleTransition", () => ({
+  RouteTitleTransition: ({ children }: { children: React.ReactNode }) => <span data-testid="route-title-transition">{children}</span>,
+}));
 
 function mockRoutes(data: RouteRecord[]) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data, isLoading: false } as never);
@@ -23,6 +32,102 @@ function renderTable(rows: unknown[][], reportType = "ranking", minSamples?: num
     </MemoryRouter>,
   );
 }
+
+/** A pending-nav provider whose navigation stays pending until "settle". */
+function TestNav({ go, children }: { go: (to: string) => void; children: React.ReactNode }) {
+  const [pendingTo, setPendingTo] = useState<string | null>(null);
+  return (
+    <NavPendingContext
+      value={{
+        pendingTo,
+        go: (to) => {
+          go(to);
+          setPendingTo(to);
+        },
+      }}
+    >
+      <button type="button" onClick={() => setPendingTo(null)}>
+        settle
+      </button>
+      {children}
+    </NavPendingContext>
+  );
+}
+
+function renderWithNav(rows: unknown[][], go: (to: string) => void) {
+  return renderWithProviders(
+    <TestNav go={go}>
+      <MemoryRouter initialEntries={["/agencies/1/analysis?from=2026-09-01"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType="ranking" rows={rows} />} />
+        </Routes>
+      </MemoryRouter>
+    </TestNav>,
+  );
+}
+
+describe("ReportTable route link travel", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  const rows = [
+    ["3", "weekday", 4.2, 3.1, 7.0, 120],
+    ["12", "weekday", 3.0, 2.1, 5.0, 120],
+  ];
+
+  it("a plain click opens the route as a screen navigation, and only the clicked label travels into the title", async () => {
+    mockRoutes([]);
+    const go = vi.fn();
+    renderWithNav(rows, go);
+    await userEvent.click(screen.getByRole("link", { name: /Route 3/ }));
+    expect(go).toHaveBeenCalledWith("/agencies/1/routes/3?from=2026-09-01");
+    const shared = screen.getAllByTestId("route-title-transition");
+    expect(shared).toHaveLength(1);
+    expect(shared[0]).toHaveTextContent("Route 3");
+    // The travelling link is one box, chevron included; the rest wrap as text.
+    expect(shared[0].firstElementChild).toHaveClass("report-route-link", "report-route-link--travelling");
+    expect(document.querySelectorAll(".report-route-link--travelling")).toHaveLength(1);
+  });
+
+  it("holds the name only while that row's navigation is pending, so a superseded one leaves nothing named", async () => {
+    mockRoutes([]);
+    renderWithNav(rows, vi.fn());
+    await userEvent.click(screen.getByRole("link", { name: /Route 3/ }));
+    expect(screen.getByTestId("route-title-transition")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "settle" }));
+    expect(screen.queryByTestId("route-title-transition")).toBeNull();
+  });
+
+  it("a route listed once per service still lends its name to only the clicked row", async () => {
+    mockRoutes([]);
+    renderWithNav([["3", "weekday", 4.2, 3.1, 7.0, 120], ["3", "weekend", 3.9, 2.8, 6.0, 90]], vi.fn());
+    await userEvent.click(screen.getAllByRole("link", { name: /Route 3/ })[1]);
+    expect(screen.getAllByTestId("route-title-transition")).toHaveLength(1);
+    expect(screen.getAllByRole("row")[2]).toContainElement(screen.getByTestId("route-title-transition"));
+  });
+
+  it("under reduced motion the click still navigates, but nothing travels", async () => {
+    mockRoutes([]);
+    stubReducedMotion();
+    const go = vi.fn();
+    renderWithNav(rows, go);
+    await userEvent.click(screen.getByRole("link", { name: /Route 3/ }));
+    expect(go).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("route-title-transition")).toBeNull();
+  });
+
+  it("a modified click stays the browser's: no screen navigation, nothing named", async () => {
+    mockRoutes([]);
+    const go = vi.fn();
+    renderWithNav(rows, go);
+    const user = userEvent.setup();
+    await user.keyboard("{Control>}");
+    await user.click(screen.getByRole("link", { name: /Route 3/ }));
+    await user.keyboard("{/Control}");
+    expect(go).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("route-title-transition")).toBeNull();
+  });
+});
 
 describe("ReportTable route column", () => {
   afterEach(() => {
