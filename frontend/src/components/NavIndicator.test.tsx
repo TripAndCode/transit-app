@@ -16,12 +16,12 @@ function rect(top: number, height: number, left = 0, width = 200): DOMRect {
   return { top, height, left, width, bottom: top + height, right: left + width, x: left, y: top, toJSON: () => ({}) } as DOMRect;
 }
 
-function Shell() {
+function Shell({ axis = "y" }: { axis?: "x" | "y" }) {
   const { pathname } = useLocation();
   return (
     <NavPendingProvider>
       <nav aria-label="Destinations">
-        <NavIndicator axis="y" watch={pathname} />
+        <NavIndicator axis={axis} watch={pathname} />
         <PendingNavLink to="/a">A</PendingNavLink>
         <PendingNavLink to="/b">B</PendingNavLink>
       </nav>
@@ -32,18 +32,18 @@ function Shell() {
   );
 }
 
-function renderShell(at: string) {
+function renderShell(at: string, axis: "x" | "y" = "y") {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (this.tagName === "NAV") return rect(100, 80);
-    if (this.textContent === "A") return rect(100, 40);
-    if (this.textContent?.startsWith("B")) return rect(140, 40);
+    if (this.textContent === "A") return rect(100, 40, 0, 80);
+    if (this.textContent?.startsWith("B")) return rect(140, 40, 80, 120);
     return rect(0, 0);
   });
   const router = createMemoryRouter(
     [
       {
         path: "/",
-        element: <Shell />,
+        element: <Shell axis={axis} />,
         children: [
           { path: "a", element: <p>page a</p> },
           { path: "b", element: <NeverLoads /> },
@@ -71,6 +71,14 @@ describe("NavIndicator", () => {
     expect(indicator.style.opacity).toBe("1");
   });
 
+  it("stretches a horizontal line to its tab by scale, so the glide animates no layout", async () => {
+    const indicator = renderShell("/a", "x");
+    expect(indicator.style.transform).toBe("translateX(0px) scaleX(80)");
+    expect(indicator.style.width).toBe("");
+    await userEvent.click(screen.getByRole("link", { name: /^B/ }));
+    expect(indicator.style.transform).toBe("translateX(80px) scaleX(120)");
+  });
+
   it("travels to a clicked link at once, before its screen has arrived", async () => {
     const indicator = renderShell("/a");
     await userEvent.click(screen.getByRole("link", { name: /^B/ }));
@@ -88,8 +96,6 @@ describe("NavIndicator", () => {
     const css = readFileSync(resolve(__dirname, "./NavIndicator.css"), "utf8");
     expect(decl(ruleBody(css, ".nav-indicator {"), "transition")).toBeNull();
     const allowed = ruleBody(css, "@media (prefers-reduced-motion: no-preference)");
-    expect(decl(ruleBody(allowed, ".nav-indicator[data-glide]"), "transition")).toBe(
-      "transform var(--dur-2) var(--ease-out), height var(--dur-2) var(--ease-out), width var(--dur-2) var(--ease-out)",
-    );
+    expect(decl(ruleBody(allowed, ".nav-indicator[data-glide]"), "transition")).toBe("transform var(--dur-2) var(--ease-out)");
   });
 });

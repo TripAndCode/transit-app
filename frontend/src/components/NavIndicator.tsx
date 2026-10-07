@@ -7,7 +7,9 @@ import "./NavIndicator.css";
  *  link and travels to a clicked one at once, while that screen is still
  *  loading, so the click is answered before the screen arrives. `axis="y"`
  *  fills a vertical list's row; `axis="x"` draws a line above a horizontal
- *  tab's. It moves by writing its own style, so a move re-renders nothing.
+ *  tab's. It moves by writing its own style, so a move re-renders nothing,
+ *  and it glides on transform alone: the line's width is a scale, while a
+ *  row's height (rows in one list rarely differ) is taken at once.
  *
  *  `watch` is whatever decides the current entry (the pathname, for route
  *  links), so the highlight moves when it changes; a list whose current
@@ -49,8 +51,8 @@ export function NavIndicator({
         indicator.style.transform = `translateY(${r.top - outer.top + box.scrollTop}px)`;
         indicator.style.height = `${r.height}px`;
       } else {
-        indicator.style.transform = `translateX(${r.left - outer.left + box.scrollLeft}px)`;
-        indicator.style.width = `${r.width}px`;
+        // A 1px line scaled to the tab's width: the glide stays on transform.
+        indicator.style.transform = `translateX(${r.left - outer.left + box.scrollLeft}px) scaleX(${r.width})`;
       }
       indicator.style.opacity = "1";
       if (indicator.dataset.glide == null) {

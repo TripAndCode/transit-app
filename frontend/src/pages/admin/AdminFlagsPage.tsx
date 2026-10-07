@@ -125,12 +125,13 @@ function FlagToggle({ flag, onRequestChange }: { flag: FeatureFlag; onRequestCha
         style={{
           position: "absolute",
           top: 1,
-          left: flag.value ? 19 : 1,
+          left: 1,
+          transform: flag.value ? "translateX(18px)" : "translateX(0)",
           width: 18,
           height: 18,
           borderRadius: "50%",
           background: flag.value ? "var(--bg-surface)" : "var(--text-tertiary)",
-          transition: "left var(--dur-1) var(--ease-out)",
+          transition: "transform var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out)",
         }}
       />
     </button>

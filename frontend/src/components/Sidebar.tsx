@@ -613,7 +613,6 @@ export function Sidebar() {
           display: "flex",
           flexDirection: "column",
           height: "100%",
-          transition: "width var(--transition)",
         }}
       >
         <div

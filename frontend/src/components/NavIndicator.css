@@ -13,12 +13,14 @@
 }
 .nav-indicator--rounded { border-radius: var(--radius); }
 .nav-indicator--x {
+  width: 1px;
   height: 2px;
+  transform-origin: 0 0;
   background: var(--accent);
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .nav-indicator[data-glide] {
-    transition: transform var(--dur-2) var(--ease-out), height var(--dur-2) var(--ease-out), width var(--dur-2) var(--ease-out);
+    transition: transform var(--dur-2) var(--ease-out);
   }
 }

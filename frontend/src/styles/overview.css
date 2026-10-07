@@ -88,10 +88,12 @@
   border-radius: var(--radius);
   outline: 1px solid var(--border-soft);
   outline-offset: -1px;
-  transition: height 200ms ease;
+  /* Rank intensity arrives as a custom property rather than an inline
+     opacity, which would outrank the hover rule below. */
+  opacity: var(--rank-opacity, 1);
+  transition: opacity var(--dur-1) var(--ease-out);
 }
-.ov-pareto-row:hover .ov-pareto-track { height: 10px; }
-.ov-pareto-row:hover .ov-pareto-fill  { height: 100%; }
+.ov-pareto-row:hover .ov-pareto-fill { opacity: calc(var(--rank-opacity, 1) * 0.85); }
 .ov-pareto-pct {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -330,11 +332,11 @@
 /* Card hover affordance for the clickable summary cards. */
 .ov-card.ov-clickable {
   cursor: pointer;
-  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+  transition: background var(--dur-1) var(--ease-out);
 }
 .ov-card.ov-clickable:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--el-2);
+  background: var(--bg-soft);
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-surface));
 }
 .ov-card.ov-clickable:focus-visible {
   outline: 2px solid var(--accent);
