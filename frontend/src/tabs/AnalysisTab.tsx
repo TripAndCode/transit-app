@@ -22,17 +22,13 @@ import { InsightPanel } from "../components/InsightPanel";
 import { SkeletonChart, SkeletonTable } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
-import { BandGrid, Legend } from "../components/charts/DowBandGrid";
+import { HeatSurface } from "../components/charts/HeatSurface";
 import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
-import { accentRampColor } from "../styles/tokens";
-import type { Band, ForecastOverviewGridCell, ForecastOverviewWorst } from "../api/types";
-import { WEEK } from "../utils/week";
 import { ReportTable } from "../components/ReportTable";
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { WeatherDelayPanel } from "../components/WeatherDelayPanel";
 import { formatNumber, formatDateRange } from "../utils/format";
-import { avgDelayText } from "../utils/delayPhrase";
 import { serviceValueLabel } from "../utils/filterValueLabels";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
@@ -395,7 +391,7 @@ function TrendBlock({
     Math.round((new Date(ctx.to).getTime() - new Date(ctx.from).getTime()) / 86400000) + 1,
   );
   // One provider over all three charts: hovering a mark in any of them dims
-  // the marks in the others that don't share its day, weekday or hour.
+  // the marks in the others that don't share its day or weekday.
   return (
     <TrendFocusProvider>
       <div>
@@ -405,7 +401,7 @@ function TrendBlock({
           <p className="trend-single-day">{t("reports.trend.single_day")}</p>
         ) : (
           <>
-            <DowBandHeatmapCard grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
+            <HeatSurface hourly={payload.hourly} grid={payload.dow_band.grid} worst={payload.dow_band.worst} rangeDays={rangeDays} />
             <DailyChart days={payload.days} revisionBoundaries={payload.revision_boundaries ?? []} />
           </>
         )}
@@ -511,53 +507,3 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
     </div>
   );
 }
-
-function DowBandHeatmapCard({
-  grid,
-  worst,
-  rangeDays,
-}: {
-  grid: ForecastOverviewGridCell[];
-  worst: ForecastOverviewWorst | null;
-  rangeDays: number;
-}) {
-  const { t } = useTranslation();
-  const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
-  const bandLabel = (b: Band) => t(`forecast.band_${b}`);
-  const axisMin = t("forecast.axis_min");
-  const values = grid.map((c) => c.expected_avg_min).filter((v): v is number => v != null);
-  const min = values.length ? Math.min(...values) : 0;
-  const max = values.length ? Math.max(...values) : 0;
-
-  return (
-    <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius)", padding: 16, marginBottom: 16 }}>
-      <h3 style={{ marginTop: 0, fontSize: 14 }}>{t("reports.dow_band.title")}</h3>
-      {values.length === 0 ? (
-        <p style={{ color: "var(--text-tertiary)", fontSize: 13 }}>{t("reports.dow_band.empty")}</p>
-      ) : (
-        <>
-          {worst && (
-            <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>
-              {t("reports.dow_band.worst_phrase", {
-                count: rangeDays,
-                day: dayLabel(worst.dow),
-                band: bandLabel(worst.band),
-                avg: avgDelayText(t, worst.expected_avg_min),
-              })}
-            </p>
-          )}
-          <BandGrid
-            grid={grid}
-            bandLabel={bandLabel}
-            dayLabel={dayLabel}
-            colorFor={accentRampColor}
-            onTip={() => {}}
-            onLeave={() => {}}
-          />
-          <Legend min={min} max={max} unit={axisMin} colorFor={accentRampColor} />
-        </>
-      )}
-    </div>
-  );
-}
-

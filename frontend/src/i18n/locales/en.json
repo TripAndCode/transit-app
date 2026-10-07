@@ -1007,10 +1007,21 @@
       "severe_outline": "outlined = {{min}} min and over"
     },
     "dow_band": {
-      "title": "Usual delay pattern",
       "empty": "No data for this period.",
       "worst_phrase_one": "Over the past day, {{day}} {{band}} ran latest ({{avg}})",
       "worst_phrase_other": "Over the past {{count}} days, {{day}} {{band}} runs latest ({{avg}})"
+    },
+    "heat_surface": {
+      "title": "Day × hour surface",
+      "aria": "Average delay by weekday and hour",
+      "profile_label": "Profile",
+      "profile_hourly": "By hour",
+      "profile_banded": "By band",
+      "legend_low": "On time",
+      "legend_high": "{{min}} min+",
+      "readout_hint": "Hover a cell to keep only its hour column and weekday row.",
+      "readout": "{{day}} {{hour}}:00 — avg {{min}}",
+      "readout_empty": "{{day}} {{hour}}:00 — no data"
     },
     "daily": {
       "empty": "No data in this range.",

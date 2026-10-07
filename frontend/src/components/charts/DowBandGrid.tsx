@@ -30,9 +30,8 @@ export function Legend({ min, max, unit, colorFor = delayColor }: { min: number;
  * the per-route detail (route cells collapsed to bands client-side).
  *
  * Hovering a cell publishes its weekday to `TrendFocusContext` when one is
- * mounted, so the trend view's other charts narrow to that weekday; outside a
- * provider (the forecast tab) the focus is inert and the grid behaves as
- * before. A cell at or beyond the severe threshold is outlined rather than
+ * mounted above it; outside a provider, which is where every grid renders
+ * today, the focus is inert. A cell at or beyond the severe threshold is outlined rather than
  * recoloured, so the outline survives whatever ramp `colorFor` applies. */
 export function BandGrid({
   grid,
