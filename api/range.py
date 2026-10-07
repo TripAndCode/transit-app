@@ -408,16 +408,17 @@ def date_range_clause(
     ctx: RangeCtx,
     next_param: int,
 ) -> tuple[str, list, int]:
-    """Inclusive date-range WHERE fragment for an agg table's date ``column``.
+    """Inclusive date-range WHERE fragment for an agg table's DATE ``column``.
 
-    ``column::date`` accepts both ways the agg tables store a date: a DATE
-    column, where the cast is a no-op, and ISO date strings in a TEXT column.
+    The column stays bare and the cast sits on the parameter side, so the
+    ``(agency_id, date, ...)`` index prefix every agg table carries can
+    serve the range scan; a cast on the column would discard it.
 
     The ``::text`` coercion keeps asyncpg sending the params as TEXT instead
     of trying (and failing) to infer a native type; ``str()`` normalizes the
     mixed caller types (ISO str from the API ctx, datetime.date from tests).
     """
-    fragment = f"{column}::date BETWEEN (${next_param}::text)::date AND (${next_param + 1}::text)::date"
+    fragment = f"{column} >= (${next_param}::text)::date AND {column} <= (${next_param + 1}::text)::date"
     return fragment, [str(ctx.from_date), str(ctx.to_date)], next_param + 2
 
 
@@ -431,10 +432,10 @@ def dow_clause(
     if days is None:
         return "TRUE", [], next_param
     if ctx.dow == "weekday":
-        return f"EXTRACT(ISODOW FROM {column}::date) BETWEEN 1 AND 5", [], next_param
+        return f"EXTRACT(ISODOW FROM {column}) BETWEEN 1 AND 5", [], next_param
     # The day numbers come from canonical_dow's closed set, never raw input.
     listed = ", ".join(str(day) for day in sorted(days))
-    return f"EXTRACT(ISODOW FROM {column}::date) IN ({listed})", [], next_param
+    return f"EXTRACT(ISODOW FROM {column}) IN ({listed})", [], next_param
 
 
 def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:

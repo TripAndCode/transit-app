@@ -1,7 +1,10 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeAll } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import i18n, { i18nReady, SUPPORTED_LOCALES } from "../i18n";
+import { ASYNC_UTIL_TIMEOUT_MS } from "./timeouts";
+
+configure({ asyncUtilTimeout: ASYNC_UTIL_TIMEOUT_MS });
 
 // Ensure React Testing Library unmounts components and clears the DOM between
 // tests so state never leaks across cases.

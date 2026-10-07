@@ -116,6 +116,12 @@ describe("FilterDock playback toggle", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps its name in an element a narrow map can hide, leaving the icon", () => {
+    renderDock([], { active: false, onToggle: vi.fn() });
+    const toggle = screen.getByRole("button", { name: PLAYBACK_ON });
+    expect(toggle.querySelector(".ops-dock__playback-label")?.textContent).toMatch(PLAYBACK_ON);
+  });
+
   it("offers the way back out once playback is on", () => {
     renderDock([], { active: true, onToggle: vi.fn() });
     expect(screen.getByRole("button", { name: PLAYBACK_OFF }).getAttribute("aria-pressed")).toBe("true");

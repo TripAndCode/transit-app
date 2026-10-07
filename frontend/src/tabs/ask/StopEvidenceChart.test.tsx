@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import i18n from "../../i18n";
 import { renderWithProviders } from "../../test/renderWithProviders";
@@ -59,5 +59,18 @@ describe("StopEvidenceChart stop bar tooltip", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("Central · #1");
     fireEvent.focusOut(bar);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+});
+
+describe("StopEvidenceChart detail placement", () => {
+  it("re-measures once per frame while the strip scrolls", () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const { container } = renderWithProviders(<StopEvidenceChart messageId={1} points={points} />);
+    fireEvent.click(screen.getAllByRole("button", { pressed: false })[0]);
+    raf.mockClear();
+    const strip = container.querySelector<HTMLElement>(".stop-evidence-scroll")!;
+    for (let i = 0; i < 5; i++) fireEvent.scroll(strip);
+    expect(raf).toHaveBeenCalledTimes(1);
+    raf.mockRestore();
   });
 });

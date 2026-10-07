@@ -1,3 +1,4 @@
+-- DESTRUCTIVE: drops agencies.static_strategy and ingest_strategy.
 -- Restore NOT NULL on updates. Any existing NULL rows must be fixed by hand
 -- before rolling back; this is intentionally strict.
 ALTER TABLE updates

@@ -50,7 +50,7 @@ export function BandGrid({
   onLeave: () => void;
 }) {
   const byKey = new Map(grid.map((c) => [`${c.dow}-${c.band}`, c]));
-  const cols = `34px repeat(${BAND_ORDER.length}, 1fr)`;
+  const cols = `auto repeat(${BAND_ORDER.length}, 1fr)`;
   const entered = useEnteredOnMount();
   const { setFocus } = useTrendFocus();
   // .chart-cell-opacity gives a reduced-motion viewer (who gets none of the
@@ -76,7 +76,7 @@ export function BandGrid({
         {Array.from({ length: 7 }, (_, di) => {
           const dow = di + 1;
           return [
-            <div key={`l${dow}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+            <div key={`l${dow}`} style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", textAlign: "right", paddingRight: 6, display: "flex", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
               {dayLabel(dow)}
             </div>,
             ...BAND_ORDER.map((b, bi) => {

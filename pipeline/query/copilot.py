@@ -36,11 +36,11 @@ def is_enabled() -> bool:
 async def ais_enabled() -> bool:
     """:func:`is_enabled` for a caller on the event loop.
 
-    The synchronous read never blocks on Postgres once anything is cached,
-    but it also declines to perform a refresh that `invalidate()` has marked
-    owed -- it leaves that to an async reader. A handler that only ever calls
-    the sync form is therefore the reader that never arrives, and an operator
-    who just cleared or set this switch keeps being served the old value.
+    After `invalidate()` the async read waits for the re-read, so the request
+    right after an operator flips this switch sees the new value; the
+    synchronous form answers it with the old one while the re-read runs
+    behind it. With nothing cached at all, the synchronous form reads
+    Postgres inline, which on the event loop stalls every other request.
     """
     return await aflag("copilot_insight_enabled")
 

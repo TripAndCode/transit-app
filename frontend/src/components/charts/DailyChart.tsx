@@ -1,7 +1,8 @@
 import { useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
-import { formatNumber, formatMinutes, formatShortDate } from "../../utils/format";
+import { formatDate, formatNumber, formatMinutes, formatShortDate } from "../../utils/format";
+import { niceAxis } from "./niceAxis";
 import { useScope } from "../../api/scope";
 import { useDrawOn } from "./ChartEnter";
 import { ShadedDays, ThresholdBand, VerticalMarker } from "./annotations";
@@ -52,8 +53,9 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
 
   const avgs = days.map((d) => d.avg_min ?? 0);
   const samples = days.map((d) => d.samples ?? 0);
+  const axis = niceAxis(0, Math.max(1, ...avgs), 4);
   const stats = {
-    maxAvg: Math.max(1, ...avgs),
+    maxAvg: axis.high,
     maxSamples: Math.max(1, ...samples),
   };
 
@@ -226,13 +228,13 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
       >
         <svg width={W} height={H} role="img" aria-label={t("reports.daily.svg_aria")} style={{ display: "block" }}>
           {/* Y axis grid */}
-          {[0.25, 0.5, 0.75].map((f) => {
-            const y = padT + innerH * 0.35 + (1 - f) * innerH * 0.65;
+          {axis.ticks.slice(1).map((value) => {
+            const y = toY(value);
             return (
-              <g key={f}>
+              <g key={value}>
                 <line x1={padL} x2={W - padR} y1={y} y2={y} stroke="var(--border-soft)" strokeDasharray="2 4" />
-                <text x={6} y={y + 4} fontSize="10" fill="var(--text-tertiary)">
-                  {formatMinutes(stats.maxAvg * f)}
+                <text data-testid="daily-grid-label" x={6} y={y + 4} fontSize="10" fill="var(--text-tertiary)">
+                  {formatMinutes(value)}
                 </text>
               </g>
             );
@@ -267,6 +269,9 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
                 width={w}
                 height={h}
                 fill="var(--accent-soft)"
+                // The attribute is what an exported SVG, which carries no
+                // stylesheet, falls back to; in the page the class wins.
+                opacity={0.7}
                 style={{ "--mark-opacity": 0.7 } as CSSProperties}
               />
             );
@@ -410,15 +415,15 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
           }}
         >
           <div>
-            <strong>{days[cursor].date}</strong>:{" "}
+            <strong>{formatDate(days[cursor].date)}</strong>:{" "}
             {t("reports.daily.tooltip_metrics", {
-              min: (days[cursor].avg_min ?? 0).toFixed(1),
+              min: formatMinutes(days[cursor].avg_min ?? 0),
               count: formatNumber(days[cursor].samples ?? 0),
             })}
           </div>
           {days[cursor].avg_min_smoothed != null && (
             <div style={{ color: "var(--text-secondary)" }}>
-              {t("reports.daily.smoothed_tooltip", { min: days[cursor].avg_min_smoothed!.toFixed(1) })}
+              {t("reports.daily.smoothed_tooltip", { min: formatMinutes(days[cursor].avg_min_smoothed!) })}
             </div>
           )}
           {days[cursor].top_offenders?.length > 0 && (
@@ -426,7 +431,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
               {t("reports.daily.worst_label")}{" "}
               {days[cursor].top_offenders
                 .slice(0, 3)
-                .map((o) => t("reports.daily.offender", { code: o.route_code, min: o.avg_min.toFixed(1) }))
+                .map((o) => t("reports.daily.offender", { code: o.route_code, min: formatMinutes(o.avg_min) }))
                 .join(", ")}
             </div>
           )}

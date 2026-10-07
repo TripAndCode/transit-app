@@ -4,6 +4,7 @@ import type { ForecastOverviewGridCell, ForecastOverviewWorst, TrendPayload } fr
 import { delayRampVar } from "../../styles/tokens";
 import { WEEK } from "../../utils/week";
 import { formatMinutes } from "../../utils/format";
+import { avgDelayText } from "../../utils/delayPhrase";
 import { DOWS, HOURS, forecastSurface, heatSurfaceDimRules, observedSurface, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
 import { useTrendFocus } from "./trendFocus";
 import "./HeatSurface.css";
@@ -155,7 +156,7 @@ export function HeatSurface({
             count: rangeDays,
             day: dayLabel(worst.dow),
             band: t(`forecast.band_${worst.band}`),
-            min: worst.expected_avg_min.toFixed(1),
+            avg: avgDelayText(t, worst.expected_avg_min),
           })}
         </p>
       )}

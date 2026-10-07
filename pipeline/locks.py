@@ -17,9 +17,11 @@ Two lock domains, distinguished by what the caller is about to write:
    caller that wants the same key with no wait at all -- a sibling, not a
    layer beneath it; each issues its own acquire).
    Held by promotion (pipeline/promote.py) around its copy from
-   `updates_live` into `updates`, and by analyze() for the whole of its own
-   run. The realtime writers (collector push, `ingest_live`) write
-   `updates_live`, which analyze never reads, and take no per-agency key.
+   `updates_live` into `updates`, by analyze() for the whole of its own
+   run, and by `gtfs_pipeline.py restamp_archive --apply` for every agency
+   it moves, under domain 1, across its rewrite of the whole table. The
+   realtime writers (collector push, `ingest_live`) write `updates_live`,
+   which analyze never reads, and take no per-agency key.
    This is analyze's own exclusion against promotion's copy landing
    mid-run, independent of whether a caller also holds domain 1. Current
    callers hold both: the cron sweep takes domain 1 once around its whole
@@ -148,9 +150,12 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
     while N+1..last are processed, well past the point this key's exclusion
     is still needed for agency N.
 
-    Waiting cannot deadlock: every holder (promotion, analyze) takes this key
-    while holding at most INGEST_ANALYZE_LOCK_KEY's single-argument lock,
-    which no holder of this key waits on.
+    Waiting cannot deadlock. Promotion and analyze take one agency's key at
+    a time, never nesting, while holding at most INGEST_ANALYZE_LOCK_KEY's
+    single-argument lock, which no holder of this key waits on. The restamp is
+    the one holder of several keys: it takes them in ascending agency_id while
+    holding that single-argument lock, so no other holder of a key can be
+    running and no cycle can form.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_lock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))
