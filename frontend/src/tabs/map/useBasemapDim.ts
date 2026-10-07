@@ -131,6 +131,13 @@ export function useBasemapDim(
       map.addLayer({ id: LIGHT_LAYER, type: "background", paint }, ids[ids.indexOf(SCRIM_LAYER) + 1]);
     }
 
+    // A scrim on the map belongs to the style loaded now, so its paint (and
+    // the light's) is written at once: waiting for the whole style to read as
+    // loaded would hold a playback frame's tint behind any source's reload.
+    if (m.getLayer(SCRIM_LAYER)) {
+      apply();
+      return;
+    }
     // Re-attach when the style is fully ready (re-arms on `styledata`, not the
     // one-shot `style.load`) so the scrim survives a basemap/language reload
     // even when basemap tiles finish after style.load fires.

@@ -663,7 +663,7 @@
       "relief": "Relief",
       "relief_hint": "A column per stop. Height = average delay (capped at {{cap}} min). Tilts the map to {{pitch}}°.",
       "pearl": "Segment highlight",
-      "pearl_hint": "A highlight travels only along the pinned trip's reported segments. It is not a vehicle position.",
+      "pearl_hint": "A highlight travels only along the selected trip's reported segments. It is not a vehicle position.",
       "light": "Ambient light",
       "light_hint": "During playback, a faint dawn, dusk or night tint follows the frame's hour."
     }

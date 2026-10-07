@@ -365,7 +365,9 @@ export function useOperationsMapLayers(
         return;
       }
       map.addSource(ACTIVE_ROUTE_SOURCE, { type: "geojson", data, lineMetrics: true });
-      const beforeId = map.getLayer(LIVE_TRIPS_LAYER) ? LIVE_TRIPS_LAYER : undefined;
+      // Beneath the trip trail when one is drawn, so the trail and its
+      // highlight stay on top whichever was added first.
+      const beforeId = [TRIP_PROGRESS_LINE_LAYER, LIVE_TRIPS_LAYER].find((id) => map.getLayer(id));
       map.addLayer({
         id: ACTIVE_ROUTE_CASING_LAYER,
         type: "line",

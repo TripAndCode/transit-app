@@ -32,12 +32,28 @@ describe("usePearlLayer", () => {
     expect(map.getLayer(PEARL_LAYER)).toBeUndefined();
     expect(map.getSource(PEARL_SOURCE)).toBeUndefined();
   });
-  it("paints the hidden gradient and runs no loop when off", () => {
+  it("adds no layer and runs no loop when off", () => {
     const raf = vi.spyOn(window, "requestAnimationFrame");
     const map = makeMockMap();
     mount(map, false);
     expect(map.getLayer(PEARL_LAYER)).toBeUndefined();
     expect(raf).not.toHaveBeenCalled();
+  });
+  it("hides the highlight when reduced motion turns on mid-session, rather than freezing it part-way", () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const map = makeMockMap();
+    const { rerender } = mount(map, true);
+    map.setPaintProperty(PEARL_LAYER, "line-gradient", pearlGradient(0.4));
+    stubReducedMotion();
+    rerender({ o: true, p: PROGRESS });
+    expect(map.getPaintProperty(PEARL_LAYER, "line-gradient")).toEqual(pearlGradient(-1));
+  });
+  it("is no wider than the reported trail it sits on", () => {
+    const map = makeMockMap();
+    mount(map, true);
+    const width = (map.getLayer(PEARL_LAYER)!.paint as Record<string, unknown>)["line-width"] as unknown[];
+    const stops = width.slice(3).filter((_, i) => i % 2 === 1) as number[];
+    expect(Math.max(...stops)).toBeLessThanOrEqual(6);
   });
   it("under reduced motion keeps the layer but never advances it", () => {
     stubReducedMotion();

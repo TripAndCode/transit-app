@@ -8,12 +8,12 @@ import { FLOW_PAINT_INTERVAL_MS, LIVE_TRIPS_LAYER, TRIP_PROGRESS_STOPS_LAYER } f
 import { PEARL_LAYER, PEARL_SOURCE, pearlGradient, pearlLine, pearlPhase } from "./pearl";
 
 /**
- * A shimmer that travels only along the reported segments of the pinned
+ * A shimmer that travels only along the reported segments of the selected
  * trip. It highlights where reports exist; it is not a vehicle. The chip's
  * hint says so, and the geometry enforces it: the source is the progress
- * response's located stops and nothing else. Advanced on the same 100 ms
- * tick as the route's flow dash; under reduced motion the layer stays but
- * paints the hidden gradient and no loop runs.
+ * response's located stops and nothing else. Advanced on a 100 ms tick like
+ * the route's flow dash; under reduced motion the layer stays but paints the
+ * hidden gradient and no loop runs.
  */
 export function usePearlLayer(
   mapRef: React.MutableRefObject<MLMap | null>,
@@ -58,7 +58,8 @@ export function usePearlLayer(
           source: PEARL_SOURCE,
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-width": ["interpolate", ["linear"], ["zoom"], 11, 3, 15, 8],
+            // No wider than the 6 px trail it lies on.
+            "line-width": ["interpolate", ["linear"], ["zoom"], 11, 3, 15, 6],
             "line-gradient": pearlGradient(-1) as never,
           },
         },
@@ -66,6 +67,14 @@ export function usePearlLayer(
       );
     });
   }, [lineKey, mapRef, on, styleEpoch]);
+
+  // The loop stops under reduced motion; a highlight left mid-trail would read
+  // as a vehicle standing there, so it is hidden instead.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!reducedMotion || !map?.getLayer(PEARL_LAYER)) return;
+    map.setPaintProperty(PEARL_LAYER, "line-gradient", pearlGradient(-1));
+  }, [mapRef, reducedMotion]);
 
   useFlowTick(on && line != null && !reducedMotion, FLOW_PAINT_INTERVAL_MS, (elapsed) => {
     const map = mapRef.current;

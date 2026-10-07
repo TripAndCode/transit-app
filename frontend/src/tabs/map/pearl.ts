@@ -2,7 +2,9 @@ import type { LiveTripProgressResponse } from "../../api/types";
 
 export const PEARL_SOURCE = "pearl-highlight";
 export const PEARL_LAYER = "pearl-highlight";
-/** Fraction of the line the shimmer covers: a highlight, not a sprite. */
+/** The shimmer's fade-in behind its peak, as a fraction of the line; half as
+ *  much fades out ahead, so the lit span is 1.5x this. A highlight, not a
+ *  sprite. */
 export const PEARL_WIDTH = 0.06;
 /** One traversal of the reported line. Slow on purpose -- a pearl that
  *  raced along the route would read as a vehicle position, and there is

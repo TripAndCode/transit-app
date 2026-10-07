@@ -205,6 +205,18 @@ describe("useBasemapDim", () => {
     expect(light["background-opacity-transition"]).toEqual({ duration: 600, delay: 0 });
   });
 
+  it("repaints an existing light at once, even while another source's reload holds the style unloaded", () => {
+    const map = makeMockMap();
+    map.reloadsOnSetData = true;
+    const { rerender } = renderHook(({ l }) => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, true, 0.3, l, 600); },
+      { initialProps: { l: { color: "#D9A066", opacity: 0.07 } } });
+    map.addSource("relief", { type: "geojson" });
+    (map.getSource("relief") as { setData: (d: unknown) => void }).setData({});
+    expect(map.isStyleLoaded()).toBe(false);
+    rerender({ l: { color: "#3B4A8C", opacity: 0.1 } });
+    expect(map.getPaintProperty(LIGHT_LAYER, "background-color")).toBe("#3B4A8C");
+  });
+
   it("updates an existing light in place and steps when the transition is 0", () => {
     const map = makeMockMap();
     const { rerender } = renderHook(({ l, ms }) => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, true, 0.3, l, ms); },

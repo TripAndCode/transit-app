@@ -128,6 +128,21 @@ describe("useOperationsMapLayers", () => {
     expect(routeLayer.paint?.["line-color"]).not.toContain("var(");
   });
 
+  it("draws a route chosen after the trail beneath the trail, so the trail and its highlight stay on top", () => {
+    const map = makeMockMap();
+    const { rerender } = renderHook(
+      ({ route }: { route: string | null }) => {
+        const mapRef = useRef(map as never);
+        useOperationsMapLayers(mapRef, LIVE, SHAPE, route, 420, 1, 0, "trip-1", PROGRESS, undefined, 0);
+      },
+      { initialProps: { route: null as string | null } },
+    );
+    rerender({ route: "12" });
+    const ids = map.layers.map((l) => l.id);
+    expect(ids.indexOf("active-route-casing")).toBeLessThan(ids.indexOf("trip-progress-line"));
+    expect(ids.indexOf("active-route-flow")).toBeLessThan(ids.indexOf("trip-progress-line"));
+  });
+
   it("clusters overlapping active trips and draws the selected trip report trail", () => {
     const map = makeMockMap();
     renderHook(() => {
