@@ -22,6 +22,16 @@ function cellAt(container: HTMLElement, date: string, hour: number): Element {
   return container.querySelector(`[data-testid='heat-cell'][data-date='${date}'][data-hour='${hour}']`)!;
 }
 
+describe("HourlyHeatmap tooltip", () => {
+  it("formats the tooltip's date and minutes for the locale", () => {
+    const { container } = renderHeatmap([{ date: "2026-06-01", hour: 8, avg_min: 3.25, samples: 2500 }]);
+    fireEvent.mouseEnter(cellAt(container, "2026-06-01", 8));
+    expect(screen.getByText(/Jun 1, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/3\.3 min/)).toBeInTheDocument();
+    expect(screen.getByText(/2,500/)).toBeInTheDocument();
+  });
+});
+
 describe("HourlyHeatmap legend", () => {
   it("describes one accent ramp over the delay domain instead of four colour bands", async () => {
     await i18n.changeLanguage("en");

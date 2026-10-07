@@ -1,0 +1,11 @@
+-- agg_daily_trend stored its service date as ISO text, the one agg_* table to
+-- do so. Every reader compared it through a date::date cast, which discards
+-- the (agency_id, date, ...) primary-key prefix and reads every row the
+-- agency has in order to narrow a range; the per-date purge in analyze() had
+-- to special-case it for the same reason. Stored as DATE, the predicates
+-- become index-served and the text/date split disappears.
+--
+-- USING date::date: every stored value is 'YYYY-MM-DD' by the builder's
+-- contract, so the cast is exact; a value that is not would abort this
+-- migration (and roll it back) rather than be coerced.
+ALTER TABLE agg_daily_trend ALTER COLUMN date TYPE DATE USING date::date;

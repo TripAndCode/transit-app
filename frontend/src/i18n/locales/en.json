@@ -25,21 +25,28 @@
     "other": "Other"
   },
   "compare": {
-    "mode_periods": "Periods and routes",
+    "mode_periods": "Weekdays and weekends",
     "mode_agencies": "Agencies"
   },
   "saved": {
     "title": "Reports",
     "view_summary": "Period summary",
     "view_saved": "Saved analyses",
-    "view_reports": "Council summary & delay reference"
+    "view_reports": "Council report & delay certificate",
+    "subtitle_summary": "How service ran over the period, on one printable page.",
+    "subtitle_saved": "Analyses saved on route pages in this browser.",
+    "subtitle_reports": "A summary for a council or board, and proof of a late departure."
   },
   "sheet": {
     "handle": "Sheet handle"
   },
   "onboarding": {
     "subtitle": "Select your transit agency",
-    "no_agencies": "No agencies are configured yet."
+    "no_agencies": "No agencies are configured yet.",
+    "data_through": "Data through {{date}}",
+    "no_data_yet": "No data collected yet",
+    "search": "Search agencies",
+    "no_matches": "No agency matches. Try another name."
   },
   "landing": {
     "hero": {
@@ -78,7 +85,7 @@
       "queue_title": "Trips to check",
       "kpi": {
         "observed": "Observed",
-        "delayed": "Delayed 5+ min",
+        "delayed": "5+\u00a0min late",
         "on_time": "On-time rate"
       },
       "legend": {
@@ -117,7 +124,8 @@
       "ask": {
         "title": "Ask, get evidence",
         "body": "The same evidence view Ask shows for a real answer — not a screenshot. Select a stop below to see it."
-      }
+      },
+      "scroll_hint": "Scroll sideways to see the whole chart."
     }
   },
   "tour": {
@@ -128,7 +136,7 @@
     "dismiss": "Dismiss this tour",
     "filters": {
       "title": "Narrow what you're looking at",
-      "body": "Filter by route, day of week, or time of day — everything below updates to match."
+      "body": "Filter by route or service pattern — everything below updates to match."
     },
     "map": {
       "title": "Inspect what's running now",
@@ -136,23 +144,24 @@
     },
     "ask": {
       "title": "Search and ask",
-      "body": "Find routes, reports and screens from here. The same field takes you to Ask, where you can put a question about delays in plain language."
+      "body": "Find routes, reports and screens from here. The same field takes you to Ask, which answers common questions about delay with a table or chart."
     }
   },
   "forecast": {
     "overview_worst_label": "When to watch out",
-    "overview_worst_phrase": "{{day}} {{band}} — generally runs late (avg +{{min}} min)",
+    "overview_worst_phrase": "{{day}} {{band}} runs latest ({{avg}})",
     "overview_grid_title": "Day × time of day (all routes)",
+    "route_grid_title": "Day × time of day (this route)",
     "overview_grid_caption": "When the agency tends to run late — darker = more delay.",
     "overview_routes_title": "Routes that run late",
-    "overview_routes_caption": "Click a route for its breakdown.",
+    "overview_routes_caption": "Click a route for its breakdown. The small line traces its daily average over its last 7 days of data.",
     "overview_no_data": "No measurements yet.",
     "band_early": "Early",
     "band_morning": "Morning",
     "band_midday": "Midday",
     "band_evening": "Evening",
     "band_night": "Night",
-    "detail_worst_phrase": "Worst on {{day}} {{band}} (avg +{{min}} min)",
+    "detail_worst_phrase": "Worst on {{day}} {{band}} ({{avg}})",
     "detail_show_grid": "Show day × hour detail",
     "low_confidence_note": "Few measurements — indicative",
     "lowSamples": "Low data ({{count}} obs.)",
@@ -175,7 +184,11 @@
     "stat_worst": "Worst",
     "stat_calmest": "Calmest",
     "stat_mean": "Route avg",
-    "stat_samples": "Measurements"
+    "stat_samples": "Measurements",
+    "route_picker_label": "Route",
+    "route_picker_all": "All routes",
+    "avg_late": "avg {{min}} min late",
+    "avg_early": "avg {{min}} min early"
   },
   "network": {
     "title": "Compare agencies",
@@ -186,7 +199,7 @@
     "col_on_time": "On-time %",
     "col_delivered": "Service delivered %",
     "col_samples": "Samples",
-    "col_feed": "Feed (clamped %)",
+    "col_feed": "Feed (implausible %)",
     "col_freshness": "Freshness",
     "stale_badge": "Behind",
     "empty": "No agencies.",
@@ -201,7 +214,7 @@
     "help_coverage": "The date span this agency actually has data for within the window.",
     "col_coverage": "Coverage",
     "no_data_in_range": "no data in range",
-    "view_agency": "View {{name}} overview",
+    "view_agency": "Open {{name}} in Live",
     "delay_unit": "min",
     "you_badge": "YOU",
     "ridership_weighted_toggle": "Weight by ridership",
@@ -210,24 +223,25 @@
     "help_ridership_weighted": "When a manually-configured ridership weight exists for this agency, pools each route's on-time contribution by that weight instead of counting every route equally.",
     "col_vehicle_km_delivered": "Vehicle-km delivered %",
     "help_vehicle_km_delivered": "Share of the current schedule's planned vehicle-kilometers actually run — shows \"—\" when this agency has no shapes.txt loaded or doesn't report cancellations (see Service delivered).",
-    "planned_trip_count_fallback": "{{count}} planned trips (vehicle-km not available)",
+    "planned_trip_count_fallback": "Planned trips {{count}} (vehicle-km not available)",
     "schedule_version_title": "Static schedule version: {{version}}",
     "col_agency": "Agency",
-    "axis_caption": "Shared axis · 0–{{max}} min",
-    "definition_disclosure": "How these are calculated"
+    "axis_caption": "Shared axis · 0–{{max}} min"
   },
   "definitionMeta": {
-    "tolerance_line": "On-time definition: {{preset}} (early ≤ {{early}}, late ≤ {{late}})",
-    "unbounded": "unbounded",
-    "not_applicable": "n/a",
-    "seconds": "{{value}}s",
+    "summary": "How this is calculated",
     "measurementPoint": {
-      "all_stops_all_observations": "measured across all stops, all observations"
+      "all_stops_all_observations": "Average of every recorded departure at every stop."
     },
     "dedupRule": {
-      "latest_observation_per_stop_event": "duplicate readings: latest observation per stop event wins"
+      "latest_observation_per_stop_event": "When a departure is reported more than once, the latest report counts."
     },
-    "exclusion_rule": "excludes |delay| > {{sec}}s as implausible"
+    "exclusion_hours_one": "Readings more than {{count}} hour off are ignored as errors.",
+    "exclusion_hours_other": "Readings more than {{count}} hours off are ignored as errors.",
+    "exclusion_limit": "Readings more than {{limit}} off are ignored as errors.",
+    "on_time_late": "On time = no more than {{late}} late.",
+    "on_time_late_early": "On time = no more than {{late}} late and no more than {{early}} early.",
+    "sentence_separator": " "
   },
   "app": {
     "data_stale": {
@@ -251,35 +265,41 @@
     "concentration_rest_one": "Remaining {{count}} route: {{rest}}%",
     "concentration_rest_other": "Remaining {{count}} routes: {{rest}}%",
     "section_peak_hour": "Worst hour of day",
-    "peak_hour_callout": "Peak: {{range}} ({{avg}} min avg).",
+    "peak_hour_callout": "Peak {{range}} ({{avg}} min average)",
     "section_service_split": "By service day",
     "hero_row": {
-      "avg_delay_label": "Network avg delay",
-      "baseline_hint_title": "About the vs. last week comparison",
-      "baseline_hint_body": "Compares the average delay for the selected date range against the same-length period immediately before it.",
+      "avg_delay_label": "Average delay · {{range}}",
+      "baseline_hint_title": "About the comparison",
+      "baseline_hint_body": "Compares the average delay over {{range}} with the same number of days just before them.",
       "avg_delay_no_baseline": "No comparison data",
-      "delayed_count_label": "Routes delayed",
-      "delayed_count_value": "{{count}} / {{total}} routes",
-      "feed_status_label": "Feed status",
-      "feed_status_ok": "Running normally",
-      "feed_status_stale": "Data delayed",
-      "feed_status_updated": "Last updated {{when}}",
-      "sparkline_baseline": "Period avg {{value}} min"
+      "delayed_count_label": "averaged {{min}} min or more late",
+      "delayed_count_value": "{{count}} of {{total}} routes",
+      "sparkline_baseline": "Selected period's average {{value}} min",
+      "feed_status_live": "Reporting live",
+      "feed_status_quiet": "Feed quiet for {{duration}}",
+      "feed_status_none": "No reports yet",
+      "feed_status_last": "Last report {{time}}"
     },
     "story": {
-      "behind_one": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
-      "behind_other": "Running {{delta}} min behind last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
-      "behind_short": "Running {{delta}} min behind last week.",
-      "ahead_one": "Running {{delta}} min ahead of last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
-      "ahead_other": "Running {{delta}} min ahead of last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
-      "ahead_short": "Running {{delta}} min ahead of last week.",
-      "flat_one": "Delay is about the same as last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} route.",
-      "flat_other": "Delay is about the same as last week; the {{peak}}:00 hour is heaviest. {{share}}% of delay sits in the top {{count}} routes.",
-      "flat_short": "Delay is about the same as last week."
+      "behind_one": "Delays are {{delta}} min longer than in the {{days}}-day period before; {{peak}} is the heaviest hour. {{share}}% of delay sits in the top route.",
+      "behind_other": "Delays are {{delta}} min longer than in the {{days}}-day period before; {{peak}} is the heaviest hour. {{share}}% of delay sits in the top {{count}} routes.",
+      "behind_short": "Delays are {{delta}} min longer than in the {{days}}-day period before.",
+      "ahead_one": "Delays are {{delta}} min shorter than in the {{days}}-day period before; {{peak}} is the heaviest hour. {{share}}% of delay sits in the top route.",
+      "ahead_other": "Delays are {{delta}} min shorter than in the {{days}}-day period before; {{peak}} is the heaviest hour. {{share}}% of delay sits in the top {{count}} routes.",
+      "ahead_short": "Delays are {{delta}} min shorter than in the {{days}}-day period before.",
+      "flat_one": "Delay is about the same as in the {{days}}-day period before; {{peak}} is the heaviest hour. {{share}}% of delay sits in the top route.",
+      "flat_other": "Delay is about the same as in the {{days}}-day period before; {{peak}} is the heaviest hour. {{share}}% of delay sits in the top {{count}} routes.",
+      "flat_short": "Delay is about the same as in the {{days}}-day period before."
     },
     "routes_to_check": {
       "title": "Routes to check now",
-      "empty": "No routes need attention"
+      "empty": "No routes need attention",
+      "band_severe_one": "{{count}} route averaging more than {{min}} min late",
+      "band_severe_other": "{{count}} routes averaging more than {{min}} min late",
+      "band_moderate_one": "{{count}} route averaging {{min}}–{{max}} min late",
+      "band_moderate_other": "{{count}} routes averaging {{min}}–{{max}} min late",
+      "band_mild_one": "{{count}} route averaging {{min}}–{{max}} min late",
+      "band_mild_other": "{{count}} routes averaging {{min}}–{{max}} min late"
     },
     "concentration": {
       "single_route": "{{name}} accounts for 100% — only 1 route observed.",
@@ -287,7 +307,7 @@
       "lorenz_caption": "Top 20% of routes carry {{pct}}% of the delay."
     },
     "service_split": {
-      "diff": "Δ: {{diff}} min ({{pct}}%)",
+      "diff": "Difference: {{diff}} min ({{pct}}%)",
       "story_weekday_higher": "Weekdays are {{ratio}}× the weekend delay.",
       "story_weekend_higher": "Weekends are {{ratio}}× the weekday delay.",
       "story_same": "Weekday and weekend nearly identical.",
@@ -297,7 +317,8 @@
       "max_label": "Max {{avg}} min",
       "avg_label": "Avg",
       "weekday_empty": "No weekday data.",
-      "weekend_empty": "No weekend data."
+      "weekend_empty": "No weekend data.",
+      "spread_legend": "Shaded: hours above the day's average"
     },
     "modal": {
       "concentration": "Delay concentration (top 20)",
@@ -307,7 +328,9 @@
     "empty": "No observations in this range. Try a wider window.",
     "concentration_explainer": "Each route's share of total delay in the selected range. The Lorenz curve below shows the skew: the dotted diagonal would be a perfectly even spread, and the further the curve bows away from it, the more the delay sits with a few routes.",
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split weekday vs weekend/holiday — compare commute peaks against weekend patterns.",
-    "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off."
+    "service_split_explainer": "Average weekday vs weekend/holiday delay across the selected range. The daily series below shows whether the gap is persistent or a one-off.",
+    "never_collected": "We haven't collected any data for {{agency}} yet.",
+    "choose_another_agency": "Choose another agency"
   },
   "markdownMermaid": {
     "diagram_fallback_label": "Diagram"
@@ -395,19 +418,20 @@
     "rel_hours_ago_one": "{{count}} hour ago",
     "rel_hours_ago_other": "{{count}} hours ago",
     "rel_days_ago_one": "{{count}} day ago",
-    "rel_days_ago_other": "{{count}} days ago"
+    "rel_days_ago_other": "{{count}} days ago",
+    "still_working": "Still working on it…",
+    "still_working_period": "Still working: a long period takes longer to count.",
+    "narrow_to_week": "Narrow to the last 7 days of the period"
   },
   "legal": {
     "privacy": "Privacy Policy",
     "terms": "Terms of Service",
-    "back": "Back",
     "nav_label": "Legal"
   },
   "help": {
     "title": "User Manual",
     "sections_nav": "Manual sections",
     "search_placeholder": "Search the manual",
-    "category_shortcut_label": "Jump to: {{title}}",
     "hint_text": "New here? Check out the User Manual for a walkthrough.",
     "hint_cta": "View Help",
     "hint_dismiss_aria": "Dismiss help hint",
@@ -438,7 +462,7 @@
     "logout_error": "Couldn't sign out. Please check your connection and try again.",
     "data": {
       "title": "Your data",
-      "description": "Download everything this app holds about you, or delete your account.",
+      "description": "Download everything this app holds about you.",
       "export": "Download my data",
       "delete": "Delete account",
       "delete_title": "Delete your account?",
@@ -447,7 +471,8 @@
       "delete_confirm": "Delete permanently",
       "error_last_admin": "You're the only admin, so this account can't be deleted. Make someone else an admin first.",
       "error_managed": "This is the operator's built-in account and can't be deleted here.",
-      "error_generic": "Couldn't delete the account. Please check your connection and try again."
+      "error_generic": "Couldn't delete the account. Please check your connection and try again.",
+      "delete_description": "Deletes your account and everything saved with it. This can't be undone."
     },
     "login": {
       "error": {
@@ -467,6 +492,7 @@
       "back_to_top": "Back to home",
       "welcome_back": "Welcome back",
       "choose_provider": "Choose an account to sign in",
+      "username_prompt": "Sign in with your username",
       "google_aria": "Sign in with Google",
       "google_continue": "Continue with Google",
       "github_aria": "Sign in with GitHub",
@@ -476,14 +502,24 @@
       "password_label": "Password",
       "local_submit": "Sign in",
       "terms_consent": "By continuing, you agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>."
-    }
+    },
+    "back_to_agency": "← Back to {{agency}}",
+    "linked_none": "None linked",
+    "session_device": "{{browser}} on {{os}}",
+    "session_unknown_device": "Unknown device",
+    "this_device": "This device",
+    "session_sign_out": "Sign out",
+    "session_sign_out_aria": "Sign out this session",
+    "session_sign_out_error": "Couldn't sign out that session. Please try again."
   },
   "presets": {
     "login_to_save_tooltip": "Sign in to save",
-    "label": "Presets",
-    "option_placeholder": "Presets",
-    "save_current": "Save current filters",
-    "name_placeholder": "Preset name"
+    "label": "Saved views",
+    "save_current": "Save this view…",
+    "empty": "No saved views yet",
+    "save_title": "Save this view",
+    "name_label": "Name",
+    "load_error": "Couldn't load your saved views."
   },
   "filters": {
     "range": {
@@ -523,6 +559,13 @@
   "operations": {
     "all_routes": "All routes",
     "last_updated": "Last updated {{when}}",
+    "feed_quiet": "Feed quiet for {{duration}} · last report {{time}}",
+    "quiet_for": {
+      "minutes": "{{n}} min",
+      "hours": "{{n}} h",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days"
+    },
     "no_update": "No update received",
     "refresh": "Fetch the latest live observation",
     "refresh_now": "Refresh now",
@@ -531,6 +574,7 @@
     "refresh_unchanged": "Reloaded; no newer observation available",
     "refresh_failed": "Reload failed",
     "refresh_rate_limited": "Too many refreshes; please try again shortly",
+    "refresh_sign_in": "Sign in to fetch the latest live observation",
     "loading": "Loading the latest operations...",
     "map": {
       "aria_label": "Map of latest reported stops and delays",
@@ -566,7 +610,7 @@
       "departure": "{{time}} departure",
       "reported": "Last report {{when}}",
       "progress_title": "Trip delay progression",
-      "progress_disclosure": "TripUpdate report progression",
+      "progress_disclosure": "How the live reports progressed",
       "progress_loading": "Loading report history…",
       "no_progress": "No report history is available for this trip yet",
       "select_route": "Select a route or a trip on the map to see its details.",
@@ -576,14 +620,15 @@
       "other_trips": "Other trips in this direction",
       "chart_label": "Delay progression by stop",
       "growth": "{{delay}} increase at {{stop}}",
-      "recovery": "{{delay}} min recovered at {{stop}}"
+      "recovery": "{{delay}} min recovered at {{stop}}",
+      "none_reporting": "Trips appear here as soon as they report."
     },
     "queue": {
       "location_unavailable": "Stop location unavailable"
     },
     "empty": {
-      "title": "No current trips to display",
-      "hint": "Waiting for the latest TripUpdate. New reports appear automatically."
+      "title": "No vehicles are reporting right now",
+      "hint": "This is normal late at night. If it lasts through service hours, the operator's feed may be down."
     },
     "playback": {
       "aria_label": "Day playback",
@@ -602,13 +647,8 @@
     }
   },
   "map": {
-    "legend": {
-      "band_1_5_3": "1.5–3 min",
-      "band_3_5": "3–5 min",
-      "band_gt_5": "> 5 min"
-    },
     "style": {
-      "osm": "OSM",
+      "osm": "OpenStreetMap",
       "label": "Map style",
       "pale": "Light",
       "std": "Standard",
@@ -693,13 +733,16 @@
       "export_notice": "Exports the selected question and stored answers, without recalculating. Files may contain conversation text; check before sharing. JSON cannot yet be reopened in the app.",
       "export_failed": "Could not create the download. Please try again.",
       "title": "Investigation",
-      "step_count": "{{count}} questions",
+      "step_count_one": "{{count}} question",
+      "step_count_other": "{{count}} questions",
       "steps": "Investigation steps",
       "retained_result": "Retained result",
       "historical": "Viewing an earlier result. Follow-up questions use the latest result.",
       "return_latest": "Return to latest",
       "saved_result_notice": "Previously returned results — opening a step does not fetch new data. The filters above apply to your next analysis, not necessarily this result.",
-      "full_log": "Full conversation"
+      "full_log": "Full conversation",
+      "new_analysis_first": "Start an analysis",
+      "no_questions": "This investigation has no questions yet. Pick one to start."
     },
     "thinking": "Thinking...",
     "dock": {
@@ -721,7 +764,7 @@
       "p90_min": "p90 (min)",
       "samples": "Samples",
       "on_time_pct": "On-time %",
-      "late5_count": "≥5 min late",
+      "late5_count": "Over 5 min late",
       "heijitsu_min": "Weekday (min)",
       "kyujitsu_min": "Weekend (min)",
       "abs_delta": "Δ (abs)",
@@ -741,6 +784,8 @@
     "low_confidence_mark": "wide range",
     "more_rows": "…and {{count}} more",
     "build_labels": {
+      "summary": "🛠 {{tool}}",
+      "summary_with_args": "🛠 {{tool}} ({{args}})",
       "metric": "Metric",
       "n": "Count",
       "best_first": "Best first",
@@ -770,7 +815,7 @@
       "values": {
         "avg_delay": "Average delay",
         "on_time_rate": "On-time rate",
-        "worst_5min": "5+ min delay count",
+        "worst_5min": "Count of delays over 5 min",
         "weekday": "Weekday",
         "weekend": "Weekend/holiday",
         "all": "All",
@@ -794,7 +839,7 @@
     "sidebar": {
       "search": "Search title, pattern or period",
       "no_matches": "No matching investigations. Try another search.",
-      "new_thread": "New conversation",
+      "new_thread": "New investigation",
       "pinned": "Pinned",
       "today": "Today",
       "yesterday": "Yesterday",
@@ -804,8 +849,8 @@
       "pin": "Pin",
       "unpin": "Unpin",
       "delete": "Delete",
-      "delete_confirm": "Delete this conversation?",
-      "empty": "No conversations yet",
+      "delete_confirm": "Delete this investigation?",
+      "empty": "No investigations yet",
       "more_options_aria": "More options"
     },
     "filter_bar": {
@@ -849,15 +894,18 @@
       },
       "top_delay": {
         "title": "Top-N delays",
-        "summary": "Top {{k}} routes ({{service}})",
-        "example_answer": "e.g., shows routes like K05 +6.2 min, S12 +5.4 min, A03 +5.1 min — ranked by delay."
+        "summary_all": "{{k}} most delayed routes",
+        "summary_weekday": "{{k}} most delayed routes on weekdays",
+        "summary_weekend": "{{k}} most delayed routes on weekends and holidays",
+        "example_answer": "e.g., lists the routes with the highest average delay, worst first."
       },
       "ontime_rank": {
         "title": "On-time rate ranking",
         "best": "Best first",
         "worst": "Worst first",
-        "summary": "{{dir}}, {{k}} routes",
-        "example_answer": "e.g., lists routes and their on-time rate, ranked best or worst first."
+        "example_answer": "e.g., lists routes and their on-time rate, ranked best or worst first.",
+        "summary_worst": "{{k}} least on-time routes",
+        "summary_best": "{{k}} most on-time routes"
       },
       "route_trend": {
         "title": "Route delay trend",
@@ -890,13 +938,13 @@
     "raw_rows_other": "Raw ({{count}} rows)",
     "type": {
       "ranking": "Delay ranking",
-      "ranking_best": "On-time ranking",
+      "ranking_best": "Lowest average delay",
       "on_time": "On-time rate",
-      "worst_5min": "≥5-min delays",
+      "worst_5min": "Delays over 5 min",
       "trend": "Trend",
-      "compare_ranking": "Compare ranking",
-      "dow_weekday": "Weekday pattern",
-      "dow_weekend": "Weekend pattern",
+      "compare_ranking": "Weekday and weekend gap",
+      "dow_weekday": "Routes on weekdays",
+      "dow_weekend": "Routes on weekends and holidays",
       "dwell_run": "Dwell/running time",
       "route_forecast": "Route forecast",
       "council_summary": "Council report",
@@ -908,15 +956,11 @@
       "median": "Median",
       "p90": "p90",
       "samples": "Samples",
-      "dow": "Day",
       "on_time_pct": "On-time %",
-      "over_5min_count": "≥5 min late",
+      "over_5min_count": "Over 5 min late",
       "diff": "Diff",
       "direction": "Direction",
-      "confidence": "Confidence",
-      "planned_trips": "Planned trips",
-      "executed_trips": "Executed trips",
-      "service_delivered_pct": "Service-delivered %",
+      "confidence": "Data",
       "agency_name": "Agency",
       "date": "Date",
       "scheduled_time": "Scheduled",
@@ -924,7 +968,7 @@
       "with_unit": "{{label}} ({{unit}})",
       "delay": "Delay"
     },
-    "confidence_low_mark": "wide range",
+    "confidence_low_mark": "few data",
     "direction": {
       "weekend_higher": "Weekend > Weekday",
       "weekday_higher": "Weekday > Weekend"
@@ -937,8 +981,8 @@
       "trend_body": ": whether things are improving or worsening over time. A rising line means delays are growing.",
       "heatmap_strong": "Time-band heatmap",
       "heatmap_body": ": peak times during the day. Compare commuter peaks against midday.",
-      "dow_strong": "Weekday / Weekend patterns",
-      "dow_body": ": day-of-week characteristics. Surfaces whether weekends run more or less punctually than weekdays.",
+      "dow_strong": "Routes on weekdays / on weekends and holidays",
+      "dow_body": ": each route's average delay on that group of days. Compare the two to see which routes run later on weekends.",
       "csv": "CSV export lets you hand data off to Excel or BI tools."
     },
     "empty": {
@@ -958,24 +1002,35 @@
       "legend_explainer": "· rows → time band · columns → date",
       "svg_aria": "Time-band delay heatmap",
       "tooltip_hour": "{{hour}}:00 · avg",
-      "tooltip_metrics": "{{min}} min · {{count, number}} obs.",
+      "tooltip_metrics": "{{min}} · {{count}} obs.",
       "ramp_max": "{{min}} min and over",
       "severe_outline": "outlined = {{min}} min and over"
     },
     "dow_band": {
-      "title": "Usual delay pattern",
       "empty": "No data for this period.",
-      "worst_phrase_one": "Over the past day, {{day}} {{band}} ran latest (avg +{{min}} min)",
-      "worst_phrase_other": "Over the past {{count}} days, {{day}} {{band}} runs latest (avg +{{min}} min)"
+      "worst_phrase_one": "Over the past day, {{day}} {{band}} ran latest ({{avg}})",
+      "worst_phrase_other": "Over the past {{count}} days, {{day}} {{band}} runs latest ({{avg}})"
+    },
+    "heat_surface": {
+      "title": "Day × hour surface",
+      "aria": "Average delay by weekday and hour",
+      "profile_label": "Profile",
+      "profile_hourly": "By hour",
+      "profile_banded": "By band",
+      "legend_low": "On time",
+      "legend_high": "{{min}} min+",
+      "readout_hint": "Hover a cell to keep only its hour column and weekday row.",
+      "readout": "{{day}} {{hour}}:00 — avg {{min}}",
+      "readout_empty": "{{day}} {{hour}}:00 — no data"
     },
     "daily": {
       "empty": "No data in this range.",
       "svg_aria": "Daily average delay chart",
-      "tooltip_metrics": "avg {{min}} min / {{count}} obs.",
-      "smoothed_tooltip": "7-day avg {{min}} min",
+      "tooltip_metrics": "avg {{min}} / {{count}} obs.",
+      "smoothed_tooltip": "7-day avg {{min}}",
       "smoothed_label": "- - - 7-day average",
       "worst_label": "Worst:",
-      "offender": "Route {{code}} ({{min}} min)",
+      "offender": "Route {{code}} ({{min}})",
       "revision_boundary_label": "Schedule change",
       "revision_boundary_aria": "Static schedule revision took effect on {{date}}",
       "brush_hint": "Drag across the chart to narrow the period",
@@ -986,7 +1041,7 @@
       "worst_day_label": "Worst day"
     },
     "dwell_run": {
-      "not_available": "This agency's feed doesn't report arrival delay, so dwell/running time decomposition isn't available.",
+      "not_available": "This agency's feed reports departures only, so delay can't yet be split into time spent at stops and time spent between them.",
       "time_band_unsupported": "This decomposition doesn't support a time-band filter yet.",
       "col": {
         "dwell_avg": "Dwell avg",
@@ -997,7 +1052,10 @@
         "run_p50": "Running p50",
         "run_p90": "Running p90",
         "run_samples": "Running samples"
-      }
+      },
+      "needs_arrivals": "Splitting delay needs arrival times",
+      "see_when": "See when delay happens",
+      "compare_day_types": "Compare weekdays and weekends"
     },
     "headway_quality": {
       "title": "Headway quality",
@@ -1061,15 +1119,15 @@
     },
     "desc": {
       "ranking": "Which routes run latest, worst first.",
-      "ranking_best": "Which routes keep to the timetable best.",
+      "ranking_best": "Routes with the lowest average delay, best first.",
       "on_time": "Share of departures inside the on-time threshold, by route.",
-      "worst_5min": "Routes with the most departures five minutes or more late.",
+      "worst_5min": "Routes with the most departures more than five minutes late.",
       "trend": "How delay moved day by day, by hour and by weekday.",
-      "compare_ranking": "The same ranking against the previous period.",
-      "dow_weekday": "How a typical weekday runs, band by band.",
-      "dow_weekend": "How a typical weekend or holiday runs, band by band.",
+      "compare_ranking": "Each route's weekday and weekend delay side by side, widest gap first.",
+      "dow_weekday": "Each route's average delay on weekdays.",
+      "dow_weekend": "Each route's average delay on weekends and holidays.",
       "dwell_run": "Where time goes: waiting at stops against running between them.",
-      "route_forecast": "Expected delay for a route on an upcoming day.",
+      "route_forecast": "When routes tend to run late, by day of week and time of day.",
       "council_summary": "A period summary written for a council or board.",
       "delay_certificate": "Proof of a specific late departure, for a passenger."
     },
@@ -1078,6 +1136,41 @@
     },
     "trend": {
       "single_day": "A trend needs more than one day. Pick a longer period to see how delay moved from day to day."
+    },
+    "service_note": "Service: the timetable the trip ran on (weekday, weekend and holiday, or a special day).",
+    "ranking_coverage": {
+      "include_sparse": "Include routes observed fewer than {{floor}} times",
+      "rows_shown": "Showing {{shown}} of {{total}}",
+      "show_all": "Show all"
+    },
+    "download_csv": "Download CSV",
+    "council": {
+      "figures": "Headline figures",
+      "on_time": "On time",
+      "avg_delay": "Average delay",
+      "departures": "Departures observed",
+      "planned_trips": "Planned trips"
+    },
+    "print": "Print / Save as PDF",
+    "certificate": {
+      "intro": "Choose the day and route you travelled on, then your departure, to get a certificate of its delay.",
+      "date": "Date",
+      "route": "Route",
+      "route_placeholder": "Search routes",
+      "departure": "Scheduled departure",
+      "departure_prompt": "Choose a departure",
+      "departure_option": "{{time}} ({{delay}} late)",
+      "loading": "Looking up late departures…",
+      "none": "No departure of this route left late on this day.",
+      "not_listed": "A departure that isn't listed left on time or early, or wasn't in the live feed.",
+      "card": "Delay certificate for the chosen departure",
+      "statement": "On {{date}}, the {{scheduled}} departure of {{route}} left its first recorded stop at {{actual}}, {{delay}} late.",
+      "operator": "Operator",
+      "scheduled": "Scheduled departure",
+      "actual": "Actual departure",
+      "delay": "Delay",
+      "measured_at": "Times are at the first stop recorded for this trip in the operator's real-time feed.",
+      "all_late": "All late departures in the period"
     }
   },
   "insight_panel": {
@@ -1106,8 +1199,8 @@
   "admin": {
     "users": {
       "table_label": "Users",
-      "title": "User management",
-      "search_placeholder": "Search by email / name",
+      "title": "Users",
+      "search_placeholder": "Email or name",
       "col": {
         "email": "Email",
         "name": "Name",
@@ -1144,7 +1237,7 @@
       },
       "view": {
         "all": "All",
-        "pending": "Pending approval",
+        "pending": "Awaiting AI access",
         "admin": "Admins",
         "suspended": "Suspended"
       },
@@ -1219,7 +1312,7 @@
       "ops": "Ops",
       "architecture": "Architecture",
       "audit": "Audit log",
-      "flags": "Flags",
+      "flags": "Feature flags",
       "board": "Control board",
       "group": {
         "operations": "Operations",
@@ -1243,7 +1336,7 @@
       "col_last_analyzed": "Last analyzed",
       "col_freshness": "Freshness",
       "col_data_to": "Data through",
-      "col_clamp_pct": "Clamp %",
+      "col_clamp_pct": "Implausible %",
       "fresh": "Fresh",
       "behind": "{{days}} d behind",
       "never": "Never analyzed",
@@ -1275,7 +1368,7 @@
       "col_freshness": "Freshness",
       "col_last_capture": "Last capture",
       "col_rt_coverage": "RT coverage",
-      "col_clamp": "Clamp rate · 14d",
+      "col_clamp": "Implausible · 14d",
       "col_static_version": "Static version",
       "table_label": "Agencies",
       "freshness_fresh": "Fresh",
@@ -1294,7 +1387,7 @@
       "strategy": "Ingest strategy",
       "last_capture": "Last capture",
       "aggregation": "Aggregation",
-      "clamp": "Clamp rate · 14d",
+      "clamp": "Implausible · 14d",
       "rt_section": "RT field diagnostics (latest probe)",
       "rt_scope_note": "Measured on TripUpdate stop_time_update fields. VehiclePosition and Alerts are not ingested.",
       "rt_present": "Present",
@@ -1488,19 +1581,25 @@
         "missing": "No data"
       },
       "cell_tooltip": "{{agency}} · {{date}} · {{state}}",
-      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · clamp {{pct}}%",
+      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · {{pct}}% implausible",
       "alerts_title": "Alerts",
       "alerts_none": "Nothing needs attention.",
       "alert_open": "Open",
       "alert": {
-        "clamp_high": "{{agency}}: {{pct}}% of samples clamped on {{date}}",
+        "clamp_high": "{{agency}}: {{pct}}% of readings set aside as implausible on {{date}}",
         "agency_stale_one": "{{agency}}: aggregates {{count}} day behind",
         "agency_stale_other": "{{agency}}: aggregates {{count}} days behind",
         "migrations_behind_one": "Schema behind by {{count}} migration",
         "migrations_behind_other": "Schema behind by {{count}} migrations",
         "llm_approvals_pending_one": "{{count}} user awaiting AI access approval",
-        "llm_approvals_pending_other": "{{count}} users awaiting AI access approval"
-      }
+        "llm_approvals_pending_other": "{{count}} users awaiting AI access approval",
+        "agencies_stale_one": "{{count}} agency's aggregates are behind",
+        "agencies_stale_other": "{{count}} agencies' aggregates are behind",
+        "agencies_never_analyzed_one": "{{count}} agency has never been analyzed",
+        "agencies_never_analyzed_other": "{{count}} agencies have never been analyzed"
+      },
+      "check_failed": "Couldn't check its status",
+      "details": "Details"
     },
     "ask_ops": {
       "title": "Ask ops",
@@ -1582,7 +1681,7 @@
     "nav_routes_sublabel": "Which routes, at which hours",
     "nav_time_sublabel": "When delay happens across the network",
     "nav_why_sublabel": "What the data can and can't explain",
-    "nav_compare_sublabel": "How two periods or agencies differ",
+    "nav_compare_sublabel": "Weekdays against weekends, and agencies against each other",
     "nav_reports_sublabel": "Documents to hand to someone",
     "nav_ask_sublabel": "Ask about routes, stops, and time bands",
     "group": {
@@ -1621,7 +1720,19 @@
   },
   "topbar": {
     "ask_placeholder": "Search routes, reports and screens",
-    "data_through": "Data through {{date}}"
+    "analyzed_through": "Analyzed through {{date}}",
+    "live_at": "live {{time}}",
+    "last_reading": "last reading {{when}}",
+    "freshness": {
+      "title": "How fresh the data is",
+      "reports": "Reports and charts",
+      "reports_through": "Service days through {{date}}",
+      "live": "Live",
+      "live_none": "No readings received yet",
+      "readings": "Readings, last 7 analyzed days",
+      "set_aside": "Set aside as implausible",
+      "note": "Days without readings are left out, not counted as on time."
+    }
   },
   "scope": {
     "label": "What you're viewing",
@@ -1632,7 +1743,7 @@
     "days_all": "every day",
     "days_weekday": "weekdays",
     "days_weekend": "weekends",
-    "time_all": "all day",
+    "time_all": "all hours",
     "hours": "{{from}}:00–{{to}}:59",
     "hour_single": "{{h}}:00–{{h}}:59",
     "service": "{{value}} timetable",
@@ -1650,8 +1761,7 @@
       "days_all": "All",
       "weekday": "Weekdays",
       "weekend": "Weekend",
-      "service": "Timetable",
-      "hour_pending": "Hour-by-hour filtering arrives with the hourly aggregate",
+      "service": "Timetable type",
       "tolerance": "Counted on time up to",
       "minutes": "{{n}} min",
       "clear": "Clear",
@@ -1660,7 +1770,7 @@
       "brush_end": "Period end",
       "since_start": "Since collection began",
       "mean_min": "{{n}} min",
-      "share": "{{pct}}%",
+      "share": "{{pct}}% on time",
       "curve_label": "On-time share by tolerance",
       "whole_day": "These figures cover the whole day",
       "no_data": "No data",
@@ -1670,20 +1780,24 @@
       "legend_d3": "3.5–5 min",
       "legend_d4": "5 min or more",
       "whole_day_place": "These figures cover the whole day, every stop and both directions",
-      "readout": "{{n}} min: {{pct}}%"
+      "readout": "Up to {{n}} min late: {{pct}}% on time",
+      "weekday_colour": "Colour = average delay on that weekday",
+      "axis_lateness": "Allowed lateness"
     },
-    "pin": "Pin controls",
+    "pin": "Show all filters",
     "reset": "Reset conditions",
     "popover": {
       "routes": "Routes",
       "period": "Period",
       "days": "Days and timetable",
       "time": "Time of day",
-      "service": "Timetable",
+      "service": "Timetable type",
       "stop": "Stop",
       "dir": "Direction",
       "early": "Early tolerance",
       "tolerance": "On-time tolerance"
-    }
+    },
+    "unapplied_note": "Not used on this screen: {{list}}",
+    "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]"
   }
 }

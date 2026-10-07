@@ -243,6 +243,11 @@
      code, a hash, a clock time — where proportional digits and an ambiguous
      1/l/I cost the reader a second look. Not for anything with prose in it. */
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* TrendFocusProvider's crossfilter writes --focus-dim onto a mark that
+     disagrees with the hovered day/weekday; 1 means "not dimmed". --mark-opacity
+     is a mark's resting opacity, set inline where it is not 1. */
+  --focus-dim: 1;
+  --mark-opacity: 1;
 }
 
 :root[data-theme="dark"] {
@@ -352,43 +357,75 @@
 input[type="date"] { color-scheme: light; }
 :root[data-theme="dark"] input[type="date"] { color-scheme: dark; }
 
-/* App.tsx's root wrapper and the sidebar's data-status disclosure are always
-   mounted, regardless of route, so their styling lives here rather than in a
-   route-lazy-loaded stylesheet. */
-.focus-data-status { position: relative; margin: 18px 14px; font-size: 12px; color: var(--text-secondary); }
-.focus-data-status > div { position: absolute; bottom: 30px; left: 0; padding: 16px; width: min(280px, 75vw); border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-surface); z-index: var(--z-modal); }
+/* A delay figure at or past the severe threshold: a small amber dot beside
+   the figure, which itself stays in the text colour. */
+.delay-marker { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--color-warning); vertical-align: middle; flex: none; }
+
+/* A muted caveat pill beside a figure or a heading ("few data",
+   "simulation"): it qualifies what it sits beside without competing with it. */
+.caveat-badge { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-soft); border-radius: 999px; background: var(--bg-soft); color: var(--text-secondary); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
+
+/* A one-line note under a report table. */
+.report-footnote { margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--text-xs); }
+
+/* The language switch on pages outside the app shell (login, legal). */
+.language-toggle__options { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: var(--radius); overflow: hidden; }
+.language-toggle__options button { padding: 3px 10px; border: 0; background: transparent; color: var(--text-secondary); font-size: var(--text-xs); cursor: pointer; }
+.language-toggle__options button + button { border-left: 1px solid var(--border-subtle); }
+.language-toggle__options button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+.language-toggle__error { margin: 6px 0 0; font-size: var(--text-xs); color: var(--text-secondary); }
+
+/* The top bar's data-freshness chip belongs to the app shell, not to any one
+   route, so its styling lives here rather than in a route-lazy-loaded
+   stylesheet. */
+.data-freshness { position: relative; margin-left: auto; min-width: 0; }
+.data-freshness__chip {
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.data-freshness__chip:hover { color: var(--text-primary); }
+.data-freshness__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-popover);
+  width: min(340px, calc(100vw - 32px));
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  box-shadow: var(--el-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.data-freshness__panel dl { margin: 0 0 12px; }
+.data-freshness__panel dt { font-size: var(--text-xs); color: var(--text-tertiary); }
+.data-freshness__panel dt:not(:first-child) { margin-top: 10px; }
+.data-freshness__panel dd { margin: 2px 0 0; color: var(--text-primary); }
+.data-freshness__panel p { margin: 0; font-size: var(--text-xs); }
 
 *, *::before, *::after { box-sizing: border-box; }
 
 .definition-meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 8px;
   max-width: 800px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
-  line-height: 1.45;
+  line-height: 1.6;
 }
-.definition-meta > span {
-  min-width: 0;
-  padding: 8px 10px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
+.definition-meta > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-secondary);
 }
-.definition-meta > span::before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin: 0 7px 2px 0;
-  border-radius: 50%;
-  background: var(--accent);
-}
-/* BP.sm */
-@media (max-width: 640px) {
-  .definition-meta { grid-template-columns: 1fr; max-width: 100%; }
-}
+.definition-meta > summary::before { content: "ⓘ "; color: var(--accent); }
+.definition-meta > p { margin: 6px 0 0; max-width: 60ch; }
 html, body, #root { height: 100%; margin: 0; }
 
 /* In flow at the top of <main>, not floating over it. Everything around this
@@ -701,7 +738,7 @@ summary::-webkit-details-marker { display: none; }
 }
 
 /* The resting value of a cell whose opacity is data-driven (a low-confidence
-   forecast cell, a crossfiltered one). Declared before the motion block below
+   forecast cell, a heat cell's magnitude). Declared before the motion block below
    and at equal specificity, so a reduced-motion viewer -- who gets none of the
    entrance classes -- still sees that opacity, while under motion
    `.chart-cell-enter`'s `opacity: 0` is declared later and wins the start of
@@ -710,23 +747,28 @@ summary::-webkit-details-marker { display: none; }
   opacity: var(--cell-opacity, 1);
 }
 
+/* The three channels a crossfiltered mark dims through, one per mark kind so
+   the dim never shares a channel with a data-driven opacity or an entrance
+   fade: daily bars/dots ride `opacity` (min with their resting value), heat
+   cells `fill-opacity` (their `opacity` is the heat ramp), weekday-band cells
+   `filter: opacity()` (their `opacity` is the entrance fade), divided by the
+   cell's own resting opacity so a dimmed cell lands at --focus-dim rather
+   than below it. */
+.focus-dim-opacity { opacity: min(var(--mark-opacity), var(--focus-dim)); }
+.focus-dim-fill { fill-opacity: var(--focus-dim); }
+.focus-dim-stroke { stroke-opacity: min(0.9, var(--focus-dim)); }
+.focus-dim-filter { filter: opacity(min(1, calc(var(--focus-dim) / var(--cell-opacity, 1)))); }
+
 /* ---------- Shared entrance animations ----------
    These live here rather than in a tab stylesheet so every route can use
    them; a lazily-loaded tab sheet would otherwise define the same keyframes
    again, and only for itself. */
 @media (prefers-reduced-motion: no-preference) {
-  @keyframes ov-fade-in {
-    from { opacity: 0; transform: translateY(2px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
   @keyframes ov-modal-in {
     from { opacity: 0; transform: translateY(6px) scale(0.99); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   .ov-modal       { animation: ov-modal-in var(--dur-2) var(--ease-out); }
-  /* Every route change fades its content in over the outgoing tab, which
-     startTransition keeps painted until the next chunk resolves. */
-  .route-enter    { animation: ov-fade-in var(--dur-2) var(--ease-out); }
 
   /* ChartEnter.tsx's useDrawOn(): the element's own JS-measured length
      (getTotalLength()) is written to --len, and .chart-draw-on--active is
@@ -756,19 +798,20 @@ summary::-webkit-details-marker { display: none; }
   }
 
   /* TrendFocusContext's crossfilter: a mark that disagrees with the hovered
-     day/weekday/hour recedes. On a grid cell the dim rides `fill-opacity`,
-     a channel the entrance fade above does not touch -- sharing `opacity`
-     would make the hover response inherit that cell's staggered entrance
-     delay. */
+     day or weekday recedes. The selectors that decide which marks dim are
+     generated by trendFocusRules.ts; each sets --focus-dim, which the
+     .focus-dim-* channel classes above read. A staggered cell's inline
+     transition-delay applies to every property it transitions, so on such a
+     cell only the entrance `opacity` is transitioned: its dim channel
+     (`fill-opacity` on a heat cell, `filter` on a weekday-band cell) changes
+     at once instead of waiting out the stagger. */
   .chart-focus-dimmable {
     transition:
       opacity var(--dur-2) var(--ease-out),
       fill-opacity var(--dur-2) var(--ease-out);
   }
   .chart-cell-enter.chart-focus-dimmable {
-    transition:
-      opacity var(--dur-2) var(--ease-out),
-      fill-opacity var(--dur-2) var(--ease-out);
+    transition: opacity var(--dur-2) var(--ease-out);
   }
 
   /* RevealSection.tsx's useInView(): a section starts fully visible, only
@@ -807,17 +850,25 @@ summary::-webkit-details-marker { display: none; }
   padding-top: 16px;
   border-top: 1px solid var(--border-soft);
 }
-/* HelpPage now renders one section (and therefore exactly one h2, that
-   section's own heading) at a time instead of the whole manual flowing past
-   each other -- the divider/spacing above was meant to separate consecutive
-   sections in the old flat render and just looks like a stray rule under
-   the page's own <h1> now that the h2 is always the first thing in the
-   content pane. */
+/* A document's first heading sits right under the page's own title, where
+   the divider would read as a stray rule. */
 .user-manual-content h2:first-child {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
 }
+/* The help manual renders each section on its own, so every section's
+   heading is a first child; from the second section on, the divider goes
+   back between them. */
+.user-manual-section + .user-manual-section > h2:first-child {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
+}
+/* A section or heading scrolled to, from the sidebar or a link, stops a
+   little below the top edge. */
+.user-manual-section,
+.user-manual-section [id] { scroll-margin-top: 16px; }
 .user-manual-content h3 {
   font-size: 15px;
   margin: 20px 0 8px;

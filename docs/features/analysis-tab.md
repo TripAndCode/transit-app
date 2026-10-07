@@ -65,8 +65,8 @@ What the user sees/does:
   `frontend/src/components/ReportTable.tsx` renders the rows, with a CSV
   download link and a raw-rows JSON `<details>` dump; `trend` instead
   renders `TrendBlock` (defined inline in `AnalysisTab.tsx`): a
-  day-of-week x time-band heatmap
-  (`frontend/src/components/charts/DowBandGrid.tsx`), a daily line chart
+  day-of-week x hour heat surface with "By hour" and "By band" profiles
+  (`frontend/src/components/charts/HeatSurface.tsx`), a daily line chart
   (`frontend/src/components/charts/DailyChart.tsx`), and an hourly heatmap
   (`frontend/src/components/charts/HourlyHeatmap.tsx`). An empty result
   shows `EmptyState` with a "reset to this week" recovery action. `dwell_run`
@@ -147,7 +147,7 @@ response honoured that field.
   theirs in their own routers.
 - **`late`/`early`.** They are the on-time tolerance, applied by `on_time`
   and `council_summary`. Elsewhere they are ignored and reported as `false`,
-  including `worst_5min`, whose "≥5 min" threshold stays its own
+  including `worst_5min`, whose over-5-min threshold stays its own
   `late_tolerance_sec`.
 - **Not yet honoured.** `hour`, `stop` and `dir` are accepted and validated,
   but no endpoint honours them yet: `hour` waits on `agg_route_hour_daily`,
@@ -236,7 +236,7 @@ the scope as one sentence above their content
 |---|---|---|
 | `useScopeSummary(agencyId, scope, enabled)` | `GET /api/{agency_id}/scope/summary` (`api/routers/scope_summary.py: scope_summary`) | `pipeline/reports/scope_summary.py: compute_scope_summary()` — four reads of `agg_route_daily_dist` (span, daily, per-weekday, per-route) plus one merged histogram for the tolerance curve; no ClickHouse. |
 | `useReports(agencyId)` | `GET /api/{agency_id}/reports` (`api/routers/reports.py: list_reports`) | Static metadata only — the fixed `_REPORT_TYPES` tuple, no DB read. |
-| `useReport(agencyId, reportType, ctx)` | `GET /api/{agency_id}/reports/{report_type}` (`api/routers/reports.py: get_report`) | Computed live per request from `pipeline/reports/rankings.py`'s `compute_ranking` / `compute_dow_ranking` / `compute_on_time` / `compute_worst_5min` / `compute_trend_series` / `compute_compare_ranking` / `compute_hourly_heatmap` — each follows the repo-wide pattern of a precomputed-`agg_*` fast path with a live ClickHouse fallback for a `time_band`-narrowed request (see `AGENTS.md` and the `ask-tab.md` doc's "ranking family" note — these are the same functions the Ask tab's `top_n`/`on_time`/`trend`/`cmp_service` tools call). `dwell_run` instead reads `pipeline/reports/dwell_run.py`'s `compute_dwell_run_decomposition` from `agg_route_daily_dwell_run` — no live fallback (a time-band filter gets an explicit `time_band_supported: false` instead). `council_summary` (`pipeline/reports/council.py: compute_council_summary`) pools the on-time/service-delivered rate into one whole-agency row, footnoted from `pipeline/reports/definition.py`'s `DefinitionMeta` via `format_definition_footnotes`. `delay_certificate` (same module's `compute_delay_certificate`) always live-scans ClickHouse for individual over-threshold departures — no `agg_*` fast path exists at that granularity. `?format=csv` streams the same rows as a UTF-8-BOM CSV via `_csv_response`. |
+| `useReport(agencyId, reportType, ctx, options)` | `GET /api/{agency_id}/reports/{report_type}` (`api/routers/reports.py: get_report`) | Computed live per request from `pipeline/reports/rankings.py`'s `compute_ranking` / `compute_dow_ranking` / `compute_on_time` / `compute_worst_5min` / `compute_trend_series` / `compute_compare_ranking` / `compute_hourly_heatmap` — each follows the repo-wide pattern of a precomputed-`agg_*` fast path with a live ClickHouse fallback for a `time_band`-narrowed request (see `AGENTS.md` and the `ask-tab.md` doc's "ranking family" note — these are the same functions the Ask tab's `top_n`/`on_time`/`trend`/`cmp_service` tools call). `dwell_run` instead reads `pipeline/reports/dwell_run.py`'s `compute_dwell_run_decomposition` from `agg_route_daily_dwell_run` — no live fallback (a time-band filter gets an explicit `time_band_supported: false` instead). `council_summary` (`pipeline/reports/council.py: compute_council_summary`) pools the on-time/service-delivered rate into one whole-agency row, footnoted from `pipeline/reports/definition.py`'s `DefinitionMeta` via `format_definition_footnotes`. `delay_certificate` (same module's `compute_delay_certificate`) always live-scans ClickHouse for individual over-threshold departures — no `agg_*` fast path exists at that granularity. `ranking`/`ranking_best` leave out groups observed fewer than `RANKING_MIN_SAMPLES` times unless `include_sparse=1` (the screen's `sparse=1` toggle) and return `rows_total` and `reliable_min_samples`, so the screen can say how many rows qualified and badge the thin ones. `?format=csv` streams the same rows as a UTF-8-BOM CSV via `_csv_response`. |
 | `useSuggestion(agencyId, exclude)` (drives `InsightPanel`) | `GET /api/{agency_id}/reports/suggest` (`api/routers/reports.py: get_suggestion`) | `pipeline/reports/suggest.py: compute_suggestion()` — a rule-based pick (anomaly over a 1-day window, or trend-shift/on-time over a 7-day window); polled every 5 minutes. |
 | `useForecastOverview(agencyId)` / `useForecastHeatmap(agencyId, route)` (both drive `RouteForecastSection`) | `GET /api/{agency_id}/forecast/overview` / `GET /api/{agency_id}/forecast/heatmap?route=...` (`api/routers/reports.py`) | Both re-pool `agg_route_hour_dow` on read (a seasonal-naive baseline, explicitly **not** a prediction — both responses carry a `disclaimer` string). `forecast/overview`'s route list additionally joins the last 7 analyzed days from `agg_route_daily` for each route's sparkline (best-effort — a failure there degrades to no sparklines rather than a 500). |
 
@@ -246,11 +246,12 @@ the scope as one sentence above their content
 
 | File | Role |
 |---|---|
-| `frontend/src/tabs/AnalysisTab.tsx` | Analysis tab shell: report-type selection, `TrendBlock`/`DowBandHeatmapCard`/`DwellRunBlock` composition |
+| `frontend/src/tabs/AnalysisTab.tsx` | Analysis tab shell: report-type selection, `TrendBlock`/`DwellRunBlock` composition |
 | `frontend/src/components/ReportTable.tsx` | Generic report-row table renderer |
 | `frontend/src/components/charts/DailyChart.tsx` | Trend report's daily line chart |
 | `frontend/src/components/charts/HourlyHeatmap.tsx` | Trend report's hourly heatmap |
-| `frontend/src/components/charts/DowBandGrid.tsx` | `BandGrid`/`Legend` — dow x time-band grid used by both the trend report and `RouteForecastSection` |
+| `frontend/src/components/charts/DowBandGrid.tsx` | `BandGrid`/`Legend` — dow x time-band grid used by `RouteForecastSection` |
+| `frontend/src/components/charts/HeatSurface.tsx`, `heatSurfaceModel.ts` | The trend report's dow x hour surface: the two profiles, the faint low-confidence cells, and the generated row/column dim rules |
 | `frontend/src/components/RouteForecastSection.tsx` | `route_forecast` report body (agency-wide + per-route views) |
 | `frontend/src/components/InsightPanel.tsx` | Proactive single-suggestion panel |
 | `frontend/src/components/InsightHint.tsx` | `?` hint popover explaining each report type |
@@ -288,6 +289,8 @@ the scope as one sentence above their content
   (pure scheduled → actual clock-time arithmetic).
 - Frontend: `frontend/src/components/ReportTable.test.tsx`,
   `frontend/src/components/charts/DowBandGrid.test.tsx`,
+  `frontend/src/components/charts/HeatSurface.test.tsx`,
+  `frontend/src/components/charts/heatSurfaceModel.test.ts`,
   `frontend/src/components/RouteForecastSection.test.tsx`,
   `frontend/src/components/InsightPanel.test.tsx`,
   `frontend/src/tabs/destinationTabs.test.tsx` and
@@ -306,7 +309,7 @@ the scope as one sentence above their content
 3. Click each report-type button in the left column, and repeat on the
    Routes, Why and Compare rail entries - expect the URL's `report` param to
    update and the body to show either a table (with a working CSV download
-   link) or, for `trend`, the daily chart + hourly heatmap + dow-band grid.
+   link) or, for `trend`, the daily chart + hourly heatmap + day x hour surface.
    Open `/agencies/:agencyId/routes?sort=on_time` - expect `on_time` to be
    selected.
 4. On Time, click "Route forecast" - expect the agency-wide grid/route list; select

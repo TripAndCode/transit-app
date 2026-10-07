@@ -25,21 +25,28 @@
     "other": "そのほか"
   },
   "compare": {
-    "mode_periods": "期間・路線どうし",
+    "mode_periods": "平日と土日祝",
     "mode_agencies": "事業者どうし"
   },
   "saved": {
     "title": "レポート",
     "view_summary": "期間のまとめ",
     "view_saved": "保存した分析",
-    "view_reports": "協議会向けまとめ・遅延の参考資料"
+    "view_reports": "協議会向けまとめ・遅延証明",
+    "subtitle_summary": "期間中の運行を、印刷できる一枚にまとめます。",
+    "subtitle_saved": "このブラウザで路線のページから保存した分析です。",
+    "subtitle_reports": "協議会や役員会向けのまとめと、遅延の証明です。"
   },
   "sheet": {
     "handle": "シートの持ち手"
   },
   "onboarding": {
     "subtitle": "あなたの事業者を選んでください",
-    "no_agencies": "事業者がまだ登録されていません。"
+    "no_agencies": "事業者がまだ登録されていません。",
+    "data_through": "{{date}}までのデータ",
+    "no_data_yet": "まだデータを収集していません",
+    "search": "事業者を検索",
+    "no_matches": "一致する事業者がありません。別の名前で検索してください。"
   },
   "landing": {
     "hero": {
@@ -79,7 +86,7 @@
       "kpi": {
         "observed": "観測便",
         "delayed": "5分以上の遅延",
-        "on_time": "定時運行率"
+        "on_time": "定時率"
       },
       "legend": {
         "under": "{{minutes}}分未満",
@@ -117,7 +124,8 @@
       "ask": {
         "title": "質問して、根拠を見る",
         "body": "質問機能が実際の回答で表示するのと同じ根拠ビューです — スクリーンショットではありません。下の停留所を選んで試せます。"
-      }
+      },
+      "scroll_hint": "横にスクロールすると、グラフ全体を見られます。"
     }
   },
   "tour": {
@@ -128,7 +136,7 @@
     "dismiss": "このツアーを閉じる",
     "filters": {
       "title": "表示範囲を絞り込む",
-      "body": "路線・曜日・時間帯で絞り込むと、下の内容すべてが連動して更新されます。"
+      "body": "路線や種別で絞り込むと、下の内容すべてが連動して更新されます。"
     },
     "map": {
       "title": "現在運行中の便を確認する",
@@ -136,23 +144,24 @@
     },
     "ask": {
       "title": "探す・質問する",
-      "body": "路線・レポート・画面をここから探せます。同じ欄から「質問」へ進むと、遅延について自然な言葉で質問できます。"
+      "body": "路線・レポート・画面をここから探せます。同じ欄から「質問」へ進むと、遅延についてのよくある質問に表や図で答えます。"
     }
   },
   "forecast": {
     "overview_worst_label": "いま見るべき時間帯",
-    "overview_worst_phrase": "{{day}}の{{band}} — 全体的に遅れやすい（平均 +{{min}}分）",
+    "overview_worst_phrase": "{{day}}の{{band}}が最も遅れやすい（{{avg}}）",
     "overview_grid_title": "曜日 × 時間帯（全路線）",
+    "route_grid_title": "曜日 × 時間帯（この路線）",
     "overview_grid_caption": "事業者全体で、いつ遅れやすいか — 濃いほど遅延が大きい。",
     "overview_routes_title": "遅れやすい路線",
-    "overview_routes_caption": "クリックすると路線ごとの詳細を表示します。",
+    "overview_routes_caption": "系統をクリックすると内訳を表示します。小さな線は、データのある直近7日間の日平均です。",
     "overview_no_data": "計測記録がまだありません。",
     "band_early": "早朝",
     "band_morning": "朝",
     "band_midday": "昼",
     "band_evening": "夕方",
     "band_night": "夜",
-    "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（平均 +{{min}}分）",
+    "detail_worst_phrase": "いちばん遅れるのは {{day}}の{{band}}（{{avg}}）",
     "detail_show_grid": "曜日×時間帯を詳しく",
     "low_confidence_note": "計測が少なく参考値",
     "lowSamples": "データ不足 ({{count}}件)",
@@ -175,7 +184,11 @@
     "stat_worst": "最も遅い",
     "stat_calmest": "最も軽い",
     "stat_mean": "路線平均",
-    "stat_samples": "計測回数"
+    "stat_samples": "計測回数",
+    "route_picker_label": "系統",
+    "route_picker_all": "すべての系統",
+    "avg_late": "平均{{min}}分の遅れ",
+    "avg_early": "平均{{min}}分の早発"
   },
   "network": {
     "title": "事業者比較",
@@ -201,7 +214,7 @@
     "help_coverage": "この事業者が期間内に実際にデータを持つ日付範囲。",
     "col_coverage": "データ範囲",
     "no_data_in_range": "期間内のデータなし",
-    "view_agency": "{{name}} の概況を見る",
+    "view_agency": "{{name}} をライブで開く",
     "delay_unit": "分",
     "you_badge": "あなた",
     "ridership_weighted_toggle": "利用者数で重み付け",
@@ -209,25 +222,26 @@
     "on_time_weighted_suffix": "（重み付け）",
     "help_ridership_weighted": "この事業者に手動設定された利用者数の重みがある場合、路線ごとの定時率への寄与を均等にではなく、その重みに応じて集計します。",
     "col_vehicle_km_delivered": "走行キロ達成率",
-    "help_vehicle_km_delivered": "現行ダイヤの計画走行キロのうち実際に運行された割合です。shapes.txtが未読み込みの場合や運休を報告しないフィードでは「—」と表示されます（「運行達成率」も参照）。",
+    "help_vehicle_km_delivered": "現行ダイヤの計画走行キロのうち実際に運行された割合です。shapes.txtが未読み込みの場合や運休を報告しないフィードでは「—」と表示されます（「運行率」も参照）。",
     "planned_trip_count_fallback": "計画本数 {{count}} 本（走行キロは算出不可）",
     "schedule_version_title": "静的ダイヤバージョン: {{version}}",
     "col_agency": "事業者",
-    "axis_caption": "共通軸 · 0〜{{max}} 分",
-    "definition_disclosure": "集計条件を見る"
+    "axis_caption": "共通軸 · 0〜{{max}} 分"
   },
   "definitionMeta": {
-    "tolerance_line": "定時判定: {{preset}}（早着許容 ≤ {{early}}、遅延許容 ≤ {{late}}）",
-    "unbounded": "無制限",
-    "not_applicable": "対象外",
-    "seconds": "{{value}}秒",
+    "summary": "集計のしかた",
     "measurementPoint": {
-      "all_stops_all_observations": "集計範囲：全停留所・全観測"
+      "all_stops_all_observations": "全停留所で記録されたすべての発車の平均です。"
     },
     "dedupRule": {
-      "latest_observation_per_stop_event": "重複排除：停留所イベントごとに最新観測を採用"
+      "latest_observation_per_stop_event": "同じ発車が複数回報告された場合は、最新の報告を使います。"
     },
-    "exclusion_rule": "除外基準：|遅延|>{{sec}}秒を除外"
+    "exclusion_hours_one": "{{count}}時間以上ずれた値は誤りとして除外します。",
+    "exclusion_hours_other": "{{count}}時間以上ずれた値は誤りとして除外します。",
+    "exclusion_limit": "{{limit}}以上ずれた値は誤りとして除外します。",
+    "on_time_late": "定時 = 遅れ{{late}}以内。",
+    "on_time_late_early": "定時 = 遅れ{{late}}以内、早発{{early}}以内。",
+    "sentence_separator": ""
   },
   "app": {
     "data_stale": {
@@ -251,35 +265,41 @@
     "concentration_rest_one": "残り {{count}} 路線で {{rest}}%",
     "concentration_rest_other": "残り {{count}} 路線で {{rest}}%",
     "section_peak_hour": "時間帯別の悪化",
-    "peak_hour_callout": "ピークは{{range}}です（平均{{avg}}分）。",
+    "peak_hour_callout": "ピーク {{range}}（平均{{avg}}分）",
     "section_service_split": "サービス日別",
     "hero_row": {
-      "avg_delay_label": "ネットワーク平均遅延",
-      "baseline_hint_title": "先週比について",
-      "baseline_hint_body": "選択した期間の平均遅延を、その直前の同じ日数分の期間と比較しています。",
+      "avg_delay_label": "平均遅延 · {{range}}",
+      "baseline_hint_title": "比較について",
+      "baseline_hint_body": "{{range}}の平均遅延を、その直前の同じ日数分と比べています。",
       "avg_delay_no_baseline": "比較データなし",
-      "delayed_count_label": "遅延中の路線",
-      "delayed_count_value": "{{count}} / {{total}}路線",
-      "feed_status_label": "フィード状況",
-      "feed_status_ok": "正常稼働中",
-      "feed_status_stale": "データ遅延あり",
-      "feed_status_updated": "最終更新 {{when}}",
-      "sparkline_baseline": "期間平均 {{value}}分"
+      "delayed_count_label": "平均{{min}}分以上の遅れ",
+      "delayed_count_value": "{{total}}路線中{{count}}路線",
+      "sparkline_baseline": "選択期間の平均 {{value}}分",
+      "feed_status_live": "受信中",
+      "feed_status_quiet": "フィード停止 {{duration}}",
+      "feed_status_none": "まだ受信していません",
+      "feed_status_last": "最終報告 {{time}}"
     },
     "story": {
-      "behind_one": "先週より{{delta}}分遅く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
-      "behind_other": "先週より{{delta}}分遅く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
-      "behind_short": "先週より{{delta}}分遅くなっています。",
-      "ahead_one": "先週より{{delta}}分早く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
-      "ahead_other": "先週より{{delta}}分早く、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
-      "ahead_short": "先週より{{delta}}分早くなっています。",
-      "flat_one": "遅延は先週とほぼ同じ水準で、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
-      "flat_other": "遅延は先週とほぼ同じ水準で、{{peak}}時台が最も重くなっています。遅延の{{share}}%は上位{{count}}路線に集中しています。",
-      "flat_short": "遅延は先週とほぼ同じ水準です。"
+      "behind_one": "直前の{{days}}日間より遅れが平均{{delta}}分長く、{{peak}}が最も遅れた時間帯です。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "behind_other": "直前の{{days}}日間より遅れが平均{{delta}}分長く、{{peak}}が最も遅れた時間帯です。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "behind_short": "直前の{{days}}日間より遅れが平均{{delta}}分長くなっています。",
+      "ahead_one": "直前の{{days}}日間より遅れが平均{{delta}}分短く、{{peak}}が最も遅れた時間帯です。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "ahead_other": "直前の{{days}}日間より遅れが平均{{delta}}分短く、{{peak}}が最も遅れた時間帯です。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "ahead_short": "直前の{{days}}日間より遅れが平均{{delta}}分短くなっています。",
+      "flat_one": "遅延は直前の{{days}}日間とほぼ同じで、{{peak}}が最も遅れた時間帯です。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "flat_other": "遅延は直前の{{days}}日間とほぼ同じで、{{peak}}が最も遅れた時間帯です。遅延の{{share}}%は上位{{count}}路線に集中しています。",
+      "flat_short": "遅延は直前の{{days}}日間とほぼ同じです。"
     },
     "routes_to_check": {
       "title": "今すぐ確認すべき路線",
-      "empty": "確認が必要な路線はありません"
+      "empty": "確認が必要な路線はありません",
+      "band_severe_one": "平均{{min}}分超の遅れ：{{count}}路線",
+      "band_severe_other": "平均{{min}}分超の遅れ：{{count}}路線",
+      "band_moderate_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
+      "band_moderate_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
+      "band_mild_one": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線",
+      "band_mild_other": "平均{{min}}〜{{max}}分の遅れ：{{count}}路線"
     },
     "concentration": {
       "single_route": "{{name}} が全体の 100% を占めています (観測は1路線のみ)。",
@@ -287,7 +307,7 @@
       "lorenz_caption": "上位 20% の路線が遅延の {{pct}}% を占めています。"
     },
     "service_split": {
-      "diff": "差: {{diff}}分 ({{pct}}%)",
+      "diff": "差：{{diff}}分（{{pct}}%）",
       "story_weekday_higher": "平日の遅延は土日祝の {{ratio}}倍です。",
       "story_weekend_higher": "土日祝の遅延は平日の {{ratio}}倍です。",
       "story_same": "平日と土日祝でほぼ差はありません。",
@@ -297,7 +317,8 @@
       "max_label": "最大 {{avg}}分",
       "avg_label": "平均",
       "weekday_empty": "平日のデータがありません。",
-      "weekend_empty": "土日祝のデータがありません。"
+      "weekend_empty": "土日祝のデータがありません。",
+      "spread_legend": "網掛け：1日の平均より遅れの大きい時間帯"
     },
     "modal": {
       "concentration": "遅延の集中度 (上位20)",
@@ -307,7 +328,9 @@
     "empty": "この期間の観測データがありません。期間を広げてください。",
     "concentration_explainer": "各路線の遅延合計が全体に占める割合です。下のローレンツ曲線は偏りを表し、点線 (均等に遅延した場合) から離れるほど、少数の路線に遅延が集中していることを意味します。",
     "peak_explainer": "時間帯別 (0〜23時) の平均遅延を平日と土日祝に分けて表示します。通勤ピークと週末の傾向を比較できます。",
-    "service_split_explainer": "平日と土日祝の平均遅延の比較です。下の日別推移から、差が恒常的か一時的かを確認できます。"
+    "service_split_explainer": "平日と土日祝の平均遅延の比較です。下の日別推移から、差が恒常的か一時的かを確認できます。",
+    "never_collected": "{{agency}}のデータはまだ収集していません。",
+    "choose_another_agency": "別の事業者を選ぶ"
   },
   "markdownMermaid": {
     "diagram_fallback_label": "図"
@@ -395,19 +418,20 @@
     "rel_hours_ago_one": "{{count}}時間前",
     "rel_hours_ago_other": "{{count}}時間前",
     "rel_days_ago_one": "{{count}}日前",
-    "rel_days_ago_other": "{{count}}日前"
+    "rel_days_ago_other": "{{count}}日前",
+    "still_working": "まだ処理しています…",
+    "still_working_period": "まだ処理しています。期間が長いほど集計に時間がかかります。",
+    "narrow_to_week": "期間の最後の7日間に絞る"
   },
   "legal": {
     "privacy": "プライバシーポリシー",
     "terms": "利用規約",
-    "back": "戻る",
     "nav_label": "規約"
   },
   "help": {
     "title": "利用マニュアル",
     "sections_nav": "マニュアルの目次",
     "search_placeholder": "マニュアル内を検索",
-    "category_shortcut_label": "{{title}}へ移動",
     "hint_text": "はじめての方へ：利用マニュアルで使い方を確認できます。",
     "hint_cta": "ヘルプを見る",
     "hint_dismiss_aria": "ヘルプのヒントを閉じる",
@@ -438,7 +462,7 @@
     "logout_error": "ログアウトできませんでした。接続を確認して再度お試しください。",
     "data": {
       "title": "あなたのデータ",
-      "description": "このアプリが保持するあなたのデータをダウンロード、またはアカウントを削除できます。",
+      "description": "このアプリが保持するあなたのデータをダウンロードできます。",
       "export": "データをダウンロード",
       "delete": "アカウントを削除",
       "delete_title": "アカウントを削除しますか？",
@@ -447,7 +471,8 @@
       "delete_confirm": "完全に削除",
       "error_last_admin": "唯一の管理者のため、このアカウントは削除できません。先に別のユーザーを管理者にしてください。",
       "error_managed": "運営者の組み込みアカウントのため、ここでは削除できません。",
-      "error_generic": "アカウントを削除できませんでした。接続を確認して再度お試しください。"
+      "error_generic": "アカウントを削除できませんでした。接続を確認して再度お試しください。",
+      "delete_description": "アカウントと、保存したすべてのデータを削除します。元に戻せません。"
     },
     "login": {
       "error": {
@@ -467,6 +492,7 @@
       "back_to_top": "トップへ戻る",
       "welcome_back": "おかえりなさい",
       "choose_provider": "アカウントを選択してログイン",
+      "username_prompt": "ユーザー名でサインイン",
       "google_aria": "Googleでログイン",
       "google_continue": "Googleで続ける",
       "github_aria": "GitHubでログイン",
@@ -476,14 +502,24 @@
       "password_label": "パスワード",
       "local_submit": "サインイン",
       "terms_consent": "続行すると、<terms>利用規約</terms>と<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
-    }
+    },
+    "back_to_agency": "← {{agency}}に戻る",
+    "linked_none": "連携なし",
+    "session_device": "{{os}} の {{browser}}",
+    "session_unknown_device": "不明な端末",
+    "this_device": "この端末",
+    "session_sign_out": "サインアウト",
+    "session_sign_out_aria": "このセッションをサインアウト",
+    "session_sign_out_error": "そのセッションをサインアウトできませんでした。もう一度お試しください。"
   },
   "presets": {
     "login_to_save_tooltip": "ログインで保存",
-    "label": "プリセット",
-    "option_placeholder": "プリセット",
-    "save_current": "現在の条件を保存",
-    "name_placeholder": "プリセット名"
+    "label": "保存したビュー",
+    "save_current": "このビューを保存…",
+    "empty": "保存したビューはまだありません",
+    "save_title": "このビューを保存",
+    "name_label": "名前",
+    "load_error": "保存したビューを読み込めませんでした。"
   },
   "filters": {
     "range": {
@@ -523,6 +559,13 @@
   "operations": {
     "all_routes": "すべての路線",
     "last_updated": "最終更新 {{when}}",
+    "feed_quiet": "フィード停止 {{duration}} · 最終報告 {{time}}",
+    "quiet_for": {
+      "minutes": "{{n}}分",
+      "hours": "{{n}}時間",
+      "days_one": "{{count}}日",
+      "days_other": "{{count}}日"
+    },
     "no_update": "最終更新なし",
     "refresh": "ライブ観測を取得",
     "refresh_now": "今すぐ更新",
@@ -531,6 +574,7 @@
     "refresh_unchanged": "再取得済み・新しい観測はありません",
     "refresh_failed": "再取得できませんでした",
     "refresh_rate_limited": "更新回数が多すぎます。しばらく待ってから再試行してください",
+    "refresh_sign_in": "ライブ観測を取得するにはログインしてください",
     "loading": "最新の運行状況を取得中...",
     "map": {
       "aria_label": "最新報告停留所と遅延の地図",
@@ -566,7 +610,7 @@
       "departure": "{{time}}発",
       "reported": "最新報告 {{when}}",
       "progress_title": "便の遅延推移",
-      "progress_disclosure": "運行データの報告進行",
+      "progress_disclosure": "リアルタイム報告の推移",
       "progress_loading": "報告履歴を取得中…",
       "no_progress": "この便の報告履歴はまだありません",
       "select_route": "路線を選ぶか、地図上の便を押すと詳細を表示します。",
@@ -576,14 +620,15 @@
       "other_trips": "同じ方面のほかの便",
       "chart_label": "停留所ごとの遅延推移",
       "growth": "{{stop}}で {{delay}}拡大",
-      "recovery": "{{stop}}で {{delay}}分回復"
+      "recovery": "{{stop}}で {{delay}}分回復",
+      "none_reporting": "走行中の便が報告し始めると、ここに表示されます。"
     },
     "queue": {
       "location_unavailable": "停留所位置を解決できません"
     },
     "empty": {
-      "title": "現在表示できる便がありません",
-      "hint": "最新の運行データを待っています。受信後、自動的に表示します。"
+      "title": "いま走行を報告している車両はありません",
+      "hint": "深夜は通常の状態です。運行時間中も続く場合は、事業者のフィードが止まっている可能性があります。"
     },
     "playback": {
       "aria_label": "1日の再生",
@@ -602,13 +647,8 @@
     }
   },
   "map": {
-    "legend": {
-      "band_1_5_3": "1.5 – 3分",
-      "band_3_5": "3 – 5分",
-      "band_gt_5": "> 5分"
-    },
     "style": {
-      "osm": "OSM",
+      "osm": "OpenStreetMap",
       "label": "地図スタイル",
       "pale": "淡色",
       "std": "標準",
@@ -686,20 +726,23 @@
     "workspace": {
       "investigations": "これまでの調査",
       "new_analysis": "別の分析を始める",
-      "unavailable": "調査を開けませんでした。接続とログイン中のアカウントを確認してください。ゲストの調査は保存したブラウザーでのみ開けます。",
+      "unavailable": "調査を開けませんでした。接続とログイン中のアカウントを確認してください。ゲストの調査は保存したブラウザでのみ開けます。",
       "retry": "再試行",
       "export_snapshot": "結果を保存（JSON）",
       "export_csv": "表{{index}}のCSV",
       "export_notice": "選択した質問と取得済みの回答を保存します。再計算はしません。会話の内容を含むため共有前に確認してください。JSONのアプリ内再読み込みは未対応です。",
       "export_failed": "ダウンロードを作成できませんでした。もう一度お試しください。",
       "title": "調査",
-      "step_count": "{{count}}件の質問",
+      "step_count_one": "{{count}}件の質問",
+      "step_count_other": "{{count}}件の質問",
       "steps": "調査の経緯",
       "retained_result": "保存されている結果",
       "historical": "過去の結果を表示中です。追質問は最新の結果をもとに回答します。",
       "return_latest": "最新の結果に戻る",
       "saved_result_notice": "取得済みの結果です。開くだけでは再取得しません。上のフィルターは次の分析用で、この結果の条件とは異なる場合があります。",
-      "full_log": "会話全文を開く"
+      "full_log": "会話全文を開く",
+      "new_analysis_first": "分析を始める",
+      "no_questions": "この調査にはまだ質問がありません。質問を選んで始めましょう。"
     },
     "thinking": "考え中...",
     "dock": {
@@ -741,6 +784,8 @@
     "low_confidence_mark": "幅あり",
     "more_rows": "…他{{count}}件",
     "build_labels": {
+      "summary": "🛠 {{tool}}",
+      "summary_with_args": "🛠 {{tool}} ({{args}})",
       "metric": "指標",
       "n": "件数",
       "best_first": "良い順に並べる",
@@ -770,7 +815,7 @@
       "values": {
         "avg_delay": "平均遅延",
         "on_time_rate": "定時率",
-        "worst_5min": "5分以上の遅延件数",
+        "worst_5min": "5分超の遅延件数",
         "weekday": "平日",
         "weekend": "土日祝",
         "all": "すべて",
@@ -794,7 +839,7 @@
     "sidebar": {
       "search": "タイトル・系統・期間で検索",
       "no_matches": "一致する調査がありません。検索条件を変えてください。",
-      "new_thread": "新しい会話",
+      "new_thread": "新しい調査",
       "pinned": "ピン留め",
       "today": "今日",
       "yesterday": "昨日",
@@ -804,8 +849,8 @@
       "pin": "ピン留め",
       "unpin": "ピン留めを外す",
       "delete": "削除",
-      "delete_confirm": "この会話を削除しますか？",
-      "empty": "まだ会話がありません",
+      "delete_confirm": "この調査を削除しますか？",
+      "empty": "まだ調査がありません",
       "more_options_aria": "その他のオプション"
     },
     "filter_bar": {
@@ -849,15 +894,18 @@
       },
       "top_delay": {
         "title": "遅延の大きい路線 Top-N",
-        "summary": "上位 {{k}} 件 ({{service}})",
-        "example_answer": "例: K05 +6.2分、S12 +5.4分、A03 +5.1分のように、遅延が大きい順に表示します。"
+        "summary_all": "遅延の大きい路線：上位{{k}}件",
+        "summary_weekday": "遅延の大きい路線：上位{{k}}件（平日）",
+        "summary_weekend": "遅延の大きい路線：上位{{k}}件（土日祝）",
+        "example_answer": "例: 平均遅延の大きい路線を、大きい順に一覧表示します。"
       },
       "ontime_rank": {
-        "title": "オンタイム率ランキング",
+        "title": "定時率ランキング",
         "best": "良い順",
         "worst": "悪い順",
-        "summary": "{{dir}} {{k}} 件",
-        "example_answer": "例: 定時率の高い順（または低い順）に、路線と割合を一覧表示します。"
+        "example_answer": "例: 定時率の高い順（または低い順）に、路線と割合を一覧表示します。",
+        "summary_worst": "定時率の低い路線：{{k}}件",
+        "summary_best": "定時率の高い路線：{{k}}件"
       },
       "route_trend": {
         "title": "路線の遅延推移",
@@ -890,16 +938,16 @@
     "raw_rows_other": "生データ（{{count}}件）",
     "type": {
       "ranking": "遅延ランキング",
-      "ranking_best": "定時運行ランキング",
+      "ranking_best": "平均遅延の少ない順",
       "on_time": "定時率",
-      "worst_5min": "5分以上遅延",
+      "worst_5min": "5分超の遅延",
       "trend": "トレンド",
-      "compare_ranking": "比較ランキング",
-      "dow_weekday": "平日傾向",
-      "dow_weekend": "週末傾向",
+      "compare_ranking": "平日・土日祝の差",
+      "dow_weekday": "平日の系統別遅延",
+      "dow_weekend": "土日祝の系統別遅延",
       "dwell_run": "滞留・走行時間",
       "route_forecast": "路線別予測",
-      "council_summary": "議会向け報告",
+      "council_summary": "協議会向け報告",
       "delay_certificate": "遅延証明書"
     },
     "col": {
@@ -908,15 +956,11 @@
       "median": "中央値",
       "p90": "p90",
       "samples": "観測数",
-      "dow": "曜日",
       "on_time_pct": "定時率",
       "over_5min_count": "5分超回数",
       "diff": "差",
       "direction": "向き",
-      "confidence": "確信度",
-      "planned_trips": "計画本数",
-      "executed_trips": "運行本数",
-      "service_delivered_pct": "運行実績率",
+      "confidence": "データ量",
       "agency_name": "事業者名",
       "date": "日付",
       "scheduled_time": "定刻",
@@ -924,7 +968,7 @@
       "with_unit": "{{label}}（{{unit}}）",
       "delay": "遅延"
     },
-    "confidence_low_mark": "幅あり",
+    "confidence_low_mark": "データ少",
     "direction": {
       "weekend_higher": "土日祝>平日",
       "weekday_higher": "平日>土日祝"
@@ -937,8 +981,8 @@
       "trend_body": "：時間経過で改善・悪化しているか。右肩上がりなら遅延が拡大中。",
       "heatmap_strong": "時間帯ヒートマップ",
       "heatmap_body": "：1 日のうちのピーク時間。朝夕の通勤帯と昼間の差を比較。",
-      "dow_strong": "平日 / 週末傾向",
-      "dow_body": "：曜日特性。週末便の方が定時率が高い／低いといった傾向を抽出。",
+      "dow_strong": "平日 / 土日祝の系統別遅延",
+      "dow_body": "：その曜日区分での系統ごとの平均遅延。両方を比べると、週末に遅れやすい系統がわかります。",
       "csv": "CSV エクスポートで Excel / BI ツールに渡せます。"
     },
     "empty": {
@@ -958,24 +1002,35 @@
       "legend_explainer": "・行 → 時間帯 ・列 → 日付",
       "svg_aria": "時間帯別遅延ヒートマップ",
       "tooltip_hour": "{{hour}}時 ・ 平均",
-      "tooltip_metrics": "{{min}}分 ・ {{count, number}}件",
+      "tooltip_metrics": "{{min}} ・ {{count}}件",
       "ramp_max": "{{min}}分以上",
       "severe_outline": "枠線 = {{min}}分以上"
     },
     "dow_band": {
-      "title": "いつもの遅れ方",
       "empty": "この期間のデータがありません。",
-      "worst_phrase_one": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（平均 +{{min}}分）",
-      "worst_phrase_other": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（平均 +{{min}}分）"
+      "worst_phrase_one": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（{{avg}}）",
+      "worst_phrase_other": "過去{{count}}日間で最も遅れやすいのは {{day}}の{{band}}（{{avg}}）"
+    },
+    "heat_surface": {
+      "title": "曜日 × 時刻の面",
+      "aria": "曜日と時刻ごとの平均遅延",
+      "profile_label": "プロファイル",
+      "profile_hourly": "時刻別",
+      "profile_banded": "時間帯別",
+      "legend_low": "定時",
+      "legend_high": "{{min}}分以上",
+      "readout_hint": "セルに触れると、同じ時刻の列と同じ曜日の行だけが残ります。",
+      "readout": "{{day}}曜 {{hour}}:00 — 平均 {{min}}",
+      "readout_empty": "{{day}}曜 {{hour}}:00 — データなし"
     },
     "daily": {
       "empty": "期間内にデータがありません。",
       "svg_aria": "日次平均遅延チャート",
-      "tooltip_metrics": "平均{{min}}分 / {{count}}件",
-      "smoothed_tooltip": "7日移動平均{{min}}分",
+      "tooltip_metrics": "平均{{min}} / {{count}}件",
+      "smoothed_tooltip": "7日移動平均{{min}}",
       "smoothed_label": "- - - 7日移動平均",
       "worst_label": "悪化:",
-      "offender": "路線{{code}}({{min}}分)",
+      "offender": "路線{{code}}({{min}})",
       "revision_boundary_label": "ダイヤ改正",
       "revision_boundary_aria": "{{date}}にダイヤ改正が反映されました",
       "brush_hint": "ドラッグで期間を絞り込み",
@@ -986,7 +1041,7 @@
       "worst_day_label": "最も遅い日"
     },
     "dwell_run": {
-      "not_available": "この事業者のフィードは到着遅延を送信しないため、滞留・走行時間の内訳は利用できません。",
+      "not_available": "この事業者のフィードは出発時刻のみを送信するため、遅れを停留所での停車時間と走行時間に分けられません。",
       "time_band_unsupported": "時間帯フィルタが指定された滞留・走行時間の内訳には対応していません。",
       "col": {
         "dwell_avg": "滞留平均",
@@ -997,7 +1052,10 @@
         "run_p50": "走行p50",
         "run_p90": "走行p90",
         "run_samples": "走行観測数"
-      }
+      },
+      "needs_arrivals": "遅れの内訳には到着時刻が必要です",
+      "see_when": "いつ遅れるかを見る",
+      "compare_day_types": "平日と土日祝を比べる"
     },
     "headway_quality": {
       "title": "運行間隔の質",
@@ -1061,16 +1119,16 @@
     },
     "desc": {
       "ranking": "遅れの大きい系統から順に並べます。",
-      "ranking_best": "時刻表どおりに運行できている系統を並べます。",
+      "ranking_best": "平均遅延の少ない系統から並べます。",
       "on_time": "定時基準内に収まった出発の割合を系統別に見ます。",
-      "worst_5min": "5分以上の遅れが多い系統を抽出します。",
+      "worst_5min": "5分を超える遅れが多い系統を抽出します。",
       "trend": "日ごと・時間帯ごと・曜日ごとの遅れの推移を見ます。",
-      "compare_ranking": "同じ順位を前期と比べます。",
-      "dow_weekday": "平日の一日を時間帯別に見ます。",
-      "dow_weekend": "土日祝の一日を時間帯別に見ます。",
+      "compare_ranking": "路線ごとに平日と土日祝の遅れを並べ、差の大きい順に示します。",
+      "dow_weekday": "平日の系統ごとの平均遅延です。",
+      "dow_weekend": "土日祝の系統ごとの平均遅延です。",
       "dwell_run": "停留所での停車時間と走行時間の内訳を見ます。",
-      "route_forecast": "指定日の系統別の遅れを予測します。",
-      "council_summary": "議会・取締役会向けの期間まとめです。",
+      "route_forecast": "系統ごとに、曜日と時間帯で遅れやすい時を示します。",
+      "council_summary": "協議会・取締役会向けの期間まとめです。",
       "delay_certificate": "特定の遅延便を証明する書類です。"
     },
     "card": {
@@ -1078,6 +1136,41 @@
     },
     "trend": {
       "single_day": "推移を見るには2日以上の期間が必要です。期間を広げると、日ごとの遅延の動きが分かります。"
+    },
+    "service_note": "種別：その便が走った時刻表（平日・土日祝・特別ダイヤなど）",
+    "ranking_coverage": {
+      "include_sparse": "観測{{floor}}回未満の系統も含める",
+      "rows_shown": "{{total}}件中{{shown}}件を表示",
+      "show_all": "すべて表示"
+    },
+    "download_csv": "CSVダウンロード",
+    "council": {
+      "figures": "主な数値",
+      "on_time": "定時率",
+      "avg_delay": "平均遅延",
+      "departures": "観測した発車",
+      "planned_trips": "計画便数"
+    },
+    "print": "印刷 / PDFで保存",
+    "certificate": {
+      "intro": "乗車した日と路線、便を選ぶと、その便の遅延証明を表示します。",
+      "date": "日付",
+      "route": "路線",
+      "route_placeholder": "路線を検索",
+      "departure": "定刻の発車時刻",
+      "departure_prompt": "便を選択",
+      "departure_option": "{{time}}（{{delay}}遅れ）",
+      "loading": "遅れた便を検索しています…",
+      "none": "この日、この路線に遅れて発車した便はありません。",
+      "not_listed": "一覧にない便は、定刻どおりか早く発車したか、リアルタイムデータに含まれていません。",
+      "card": "選んだ便の遅延証明書",
+      "statement": "{{date}}、{{route}} {{scheduled}}発の便は、最初に記録された停留所を{{actual}}に発車し、{{delay}}遅れました。",
+      "operator": "事業者",
+      "scheduled": "定刻の発車",
+      "actual": "実際の発車",
+      "delay": "遅れ",
+      "measured_at": "時刻は、事業者のリアルタイムデータでこの便が最初に記録された停留所でのものです。",
+      "all_late": "期間内のすべての遅延便"
     }
   },
   "insight_panel": {
@@ -1107,7 +1200,7 @@
     "users": {
       "table_label": "ユーザー一覧",
       "title": "ユーザー管理",
-      "search_placeholder": "メール / 名前で検索",
+      "search_placeholder": "メールまたは名前",
       "col": {
         "email": "メール",
         "name": "名前",
@@ -1144,7 +1237,7 @@
       },
       "view": {
         "all": "すべて",
-        "pending": "承認待ち",
+        "pending": "AI利用の承認待ち",
         "admin": "管理者",
         "suspended": "停止中"
       },
@@ -1243,7 +1336,7 @@
       "col_last_analyzed": "最終集計",
       "col_freshness": "集計状態",
       "col_data_to": "データ最終日",
-      "col_clamp_pct": "クランプ率",
+      "col_clamp_pct": "異常値率",
       "fresh": "最新",
       "behind": "{{days}} 日遅れ",
       "never": "未集計",
@@ -1275,7 +1368,7 @@
       "col_freshness": "鮮度",
       "col_last_capture": "最終取得",
       "col_rt_coverage": "RT 被覆",
-      "col_clamp": "clamp 率 · 14日",
+      "col_clamp": "異常値率 · 14日",
       "col_static_version": "静的版",
       "table_label": "事業者一覧",
       "freshness_fresh": "最新",
@@ -1294,7 +1387,7 @@
       "strategy": "取得方式",
       "last_capture": "最終取得",
       "aggregation": "集計",
-      "clamp": "clamp 率 · 14日",
+      "clamp": "異常値率 · 14日",
       "rt_section": "RT フィールド診断（直近プローブ）",
       "rt_scope_note": "計測対象は TripUpdate の stop_time_update 項目です。VehiclePosition と Alerts は取り込んでいません。",
       "rt_present": "あり",
@@ -1488,7 +1581,7 @@
         "missing": "欠測"
       },
       "cell_tooltip": "{{agency}} · {{date}} · {{state}}",
-      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · クランプ {{pct}}%",
+      "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · 異常値 {{pct}}%",
       "alerts_title": "警告",
       "alerts_none": "対応が必要な項目はありません。",
       "alert_open": "開く",
@@ -1499,8 +1592,14 @@
         "migrations_behind_one": "スキーマが {{count}} 件遅れています",
         "migrations_behind_other": "スキーマが {{count}} 件遅れています",
         "llm_approvals_pending_one": "AI 利用の承認待ち {{count}} 名",
-        "llm_approvals_pending_other": "AI 利用の承認待ち {{count}} 名"
-      }
+        "llm_approvals_pending_other": "AI 利用の承認待ち {{count}} 名",
+        "agencies_stale_one": "{{count}} 事業者の集計が遅れています",
+        "agencies_stale_other": "{{count}} 事業者の集計が遅れています",
+        "agencies_never_analyzed_one": "{{count}} 事業者はまだ一度も集計されていません",
+        "agencies_never_analyzed_other": "{{count}} 事業者はまだ一度も集計されていません"
+      },
+      "check_failed": "状態を確認できませんでした",
+      "details": "詳細"
     },
     "ask_ops": {
       "title": "Ask 運用",
@@ -1582,7 +1681,7 @@
     "nav_routes_sublabel": "どの路線が、どの時間帯に",
     "nav_time_sublabel": "ネットワーク全体で、いつ遅れるか",
     "nav_why_sublabel": "データで説明できること・できないこと",
-    "nav_compare_sublabel": "二つの期間・事業者の違い",
+    "nav_compare_sublabel": "平日と土日祝、事業者どうしを比べる",
     "nav_reports_sublabel": "人に渡す資料",
     "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
     "group": {
@@ -1621,7 +1720,19 @@
   },
   "topbar": {
     "ask_placeholder": "路線・レポート・画面を検索",
-    "data_through": "データは{{date}}まで"
+    "analyzed_through": "{{date}}まで集計",
+    "live_at": "ライブ {{time}}",
+    "last_reading": "最終受信 {{when}}",
+    "freshness": {
+      "title": "データの鮮度",
+      "reports": "レポートとグラフ",
+      "reports_through": "{{date}}までの運行日",
+      "live": "ライブ",
+      "live_none": "まだ受信していません",
+      "readings": "直近7集計日の観測数",
+      "set_aside": "異常値として除外",
+      "note": "観測のない日は定時扱いにせず、集計から外しています。"
+    }
   },
   "scope": {
     "label": "表示の条件",
@@ -1632,7 +1743,7 @@
     "days_all": "すべての曜日",
     "days_weekday": "平日",
     "days_weekend": "土日",
-    "time_all": "終日",
+    "time_all": "全時間帯",
     "hours": "{{from}}時〜{{to}}時台",
     "hour_single": "{{h}}時台",
     "service": "{{value}}ダイヤ",
@@ -1650,8 +1761,7 @@
       "days_all": "すべて",
       "weekday": "平日",
       "weekend": "土日",
-      "service": "ダイヤ",
-      "hour_pending": "1時間単位の絞り込みは、時間別の集計が入ると使えます",
+      "service": "ダイヤの種類",
       "tolerance": "定時とみなす遅れ",
       "minutes": "{{n}}分",
       "clear": "解除",
@@ -1660,7 +1770,7 @@
       "brush_end": "期間の終了日",
       "since_start": "収集開始から",
       "mean_min": "{{n}}分",
-      "share": "{{pct}}%",
+      "share": "定時{{pct}}%",
       "curve_label": "許容幅ごとの定時率",
       "whole_day": "この数値は時間帯の条件を含みません",
       "no_data": "データなし",
@@ -1670,20 +1780,24 @@
       "legend_d3": "3.5〜5分",
       "legend_d4": "5分以上",
       "whole_day_place": "この数値は時間帯・停留所・方向の条件を含みません",
-      "readout": "{{n}}分のとき{{pct}}%"
+      "readout": "{{n}}分までの遅れなら定時{{pct}}%",
+      "weekday_colour": "色は曜日ごとの平均遅延",
+      "axis_lateness": "許容する遅れ"
     },
-    "pin": "帯を固定",
+    "pin": "すべての条件を表示",
     "reset": "条件をリセット",
     "popover": {
       "routes": "対象の路線",
       "period": "期間",
       "days": "曜日とダイヤ",
       "time": "時間帯",
-      "service": "ダイヤ",
+      "service": "ダイヤの種類",
       "stop": "停留所",
       "dir": "方向",
       "early": "早発の幅",
       "tolerance": "定時の幅"
-    }
+    },
+    "unapplied_note": "この画面では使いません：{{list}}",
+    "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る"
   }
 }

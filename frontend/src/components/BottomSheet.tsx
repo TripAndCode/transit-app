@@ -30,9 +30,8 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     startTime: number;
     lastY: number;
     lastTime: number;
-    /** The panel's height when the drag began. Measured once: `snap` cannot
-     *  change mid-gesture, so re-reading it per move would only force a
-     *  synchronous layout between the previous frame's write and the next. */
+    /** The sheet's visible height when the drag began, from the snap table:
+     *  the box itself is always laid out at the full height and translated. */
     restingHeight: number;
   } | null>(null);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
@@ -41,7 +40,7 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
   useFocusTrap(isFull, panelRef, () => onSnapChange("half"));
 
   /** The pointer's height, expressed on the same peek-anchored 0..1 scale as
-   *  `SNAP_RATIO` and `heightVh`. Normalizing against the full height alone
+   *  `SNAP_RATIO` and `visibleVh`. Normalizing against the full height alone
    *  would put peek at 0.159 rather than 0, so the first move of a drag that
    *  has not travelled yet would re-render the sheet at a different height
    *  than it is resting at. */
@@ -63,11 +62,7 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
       startTime: now,
       lastY: e.clientY,
       lastTime: now,
-      // `||`, not `??`: an unlaid-out panel measures 0 rather than nothing,
-      // and a 0 resting height would place the very first pointermove far
-      // below peek and clamp the sheet shut.
-      restingHeight:
-        panelRef.current?.getBoundingClientRect().height || viewportH * (SNAP_HEIGHT_VH[snap] / 100),
+      restingHeight: viewportH * (SNAP_HEIGHT_VH[snap] / 100),
     };
     setDragRatio(SNAP_RATIO[snap]);
   }
@@ -108,9 +103,14 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
     }
   }
 
-  const heightVh = dragRatio != null
+  const visibleVh = dragRatio != null
     ? SNAP_HEIGHT_VH.peek + dragRatio * (SNAP_HEIGHT_VH.full - SNAP_HEIGHT_VH.peek)
     : SNAP_HEIGHT_VH[snap];
+  // Laid out once at the full height and slid down by the hidden part, so a
+  // snap change animates transform alone and reflows nothing; the body's
+  // bottom padding grows by the same amount so its scroll range ends at the
+  // visible edge rather than under the viewport.
+  const hiddenVh = SNAP_HEIGHT_VH.full - visibleVh;
 
   return (
     <div
@@ -121,8 +121,9 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
       tabIndex={-1}
       className="bottom-sheet"
       style={{
-        height: `${heightVh}vh`,
-        transition: dragRatio != null ? "none" : "height var(--dur-2) var(--ease-out)",
+        height: `${SNAP_HEIGHT_VH.full}vh`,
+        transform: `translateY(${hiddenVh}vh)`,
+        transition: dragRatio != null ? "none" : "transform var(--dur-2) var(--ease-out)",
       }}
     >
       <button
@@ -138,7 +139,7 @@ export function BottomSheet({ snap, onSnapChange, ariaLabel, children }: Props) 
       >
         <GripHorizontal size={16} strokeWidth={1.5} aria-hidden="true" />
       </button>
-      <div className="bottom-sheet__body">{children}</div>
+      <div className="bottom-sheet__body" style={{ paddingBottom: `calc(12px + ${hiddenVh}vh)` }}>{children}</div>
     </div>
   );
 }

@@ -37,8 +37,10 @@
    exist yet, rather than being load-bearing for one that does. */
 .ops-freshness > span { width: 8px; height: 8px; border-radius: 50%; background: var(--color-warning); box-shadow: 0 0 0 4px rgba(201,154,46,.12); }
 .ops-freshness--normal > span { background: var(--delay-ok); box-shadow: 0 0 0 4px rgba(46,168,122,.12); }
-.ops-freshness--delayed > span { background: var(--color-warning); box-shadow: 0 0 0 4px rgba(201,154,46,.12); }
-.ops-freshness--stale > span { background: var(--delay-severe); box-shadow: 0 0 0 4px rgba(168,57,31,.12); box-shadow: 0 0 0 4px color-mix(in srgb, var(--delay-severe) 12%, transparent); }
+/* A quiet feed (`stale`) is amber like a lagging one, not alarm red: it is
+   often just the night, and the label says how long it has been quiet. */
+.ops-freshness--delayed > span,
+.ops-freshness--stale > span { background: var(--color-warning); box-shadow: 0 0 0 4px rgba(201,154,46,.12); }
 /* Neutral, not amber: "unknown" means there is no reading to judge -- no
    timestamp at all, labelled "no update" -- which is a different fact from a
    feed that is lagging. Sharing the warning colour with `delayed` presented
@@ -269,6 +271,13 @@
   .ops-header { gap: 10px; }
   .ops-heading { width: 100%; }
   .ops-freshness { margin-left: auto; }
+}
+
+/* The map's own width, not the viewport's, decides when its overlays
+   compact: beside the sidebar and the queue panel a wide window can still
+   leave the map narrower than a phone. */
+.ops-map { container: ops-map / inline-size; }
+@container ops-map (max-width: 640px) {
   /* Reserves the same right-side clearance NavigationControl needs (moved
      to top-right, see MapTab.tsx) so the full-width reference panel doesn't
      paint over the zoom buttons. */
@@ -276,10 +285,13 @@
   .ops-map-ref__peek { left: 8px; }
   /* The chips share the width that's left instead of keeping their desktop
      size and being clipped by the dock's own overflow: at this width the
-     dock plus the zoom buttons no longer both fit at natural size. */
+     dock plus the zoom buttons no longer both fit at natural size. Captions
+     stay on one line and playback keeps only its icon, so the dock keeps the
+     one-row height the reference panel below it is placed against. */
   .ops-dock { right: 48px; left: 8px; }
-  .ops-dock label { flex: 1 1 0; padding: 4px 10px 5px; }
+  .ops-dock label { flex: 1 1 0; padding: 4px 10px 5px; white-space: nowrap; overflow: hidden; }
   .ops-dock select { max-width: none; width: 100%; }
+  .ops-dock__playback-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 
 /* Present only while a change is pending, so the resting dock carries no
@@ -293,8 +305,7 @@
    disagree without a banner elbowing the layout around. */
 .ops-dock--dirty { border-color: var(--accent); box-shadow: var(--el-2), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
 /* Visually hidden, not displayed: the Apply button's appearance is the sighted
-   signal, and this is the same fact for a screen reader. Scoped here rather
-   than added as a global utility, since nothing else in this app needs one. */
+   signal, and this is the same fact for a screen reader. */
 .ops-dock__pending { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Export lives with the counts it exports, in the queue panel, not among the
@@ -361,7 +372,10 @@
    side column moves into a bottom sheet layered over the map instead. */
 @media (max-width: 640px) {
   .focused-overview.operations-page { height: 100%; }
-  .focused-overview .ops-workspace { display: block; height: 100%; max-height: none; position: relative; }
+  /* Clips again what the BP.md rule set visible: the bottom sheet is laid out
+     at its full height and translated down, and the translated-away part
+     must not extend the page's scroll range. */
+  .focused-overview .ops-workspace { display: block; height: 100%; max-height: none; position: relative; overflow: hidden; }
   .focused-overview .ops-map { position: absolute; inset: 0; height: 100%; }
   .ops-resizer { display: none; }
   .ops-map-ref__legend { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }

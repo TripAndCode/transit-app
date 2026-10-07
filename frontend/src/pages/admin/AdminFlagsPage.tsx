@@ -11,6 +11,7 @@ import {
 } from "../../api/admin";
 import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 /** The flag a toggle click opened a reason dialog for, plus the value it
  * would move to if confirmed -- captured at click time so a slow query
@@ -124,12 +125,13 @@ function FlagToggle({ flag, onRequestChange }: { flag: FeatureFlag; onRequestCha
         style={{
           position: "absolute",
           top: 1,
-          left: flag.value ? 19 : 1,
+          left: 1,
+          transform: flag.value ? "translateX(18px)" : "translateX(0)",
           width: 18,
           height: 18,
           borderRadius: "50%",
           background: flag.value ? "var(--bg-surface)" : "var(--text-tertiary)",
-          transition: "left var(--dur-1) var(--ease-out)",
+          transition: "transform var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out)",
         }}
       />
     </button>
@@ -203,7 +205,7 @@ export function AdminFlagsPage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.flags.title")}</h1>
+      <PageHeader title={t("admin.flags.title")} />
 
       {clear.error !== null && <ErrorBanner error={clear.error} message={t("admin.flags.clear_error")} />}
       {error != null && <ErrorBanner error={error} onRetry={refetch} />}

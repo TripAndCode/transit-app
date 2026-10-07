@@ -16,6 +16,7 @@ import { SkeletonChart, SkeletonKpiRow, SkeletonTable } from "../../components/S
 import { Tooltip } from "../../components/Tooltip";
 import { Modal } from "../../components/Modal";
 import { RunTimeline } from "./RunTimeline";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
 
@@ -118,8 +119,14 @@ function CollectorTile({ collector }: { collector: BoardCollector }) {
           ? t("admin.board.last_success", { when: formatDateTime(collector.last_success_at) })
           : t("admin.board.never")}
       </p>
+      {collector.check_failed && (
+        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", margin: "2px 0 0" }}>{t("admin.board.check_failed")}</p>
+      )}
       {collector.detail && (
-        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "2px 0 0" }}>{collector.detail}</p>
+        <details style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "2px 0 0" }}>
+          <summary style={{ cursor: "pointer" }}>{t("admin.board.details")}</summary>
+          <p style={{ margin: "4px 0 0", overflowWrap: "anywhere" }}>{collector.detail}</p>
+        </details>
       )}
       <Sparkline history={collector.history} />
     </div>
@@ -192,16 +199,13 @@ export function AdminBoardPage() {
       aria-busy={isPending}
       style={{ padding: 24, display: "grid", gap: 16, alignContent: "start" }}
     >
-      <header style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 22, margin: 0 }}>{t("admin.board.title")}</h1>
-        <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("admin.board.poll_note")}</span>
-        <span style={{ flex: 1 }} />
-        {reanalyzeBlockedReason === null ? (
-          reanalyzeButton
-        ) : (
-          <Tooltip label={reanalyzeBlockedReason}>{reanalyzeButton}</Tooltip>
-        )}
-      </header>
+      <PageHeader
+        title={t("admin.board.title")}
+        subtitle={t("admin.board.poll_note")}
+        actions={
+          reanalyzeBlockedReason === null ? reanalyzeButton : <Tooltip label={reanalyzeBlockedReason}>{reanalyzeButton}</Tooltip>
+        }
+      />
 
       <Modal
         open={confirming}
@@ -308,10 +312,20 @@ export function AdminBoardPage() {
           }}
         >
           <h2 style={{ fontSize: "var(--text-sm)", fontWeight: 700, margin: 0 }}>{t("admin.board.freshness_title")}</h2>
-          <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", display: "flex", gap: 12 }}>
-            <span>■ {t("admin.board.legend_fresh")}</span>
-            <span>■ {t("admin.board.legend_stale")}</span>
-            <span>□ {t("admin.board.legend_missing")}</span>
+          <p
+            data-testid="freshness-legend"
+            style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-tertiary)", display: "flex", gap: 12 }}
+          >
+            {(["fresh", "stale", "missing"] as const).map((state) => (
+              <span key={state} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span
+                  data-testid={`legend-swatch-${state}`}
+                  aria-hidden="true"
+                  style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, ...CELL_STYLES[state] }}
+                />
+                {t(`admin.board.legend_${state}`)}
+              </span>
+            ))}
           </p>
         </div>
         {isPending ? (

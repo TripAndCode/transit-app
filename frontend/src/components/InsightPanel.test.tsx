@@ -125,6 +125,13 @@ describe("InsightPanel", () => {
     expect(params.get("to")).toBe("2026-08-20");
   });
 
+  it("holds the suggestion's place while it loads, instead of a header over nothing", () => {
+    localStorage.setItem("transit.insightPanelEnabled", "1");
+    vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: undefined, isPending: true, error: null } as never);
+    const { container } = renderPanel();
+    expect(container.querySelector(".skeleton")).not.toBeNull();
+  });
+
   it("shows the calm no-signal message when the endpoint returns null", () => {
     localStorage.setItem("transit.insightPanelEnabled", "1");
     vi.spyOn(hooks, "useSuggestion").mockReturnValue({

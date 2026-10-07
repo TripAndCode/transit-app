@@ -69,6 +69,17 @@ jobs:
       - name: Install dependencies
         run: poetry install --with embeddings
 
+      # This persistent runner keeps every venv Poetry makes for the checkout,
+      # one per Python minor version, and Poetry never removes one when the
+      # pinned version moves on. Keep only the venv this job just installed;
+      # an empty answer stops the step rather than matching every venv.
+      - name: Remove this checkout's venvs for other Python versions
+        run: |
+          active="$(poetry env info --path)"
+          active="${active##*/}"
+          test -n "$active"
+          poetry env list | awk '{print $1}' | { grep -vxF "$active" || true; } | xargs -r -n1 poetry env remove
+
       # RUN_I18N_SCAN and RUN_DASHBOARD_E2E_SCAN drive a real Chromium
       # against the built SPA (see those tests' own module docstrings) —
       # without both of these, they self-skip for a setup reason rather
@@ -122,7 +133,10 @@ jobs:
 
       # -ra: a one-line reason for every non-passing test, including
       # skips — the input the fail-if-still-skipped step below greps.
+      # `shell: bash` selects `-o pipefail`, so pytest's exit status survives
+      # the pipe into tee instead of being replaced by tee's.
       - name: Run extended pytest suites
+        shell: bash
         run: poetry run pytest -ra | tee pytest-extended.log
         env:
           DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit

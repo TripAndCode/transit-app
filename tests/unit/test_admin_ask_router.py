@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from api.deps import get_conn
 from api.routers import admin_ask
 from api.security import require_admin
+from tests.fixtures.pool import CountingPool
 from tests.fixtures.users import admin_user
 
 _ADMIN = admin_user()
@@ -51,12 +52,14 @@ class _PromoteConn:
         raise AssertionError(f"unexpected fetchrow: {sql}")
 
 
-def _client(conn) -> TestClient:
+def _client(conn) -> tuple[TestClient, CountingPool]:
     app = FastAPI()
     app.include_router(admin_ask.router)
     app.dependency_overrides[require_admin] = lambda: _ADMIN
     app.dependency_overrides[get_conn] = lambda: conn
-    return TestClient(app)
+    pool = CountingPool(conn)
+    app.state.pool = pool
+    return TestClient(app), pool
 
 
 # ── funnel default window (A11) ─────────────────────────────────────────────
@@ -66,7 +69,7 @@ def test_funnel_defaults_to_the_last_30_jst_days_when_both_bounds_omitted(monkey
     monkeypatch.setattr(admin_ask, "jst_today", lambda: date(2026, 9, 24))
     conn = _CaptureConn()
 
-    r = _client(conn).get("/api/admin/ask/funnel")
+    r = _client(conn)[0].get("/api/admin/ask/funnel")
 
     assert r.status_code == 200
     assert len(conn.calls) == 1
@@ -78,7 +81,7 @@ def test_funnel_does_not_default_the_other_bound_when_one_is_given(monkeypatch):
     monkeypatch.setattr(admin_ask, "jst_today", lambda: date(2026, 9, 24))
     conn = _CaptureConn()
 
-    r = _client(conn).get("/api/admin/ask/funnel", params={"from": "2026-01-01"})
+    r = _client(conn)[0].get("/api/admin/ask/funnel", params={"from": "2026-01-01"})
 
     assert r.status_code == 200
     _sql, args = conn.calls[0]
@@ -89,7 +92,7 @@ def test_funnel_runs_unbounded_when_both_bounds_are_given(monkeypatch):
     monkeypatch.setattr(admin_ask, "jst_today", lambda: date(2026, 9, 24))
     conn = _CaptureConn()
 
-    r = _client(conn).get("/api/admin/ask/funnel", params={"from": "2020-01-01", "to": "2020-01-31"})
+    r = _client(conn)[0].get("/api/admin/ask/funnel", params={"from": "2020-01-01", "to": "2020-01-31"})
 
     assert r.status_code == 200
     _sql, args = conn.calls[0]
@@ -116,7 +119,27 @@ def test_promote_loads_the_embedder_via_asyncio_to_thread(monkeypatch):
     monkeypatch.setattr(admin_ask, "get_embedder", lambda: _UnavailableEmbedder())
     conn = _PromoteConn({"agency_id": 1, "signature_hash": "abc"})
 
-    r = _client(conn).post("/api/admin/ask/promote", json={"query_log_id": 1}, headers=_ORIGIN)
+    r = _client(conn)[0].post("/api/admin/ask/promote", json={"query_log_id": 1}, headers=_ORIGIN)
 
     assert r.status_code == 503
     assert calls == [admin_ask.get_embedder], "get_embedder must be called through asyncio.to_thread"
+
+
+def test_promote_holds_no_connection_while_the_embedder_loads(monkeypatch):
+    conn = _PromoteConn({"agency_id": 1, "signature_hash": "abc"})
+    client, pool = _client(conn)
+    monkeypatch.setattr(admin_ask, "csrf_guard", lambda _request: None)
+    held: list[int] = []
+
+    class _UnavailableEmbedder:
+        available = False
+
+    def _load():
+        held.append(pool.held)
+        return _UnavailableEmbedder()
+
+    monkeypatch.setattr(admin_ask, "get_embedder", _load)
+    r = client.post("/api/admin/ask/promote", json={"query_log_id": 1}, headers=_ORIGIN)
+    assert r.status_code == 503
+    assert held == [0]
+    assert pool.peak == 1
