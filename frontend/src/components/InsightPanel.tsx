@@ -8,6 +8,7 @@ import { useAgencyId } from "../api/useAgencyId";
 import { delayColor } from "../styles/tokens";
 import { routeHref } from "../routes/destinations";
 import { isoDaysBefore } from "../api/scope";
+import { Skeleton } from "./Skeleton";
 
 /** Days of history a suggestion's route page opens on. */
 const ROUTE_WINDOW_DAYS = 14;
@@ -139,7 +140,6 @@ export function InsightPanel({ className }: { className?: string } = {}) {
         flexShrink: 0,
         borderLeft: "1px solid var(--border-subtle)",
         padding: collapsed ? "12px 8px" : "12px 16px",
-        transition: "width var(--transition)",
       }}
     >
       <button
@@ -165,6 +165,7 @@ export function InsightPanel({ className }: { className?: string } = {}) {
             <Sparkles size={14} strokeWidth={1.75} />
             {t("insight_panel.title")}
           </h4>
+          {suggestion.isPending && !suggestion.error && <Skeleton height={48} />}
           {suggestion.error ? (
             <p style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("insight_panel.load_error")}</p>
           ) : (

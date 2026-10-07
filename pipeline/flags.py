@@ -27,13 +27,17 @@ from where it runs:
   threadpool. They block on the database only when nothing is cached at
   all; otherwise they serve the cache and let someone else refresh it.
 
-The trade-off that split buys: after `invalidate()` the owed refresh belongs
-to the next async caller, so a synchronous caller may keep seeing the old
-value for up to `_CACHE_TTL_SECONDS`. In a process with no async readers at
-all (a CLI run) it sees the old value until the next `warm()`. Correctness
-for the admin surface is unaffected -- the PATCH/DELETE handlers are async
-and resolve their own response through the async path, so the write is
-visible in the response that reports it.
+After `invalidate()` an async reader waits for the owed re-read; a
+synchronous reader serves the cached entry and starts that same shared
+re-read behind it, so it answers with the pre-write value only until the
+re-read commits, not for the TTL. If the re-read cannot reach the database,
+the last-known overrides are carried forward and the TTL re-armed, so any
+reader may see the pre-write value for up to `_CACHE_TTL_SECONDS`: failing
+closed on an override is worth that. In a process with no readers at all
+nothing refreshes until the next read or `warm()`. Correctness for the admin
+surface is unaffected -- the PATCH/DELETE handlers are async and resolve
+their own response through the async path, so the write is visible in the
+response that reports it.
 """
 
 from __future__ import annotations
@@ -328,10 +332,12 @@ def _join_owed_refresh() -> concurrent.futures.Future[None]:
 
 def _run_owed_refresh(done: concurrent.futures.Future[None]) -> None:
     # Settled whatever happens: a future left pending would be joined, and
-    # waited on forever, by every later reader of this generation.
+    # waited on forever, by every later reader of this generation. Logged as
+    # well, because a synchronous reader never collects the result.
     try:
         _refresh()
     except BaseException as exc:
+        _log.exception("flags: owed re-read failed")
         done.set_exception(exc)
     else:
         done.set_result(None)
@@ -401,8 +407,10 @@ def get_flag_state(key: str) -> FlagState:
     blocks on Postgres only when this process has never resolved `key` at
     all; with anything cached it answers from the cache, so an `async def`
     handler that reaches here by mistake stalls the event loop for no longer
-    than a dict lookup. A refresh owed by `invalidate()` is left for an
-    async caller -- see the module docstring for the staleness this admits.
+    than a dict lookup. A refresh owed by `invalidate()` is joined or started
+    in a worker thread behind this reader, so a synchronous caller sees the
+    old value only until it commits -- see the module docstring for a
+    re-read that fails.
 
     Raises `KeyError` for a key not in `REGISTRY` -- every caller of `flag()`
     is expected to pass a registered key, and a typo here should fail loud
@@ -413,7 +421,14 @@ def get_flag_state(key: str) -> FlagState:
         assert cached is not None
         return cached
     if cached is not None:
-        if state == _EXPIRED:
+        # Expired, or marked stale by `invalidate()`: either way the entry is
+        # served as it stands and the re-read runs behind the reader. This
+        # path may be on the event loop by mistake, so it never reads inline.
+        # An owed re-read is the one async readers wait on, so a sync and an
+        # async reader in the same window never start two.
+        if state == _OWED:
+            _join_owed_refresh()
+        else:
             _start_background_refresh()
         return cached
     _refresh()
@@ -471,14 +486,14 @@ async def aflag(key: str, /) -> bool:
 
 
 def invalidate() -> None:
-    """Mark the cache stale so the next *async* read re-reads the DB
-    immediately, instead of waiting out the TTL.
+    """Mark the cache stale so the next read re-reads the DB instead of
+    waiting out the TTL: an async read waits for the re-read, a synchronous
+    read serves the old value until it commits.
 
     Called after a write to `/api/admin/flags/:key` so the API's own next
     GET -- and the very next gated request anywhere in the process -- sees
-    the new value without delay. The owed read is deliberately an async
-    caller's to perform: it is a blocking psycopg2 round trip, and only the
-    async path can put it on a worker thread rather than the event loop.
+    the new value without delay. The re-read is a blocking psycopg2 round
+    trip, so it always runs on a worker thread, never on the event loop.
     """
     global _cache_expires_at, _refresh_owed, _generation
     with _cache_lock:

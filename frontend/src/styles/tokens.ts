@@ -186,13 +186,6 @@ export function heatOpacity(minutes: number): number {
   return Math.round(opacity * 1000) / 1000;
 }
 
-/** The same ramp as a CSS colour, for grids that paint a `background`
- *  instead of setting an SVG opacity. `var(--accent)` is kept intact so the
- *  cascade recolors the whole ramp on a theme toggle. */
-export function accentRampColor(minutes: number): string {
-  return `color-mix(in srgb, var(--accent) ${Math.round(heatOpacity(minutes) * 100)}%, transparent)`;
-}
-
 /** Same ramp as `delayColor()`, but MapLibre-safe: the severe tier resolves
  *  to a real hex via `severeColorResolved()` instead of the literal
  *  `var(--delay-severe)` string MapLibre paint expressions can't parse. Use

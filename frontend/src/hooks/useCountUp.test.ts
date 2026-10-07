@@ -43,20 +43,13 @@ describe("useCountUp", () => {
     vi.restoreAllMocks();
   });
 
-  it("counts up from 0 on first paint when motion is allowed", () => {
+  it("prints the value on first paint and schedules no frame -- the route fade is the only entrance", () => {
     const raf = mockRaf();
+    const spy = vi.spyOn(window, "requestAnimationFrame");
     const { result } = renderHook(() => useCountUp(42, { duration: 600, decimals: 1 }));
-    // The figure arrives at 0 and climbs, rather than being printed at its
-    // final value before the tile it lives in has finished appearing.
-    expect(result.current).toBe(0);
-
-    raf.flush(0);
-    expect(result.current).toBe(0);
-    raf.flush(300);
-    expect(result.current).toBeGreaterThan(0);
-    expect(result.current).toBeLessThan(42);
-    raf.flush(600);
     expect(result.current).toBe(42);
+    raf.flush(0);
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("prints the value outright on first paint under prefers-reduced-motion: reduce", () => {
@@ -74,30 +67,19 @@ describe("useCountUp", () => {
     expect(raf).not.toHaveBeenCalled();
   });
 
-  it("prints the value outright on first paint with entrance: false, then animates later changes", () => {
+  it("travels from the displayed value to a new one, never from 0", () => {
     const raf = mockRaf();
-    const { result, rerender } = renderHook(
-      ({ value }) => useCountUp(value, { duration: 600, decimals: 1, entrance: false }),
-      { initialProps: { value: 42 } },
-    );
-    expect(result.current).toBe(42);
-    raf.flush(0);
-    expect(result.current).toBe(42);
-
+    const { result, rerender } = renderHook(({ value }) => useCountUp(value, { duration: 600, decimals: 1 }), {
+      initialProps: { value: 42 },
+    });
     rerender({ value: 10 });
     raf.flush(0);
+    expect(result.current).toBe(42);
     raf.flush(300);
     expect(result.current).toBeGreaterThan(10);
     expect(result.current).toBeLessThan(42);
     raf.flush(600);
     expect(result.current).toBe(10);
-  });
-
-  it("schedules no frames on first paint for a value of 0 -- nothing to count up to", () => {
-    const raf = vi.spyOn(window, "requestAnimationFrame");
-    const { result } = renderHook(() => useCountUp(0));
-    expect(result.current).toBe(0);
-    expect(raf).not.toHaveBeenCalled();
   });
 
   it("eases toward a new value over successive frames and reaches the exact target", () => {
@@ -120,15 +102,15 @@ describe("useCountUp", () => {
   });
 
   it("continues from where it was when the value changes mid-tween, never falling back", () => {
-    // A refetch or an agency switch can land inside the entrance window that
-    // now runs on every first paint. The next tween has to start from the
-    // figure on screen; starting from the interrupted tween's own origin
-    // would walk the number backwards, usually to 0.
+    // A refetch or an agency switch can land inside a running tween. The
+    // next tween has to start from the figure on screen; starting from the
+    // interrupted tween's own origin would walk the number backwards.
     const raf = mockRaf();
     const { result, rerender } = renderHook(({ value }) => useCountUp(value, { duration: 600, decimals: 1 }), {
-      initialProps: { value: 10 },
+      initialProps: { value: 0 },
     });
 
+    rerender({ value: 10 });
     raf.flush(0);
     raf.flush(300);
     const midTween = result.current;

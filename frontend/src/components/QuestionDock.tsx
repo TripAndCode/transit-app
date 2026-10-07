@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { buildCardTemplates, type CardTemplate } from "./askCardTemplates";
 import { ParamStrip } from "./ParamStrip";
+import { CardTemplateIcon } from "./CardTemplateIcon";
 
 type QuestionDockProps = {
   agencyId: number;
@@ -134,7 +135,7 @@ export function QuestionDock({
                   }}
                   title={t(tpl.title_key)}
                 >
-                  {tpl.emoji} {t(tpl.title_key)}
+                  <CardTemplateIcon icon={tpl.icon} /> {t(tpl.title_key)}
                 </button>
               );
             })}

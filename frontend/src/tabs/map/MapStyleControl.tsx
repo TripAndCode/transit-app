@@ -133,7 +133,7 @@ export function MapStyleControl({
             <output htmlFor="ops-map-dim" className="num">{dimPercent}%</output>
           </div>
           {layers.length > 0 && (
-            <div className="ops-style-control__layers" role="group" aria-label={t("map.style.layers_label")}>
+            <div className="ops-style-control__layers" role="group" aria-label={t("map.style.layers")}>
               {layers.map((layer) => (
                 <Tooltip key={layer.id} label={layer.hint}>
                   <button type="button" className="ops-style-control__chip" aria-pressed={layer.on} onClick={layer.onToggle}>

@@ -1,9 +1,32 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "@testing-library/react";
 import { InlineSparkline } from "./InlineSparkline";
 import { periodMean } from "./periodMean";
 
 describe("InlineSparkline", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (SVGElement.prototype as unknown as { getTotalLength?: () => number }).getTotalLength;
+  });
+
+  // jsdom has no getTotalLength anywhere; without one useDrawOn quietly skips.
+  function measurableLines() {
+    (SVGElement.prototype as unknown as { getTotalLength: () => number }).getTotalLength = () => 50;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+  }
+
+  it("draws its line on when the series arrives", () => {
+    measurableLines();
+    const { container } = render(<InlineSparkline points={[1, 2, 3]} />);
+    expect(container.querySelector("polyline")!.classList.contains("chart-draw-on")).toBe(true);
+  });
+
+  it("leaves the line drawn with drawOn={false}, for a host whose own reveal is the entrance", () => {
+    measurableLines();
+    const { container } = render(<InlineSparkline points={[1, 2, 3]} drawOn={false} />);
+    expect(container.querySelector("polyline")!.classList.contains("chart-draw-on")).toBe(false);
+  });
+
   it("does not set preserveAspectRatio by default", () => {
     const { container } = render(<InlineSparkline points={[1, 2, 3]} />);
     expect(container.querySelector("svg")?.getAttribute("preserveAspectRatio")).toBeNull();

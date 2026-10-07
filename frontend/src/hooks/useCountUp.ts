@@ -6,11 +6,6 @@ type UseCountUpOptions = {
   duration?: number;
   /** Decimal places the intermediate displayed value is rounded to. */
   decimals?: number;
-  /** Climb from 0 on first paint. Pass false for figures repeated down a
-   *  list, where one rAF loop per row on mount would cost the first render
-   *  and read as noise rather than an entrance; those still animate later
-   *  changes. */
-  entrance?: boolean;
 };
 
 // 1 - (1-t)^3 -- decelerates hard, matching --ease-out's cubic-bezier(.22, 1,
@@ -28,13 +23,12 @@ function round(n: number, decimals: number): number {
 
 /**
  * Animates a displayed number toward `value` with an ease-out rAF loop, for a
- * large figure (a KPI hero value, a stat tile, a per-row delay figure). The
- * count-up is an entrance effect first: on first paint the figure starts at
- * 0 and climbs to `value`, arriving with the panel around it rather than
- * being printed before the panel has finished appearing (unless `entrance`
- * is false).
- * Later changes to `value` -- an agency switch, a filter change, a live
- * refresh -- animate from whatever is currently displayed.
+ * large figure (a KPI hero value, a stat tile, a per-row delay figure).
+ *
+ * The first paint prints `value` as it is: a route has exactly one entrance
+ * (the route fade), and a figure climbing from 0 inside it would be a second
+ * arrival stacked on the first. Later changes to `value` -- an agency switch,
+ * a filter change, a live refresh -- travel from whatever is on screen.
  *
  * Jumps straight to `value` (no rAF loop at all) under
  * `prefers-reduced-motion: reduce`, and whenever `duration` is 0.
@@ -44,19 +38,12 @@ function round(n: number, decimals: number): number {
  * `n.toLocaleString(i18n.language)` over a bare `toLocaleString()` at the
  * call site so digit grouping follows the active UI language.
  */
-export function useCountUp(
-  value: number,
-  { duration = 600, decimals = 1, entrance = true }: UseCountUpOptions = {},
-): number {
+export function useCountUp(value: number, { duration = 600, decimals = 1 }: UseCountUpOptions = {}): number {
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const immediate = duration <= 0 || reducedMotion;
-  const initial = immediate || !entrance ? value : 0;
 
-  // 0 is the first-paint start, so the mount effect below has a real delta
-  // to animate across. Under reduced motion (or duration 0) there is no
-  // entrance to stage, so the figure is simply correct from the first frame.
-  const [display, setDisplay] = useState(initial);
-  const fromRef = useRef(initial);
+  const [display, setDisplay] = useState(value);
+  const fromRef = useRef(value);
 
   // Re-sync during render: in immediate mode `display` must equal `value`, so
   // comparing the two also catches motion being switched off mid-tween, which
@@ -72,23 +59,17 @@ export function useCountUp(
     }
     const from = fromRef.current;
     const delta = value - from;
-    if (delta === 0) {
-      return;
-    }
+    if (delta === 0) return;
 
     let frameId = 0;
     let startTime: number | null = null;
 
     function tick(now: number) {
       if (startTime === null) startTime = now;
-      const elapsed = now - startTime;
-      const t = Math.min(1, elapsed / duration);
+      const t = Math.min(1, (now - startTime) / duration);
       // Written every frame, not only on arrival: a `value` that changes
       // mid-tween cancels this loop, and the next one starts from wherever
-      // the figure actually is. Recording it only at `t === 1` would leave
-      // the interrupted tween's starting point behind -- since first paint
-      // now always starts at 0, the figure would visibly fall back to 0
-      // before climbing to the new target.
+      // the figure actually is.
       fromRef.current = round(from + delta * easeOutCubic(t), decimals);
       setDisplay(fromRef.current);
       if (t < 1) frameId = requestAnimationFrame(tick);

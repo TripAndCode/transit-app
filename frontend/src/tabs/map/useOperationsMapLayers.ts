@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import maplibregl, { type LayerSpecification, type Map as MLMap } from "maplibre-gl";
 import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
 import {
@@ -230,6 +230,9 @@ export function useOperationsMapLayers(
 ): void {
   const fittedAgencyRef = useRef<number | null>(null);
   const theme = useThemeSignal();
+  // Read at reveal time, not a dependency: the relief toggling the rest pitch
+  // must not re-run the effect that feeds the live layers.
+  const reveal = useEffectEvent((map: MLMap, bounds: maplibregl.LngLatBounds) => revealAgency(map, bounds, restPitch));
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
 
   useEffect(() => {
@@ -317,11 +320,11 @@ export function useOperationsMapLayers(
       if (agencyId != null && fittedAgencyRef.current !== agencyId && features.length > 0) {
         const bounds = new maplibregl.LngLatBounds();
         for (const feature of features) bounds.extend(feature.geometry.coordinates as [number, number]);
-        revealAgency(map, bounds, restPitch);
+        reveal(map, bounds);
         fittedAgencyRef.current = agencyId;
       }
     });
-  }, [agencyId, live, mapRef, restPitch, selectedRoute, selectedTripId, styleEpoch, theme]);
+  }, [agencyId, live, mapRef, selectedRoute, selectedTripId, styleEpoch, theme]);
 
   useEffect(() => {
     const map = mapRef.current;

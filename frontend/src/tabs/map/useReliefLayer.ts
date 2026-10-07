@@ -15,15 +15,17 @@ import {
   type ReliefPoint,
 } from "./reliefLayer";
 import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
+import { TIMELINE_LAYER } from "./useTimelineLayers";
 
-/** The live layers, bottom first. The columns go under the lowest one present
- *  so the vehicle dots, clusters and labels draw over them and keep every
- *  click and hover they had: the columns themselves are not interactive. */
-const LIVE_LAYERS_BOTTOM_FIRST = [LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER];
+/** The live and playback layers, bottom first. The columns go under the
+ *  lowest one present so the vehicle dots, clusters, labels and playback dots
+ *  draw over them and keep every click and hover they had: the columns
+ *  themselves are not interactive. */
+const MARK_LAYERS_BOTTOM_FIRST = [LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LAYER, LIVE_TRIPS_LABEL_LAYER, TIMELINE_LAYER];
 
 /** `setData` writes per tween. Enough for the eye to read a rise rather than
- *  a jump; few enough that a few hundred polygons re-tessellate well inside a
- *  frame budget. */
+ *  a jump; few enough that the per-write cost -- serialising every column to
+ *  the worker and reloading the source -- stays occasional, not per frame. */
 const TWEEN_STEPS = 16;
 
 type ReliefSource = { setData: (data: ReliefCollection) => void };
@@ -72,20 +74,11 @@ export function useReliefLayer(
       });
     }
     const next = reliefFeatures(points);
-    return whenStyleReady(map, () => {
-      const source = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
-      if (!source) {
-        // First show, or a style reload wiped the layer: no on-screen
-        // reading to tween from.
-        cancelTween(rafRef);
-        map.addSource(RELIEF_SOURCE, { type: "geojson", data: next });
-        const beforeId = LIVE_LAYERS_BOTTOM_FIRST.find((id) => map.getLayer(id));
-        map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint(crossFadeMs) }, beforeId);
-        shownRef.current = next;
-        targetRef.current = next;
-        return;
-      }
-      repaintLayer(map, RELIEF_LAYER, reliefPaint(crossFadeMs));
+    // A new reading on an existing source eases from what is on screen. It
+    // runs at once: the source belongs to the style loaded now, and waiting
+    // for the whole style to read as loaded would hold it behind any other
+    // source's reload (the playback dots').
+    const follow = (source: ReliefSource) => {
       if (targetRef.current && sameReliefReading(targetRef.current, next)) return;
       cancelTween(rafRef);
       targetRef.current = next;
@@ -99,7 +92,9 @@ export function useReliefLayer(
       let start: number | null = null;
       let lastWrite = 0;
       const tick = (now: number) => {
-        start ??= now;
+        // Started one step back, so the first frame already writes: a
+        // reading replaced every frame (a scrub) still moves the columns.
+        if (start == null) start = now - stepMs;
         const elapsed = now - start;
         const done = elapsed >= crossFadeMs;
         if (done || elapsed - lastWrite >= stepMs) {
@@ -111,8 +106,38 @@ export function useReliefLayer(
         rafRef.current = done ? null : requestAnimationFrame(tick);
       };
       rafRef.current = requestAnimationFrame(tick);
+    };
+    const existing = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
+    if (existing) {
+      follow(existing);
+      return;
+    }
+    return whenStyleReady(map, () => {
+      const source = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
+      if (source) {
+        follow(source);
+        return;
+      }
+      // First show, or a style reload wiped the layer: no on-screen reading
+      // to tween from.
+      cancelTween(rafRef);
+      map.addSource(RELIEF_SOURCE, { type: "geojson", data: next });
+      const beforeId = MARK_LAYERS_BOTTOM_FIRST.find((id) => map.getLayer(id));
+      map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint() }, beforeId);
+      shownRef.current = next;
+      targetRef.current = next;
     });
-  }, [crossFadeMs, mapRef, on, points, styleEpoch, theme]);
+  }, [crossFadeMs, mapRef, on, points, styleEpoch]);
+
+  // Colour tokens are resolved when the paint is written, so a theme change
+  // re-writes it; a reading never needs to.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !on) return;
+    return whenStyleReady(map, () => {
+      if (map.getLayer(RELIEF_LAYER)) repaintLayer(map, RELIEF_LAYER, reliefPaint());
+    });
+  }, [mapRef, on, styleEpoch, theme]);
 
   useEffect(() => () => cancelTween(rafRef), []);
 }

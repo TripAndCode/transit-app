@@ -21,29 +21,21 @@ const M_PER_DEG_LAT = 110_574;
 const M_PER_DEG_LON_AT_EQUATOR = 111_320;
 
 export type ReliefPoint = { stop_id: string; lon: number; lat: number; delay_min: number };
-type ReliefOptions = { capMin?: number; metresPerMin?: number; baseM?: number; halfSideM?: number };
 type ReliefProps = { stop_id: string; delay_min: number; h: number };
 export type ReliefCollection = GeoJSON.FeatureCollection<GeoJSON.Polygon, ReliefProps>;
 type FillExtrusionPaint = NonNullable<Extract<LayerSpecification, { type: "fill-extrusion" }>["paint"]>;
-/** MapLibre accepts `<property>-transition` beside every paint property but
- *  the bundle's types do not declare them; the two this layer sets are
- *  spelled out rather than cast at the call site. */
-type ReliefPaint = FillExtrusionPaint & {
-  "fill-extrusion-height-transition": { duration: number; delay: number };
-  "fill-extrusion-color-transition": { duration: number; delay: number };
-};
 
-export function reliefHeight(delayMin: number, opts: ReliefOptions = {}): number {
-  const { capMin = RELIEF_CAP_MIN, metresPerMin = RELIEF_HEIGHT_M_PER_MIN, baseM = RELIEF_BASE_M } = opts;
-  return Math.min(Math.max(delayMin, 0), capMin) * metresPerMin + baseM;
+
+export function reliefHeight(delayMin: number): number {
+  return Math.min(Math.max(delayMin, 0), RELIEF_CAP_MIN) * RELIEF_HEIGHT_M_PER_MIN + RELIEF_BASE_M;
 }
 
 /** One square polygon per stop, sized in metres so it is the same footprint
  *  at every latitude, with the extrusion height precomputed as `h` -- the
  *  paint expression stays a plain `["get", "h"]` and the cap/ramp maths
  *  lives here, where it can be tested without a map. */
-export function reliefFeatures(points: ReliefPoint[], opts: ReliefOptions = {}): ReliefCollection {
-  const halfSideM = opts.halfSideM ?? RELIEF_HALF_SIDE_M;
+export function reliefFeatures(points: ReliefPoint[]): ReliefCollection {
+  const halfSideM = RELIEF_HALF_SIDE_M;
   const features: GeoJSON.Feature<GeoJSON.Polygon, ReliefProps>[] = [];
   for (const p of points) {
     if (!Number.isFinite(p.lon) || !Number.isFinite(p.lat)) continue;
@@ -51,7 +43,7 @@ export function reliefFeatures(points: ReliefPoint[], opts: ReliefOptions = {}):
     const dLon = halfSideM / (M_PER_DEG_LON_AT_EQUATOR * Math.cos((p.lat * Math.PI) / 180));
     features.push({
       type: "Feature",
-      properties: { stop_id: p.stop_id, delay_min: p.delay_min, h: reliefHeight(p.delay_min, opts) },
+      properties: { stop_id: p.stop_id, delay_min: p.delay_min, h: reliefHeight(p.delay_min) },
       geometry: {
         type: "Polygon",
         coordinates: [[
@@ -72,24 +64,20 @@ export function reliefFeatures(points: ReliefPoint[], opts: ReliefOptions = {}):
  * one the live and playback circles use, so the column and the dot standing
  * on it always agree.
  *
- * The `-transition` entries carry the playback cross-fade (0 under reduced
- * motion) but do not move the columns: MapLibre interpolates only between
- * two constant values, and both properties here read feature data. Height
- * and colour are eased by `tweenFeatures` instead, one `setData` per step.
+ * Neither property has a paint transition: MapLibre does not ease paint
+ * that reads feature data. Height is eased by `tweenFeatures`, one `setData`
+ * per step; colour steps through the ramp as the tweened delay crosses each
+ * threshold.
  */
-export function reliefPaint(crossFadeMs: number): ReliefPaint {
+export function reliefPaint(): FillExtrusionPaint {
   return {
     "fill-extrusion-color": ["step", ["get", "delay_min"], ...severityStepColors()],
     "fill-extrusion-height": ["get", "h"],
     "fill-extrusion-base": 0,
     "fill-extrusion-opacity": 0.92,
-    // Lit faces: the gradient is what separates a column from a flat tile
-    // when the camera is tilted; it is a shader flag, not extra geometry.
-    "fill-extrusion-vertical-gradient": true,
-    "fill-extrusion-height-transition": { duration: crossFadeMs, delay: 0 },
-    "fill-extrusion-color-transition": { duration: crossFadeMs, delay: 0 },
-  } as ReliefPaint;
+  };
 }
+
 
 /** One column per stop from the live rows: the mean of every vehicle's
  *  latest reading there, in minutes to match the ramp. */

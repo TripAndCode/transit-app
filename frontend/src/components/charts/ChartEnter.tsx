@@ -10,26 +10,31 @@ import { prefersReducedMotion } from "../../utils/motion";
  * frame later so the browser paints the "undrawn" state first; without that
  * frame there is nothing for the transition to animate from.
  *
+ * The draw-on fires once per mount, on the first render where `ready` is true
+ * -- the caller's "real data has arrived" signal. A chart that mounts empty
+ * while its query resolves would otherwise spend its one draw on nothing, and
+ * a chart whose data changes in place does not replay it (it is a first-data
+ * effect, not a per-update one).
+ *
  * No-ops entirely under `prefers-reduced-motion: reduce` (the line renders
  * fully drawn, immediately) and whenever the element can't report a length --
  * `getTotalLength()` is unimplemented in some test environments, and possibly
- * unavailable for a `display: none` element in a real browser. The draw-on
- * runs once per mount; a chart whose data changes in place does not replay
- * it (it is an entrance effect, not a per-update one).
+ * unavailable for a `display: none` element in a real browser.
  *
  * `--len` itself is re-measured whenever the line's geometry (`d` or
  * `points`) changes, though. The dasharray stays on for as long as the class
- * does, so a line that outgrew the length measured at mount -- a chart kept
- * mounted while its data changes -- would otherwise break into dash-length
- * segments with gaps between them. The attribute comparison comes first
- * because `getTotalLength()` forces a synchronous layout, and charts
+ * does, so a line that outgrew the length measured at its first draw -- a
+ * chart kept mounted while its data changes -- would otherwise break into
+ * dash-length segments with gaps between them. The attribute comparison comes
+ * first because `getTotalLength()` forces a synchronous layout, and charts
  * re-render on every hover without changing their line.
  */
-export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>): void {
+export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>, ready = true): void {
   const measuredGeometry = useRef<string | null>(null);
+  const drawnRef = useRef(false);
 
-  // Declared ahead of the entrance effect so that at mount, when the class is
-  // not on yet, it leaves the one measurement to that effect.
+  // Declared ahead of the draw effect so that on the first `ready` render,
+  // when the class is not on yet, it leaves the one measurement to that effect.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el?.classList.contains("chart-draw-on")) return;
@@ -41,21 +46,24 @@ export function useDrawOn<T extends SVGGeometryElement>(ref: RefObject<T | null>
     measuredGeometry.current = geometry;
   });
 
+  // Fires once, on the first render with real data (`ready`), never on a
+  // mount that precedes it and never again on a later data change.
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el || prefersReducedMotion()) return;
+    if (!el || !ready || drawnRef.current || prefersReducedMotion()) return;
     const length = measureLength(el);
     if (length === null) return;
-
+    drawnRef.current = true;
     measuredGeometry.current = geometryOf(el);
     el.style.setProperty("--len", String(length));
     el.classList.add("chart-draw-on");
-    const raf = requestAnimationFrame(() => el.classList.add("chart-draw-on--active"));
-    return () => cancelAnimationFrame(raf);
-    // Runs once at mount -- see the docstring above. `ref` (from `useRef`) is
-    // stable across renders, so listing it here satisfies exhaustive-deps
-    // without changing when the effect re-runs.
-  }, [ref]);
+    // Deliberately not cancelled on cleanup. This effect never re-arms once
+    // `drawnRef` is set, so a cancelled frame -- StrictMode's replayed mount,
+    // or `ready` dropping before the next frame -- would park the line at its
+    // undrawn dashoffset for good. A late class add on a detached node is
+    // harmless.
+    requestAnimationFrame(() => el.classList.add("chart-draw-on--active"));
+  }, [ref, ready]);
 }
 
 function geometryOf(el: SVGGeometryElement): string | null {
@@ -89,10 +97,14 @@ type StaggerOptions = {
  * inside the `prefers-reduced-motion: no-preference` block, so a
  * reduced-motion viewer never sees the cell start hidden.
  *
+ * The default cap plus the cell's `--dur-2` fade equals `--dur-3`: the last
+ * cell of any grid has settled inside the data-change budget, however many
+ * cells the grid holds.
+ *
  * ```tsx
  * <rect className="chart-cell-enter" style={staggerDelay(index)} ... />
  * ```
  */
-export function staggerDelay(index: number, { step = 6, cap = 900 }: StaggerOptions = {}): CSSProperties {
+export function staggerDelay(index: number, { step = 4, cap = 360 }: StaggerOptions = {}): CSSProperties {
   return { transitionDelay: `${Math.min(index * step, cap)}ms` };
 }

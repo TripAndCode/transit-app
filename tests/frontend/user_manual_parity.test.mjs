@@ -5,11 +5,12 @@ import { test } from "node:test";
 const MANUAL_DIR = "frontend/public/user-manual";
 
 // Trip-wire for the two-tier i18n system frontend/public/user-manual/{en,ja}.md
-// use: unlike src/i18n/locales/{en,ja}.json, no lint checks this content for
-// drift (tests/frontend/i18n_keys.test.mjs and scripts/lint-i18n-strings.py
-// both only inspect src/**/*.ts(x) and the locale JSON files). This can't
-// verify translation *quality*, but it does catch the gross case of one
-// locale's manual gaining/losing a whole section or image without the other.
+// use: tests/frontend/i18n_keys.test.mjs and scripts/lint-i18n-strings.py
+// inspect only src/**/*.ts(x) and the locale JSON files, and
+// i18n_glossary.test.mjs checks the manuals only for retired terms. This
+// can't verify translation *quality*, but it does catch the gross case of
+// one locale's manual gaining/losing a whole section or image without the
+// other.
 
 function headingCount(markdown, level) {
   const marker = "#".repeat(level) + " ";

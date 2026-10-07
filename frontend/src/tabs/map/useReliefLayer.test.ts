@@ -94,7 +94,6 @@ describe("useReliefLayer", () => {
     expect(heightOf(setData.mock.calls[0][0])).toBe(5.5 * 55 + 6);
     expect(queued).toBeNull();
     expect(map.layers.filter((l) => l.id === RELIEF_LAYER)).toHaveLength(1);
-    expect(map.getPaintProperty(RELIEF_LAYER, "fill-extrusion-height-transition")).toEqual({ duration: 0, delay: 0 });
   });
 
   it("tweens a changed reading over the cross-fade in at most 16 throttled steps, landing exactly on the new height", () => {
@@ -111,6 +110,40 @@ describe("useReliefLayer", () => {
     for (let i = 1; i < heights.length; i += 1) expect(heights[i]).toBeGreaterThan(heights[i - 1]);
     expect(heights[0]).toBeGreaterThan(reliefHeight(2));
     expect(heights.at(-1)).toBe(reliefHeight(6));
+  });
+
+  it("moves the columns on the first frame of every tween, so a reading replaced each frame (a scrub) still follows", () => {
+    const map = liveMap();
+    const { rerender } = mount(map, true);
+    const setData = vi.spyOn(source(map), "setData");
+    for (let i = 0; i < 5; i += 1) {
+      rerender({ o: true, p: [{ ...POINTS[0], delay_min: 3 + i }], c: 600 });
+      frame(i * 20);
+    }
+    const heights = setData.mock.calls.map(([d]) => heightOf(d));
+    expect(heights).toHaveLength(5);
+    for (let i = 1; i < heights.length; i += 1) expect(heights[i]).toBeGreaterThan(heights[i - 1]);
+  });
+
+  it("writes a new reading on the first frame even while another source's reload holds the style unloaded", () => {
+    const map = liveMap();
+    map.reloadsOnSetData = true;
+    const { rerender } = mount(map, true);
+    // The playback dots' own write in the same commit leaves the style unloaded.
+    map.addSource("other", { type: "geojson" });
+    (map.getSource("other") as Source).setData({});
+    expect(map.isStyleLoaded()).toBe(false);
+    const setData = vi.spyOn(source(map), "setData");
+    rerender({ o: true, p: LATER, c: 600 });
+    frame(0);
+    expect(setData).toHaveBeenCalledTimes(1);
+  });
+
+  it("goes beneath the playback dots too when no live layer is on the map yet", () => {
+    const map = makeMockMap([{ id: "basemap", type: "raster" }, { id: TIMELINE_LAYER, type: "circle" }]);
+    mount(map, true);
+    const ids = map.layers.map((l) => l.id);
+    expect(ids.indexOf(RELIEF_LAYER)).toBeLessThan(ids.indexOf(TIMELINE_LAYER));
   });
 
   it("does not restart a running tween for a re-render carrying the same reading", () => {

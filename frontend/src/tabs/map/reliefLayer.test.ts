@@ -39,19 +39,15 @@ describe("reliefFeatures", () => {
 });
 
 describe("reliefPaint", () => {
-  it("colours by the shared severity ramp, extrudes `h` from the ground, and eases height and colour over the cross-fade", () => {
-    const paint = reliefPaint(600);
+  it("colours by the shared severity ramp and extrudes `h` from the ground, with no paint transition to ease data-driven values", () => {
+    const paint = reliefPaint();
     expect(paint["fill-extrusion-color"]).toEqual(["step", ["get", "delay_min"], ...severityStepColors()]);
     expect(paint["fill-extrusion-height"]).toEqual(["get", "h"]);
     expect(paint["fill-extrusion-base"]).toBe(0);
-    expect(paint["fill-extrusion-vertical-gradient"]).toBe(true);
-    expect(paint["fill-extrusion-height-transition"]).toEqual({ duration: 600, delay: 0 });
-    expect(paint["fill-extrusion-color-transition"]).toEqual({ duration: 600, delay: 0 });
-  });
-  it("steps instead of easing when the caller passes 0 (reduced motion)", () => {
-    expect(reliefPaint(0)["fill-extrusion-height-transition"]).toEqual({ duration: 0, delay: 0 });
+    expect(Object.keys(paint).some((k) => k.endsWith("-transition"))).toBe(false);
   });
 });
+
 
 describe("reliefPointsFromLive", () => {
   const row = (o: Partial<LiveTrip>): LiveTrip => ({

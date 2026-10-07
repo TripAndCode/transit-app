@@ -269,6 +269,7 @@ function PeakHourChart({
           />
         )}
       </svg>
+      {spreadSegments.length > 0 && <p className="ov-peak-legend">{t("overview.peak_hour.spread_legend")}</p>}
       {hover.visible && (
         <div
           className="ov-tooltip"
