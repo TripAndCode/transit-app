@@ -23,7 +23,6 @@ export function TrendFocusProvider({ children }: { children: ReactNode }) {
         data-focus-source={focus?.source}
         data-focus-date={focus?.date}
         data-focus-dow={focus?.dow}
-        data-focus-hour={focus?.hour}
       >
         <style>{dimRules(focus)}</style>
         {children}

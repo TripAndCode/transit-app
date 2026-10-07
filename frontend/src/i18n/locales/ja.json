@@ -1015,13 +1015,13 @@
       "title": "曜日 × 時刻の面",
       "aria": "曜日と時刻ごとの平均遅延",
       "profile_label": "プロファイル",
-      "profile_observed": "観測",
-      "profile_forecast": "予測",
+      "profile_hourly": "時刻別",
+      "profile_banded": "時間帯別",
       "legend_low": "定時",
-      "legend_high": "5分以上",
+      "legend_high": "{{min}}分以上",
       "readout_hint": "セルに触れると、同じ時刻の列と同じ曜日の行だけが残ります。",
       "readout": "{{day}}曜 {{hour}}:00 — 平均 {{min}}",
-      "readout_empty": "{{day}}曜 {{hour}}:00 — 観測なし"
+      "readout_empty": "{{day}}曜 {{hour}}:00 — データなし"
     },
     "daily": {
       "empty": "期間内にデータがありません。",

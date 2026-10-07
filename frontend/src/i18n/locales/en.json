@@ -85,7 +85,7 @@
       "queue_title": "Trips to check",
       "kpi": {
         "observed": "Observed",
-        "delayed": "5+\u00a0min late",
+        "delayed": "5+ min late",
         "on_time": "On-time rate"
       },
       "legend": {
@@ -1015,10 +1015,10 @@
       "title": "Day × hour surface",
       "aria": "Average delay by weekday and hour",
       "profile_label": "Profile",
-      "profile_observed": "Observed",
-      "profile_forecast": "Forecast",
+      "profile_hourly": "By hour",
+      "profile_banded": "By band",
       "legend_low": "On time",
-      "legend_high": "5 min+",
+      "legend_high": "{{min}} min+",
       "readout_hint": "Hover a cell to keep only its hour column and weekday row.",
       "readout": "{{day}} {{hour}}:00 — avg {{min}}",
       "readout_empty": "{{day}} {{hour}}:00 — no data"

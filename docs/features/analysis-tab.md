@@ -65,8 +65,8 @@ What the user sees/does:
   `frontend/src/components/ReportTable.tsx` renders the rows, with a CSV
   download link and a raw-rows JSON `<details>` dump; `trend` instead
   renders `TrendBlock` (defined inline in `AnalysisTab.tsx`): a
-  day-of-week x time-band heatmap
-  (`frontend/src/components/charts/DowBandGrid.tsx`), a daily line chart
+  day-of-week x hour heat surface with "By hour" and "By band" profiles
+  (`frontend/src/components/charts/HeatSurface.tsx`), a daily line chart
   (`frontend/src/components/charts/DailyChart.tsx`), and an hourly heatmap
   (`frontend/src/components/charts/HourlyHeatmap.tsx`). An empty result
   shows `EmptyState` with a "reset to this week" recovery action. `dwell_run`
@@ -246,11 +246,12 @@ the scope as one sentence above their content
 
 | File | Role |
 |---|---|
-| `frontend/src/tabs/AnalysisTab.tsx` | Analysis tab shell: report-type selection, `TrendBlock`/`DowBandHeatmapCard`/`DwellRunBlock` composition |
+| `frontend/src/tabs/AnalysisTab.tsx` | Analysis tab shell: report-type selection, `TrendBlock`/`DwellRunBlock` composition |
 | `frontend/src/components/ReportTable.tsx` | Generic report-row table renderer |
 | `frontend/src/components/charts/DailyChart.tsx` | Trend report's daily line chart |
 | `frontend/src/components/charts/HourlyHeatmap.tsx` | Trend report's hourly heatmap |
-| `frontend/src/components/charts/DowBandGrid.tsx` | `BandGrid`/`Legend` — dow x time-band grid used by both the trend report and `RouteForecastSection` |
+| `frontend/src/components/charts/DowBandGrid.tsx` | `BandGrid`/`Legend` — dow x time-band grid used by `RouteForecastSection` |
+| `frontend/src/components/charts/HeatSurface.tsx`, `heatSurfaceModel.ts` | The trend report's dow x hour surface: the two profiles, the faint low-confidence cells, and the generated row/column dim rules |
 | `frontend/src/components/RouteForecastSection.tsx` | `route_forecast` report body (agency-wide + per-route views) |
 | `frontend/src/components/InsightPanel.tsx` | Proactive single-suggestion panel |
 | `frontend/src/components/InsightHint.tsx` | `?` hint popover explaining each report type |
@@ -288,6 +289,8 @@ the scope as one sentence above their content
   (pure scheduled → actual clock-time arithmetic).
 - Frontend: `frontend/src/components/ReportTable.test.tsx`,
   `frontend/src/components/charts/DowBandGrid.test.tsx`,
+  `frontend/src/components/charts/HeatSurface.test.tsx`,
+  `frontend/src/components/charts/heatSurfaceModel.test.ts`,
   `frontend/src/components/RouteForecastSection.test.tsx`,
   `frontend/src/components/InsightPanel.test.tsx`,
   `frontend/src/tabs/destinationTabs.test.tsx` and
@@ -306,7 +309,7 @@ the scope as one sentence above their content
 3. Click each report-type button in the left column, and repeat on the
    Routes, Why and Compare rail entries - expect the URL's `report` param to
    update and the body to show either a table (with a working CSV download
-   link) or, for `trend`, the daily chart + hourly heatmap + dow-band grid.
+   link) or, for `trend`, the daily chart + hourly heatmap + day x hour surface.
    Open `/agencies/:agencyId/routes?sort=on_time` - expect `on_time` to be
    selected.
 4. On Time, click "Route forecast" - expect the agency-wide grid/route list; select

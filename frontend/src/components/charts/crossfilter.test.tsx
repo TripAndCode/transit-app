@@ -8,6 +8,7 @@ import { isoDow, type TrendFocus, type TrendFocusSource, type TrendMark } from "
 import { DailyChart } from "./DailyChart";
 import { HourlyHeatmap, type HourlyCell } from "./HourlyHeatmap";
 import { BandGrid } from "./DowBandGrid";
+import { HeatSurface } from "./HeatSurface";
 import { BAND_ORDER, type ForecastOverviewGridCell, type TrendDay } from "../../api/types";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
 
@@ -177,6 +178,38 @@ describe("TrendFocus crossfilter (CSS attribute dimming)", () => {
       }
       for (let dow = 1; dow <= 7; dow++) {
         expect(dimmedByCss(container, dowCell(container, dow))).toBe(isFocusDimmed(focus, { dow }, "dow"));
+      }
+    }
+  });
+
+  it("agrees with the reference semantics in the trend view's own trio, with the heat surface as the weekday chart", () => {
+    const { container } = renderWithProviders(
+      <MemoryRouter>
+        <TrendFocusProvider>
+          <div data-testid="daily">
+            <DailyChart days={DAYS} />
+          </div>
+          <HourlyHeatmap cells={CELLS} />
+          <HeatSurface hourly={CELLS} grid={grid()} worst={null} rangeDays={14} />
+        </TrendFocusProvider>
+      </MemoryRouter>,
+    );
+    const surfaceCell = (dow: number, hour: number) => container.querySelector(`.heat-surface__cell[data-dow='${dow}'][data-hour='${hour}']`)!;
+    const hovers: Array<[() => void, TrendFocus]> = [
+      [() => hoverDay(container, 0), { source: "daily", date: MON, dow: 1 }],
+      [() => fireEvent.mouseEnter(heatCell(container, TUE, 9)), { source: "hourly", hour: 9, dow: 2 }],
+      [() => fireEvent.mouseOver(surfaceCell(1, 8)), { source: "dow", dow: 1 }],
+    ];
+    for (const [hover, focus] of hovers) {
+      hover();
+      for (const [i, d] of DAYS.entries()) {
+        expect(dimmedByCss(container, dailyBar(container, i))).toBe(isFocusDimmed(focus, { date: d.date, dow: isoDow(d.date) }, "daily"));
+      }
+      for (const c of CELLS) {
+        expect(dimmedByCss(container, heatCell(container, c.date, c.hour))).toBe(isFocusDimmed(focus, { date: c.date, hour: c.hour, dow: isoDow(c.date) }, "hourly"));
+      }
+      for (let dow = 1; dow <= 7; dow++) {
+        expect(dimmedByCss(container, surfaceCell(dow, 8))).toBe(isFocusDimmed(focus, { dow }, "dow"));
       }
     }
   });

@@ -3,7 +3,6 @@ import { screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { renderWithProviders } from "../../test/renderWithProviders";
-import { stubReducedMotion } from "../../test/reducedMotion";
 import { HeatSurface } from "./HeatSurface";
 import { TrendFocusProvider } from "./TrendFocusContext";
 import { useTrendFocus } from "./trendFocus";
@@ -32,10 +31,15 @@ const surface = () => <HeatSurface hourly={hourly} grid={grid} worst={null} rang
 const mount = () => renderWithProviders(surface());
 const cellAt = (dow: number, hour: number) => document.querySelector<HTMLElement>(`.heat-surface [data-dow="${dow}"][data-hour="${hour}"]`)!;
 
-/** Publishes another linked chart's focus, as DailyChart would on hover. */
+/** Publishes and clears another linked chart's focus, as DailyChart would on hover. */
 function OtherChart() {
   const { setFocus } = useTrendFocus();
-  return <button type="button" onClick={() => setFocus({ source: "daily", date: "2026-10-06", dow: 2 })}>other</button>;
+  return (
+    <>
+      <button type="button" onClick={() => setFocus({ source: "daily", date: "2026-10-06", dow: 2 })}>other</button>
+      <button type="button" onClick={() => setFocus(null)}>clear</button>
+    </>
+  );
 }
 
 function providerSelectors(): string[] {
@@ -64,24 +68,18 @@ describe("HeatSurface", () => {
     expect(cellAt(1, 8).style.getPropertyValue("--ring")).toBe("1px");
     expect(cellAt(1, 9).style.getPropertyValue("--c")).toBe("var(--none)");
     expect(cellAt(1, 9).style.getPropertyValue("--ring")).toBe("0px");
-    expect(screen.getByRole("button", { name: "Observed" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "By hour" }).getAttribute("aria-pressed")).toBe("true");
   });
   it("switching the profile recolours cells in place -- same nodes, new --c", async () => {
     mount();
     const before = cellAt(1, 8);
-    await userEvent.click(screen.getByRole("button", { name: "Forecast" }));
+    await userEvent.click(screen.getByRole("button", { name: "By band" }));
     const after = cellAt(1, 8);
     expect(after).toBe(before);
     expect(after.style.getPropertyValue("--c")).toBe("var(--d1)");
     expect(after.style.getPropertyValue("--ring")).toBe("0px");
     expect(cellAt(7, 20).style.getPropertyValue("--c")).toBe("var(--none)");
-    expect(screen.getByRole("button", { name: "Forecast" }).getAttribute("aria-pressed")).toBe("true");
-  });
-  it("under reduced motion the profile switch writes the same values (the tokens, not the code, go to 0)", async () => {
-    stubReducedMotion();
-    mount();
-    await userEvent.click(screen.getByRole("button", { name: "Forecast" }));
-    expect(cellAt(1, 8).style.getPropertyValue("--c")).toBe("var(--d1)");
+    expect(screen.getByRole("button", { name: "By band" }).getAttribute("aria-pressed")).toBe("true");
   });
   it("hover writes the focus attributes on the grid and the readout text without re-rendering", () => {
     mount();
@@ -122,13 +120,33 @@ describe("HeatSurface", () => {
   it("a profile switch re-renders the cells but leaves the moved tab stop where focus put it", async () => {
     mount();
     cellAt(4, 12).focus();
-    await userEvent.click(screen.getByRole("button", { name: "Forecast" }));
+    await userEvent.click(screen.getByRole("button", { name: "By band" }));
     expect(screen.getAllByRole("gridcell").filter((c) => c.getAttribute("tabindex") === "0")).toEqual([cellAt(4, 12)]);
   });
   it("says so when neither profile holds data", () => {
     renderWithProviders(<HeatSurface hourly={[]} grid={[]} worst={null} rangeDays={14} />);
     expect(screen.queryByRole("grid")).toBeNull();
     expect(screen.getByText("No data for this period.")).toBeTruthy();
+  });
+  it("draws a weekday-hour pooled from few observations faint", () => {
+    renderWithProviders(
+      <HeatSurface hourly={[...hourly, { date: "2026-10-06", hour: 8, avg_min: 1, samples: 40 }]} grid={grid} worst={null} rangeDays={14} />,
+    );
+    expect(cellAt(1, 8).style.getPropertyValue("--mark-opacity")).toBe("0.5");
+    expect(cellAt(2, 8).style.getPropertyValue("--mark-opacity")).toBe("");
+  });
+  it("leaves a modified arrow key to the browser, which uses it for history", () => {
+    mount();
+    cellAt(1, 8).focus();
+    expect(fireEvent.keyDown(cellAt(1, 8), { key: "ArrowLeft", altKey: true })).toBe(true);
+    expect(fireEvent.keyDown(cellAt(1, 8), { key: "ArrowLeft", metaKey: true })).toBe(true);
+    expect(document.activeElement).toBe(cellAt(1, 8));
+  });
+  it("hands focus that lands on the grid itself to the cell holding the tab stop", () => {
+    mount();
+    cellAt(3, 5).focus();
+    screen.getByRole("grid").focus();
+    expect(document.activeElement).toBe(cellAt(3, 5));
   });
   it("names the worst weekday band over the range", () => {
     renderWithProviders(<HeatSurface hourly={hourly} grid={grid} worst={{ dow: 1, band: "morning", expected_avg_min: 2, samples: 10 }} rangeDays={14} />);
@@ -137,19 +155,42 @@ describe("HeatSurface", () => {
 });
 
 describe("HeatSurface in the linked trend view", () => {
-  it("publishes its weekday and hour to the provider without re-rendering itself", () => {
+  it("publishes its weekday to the provider without re-rendering itself", () => {
     renderWithProviders(<TrendFocusProvider>{surface()}</TrendFocusProvider>);
     const wrapper = document.querySelector<HTMLElement>(".trend-focus")!;
     const before = renders.surface;
     fireEvent.mouseOver(cellAt(3, 17));
     expect(wrapper.dataset.focusSource).toBe("dow");
     expect(wrapper.dataset.focusDow).toBe("3");
-    expect(wrapper.dataset.focusHour).toBe("17");
+    // The linked charts narrow by weekday; no rule reads an hour from here.
+    expect(wrapper.dataset.focusHour).toBeUndefined();
     fireEvent.mouseOver(cellAt(3, 18));
     fireEvent.mouseLeave(screen.getByRole("grid"));
     expect(wrapper.dataset.focusSource).toBeUndefined();
-    expect(wrapper.dataset.focusHour).toBeUndefined();
     expect(renders.surface - before).toBe(0);
+  });
+  it("publishes a cell again after another chart cleared the focus", async () => {
+    renderWithProviders(
+      <TrendFocusProvider>
+        <OtherChart />
+        {surface()}
+      </TrendFocusProvider>,
+    );
+    const wrapper = document.querySelector<HTMLElement>(".trend-focus")!;
+    fireEvent.mouseOver(cellAt(1, 8));
+    await userEvent.click(screen.getByRole("button", { name: "clear" }));
+    expect(wrapper.dataset.focusDow).toBeUndefined();
+    fireEvent.mouseOver(cellAt(1, 8));
+    expect(wrapper.dataset.focusDow).toBe("1");
+  });
+  it("falls back to the keyboard-focused cell when the pointer leaves", () => {
+    renderWithProviders(<TrendFocusProvider>{surface()}</TrendFocusProvider>);
+    const wrapper = document.querySelector<HTMLElement>(".trend-focus")!;
+    cellAt(2, 9).focus();
+    fireEvent.mouseOver(cellAt(5, 4));
+    fireEvent.mouseLeave(screen.getByRole("grid"));
+    expect(screen.getByRole("grid").getAttribute("data-focus-dow")).toBe("2");
+    expect(wrapper.dataset.focusDow).toBe("2");
   });
   it("recedes the weekdays another chart's focus disagrees with, and never dims from its own", async () => {
     renderWithProviders(

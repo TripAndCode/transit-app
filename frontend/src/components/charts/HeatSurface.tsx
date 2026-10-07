@@ -1,16 +1,16 @@
 import { useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { ForecastOverviewGridCell, ForecastOverviewWorst, TrendPayload } from "../../api/types";
-import { delayRampVar } from "../../styles/tokens";
+import { DELAY_THRESHOLDS, delayRampVar } from "../../styles/tokens";
 import { WEEK } from "../../utils/week";
 import { formatMinutes } from "../../utils/format";
 import { avgDelayText } from "../../utils/delayPhrase";
-import { DOWS, HOURS, forecastSurface, heatSurfaceDimRules, observedSurface, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
+import { DOWS, HOURS, bandSurface, bandThin, heatSurfaceDimRules, observedSurface, observedThin, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
 import { useTrendFocus } from "./trendFocus";
 import "./HeatSurface.css";
 
 const DIM_RULES = heatSurfaceDimRules();
-const PROFILES: readonly Profile[] = ["observed", "forecast"];
+const PROFILES: readonly Profile[] = ["hourly", "banded"];
 const RAMP = ["--d0", "--d1", "--d2", "--d3", "--d4"] as const;
 
 function cellOf(target: EventTarget | null): HTMLElement | null {
@@ -32,23 +32,24 @@ function step(key: string, dow: number, hour: number): [number, number] | null {
 
 /**
  * The trend view's weekday × hour surface. Two profiles over the same 168
- * cells -- what was observed in the range, and what the forecast expects --
- * and switching between them changes each cell's colour and inset ring in
- * place, so the eye follows the morning peak moving rather than re-reading
- * a new chart.
+ * cells, both of the selected range -- its delay hour by hour, and the same
+ * delay averaged by time band -- and switching between them changes each
+ * cell's colour and inset ring in place, so the eye follows the morning peak
+ * spreading across its band rather than re-reading a new chart. A cell
+ * pooled from few observations is drawn faint (--mark-opacity).
  *
  * Hover and keyboard focus never re-render it: the handlers write
  * `data-focus-dow` / `data-focus-hour` on the grid (the generated rules in
  * DIM_RULES keep that column and row and recede the rest), copy the cell's
- * label into the readout through a ref, and publish the weekday and hour to
- * the linked trend charts as the `dow` source. As the `dow` viewer, its cells
+ * label into the readout through a ref, and publish the weekday to the
+ * linked trend charts as the `dow` source. As the `dow` viewer, its cells
  * carry `data-mark-dow` and recede through `.focus-dim-opacity` when another
  * chart's focus names a different weekday.
  *
  * The grid is one tab stop (roving tabindex, moved on the DOM rather than in
  * state); arrows, Home and End travel between cells. The grid element itself
- * is focusable only programmatically (tabIndex -1), never a tab stop of its
- * own.
+ * is focusable only programmatically (tabIndex -1), and passes any focus it
+ * receives on to the cell holding the tab stop.
  */
 export function HeatSurface({
   hourly,
@@ -63,24 +64,27 @@ export function HeatSurface({
 }) {
   const { t } = useTranslation();
   const { setFocus } = useTrendFocus();
-  const [profile, setProfile] = useState<Profile>("observed");
+  const [profile, setProfile] = useState<Profile>("hourly");
   const gridRef = useRef<HTMLDivElement | null>(null);
   const readoutRef = useRef<HTMLParagraphElement | null>(null);
   const observed = observedSurface(hourly);
-  const forecast = forecastSurface(grid);
-  const surface = profile === "observed" ? observed : forecast;
+  const banded = bandSurface(grid, observed);
+  const surface = profile === "hourly" ? observed : banded;
+  const thin = profile === "hourly" ? observedThin(hourly) : bandThin(grid);
   const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
   const cellLabel = (dow: number, hour: number, v: number | null) =>
     v == null
       ? t("reports.heat_surface.readout_empty", { day: dayLabel(dow), hour })
       : t("reports.heat_surface.readout", { day: dayLabel(dow), hour, min: formatMinutes(v) });
 
+  /** Shows `cell` on the grid and readout, and names its weekday to the
+   *  linked charts every time: another chart may have replaced or cleared
+   *  the shared focus since this grid last wrote its own. */
   function publish(cell: HTMLElement | null) {
     const node = gridRef.current;
     if (!node) return;
     const dow = cell?.dataset.dow;
     const hour = cell?.dataset.hour;
-    if (node.dataset.focusDow === dow && node.dataset.focusHour === hour) return;
     if (dow === undefined || hour === undefined) {
       delete node.dataset.focusDow;
       delete node.dataset.focusHour;
@@ -88,18 +92,32 @@ export function HeatSurface({
       setFocus(null);
       return;
     }
-    node.dataset.focusDow = dow;
-    node.dataset.focusHour = hour;
-    if (readoutRef.current) readoutRef.current.textContent = cell?.getAttribute("aria-label") ?? "";
-    setFocus({ source: "dow", dow: Number(dow), hour: Number(hour) });
+    if (node.dataset.focusDow !== dow || node.dataset.focusHour !== hour) {
+      node.dataset.focusDow = dow;
+      node.dataset.focusHour = hour;
+      if (readoutRef.current) readoutRef.current.textContent = cell?.getAttribute("aria-label") ?? "";
+    }
+    setFocus({ source: "dow", dow: Number(dow) });
+  }
+
+  /** The cell keyboard focus rests on, which the pointer leaving falls back to. */
+  function focusedCell(): HTMLElement | null {
+    const active = document.activeElement;
+    return gridRef.current && active && gridRef.current.contains(active) ? cellOf(active) : null;
   }
 
   function onMouseOver(e: MouseEvent<HTMLDivElement>) {
-    publish(cellOf(e.target));
+    const cell = cellOf(e.target);
+    if (cell) publish(cell);
   }
   function onFocus(e: FocusEvent<HTMLDivElement>) {
     const cell = cellOf(e.target);
-    if (!cell) return;
+    if (!cell) {
+      // The grid itself took focus (a press between cells): hand it to the
+      // cell that holds the tab stop, so the arrows keep working.
+      if (e.target === gridRef.current) gridRef.current.querySelector<HTMLElement>('.heat-surface__cell[tabindex="0"]')?.focus();
+      return;
+    }
     if (cell.tabIndex !== 0) {
       gridRef.current?.querySelector<HTMLElement>('.heat-surface__cell[tabindex="0"]')?.setAttribute("tabindex", "-1");
       cell.tabIndex = 0;
@@ -111,7 +129,8 @@ export function HeatSurface({
   }
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     const cell = cellOf(e.target);
-    if (!cell) return;
+    // Alt/Cmd + arrow is the browser's history navigation, not a move.
+    if (!cell || e.altKey || e.metaKey) return;
     const next = step(e.key, Number(cell.dataset.dow), Number(cell.dataset.hour));
     if (!next) return;
     e.preventDefault();
@@ -119,7 +138,7 @@ export function HeatSurface({
   }
 
   const title = <h3 className="heat-surface__title">{t("reports.heat_surface.title")}</h3>;
-  if (!surfaceHasData(observed) && !surfaceHasData(forecast)) {
+  if (!surfaceHasData(observed)) {
     return (
       <div className="heat-surface-card">
         {title}
@@ -147,7 +166,7 @@ export function HeatSurface({
               <i key={v} style={{ background: `var(${v})` }} />
             ))}
           </span>
-          <span>{t("reports.heat_surface.legend_high")}</span>
+          <span>{t("reports.heat_surface.legend_high", { min: DELAY_THRESHOLDS.severe })}</span>
         </div>
       </div>
       {worst && (
@@ -168,7 +187,7 @@ export function HeatSurface({
         aria-label={t("reports.heat_surface.aria")}
         data-focus-viewer="dow"
         onMouseOver={onMouseOver}
-        onMouseLeave={() => publish(null)}
+        onMouseLeave={() => publish(focusedCell())}
         onFocus={onFocus}
         onBlur={onBlur}
         onKeyDown={onKeyDown}
@@ -196,7 +215,13 @@ export function HeatSurface({
                 data-mark-dow={di + 1}
                 data-hour={h}
                 aria-label={cellLabel(di + 1, h, v)}
-                style={{ "--c": v == null ? "var(--none)" : delayRampVar(v), "--ring": ringFor(v) } as CSSProperties}
+                style={
+                  {
+                    "--c": v == null ? "var(--none)" : delayRampVar(v),
+                    "--ring": ringFor(v),
+                    ...(thin[di][h] ? { "--mark-opacity": 0.5 } : {}),
+                  } as CSSProperties
+                }
               />
             ))}
           </div>

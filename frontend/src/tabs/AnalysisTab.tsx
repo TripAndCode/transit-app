@@ -391,7 +391,7 @@ function TrendBlock({
     Math.round((new Date(ctx.to).getTime() - new Date(ctx.from).getTime()) / 86400000) + 1,
   );
   // One provider over all three charts: hovering a mark in any of them dims
-  // the marks in the others that don't share its day, weekday or hour.
+  // the marks in the others that don't share its day or weekday.
   return (
     <TrendFocusProvider>
       <div>
