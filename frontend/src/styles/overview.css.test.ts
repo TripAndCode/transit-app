@@ -36,7 +36,7 @@ describe("overview.css hover affordances change colour or opacity only", () => {
 describe("overview.css living hero", () => {
   it("the check bar slides by transform on --dur-3 and the value uses the numeric scale", () => {
     const fill = ruleBody(css, ".ov-check-fill {");
-    expect(decl(fill, "transform")).toBe("translateX(calc((var(--check-share, 0) - 1) * 100%))");
+    expect(decl(fill, "transform")).toBe("translateX(calc((var(--bar-share, 0) - 1) * 100%))");
     expect(decl(ruleBody(css, ".ov-check-track {"), "overflow")).toBe("hidden");
     expect(decl(fill, "transition")).toBe("transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out)");
     expect(decl(fill, "width")).toBe("100%");
@@ -45,8 +45,9 @@ describe("overview.css living hero", () => {
     expect(decl(ruleBody(css, ".ov-check-value {"), "font-size")).toBe("var(--text-sm)");
     expect(decl(ruleBody(css, ".ov-check-value {"), "font-family")).toBeNull();
   });
-  it("a re-ranked row travels by transform on --dur-3", () => {
+  it("a re-ranked row and a band header travel by transform on --dur-3", () => {
     expect(decl(ruleBody(css, ".ov-check-row {"), "transition")).toBe("transform var(--dur-3) var(--ease-out), background var(--transition)");
+    expect(decl(ruleBody(css, ".ov-check-band-hd {"), "transition")).toBe("transform var(--dur-3) var(--ease-out)");
   });
   it("the breath loop lives inside the motion block, on --ease-in-out at 3 × --dur-4", () => {
     const motion = ruleBody(css, "@media (prefers-reduced-motion: no-preference)");

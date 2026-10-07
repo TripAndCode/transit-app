@@ -81,7 +81,7 @@ describe("RoutesToCheckList", () => {
     renderList(routes());
     const bars = document.querySelectorAll(".ov-check-fill");
     expect(bars).toHaveLength(3);
-    expect((bars[0] as HTMLElement).style.getPropertyValue("--check-share")).toBe("1");
+    expect((bars[0] as HTMLElement).style.getPropertyValue("--bar-share")).toBe("1");
   });
 
   it("keys every row for FLIP and sizes the bar with a transform, not a width", () => {
@@ -89,9 +89,9 @@ describe("RoutesToCheckList", () => {
     const rows = screen.getAllByRole("link");
     expect(rows.map((r) => r.getAttribute("data-flip-key"))).toEqual(["3", "12"]);
     const fill = rows[0].querySelector<HTMLElement>(".ov-check-fill")!;
-    expect(fill.style.getPropertyValue("--check-share")).toBe("1");
+    expect(fill.style.getPropertyValue("--bar-share")).toBe("1");
     expect(fill.style.width).toBe("");
-    expect(rows[1].querySelector<HTMLElement>(".ov-check-fill")!.style.getPropertyValue("--check-share")).toBe("0.5");
+    expect(rows[1].querySelector<HTMLElement>(".ov-check-fill")!.style.getPropertyValue("--bar-share")).toBe("0.5");
   });
 
   it("keeps a route's row, and so its count-up and bar slide, when it crosses into another band", () => {
@@ -99,6 +99,12 @@ describe("RoutesToCheckList", () => {
     const before = screen.getByText("Route A").closest("a");
     rerender(list([route("A", 4.5), route("B", 4.0)]));
     expect(screen.getByText("Route A").closest("a")).toBe(before);
+  });
+
+  it("keys band headers for FLIP too, so a header slides with the rows around it", () => {
+    renderList([route("A", 6.0), route("B", 4.0)]);
+    const keys = Array.from(document.querySelectorAll("[data-flip-key]")).map((el) => el.getAttribute("data-flip-key"));
+    expect(keys).toEqual(["band:severe", "A", "band:moderate", "B"]);
   });
 
   it("re-measures for FLIP when a band header appears or goes, even if the route order holds", () => {

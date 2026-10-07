@@ -294,6 +294,19 @@ describe("OverviewHeroRow", () => {
     expect(document.querySelector(".ov-fresh-dot")).toBeNull();
   });
 
+  it("drops the live green when the live window closes, without a refetch", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-03T08:00:00Z") });
+    mockFeedSummary("2026-10-03T07:55:00Z");
+    renderHero();
+    expect(screen.getByText("Reporting live")).toBeInTheDocument();
+    expect(document.querySelector(".ov-fresh-dot--stale")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(5 * 60_000 + 1_000);
+    });
+    expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
+    expect(screen.queryByText("Reporting live")).toBeNull();
+  });
+
   it("prints the delayed-route count in the numeric face", () => {
     mockHooks(38, 0.1);
     renderHero();

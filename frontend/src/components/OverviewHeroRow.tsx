@@ -28,7 +28,9 @@ type Props = {
 // The Date.now() read lives in a top-level helper because an inline read in
 // the component body trips react-hooks/purity's "impure function during
 // render" check. NaN for an unparseable timestamp, so it reads as "no age"
-// rather than as a fresh report.
+// rather than as a fresh report. The compiler caches a call per argument, not
+// per clock, so a render reads the age once per report: crossing a window's
+// edge needs a timer and state, as the breath and live windows below have.
 function reportAgeMs(iso: string): number {
   const captured = Date.parse(iso);
   return Number.isFinite(captured) ? Date.now() - captured : NaN;
@@ -44,13 +46,14 @@ type FeedState = { kind: "unknown" } | { kind: "none" } | { kind: "live" } | { k
 /** The feed's state, by the same rule as Live's freshness badge: a feed whose
  *  newest report is older than the live window is quiet, however recent the
  *  aggregates are. Unknown while the status is unread or its timestamp
- *  unreadable, so nothing is claimed then. */
-function readFeed(summary: RouteSummaryResponse | undefined): FeedState {
+ *  unreadable, so nothing is claimed then. `liveWindowClosed` is the timer's
+ *  word that the window has closed since the age was last read. */
+function readFeed(summary: RouteSummaryResponse | undefined, liveWindowClosed: boolean): FeedState {
   if (!summary) return { kind: "unknown" };
   if (!summary.latest_captured_at) return { kind: "none" };
   const ageMs = reportAgeMs(summary.latest_captured_at);
   if (!Number.isFinite(ageMs)) return { kind: "unknown" };
-  return ageMs > MAX_REPORT_AGE_MS ? { kind: "quiet", ageMs } : { kind: "live" };
+  return liveWindowClosed || ageMs > MAX_REPORT_AGE_MS ? { kind: "quiet", ageMs } : { kind: "live" };
 }
 
 function describeFeedStatus(feed: FeedState, t: TFunction): string {
@@ -82,23 +85,27 @@ export function OverviewHeroRow({
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
 
-  const feed = readFeed(feedSummary);
-  const feedStatus = describeFeedStatus(feed, t);
   const captured = feedSummary?.latest_captured_at;
   const lastReport = captured && Number.isFinite(Date.parse(captured)) ? formatReportTime(captured) : null;
 
-  // The dot breathes while the latest report is under two minutes old.
-  // Nothing refetches this summary on its own, so the window's close is
-  // scheduled here: the timer records which report it closed for, and a
-  // newer report opens a fresh window.
+  // The dot breathes inside BREATH_WINDOW_MS and is green inside the live
+  // window. Nothing refetches this summary on its own, so each window's close
+  // is scheduled here: a timer records which report it closed for, and a
+  // newer report opens fresh windows.
   const [breathClosedFor, setBreathClosedFor] = useState<string | null>(null);
+  const [liveClosedFor, setLiveClosedFor] = useState<string | null>(null);
   const breathing = captured != null && breathClosedFor !== captured && breathingNow(captured);
+  const feed = readFeed(feedSummary, captured != null && liveClosedFor === captured);
+  const feedStatus = describeFeedStatus(feed, t);
   useEffect(() => {
     if (!captured) return;
-    const left = BREATH_WINDOW_MS - reportAgeMs(captured);
-    if (!(left > 0)) return;
-    const id = window.setTimeout(() => setBreathClosedFor(captured), left);
-    return () => window.clearTimeout(id);
+    const age = reportAgeMs(captured);
+    if (!Number.isFinite(age)) return;
+    const timers: number[] = [];
+    if (BREATH_WINDOW_MS - age > 0) timers.push(window.setTimeout(() => setBreathClosedFor(captured), BREATH_WINDOW_MS - age));
+    // Live holds through MAX_REPORT_AGE_MS itself, so the close lands just past it.
+    if (MAX_REPORT_AGE_MS - age >= 0) timers.push(window.setTimeout(() => setLiveClosedFor(captured), MAX_REPORT_AGE_MS - age + 1));
+    return () => timers.forEach((id) => window.clearTimeout(id));
   }, [captured]);
   const range = formatDateRange(headline.window_from, headline.window_to, { year: false });
 

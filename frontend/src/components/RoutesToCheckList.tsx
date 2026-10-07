@@ -43,8 +43,9 @@ export function RoutesToCheckList({ routes }: Props) {
   const maxMin = routes.length > 0 ? Math.max(...routes.map((r) => r.avg_min)) : 0;
 
   // What can move a row: its rank, and the band headers above it, which
-  // appear or go as routes cross a threshold. A refetch that changed neither
-  // produces the same string and no FLIP.
+  // appear or go as routes cross a threshold; headers are keyed too, so they
+  // slide with the rows. A refetch that changed neither produces the same
+  // string and no FLIP.
   const listRef = useRef<HTMLDivElement | null>(null);
   useFlipRows(listRef, groups.map((g) => `${g.band}:${g.routes.map((r) => r.route_code).join(",")}`).join("|"));
 
@@ -62,7 +63,7 @@ export function RoutesToCheckList({ routes }: Props) {
         // per band: a route crossing a threshold keeps its node, so its
         // figure counts and its bar slides instead of remounting.
         groups.flatMap((g) => [
-          <div key={`band:${g.band}`} className="ov-check-band-hd">
+          <div key={`band:${g.band}`} className="ov-check-band-hd" data-flip-key={`band:${g.band}`}>
             {t(`overview.routes_to_check.band_${g.band}`, { count: g.routes.length, ...BAND_BOUNDS[g.band] })}
           </div>,
           ...g.routes.map((r) => (
@@ -80,7 +81,7 @@ export function RoutesToCheckList({ routes }: Props) {
                   className="ov-check-fill"
                   style={
                     {
-                      "--check-share": maxMin > 0 ? r.avg_min / maxMin : 0,
+                      "--bar-share": maxMin > 0 ? r.avg_min / maxMin : 0,
                       background: delayColor(r.avg_min),
                     } as CSSProperties
                   }

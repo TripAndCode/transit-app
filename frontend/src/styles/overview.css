@@ -125,6 +125,8 @@
   margin-bottom: 8px;
   font-weight: 600;
   font-size: 13px;
+  /* A header moves with the rows when a band appears or goes (useFlipRows). */
+  transition: transform var(--dur-3) var(--ease-out);
 }
 .ov-check-row {
   display: flex;
@@ -166,10 +168,9 @@
   width: 100%;
   height: 100%;
   border-radius: 2px;
-  /* --check-share is the row's share of the worst route, set inline per row.
-     The bar is the track's full width slid left by the rest: a transform, so
-     a change costs no layout, and a slide, so the corners keep their radius. */
-  transform: translateX(calc((var(--check-share, 0) - 1) * 100%));
+  /* --bar-share is the row's share of the worst route, set inline per row,
+     slid like the compare bars (compareBars.css). */
+  transform: translateX(calc((var(--bar-share, 0) - 1) * 100%));
   transition: transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out);
 }
 /* The face and tabular figures come from .num on the element. */
@@ -543,7 +544,7 @@
   font-weight: 700;
 }
 /* Feed-status dot: still by default; it breathes (motion block at the end
-   of this file) only while the latest observation is under two minutes old. */
+   of this file) only inside BREATH_WINDOW_MS (overview/freshness.ts). */
 .ov-fresh-dot {
   display: inline-block;
   width: 8px;
@@ -554,8 +555,8 @@
   vertical-align: middle;
   opacity: 0.55;
 }
-/* A stale feed keeps the dot but drops the "running normally" green: the
-   label beside it already says the data is delayed, calmly. */
+/* A quiet or never-reporting feed keeps the dot but drops the live green;
+   the label beside it says which. */
 .ov-fresh-dot--stale {
   background: var(--text-tertiary);
 }
@@ -570,8 +571,7 @@
 }
 
 /* The freshness dot's breath: a symmetric loop (the place --ease-in-out
-   belongs), running only while the feed is under two minutes old and never
-   for a reduced-motion viewer. */
+   belongs), never for a reduced-motion viewer. */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes ov-breath {
     0%, 100% { opacity: 0.55; }

@@ -142,5 +142,5 @@ test("the dynamic-property allowlist is exactly the runtime-set properties", () 
   // This set is the one way a `var(--x, <literal>)` naming an undefined
   // token can pass, so widening it has to be a deliberate edit here rather
   // than a line nobody notices in a diff.
-  assert.deepEqual([...DYNAMIC_PER_INSTANCE_PROPERTIES].sort(), ["--bar-share", "--cell-opacity", "--check-share", "--heat-ring", "--len", "--ops-queue-width", "--rank-opacity", "--stagger"]);
+  assert.deepEqual([...DYNAMIC_PER_INSTANCE_PROPERTIES].sort(), ["--bar-share", "--cell-opacity", "--heat-ring", "--len", "--ops-queue-width", "--rank-opacity", "--stagger"]);
 });

@@ -1,9 +1,9 @@
-import { delayRampVar } from "../../styles/tokens";
+import { HEAT_RAMP, delayRampVar } from "../../styles/tokens";
 
 export const RIBBON_W = 960;
 export const RIBBON_H = 160;
-/** The ramp's ceiling (HEAT_RAMP.maxMin): a 9-minute hour is still "the top". */
-const RIBBON_MAX_MIN = 5.5;
+/** The ramp's ceiling: a 9-minute hour is still "the top". */
+const RIBBON_MAX_MIN = HEAT_RAMP.maxMin;
 const PAD_TOP = 12;
 const PAD_BOTTOM = 8;
 /** Hours the gradient samples, spread across the day. */
@@ -18,11 +18,10 @@ export type PulsePaths = { area: string; line: string };
  *  line-to per hour, the closing edge), so a CSS `d` transition can
  *  interpolate it between two profiles; the line's moves follow the gaps, so
  *  it snaps when the gaps themselves change. */
-export function pulsePaths(
-  byHour: readonly (number | null)[],
-  opts: { width?: number; height?: number; maxMin?: number } = {},
-): PulsePaths {
-  const { width = RIBBON_W, height = RIBBON_H, maxMin = RIBBON_MAX_MIN } = opts;
+export function pulsePaths(byHour: readonly (number | null)[]): PulsePaths {
+  const width = RIBBON_W;
+  const height = RIBBON_H;
+  const maxMin = RIBBON_MAX_MIN;
   if (!byHour.some((v) => v != null)) return { area: "", line: "" };
   const n = Math.max(1, byHour.length - 1);
   const yOf = (v: number) =>

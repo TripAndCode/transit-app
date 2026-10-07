@@ -1,8 +1,8 @@
 import { useId } from "react";
 import { RIBBON_H, RIBBON_W, pulseGradientStops, pulsePaths } from "./dayPulsePaths";
 
-/** The day's delay profile as a quiet area behind the hero figure: 24 hours,
- *  ramp-coloured, 16% fill. Decoration for a reading the sentence and the
+/** The day's delay profile as a quiet area and line behind both hero
+ *  columns: 24 hours, ramp-coloured, the area at 16% fill. Decoration for a reading the sentence and the
  *  figure already give in words and digits, so it is hidden from assistive
  *  tech and takes no pointer. */
 export function DayPulseRibbon({ byHour }: { byHour: readonly (number | null)[] }) {
