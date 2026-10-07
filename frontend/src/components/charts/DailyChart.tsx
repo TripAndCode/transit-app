@@ -269,6 +269,9 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
                 width={w}
                 height={h}
                 fill="var(--accent-soft)"
+                // The attribute is what an exported SVG, which carries no
+                // stylesheet, falls back to; in the page the class wins.
+                opacity={0.7}
                 style={{ "--mark-opacity": 0.7 } as CSSProperties}
               />
             );

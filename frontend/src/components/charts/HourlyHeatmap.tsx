@@ -209,10 +209,9 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             // Two independent channels, deliberately: `opacity` carries the
             // magnitude ramp (and is what the staggered entrance fades to via
             // --cell-opacity), `fill-opacity` carries the crossfilter dim,
-            // which `.focus-dim-fill` reads from --focus-dim. Sharing one
-            // channel would make a hover response inherit the entrance
-            // transition's per-cell delay, which on a grid this size is most
-            // of a second.
+            // which `.focus-dim-fill` reads from --focus-dim. The dim is not
+            // transitioned: the inline per-cell delay would apply to it too,
+            // and on a grid this size that is most of a second.
             const cell = (
               <rect
                 key={`${d}|${h}`}
