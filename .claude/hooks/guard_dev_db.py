@@ -113,6 +113,11 @@ def docker_subcommands(lowered: list[str]) -> list[list[str]]:
     return found
 
 
+def names_a_computed_list(lowered: list[str]) -> bool:
+    """Targets resolved at run time can name the dataset without spelling it."""
+    return "xargs" in lowered or any("$(" in tok or "`" in tok for tok in lowered)
+
+
 def destroys_dev_volume(lowered: list[str]) -> bool:
     """A teardown that removes the dataset's volume carries no SQL keyword, so
     it is a block on its own rather than a target waiting for a mutation."""
@@ -121,9 +126,7 @@ def destroys_dev_volume(lowered: list[str]) -> bool:
     if "compose" in lowered and "down" in lowered:
         return bool({"-v", "--volumes"} & set(lowered))
     if "volume" in lowered and {"rm", "remove"} & set(lowered):
-        # A list computed at run time can name the dataset without spelling it.
-        computed = "xargs" in lowered or any("$(" in tok or "`" in tok for tok in lowered)
-        return computed or any(DEV_VOLUME.fullmatch(tok) for tok in lowered)
+        return names_a_computed_list(lowered) or any(DEV_VOLUME.fullmatch(tok) for tok in lowered)
     if "prune" in lowered:
         return "volume" in lowered or "--volumes" in lowered
     # Docker's own `rm`, not an `rm` run inside a container by `docker exec`.
@@ -131,7 +134,9 @@ def destroys_dev_volume(lowered: list[str]) -> bool:
         words[:1] == ["rm"] or words in (["container", "rm"], ["container", "remove"])
         for words in docker_subcommands(lowered)
     ):
-        names_dev = any(tok in DEV_CONTAINERS or CONTAINER.fullmatch(tok) for tok in lowered)
+        names_dev = names_a_computed_list(lowered) or any(
+            tok in DEV_CONTAINERS or CONTAINER.fullmatch(tok) for tok in lowered
+        )
         return names_dev and any(VOLUME_FLAG.fullmatch(tok) for tok in lowered)
     return False
 

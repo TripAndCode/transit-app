@@ -99,6 +99,8 @@ BLOCKED = [
     # A volume list computed at run time can name the dataset without spelling it.
     pytest.param("docker volume rm $(docker volume ls -q)", id="volume-rm-computed-list"),
     pytest.param("docker volume ls -q | xargs docker volume rm", id="volume-rm-via-xargs"),
+    pytest.param("docker rm -v $(docker ps -aq --filter name=transit-pg)", id="rm-v-computed-list"),
+    pytest.param("docker ps -q --filter name=transit-pg | xargs docker rm -v", id="rm-v-via-xargs"),
     # The dev Postgres container as it runs today, created outside compose.
     pytest.param(
         'docker exec transit-pg-latest-main psql -U transit -c "DROP TABLE agencies"', id="current-dev-pg-container"

@@ -93,7 +93,7 @@ list from `scripts/comment_lint.py` and enforces `AGENTS.md`'s durable-content r
   teardown is blocked on its own: `compose down -v`, `docker volume rm` of a
   `transit_*data` volume or of a list computed at run time, any `docker volume
   prune` or `docker system prune --volumes`, and docker's own `rm -v` of a dev
-  container. `docker-compose` counts as `docker compose`. It has no visibility into a script's
+  container or of a computed list. `docker-compose` counts as `docker compose`. It has no visibility into a script's
   contents beyond that, or into a `DATABASE_URL` set outside the command line
   it sees, and it deliberately still blocks prose that merely names a dev
   store next to a write-sounding word — a false block only costs a rephrase,
