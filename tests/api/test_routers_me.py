@@ -114,6 +114,22 @@ async def test_other_user_cannot_delete_preset(me_client, aconn, aagency_id):
 
 
 @pytest.mark.asyncio
+async def test_sessions_mark_the_one_making_the_request(me_client, aconn):
+    sid, uid = await _seed_user_and_session(aconn)
+    other = f"sid-other-{uid:0>24}"
+    await aconn.execute(
+        "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
+        token_hash(other),
+        uid,
+        datetime.now(timezone.utc) + timedelta(days=30),
+        "other-ua",
+    )
+    rows = (await me_client.get("/api/me/sessions", cookies={"sid": sid})).json()
+    current = {row["sid_prefix"]: row["current"] for row in rows}
+    assert current == {token_hash(sid)[:12]: True, token_hash(other)[:12]: False}
+
+
+@pytest.mark.asyncio
 async def test_sessions_listed_then_revoked(me_client, aconn):
     """Sessions list shows the active session; revoking it logs out."""
     sid, _uid = await _seed_user_and_session(aconn)

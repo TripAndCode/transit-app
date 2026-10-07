@@ -168,4 +168,17 @@ describe("defaultPeriod", () => {
     expect(lastClosedDayISO()).toBe("2026-10-02");
     expect(defaultPeriod()).toEqual({ from: "2026-09-03", to: "2026-10-02" });
   });
+
+  it("ends on the agency's latest data day when the data stops before yesterday", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-02T14:59:59Z")); // 2026-10-02 23:59:59 JST
+    expect(defaultPeriod("2026-09-28")).toEqual({ from: "2026-08-30", to: "2026-09-28" });
+  });
+
+  it("never runs past the last closed day, whatever the data says", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-02T14:59:59Z"));
+    expect(defaultPeriod("2026-10-02")).toEqual({ from: "2026-09-02", to: "2026-10-01" });
+    expect(defaultPeriod(null)).toEqual({ from: "2026-09-02", to: "2026-10-01" });
+  });
 });

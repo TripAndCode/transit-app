@@ -220,3 +220,99 @@ describe("MareyDiagram on a narrow viewport", () => {
     expect(screen.getByTestId("marey-table").className).toContain("marey__table--hidden");
   });
 });
+
+describe("MareyDiagram scrubber", () => {
+  // T1 is under way 07:00-07:12 (observed), T2 from 07:32, T3 from 08:01.
+  const AT_T1 = 25_500;
+
+  it("renders a scrub rail bounded by the view window and reports the chosen second", () => {
+    const onScrub = vi.fn();
+    show({ scrubSec: AT_T1, onScrub });
+    const slider = screen.getByRole("slider", { name: "Scrub the clock" });
+    expect(slider).toHaveAttribute("min", "21600");
+    expect(slider).toHaveAttribute("max", "36000");
+    expect(slider).toHaveAttribute("step", "60");
+    expect(slider).toHaveAttribute("value", String(AT_T1));
+    fireEvent.change(slider, { target: { value: "25560" } });
+    expect(onScrub).toHaveBeenCalledWith(25_560);
+  });
+
+  it("offers no rail without a scrub handler", () => {
+    show();
+    expect(screen.queryByRole("slider")).toBeNull();
+  });
+
+  it("brightens the trips crossing the second and mutes the rest, with a cursor", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    expect(container.querySelector('[data-trip-id="T1"]')!.classList.contains("marey-trip--cross")).toBe(true);
+    expect(container.querySelector('[data-trip-id="T1"]')!.getAttribute("opacity")).toBe("1");
+    expect(container.querySelector('[data-trip-id="T2"]')!.classList.contains("marey-trip--cross")).toBe(false);
+    expect(container.querySelector('[data-trip-id="T2"]')!.getAttribute("opacity")).toBe(String(MUTED_OPACITY));
+    expect(container.querySelector(".marey-cursor")).not.toBeNull();
+    expect(screen.getByTestId("marey-readout").textContent).toContain("1 trip under way");
+  });
+
+  it("a trip stepped to by keyboard is read out and lit even while a scrub is set", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    fireEvent.focus(container.querySelector('[data-trip-id="T2"]')!);
+    expect(screen.getByTestId("marey-readout").textContent).toContain("Departure 07:30");
+    expect(container.querySelector('[data-trip-id="T2"]')!.getAttribute("opacity")).toBe("1");
+    expect(container.querySelector('[data-trip-id="T1"]')!.getAttribute("opacity")).toBe(String(MUTED_OPACITY));
+  });
+
+  it("puts a position marker on the ribbon for each crossing trip", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    expect(container.querySelectorAll(".stop-ribbon__pos")).toHaveLength(1);
+  });
+
+  it("clears the scrub from the rail and hands focus back to the slider", () => {
+    const onScrub = vi.fn();
+    show({ scrubSec: AT_T1, onScrub });
+    fireEvent.click(screen.getByRole("button", { name: "Clear scrub" }));
+    expect(onScrub).toHaveBeenCalledWith(null);
+    expect(document.activeElement).toBe(screen.getByRole("slider", { name: "Scrub the clock" }));
+  });
+
+  it("marks the diagram as scrubbing only while a scrub is set", () => {
+    const { container, rerender } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(true);
+    rerender(<MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" onScrub={vi.fn()} />);
+    expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(false);
+  });
+
+  it("a trip pointed at during a scrub fades the rest on the quick tier, not the scrub's", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    fireEvent.focus(container.querySelector('[data-trip-id="T2"]')!);
+    expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(false);
+  });
+
+  it("pressing the slider where it rests starts a scrub at that minute", () => {
+    const onScrub = vi.fn();
+    show({ onScrub });
+    const slider = screen.getByRole("slider", { name: "Scrub the clock" });
+    fireEvent.pointerDown(slider);
+    expect(onScrub).toHaveBeenCalledWith(Number(slider.getAttribute("value")));
+  });
+
+  it("gives each diagram's rail its own id, so each clock reads its own slider", () => {
+    render(
+      <>
+        <MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" onScrub={vi.fn()} />
+        <MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" onScrub={vi.fn()} />
+      </>,
+    );
+    const ids = screen.getAllByRole("slider").map((s) => s.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("keeps the clear control in place, disabled, before any scrub, so the rail does not resize mid-drag", () => {
+    show({ onScrub: vi.fn() });
+    expect(screen.getByRole("button", { name: "Clear scrub" })).toBeDisabled();
+  });
+
+  it("without a scrub second, no cursor is drawn", () => {
+    const { container } = show({ onScrub: vi.fn() });
+    expect(container.querySelector(".marey-cursor")).toBeNull();
+    expect(container.querySelectorAll(".stop-ribbon__pos")).toHaveLength(0);
+  });
+});

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
@@ -7,6 +7,7 @@ import type { Agency } from "../api/types";
 import { onActivateKey } from "../utils/a11y";
 import { Z_INDEX } from "../styles/zIndex";
 import { agencySwitchHref } from "../routes/destinations";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 
 // Module-scope pure function rather than an in-render IIFE — see
 // eslint.config.js's manual-memoization ban comment for why this shape is
@@ -27,18 +28,16 @@ export function AgencyPicker() {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const currentId = useAgencyId();
   const current = agencies?.find((a) => a.agency_id === currentId);
 
-  // close on outside click
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
+  usePopoverDismiss(open, ref, (reason) => {
+    setOpen(false);
+    setFilter("");
+    if (reason === "escape") triggerRef.current?.focus();
+  });
 
   const filtered = filterAgencies(agencies, filter);
 
@@ -64,6 +63,7 @@ export function AgencyPicker() {
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         style={{

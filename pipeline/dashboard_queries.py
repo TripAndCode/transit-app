@@ -145,7 +145,7 @@ async def _heatmap_from_agg(
         frag2, params2, n2 = build_agg_daily_trend_filter(ctx, next_param=2)
         rc_param = n2
         grid = await conn.fetch(
-            "SELECT route_code, EXTRACT(DOW FROM date::date)::int AS bucket, "
+            "SELECT route_code, EXTRACT(DOW FROM date)::int AS bucket, "
             "(SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric "
             "    / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min "
             "FROM agg_daily_trend "
@@ -220,7 +220,10 @@ async def _anomalies_series_from_agg(
     # in the series as `avg_delay: None` (for display as "no data") rather
     # than fabricating a 0.0 that would silently bias anomaly_timeline's
     # mean/std/z-score population below.
-    return [{"date": r["d"], "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else None} for r in rows]
+    return [
+        {"date": r["d"].isoformat(), "avg_delay": float(r["avg_min"]) if r["avg_min"] is not None else None}
+        for r in rows
+    ]
 
 
 @perf.timed("dashboard.anomalies")

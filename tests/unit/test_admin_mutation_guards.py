@@ -211,12 +211,19 @@ def _dummy_value(annotation: Any) -> Any:
     return None
 
 
+# Required fields whose validators constrain more than the annotation shows;
+# filled by name because a shape check on the value is invisible from the type.
+_DUMMY_BY_FIELD_NAME: dict[str, Any] = {"email": "member@example.com"}
+
+
 def _dummy_body(model_cls: type[BaseModel]) -> dict[str, Any]:
     """A dict with every *required* field of *model_cls* filled in, so a
     request reaches the handler's own guards instead of 422ing on body
     shape first. Fields with a default are left out entirely."""
     return {
-        name: _dummy_value(field.annotation) for name, field in model_cls.model_fields.items() if field.is_required()
+        name: _DUMMY_BY_FIELD_NAME[name] if name in _DUMMY_BY_FIELD_NAME else _dummy_value(field.annotation)
+        for name, field in model_cls.model_fields.items()
+        if field.is_required()
     }
 
 

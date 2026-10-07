@@ -1,0 +1,26 @@
+.compare-bars { display: grid; gap: 14px; }
+.compare-bars__head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+.compare-bars__seg { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: 999px; overflow: hidden; background: var(--bg-surface); }
+.compare-bars__seg button { border: 0; background: transparent; padding: 5px 10px; font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+.compare-bars__seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); }
+.compare-bars__legend { font-size: var(--text-xs); color: var(--text-tertiary); }
+.compare-bars__list { display: grid; gap: 10px; }
+/* A re-ranked row travels (useFlipRows); background is the only other
+   thing that moves on it. */
+.compare-bar-row { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(0, 2fr) 7ch 7ch; gap: 12px; align-items: center; font-size: var(--text-sm); border-radius: var(--radius); transition: transform var(--dur-3) var(--ease-out), background var(--dur-1) var(--ease-out); }
+.compare-bar-row:hover { background: var(--bg-soft); }
+.compare-bar__route { min-width: 0; font-weight: 500; }
+.compare-bar__route a { color: inherit; text-decoration: none; }
+.compare-bar__route a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.compare-bar__track { position: relative; height: 14px; border-radius: 4px; background: var(--track-bg); overflow: hidden; }
+/* --bar-share is the bar's share of the fixed axis, set per row. The bar is
+   the track's full width slid left by the rest, so a period switch is one
+   transform morph and the ghost's dashed edge and the corners keep their
+   drawn size, which scaling would squash. */
+.compare-bar__track i { position: absolute; inset: 0; transform: translateX(calc((var(--bar-share, 0) - 1) * 100%)); border-radius: 4px; transition: transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out); }
+.compare-bar__ghost { background: transparent; border: 1px dashed var(--border-subtle); opacity: .9; }
+.compare-bar__value { text-align: right; font-weight: 600; }
+.compare-bar__delta { text-align: right; color: var(--text-secondary); }
+.compare-bar__delta--up { color: var(--delay-text-moderate); }
+.compare-bar__delta--down { color: var(--delay-text-ok); }
+@media (max-width: 640px) { .compare-bar-row { grid-template-columns: minmax(0, 1fr) 6ch; } .compare-bar__track { grid-column: 1 / -1; grid-row: 2; } .compare-bar__delta { display: none; } }

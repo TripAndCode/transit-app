@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_conn
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["static"])
 
@@ -37,7 +37,7 @@ class StaticStopsResponse(BaseModel):
 
 
 @router.get("/routes", response_model=StaticRoutesResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def list_routes(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -75,7 +75,7 @@ async def list_routes(
 
 
 @router.get("/stops", response_model=StaticStopsResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def list_stops(
     request: Request,
     agency_id: int = Depends(get_agency),

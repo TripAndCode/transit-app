@@ -25,6 +25,11 @@ describe("relativeTime", () => {
     expect(relativeTime(ago(3600))).toBe("1時間前");
   });
 
+  it("takes an explicit now so a render tick and the badge agree", () => {
+    const now = Date.parse("2026-10-03T00:10:00Z");
+    expect(relativeTime("2026-10-03T00:00:00Z", now)).toBe("10 minutes ago");
+  });
+
   it("returns the em dash for an unparseable or future time", () => {
     expect(relativeTime("nope")).toBe("—");
     expect(relativeTime(new Date(Date.now() + 60_000).toISOString())).toBe("—");

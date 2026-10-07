@@ -9,6 +9,7 @@ from httpx import ASGITransport
 from api.range import jst_today
 from pipeline.clickhouse import LIVE_TABLE
 from tests.conftest import _test_pool
+from tests.fixtures.stop_clusters import rebuild_stop_clusters
 
 
 @pytest.fixture
@@ -33,6 +34,7 @@ async def hmap_client(apply_schema):
         40.7,
         140.7,
     )
+    await rebuild_stop_clusters(pool, aid)
     # Three daily rows with delay_sum/samples giving per-day avgs: 60s, 120s, 600s
     # p90 over these 3 days ≈ PERCENTILE_CONT(0.9) of [1, 2, 10] min = 10*0.9=9+ → 9.0 min
     for d_offset, (ds, s) in enumerate([(60, 1), (120, 1), (600, 1)]):
@@ -112,6 +114,7 @@ async def zero_sample_hmap_client(apply_schema):
         40.8,
         140.8,
     )
+    await rebuild_stop_clusters(pool, aid)
     await pool.execute(
         "INSERT INTO agg_stop_daily "
         "(agency_id, stop_id, date, service_type, time_band, delay_sum, samples) "
