@@ -265,7 +265,7 @@ export function AskTab() {
   // cards to find it.
   const dock = (
     <details className="ask-tool-menu" open={!hasMessages || composingId !== null}>
-      <summary>{t("ask.workspace.new_analysis")}</summary>
+      <summary>{t(hasMessages ? "ask.workspace.new_analysis" : "ask.workspace.new_analysis_first")}</summary>
       {id != null && !unavailable && !(activeId && convQuery.isPending) && (
         <QuestionDock
           agencyId={id}
@@ -415,12 +415,15 @@ export function AskTab() {
               </>}
             </InvestigationCanvas>
           ) : (
-            <AskLandingCards
-              templates={templates}
-              onInstantSubmit={handleInstantSubmit}
-              onOpenChip={handleChipTap}
-              busy={busy}
-            />
+            <>
+              {activeId !== null && <p className="ask-no-questions">{t("ask.workspace.no_questions")}</p>}
+              <AskLandingCards
+                templates={templates}
+                onInstantSubmit={handleInstantSubmit}
+                onOpenChip={handleChipTap}
+                busy={busy}
+              />
+            </>
           )}
         </div>
 

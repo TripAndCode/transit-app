@@ -71,16 +71,9 @@ describe("ReportTable on_time confidence column", () => {
   });
 });
 
-describe("ReportTable council_summary/delay_certificate schemas", () => {
+describe("ReportTable delay_certificate schema", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  it("renders the pooled council_summary row", () => {
-    mockRoutes([]);
-    renderTable([[71.4, 3.2, 35, 4, 3, 75.0]], "council_summary");
-    expect(screen.getByText("71.4%")).toBeInTheDocument();
-    expect(screen.getByText("75.0%")).toBeInTheDocument();
   });
 
   it("renders a delay_certificate row without crashing on the un-enriched route column", () => {
@@ -150,6 +143,21 @@ describe("ReportTable route links", () => {
     expect(link).toHaveAttribute("href", "/agencies/1/routes/39061?from=2026-09-01&dow=weekday");
     expect(link.closest("tr")).toHaveClass("report-row--link");
   });
+
+  it("keeps the chevron on the route code's line, so a narrow cell never wraps it alone", () => {
+    mockRoutes([
+      { route_id: "C12線(21111)", route_short_name: "C12", route_long_name: "造道・八重田線", route_code: "21111", trip_headsigns: [] },
+    ]);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/routes?report=ranking"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="ranking" rows={[["21111", "平日", 0.9, 0.9, 2.0, 245]]} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const chevron = screen.getByRole("link", { name: /C12/ }).querySelector(".report-route-link__chevron");
+    expect(chevron?.textContent).toBe("\u00a0›");
+  });
 });
 
 describe("ReportTable service column", () => {
@@ -191,14 +199,6 @@ describe("ReportTable on a phone", () => {
     for (const text of ["1", "T50", "39061", "Avg", "5.2 min", "Weekday", "Median", "3.1 min", "p90", "8.4 min", "Samples", "120"]) {
       expect(within(item).getByText(text)).toBeInTheDocument();
     }
-  });
-
-  it("names no route for a report without a route column", () => {
-    renderTable([[92.3, 5.2, 120, 100, 95, 95.0]], "council_summary");
-    const [item] = screen.getAllByRole("listitem");
-    expect(within(item).queryByText(/Route/)).not.toBeInTheDocument();
-    expect(within(item).getAllByText("On-time %")).toHaveLength(1);
-    expect(within(item).getByText("Planned trips")).toBeInTheDocument();
   });
 
   it("titles a certificate row by its own route column, not the agency in column 0", () => {

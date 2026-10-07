@@ -111,6 +111,12 @@ describe("RouteForecastSection", () => {
     expect(screen.getByText(/No measurements yet/i)).toBeInTheDocument();
   });
 
+  it("titles a chosen route's grid for that route, and the agency's for all routes", () => {
+    renderSection(overview(), "100");
+    expect(within(screen.getByTestId("fc-detail-bandgrid")).getByText("Day × time of day (this route)")).toBeInTheDocument();
+    expect(screen.queryByText("Day × time of day (all routes)")).toBeNull();
+  });
+
   it("shows the per-route detail when exactly one route is already selected via the URL", () => {
     renderSection(overview(), "100");
     expect(screen.getByTestId("detail-worst")).toBeInTheDocument();

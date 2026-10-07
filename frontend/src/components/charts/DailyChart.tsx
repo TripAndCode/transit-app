@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
 import { formatNumber, formatMinutes, formatShortDate } from "../../utils/format";
+import { niceAxis } from "./niceAxis";
 import { useScope } from "../../api/scope";
 import { useDrawOn } from "./ChartEnter";
 import { ShadedDays, ThresholdBand, VerticalMarker } from "./annotations";
@@ -52,8 +53,9 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
 
   const avgs = days.map((d) => d.avg_min ?? 0);
   const samples = days.map((d) => d.samples ?? 0);
+  const axis = niceAxis(0, Math.max(1, ...avgs), 4);
   const stats = {
-    maxAvg: Math.max(1, ...avgs),
+    maxAvg: axis.high,
     maxSamples: Math.max(1, ...samples),
   };
 
@@ -226,13 +228,13 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
       >
         <svg width={W} height={H} role="img" aria-label={t("reports.daily.svg_aria")} style={{ display: "block" }}>
           {/* Y axis grid */}
-          {[0.25, 0.5, 0.75].map((f) => {
-            const y = padT + innerH * 0.35 + (1 - f) * innerH * 0.65;
+          {axis.ticks.slice(1).map((value) => {
+            const y = toY(value);
             return (
-              <g key={f}>
+              <g key={value}>
                 <line x1={padL} x2={W - padR} y1={y} y2={y} stroke="var(--border-soft)" strokeDasharray="2 4" />
-                <text x={6} y={y + 4} fontSize="10" fill="var(--text-tertiary)">
-                  {formatMinutes(stats.maxAvg * f)}
+                <text data-testid="daily-grid-label" x={6} y={y + 4} fontSize="10" fill="var(--text-tertiary)">
+                  {formatMinutes(value)}
                 </text>
               </g>
             );

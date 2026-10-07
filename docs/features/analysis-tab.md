@@ -147,7 +147,7 @@ response honoured that field.
   theirs in their own routers.
 - **`late`/`early`.** They are the on-time tolerance, applied by `on_time`
   and `council_summary`. Elsewhere they are ignored and reported as `false`,
-  including `worst_5min`, whose "≥5 min" threshold stays its own
+  including `worst_5min`, whose over-5-min threshold stays its own
   `late_tolerance_sec`.
 - **Not yet honoured.** `hour`, `stop` and `dir` are accepted and validated,
   but no endpoint honours them yet: `hour` waits on `agg_route_hour_daily`,

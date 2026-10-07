@@ -46,7 +46,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
     The consequence while the table is empty, which is worth stating because
     it reads as a bug otherwise: *any* request carrying ``X-API-Key`` gets a
-    401, and ``PRO_LIMIT`` in ``api/middleware/ratelimit.py`` is unreachable.
+    401, and the pro bucket in ``api/middleware/ratelimit.py`` is unreachable.
     Both are correct for a deployment that has sold nothing.
 
     A usable key also marks the request as authenticated for the login gate

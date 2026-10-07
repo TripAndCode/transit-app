@@ -5,6 +5,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
+import * as client from "../api/client";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
 import { MapTab } from "./MapTab";
@@ -280,5 +281,24 @@ describe("MapTab delayed-trips cap", () => {
 
     fireEvent.click(screen.getByText("refilter"));
     expect(screen.getByText(remainder)).toBeInTheDocument();
+  });
+
+  it.each([
+    [401, "Sign in to fetch the latest live observation"],
+    [429, "Too many refreshes; please try again shortly"],
+    [500, "Reload failed"],
+  ])("explains a refused refresh (%i) without inviting a retry it cannot win", async (status, message) => {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(client, "apiPost").mockRejectedValue(new client.ApiError(status, ""));
+    renderMap();
+    await userEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
   });
 });

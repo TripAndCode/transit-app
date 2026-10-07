@@ -177,6 +177,7 @@ export function RoutesPicker({
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
+                  minHeight: 36,
                 }}
               >
                 <input
@@ -220,6 +221,8 @@ export function RoutesPicker({
                       background: "transparent",
                       border: "none",
                       padding: "2px 6px",
+                      minWidth: 32,
+                      minHeight: 32,
                       cursor: "pointer",
                       color: "var(--text-tertiary)",
                       fontSize: 12,
@@ -244,6 +247,7 @@ export function RoutesPicker({
                           display: "flex",
                           alignItems: "center",
                           gap: 6,
+                          minHeight: 32,
                           borderTop: "1px dashed var(--border-soft)",
                         }}
                       >

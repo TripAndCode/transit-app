@@ -136,7 +136,7 @@ issuing their own requests.
    combined file from the footer button.
 7. Click "Create share link" — expect a clipboard-copy confirmation; paste
    the URL in a new tab and confirm the same filter loads.
-8. Click "Print / Save PDF" — expect the browser print dialog.
+8. Click "Print / Save as PDF" — expect the browser print dialog.
 9. Switch to the "Saved analyses" view → URL
    `/agencies/:agencyId/reports?doc=saved`; expect any bookmarks saved from
    a route's dossier for this agency to appear, each linking back to that

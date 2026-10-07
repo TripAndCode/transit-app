@@ -747,18 +747,11 @@ summary::-webkit-details-marker { display: none; }
    them; a lazily-loaded tab sheet would otherwise define the same keyframes
    again, and only for itself. */
 @media (prefers-reduced-motion: no-preference) {
-  @keyframes ov-fade-in {
-    from { opacity: 0; transform: translateY(2px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
   @keyframes ov-modal-in {
     from { opacity: 0; transform: translateY(6px) scale(0.99); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   .ov-modal       { animation: ov-modal-in var(--dur-2) var(--ease-out); }
-  /* Every route change fades its content in over the outgoing tab, which
-     startTransition keeps painted until the next chunk resolves. */
-  .route-enter    { animation: ov-fade-in var(--dur-2) var(--ease-out); }
 
   /* ChartEnter.tsx's useDrawOn(): the element's own JS-measured length
      (getTotalLength()) is written to --len, and .chart-draw-on--active is
@@ -838,17 +831,25 @@ summary::-webkit-details-marker { display: none; }
   padding-top: 16px;
   border-top: 1px solid var(--border-soft);
 }
-/* HelpPage now renders one section (and therefore exactly one h2, that
-   section's own heading) at a time instead of the whole manual flowing past
-   each other -- the divider/spacing above was meant to separate consecutive
-   sections in the old flat render and just looks like a stray rule under
-   the page's own <h1> now that the h2 is always the first thing in the
-   content pane. */
+/* A document's first heading sits right under the page's own title, where
+   the divider would read as a stray rule. */
 .user-manual-content h2:first-child {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
 }
+/* The help manual renders each section on its own, so every section's
+   heading is a first child; from the second section on, the divider goes
+   back between them. */
+.user-manual-section + .user-manual-section > h2:first-child {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
+}
+/* A section or heading scrolled to, from the sidebar or a link, stops a
+   little below the top edge. */
+.user-manual-section,
+.user-manual-section [id] { scroll-margin-top: 16px; }
 .user-manual-content h3 {
   font-size: 15px;
   margin: 20px 0 8px;
