@@ -26,9 +26,9 @@ def test_time_band_case_covers_all_bands_and_null():
     assert sql.strip().startswith("CASE") and sql.strip().endswith("END")
 
 
-def test_date_range_clause_casts_the_iso_text_column_to_date():
+def test_date_range_clause_keeps_the_date_column_uncast():
     frag, params, n = date_range_clause("date", _ctx(), next_param=3)
-    assert frag == "date::date BETWEEN ($3::text)::date AND ($4::text)::date"
+    assert frag == "date >= ($3::text)::date AND date <= ($4::text)::date"
     assert params == ["2026-05-13", "2026-06-11"]
     assert n == 5
 

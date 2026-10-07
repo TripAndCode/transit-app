@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from api.admin_audit import record_admin_action
-from api.deps import get_conn
+from api.deps import get_conn, invalidate_agency
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
 from pipeline.query import agencies as _agencies
@@ -230,6 +230,9 @@ async def delete_agency(
                 before={"deleted": False},
                 after={"deleted": True},
             )
+    # After the commit: invalidating inside the transaction would let a
+    # concurrent request re-cache the still-active row before it lands.
+    invalidate_agency(agency_id)
     return Response(status_code=204)
 
 
@@ -277,4 +280,5 @@ async def restore_agency(
             out = await conn.fetchrow(f"SELECT {_COLS} FROM agencies WHERE agency_id=$1", agency_id)
             if out is None:
                 raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
+    invalidate_agency(agency_id)
     return dict(out)
