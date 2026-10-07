@@ -8,6 +8,7 @@ import { ApiError } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { SidebarNavList } from "../components/SidebarNavList";
 import { PageHeader } from "../components/ui/PageHeader";
+import { coalesceToFrame } from "../utils/frameCoalesce";
 
 const MANUAL_BASE = "/user-manual";
 
@@ -206,11 +207,11 @@ export function HelpPage() {
     setCurrent(Number(el.dataset.section));
   });
   useEffect(() => {
-    let frame = 0;
+    let target: EventTarget | null = null;
+    const frame = coalesceToFrame(() => followScroll(target));
     const onScroll = (e: Event) => {
-      cancelAnimationFrame(frame);
-      const target = e.target;
-      frame = requestAnimationFrame(() => followScroll(target));
+      target = e.target;
+      frame.schedule();
     };
     const onScrollEnd = () => stopSettling();
     // Capturing on the document hears the app shell's scrolling pane as
@@ -218,7 +219,7 @@ export function HelpPage() {
     document.addEventListener("scroll", onScroll, { capture: true, passive: true });
     document.addEventListener("scrollend", onScrollEnd, { capture: true });
     return () => {
-      cancelAnimationFrame(frame);
+      frame.cancel();
       document.removeEventListener("scroll", onScroll, { capture: true });
       document.removeEventListener("scrollend", onScrollEnd, { capture: true });
       stopSettling();

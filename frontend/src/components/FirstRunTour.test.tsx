@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
@@ -65,6 +65,11 @@ describe("FirstRunTour", () => {
     );
     const dock = screen.getByTestId("dock");
     vi.spyOn(dock, "getBoundingClientRect").mockReturnValue(rect(300, 400, 200, 40));
+    // A resize re-places the tour on the next frame; run that frame now.
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((run) => {
+      run(0);
+      return 1;
+    });
     act(() => {
       window.dispatchEvent(new Event("resize"));
     });
@@ -292,6 +297,9 @@ describe("FirstRunTour", () => {
       act(() => {
         window.dispatchEvent(new Event("resize"));
       });
+      await act(async () => {
+        vi.advanceTimersToNextFrame();
+      });
       expect(document.querySelector<HTMLElement>(".first-run-tour")?.hidden).toBe(true);
 
       const second = document.createElement("div");
@@ -306,6 +314,15 @@ describe("FirstRunTour", () => {
       vi.unstubAllGlobals();
       vi.useRealTimers();
     }
+  });
+
+  it("coalesces scroll and resize into one frame of repositioning", () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    renderTourWithAnchors();
+    raf.mockClear();
+    for (let i = 0; i < 4; i++) fireEvent.scroll(window);
+    fireEvent(window, new Event("resize"));
+    expect(raf).toHaveBeenCalledTimes(1);
   });
 });
 
