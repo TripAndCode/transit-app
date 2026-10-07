@@ -38,11 +38,14 @@ export function useFlipRows(containerRef: RefObject<HTMLElement | null>, signal:
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     // Every row is measured before any is offset: a read after a write forces
     // a fresh style pass, so interleaving them costs one per moved row.
+    // Positions are taken against the list, not the viewport, so a scroll or
+    // a reflow above the list between two runs is not read as a move.
     const moves: [HTMLElement, number][] = [];
+    const origin = container.getBoundingClientRect().top;
     for (const row of rows) {
       const key = row.dataset.flipKey;
       if (key == null) continue;
-      const top = row.getBoundingClientRect().top;
+      const top = row.getBoundingClientRect().top - origin;
       current.set(key, top);
       const before = previous?.get(key);
       if (before == null || reduced || before === top) continue;
@@ -51,6 +54,14 @@ export function useFlipRows(containerRef: RefObject<HTMLElement | null>, signal:
     for (const [row, dy] of moves) {
       row.style.transition = "none";
       row.style.transform = `translateY(${dy}px)`;
+    }
+    // One style pass with the offsets applied. A commit that runs in its own
+    // task (a router transition, a query result) otherwise reaches the release
+    // frame before any style was computed with the offset, so the browser sees
+    // no change of transform, starts no transition, and the row jumps. A call,
+    // not a bare property read, which the compiler drops as side-effect free.
+    if (moves.length > 0) container.getBoundingClientRect();
+    for (const [row] of moves) {
       frames.push(
         requestAnimationFrame(() => {
           row.style.transition = "";

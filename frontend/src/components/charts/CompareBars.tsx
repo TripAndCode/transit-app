@@ -77,8 +77,9 @@ export function CompareBars({ rows, resetKey }: { rows: readonly unknown[][]; re
                 )}
               </span>
               <span className="compare-bar__track" aria-hidden="true">
-                <i className="compare-bar__ghost" style={{ "--bar-share": delayAxisShare(row[ghost]) } as CSSProperties} />
                 <i className="compare-bar__fill" style={{ "--bar-share": delayAxisShare(v), background: v == null ? "transparent" : delayColor(v) } as CSSProperties} />
+                {/* After the fill, so its dashed edge paints over a longer fill. */}
+                <i className="compare-bar__ghost" style={{ "--bar-share": delayAxisShare(row[ghost]) } as CSSProperties} />
               </span>
               <span className="compare-bar__value num" style={{ color: v == null ? undefined : delayTextColor(v) }}>
                 {v == null ? "—" : <Figure value={v} />}

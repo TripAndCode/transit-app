@@ -29,6 +29,9 @@ describe("deltaFor / otherPeriod", () => {
     expect(deltaFor(rows[0], "weekend")).toBe(-0.7);
     expect(deltaFor(rows[3], "weekend")).toBe(1.3);
     expect(deltaFor({ route_code: "7", weekday: 1.24, weekend: 1.2 }, "weekend")).toBe(0);
+    // The gap between the printed 1.5 and 1.3, the same size from either side.
+    expect(deltaFor({ route_code: "8", weekday: 1.5, weekend: 1.25 }, "weekday")).toBe(0.2);
+    expect(deltaFor({ route_code: "8", weekday: 1.5, weekend: 1.25 }, "weekend")).toBe(-0.2);
     expect(deltaFor(rows[2], "weekday")).toBeNull();
     expect(otherPeriod("weekday")).toBe("weekend");
   });

@@ -28,6 +28,8 @@ describe("CompareBars", () => {
     expect(fill.style.getPropertyValue("--bar-share")).toBe(String(3.8 / 6));
     expect(ghost.style.getPropertyValue("--bar-share")).toBe(String(3.1 / 6));
     expect(fill.style.width).toBe("");
+    // Later in the track, so its dashed edge paints over a longer fill.
+    expect(rows[0].querySelector(".compare-bar__track")!.lastElementChild).toBe(ghost);
   });
   it("switching the period re-sorts, swaps fill and ghost, and prints the signed delta against the other period", async () => {
     mount();
