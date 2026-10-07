@@ -8,6 +8,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import * as client from "../api/client";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
+import * as mapStyle from "../styles/mapStyle";
 import { MapTab } from "./MapTab";
 import { stubReducedMotion } from "../test/reducedMotion";
 import { decl, ruleBody } from "../test/cssRules";
@@ -178,6 +179,8 @@ describe("MapTab when no trip is reporting", () => {
 describe("MapTab basemap style from the URL", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    // Two cases persist a preference; later cases must start from none.
+    localStorage.clear();
   });
 
   function renderWithStyle(search: string) {
@@ -202,6 +205,21 @@ describe("MapTab basemap style from the URL", () => {
     const src = renderWithStyle("?style=garbage");
     expect(src).toContain("/pale/");
     expect(src).not.toContain("tile.openstreetmap.org");
+  });
+
+  it("paints the first frame from the URL's style, not the persisted preference", () => {
+    mapStyle.writeMapStylePref("osm");
+    const build = vi.spyOn(mapStyle, "buildStyle");
+    renderWithStyle("?style=photo");
+    expect(build).toHaveBeenCalled();
+    expect(build.mock.calls[0]?.[0]).toBe("photo");
+  });
+
+  it("falls back to the persisted preference when the URL names no style", () => {
+    mapStyle.writeMapStylePref("osm");
+    const build = vi.spyOn(mapStyle, "buildStyle");
+    renderWithStyle("");
+    expect(build.mock.calls[0]?.[0]).toBe("osm");
   });
 });
 
