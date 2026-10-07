@@ -1061,14 +1061,14 @@ dev = ["PyTest", "PyTest-Cov", "bump2version (<1)", "setuptools ; python_version
 
 [[package]]
 name = "fastapi"
-version = "0.142.0"
+version = "0.142.1"
 description = "FastAPI framework, high performance, easy to learn, fast to code, ready for production"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "fastapi-0.142.0-py3-none-any.whl", hash = "sha256:a42da52ec744e7b0e8a0ea6e0cbc7292c6df3cbbda8606a91aecf5c166b156da"},
-    {file = "fastapi-0.142.0.tar.gz", hash = "sha256:0b2d2ad7f915f29f79f190e30b40bd2b2e1bdec5617faeda10c37f7c36416305"},
+    {file = "fastapi-0.142.1-py3-none-any.whl", hash = "sha256:7eea2b5b1632ed43de2c090b3a43b7d92267189dfbbd55a967307ed763b6c57a"},
+    {file = "fastapi-0.142.1.tar.gz", hash = "sha256:761663e3e6939da45f997a6f68362abc0fa9d8606e76d504f15f806d2281581d"},
 ]
 
 [package.dependencies]
@@ -2988,14 +2988,14 @@ files = [
 
 [[package]]
 name = "openai"
-version = "3.21.0"
+version = "3.22.1"
 description = "The official Python library for the openai API"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "openai-3.21.0-py3-none-any.whl", hash = "sha256:28040df2ca1ffcb358c22d574aa3c339f37309650df972de0511fa1df8b09184"},
-    {file = "openai-3.21.0.tar.gz", hash = "sha256:b3da56a0693953fa1851d554579e8904d0166f524d004048b636c548e0b7ef8f"},
+    {file = "openai-3.22.1-py3-none-any.whl", hash = "sha256:43ff3de5457a8beb4afa177d4e0ba6841cfadd5219ebc62297fde6c8a9d401a6"},
+    {file = "openai-3.22.1.tar.gz", hash = "sha256:2575f961e4c1df8761f8eeb4d78e967de3f9b9f91b22f7120d60e393e970094d"},
 ]
 
 [package.dependencies]

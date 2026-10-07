@@ -1,9 +1,10 @@
-import { useState, type CSSProperties } from "react";
+import { use, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
+import { CalendarDays } from "lucide-react";
 import type { FilterCtx } from "../api/types";
 import type { DowFilter } from "../api/scope";
 import { dowValueLabel } from "../utils/filterValueLabels";
-import { defaultPeriod } from "../api/scope";
+import { DataEndContext, defaultPeriod } from "../api/scope";
 import { rangeLabel } from "../utils/rangeLabel";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
@@ -107,7 +108,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
   const [editing, setEditing] = useState(false);
 
   // Draft uses explicit date defaults when value has no dates
-  const { from: defaultFrom, to: defaultTo } = defaultPeriod();
+  const { from: defaultFrom, to: defaultTo } = defaultPeriod(use(DataEndContext));
 
   const [draft, setDraft] = useState<FilterCtx>(() => ({
     ...value,
@@ -154,7 +155,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
   if (!editing) {
     return (
       <div style={pillRowStyle}>
-        <span aria-hidden style={{ fontSize: 14 }}>📅</span>
+        <CalendarDays size={14} strokeWidth={1.75} aria-hidden="true" style={{ flexShrink: 0 }} />
         <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{summary}</span>
         <span style={{ color: "var(--text-tertiary)" }}>・</span>{/* i18n-ignore: locale-neutral separator */}
         <span>{routes}</span>

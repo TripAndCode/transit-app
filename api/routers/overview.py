@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.reports import compute_overview_summary
@@ -123,12 +123,13 @@ class TopDelayedRoute(BaseModel):
 
 
 class TopDelayed(BaseModel):
-    """Top-5 routes by absolute avg delay + a count of routes at/above the
-    2.0-min "not ok" threshold, both over the same window the headline
-    covers."""
+    """Top-5 routes by absolute avg delay + a count of routes averaging at
+    least ``delayed_threshold_min`` late, both over the same window the
+    headline covers."""
 
     routes: list[TopDelayedRoute]
     delayed_count: int
+    delayed_threshold_min: float
 
 
 class PeakHour(BaseModel):
@@ -183,7 +184,7 @@ class PeakHourBreakdown(BaseModel):
 
 
 @router.get("/peak-hour-breakdown", response_model=PeakHourBreakdown)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def peak_hour_breakdown(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -221,7 +222,7 @@ async def peak_hour_breakdown(
 
 
 @router.get("/overview/summary", response_model=OverviewSummary)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def overview_summary(
     request: Request,
     agency_id: int = Depends(get_agency),

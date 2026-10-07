@@ -24,8 +24,8 @@ describe("CompareBars", () => {
     expect(rows.map((r) => r.getAttribute("data-flip-key"))).toEqual(["12", "3", "2"]);
     const fill = rows[0].querySelector<HTMLElement>(".compare-bar__fill")!;
     const ghost = rows[0].querySelector<HTMLElement>(".compare-bar__ghost")!;
-    expect(fill.style.getPropertyValue("--w")).toBe(String(3.8 / 6));
-    expect(ghost.style.getPropertyValue("--w")).toBe(String(3.1 / 6));
+    expect(fill.style.getPropertyValue("--bar-share")).toBe(String(3.8 / 6));
+    expect(ghost.style.getPropertyValue("--bar-share")).toBe(String(3.1 / 6));
     expect(fill.style.width).toBe("");
   });
   it("switching the period re-sorts, swaps fill and ghost, and prints the signed delta against the other period", async () => {

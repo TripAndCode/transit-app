@@ -52,19 +52,7 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
               {t("reports.weather_delay.station_label", { name: data.station?.station_name ?? "" })}
             </span>
             {data.low_confidence && (
-              <span
-                style={{
-                  fontSize: "var(--text-xs)",
-                  fontWeight: 500,
-                  color: "var(--text-secondary)",
-                  background: "var(--bg-soft)",
-                  border: "1px solid var(--border-soft)",
-                  borderRadius: 999,
-                  padding: "2px 8px",
-                }}
-              >
-                {t("reports.weather_delay.low_confidence_badge")}
-              </span>
+              <span className="caveat-badge">{t("reports.weather_delay.low_confidence_badge")}</span>
             )}
           </div>
           {data.station?.note && (

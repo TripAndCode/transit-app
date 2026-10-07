@@ -4,6 +4,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
+import { AgencyDataEndProvider } from "../../api/AgencyDataEndProvider";
 import * as hooks from "../../api/hooks";
 import { useScope } from "../../api/scope";
 import type { ScopeSummary } from "../../api/types";
@@ -57,10 +58,10 @@ function mount(C: ComponentType<ControlProps>, search = "", summary?: ScopeSumma
         <Route
           path="/agencies/:agencyId/time"
           element={
-            <>
+            <AgencyDataEndProvider>
               <Harness C={C} summary={summary} />
               <Probe />
-            </>
+            </AgencyDataEndProvider>
           }
         />
       </Routes>
@@ -90,7 +91,7 @@ describe("scope controls", () => {
       mount(DaysControl);
       await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
       expect(params().get("dow")).toBe("weekday");
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Timetable" }), "平日");
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Timetable type" }), "平日");
       expect(params().get("service")).toBe("平日");
     });
 
@@ -100,6 +101,16 @@ describe("scope controls", () => {
       expect(mon.querySelector(".scope-mini-bar")).toHaveStyle({ background: "var(--d1)" });
       expect(screen.getByRole("button", { name: "Sat 5.1 min" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Tue" })).toBeInTheDocument();
+    });
+
+    it("says what the weekday colours mean once they show", () => {
+      mount(DaysControl, "", SUMMARY);
+      expect(screen.getByText("Colour = average delay on that weekday")).toBeInTheDocument();
+    });
+
+    it("explains no colours before there are any", () => {
+      mount(DaysControl);
+      expect(screen.queryByText("Colour = average delay on that weekday")).toBeNull();
     });
 
     it("marks the selected days", () => {
@@ -117,13 +128,31 @@ describe("scope controls", () => {
       expect(params().has("hour")).toBe(false);
     });
 
-    it("says hour filtering is not available yet", () => {
+    it("makes no promises about features to come", () => {
       mount(TimeControl);
-      expect(screen.getByText("Hour-by-hour filtering arrives with the hourly aggregate")).toBeInTheDocument();
+      expect(screen.queryByText(/arrives with/)).not.toBeInTheDocument();
     });
   });
 
   describe("period", () => {
+    afterEach(() => vi.useRealTimers());
+
+    it("shows the default period as the 30-day preset when the data stops before yesterday", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-03T03:00:00Z"));
+      mount(PeriodControl);
+      expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("ends the presets where the default period ends, leaving out a partial today", async () => {
+      vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+      vi.setSystemTime(new Date("2026-09-29T03:00:00Z"));
+      mount(PeriodControl, "", { ...SUMMARY, latest: "2026-09-29" });
+      expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
+      await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
+      expect(params().get("to")).toBe("2026-09-28");
+    });
+
     it("anchors a preset on the agency's latest data", async () => {
       mount(PeriodControl);
       await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
@@ -171,9 +200,9 @@ describe("scope controls", () => {
 
     it("names each preset's on-time share once the data is in", () => {
       mount(ToleranceControl, "", SUMMARY);
-      expect(screen.getByRole("button", { name: "1 min 34%" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "3 min 60%" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "5 min 75%" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "1 min 34% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "3 min 60% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "5 min 75% on time" })).toBeInTheDocument();
     });
 
     it("draws the on-time curve with a marker at the current tolerance", () => {
@@ -196,7 +225,13 @@ describe("scope controls", () => {
 
     it("reads out the share at the current tolerance", () => {
       mount(ToleranceControl, "?late=180", SUMMARY);
-      expect(screen.getByText("3 min: 60%")).toBeInTheDocument();
+      expect(screen.getByText("Up to 3 min late: 60% on time")).toBeInTheDocument();
+    });
+
+    it("labels the curve's axis: allowed lateness from 0 to 10 min", () => {
+      mount(ToleranceControl, "", SUMMARY);
+      const axis = document.querySelector(".scope-curve-axis")!;
+      expect([...axis.children].map((c) => c.textContent)).toEqual(["0 min", "Allowed lateness", "10 min"]);
     });
 
     it("leaves out the whole-day note when there are no figures", () => {

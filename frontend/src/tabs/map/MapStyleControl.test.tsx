@@ -31,7 +31,7 @@ describe("MapStyleControl", () => {
     // Expanded: a labelled tile per style.
     expect(screen.getByRole("button", { name: "Standard" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Satellite" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "OSM" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "OpenStreetMap" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Satellite" }));
     expect(onChange).toHaveBeenCalledWith("photo");
   });

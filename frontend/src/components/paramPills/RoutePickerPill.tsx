@@ -13,11 +13,12 @@
  * which is docked at the bottom of the viewport) — otherwise the popover
  * renders mostly or entirely off-screen with no way to scroll to it.
  */
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../../api/hooks";
 import { routeLabel } from "../../api/useRouteNames";
 import { delayColor } from "../../styles/tokens";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import "./RoutePickerPill.css";
 
 /** Popover's own rendered height (search input + max-height list + padding/border),
@@ -62,10 +63,10 @@ export function RoutePickerPill({
   const { t } = useTranslation();
   const { data: routes = [], isLoading } = useRoutes(agencyId);
 
-  function close() {
+  function close(refocus = true) {
     setQ("");
     setOpen(false);
-    triggerRef.current?.focus();
+    if (refocus) triggerRef.current?.focus();
   }
 
   // Decide open direction once, right when the popover mounts — measuring the
@@ -78,21 +79,7 @@ export function RoutePickerPill({
     setOpenUp(spaceBelow < POPOVER_HEIGHT_ESTIMATE && spaceAbove > spaceBelow);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, ref, (reason) => close(reason === "escape"));
 
   const ql = q.trim().toLowerCase();
   const filteredList = (ql

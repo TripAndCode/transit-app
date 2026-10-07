@@ -70,7 +70,7 @@ What the user sees/does:
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
 | `useReport(agencyId, "trend", ctx)` | `GET /api/{agency_id}/reports/trend` (`api/routers/reports.py: get_report`) | `pipeline/reports/rankings.py: compute_trend_series()` — precomputed `agg_daily_trend` by default, falling back to a live ClickHouse scan for a `time_band`-narrowed request. Same function the Analysis tab's `trend` report and the Ask tab's `trend` tool call. |
-| `useReport(agencyId, "ranking", ctx)` | `GET /api/{agency_id}/reports/ranking` (`api/routers/reports.py: get_report`) | `pipeline/reports/rankings.py: compute_ranking()` — same `agg_*`-fast-path-with-live-fallback pattern as `trend`. |
+| `useReport(agencyId, "ranking", ctx)` | `GET /api/{agency_id}/reports/ranking` (`api/routers/reports.py: get_report`) | `pipeline/reports/rankings.py: compute_ranking()` — same `agg_*`-fast-path-with-live-fallback pattern as `trend`. Takes the endpoint's default observation floor (`reliable_min_samples` in the response), which the section states under its table; the Routes screen's ranking is where thinly observed routes can be included. |
 | `useAgencies()` (only used for the current agency's display name in the section heading) | `GET /api/agencies` (`api/routers/agencies.py`, not scoped under `/api/{agency_id}`) | Static agency metadata from Postgres. |
 
 Saved-analysis reads/writes and the CSV/share-link/print actions are entirely
@@ -136,7 +136,7 @@ issuing their own requests.
    combined file from the footer button.
 7. Click "Create share link" — expect a clipboard-copy confirmation; paste
    the URL in a new tab and confirm the same filter loads.
-8. Click "Print / Save PDF" — expect the browser print dialog.
+8. Click "Print / Save as PDF" — expect the browser print dialog.
 9. Switch to the "Saved analyses" view → URL
    `/agencies/:agencyId/reports?doc=saved`; expect any bookmarks saved from
    a route's dossier for this agency to appear, each linking back to that

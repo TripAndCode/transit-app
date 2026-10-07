@@ -75,8 +75,8 @@ export function CompareBars({ rows }: { rows: readonly unknown[][] }) {
                 )}
               </span>
               <span className="compare-bar__track" aria-hidden="true">
-                <i className="compare-bar__ghost" style={{ "--w": barScale(row[ghost]) } as CSSProperties} />
-                <i className="compare-bar__fill" style={{ "--w": barScale(v), background: v == null ? "transparent" : delayColor(v) } as CSSProperties} />
+                <i className="compare-bar__ghost" style={{ "--bar-share": barScale(row[ghost]) } as CSSProperties} />
+                <i className="compare-bar__fill" style={{ "--bar-share": barScale(v), background: v == null ? "transparent" : delayColor(v) } as CSSProperties} />
               </span>
               <span className="compare-bar__value num" style={{ color: v == null ? undefined : delayTextColor(v) }}>
                 {v == null ? "—" : <Figure value={v} />}

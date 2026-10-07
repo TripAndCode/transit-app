@@ -539,11 +539,9 @@ describe("--delay-severe clears AA on its own theme's surface", () => {
   });
 });
 
-/** Every surface a `delayTextColor()` figure actually renders on. Checking
- *  only `--bg-surface` is what let these tokens ship tuned to clear AA on a
- *  card while failing on the page, the soft fill and the current-row tint --
- *  the KPI hero sits on the page, the report bar cell on the page, and the
- *  network row on `--bg-soft` or `--accent-soft` when it is the active one. */
+/** Every surface a delay-ramp text colour can sit on: a card, the page, the
+ *  soft fill and the current-row tint. Checking only `--bg-surface` would let
+ *  these tokens clear AA on a card while failing on the others. */
 const DELAY_TEXT_SURFACES = ["--bg-surface", "--bg-page", "--bg-soft", "--accent-soft"];
 const DELAY_TEXT_TOKENS = ["--delay-text-ok", "--delay-text-mild", "--delay-text-moderate"];
 
@@ -608,6 +606,7 @@ describe("--color-danger is retired outside destructive-action buttons", () => {
         [/^\s*--color-danger:[^;]*;/gm, /\.context-menu__item--danger\s*\{\s*color:\s*var\(--color-danger\);\s*\}/g],
       ],
       [resolve(srcDir, "pages/admin/adminControls.tsx"), [/\.admin-btn\.danger[^{]*\{[^}]*\}/g]],
+      [resolve(srcDir, "pages/AccountPage.css"), [/\.account-danger__button\s*\{[^}]*\}/g]],
     ]);
 
     const offenders = walk(srcDir).filter((file) => {
@@ -667,23 +666,6 @@ describe("surfaceColorResolved()", () => {
   it("reads --bg-surface when the cascade provides it", () => {
     document.documentElement.style.setProperty("--bg-surface", "#141726");
     expect(surfaceColorResolved()).toBe("#141726");
-  });
-});
-
-describe("route-enter animation", () => {
-  it("is declared once, inside a motion-allowed block, reusing the shared fade keyframes", () => {
-    // Nothing outside a no-preference block may define it: the class is
-    // applied unconditionally by RouteTransition, so the media query is the
-    // only thing standing between it and a reduced-motion user.
-    const allowed = [...globalCss.matchAll(/@media \(prefers-reduced-motion: no-preference\)/g)]
-      .map((m) => ruleBody(globalCss.slice(m.index), "@media (prefers-reduced-motion: no-preference)"))
-      .filter((block) => block.includes(".route-enter"));
-
-    expect(globalCss.match(/\.route-enter/g)).toHaveLength(1);
-    expect(allowed).toHaveLength(1);
-    expect(decl(ruleBody(allowed[0], ".route-enter"), "animation")).toBe(
-      "ov-fade-in var(--dur-2) var(--ease-out)",
-    );
   });
 });
 

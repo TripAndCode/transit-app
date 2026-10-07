@@ -463,7 +463,6 @@ async def probe_agency_feed(
     agency_id: int,
     request: Request,
     admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
 ) -> dict[str, Any]:
     """Run one RT field-coverage probe against the agency's own live feed and
     record the verdict.
@@ -480,7 +479,11 @@ async def probe_agency_feed(
     from pipeline.url_guard import FeedURLError
 
     csrf_guard(request)
-    header = await _load_agency(conn, agency_id)
+    pool = request.app.state.pool
+    # Two acquisitions on purpose: the feed fetch can take seconds, and a
+    # connection held across it is one no other request can use.
+    async with pool.acquire() as conn:
+        header = await _load_agency(conn, agency_id)
     feed_url = header["feed_url"]
 
     try:
@@ -491,22 +494,23 @@ async def probe_agency_feed(
         _log.warning("admin probe: feed fetch failed for agency %s: %s", agency_id, exc)
         raise HTTPException(status_code=502, detail="The feed could not be fetched") from None
 
-    try:
-        async with conn.transaction():
-            verdicts = await record_field_coverage_probe(conn, agency_id, cov, feed_url)
-            await record_admin_action(
-                conn,
-                actor_id=admin.user_id,
-                action="agency.probed",
-                target_type="agency",
-                target_id=agency_id,
-                after={"verdicts": verdicts, "sample_size": cov.get("stop_time_updates")},
-                ip=request.client.host if request.client else None,
-            )
-    except ValueError as exc:
-        # An empty poll proves nothing; recording it would turn "probed
-        # outside service hours" into a durable refutation.
-        raise HTTPException(status_code=409, detail=str(exc)) from None
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                verdicts = await record_field_coverage_probe(conn, agency_id, cov, feed_url)
+                await record_admin_action(
+                    conn,
+                    actor_id=admin.user_id,
+                    action="agency.probed",
+                    target_type="agency",
+                    target_id=agency_id,
+                    after={"verdicts": verdicts, "sample_size": cov.get("stop_time_updates")},
+                    ip=request.client.host if request.client else None,
+                )
+        except ValueError as exc:
+            # An empty poll proves nothing; recording it would turn "probed
+            # outside service hours" into a durable refutation.
+            raise HTTPException(status_code=409, detail=str(exc)) from None
     return {
         "status": "recorded",
         "sample_size": cov.get("stop_time_updates"),

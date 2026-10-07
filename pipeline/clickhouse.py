@@ -202,7 +202,7 @@ def distinct_file_names(client, agency_id: int, since: date | None = None) -> se
 # `live_<timestamp>`. Promotion copies those names into `updates` unchanged,
 # while archive ingest writes `<YYYYMMDD>/<member>`. The prefix is therefore
 # the source of a row in `updates`.
-_LIVE_SOURCED = "(startsWith(file_name, 'oracle/') OR startsWith(file_name, 'live_'))"
+LIVE_SOURCED = "(startsWith(file_name, 'oracle/') OR startsWith(file_name, 'live_'))"
 
 
 def days_with_source(client, agency_id: int, days: Iterable[date], *, live_sourced: bool) -> set[date]:
@@ -215,7 +215,7 @@ def days_with_source(client, agency_id: int, days: Iterable[date], *, live_sourc
     wanted = sorted(set(days))
     if not wanted:
         return set()
-    predicate = _LIVE_SOURCED if live_sourced else f"NOT {_LIVE_SOURCED}"
+    predicate = LIVE_SOURCED if live_sourced else f"NOT {LIVE_SOURCED}"
     result = client.query(
         "SELECT DISTINCT toDate(captured_at, 'Asia/Tokyo') AS day FROM updates "
         "WHERE agency_id = {agency_id:UInt16} "

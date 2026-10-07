@@ -20,6 +20,7 @@ EXPECTED_TABLES = [
     "login_events",
     "filter_presets",
     "rt_field_coverage_probes",
+    "stop_clusters",
 ]
 
 
