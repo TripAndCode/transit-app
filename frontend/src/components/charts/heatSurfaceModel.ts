@@ -6,6 +6,9 @@ export const HOURS = 24;
 export const DOWS = 7;
 /** Opacity the cells outside the hovered row and column drop to. */
 export const SURFACE_DIM = 0.55;
+/** Resting opacity of a cell backed by few observations: faint, but above
+ *  SURFACE_DIM, so a hover still visibly keeps its row and column. */
+export const THIN_OPACITY = 0.75;
 
 /** `[dowIndex 0 = Monday … 6 = Sunday][hour]`, null where nothing is known. */
 export type Surface = (number | null)[][];
@@ -63,10 +66,12 @@ export function bandSurface(grid: readonly BandCell[], observed: Surface): Surfa
   return s;
 }
 
-export function bandThin(grid: readonly BandCell[]): Thin {
+/** A low-confidence band's hours, at the same observed hours `bandSurface`
+ *  paints: an empty cell is empty, not faint. */
+export function bandThin(grid: readonly BandCell[], observed: Surface): Thin {
   const thin = Array.from({ length: DOWS }, () => Array.from({ length: HOURS }, () => false));
   eachBandHour(grid, (cell, d, h) => {
-    if (cell.low_confidence) thin[d][h] = true;
+    if (cell.low_confidence && observed[d][h] != null) thin[d][h] = true;
   });
   return thin;
 }

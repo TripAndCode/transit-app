@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DOWS, HOURS, SURFACE_DIM, bandSurface, bandThin, emptySurface, heatSurfaceDimRules, observedSurface, observedThin, ringFor, surfaceHasData } from "./heatSurfaceModel";
+import { DOWS, HOURS, SURFACE_DIM, THIN_OPACITY, bandSurface, bandThin, emptySurface, heatSurfaceDimRules, observedSurface, observedThin, ringFor, surfaceHasData } from "./heatSurfaceModel";
 
 describe("observedSurface", () => {
   it("pools cells of the same weekday and hour, weighted by samples", () => {
@@ -63,10 +63,15 @@ describe("bandSurface", () => {
     const s = bandSurface([{ dow: 1, band: "morning", expected_avg_min: null }, { dow: 8, band: "morning", expected_avg_min: 2 }], observed);
     expect(surfaceHasData(s)).toBe(false);
   });
-  it("carries a band's low confidence onto its hours", () => {
-    const thin = bandThin([{ dow: 2, band: "morning", expected_avg_min: 2, low_confidence: true }]);
+  it("carries a band's low confidence onto its observed hours only", () => {
+    const tuesday = observedSurface([{ date: "2026-10-06", hour: 6, avg_min: 1, samples: 40 }]);
+    const thin = bandThin([{ dow: 2, band: "morning", expected_avg_min: 2, low_confidence: true }], tuesday);
     expect(thin[1][6]).toBe(true);
+    expect(thin[1][7]).toBe(false); // in the band, but nothing ran: empty, not faint
     expect(thin[1][9]).toBe(false);
+  });
+  it("rests a thin cell above the hover dim, so a hover still narrows the surface", () => {
+    expect(THIN_OPACITY).toBeGreaterThan(SURFACE_DIM);
   });
 });
 

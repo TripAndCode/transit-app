@@ -132,7 +132,7 @@ describe("HeatSurface", () => {
     renderWithProviders(
       <HeatSurface hourly={[...hourly, { date: "2026-10-06", hour: 8, avg_min: 1, samples: 40 }]} grid={grid} worst={null} rangeDays={14} />,
     );
-    expect(cellAt(1, 8).style.getPropertyValue("--mark-opacity")).toBe("0.5");
+    expect(cellAt(1, 8).style.getPropertyValue("--mark-opacity")).toBe("0.75");
     expect(cellAt(2, 8).style.getPropertyValue("--mark-opacity")).toBe("");
   });
   it("leaves a modified arrow key to the browser, which uses it for history", () => {
@@ -182,6 +182,35 @@ describe("HeatSurface in the linked trend view", () => {
     expect(wrapper.dataset.focusDow).toBeUndefined();
     fireEvent.mouseOver(cellAt(1, 8));
     expect(wrapper.dataset.focusDow).toBe("1");
+  });
+  it("lets a clicked cell go when the pointer leaves: a click is not keyboard focus", async () => {
+    renderWithProviders(<TrendFocusProvider>{surface()}</TrendFocusProvider>);
+    const wrapper = document.querySelector<HTMLElement>(".trend-focus")!;
+    await userEvent.click(cellAt(2, 9));
+    fireEvent.mouseLeave(screen.getByRole("grid"));
+    expect(screen.getByRole("grid").hasAttribute("data-focus-dow")).toBe(false);
+    expect(wrapper.dataset.focusDow).toBeUndefined();
+  });
+  it("keeps the hovered cell when keyboard focus leaves the grid", () => {
+    renderWithProviders(
+      <TrendFocusProvider>
+        <OtherChart />
+        {surface()}
+      </TrendFocusProvider>,
+    );
+    cellAt(1, 1).focus();
+    fireEvent.mouseOver(cellAt(3, 4));
+    screen.getByRole("button", { name: "other" }).focus();
+    expect(screen.getByRole("grid").getAttribute("data-focus-dow")).toBe("3");
+  });
+  it("re-reads the hovered cell after a profile switch", async () => {
+    mount();
+    fireEvent.mouseOver(cellAt(1, 8));
+    expect(screen.getByTestId("heat-surface-readout").textContent).toContain("4.0 min");
+    screen.getByRole("button", { name: "By band" }).focus();
+    await userEvent.keyboard(" ");
+    fireEvent.mouseOver(cellAt(1, 8));
+    expect(screen.getByTestId("heat-surface-readout").textContent).toContain("2.0 min");
   });
   it("falls back to the keyboard-focused cell when the pointer leaves", () => {
     renderWithProviders(<TrendFocusProvider>{surface()}</TrendFocusProvider>);

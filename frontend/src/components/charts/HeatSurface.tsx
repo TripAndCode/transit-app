@@ -5,7 +5,7 @@ import { DELAY_THRESHOLDS, delayRampVar } from "../../styles/tokens";
 import { WEEK } from "../../utils/week";
 import { formatMinutes } from "../../utils/format";
 import { avgDelayText } from "../../utils/delayPhrase";
-import { DOWS, HOURS, bandSurface, bandThin, heatSurfaceDimRules, observedSurface, observedThin, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
+import { DOWS, HOURS, THIN_OPACITY, bandSurface, bandThin, heatSurfaceDimRules, observedSurface, observedThin, ringFor, surfaceHasData, type Profile } from "./heatSurfaceModel";
 import { useTrendFocus } from "./trendFocus";
 import "./HeatSurface.css";
 
@@ -67,10 +67,17 @@ export function HeatSurface({
   const [profile, setProfile] = useState<Profile>("hourly");
   const gridRef = useRef<HTMLDivElement | null>(null);
   const readoutRef = useRef<HTMLParagraphElement | null>(null);
+  // Which cell the pointer is over, and whether the focused cell was reached
+  // by keyboard: the pointer leaving falls back to keyboard focus only, and
+  // keyboard focus leaving falls back to the hovered cell. A click focuses a
+  // cell too, but that focus shows no ring and must not hold the narrowing.
+  const hoveredRef = useRef<HTMLElement | null>(null);
+  const pointerPressRef = useRef(false);
+  const keyboardFocusRef = useRef(false);
   const observed = observedSurface(hourly);
   const banded = bandSurface(grid, observed);
   const surface = profile === "hourly" ? observed : banded;
-  const thin = profile === "hourly" ? observedThin(hourly) : bandThin(grid);
+  const thin = profile === "hourly" ? observedThin(hourly) : bandThin(grid, observed);
   const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
   const cellLabel = (dow: number, hour: number, v: number | null) =>
     v == null
@@ -95,22 +102,33 @@ export function HeatSurface({
     if (node.dataset.focusDow !== dow || node.dataset.focusHour !== hour) {
       node.dataset.focusDow = dow;
       node.dataset.focusHour = hour;
-      if (readoutRef.current) readoutRef.current.textContent = cell?.getAttribute("aria-label") ?? "";
     }
+    // Compared on content, not coordinates: a profile switch relabels the same cell.
+    const label = cell?.getAttribute("aria-label") ?? "";
+    if (readoutRef.current && readoutRef.current.textContent !== label) readoutRef.current.textContent = label;
     setFocus({ source: "dow", dow: Number(dow) });
   }
 
   /** The cell keyboard focus rests on, which the pointer leaving falls back to. */
-  function focusedCell(): HTMLElement | null {
+  function keyboardFocusedCell(): HTMLElement | null {
     const active = document.activeElement;
-    return gridRef.current && active && gridRef.current.contains(active) ? cellOf(active) : null;
+    if (!keyboardFocusRef.current || !gridRef.current || !active || !gridRef.current.contains(active)) return null;
+    return cellOf(active);
   }
 
   function onMouseOver(e: MouseEvent<HTMLDivElement>) {
     const cell = cellOf(e.target);
-    if (cell) publish(cell);
+    if (!cell) return;
+    hoveredRef.current = cell;
+    publish(cell);
+  }
+  function onMouseLeave() {
+    hoveredRef.current = null;
+    publish(keyboardFocusedCell());
   }
   function onFocus(e: FocusEvent<HTMLDivElement>) {
+    keyboardFocusRef.current = !pointerPressRef.current;
+    pointerPressRef.current = false;
     const cell = cellOf(e.target);
     if (!cell) {
       // The grid itself took focus (a press between cells): hand it to the
@@ -125,12 +143,15 @@ export function HeatSurface({
     publish(cell);
   }
   function onBlur(e: FocusEvent<HTMLDivElement>) {
-    if (!gridRef.current?.contains(e.relatedTarget as Node | null)) publish(null);
+    if (gridRef.current?.contains(e.relatedTarget as Node | null)) return;
+    keyboardFocusRef.current = false;
+    publish(hoveredRef.current);
   }
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     const cell = cellOf(e.target);
     // Alt/Cmd + arrow is the browser's history navigation, not a move.
     if (!cell || e.altKey || e.metaKey) return;
+    keyboardFocusRef.current = true;
     const next = step(e.key, Number(cell.dataset.dow), Number(cell.dataset.hour));
     if (!next) return;
     e.preventDefault();
@@ -187,7 +208,10 @@ export function HeatSurface({
         aria-label={t("reports.heat_surface.aria")}
         data-focus-viewer="dow"
         onMouseOver={onMouseOver}
-        onMouseLeave={() => publish(focusedCell())}
+        onPointerDown={() => {
+          pointerPressRef.current = true;
+        }}
+        onMouseLeave={onMouseLeave}
         onFocus={onFocus}
         onBlur={onBlur}
         onKeyDown={onKeyDown}
@@ -219,7 +243,7 @@ export function HeatSurface({
                   {
                     "--c": v == null ? "var(--none)" : delayRampVar(v),
                     "--ring": ringFor(v),
-                    ...(thin[di][h] ? { "--mark-opacity": 0.5 } : {}),
+                    ...(thin[di][h] ? { "--mark-opacity": THIN_OPACITY } : {}),
                   } as CSSProperties
                 }
               />
