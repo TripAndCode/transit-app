@@ -179,6 +179,8 @@ describe("MapTab when no trip is reporting", () => {
 describe("MapTab basemap style from the URL", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    // Two cases persist a preference; later cases must start from none.
+    localStorage.clear();
   });
 
   function renderWithStyle(search: string) {
