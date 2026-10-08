@@ -1,8 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { describe, it, expect, afterEach } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { makeMockMap, type MockMap } from "../../test/mockMap";
-import { useBasemapDim, SCRIM_LAYER } from "./useBasemapDim";
+import { useBasemapDim, LIGHT_LAYER, SCRIM_LAYER } from "./useBasemapDim";
+import { surfaceColorResolved } from "../../styles/tokens";
+import { applyTheme } from "../../styles/theme";
 
 function run(map: MockMap, epoch = 0) {
   return renderHook(() => {
@@ -11,7 +13,14 @@ function run(map: MockMap, epoch = 0) {
   });
 }
 
+const DARK_SURFACE = "#161b26";
+
 describe("useBasemapDim", () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--bg-surface");
+    delete document.documentElement.dataset.theme;
+  });
+
   it("sets zoom-gated raster mute on the basemap layer", () => {
     const map = makeMockMap();
     run(map);
@@ -157,5 +166,64 @@ describe("useBasemapDim", () => {
     expect(map.getPaintProperty("basemap", "raster-brightness-max")).toEqual([
       "interpolate", ["linear"], ["zoom"], 12, 1, 14, 1,
     ]);
+  });
+
+  it("paints the scrim in the theme's surface colour, not a fixed white", () => {
+    // A dark surface: jsdom resolves no stylesheet, and the token's fallback
+    // is white, so only a non-white value proves the scrim reads the theme.
+    document.documentElement.style.setProperty("--bg-surface", DARK_SURFACE);
+    const map = makeMockMap();
+    run(map);
+    expect(surfaceColorResolved()).toBe(DARK_SURFACE);
+    expect((map.getLayer(SCRIM_LAYER)!.paint as Record<string, unknown>)["background-color"]).toBe(DARK_SURFACE);
+  });
+
+  it("recolours the existing scrim when the theme toggles", () => {
+    document.documentElement.dataset.theme = "light";
+    const map = makeMockMap();
+    run(map);
+    document.documentElement.style.setProperty("--bg-surface", DARK_SURFACE);
+    act(() => applyTheme("dark"));
+    expect(map.layers.filter((l) => l.id === SCRIM_LAYER)).toHaveLength(1);
+    expect(map.getPaintProperty(SCRIM_LAYER, "background-color")).toBe(DARK_SURFACE);
+  });
+
+  it("adds no light layer when no light is given", () => {
+    const map = makeMockMap();
+    run(map);
+    expect(map.getLayer(LIGHT_LAYER)).toBeUndefined();
+  });
+
+  it("lays the ambient light directly above the scrim with the given transition", () => {
+    const map = makeMockMap();
+    renderHook(() => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, true, 0.3, { color: "#D9A066", opacity: 0.07 }, 600); });
+    expect(map.layers.map((l) => l.id)).toEqual(["basemap", SCRIM_LAYER, LIGHT_LAYER]);
+    const light = map.getLayer(LIGHT_LAYER)!.paint as Record<string, unknown>;
+    expect(light["background-color"]).toBe("#D9A066");
+    expect(light["background-opacity"]).toBe(0.07);
+    expect(light["background-color-transition"]).toEqual({ duration: 600, delay: 0 });
+    expect(light["background-opacity-transition"]).toEqual({ duration: 600, delay: 0 });
+  });
+
+  it("repaints an existing light at once, even while another source's reload holds the style unloaded", () => {
+    const map = makeMockMap();
+    map.reloadsOnSetData = true;
+    const { rerender } = renderHook(({ l }) => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, true, 0.3, l, 600); },
+      { initialProps: { l: { color: "#D9A066", opacity: 0.07 } } });
+    map.addSource("relief", { type: "geojson" });
+    (map.getSource("relief") as { setData: (d: unknown) => void }).setData({});
+    expect(map.isStyleLoaded()).toBe(false);
+    rerender({ l: { color: "#3B4A8C", opacity: 0.1 } });
+    expect(map.getPaintProperty(LIGHT_LAYER, "background-color")).toBe("#3B4A8C");
+  });
+
+  it("updates an existing light in place and steps when the transition is 0", () => {
+    const map = makeMockMap();
+    const { rerender } = renderHook(({ l, ms }) => { const mapRef = useRef(map as never); useBasemapDim(mapRef, 0, true, 0.3, l, ms); },
+      { initialProps: { l: { color: "#D9A066", opacity: 0.07 }, ms: 600 } });
+    rerender({ l: { color: "#3B4A8C", opacity: 0.1 }, ms: 0 });
+    expect(map.layers.filter((l) => l.id === LIGHT_LAYER)).toHaveLength(1);
+    expect(map.getPaintProperty(LIGHT_LAYER, "background-color")).toBe("#3B4A8C");
+    expect(map.getPaintProperty(LIGHT_LAYER, "background-opacity-transition")).toEqual({ duration: 0, delay: 0 });
   });
 });

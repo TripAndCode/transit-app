@@ -52,7 +52,9 @@ import { useCappedList } from "../hooks/useCappedList";
 import { fitAll, focusRoute as frameRoute, inspectTrip, RELIEF_PITCH, reliefPitch } from "./map/cameraChoreography";
 import { useReliefLayer } from "./map/useReliefLayer";
 import { RELIEF_CAP_MIN, reliefPointsFromFrame, reliefPointsFromLive, type ReliefPoint } from "./map/reliefLayer";
-import { RELIEF_PREF_KEY, useBoolPref } from "./map/mapLayerPrefs";
+import { LIGHT_PREF_KEY, PEARL_PREF_KEY, RELIEF_PREF_KEY, useBoolPref } from "./map/mapLayerPrefs";
+import { frameHour, lightFor } from "./map/ambientLight";
+import { usePearlLayer } from "./map/usePearlLayer";
 import { CROSS_FADE_MS } from "./map/playbackFrames";
 import { InspectCard } from "./map/InspectCard";
 
@@ -183,6 +185,10 @@ export function MapTab() {
     setPersistedRelief(next);
     setReliefParam(next ? "1" : "0");
   }
+  // The segment highlight and the playback light are calm enough to start on;
+  // both stay off under reduced motion whatever the chip says.
+  const [pearlOn, setPearlOn] = useBoolPref(PEARL_PREF_KEY, true);
+  const [lightOn, setLightOn] = useBoolPref(LIGHT_PREF_KEY, true);
   const [sheetSnap, setSheetSnap] = useState<SnapPoint>("peek");
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -405,7 +411,12 @@ export function MapTab() {
 
   const playback = useDayPlayback(id, playbackOn);
 
-  useBasemapDim(mapRef, styleEpoch, true, dimAmount);
+  // The light follows the hour of the frame on screen; outside playback the
+  // view is "now" and carries no tint. steppingOnly is the reduced-motion
+  // signal: no tint, and any change steps rather than fades.
+  const playbackFrame = playbackOn ? playback.frames[playback.index] : undefined;
+  const light = lightFor(playbackFrame ? frameHour(playbackFrame.t) : null, lightOn && !playback.steppingOnly);
+  useBasemapDim(mapRef, styleEpoch, true, dimAmount, light, playback.steppingOnly ? 0 : CROSS_FADE_MS);
   useOperationsMapLayers(
     mapRef,
     liveQuery.data ? { ...liveQuery.data, rows: liveRows } : undefined,
@@ -419,6 +430,8 @@ export function MapTab() {
     stopProfileQuery.data?.stops,
     restPitch,
   );
+  // After useOperationsMapLayers, so the reported trail it lies on exists.
+  usePearlLayer(mapRef, styleEpoch, progressQuery.data, pearlOn);
   // Declared after useOperationsMapLayers: effects run in declaration order,
   // so on a style reload (which wipes every imperatively-added layer) the live
   // layers are re-added before playback hides them again.
@@ -662,6 +675,29 @@ export function MapTab() {
                 icon: (
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
                     <path d="M2 13 6 5l3 5 2-3 3 6Z" />
+                  </svg>
+                ),
+              }, {
+                id: "pearl",
+                label: t("map.style.pearl"),
+                hint: t("map.style.pearl_hint"),
+                on: pearlOn,
+                onToggle: () => setPearlOn(!pearlOn),
+                icon: (
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <path d="M2 8h12M9 4l4 4-4 4" />
+                  </svg>
+                ),
+              }, {
+                id: "light",
+                label: t("map.style.light"),
+                hint: t("map.style.light_hint"),
+                on: lightOn,
+                onToggle: () => setLightOn(!lightOn),
+                icon: (
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <circle cx="8" cy="8" r="3" />
+                    <path d="M8 1v2M8 13v2M1 8h2M13 8h2" />
                   </svg>
                 ),
               }]}
