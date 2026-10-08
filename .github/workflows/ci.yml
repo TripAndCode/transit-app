@@ -98,6 +98,12 @@ jobs:
       - name: CSS tokens check
         run: npm run check:css-tokens
 
+      - name: React Compiler checker unit tests
+        run: npm run test:check-react-compiler
+
+      - name: React Compiler compiles every component
+        run: npm run check:react-compiler
+
       # Typecheck already ran above (tsc -b), so this build step skips it
       # (build:bundle = vite build only) and just enforces AGENTS.md's
       # "keep MapLibre out of the entry chunk" rule against the real bundle.

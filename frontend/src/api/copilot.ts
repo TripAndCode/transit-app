@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
 import { useTranslation } from "react-i18next";
@@ -51,9 +51,9 @@ export function useCopilotInsight(
   // Only the request *key* is debounced here; useQuery (queryKey
   // ["copilot-insight", debouncedKey]) owns the fetch, loading/error state,
   // and stale-response discard — same split as AdminUsersPage's search box.
-  // `[key]` alone as the effect dep is enough: `params` is derived from the
-  // same inputs that produce `key`, so a `key` change always means fresh
-  // `params` too.
+  // The timer restarts only when `key` changes: `params` is derived from the
+  // same inputs that produce `key`, so the inputs are read when the timer
+  // fires rather than tracked as dependencies.
   // Starts at {key: null, params: null} rather than the current `key` so the
   // very first request also waits DEBOUNCE_MS -- a mount that immediately has
   // a `key` (e.g. Overview already has a cached viewPayload) would otherwise
@@ -64,17 +64,18 @@ export function useCopilotInsight(
     params: null,
   });
 
+  const publish = useEffectEvent((nextKey: string | null) => {
+    setDebounced({
+      key: nextKey,
+      params: nextKey == null ? null : { agencyId: agencyId!, tab: tab!, viewPayload },
+    });
+  });
+  const debouncedKey = debounced.key;
   useEffect(() => {
-    if (key === debounced.key) return;
-    const id = setTimeout(() => {
-      setDebounced({
-        key,
-        params: key == null ? null : { agencyId: agencyId!, tab: tab!, viewPayload },
-      });
-    }, DEBOUNCE_MS);
+    if (key === debouncedKey) return;
+    const id = setTimeout(() => publish(key), DEBOUNCE_MS);
     return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, debouncedKey]);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["copilot-insight", debounced.key],

@@ -155,10 +155,10 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
     .map((bd) => days.findIndex((d) => d.date === bd))
     .filter((i) => i >= 0);
 
-  const worstIdx = days.reduce(
-    (best, d, i) => ((d.avg_min ?? 0) > (days[best].avg_min ?? 0) ? i : best),
-    0,
-  );
+  const worstIdx = days.reduce((best, d, i) => {
+    const delay = d.avg_min ?? 0;
+    return delay > (days[best].avg_min ?? 0) ? i : best;
+  }, 0);
   const showWorst = days.length > 1 && (days[worstIdx].avg_min ?? 0) > 0;
   const selected = drag ? brushIndices(drag.anchor, drag.head) : [];
   const cursor = drag ? drag.head : hover;

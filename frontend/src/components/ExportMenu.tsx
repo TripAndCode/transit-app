@@ -103,9 +103,10 @@ export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint
   async function handlePng() {
     const svg = svgContainerRef?.current?.querySelector("svg");
     if (!svg) return;
+    const filename = `${(pngFilenameBase ?? "export").replace(/[^\w.-]/g, "_")}.png`;
     try {
       const blob = await svgToPngBlob(svg);
-      triggerBlobDownload(blob, `${(pngFilenameBase ?? "export").replace(/[^\w.-]/g, "_")}.png`);
+      triggerBlobDownload(blob, filename);
       closeMenu();
     } catch {
       setStatus("pngFailed");

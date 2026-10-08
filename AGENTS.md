@@ -95,6 +95,8 @@ to the same files for Codex discovery. They are plain Markdown any agent can rea
   - `npm run deadcode`
   - `npm run test:check-entry-chunk`, `npm run test:check-css-tokens`,
     `npm run check:css-tokens`
+  - `npm run test:check-react-compiler`, `npm run check:react-compiler`: the second
+    fails on any component or hook the React Compiler skips
   - then `npm run build:bundle && npm run check:entry-chunk`
 
   Lint through `npm run lint`, never a bare `npx eslint`, which fails outright.
