@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   RELIEF_BASE_M, RELIEF_CAP_MIN, RELIEF_HEIGHT_M_PER_MIN,
   reliefFeatures, reliefHeight, reliefPaint, reliefPointsFromFrame, reliefPointsFromLive, tweenFeatures,
+  reliefScale,
 } from "./reliefLayer";
 import { severityStepColors } from "../../styles/tokens";
 import type { LiveTrip, TimelineFrame } from "../../api/types";
@@ -35,6 +36,42 @@ describe("reliefFeatures", () => {
   });
   it("skips points without finite coordinates", () => {
     expect(reliefFeatures([{ ...P(1), lon: Number.NaN }]).features).toEqual([]);
+  });
+});
+
+describe("reliefScale", () => {
+  const metresPerPx = (zoom: number, lat: number) => (40_075_016.686 * Math.cos((lat * Math.PI) / 180)) / (512 * 2 ** zoom);
+
+  it("leaves a column its own size at street zoom", () => {
+    expect(reliefScale(14, 35.7)).toBe(1);
+    expect(reliefScale(16, 35.7)).toBe(1);
+  });
+
+  it("grows a column below street zoom so it stays at least 8px wide on screen, where the vehicle dots would cover it", () => {
+    for (const zoom of [10, 11, 12, 13]) {
+      const [feature] = reliefFeatures([{ stop_id: "S", lon: 139.7, lat: 35.7, delay_min: 2 }], reliefScale(zoom, 35.7)).features;
+      const ring = feature.geometry.coordinates[0];
+      const widthM = (ring[1][0] - ring[0][0]) * 111_320 * Math.cos((35.7 * Math.PI) / 180);
+      expect(widthM / metresPerPx(zoom, 35.7)).toBeGreaterThanOrEqual(8 - 1e-6);
+    }
+  });
+
+  it("stops growing below the zoom where a region's stops crowd together, so a column never stands kilometres tall", () => {
+    expect(reliefScale(8, 35.7)).toBe(reliefScale(10, 35.7));
+    expect(reliefScale(2, 35.7)).toBe(reliefScale(10, 35.7));
+    expect(reliefScale(10, 35.7)).toBeGreaterThan(reliefScale(11, 35.7));
+  });
+
+  it("scales height with the footprint, so one column's height against another's still reads as their delays", () => {
+    const points = [
+      { stop_id: "A", lon: 139.7, lat: 35.7, delay_min: 1 },
+      { stop_id: "B", lon: 139.71, lat: 35.7, delay_min: 4 },
+    ];
+    const scale = reliefScale(11, 35.7);
+    expect(scale).toBeGreaterThan(1);
+    const [a, b] = reliefFeatures(points, scale).features;
+    expect(a.properties.h).toBeCloseTo(reliefHeight(1) * scale);
+    expect(b.properties.h / a.properties.h).toBeCloseTo(reliefHeight(4) / reliefHeight(1));
   });
 });
 
@@ -77,6 +114,12 @@ describe("reliefPointsFromFrame", () => {
 describe("tweenFeatures", () => {
   const at = (stop_id: string, delay_min: number) => ({ stop_id, lon: 132.4585, lat: 34.397, delay_min });
   const props = (fc: ReturnType<typeof reliefFeatures>) => fc.features.map((f) => f.properties);
+
+  it("raises a newly reporting stop from the floor at the scale the reading is drawn at", () => {
+    const empty = reliefFeatures([]);
+    const scaled = reliefFeatures([at("NEW", 4)], 3);
+    expect(tweenFeatures(empty, scaled, 0).features[0].properties.h).toBeCloseTo(RELIEF_BASE_M * 3);
+  });
 
   it("runs each surviving stop's height and delay from the previous reading to the new one", () => {
     const prev = reliefFeatures([at("S1", 1)]);

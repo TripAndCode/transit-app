@@ -18,6 +18,7 @@ export function makeMockMap(
   const paint: Record<string, unknown> = {};
   const layout: Record<string, unknown> = {};
   let styleLoadedFlag = styleLoaded;
+  let zoom = 14;
   const map = {
     /** As MapLibre does: a GeoJSON `setData` leaves the style "not loaded"
      *  until the source's reload lands (settleStyle / settleViaIdle). */
@@ -97,6 +98,13 @@ export function makeMockMap(
       styleLoadedFlag = true;
       map.fire("idle");
     },
+    // A street-zoom camera over Tokyo; `setZoom` moves it without an event,
+    // so a test fires the `zoomend` it wants to simulate.
+    getZoom: () => zoom,
+    setZoom: (next: number) => {
+      zoom = next;
+    },
+    getCenter: () => ({ lng: 139.7, lat: 35.7 }),
     flyTo: () => {},
     jumpTo: () => {},
     fitBounds: () => {},

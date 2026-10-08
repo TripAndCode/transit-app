@@ -9,6 +9,7 @@ import {
   RELIEF_SOURCE,
   reliefFeatures,
   reliefPaint,
+  reliefScale,
   sameReliefReading,
   tweenFeatures,
   type ReliefCollection,
@@ -73,12 +74,12 @@ export function useReliefLayer(
         if (map.getSource(RELIEF_SOURCE)) map.removeSource(RELIEF_SOURCE);
       });
     }
-    const next = reliefFeatures(points);
+    const featuresAtZoom = () => reliefFeatures(points, reliefScale(map.getZoom(), map.getCenter().lat));
     // A new reading on an existing source eases from what is on screen. It
     // runs at once: the source belongs to the style loaded now, and waiting
     // for the whole style to read as loaded would hold it behind any other
     // source's reload (the playback dots').
-    const follow = (source: ReliefSource) => {
+    const follow = (source: ReliefSource, next: ReliefCollection) => {
       if (targetRef.current && sameReliefReading(targetRef.current, next)) return;
       cancelTween(rafRef);
       targetRef.current = next;
@@ -107,26 +108,40 @@ export function useReliefLayer(
       };
       rafRef.current = requestAnimationFrame(tick);
     };
+    // A camera move that lands on another zoom re-sizes the same reading.
+    const onZoomEnd = () => {
+      const source = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
+      if (source) follow(source, featuresAtZoom());
+    };
+    map.on("zoomend", onZoomEnd);
+    const stopZoom = () => map.off("zoomend", onZoomEnd);
     const existing = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
     if (existing) {
-      follow(existing);
-      return;
+      follow(existing, featuresAtZoom());
+      return stopZoom;
     }
-    return whenStyleReady(map, () => {
+    // Built when the style is ready rather than now: a zoom that lands before
+    // then finds no source to re-size.
+    const cancelReady = whenStyleReady(map, () => {
+      const ready = featuresAtZoom();
       const source = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
       if (source) {
-        follow(source);
+        follow(source, ready);
         return;
       }
       // First show, or a style reload wiped the layer: no on-screen reading
       // to tween from.
       cancelTween(rafRef);
-      map.addSource(RELIEF_SOURCE, { type: "geojson", data: next });
+      map.addSource(RELIEF_SOURCE, { type: "geojson", data: ready });
       const beforeId = MARK_LAYERS_BOTTOM_FIRST.find((id) => map.getLayer(id));
       map.addLayer({ id: RELIEF_LAYER, type: "fill-extrusion", source: RELIEF_SOURCE, paint: reliefPaint() }, beforeId);
-      shownRef.current = next;
-      targetRef.current = next;
+      shownRef.current = ready;
+      targetRef.current = ready;
     });
+    return () => {
+      stopZoom();
+      cancelReady();
+    };
   }, [crossFadeMs, mapRef, on, points, styleEpoch]);
 
   // Colour tokens are resolved when the paint is written, so a theme change
