@@ -155,9 +155,8 @@ export function AdminAuditPage() {
       ]);
     } catch (e) {
       setExportError(formatApiError(e));
-    } finally {
-      setExporting(false);
     }
+    setExporting(false);
   }
 
   return (

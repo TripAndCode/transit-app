@@ -75,24 +75,25 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
   async function handlePromote(queryLogId: number) {
     setPromoteMessage(null);
     setPromotingIds((ids) => new Set(ids).add(queryLogId));
+    let message: string;
     try {
       const result = await promote.mutateAsync(queryLogId);
       if (result.promoted) {
-        setPromoteMessage(t("admin.ask_ops.promote_success"));
+        message = t("admin.ask_ops.promote_success");
       } else if (result.reason === "already_promoted") {
-        setPromoteMessage(t("admin.ask_ops.promote_already"));
+        message = t("admin.ask_ops.promote_already");
       } else {
-        setPromoteMessage(t("admin.ask_ops.promote_not_eligible"));
+        message = t("admin.ask_ops.promote_not_eligible");
       }
     } catch {
-      setPromoteMessage(t("admin.ask_ops.promote_error"));
-    } finally {
-      setPromotingIds((ids) => {
-        const next = new Set(ids);
-        next.delete(queryLogId);
-        return next;
-      });
+      message = t("admin.ask_ops.promote_error");
     }
+    setPromotingIds((ids) => {
+      const next = new Set(ids);
+      next.delete(queryLogId);
+      return next;
+    });
+    setPromoteMessage(message);
   }
 
   const columns: DataTableColumn<AskQueryLogRow>[] = [
