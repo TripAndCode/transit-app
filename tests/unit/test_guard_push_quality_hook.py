@@ -177,15 +177,60 @@ def _frontend_gate_block() -> str:
     return text[start:end]
 
 
+#: npm scripts CI's frontend job runs that this gate deliberately does not.
+#: The hook header names each, with its reason.
+_CI_ONLY_SCRIPTS = {"test:coverage"}
+
+
+def _ci_frontend_scripts() -> set[str]:
+    """Every `npm run <script>` a step of CI's frontend job runs."""
+    from tests.unit.test_ci_workflow_gates import _workflow_yaml
+
+    steps = _workflow_yaml()["jobs"]["frontend"]["steps"]
+    runs = "\n".join(step["run"] for step in steps if "run" in step)
+    return set(re.findall(r"npm run ([\w:-]+)", runs))
+
+
+def _commands(block: str) -> str:
+    """The block's shell outside comments and double-quoted strings. A
+    run_step label and an echo's text are double-quoted; the commands
+    themselves are not (a `bash -c` body is single-quoted), so a label that
+    names a script is not mistaken for running it."""
+    code = "\n".join(line for line in block.splitlines() if not line.lstrip().startswith("#"))
+    return re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)
+
+
+def _runs(block: str, script: str) -> bool:
+    """Whether `block` invokes exactly `script` (`lint` is not `lint:i18n`),
+    with or without npm flags before it."""
+    pattern = rf"npm run(?: --?[\w-]+)* {re.escape(script)}(?![\w:-])"
+    return re.search(pattern, _commands(block)) is not None
+
+
 def test_frontend_gate_runs_every_check_ci_runs():
-    """The local push gate must not silently omit a check CI enforces --
-    CI added deadcode, the CSS-tokens checker's own unit tests, and the
-    CSS-tokens static scan (frontend/.github/workflows/ci.yml), and this
-    gate is the only local signal for a push made from a worktree (see the
-    module docstring in the hook itself)."""
+    """The local push gate must not silently omit a check CI enforces: it is
+    the only local signal for a push made from a worktree (see the module
+    docstring in the hook itself). The list is CI's own, so a new CI step
+    fails here until the gate runs it or the header says why it does not."""
     block = _frontend_gate_block()
-    for script in ("npm run deadcode", "npm run test:check-css-tokens", "npm run check:css-tokens"):
-        assert script in block, f"{script} missing from the RUN_FRONTEND gate block"
+    scripts = _ci_frontend_scripts()
+    assert {"typecheck", "lint", "deadcode", "check:css-tokens"} <= scripts, "ci.yml's frontend job was not read"
+    for script in sorted(scripts - _CI_ONLY_SCRIPTS):
+        assert _runs(block, script), f"npm run {script} missing from the RUN_FRONTEND gate block"
+    header = HOOK_PATH.read_text().split("\n\n", 1)[0]
+    for script in _CI_ONLY_SCRIPTS:
+        assert script in header, f"{script} runs in CI only, but the hook header does not say so"
+
+
+def test_a_script_counts_as_run_only_when_a_command_invokes_it_by_its_exact_name():
+    assert _runs('run_step 30 "npm run lint:i18n" x npm run lint:i18n', "lint:i18n")
+    assert not _runs('run_step 30 "npm run lint:i18n" x npm run lint:i18n', "lint")
+    assert not _runs("npm run lint:i18n-strings", "lint:i18n")
+    assert not _runs('run_step 120 "npm run check:react-compiler (label)" x true', "check:react-compiler")
+    assert not _runs('    # npm run deadcode, described\n    echo "== npm run deadcode =="', "deadcode")
+    assert _runs("run_with_timeout 90 x npm run --silent deadcode -- --reporter json", "deadcode")
+    build_step = "run_step 480 \"label\" x bash -c 'npm run build:bundle && npm run check:entry-chunk'"
+    assert _runs(build_step, "check:entry-chunk")
 
 
 def _deadcode_classifier() -> str:

@@ -766,6 +766,10 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
       "${IN_DIR[@]}" "$FE_DIR" npm run test:check-entry-chunk || FAIL=1
     run_step 30 "npm run test:check-css-tokens (fixture-based positive/negative controls for the checker itself)" \
       "${IN_DIR[@]}" "$FE_DIR" npm run test:check-css-tokens || FAIL=1
+    run_step 30 "npm run test:check-react-compiler (fixture-based positive/negative controls for the checker itself)" \
+      "${IN_DIR[@]}" "$FE_DIR" npm run test:check-react-compiler || FAIL=1
+    run_step 120 "npm run check:react-compiler (the React Compiler compiles every component and hook)" \
+      "${IN_DIR[@]}" "$FE_DIR" npm run check:react-compiler || FAIL=1
     run_step 30 "npm run check:css-tokens (static scan: var(--x) refs resolve, z-index uses the shared ladder)" \
       "${IN_DIR[@]}" "$FE_DIR" npm run check:css-tokens || FAIL=1
     if [ "${PUSH_GATE_SKIP_BUILD:-0}" = "1" ]; then
