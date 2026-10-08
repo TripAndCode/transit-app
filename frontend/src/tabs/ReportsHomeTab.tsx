@@ -100,7 +100,7 @@ export function ReportsHomeTab() {
         ["definition", JSON.stringify(trend.data?.definition)], [], ...buildCsv(days, daysColumns, ctx),
       ])}>{t("csv")}</button></div></div>
       <AsyncSection loading={trend.isPending} error={trend.error} onRetry={() => void trend.refetch()} data={trend.data} hasContent={() => days.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
-        {() => <><p className="focus-muted">{t("mean")}{FILTER_SEPARATOR}{t("coverage", { range: formatDateRange(days[0]?.date ?? "", days.at(-1)?.date ?? "") })}</p><div ref={chartWrapRef}><PeriodChart days={days} /></div></>}
+        {() => <><p className="focus-muted">{t("mean")}{FILTER_SEPARATOR}{t("coverage", { range: formatDateRange(days[0]?.date ?? "", days.at(-1)?.date ?? "") })}</p><div ref={chartWrapRef} className="focus-chart-scroll"><PeriodChart days={days} /></div></>}
       </AsyncSection></section>
       <section><div className="focus-header"><h2>{t("routesToCheck")}</h2><div className="focus-actions"><button className="btn-ghost" disabled={!rows.length || !!ranking.error || ranking.isFetching} onClick={() => downloadCsv(`patterns-${id}-${ctx.from}-${ctx.to}`, [
         ["definition", JSON.stringify(ranking.data?.definition)], [], ...buildCsv(rows, rankingColumns, ctx),

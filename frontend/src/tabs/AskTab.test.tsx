@@ -58,6 +58,16 @@ describe("AskTab layout", () => {
     Element.prototype.scrollTo = vi.fn();
   });
 
+  it("titles the screen with one level-1 heading, above the investigations bar", () => {
+    const { container } = renderAskTab();
+    const heading = screen.getByRole("heading", { level: 1, name: "Ask" });
+    const bar = container.querySelector(".ask-workspace-bar");
+    expect(bar).not.toBeNull();
+    expect(heading.compareDocumentPosition(bar!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The bar holds only the investigations menu; the screen name is the h1's.
+    expect(bar!.textContent).not.toMatch(/^Ask/);
+  });
+
   it("renders the question composer above the landing cards when there are no messages", () => {
     const { container } = renderAskTab();
     const dock = container.querySelector(".ask-tool-menu");

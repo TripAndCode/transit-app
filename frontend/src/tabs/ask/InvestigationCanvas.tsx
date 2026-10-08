@@ -67,7 +67,9 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
               aria-current={step.id === selected.id ? "step" : undefined}
               onClick={() => selectStep({ id: step.id, latestId: latest.id })}
             >
-              {index + 1}. {step.question.split("\n")[0] || t("ask.workspace.retained_result")}
+              <span className="clamp-2">
+                {index + 1}. {step.question.split("\n")[0] || t("ask.workspace.retained_result")}
+              </span>
             </button>
           </Tooltip>
         ))}

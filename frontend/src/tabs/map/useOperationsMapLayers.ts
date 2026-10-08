@@ -361,6 +361,7 @@ export function useOperationsMapLayers(
         // colour tokens, but a selected route takes this branch instead of
         // re-adding the layers -- every resolved colour in the stack has to
         // be refreshed here or it stays pinned to the theme that created it.
+        map.setPaintProperty(ACTIVE_ROUTE_CASING_LAYER, "line-color", surfaceColorResolved());
         if (map.getLayer(ACTIVE_ROUTE_FLOW_LAYER)) {
           map.setPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-color", accentColorResolved());
         }
@@ -375,7 +376,9 @@ export function useOperationsMapLayers(
         type: "line",
         source: ACTIVE_ROUTE_SOURCE,
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "rgba(255,255,255,0.94)", "line-width": 10 },
+        // The casing separates the route from the basemap, so it is the
+        // theme's surface: light on the light map, dark on the dark one.
+        paint: { "line-color": surfaceColorResolved(), "line-width": 10 },
       }, beforeId);
       map.addLayer({
         id: ACTIVE_ROUTE_LAYER,
@@ -443,6 +446,7 @@ export function useOperationsMapLayers(
         repaintLayer(map, TRIP_PROGRESS_LINE_LAYER, tripProgressLinePaint());
         repaintLayer(map, TRIP_PROGRESS_DIRECTION_LAYER, tripProgressDirectionPaint());
         repaintLayer(map, TRIP_PROGRESS_STOPS_LAYER, tripProgressStopsPaint());
+        repaintLayer(map, TRIP_PROGRESS_LABELS_LAYER, labelPaint());
         return;
       }
       map.addSource(TRIP_PROGRESS_SOURCE, { type: "geojson", data: collection });
@@ -491,7 +495,7 @@ export function useOperationsMapLayers(
           "text-anchor": "top",
           "text-optional": true,
         },
-        paint: { "text-color": "#f8fbff", "text-halo-color": "rgba(12,18,31,.9)", "text-halo-width": 2 },
+        paint: labelPaint(),
       });
     });
   }, [mapRef, progress, styleEpoch, theme]);

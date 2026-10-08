@@ -20,6 +20,7 @@ import { RevealSection } from "../components/overview/RevealSection";
 import { RoutesToCheckList } from "../components/RoutesToCheckList";
 import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
+import { PageHeader } from "../components/ui/PageHeader";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
 
 import "../styles/overview.css";
@@ -116,6 +117,7 @@ export function OverviewTab() {
 
   return (
     <>
+      <div className="ov-page-head"><PageHeader title={t("nav.pulse")} /></div>
       <ScopeSentence applied={query.data?.scope_applied} />
       <div className="ov-page">
         <AsyncSection

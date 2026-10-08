@@ -56,6 +56,11 @@ describe("OverviewTab", () => {
     expect(screen.getByText("No observations in this range. Try a wider window.")).toBeInTheDocument();
   });
 
+  it("titles the screen with one level-1 heading", () => {
+    renderOverview(summary());
+    expect(screen.getByRole("heading", { level: 1, name: "Pulse" })).toBeInTheDocument();
+  });
+
   it("states its scope as a sentence, greying what the summary did not use", () => {
     renderOverview(
       { ...summary({}), scope_applied: { from: true, to: true, dow: false } } as OverviewSummary,

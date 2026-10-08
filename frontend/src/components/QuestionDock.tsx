@@ -88,7 +88,7 @@ export function QuestionDock({
           borderRadius: 12,
           padding: "10px 12px",
           boxShadow: composing ? "var(--el-1)" : "none",
-          transition: "box-shadow 120ms ease",
+          transition: "box-shadow var(--transition)",
         }}
       >
         {composing && (
@@ -131,7 +131,7 @@ export function QuestionDock({
                     fontSize: 13,
                     cursor: busy && !active ? "not-allowed" : "pointer",
                     opacity: busy && !active ? 0.6 : 1,
-                    transition: "background 120ms ease, color 120ms ease",
+                    transition: "background var(--transition), color var(--transition)",
                   }}
                   title={t(tpl.title_key)}
                 >

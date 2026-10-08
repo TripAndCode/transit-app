@@ -1,6 +1,7 @@
 import { lazy } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
+import { PageHeader } from "../components/ui/PageHeader";
 import { COMPARE_REPORT_TYPES } from "../routes/destinations";
 import { loadAnalysisTab, loadNetworkTab } from "../routes/lazyTabs";
 
@@ -24,6 +25,9 @@ export function CompareTab() {
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* NetworkTab carries its own h1 on the agencies board, so the screen
+          title is rendered for the period comparison only: one h1 either way. */}
+      {mode === "periods" && <PageHeader title={t("nav.compare")} />}
       <div
         role="group"
         aria-label={t("nav.compare")}

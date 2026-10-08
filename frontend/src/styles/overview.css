@@ -13,6 +13,16 @@
   padding: 40px 24px 80px;
   color: var(--text-primary);
 }
+/* The screen's title, on the same 880px column as the page below it. */
+.ov-page-head {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 24px 0;
+}
+@media (max-width: 640px) {
+  .ov-page-head { padding: 16px 16px 0; }
+}
 
 /* ---------- Card surface (everything except hero) ---------- */
 .ov-card {
@@ -60,7 +70,7 @@
   padding: 6px 8px;
   margin: 0 -8px;
   border-radius: var(--radius);
-  transition: background-color 200ms ease;
+  transition: background-color var(--dur-1) var(--ease-out);
 }
 /* Plain fallback first: color-mix() has no built-in fallback, and an
    engine without it would resolve `background` to its initial value
@@ -72,9 +82,6 @@
 .ov-pareto-label {
   color: var(--text-primary);
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .ov-pareto-track {
   height: 8px;
@@ -96,7 +103,6 @@
 .ov-pareto-row:hover .ov-pareto-fill { opacity: calc(var(--rank-opacity, 1) * 0.85); }
 .ov-pareto-pct {
   text-align: right;
-  font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
   font-size: 13px;
 }
@@ -151,9 +157,6 @@
   font-size: var(--text-sm);
   color: var(--text-secondary);
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .ov-check-track {
   width: 120px;
@@ -196,6 +199,18 @@
   position: relative;
   width: 100%;
 }
+/* HTML chart labels, placed as .ov-chart-plot describes. */
+.ov-peak-label {
+  position: absolute;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  pointer-events: none;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+.ov-peak-label--max { color: var(--trend-bad); font-weight: 600; }
+.ov-peak-label--flip { transform: translate(-100%, -50%); }
+.ov-peak-label--tick { transform: translate(-50%, 0); line-height: 1; }
 /* Plain fallback first: an engine without color-mix() would otherwise
    resolve `fill` to its initial value (black), not transparent. */
 .ov-peak-spread { fill: rgba(180, 83, 9, 0.06); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
@@ -230,7 +245,6 @@
   font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.01em;
-  font-variant-numeric: tabular-nums;
   color: var(--text-primary);
 }
 .ov-svc-track {
@@ -275,7 +289,7 @@
   white-space: nowrap;
   box-shadow: var(--el-2);
   transform: translate(-50%, -100%) translateY(-8px);
-  transition: opacity 100ms;
+  transition: opacity var(--dur-1) var(--ease-out);
 }
 .ov-tooltip::after {
   content: "";
@@ -384,6 +398,25 @@
   color: var(--text-secondary);
   margin-bottom: 8px;
 }
+/* The box a chart's HTML labels are placed against. A stretched svg scales
+   any text inside it with the chart, distorting it and shrinking it below
+   the 12px floor on a narrow card, so the labels are HTML instead. The box
+   is exactly the svg (no legend, caption or tooltip offset inside it), so
+   a percent of it is a percent of the viewBox. The peak ribbon's
+   .ov-peak-svg-wrap is the same kind of box. */
+.ov-chart-plot { position: relative; }
+.ov-svc-daily-label,
+.ov-lorenz-label {
+  position: absolute;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.ov-svc-daily-label--y,
+.ov-lorenz-label--y { transform: translate(-100%, -50%); }
+.ov-svc-daily-label--x,
+.ov-lorenz-label--x { transform: translate(-50%, -50%); }
 .ov-svc-daily-legend-swatch {
   display: inline-block;
   width: 14px;
@@ -407,7 +440,6 @@
   .ov-page { padding: 24px 16px 60px; }
   .ov-card { padding: 22px; }
   .ov-pareto-row { grid-template-columns: 1fr 2fr 50px; gap: 6px; font-size: 12px; }
-  .ov-pareto-label { white-space: normal; }
   .ov-modal {
     width: 100%;
     max-height: 100vh;

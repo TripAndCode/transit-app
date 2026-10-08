@@ -43,6 +43,12 @@ describe("RoutesIndex", () => {
     expect(await screen.findByText("analysis-tab:ranking,ranking_best,on_time,worst_5min default:none")).toBeInTheDocument();
   });
 
+  it("titles the screen with one level-1 heading", async () => {
+    open("/agencies/9/routes");
+    await screen.findByText(/^analysis-tab/);
+    expect(screen.getByRole("heading", { level: 1, name: "Routes" })).toBeInTheDocument();
+  });
+
   it("opens the report its sort names", async () => {
     open("/agencies/9/routes?sort=on_time");
     expect(await screen.findByText(/default:on_time/)).toBeInTheDocument();

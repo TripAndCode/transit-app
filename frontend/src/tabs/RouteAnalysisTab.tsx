@@ -204,7 +204,7 @@ export function RouteAnalysisTab() {
           <div>
             {activeTab === "trend" && <div className="focus-tab-panel" role="tabpanel" id={panelId("trend")} aria-labelledby={tabId("trend")}>
               <div className="focus-actions focus-muted"><span style={{ color: "var(--accent)" }}>● {t("selected")}</span>{compare && <span>┄ {t("previous")}</span>}<span>○ {t("missing")}</span></div>
-              <StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
+              <div className="focus-chart-scroll"><StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} /></div>
               <p className="focus-muted">{t("selected")} {formatDateRange(ctx.from, ctx.to)}{compare && ` · ${t("previous")} ${formatDateRange(prevCtx.from, prevCtx.to)}`}</p>
             </div>}
             {activeTab === "marey" && <div className="focus-tab-panel" role="tabpanel" id={panelId("marey")} aria-labelledby={tabId("marey")}>
@@ -226,7 +226,7 @@ export function RouteAnalysisTab() {
           </div>
           <aside className="focus-aside"><label>{t("selectedStop")}<select style={{ width: "100%", margin: "12px 0" }} value={selected?.stop_sequence ?? ""} onChange={(e) => setSelection({ route, sequence: Number(e.target.value) })}>
             {stops.map((s) => <option key={s.stop_sequence} value={s.stop_sequence}>{s.stop_name}</option>)}
-          </select></label><p><strong>{selected?.avg_min == null ? "—" : selected.avg_min.toFixed(1)}</strong> {t("minutes")}</p><p>{t("samples")} {formatNumber(selected?.samples ?? 0)}</p></aside>
+          </select></label><p><strong className="num">{selected?.avg_min == null ? "—" : selected.avg_min.toFixed(1)}</strong> {t("minutes")}</p><p>{t("samples")} {formatNumber(selected?.samples ?? 0)}</p></aside>
         </div>
       </>}
     </AsyncSection>}

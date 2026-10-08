@@ -546,6 +546,20 @@ describe("a theme toggle repaints layers whose source already exists", () => {
     expect(severityStepColors()).toContain(DARK["--delay-severe"]);
   });
 
+  it("recolours the selected route's casing from the theme surface", () => {
+    const map = mountThenToggleToDark();
+
+    expect(map.getPaintProperty("active-route-casing", "line-color")).toBe(surfaceColorResolved());
+    expect(map.getPaintProperty("active-route-casing", "line-color")).toBe(DARK["--bg-surface"]);
+  });
+
+  it("paints the inspected trip's stop labels with the theme's label ink and repaints them on a toggle", () => {
+    const map = mountThenToggleToDark();
+
+    expectRepainted(map, "trip-progress-labels", labelPaint());
+    expect(map.getPaintProperty("trip-progress-labels", "text-halo-color")).toBe(DARK["--bg-surface"]);
+  });
+
   it("recolours the live vehicle marks, clusters and labels", () => {
     const map = mountThenToggleToDark();
 

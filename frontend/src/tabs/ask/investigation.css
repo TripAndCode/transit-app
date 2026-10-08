@@ -4,8 +4,8 @@
 .investigation-caption { color: var(--text-secondary); font-size: 12px; }
 .investigation-steps { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }
 .investigation-steps button {
-  flex: 0 0 auto; max-width: 240px; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; padding: 8px 12px; border: 1px solid var(--border-soft);
+  flex: 0 0 auto; max-width: 240px;
+  padding: 8px 12px; border: 1px solid var(--border-soft);
   border-radius: var(--radius); color: var(--text-secondary); background: var(--bg-surface);
 }
 .investigation-steps button[aria-current="step"] { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
@@ -14,7 +14,8 @@
 .investigation-log > summary { cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); }
 .investigation-exports > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .investigation-exports button { padding: 6px 10px; font-size: 12px; }
-.ask-workspace-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border-soft); }
+.ask-page-header { margin-bottom: 12px; }
+.ask-workspace-bar { display: flex; align-items: center; justify-content: flex-end; padding: 8px 16px; border-bottom: 1px solid var(--border-soft); }
 .ask-thread-menu { position: relative; }
 .ask-thread-menu summary, .ask-tool-menu summary, .investigation-history summary { cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary); }
 .ask-thread-menu-content { position: absolute; right: 0; top: 28px; width: min(340px, 85vw); max-height: 65vh; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border-soft); border-radius: var(--radius); z-index: var(--z-dropdown); box-shadow: var(--el-2); }

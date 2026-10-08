@@ -116,7 +116,7 @@ function RankedRoutes({
           {...clickable(() => onPick(r.route_code))}
           style={{ display: "grid", gridTemplateColumns: "minmax(120px, 34%) 1fr 72px auto", gap: 10, alignItems: "center", cursor: "pointer", padding: "5px 8px", borderRadius: 6, opacity: r.low_confidence ? 0.6 : 1 }}
         >
-          <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span className="clamp-2" style={{ fontSize: "var(--text-sm)" }}>
             <RouteLabel code={r.route_code} names={names} fallbackName={r.route_name} />
             {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
           </span>

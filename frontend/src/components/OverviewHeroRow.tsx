@@ -148,7 +148,7 @@ export function OverviewHeroRow({
         <div className="ov-hero-label">
           {t("overview.hero_row.avg_delay_label", { range })}
         </div>
-        <div className="ov-kpi-value">
+        <div className="ov-kpi-value num">
           {headline.avg_min != null ? avgMinDisplay.toFixed(1) : "—"}
           <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
         </div>

@@ -89,7 +89,7 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
           display: "inline-flex",
           alignItems: "center",
           gap: 4,
-          transition: "background 120ms ease",
+          transition: "background var(--transition)",
         }}
         aria-haspopup="dialog"
         aria-expanded={open}

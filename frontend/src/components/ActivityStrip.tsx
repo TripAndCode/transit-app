@@ -67,7 +67,7 @@ export function ActivityStrip() {
         color: "var(--accent-strong)",
         opacity: visible ? 1 : 0,
         transition:
-          "opacity 200ms ease-out, background 200ms ease-out, border-color 200ms ease-out",
+          "opacity var(--dur-2) var(--ease-out), background var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out)",
         overflow: "hidden",
       }}
     >

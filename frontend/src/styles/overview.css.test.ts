@@ -71,3 +71,14 @@ describe("overview.css living hero", () => {
     expect(decl(ruleBody(css, ".ov-hero-text {"), "position")).toBe("relative");
   });
 });
+
+describe("overview.css peak label", () => {
+  it("a tick is placed from its top, one line tall, so it hangs below the axis", () => {
+    const tick = ruleBody(css, ".ov-peak-label--tick {");
+    expect(decl(tick, "bottom")).toBeNull();
+    expect(decl(tick, "line-height")).toBe("1");
+  });
+  it("a flipped peak label moves left and stays centred on its callout, like an unflipped one", () => {
+    expect(decl(ruleBody(css, ".ov-peak-label--flip {"), "transform")).toBe("translate(-100%, -50%)");
+  });
+});

@@ -33,7 +33,12 @@
 .focus-tab-panel--hidden { display: none; }
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
 .focus-aside strong { font-size: 30px; color: var(--text-primary); }
-.focus-chart { width: 100%; height: 300px; min-height: 230px; }
+/* Never narrower than the width at which its 14-unit labels still clear the
+   12px floor (svgTextFloor.test.ts); past that the fixed height sets the
+   scale. A narrower screen scrolls the chart sideways inside
+   .focus-chart-scroll instead of shrinking its text. */
+.focus-chart { width: 100%; height: 300px; min-height: 230px; min-width: 700px; }
+.focus-chart-scroll { overflow-x: auto; }
 /* `components/tableStyles.ts` is where table and cell styling belongs, and
    the tables on these pages read from it. `.focus-table` stays for the one
    consumer that has not moved -- the Marey diagram's narrow-viewport data
@@ -50,7 +55,9 @@
 .focus-saved { list-style: none; padding: 0; }
 .focus-saved li { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; gap: 20px; border-bottom: 1px solid var(--border-soft); }
 /* BP.md */
-@media (max-width: 900px) { .focus-split { grid-template-columns: 1fr; } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
+/* minmax(0, ...): an auto minimum would let the chart's floor widen the
+   whole stacked page; only the chart scrolls sideways. */
+@media (max-width: 900px) { .focus-split { grid-template-columns: minmax(0, 1fr); } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
 /* Print rules for `.focus-page` and the app shell live in the shared print
    media block in styles/global.css, loaded on every page. */
 .marey__caption { margin: 0 0 6px; }

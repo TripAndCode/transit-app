@@ -130,7 +130,7 @@ export function ConcentrationBar({
         const opacity = RANK_OPACITY[Math.min(idx, RANK_OPACITY.length - 1)];
         return (
           <div className="ov-pareto-row" key={r.route_code}>
-            <div className="ov-pareto-label">
+            <div className="ov-pareto-label clamp-2">
               {r.route_short_name
                 ? `${r.route_short_name} (${r.route_code})`
                 : r.route_code}
@@ -145,7 +145,7 @@ export function ConcentrationBar({
                 } as CSSProperties}
               />
             </div>
-            <div className="ov-pareto-pct">{r.share_pct.toFixed(1)}%</div>
+            <div className="ov-pareto-pct num">{r.share_pct.toFixed(1)}%</div>
           </div>
         );
       })}
@@ -264,6 +264,7 @@ function LorenzCurve({
   const diagonal = `M ${LZ_PAD_LEFT},${LZ_PAD_TOP + innerH} L ${LZ_PAD_LEFT + innerW},${LZ_PAD_TOP}`;
   return (
     <div className="ov-lorenz-wrap">
+      <div className="ov-chart-plot">
       <svg
         width="100%"
         viewBox={`0 0 ${LZ_W} ${LZ_H}`}
@@ -313,33 +314,33 @@ function LorenzCurve({
             <circle cx={ticks20.x} cy={ticks20.y} r="3" style={{ fill: "var(--trend-bad)" }} />
           </g>
         )}
-        {/* X tick labels */}
-        {[0, 50, 100].map((p) => (
-          <text
-            key={`xt-${p}`}
-            x={LZ_PAD_LEFT + (p / 100) * innerW}
-            y={LZ_PAD_TOP + innerH + 14}
-            fontSize="10"
-            style={{ fill: "var(--text-tertiary)" }}
-            textAnchor="middle"
-          >
-            {p}%
-          </text>
-        ))}
-        {/* Y tick labels */}
-        {[0, 50, 100].map((p) => (
-          <text
-            key={`yt-${p}`}
-            x={LZ_PAD_LEFT - 6}
-            y={LZ_PAD_TOP + innerH - (p / 100) * innerH + 3}
-            fontSize="10"
-            style={{ fill: "var(--text-tertiary)" }}
-            textAnchor="end"
-          >
-            {p}%
-          </text>
-        ))}
       </svg>
+      {/* HTML axis labels (see .ov-chart-plot in overview.css). */}
+      {[0, 50, 100].map((p) => (
+        <span
+          key={`xt-${p}`}
+          className="ov-lorenz-label ov-lorenz-label--x num"
+          style={{
+            top: `${((LZ_PAD_TOP + innerH + 14) / LZ_H) * 100}%`,
+            left: `${((LZ_PAD_LEFT + (p / 100) * innerW) / LZ_W) * 100}%`,
+          }}
+        >
+          {p}%
+        </span>
+      ))}
+      {[0, 50, 100].map((p) => (
+        <span
+          key={`yt-${p}`}
+          className="ov-lorenz-label ov-lorenz-label--y num"
+          style={{
+            top: `${((LZ_PAD_TOP + innerH - (p / 100) * innerH) / LZ_H) * 100}%`,
+            left: `${((LZ_PAD_LEFT - 6) / LZ_W) * 100}%`,
+          }}
+        >
+          {p}%
+        </span>
+      ))}
+      </div>
       <p className="ov-lorenz-caption">
         {t("overview.concentration.lorenz_caption", {
           pct: share20Pct.toFixed(0),

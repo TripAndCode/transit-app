@@ -250,7 +250,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             color: "var(--text-tertiary)",
             fontSize: "var(--text-xs)",
             transform: open ? "rotate(180deg)" : "none",
-            transition: "transform 160ms ease",
+            transition: "transform var(--transition)",
           }}
         >
           &#9662;

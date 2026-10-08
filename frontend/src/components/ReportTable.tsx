@@ -231,7 +231,7 @@ export function ReportTable({ reportType, rows, minSamples }: Props) {
                   <span className="report-cards__headline">
                     <span className="report-cards__label">{t(headline.labelKey)}</span>{" "}
                     {headline.bar === "delay" && isSevere(row[headline.index]) && <DelayMarker />}
-                    <span>{cardValue(headline, row[headline.index], t)}</span>
+                    <span className="num">{cardValue(headline, row[headline.index], t)}</span>
                   </span>
                 )}
               </div>
@@ -447,7 +447,7 @@ function BarCell({
         <div style={{ width: `${ratio * 100}%`, height: "100%", borderRadius: 3, background: color, opacity: 0.6 }} />
       </div>
       {marked && <DelayMarker />}
-      <span style={textColor ? { color: textColor } : undefined}>{text}</span>
+      <span className="num" style={textColor ? { color: textColor } : undefined}>{text}</span>
     </div>
   );
 }

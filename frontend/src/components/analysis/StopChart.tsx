@@ -4,6 +4,7 @@ import type { RouteShapeStop } from "../../api/types";
 import { matchedPrevious } from "./stopSeries";
 import { delayColor } from "../../styles/tokens";
 import { ChartAxis } from "./ChartAxis";
+import { showsLabel } from "./axisLabels";
 import { useDrawOn } from "../charts/ChartEnter";
 import { niceAxis } from "../charts/niceAxis";
 
@@ -38,8 +39,8 @@ export function StopChart({ stops, previous, selected, onSelect }: {
         onClick={() => onSelect(s.stop_sequence)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(s.stop_sequence); } }}>
         <title>{s.stop_name}</title>
       </circle>
-      {(i % Math.max(1, Math.ceil(stops.length / 7)) === 0 || i === stops.length - 1) &&
-        <text x={x(i)} y={307} textAnchor="middle" fill="var(--text-secondary)" fontSize={11}>{s.stop_name.slice(0, 7)}</text>}
+      {showsLabel(i, stops.length) &&
+        <text x={x(i)} y={307} textAnchor="middle" fill="var(--text-secondary)" fontSize={14}>{s.stop_name.slice(0, 7)}</text>}
     </g>)}
   </svg>;
 }
