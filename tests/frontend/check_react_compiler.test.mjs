@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { compilerErrors, skippedFunction, sourceFiles } from "../../frontend/scripts/check-react-compiler.mjs";
 
@@ -71,4 +73,49 @@ test("the build and the tests pass the compiler no options, the ones this check 
     const calls = readFileSync(join(FRONTEND, config), "utf8").match(/reactCompilerPreset\([^)]*\)/g) ?? [];
     assert.deepEqual(calls, ["reactCompilerPreset()"], `${config}: options added here must be added to check-react-compiler.mjs too`);
   }
+});
+
+const SCRIPT = fileURLToPath(new URL("../../frontend/scripts/check-react-compiler.mjs", import.meta.url));
+const tmpDirs = [];
+after(() => {
+  for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
+});
+
+/** A throwaway git repo whose tracked src/ holds `files`, as the script lists it. */
+function trackedTree(files) {
+  const dir = mkdtempSync(join(tmpdir(), "check-react-compiler-"));
+  tmpDirs.push(dir);
+  mkdirSync(join(dir, "src"));
+  for (const [name, code] of Object.entries(files)) writeFileSync(join(dir, "src", name), code);
+  for (const args of [["init", "-q"], ["add", "src"]]) spawnSync("git", args, { cwd: dir });
+  return dir;
+}
+
+const run = (root) => spawnSync("node", [SCRIPT, "--root", root], { encoding: "utf8" });
+
+test("the command exits 1 and names the file and line when a component is skipped", () => {
+  const root = trackedTree({
+    "Saver.tsx":
+      'import { useState } from "react";\nexport function Saver({ save }) {\n  const [busy, setBusy] = useState(false);\n' +
+      "  async function onClick() {\n    try { await save(); } finally { setBusy(false); }\n  }\n" +
+      "  return <button disabled={busy} onClick={onClick} />;\n}\n",
+  });
+  const result = run(root);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /src\/Saver\.tsx:5: .*TryStatement/);
+});
+
+test("the command exits 0 for a tree the compiler compiles whole", () => {
+  const root = trackedTree({
+    "Counter.tsx": 'import { useState } from "react";\nexport function Counter() {\n  const [n, setN] = useState(0);\n  return <button onClick={() => setN(n + 1)}>{n}</button>;\n}\n',
+  });
+  const result = run(root);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /OK/);
+});
+
+test("the command fails rather than passing when there is no git tree to list", () => {
+  const dir = mkdtempSync(join(tmpdir(), "check-react-compiler-nogit-"));
+  tmpDirs.push(dir);
+  assert.notEqual(run(dir).status, 0);
 });

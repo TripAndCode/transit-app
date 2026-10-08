@@ -60,8 +60,15 @@ export function sourceFiles(root) {
   return listed.split("\n").filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$|\.d\.ts$/.test(f));
 }
 
+/** `--root <dir>` points the check at another tree with a git-tracked src/
+ *  (its tests do); by default it checks this frontend. */
+function rootFrom(argv) {
+  const at = argv.indexOf("--root");
+  return at >= 0 && argv[at + 1] ? resolve(argv[at + 1]) : resolve(fileURLToPath(import.meta.url), "../..");
+}
+
 function main() {
-  const root = resolve(fileURLToPath(import.meta.url), "../..");
+  const root = rootFrom(process.argv);
   let failures = 0;
   for (const file of sourceFiles(root)) {
     const path = resolve(root, file);
