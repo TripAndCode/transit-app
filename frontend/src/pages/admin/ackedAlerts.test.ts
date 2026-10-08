@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { ackAlert, hashAlertKey, pruneAcked, readAckedAlerts, type AckedMap } from "./ackedAlerts";
+import { ackAlert, ackedFromSnapshot, ackedSnapshot, hashAlertKey, pruneAcked, type AckedMap } from "./ackedAlerts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -31,8 +31,9 @@ describe("hashAlertKey", () => {
     expect(hashAlertKey("warn", "same text", null)).not.toBe(hashAlertKey("warn", "same text", "/a"));
   });
 
-  it("does not collide across the level|text|href join boundary", () => {
-    expect(hashAlertKey("warn", "a|b", null)).not.toBe(hashAlertKey("warna", "b", null));
+  it("does not collide when a field itself contains the separator", () => {
+    expect(hashAlertKey("warn", "a|b", "/c")).not.toBe(hashAlertKey("warn", "a", "b|/c"));
+    expect(hashAlertKey("warn", "x|", null)).not.toBe(hashAlertKey("warn", "x", "|"));
   });
 });
 
@@ -55,24 +56,24 @@ describe("pruneAcked", () => {
   });
 });
 
-describe("ackAlert / readAckedAlerts", () => {
+describe("ackAlert / ackedFromSnapshot", () => {
   const now = 1_700_000_000_000;
 
-  it("marks a hash acknowledged for readAckedAlerts to see", () => {
+  it("marks a hash acknowledged for a snapshot read to see", () => {
     ackAlert("abc123", now);
-    expect(readAckedAlerts(now).has("abc123")).toBe(true);
+    expect(ackedFromSnapshot(ackedSnapshot(), now).has("abc123")).toBe(true);
   });
 
   it("expires an acknowledgement after 7 days", () => {
     ackAlert("abc123", now);
-    expect(readAckedAlerts(now + 7 * DAY_MS - 1).has("abc123")).toBe(true);
-    expect(readAckedAlerts(now + 7 * DAY_MS).has("abc123")).toBe(false);
+    expect(ackedFromSnapshot(ackedSnapshot(), now + 7 * DAY_MS - 1).has("abc123")).toBe(true);
+    expect(ackedFromSnapshot(ackedSnapshot(), now + 7 * DAY_MS).has("abc123")).toBe(false);
   });
 
   it("persists across separate reads (backed by localStorage)", () => {
     ackAlert("hash-1", now);
     ackAlert("hash-2", now);
-    const acked = readAckedAlerts(now);
+    const acked = ackedFromSnapshot(ackedSnapshot(), now);
     expect(acked.has("hash-1")).toBe(true);
     expect(acked.has("hash-2")).toBe(true);
   });
@@ -89,11 +90,11 @@ describe("ackAlert / readAckedAlerts", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new DOMException("blocked");
     });
-    expect(readAckedAlerts(now).size).toBe(0);
+    expect(ackedFromSnapshot(ackedSnapshot(), now).size).toBe(0);
   });
 
   it("treats malformed stored JSON as no acknowledgements", () => {
     localStorage.setItem("transit.admin.ackedAlerts", "{not json");
-    expect(readAckedAlerts(now).size).toBe(0);
+    expect(ackedFromSnapshot(ackedSnapshot(), now).size).toBe(0);
   });
 });

@@ -1,7 +1,3 @@
-/* Self-sufficient styling for AlertCenter.tsx, imported directly here rather
-   than relying on another chunk having loaded first (same reasoning as
-   commandPalette.css). */
-
 .alert-center-trigger {
   position: relative;
   display: inline-flex;
@@ -40,11 +36,11 @@
    drops to the same neutral tone as the rest of the trigger, rather than
    disappearing outright. */
 .alert-center-badge--muted {
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
 }
 
 /* An unread warning, in the board's warning tone; an info-only list keeps
-   the plain colour below, not an alarm. */
+   the base badge colour, not an alarm. */
 .alert-center-badge--warn {
   color: var(--color-warning-text);
 }
@@ -92,6 +88,12 @@
   background: var(--surface-2);
 }
 
+.alert-center-stale {
+  margin: 0 0 8px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
 .alert-center-empty {
   margin: 8px 2px;
   font-size: var(--text-sm);
@@ -131,9 +133,6 @@
 .alert-center-item[data-acked="true"] {
   opacity: 0.62;
 }
-
-
-
 
 .alert-center-item-text {
   flex: 1 1 160px;

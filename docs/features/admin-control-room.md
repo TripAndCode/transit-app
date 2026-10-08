@@ -35,8 +35,8 @@ the same board snapshot, with an unread count and a popover of its alerts
 grouped by level. On `/admin` it adds no poll of its own (the board page
 polls); elsewhere it polls the endpoint every minute. Acknowledging an alert
 is browser-only: a 7-day entry in localStorage (`transit.admin.ackedAlerts`,
-keyed by a hash of level, text and link), shared by the browser's tabs.
-Server-side acknowledgement, visible to other operators, is a follow-up.
+keyed by a hash of level, text and link), shared by the browser's tabs;
+other operators and devices do not see it.
 
 ## Agencies health + diagnostics drawer
 

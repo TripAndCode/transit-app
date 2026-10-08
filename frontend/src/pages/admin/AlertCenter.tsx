@@ -9,11 +9,6 @@ import { ackAlert, ackedFromSnapshot, ackedSnapshot, hashAlertKey, subscribeAcke
 import { alertText } from "./alertText";
 import "./alertCenter.css";
 
-// Hoisted: a Date.now() read inside the component trips react-hooks/purity.
-function nowMs(): number {
-  return Date.now();
-}
-
 const LEVELS = ["warn", "info"] as const satisfies readonly BoardAlert["level"][];
 
 /** Off the board page the bell is the only reader of the snapshot, and an
@@ -25,33 +20,36 @@ const BELL_POLL_MS = 60_000;
  * page. On the board page, whose own subscriber already polls, the bell adds
  * no timer; elsewhere it polls at `BELL_POLL_MS`.
  *
- * Acknowledgement is client-side only (`ackedAlerts.ts`, localStorage keyed
- * by a hash of level+text+href, expiring after 7 days): it silences an alert
- * in the browser that dismissed it, in every tab of it. Server-side
- * acknowledgement, visible to other operators, is a follow-up.
+ * Acknowledging an alert silences it in this browser, in every tab of it
+ * (`ackedAlerts.ts`).
  */
 export function AlertCenter() {
   const { t } = useTranslation();
-  const { pathname } = useLocation();
-  const onBoard = pathname === "/admin" || pathname === "/admin/";
+  const location = useLocation();
+  const onBoard = location.pathname === "/admin" || location.pathname === "/admin/";
   const board = useAdminBoard({ refetchInterval: onBoard ? false : BELL_POLL_MS });
   const alerts = board.data?.alerts ?? [];
-  // Open on the page it was opened on: a navigation closes it.
-  const [openAt, setOpenAt] = useState<string | null>(null);
-  const open = openAt === pathname;
+  const [open, setOpen] = useState(false);
+  // Any navigation, history steps included, closes it: reset during render
+  // from the location it last saw rather than synchronised in an effect.
+  const [seenKey, setSeenKey] = useState(location.key);
+  if (seenKey !== location.key) {
+    setSeenKey(location.key);
+    setOpen(false);
+  }
   const [anchor, setAnchor] = useState({ top: 0, right: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   // Expiry is read at the board's own fetch time, so an acknowledgement that
   // lapses while the page stays open counts again on the next poll.
-  const acked = ackedFromSnapshot(useSyncExternalStore(subscribeAcked, ackedSnapshot, () => ""), board.dataUpdatedAt || nowMs());
+  const acked = ackedFromSnapshot(useSyncExternalStore(subscribeAcked, ackedSnapshot, () => ""), board.dataUpdatedAt);
 
   const hashed = alerts.map((alert) => ({ alert, hash: hashAlertKey(alert.level, alert.text, alert.href) }));
   const unread = hashed.filter(({ hash }) => !acked.has(hash));
   const warnUnread = unread.some(({ alert }) => alert.level === "warn");
 
   function close() {
-    setOpenAt(null);
+    setOpen(false);
   }
 
   function toggle() {
@@ -61,7 +59,7 @@ export function AlertCenter() {
     }
     const rect = buttonRef.current?.getBoundingClientRect();
     if (rect) setAnchor({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
-    setOpenAt(pathname);
+    setOpen(true);
   }
 
   const badgeClass = [
@@ -111,9 +109,10 @@ export function AlertCenter() {
             <X size={14} strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
+        {board.data && board.error && <p className="alert-center-stale">{t("admin.alert_center.refresh_failed")}</p>}
         {!board.data ? (
-          // Unread or failed is not the same as nothing to report.
-          <p className="alert-center-empty">{board.error ? t("admin.board.check_failed") : t("common.loading")}</p>
+          // Loading or failed is not the same as nothing to report.
+          <p className="alert-center-empty">{board.error ? t("admin.alert_center.load_failed") : t("common.loading")}</p>
         ) : alerts.length === 0 ? (
           <p className="alert-center-empty">{t("admin.board.alerts_none")}</p>
         ) : (
@@ -138,7 +137,7 @@ export function AlertCenter() {
                           type="button"
                           className="alert-center-ack"
                           disabled={isAcked}
-                          onClick={() => ackAlert(hash, nowMs())}
+                          onClick={() => ackAlert(hash, Date.now())}
                         >
                           {isAcked ? t("admin.alert_center.acked") : t("admin.alert_center.ack")}
                         </button>

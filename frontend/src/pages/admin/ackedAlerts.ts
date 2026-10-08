@@ -4,10 +4,10 @@ const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Deterministic 32-bit FNV-1a hash, rendered as 8 hex digits. Good enough to
  *  key a small localStorage map by level+text+href without a hashing
  *  dependency: a collision would only mis-acknowledge one alert, never
- *  corrupt the store. Keeping the pipe separator means "warn"+"a|b" and
- *  "warna"+"|b" hash differently rather than colliding on concatenation. */
+ *  corrupt the store. The fields are joined as a JSON array, which no two
+ *  different field lists can spell the same way. */
 export function hashAlertKey(level: string, text: string, href: string | null): string {
-  const input = `${level}|${text}|${href ?? ""}`;
+  const input = JSON.stringify([level, text, href]);
   let hash = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {
     hash ^= input.charCodeAt(i);
@@ -29,10 +29,11 @@ export function pruneAcked(map: AckedMap, now: number): AckedMap {
   return pruned;
 }
 
-function readRawMap(): AckedMap {
+/** A stored map, or empty when it is missing, malformed or not a map of
+ *  expiry times. */
+function parseAckedMap(raw: string | null): AckedMap {
+  if (!raw) return {};
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return {};
     const map: AckedMap = {};
@@ -55,13 +56,6 @@ function writeRawMap(map: AckedMap): void {
   }
 }
 
-/** Hashes still inside their 7-day acknowledgement window, as of `now`.
- *  Expired and malformed entries are skipped here and dropped from storage
- *  on the next acknowledgement. */
-export function readAckedAlerts(now: number): Set<string> {
-  return new Set(Object.keys(pruneAcked(readRawMap(), now)));
-}
-
 /** The stored acknowledgements as written, for useSyncExternalStore: a
  *  string stays equal while the store is unchanged. */
 export function ackedSnapshot(): string {
@@ -72,20 +66,11 @@ export function ackedSnapshot(): string {
   }
 }
 
-/** The hashes in `snapshot` still inside their window as of `now`. */
+/** The hashes in `snapshot` still inside their 7-day window as of `now`.
+ *  Expired and malformed entries are skipped here and dropped from storage
+ *  on the next acknowledgement. */
 export function ackedFromSnapshot(snapshot: string, now: number): Set<string> {
-  if (!snapshot) return new Set();
-  try {
-    const parsed: unknown = JSON.parse(snapshot);
-    if (typeof parsed !== "object" || parsed === null) return new Set();
-    const map: AckedMap = {};
-    for (const [hash, expiresAt] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof expiresAt === "number") map[hash] = expiresAt;
-    }
-    return new Set(Object.keys(pruneAcked(map, now)));
-  } catch {
-    return new Set();
-  }
+  return new Set(Object.keys(pruneAcked(parseAckedMap(snapshot), now)));
 }
 
 const listeners = new Set<() => void>();
@@ -103,11 +88,10 @@ export function subscribeAcked(onChange: () => void): () => void {
   };
 }
 
-/** Marks `hash` acknowledged for 7 days from `now`. Server-side
- *  acknowledgement (visible to other operators/devices) is a follow-up --
- *  this only silences the alert in the browser that dismissed it. */
+/** Marks `hash` acknowledged for 7 days from `now`, in this browser only:
+ *  other operators and devices do not see it. */
 export function ackAlert(hash: string, now: number): void {
-  const pruned = pruneAcked(readRawMap(), now);
+  const pruned = pruneAcked(parseAckedMap(ackedSnapshot()), now);
   pruned[hash] = now + TTL_MS;
   writeRawMap(pruned);
   // A tab hears its own writes from here; other tabs from the storage event.

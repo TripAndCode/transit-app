@@ -39,9 +39,14 @@ vi.mock("../../api/admin", async (importOriginal) => ({
 function GoTo({ to }: { to: string }) {
   const navigate = useNavigate();
   return (
-    <button type="button" onClick={() => navigate(to)}>
-      go
-    </button>
+    <>
+      <button type="button" onClick={() => navigate(to)}>
+        go
+      </button>
+      <button type="button" onClick={() => navigate(-1)}>
+        back
+      </button>
+    </>
   );
 }
 
@@ -59,8 +64,9 @@ function wrap(path = "/admin/users") {
   );
 }
 
-function board(alerts: AdminBoard["alerts"]): { data: AdminBoard } {
+function board(alerts: AdminBoard["alerts"]): { data: AdminBoard; dataUpdatedAt: number } {
   return {
+    dataUpdatedAt: Date.now(),
     data: {
       collectors: [],
       freshness: [],
@@ -108,7 +114,7 @@ describe("AlertCenter states and closing", () => {
     mockBoard = { data: undefined, isPending: false, error: new Error("boom") };
     wrap();
     await openPopover();
-    expect(screen.getByText(i18n.t("admin.board.check_failed"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("admin.alert_center.load_failed"))).toBeInTheDocument();
   });
 
   it("closes when the admin navigates elsewhere", async () => {
@@ -117,6 +123,23 @@ describe("AlertCenter states and closing", () => {
     const user = await openPopover();
     await user.click(screen.getByRole("button", { name: "go" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("stays closed when history returns to the page it was opened on", async () => {
+    mockBoard = board([WARN_ALERT]);
+    wrap();
+    const user = await openPopover();
+    await user.click(screen.getByRole("button", { name: "go" }));
+    await user.click(screen.getByRole("button", { name: "back" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("says when a refresh failed while it still shows the last alerts read", async () => {
+    mockBoard = { ...board([WARN_ALERT]), error: new Error("boom") };
+    wrap();
+    await openPopover();
+    expect(screen.getByText(i18n.t("admin.alert_center.refresh_failed"))).toBeInTheDocument();
+    expect(screen.getAllByTestId("alert-center-item")).toHaveLength(1);
   });
 
   it("closes on a click outside the panel", async () => {
@@ -269,6 +292,7 @@ describe("AlertCenter acknowledgement persistence", () => {
 
     // Well past the 7-day window: the exact edge is pinned in ackedAlerts.test.ts.
     vi.setSystemTime(new Date("2026-09-08T01:00:00Z"));
+    mockBoard = board([WARN_ALERT]);
     wrap();
     expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("1");
   });
