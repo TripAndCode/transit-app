@@ -10,6 +10,13 @@ import "./alertCenter.css";
 
 const LEVELS = ["warn", "info"] as const satisfies readonly BoardAlert["level"][];
 
+function withKey(keys: ReadonlySet<string>, key: string, present: boolean): ReadonlySet<string> {
+  const next = new Set(keys);
+  if (present) next.add(key);
+  else next.delete(key);
+  return next;
+}
+
 /** Off the board page the bell is the only reader of the snapshot, and an
  *  alert does not need the board's own pace to be noticed. */
 const BELL_POLL_MS = 60_000;
@@ -42,6 +49,21 @@ export function AlertCenter() {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const ack = useAckBoardAlert();
+  // Kept per alert, from each acknowledgement's own promise: the mutation's
+  // own state follows only its latest call, so a second alert acknowledged
+  // meanwhile would otherwise release the first one's button and hide its
+  // failure.
+  const [sending, setSending] = useState<ReadonlySet<string>>(() => new Set());
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+
+  function acknowledge(key: string) {
+    setSending((keys) => withKey(keys, key, true));
+    setFailed((keys) => withKey(keys, key, false));
+    ack
+      .mutateAsync(key)
+      .catch(() => setFailed((keys) => withKey(keys, key, true)))
+      .finally(() => setSending((keys) => withKey(keys, key, false)));
+  }
 
   const unread = alerts.filter((alert) => !alert.acked);
   const warnUnread = unread.some((alert) => alert.level === "warn");
@@ -121,10 +143,7 @@ export function AlertCenter() {
               <section key={level} className="alert-center-group">
                 <p className="alert-center-group-label">{t(`admin.alert_center.group.${level}`)}</p>
                 <ul className="alert-center-list">
-                  {group.map((alert) => {
-                    const sending = ack.isPending && ack.variables === alert.key;
-                    const failed = ack.isError && ack.variables === alert.key;
-                    return (
+                  {group.map((alert) => (
                       <li key={alert.key} className="alert-center-item" data-testid="alert-center-item" data-acked={alert.acked}>
                         <span className="alert-center-item-text">{alertText(t, alert)}</span>
                         {alert.href && (
@@ -135,15 +154,14 @@ export function AlertCenter() {
                         <button
                           type="button"
                           className="alert-center-ack"
-                          disabled={alert.acked || sending}
-                          onClick={() => ack.mutate(alert.key)}
+                          disabled={alert.acked || sending.has(alert.key)}
+                          onClick={() => acknowledge(alert.key)}
                         >
                           {alert.acked ? t("admin.alert_center.acked") : t("admin.alert_center.ack")}
                         </button>
-                        {failed && <p className="alert-center-ack-failed">{t("admin.alert_center.ack_failed")}</p>}
+                        {failed.has(alert.key) && <p className="alert-center-ack-failed">{t("admin.alert_center.ack_failed")}</p>}
                       </li>
-                    );
-                  })}
+                  ))}
                 </ul>
               </section>
             );

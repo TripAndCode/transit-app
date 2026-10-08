@@ -15,7 +15,7 @@ vi.mock("../../api/admin", () => ({
     return mockUsers;
   },
   useAdminBoard: () => mockBoard,
-  useAckBoardAlert: () => ({ mutate: () => {}, isPending: false, isError: false }),
+  useAckBoardAlert: () => ({ mutateAsync: () => Promise.resolve() }),
 }));
 
 function wrap(path = "/admin") {
