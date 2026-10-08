@@ -128,7 +128,7 @@ function RankedRoutes({
               auto-places the remaining 3 children into columns 1-3,
               shifting the delay number out of its trailing `auto` track. */}
           <span>
-            <InlineSparkline points={r.recent_daily ?? []} width={64} height={20} showLabels={false} showEndDot={false} />
+            <InlineSparkline points={r.recent_daily ?? []} width={64} height={20} showEndDot={false} />
           </span>
           <b style={{ fontSize: 13, fontVariantNumeric: "tabular-nums", minWidth: 52, textAlign: "right" }}>
             {r.expected_avg_min.toFixed(1)}

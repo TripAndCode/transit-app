@@ -140,7 +140,6 @@ export function OverviewHeroRow({
           width={400}
           height={190}
           preserveAspectRatio="none"
-          showLabels={false}
           showEndDot={false}
           baseline={sparklineMean ?? undefined}
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}

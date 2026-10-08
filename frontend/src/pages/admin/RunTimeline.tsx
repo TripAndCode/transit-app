@@ -81,76 +81,80 @@ export function RunTimeline({ runs, dayStart, now }: { runs: readonly PipelineRu
   const ticks = Array.from({ length: HOURS / AXIS_STEP_HOURS + 1 }, (_, i) => i * AXIS_STEP_HOURS);
 
   return (
-    <svg
-      data-testid="run-timeline"
-      role="img"
-      aria-label={t("admin.board.runs_chart_label", { count: runs.length })}
-      viewBox={`0 0 ${VIEW_WIDTH} ${height}`}
-      style={{ width: "100%", height: "auto", display: "block", overflow: "visible" }}
-    >
-      {ticks.map((hour) => (
-        <g key={hour}>
-          <line x1={hourX(hour)} x2={hourX(hour)} y1={TOP_PAD} y2={axisY} stroke="var(--border-subtle)" />
-          <text
-            x={hourX(hour)}
-            y={height - 6}
-            textAnchor="middle"
-            fontSize={10.5}
-            fill="var(--text-tertiary)"
-          >
-            {clockLabel(hour)}
-          </text>
-        </g>
-      ))}
-
-      {lanes.map((lane, index) => {
-        const label = laneLabel(t, lane);
-        const y = TOP_PAD + index * LANE_HEIGHT;
-        return (
-          <g key={lane.key} data-testid="run-lane" data-lane={lane.key}>
-            <text x={LABEL_GUTTER - 8} y={y + BAR_HEIGHT - 3} textAnchor="end" fontSize={10.5} fill="var(--text-secondary)">
-              {label}
+    <div style={{ overflowX: "auto" }}>
+      <svg
+        data-testid="run-timeline"
+        role="img"
+        aria-label={t("admin.board.runs_chart_label", { count: runs.length })}
+        viewBox={`0 0 ${VIEW_WIDTH} ${height}`}
+        // Never narrower than the viewBox, so the 12-unit labels stay at 12px or
+        // more; a narrower card scrolls the chart instead.
+        style={{ width: "100%", minWidth: VIEW_WIDTH, height: "auto", display: "block", overflow: "visible" }}
+      >
+        {ticks.map((hour) => (
+          <g key={hour}>
+            <line x1={hourX(hour)} x2={hourX(hour)} y1={TOP_PAD} y2={axisY} stroke="var(--border-subtle)" />
+            <text
+              x={hourX(hour)}
+              y={height - 6}
+              textAnchor="middle"
+              fontSize={12}
+              fill="var(--text-tertiary)"
+            >
+              {clockLabel(hour)}
             </text>
-            {lane.bars.map((bar) => (
-              <rect
-                key={bar.runId}
-                data-testid="run-bar"
-                data-status={bar.status}
-                data-dashed={String(bar.dashed)}
-                x={hourX(bar.startHour)}
-                y={y}
-                // A run shorter than a pixel of axis still has to be visible:
-                // an instant skip is the most important bar on the chart.
-                width={Math.max(3, hourX(bar.endHour) - hourX(bar.startHour))}
-                height={BAR_HEIGHT}
-                rx={3}
-                fill={STATUS_FILL[bar.status]}
-                fillOpacity={bar.dashed ? 0.35 : 0.9}
-                stroke={bar.dashed ? STATUS_FILL[bar.status] : undefined}
-                strokeDasharray={bar.dashed ? "3 3" : undefined}
-              >
-                <title>{barTooltip(t, label, bar)}</title>
-              </rect>
-            ))}
           </g>
-        );
-      })}
+        ))}
 
-      {marker != null && (
-        <g data-testid="run-now-marker">
-          <line
-            x1={hourX(marker)}
-            x2={hourX(marker)}
-            y1={TOP_PAD}
-            y2={axisY}
-            stroke="var(--text-primary)"
-            strokeWidth={1.5}
-          />
-          <text x={hourX(marker) + 4} y={TOP_PAD + 8} fontSize={10.5} fontWeight={600} fill="var(--text-primary)">
-            {t("admin.board.runs_now")}
-          </text>
-        </g>
-      )}
-    </svg>
+        {lanes.map((lane, index) => {
+          const label = laneLabel(t, lane);
+          const y = TOP_PAD + index * LANE_HEIGHT;
+          return (
+            <g key={lane.key} data-testid="run-lane" data-lane={lane.key}>
+              <text x={LABEL_GUTTER - 8} y={y + BAR_HEIGHT - 3} textAnchor="end" fontSize={12} fill="var(--text-secondary)">
+                {label}
+              </text>
+              {lane.bars.map((bar) => (
+                <rect
+                  key={bar.runId}
+                  data-testid="run-bar"
+                  data-status={bar.status}
+                  data-dashed={String(bar.dashed)}
+                  x={hourX(bar.startHour)}
+                  y={y}
+                  // A run shorter than a pixel of axis still has to be visible:
+                  // an instant skip is the most important bar on the chart.
+                  width={Math.max(3, hourX(bar.endHour) - hourX(bar.startHour))}
+                  height={BAR_HEIGHT}
+                  rx={3}
+                  fill={STATUS_FILL[bar.status]}
+                  fillOpacity={bar.dashed ? 0.35 : 0.9}
+                  stroke={bar.dashed ? STATUS_FILL[bar.status] : undefined}
+                  strokeDasharray={bar.dashed ? "3 3" : undefined}
+                >
+                  <title>{barTooltip(t, label, bar)}</title>
+                </rect>
+              ))}
+            </g>
+          );
+        })}
+
+        {marker != null && (
+          <g data-testid="run-now-marker">
+            <line
+              x1={hourX(marker)}
+              x2={hourX(marker)}
+              y1={TOP_PAD}
+              y2={axisY}
+              stroke="var(--text-primary)"
+              strokeWidth={1.5}
+            />
+            <text x={hourX(marker) + 4} y={TOP_PAD + 8} fontSize={12} fontWeight={600} fill="var(--text-primary)">
+              {t("admin.board.runs_now")}
+            </text>
+          </g>
+        )}
+      </svg>
+    </div>
   );
 }

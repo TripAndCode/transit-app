@@ -44,7 +44,7 @@ describe("InlineSparkline", () => {
 
   it("draws a dashed full-width reference line at the requested value", () => {
     const { container } = render(
-      <InlineSparkline points={[0, 10]} width={100} height={50} showLabels={false} baseline={5} />,
+      <InlineSparkline points={[0, 10]} width={100} height={50} baseline={5} />,
     );
     const line = container.querySelector('[data-testid="sparkline-baseline"]');
     expect(line).toBeTruthy();
@@ -59,7 +59,7 @@ describe("InlineSparkline", () => {
 
   it("carries no SVG text for the reference line -- a stretched viewBox would distort it", () => {
     const { container } = render(
-      <InlineSparkline points={[0, 10]} showLabels={false} baseline={5} preserveAspectRatio="none" />,
+      <InlineSparkline points={[0, 10]} baseline={5} preserveAspectRatio="none" />,
     );
     expect(container.querySelectorAll("text")).toHaveLength(0);
   });

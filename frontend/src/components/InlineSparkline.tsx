@@ -9,15 +9,12 @@ type Props = {
   /** When true, always render in `accent`; skip the auto green-on-improvement. */
   forceAccent?: boolean;
   showEndDot?: boolean;
-  showLabels?: boolean;
   style?: CSSProperties;
   /** Draws a dashed horizontal reference line at this value, in the series'
    *  own units. The y-scale spans the series min..max, which on its own says
    *  nothing about how large the swing actually is -- a reference the reader
    *  already understands (the period mean, a target, zero) is what turns the
-   *  shape back into a reading. No SVG text comes with it: callers stretch
-   *  this chart with `preserveAspectRatio="none"`, which would distort any
-   *  glyph, so the label belongs in the caller's own HTML. */
+   *  shape back into a reading. */
   baseline?: number;
   /** Passed straight to the `<svg>`. Set to `"none"` when the element is
    *  stretched via CSS (e.g. `position: absolute; inset: 0`) to fill a box
@@ -30,6 +27,10 @@ type Props = {
   drawOn?: boolean;
 };
 
+/** A trend line too small for an axis. It draws no SVG text: callers stretch
+ *  it (`preserveAspectRatio="none"`, or a fixed box), which would distort a
+ *  glyph or take it below the 12px floor, so any figure it needs belongs in
+ *  the caller's own HTML. */
 export function InlineSparkline({
   points,
   width = 160,
@@ -37,7 +38,6 @@ export function InlineSparkline({
   accent = "var(--trend-bad)",
   forceAccent = false,
   showEndDot = true,
-  showLabels = true,
   style,
   baseline,
   preserveAspectRatio,
@@ -61,7 +61,7 @@ export function InlineSparkline({
   const span = y_max - y_min || 1;
 
   const stepX = width / (points.length - 1);
-  const top_pad = showLabels ? 12 : 2;
+  const top_pad = 2;
   const bottom_pad = 2;
   const usable_h = height - top_pad - bottom_pad;
   const toY = (v: number) =>
@@ -125,28 +125,6 @@ export function InlineSparkline({
         points={coords.join(" ")}
       />
       {showEndDot && <circle cx={lastX} cy={lastY} r="2.5" style={{ fill: stroke }} />}
-      {showLabels && (
-        <>
-          <text
-            x={2}
-            y={10}
-            fontSize="10"
-            style={{ fill: "var(--text-secondary)" }}
-            textAnchor="start"
-          >
-            {first.toFixed(1)}
-          </text>
-          <text
-            x={width - 2}
-            y={10}
-            fontSize="10"
-            style={{ fill: "var(--text-secondary)" }}
-            textAnchor="end"
-          >
-            {last_v.toFixed(1)}
-          </text>
-        </>
-      )}
     </svg>
   );
 }

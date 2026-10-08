@@ -45,7 +45,7 @@ export function ThresholdBand({ min, max, toY, x, width, label }: ThresholdBandP
         opacity={0.5}
       />
       {label && (
-        <text x={x + width - 4} y={yMin - 4} textAnchor="end" fontSize="9" fill="var(--text-tertiary)">
+        <text x={x + width - 4} y={yMin - 4} textAnchor="end" fontSize="12" fill="var(--text-tertiary)">
           {label}
         </text>
       )}
@@ -87,7 +87,7 @@ export function VerticalMarker({ x, y1, y2, label, title, variant = "context" }:
       {label && (
         // A highlight labels from the baseline so it can't collide with the
         // context markers, which all label from the top.
-        <text x={x + 3} y={highlight ? y2 - 3 : y1 + 9} fontSize="9" fill={stroke}>
+        <text x={x + 3} y={highlight ? y2 - 3 : y1 + 12} fontSize="12" fill={stroke}>
           {label}
         </text>
       )}
