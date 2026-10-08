@@ -15,6 +15,7 @@ export function StopRibbon({
   selectedSequence = null,
   onSelect,
   height = 18,
+  markers,
 }: {
   segments: StopRibbonSegment[];
   /** Already-translated accessible name. Pass `t(...)`, never a key. */
@@ -22,6 +23,9 @@ export function StopRibbon({
   selectedSequence?: number | null;
   onSelect?: (stopSequence: number) => void;
   height?: number;
+  /** Moving positions drawn over the bands, as a fraction of the axis: 0 is
+   *  the first stop's band centre, 1 the last's. */
+  markers?: { fraction: number; color: string; key: string }[];
 }) {
   const { t } = useTranslation("design");
   const select = onSelect;
@@ -66,6 +70,10 @@ export function StopRibbon({
           </rect>
         );
       })}
+      {markers?.map((m) => (
+        <circle key={m.key} className="stop-ribbon__pos" cx={0}
+          style={{ transform: `translateX(${(m.fraction * (segments.length - 1) + 0.5) * bandWidth}px)` }} cy={1 + height / 2} r={7} fill={m.color} />
+      ))}
     </svg>
   );
 }

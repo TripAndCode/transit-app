@@ -78,7 +78,12 @@ export function useTimelineLayers(
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !active) return;
-    const handler = () => interact();
+    // Only a person's gesture pauses: MapLibre attaches `originalEvent` to
+    // camera events it raises from input, and a move the app makes itself
+    // (the relief tilt, a route framing) carries none.
+    const handler = (event?: { originalEvent?: unknown }) => {
+      if (event?.originalEvent) interact();
+    };
     const events = ["dragstart", "zoomstart", "rotatestart", "pitchstart", "mousedown", "touchstart"];
     for (const event of events) map.on(event, handler);
     return () => {
@@ -101,16 +106,23 @@ export function useTimelineLayers(
     }
 
     const data = timelineFeatures(frames, index);
-    return whenStyleReady(map, () => {
+    const hideLive = () => {
       for (const id of LIVE_LAYERS) {
         if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
       }
-      const existing = map.getSource(TIMELINE_SOURCE) as { setData: (d: unknown) => void } | undefined;
-      if (existing) {
-        existing.setData(data);
-        repaintLayer(map, TIMELINE_LAYER, timelineCirclePaint(crossFadeMs));
-        return;
-      }
+    };
+    // An existing source belongs to the style that is loaded now, so it takes
+    // the frame at once: waiting for the whole style to read as loaded would
+    // hold the dots back behind any other source's reload (the relief's).
+    const existing = map.getSource(TIMELINE_SOURCE) as { setData: (d: unknown) => void } | undefined;
+    if (existing) {
+      hideLive();
+      existing.setData(data);
+      repaintLayer(map, TIMELINE_LAYER, timelineCirclePaint(crossFadeMs));
+      return;
+    }
+    return whenStyleReady(map, () => {
+      hideLive();
       map.addSource(TIMELINE_SOURCE, { type: "geojson", data });
       map.addLayer({
         id: TIMELINE_LAYER,

@@ -133,143 +133,147 @@ function PeakHourChart({
   }
 
   return (
-    <div
-      className="ov-peak-svg-wrap"
-      onMouseLeave={() => setHover((h) => ({ ...h, visible: false }))}
-      style={{ cursor: onHourClick ? "pointer" : "default" }}
-    >
-      <svg
-        width="100%"
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-        style={{ display: "block", overflow: "visible" }}
-        role="img"
-        aria-label={t("overview.section_peak_hour")}
-        onMouseMove={handleMove}
-        onClick={handleClick}
+    <>
+      <div
+        className="ov-peak-svg-wrap"
+        onMouseLeave={() => setHover((h) => ({ ...h, visible: false }))}
+        style={{ cursor: onHourClick ? "pointer" : "default" }}
       >
-        {spreadSegments.map((seg, i) => (
-          <rect
-            key={`spread-${i}`}
-            className="ov-peak-spread"
-            x={PAD_LEFT + seg.startHour * CELL_W}
-            y={PAD_TOP - 4}
-            width={(seg.endHour - seg.startHour) * CELL_W}
-            height={H - PAD_BOTTOM - (PAD_TOP - 4)}
-          />
-        ))}
-
-        {hourValues.map((v, h) => {
-          if (v == null) return null;
-          const x = PAD_LEFT + h * CELL_W + 1;
-          const y = clampY(toY(v));
-          const bar_h = Math.max(H - PAD_BOTTOM - y, 0);
-          const isPeak = h === peakIdx;
-          const fill = isPeak ? "var(--trend-bad)" : "var(--trend-neutral)";
-          const opacity = isPeak ? 0.95 : 0.3;
-          return (
+        <svg
+          width="100%"
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          style={{ display: "block", overflow: "visible" }}
+          role="img"
+          aria-label={t("overview.section_peak_hour")}
+          onMouseMove={handleMove}
+          onClick={handleClick}
+        >
+          {spreadSegments.map((seg, i) => (
             <rect
-              key={h}
-              x={x}
-              y={y}
-              width={CELL_W - 2}
-              height={bar_h}
-              style={{ fill }}
-              opacity={opacity}
-              rx={2}
-              ry={2}
+              key={`spread-${i}`}
+              className="ov-peak-spread"
+              x={PAD_LEFT + seg.startHour * CELL_W}
+              y={PAD_TOP - 4}
+              width={(seg.endHour - seg.startHour) * CELL_W}
+              height={H - PAD_BOTTOM - (PAD_TOP - 4)}
             />
-          );
-        })}
+          ))}
 
-        {overallAvg > 0 && (
-          <>
+          {hourValues.map((v, h) => {
+            if (v == null) return null;
+            const x = PAD_LEFT + h * CELL_W + 1;
+            const y = clampY(toY(v));
+            const bar_h = Math.max(H - PAD_BOTTOM - y, 0);
+            const isPeak = h === peakIdx;
+            const fill = isPeak ? "var(--trend-bad)" : "var(--trend-neutral)";
+            const opacity = isPeak ? 0.95 : 0.3;
+            return (
+              <rect
+                key={h}
+                x={x}
+                y={y}
+                width={CELL_W - 2}
+                height={bar_h}
+                style={{ fill }}
+                opacity={opacity}
+                rx={2}
+                ry={2}
+              />
+            );
+          })}
+
+          {overallAvg > 0 && (
+            <>
+              <line
+                x1={PAD_LEFT}
+                y1={avgY}
+                x2={W - PAD_RIGHT}
+                y2={avgY}
+                style={{ stroke: "var(--border-subtle)" }}
+                strokeWidth="1"
+                strokeDasharray="4 4"
+              />
+            </>
+          )}
+
+          <g>
             <line
-              x1={PAD_LEFT}
-              y1={avgY}
-              x2={W - PAD_RIGHT}
-              y2={avgY}
-              style={{ stroke: "var(--border-subtle)" }}
+              x1={peakBarX + CELL_W / 2}
+              y1={peakBarY - 2}
+              x2={peakBarX + CELL_W / 2}
+              y2={peakBarY - 12}
+              style={{ stroke: "var(--trend-bad)" }}
               strokeWidth="1"
-              strokeDasharray="4 4"
             />
-          </>
+            <line
+              x1={peakBarX + CELL_W / 2}
+              y1={peakBarY - 12}
+              x2={peakBarX + CELL_W / 2 + 4}
+              y2={peakBarY - 12}
+              style={{ stroke: "var(--trend-bad)" }}
+              strokeWidth="1"
+            />
+          </g>
+
+          <line
+            x1={PAD_LEFT}
+            y1={H - PAD_BOTTOM}
+            x2={W - PAD_RIGHT}
+            y2={H - PAD_BOTTOM}
+            style={{ stroke: "var(--border-subtle)" }}
+            strokeWidth="1"
+          />
+
+          {hover.visible && (
+            <line
+              x1={hover.svgX}
+              y1={PAD_TOP - 2}
+              x2={hover.svgX}
+              y2={H - PAD_BOTTOM + 2}
+              style={{ stroke: "var(--trend-neutral)", strokeOpacity: 0.30 }}
+              strokeWidth="1"
+            />
+          )}
+        </svg>
+        {/* Labels in HTML, positioned in percent of the stretched svg: SVG text
+            here would be distorted by preserveAspectRatio="none" and scaled
+            below the 12px floor on a narrow card. */}
+        {overallAvg > 0 && (
+          <span
+            className="ov-peak-label ov-peak-label--avg num"
+            style={{ top: `${(avgY / H) * 100}%`, left: `${((W - PAD_RIGHT + 4) / W) * 100}%` }}
+          >
+            {t("overview.peak_hour.avg_label")}
+          </span>
         )}
-
-        <g>
-          <line
-            x1={peakBarX + CELL_W / 2}
-            y1={peakBarY - 2}
-            x2={peakBarX + CELL_W / 2}
-            y2={peakBarY - 12}
-            style={{ stroke: "var(--trend-bad)" }}
-            strokeWidth="1"
-          />
-          <line
-            x1={peakBarX + CELL_W / 2}
-            y1={peakBarY - 12}
-            x2={peakBarX + CELL_W / 2 + 4}
-            y2={peakBarY - 12}
-            style={{ stroke: "var(--trend-bad)" }}
-            strokeWidth="1"
-          />
-        </g>
-
-        <line
-          x1={PAD_LEFT}
-          y1={H - PAD_BOTTOM}
-          x2={W - PAD_RIGHT}
-          y2={H - PAD_BOTTOM}
-          style={{ stroke: "var(--border-subtle)" }}
-          strokeWidth="1"
-        />
-
+        <span
+          className="ov-peak-label ov-peak-label--max num"
+          style={{ top: `${((peakBarY - 9) / H) * 100}%`, left: `${((peakBarX + CELL_W / 2 + 6) / W) * 100}%` }}
+        >
+          {t("overview.peak_hour.max_label", { avg: peak_hour.peak_avg_min.toFixed(1) })}
+        </span>
+        {[0, 6, 12, 18].map((h) => (
+          <span
+            key={h}
+            className="ov-peak-label ov-peak-label--tick num"
+            style={{ left: `${((PAD_LEFT + h * CELL_W + CELL_W / 2) / W) * 100}%` }}
+          >
+            {h}
+          </span>
+        ))}
         {hover.visible && (
-          <line
-            x1={hover.svgX}
-            y1={PAD_TOP - 2}
-            x2={hover.svgX}
-            y2={H - PAD_BOTTOM + 2}
-            style={{ stroke: "var(--trend-neutral)", strokeOpacity: 0.30 }}
-            strokeWidth="1"
-          />
+          <div
+            className="ov-tooltip"
+            style={{ left: hover.px, top: hover.py }}
+          >
+            {hover.label} — {hover.value}
+          </div>
         )}
-      </svg>
-      {/* Labels in HTML, positioned in percent of the stretched svg: SVG text
-          here would be distorted by preserveAspectRatio="none" and scaled
-          below the 12px floor on a narrow card. */}
-      {overallAvg > 0 && (
-        <span
-          className="ov-peak-label ov-peak-label--avg num"
-          style={{ top: `${(avgY / H) * 100}%`, left: `${((W - PAD_RIGHT + 4) / W) * 100}%` }}
-        >
-          {t("overview.peak_hour.avg_label")}
-        </span>
-      )}
-      <span
-        className="ov-peak-label ov-peak-label--max num"
-        style={{ top: `${((peakBarY - 9) / H) * 100}%`, left: `${((peakBarX + CELL_W / 2 + 6) / W) * 100}%` }}
-      >
-        {t("overview.peak_hour.max_label", { avg: peak_hour.peak_avg_min.toFixed(1) })}
-      </span>
-      {[0, 6, 12, 18].map((h) => (
-        <span
-          key={h}
-          className="ov-peak-label ov-peak-label--tick num"
-          style={{ left: `${((PAD_LEFT + h * CELL_W + CELL_W / 2) / W) * 100}%` }}
-        >
-          {h}
-        </span>
-      ))}
-      {hover.visible && (
-        <div
-          className="ov-tooltip"
-          style={{ left: hover.px, top: hover.py }}
-        >
-          {hover.label} — {hover.value}
-        </div>
-      )}
-    </div>
+      </div>
+      {/* Outside the plot box: the labels above are placed in percent of it. */}
+      {spreadSegments.length > 0 && <p className="ov-peak-legend">{t("overview.peak_hour.spread_legend")}</p>}
+    </>
   );
 }
 

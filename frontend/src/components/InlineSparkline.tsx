@@ -25,6 +25,9 @@ type Props = {
    *  background sparkline -- so it fills edge-to-edge instead of
    *  letterboxing under the default `xMidYMid meet`. */
   preserveAspectRatio?: string;
+  /** Draw the line on when its data first arrives. Pass false inside a
+   *  RevealSection, whose own transform is the entrance. */
+  drawOn?: boolean;
 };
 
 export function InlineSparkline({
@@ -38,11 +41,12 @@ export function InlineSparkline({
   style,
   baseline,
   preserveAspectRatio,
+  drawOn = true,
 }: Props) {
   // Called unconditionally, ahead of the early return below -- hooks can't
   // themselves be conditional on `points.length`.
   const lineRef = useRef<SVGPolylineElement | null>(null);
-  useDrawOn(lineRef);
+  useDrawOn(lineRef, drawOn && !!points && points.length >= 2);
 
   if (!points || points.length < 2) {
     return null;

@@ -13,49 +13,25 @@ export type TrendMark = { date?: string; dow?: number; hour?: number };
 
 export type TrendFocus = TrendMark & { source: TrendFocusSource };
 
-type TrendFocusApi = {
-  focus: TrendFocus | null;
-  setFocus: (focus: TrendFocus | null) => void;
-};
+type SetTrendFocus = (focus: TrendFocus | null) => void;
 
-const NO_FOCUS: TrendFocusApi = { focus: null, setFocus: () => {} };
-
-export const TrendFocusCtx = createContext<TrendFocusApi>(NO_FOCUS);
+/** The context carries only the publishing side. Reading the focus happens in
+ *  CSS, off the provider wrapper's `data-focus-*` attributes, so a hover never
+ *  re-renders a chart that is not under the pointer. */
+export const TrendFocusCtx = createContext<SetTrendFocus>(() => {});
 
 /** Charts reused outside a `TrendFocusProvider` (the forecast tab mounts the
- *  same band grid) get an inert focus rather than having to know whether
+ *  same band grid) get an inert setter rather than having to know whether
  *  they are linked to anything. */
-export function useTrendFocus(): TrendFocusApi {
-  return useContext(TrendFocusCtx);
+export function useTrendFocus(): { setFocus: SetTrendFocus } {
+  return { setFocus: useContext(TrendFocusCtx) };
 }
 
-/** Opacity a mark drops to while another chart's mark holds the focus. Low
- *  enough to recede, high enough that the dimmed distribution is still
- *  readable as context. */
+/** Opacity a mark drops to while another chart's mark holds the focus; the
+ *  value every generated rule writes into `--focus-dim`. Low enough to
+ *  recede, high enough that the dimmed distribution is still readable as
+ *  context. */
 export const DIM_OPACITY = 0.18;
-
-const DIMENSIONS = ["date", "dow", "hour"] as const;
-
-/**
- * A mark dims when it disagrees with the focus on a dimension they both
- * carry. Dimensions only one side knows about are ignored, so hovering an
- * hour row — which has no date — narrows the daily chart by weekday alone
- * instead of blanking every day in it.
- */
-export function isFocusDimmed(
-  focus: TrendFocus | null,
-  mark: TrendMark,
-  viewer: TrendFocusSource,
-): boolean {
-  if (!focus || focus.source === viewer) return false;
-  for (const key of DIMENSIONS) {
-    const f = focus[key];
-    const m = mark[key];
-    if (f === undefined || m === undefined) continue;
-    if (f !== m) return true;
-  }
-  return false;
-}
 
 /** ISO weekday (1 = Monday … 7 = Sunday) of a `YYYY-MM-DD` date string.
  *  Parsed as UTC midnight so the host timezone can never shift the day. */

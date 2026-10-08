@@ -18,5 +18,5 @@
   color: var(--accent-strong);
 }
 .stat-tile__value--flagged {
-  color: var(--delay-flag);
+  color: var(--color-warning-text);
 }

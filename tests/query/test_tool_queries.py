@@ -716,7 +716,7 @@ async def test_route_trend_shift_detects_regime_change(aconn, aagency_id):
             "(agency_id, date, route_code, service_type, avg_min, samples, sum_delay_sec) "
             "VALUES ($1, $2, 'R1', '平日', $3, 20, $4)",
             aagency_id,
-            d.isoformat(),
+            d,
             avg,
             round(avg * 60 * 20),
         )

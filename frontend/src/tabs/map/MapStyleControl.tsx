@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type { Map as MLMap } from "maplibre-gl";
 import { buildThumbnailUrl, DEFAULT_THUMBNAIL_VIEW, MAP_STYLES, MAX_DIM_AMOUNT, type MapStyleId } from "../../styles/mapStyle";
+import { Tooltip } from "../../components/Tooltip";
 
 const THUMB_PX = 44;
+
+/** An optional overlay the operator can switch on from the style panel. */
+type LayerChip = { id: string; label: string; hint: string; on: boolean; onToggle: () => void; icon: ReactNode };
 
 function Tile({
   label,
@@ -39,6 +43,7 @@ export function MapStyleControl({
   onDimChange,
   mapRef,
   lang = "ja",
+  layers = [],
   t,
 }: {
   value: MapStyleId;
@@ -49,6 +54,8 @@ export function MapStyleControl({
   /** UI language, for picking a style's English tile template (only `std` has
    *  one) — matches the same `lang.startsWith("en")` rule `buildStyle` uses. */
   lang?: string;
+  /** Overlay toggles rendered as chips under the dim slider. */
+  layers?: LayerChip[];
   t: TFunction;
 }) {
   const [open, setOpen] = useState(false);
@@ -125,6 +132,18 @@ export function MapStyleControl({
             />
             <output htmlFor="ops-map-dim" className="num">{dimPercent}%</output>
           </div>
+          {layers.length > 0 && (
+            <div className="ops-style-control__layers" role="group" aria-label={t("map.style.layers")}>
+              {layers.map((layer) => (
+                <Tooltip key={layer.id} label={layer.hint}>
+                  <button type="button" className="ops-style-control__chip" aria-pressed={layer.on} onClick={layer.onToggle}>
+                    <span className="ops-style-control__chip-icon" aria-hidden="true">{layer.icon}</span>
+                    {layer.label}
+                  </button>
+                </Tooltip>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

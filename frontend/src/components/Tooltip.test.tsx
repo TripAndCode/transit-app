@@ -85,6 +85,18 @@ describe("Tooltip on hover", () => {
     unhover(trigger);
     expect(trigger).not.toHaveAttribute("aria-describedby");
   });
+
+  it("re-measures at most once per frame under a burst of scroll events", () => {
+    vi.useFakeTimers();
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const trigger = renderFitButton();
+    hover(trigger);
+    advance(PAST_HOVER_INTENT_MS);
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    raf.mockClear();
+    for (let i = 0; i < 5; i++) fireEvent.scroll(window);
+    expect(raf).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Tooltip on keyboard", () => {

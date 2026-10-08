@@ -4,7 +4,7 @@ import { serviceValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewServiceSplitDay } from "../api/types";
 import { ServiceName } from "./ServiceName";
-import { formatMinutes } from "../utils/format";
+import { formatMinutes, formatShortDate } from "../utils/format";
 
 type Props = {
   service_split: Record<string, number>;
@@ -210,10 +210,7 @@ function ServiceSplitDailyChart({
       .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)},${p.y.toFixed(1)}`)
       .join(" ");
 
-  const dateLabels = daily.map((d) => {
-    const dt = new Date(d.date + "T00:00:00");
-    return `${dt.getMonth() + 1}/${dt.getDate()}`;
-  });
+  const dateLabels = daily.map((d) => formatShortDate(d.date));
   const xs = daily.map((_, i) => toX(i));
   const weekdayPath = buildPath(wd);
   const weekendPath = buildPath(we);

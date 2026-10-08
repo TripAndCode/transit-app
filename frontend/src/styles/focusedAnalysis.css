@@ -32,7 +32,7 @@
    tabs doesn't tear down and recreate the MapLibre WebGL context each time. */
 .focus-tab-panel--hidden { display: none; }
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
-.focus-aside strong { font-size: 30px; color: var(--delay-severe); }
+.focus-aside strong { font-size: 30px; color: var(--text-primary); }
 /* Never narrower than the 780-unit viewBox, so the only scale left on its
    labels is the fixed height against the viewBox height -- which keeps a
    14-unit label above the 12px floor. A narrower screen scrolls the chart
@@ -64,6 +64,21 @@
    can be picked up anywhere along its line rather than only on the 2px ink. */
 .marey-trip__hit { cursor: pointer; }
 .marey-trip { transition: opacity var(--dur-1) var(--ease-out); }
+/* While a scrub is set and no trip is pointed at, trips come up and recede
+   with the scrubbed second on the panel tier; a hover keeps the quick one. */
+.marey--scrubbing .marey-trip { transition: opacity var(--dur-2) var(--ease-out); }
+/* The trips crossing the scrubbed second: a hair heavier; the opacity
+   contrast is set inline by tripOpacity. A stroke-width change is paint, not
+   layout, in SVG. */
+.marey-trip--cross line { stroke-width: 2.4; }
+.marey-cursor { stroke: var(--accent); stroke-width: 1.5; pointer-events: none; }
+.marey-scrub { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; margin: 0 0 10px; }
+.marey-scrub__clock { font-size: var(--text-lg); font-weight: 600; min-width: 4.2ch; }
+/* The shared scrubber chrome leaves the track to its caller; this rail draws
+   a plain one so the slider's range is visible. */
+.marey-scrub .scrub-input::-webkit-slider-runnable-track { background: var(--border-soft); border-radius: 4px; }
+.marey-scrub .scrub-input::-moz-range-track { background: var(--border-soft); border-radius: 4px; }
+.stop-ribbon__pos { stroke: var(--bg-surface); stroke-width: 2; transition: transform var(--dur-2) var(--ease-out); }
 /* Each trip group is in the tab order, so the keyboard ring has to survive
    the SVG's own default of no visible focus style. */
 .marey-trip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

@@ -7,8 +7,9 @@
  * on blur or Enter, after clamping to [min, max]. The draft re-syncs from `value`
  * whenever the parent updates it externally (e.g., chip-swap resetting defaults).
  */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Z_INDEX } from "../../styles/zIndex";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import { useTranslation } from "react-i18next";
 
 /** Props for {@link LimitPill}. */
@@ -37,26 +38,12 @@ export function LimitPill({ label, value, min = 3, max = 20, onChange, disabled 
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  function close() {
+  function close(refocus = true) {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (refocus) triggerRef.current?.focus();
   }
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, ref, (reason) => close(reason === "escape"));
 
   /** Clamp and emit a numeric value; no-op for non-finite inputs. */
   function commit(next: number) {

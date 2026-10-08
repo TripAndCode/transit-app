@@ -44,7 +44,15 @@ export class MockMap {
   remove() {}
   setStyle() {}
   fitBounds() {}
-  easeTo() {}
+  private pitch = 0;
+  // Settles on the requested pitch at once: jsdom has no animation frame
+  // worth waiting on, and callers read the pitch back to decide a move.
+  easeTo(options?: { pitch?: number }) {
+    if (options?.pitch != null) this.pitch = options.pitch;
+  }
+  getPitch() {
+    return this.pitch;
+  }
   // jsdom has no projection, so there is no meaningful camera to compute.
   // Returning undefined matches what MapLibre itself does for bounds it
   // cannot fit, and is the branch revealAgency() already handles.
@@ -53,6 +61,10 @@ export class MockMap {
   }
   getZoom() {
     return 11;
+  }
+  // The style panel samples the view when it opens, for its thumbnails.
+  getCenter() {
+    return { lng: 140.7474, lat: 40.8246 };
   }
   isStyleLoaded() {
     return true;

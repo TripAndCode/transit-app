@@ -113,7 +113,7 @@ export function EmptyState({ title, hint, icon, reasons, recoveries, action }: P
                   fontSize: 13,
                   color: "var(--text-secondary)",
                   cursor: "pointer",
-                  transition: "all var(--transition)",
+                  transition: "background var(--transition), color var(--transition), border-color var(--transition)",
                 }}
               >
                 {recovery.label}

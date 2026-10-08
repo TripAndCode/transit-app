@@ -74,7 +74,7 @@ describe("destination screens", () => {
     const router = open("/agencies/9/compare?by=agencies&from=2026-09-01", "agencies/:agencyId/compare", <CompareTab />);
     expect(await screen.findByText("network-tab")).toBeInTheDocument();
     const agencies = screen.getByRole("button", { name: "Agencies" });
-    const periods = screen.getByRole("button", { name: "Periods and routes" });
+    const periods = screen.getByRole("button", { name: "Weekdays and weekends" });
     expect(agencies).toHaveAttribute("aria-pressed", "true");
     expect(periods).toHaveAttribute("aria-pressed", "false");
     await userEvent.click(periods);
@@ -87,6 +87,6 @@ describe("destination screens", () => {
   it.each(["", "?by=service", "?by=periods"])("shows the period comparison on Compare%s", async (search) => {
     open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
     expect(await screen.findByText("analysis-tab:compare_ranking")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Periods and routes" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Weekdays and weekends" })).toHaveAttribute("aria-pressed", "true");
   });
 });

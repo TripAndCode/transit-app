@@ -87,4 +87,11 @@ describe("PeakHourRibbon", () => {
     expect(top).toBeGreaterThanOrEqual(PAD_TOP);
     expect(top).toBeLessThanOrEqual(H - PAD_BOTTOM);
   });
+
+  it("names the peak as a clock range with its average, and says what the shading marks", () => {
+    const by_hour = Array.from({ length: 24 }, (_, h) => (h === 17 ? 3.3 : h >= 7 && h <= 9 ? 2.8 : 1.0));
+    const { getByText } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 17, peak_avg_min: 3.3 }} />);
+    expect(getByText("Peak 17:00–18:00 (3.3 min average)")).toBeTruthy();
+    expect(getByText("Shaded: hours above the day's average")).toBeTruthy();
+  });
 });

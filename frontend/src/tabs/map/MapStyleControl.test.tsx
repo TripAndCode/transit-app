@@ -31,7 +31,7 @@ describe("MapStyleControl", () => {
     // Expanded: a labelled tile per style.
     expect(screen.getByRole("button", { name: "Standard" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Satellite" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "OSM" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "OpenStreetMap" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Satellite" }));
     expect(onChange).toHaveBeenCalledWith("photo");
   });
@@ -81,6 +81,16 @@ describe("MapStyleControl", () => {
     expect(slider).toHaveAttribute("value", "30");
     fireOnChange(slider, "45");
     expect(onDimChange).toHaveBeenCalledWith(0.45);
+  });
+
+  it("renders layer chips inside the panel, pressed when on, and toggles through the callback", async () => {
+    const onToggle = vi.fn();
+    renderControl({ layers: [{ id: "relief", label: "Relief", hint: "Column height = average delay", on: true, onToggle, icon: <span /> }] });
+    await userEvent.click(screen.getByRole("button", { name: /Map style|Layers/ }));
+    const chip = screen.getByRole("button", { name: /Relief/ });
+    expect(chip).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(chip);
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });
 

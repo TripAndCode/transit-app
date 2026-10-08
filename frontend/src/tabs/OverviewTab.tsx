@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
-import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import { useAgencies, useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import { clearLastAgency } from "../api/lastAgency";
 import { useAgencyId } from "../api/useAgencyId";
-import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
+import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { useScope } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { ConcentrationBar } from "../components/ConcentrationBar";
@@ -30,6 +32,9 @@ export function OverviewTab() {
   const agencyId = useAgencyId();
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(agencyId);
+  const navigate = useNavigate();
+  const agencies = useAgencies();
+  const agency = agencies.data?.find((a) => a.agency_id === agencyId);
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
@@ -73,6 +78,37 @@ export function OverviewTab() {
     summary.concentration.top_routes.length > 0 ||
     Object.keys(summary.service_split).length > 0;
 
+  // Whether the agency was ever collected decides which empty state is true,
+  // so the generic "nothing in this range" waits for the agency list.
+  const emptyState = agencies.isPending ? (
+    <SkeletonTable rows={3} />
+  ) : agency && !agency.latest_data_date ? (
+    <EmptyState
+      title={t("overview.never_collected", { agency: agency.agency_name })}
+      recoveries={[
+        {
+          label: t("overview.choose_another_agency"),
+          onClick: () => {
+            clearLastAgency();
+            navigate("/");
+          },
+        },
+      ]}
+    />
+  ) : (
+    <EmptyState
+      title={t("overview.empty")}
+      reasons={buildFilterCtxReasons(ctx, t)}
+      recoveries={buildFilterCtxRecoveries({
+        ctx,
+        onClearRoutes: () => update({ routes: null }),
+        onResetService: () => update({ service: "all" }),
+        jumpToLatestData,
+        t,
+      })}
+    />
+  );
+
   const modalTitleKey: Record<Exclude<OpenCard, null>, string> = {
     concentration: "overview.modal.concentration",
     peak_hour: "overview.modal.peak_hour",
@@ -90,19 +126,7 @@ export function OverviewTab() {
           onRetry={() => refetch()}
           data={data}
           hasContent={hasAnyData}
-          empty={
-            <EmptyState
-              title={t("overview.empty")}
-              reasons={buildFilterCtxReasons(ctx, t)}
-              recoveries={buildFilterCtxRecoveries({
-                ctx,
-                onClearRoutes: () => update({ routes: null }),
-                onResetService: () => update({ service: "all" }),
-                jumpToLatestData,
-                t,
-              })}
-            />
-          }
+          empty={emptyState}
           skeleton={
             <>
               <SkeletonKpiRow />
@@ -115,6 +139,7 @@ export function OverviewTab() {
             <OverviewHeroRow
               headline={data.headline}
               delayedCount={data.top_delayed.delayed_count}
+              delayedThresholdMin={data.top_delayed.delayed_threshold_min}
               agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               peakHour={data.peak_hour}

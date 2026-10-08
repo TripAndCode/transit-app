@@ -21,6 +21,10 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 function mockConversations(data: Conversation[], isLoading = false) {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({
+    data: [{ route_id: "HL(39061)", route_short_name: "", route_long_name: "Harbor Loop", route_code: "39061", trip_headsigns: [] }],
+    isLoading: false,
+  } as never);
   vi.spyOn(hooks, "useConversations").mockReturnValue({ data, isLoading } as never);
   vi.spyOn(hooks, "useUpdateConversation").mockReturnValue({ mutate: vi.fn() } as never);
   vi.spyOn(hooks, "useDeleteConversation").mockReturnValue({ mutate: vi.fn() } as never);
@@ -61,7 +65,7 @@ describe("ThreadSidebar", () => {
   it("shows the empty state when there are no conversations", () => {
     mockConversations([]);
     render();
-    expect(screen.getAllByText("No conversations yet").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("No investigations yet").length).toBeGreaterThan(0);
   });
 
   it("shows the loading state", () => {
@@ -100,7 +104,7 @@ describe("ThreadSidebar", () => {
   it("renders a single embedded copy of the sidebar content, with no viewport-specific chrome", () => {
     mockConversations([]);
     render();
-    expect(screen.getByText("New conversation")).toBeInTheDocument();
+    expect(screen.getByText("New investigation")).toBeInTheDocument();
   });
 
   describe("row semantics", () => {
@@ -176,6 +180,27 @@ describe("ThreadSidebar", () => {
       expect(kebab).toHaveFocus();
     });
 
+    it("closes when its kebab is pressed again", async () => {
+      const user = userEvent.setup();
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      const kebab = screen.getByRole("button", { name: "More options" });
+      await user.click(kebab);
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      await user.click(kebab);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+
+    it("closes on a press outside without pulling focus back to the kebab", async () => {
+      const user = userEvent.setup();
+      mockConversations([conv({ title: "Morning delays" })]);
+      render();
+      await user.click(screen.getByRole("button", { name: "More options" }));
+      await user.click(screen.getByRole("searchbox"));
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(screen.getByRole("searchbox")).toHaveFocus();
+    });
+
     it("returns focus to the control that opened it when an item is chosen", () => {
       // Choosing an item unmounts the menuitem that had focus. Escape is not
       // the only exit that has to put the operator back on the kebab.
@@ -248,5 +273,19 @@ describe("ThreadSidebar", () => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
       Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
     });
+  });
+
+  it("calls the new-item button an investigation, like the list it adds to", () => {
+    mockConversations([]);
+    render();
+    expect(screen.getByRole("button", { name: /New investigation/ })).toBeInTheDocument();
+  });
+
+  it("names an investigation's routes by their label, not their GTFS code", () => {
+    mockConversations([conv({ title: "Morning delays", filter_ctx: { routes: ["39061"] } })]);
+    render();
+    const item = screen.getByText("Morning delays").closest("button")!;
+    expect(within(item).getByText(/Harbor Loop/)).toBeInTheDocument();
+    expect(within(item).queryByText(/39061/)).not.toBeInTheDocument();
   });
 });

@@ -194,7 +194,7 @@ function drawKpiTiles(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, p: Pan
     ctx.fillText(label, x + tw * 0.1, y + 22 * s);
     const n = Math.round(value * expoOut(segment(since, 0.2 + i * (BEAT / 2), 0.9 + i * (BEAT / 2))));
     setFont(ctx, 800, Math.min(26 * s, tw * 0.24), palette.fontBody);
-    ctx.fillStyle = flagged ? palette.delay.severe : palette.text;
+    ctx.fillStyle = flagged ? palette.warning : palette.text;
     ctx.fillText(formatNumber(n) + suffix, x + tw * 0.1, y + 56 * s);
     ctx.restore();
   });
@@ -230,7 +230,7 @@ function drawQueue(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, p: PanelG
     ctx.textBaseline = "middle";
     ctx.fillText(`${labels.routes[row.route]}\u3000${labels.stops[row.stop]}`, p.ix + 22 * s, y);
     ctx.textAlign = "right";
-    ctx.fillStyle = delayColorIn(palette, row.delay);
+    ctx.fillStyle = palette.text;
     ctx.fillText(labels.delayShort(row.delay), p.ix + p.iw, y);
     ctx.restore();
   });
@@ -271,7 +271,7 @@ function drawTripDetail(ctx: Ctx, palette: HeroPalette, labels: HeroLabels, p: P
   ctx.fillStyle = palette.muted;
   ctx.fillText(labels.tripHeading, p.ix, p.y + 80 * s);
   setFont(ctx, 800, 40 * s, palette.fontBody);
-  ctx.fillStyle = delayColorIn(palette, SELECTED_TRIP.delay);
+  ctx.fillStyle = palette.text;
   ctx.fillText(labels.delayShort(SELECTED_TRIP.delay), p.ix, p.y + 124 * s);
   setFont(ctx, 800, 14 * s, palette.fontBody);
   ctx.fillStyle = palette.text;

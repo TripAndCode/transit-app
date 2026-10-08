@@ -10,7 +10,7 @@
  *
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
-import { useState, useRef, useEffect, useEffectEvent } from "react";
+import { use, useState, useRef, useEffect, useEffectEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -24,7 +24,7 @@ import {
   useFollowup,
   useFollowupEnabled,
 } from "../api/hooks";
-import { isoDaysBefore, useScope } from "../api/scope";
+import { DataEndContext, isoDaysBefore, useScope } from "../api/scope";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { conversationsAnon } from "../api/conversationsAnon";
@@ -106,11 +106,12 @@ export function AskTab() {
   //   3. the URL range context (no active thread / conversation still loading).
   const [filterEdit, setFilterEdit] = useState<{ key: string | null; fc: FilterCtx } | null>(null);
   const storedFc = convQuery.data?.conversation?.filter_ctx;
+  const dataEnd = use(DataEndContext);
   const filterCtx: FilterCtx =
     filterEdit && filterEdit.key === activeId
       ? filterEdit.fc
       : activeId && storedFc
-        ? resolvedFilterCtx(storedFc)
+        ? resolvedFilterCtx(storedFc, dataEnd)
         : rangeCtxToFilterCtx(rangeCtx);
 
   // User-initiated filter edit. When an active thread exists, persist the new
@@ -265,7 +266,7 @@ export function AskTab() {
   // cards to find it.
   const dock = (
     <details className="ask-tool-menu" open={!hasMessages || composingId !== null}>
-      <summary>{t("ask.workspace.new_analysis")}</summary>
+      <summary>{t(hasMessages ? "ask.workspace.new_analysis" : "ask.workspace.new_analysis_first")}</summary>
       {id != null && !unavailable && !(activeId && convQuery.isPending) && (
         <QuestionDock
           agencyId={id}
@@ -415,12 +416,15 @@ export function AskTab() {
               </>}
             </InvestigationCanvas>
           ) : (
-            <AskLandingCards
-              templates={templates}
-              onInstantSubmit={handleInstantSubmit}
-              onOpenChip={handleChipTap}
-              busy={busy}
-            />
+            <>
+              {activeId !== null && <p className="ask-no-questions">{t("ask.workspace.no_questions")}</p>}
+              <AskLandingCards
+                templates={templates}
+                onInstantSubmit={handleInstantSubmit}
+                onOpenChip={handleChipTap}
+                busy={busy}
+              />
+            </>
           )}
         </div>
 
