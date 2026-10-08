@@ -29,7 +29,9 @@ describe("focusedAnalysis.css chart floor", () => {
     expect(decl(ruleBody(narrow, ".focus-split {"), "grid-template-columns")).toBe("minmax(0, 1fr)");
   });
   it("drops the chart's floor in print, where a scroll box would clip it", () => {
+    // global.css loads before the lazily loaded focusedAnalysis.css, so the
+    // print rule needs the higher specificity (svg.focus-chart) to win.
     const print = ruleBody(globalCss, "@media print {");
-    expect(decl(ruleBody(print, ".focus-chart {"), "min-width")).toBe("0");
+    expect(decl(ruleBody(print, "svg.focus-chart {"), "min-width")).toBe("0");
   });
 });

@@ -262,7 +262,10 @@ function PeakHourChart({
           <span
             key={h}
             className="ov-peak-label ov-peak-label--tick num"
-            style={{ left: `${((PAD_LEFT + h * CELL_W + CELL_W / 2) / W) * 100}%` }}
+            style={{
+              left: `${((PAD_LEFT + h * CELL_W + CELL_W / 2) / W) * 100}%`,
+              top: `${((H - PAD_BOTTOM + 2) / H) * 100}%`,
+            }}
           >
             {h}
           </span>

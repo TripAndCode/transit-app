@@ -44,7 +44,7 @@
 }
 /* The stop chart keeps its drawn size at every width and scrolls sideways:
    scaled to the figure, its labels shrink past reading. */
-.landing-narrative-section__figure .focus-chart { min-width: 780px; height: 300px; }
+.landing-narrative-section__figure .focus-chart { min-width: 700px; height: 300px; }
 
 .landing-narrative-section__hint {
   display: none;

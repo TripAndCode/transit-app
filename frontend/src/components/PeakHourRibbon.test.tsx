@@ -26,6 +26,13 @@ describe("PeakHourRibbon", () => {
     expect(container.querySelector(".ov-peak-label--max")).not.toBeNull();
   });
 
+  it("hangs the hour ticks just below the axis line, not across it", () => {
+    const by_hour = Array.from({ length: 24 }, (_, h) => (h === 8 ? 6 : 1));
+    const { container } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 8, peak_avg_min: 6 }} />);
+    const tick = container.querySelector<HTMLElement>(".ov-peak-label--tick")!;
+    expect(Number.parseFloat(tick.style.top)).toBeCloseTo(((140 - 22 + 2) / 140) * 100, 1);
+  });
+
   it("puts a late peak's label on the left of its callout, so it stays on the card", () => {
     const by_hour = Array.from({ length: 24 }, (_, h) => (h === 22 ? 6 : 1));
     const { container } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 22, peak_avg_min: 6 }} />);

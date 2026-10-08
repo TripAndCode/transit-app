@@ -73,10 +73,10 @@ and MapLibre style-expression consumers resolve the same source of truth.
   same family set at 700, so identity comes from weight and size rather
   than a second face.
 - `--font-num` is Barlow Semi Condensed, which `.num` applies (with tabular
-  figures) to every figure printed outside a table: hero values, stat tiles,
-  chart labels and counters. Table cells get tabular figures from
-  `td({ align: "right" })`; ReportTable's delay cells also carry `.num`, like
-  the card headline they mirror.
+  figures) to every HTML figure printed outside a table: hero values, stat
+  tiles, HTML chart labels and counters. Table cells get tabular figures
+  from `td({ align: "right" })`; ReportTable's bar cells also carry `.num`,
+  like the card headline they mirror.
 - `--font-mono` is IBM Plex Mono, for identifiers read character by
   character.
 - `frontend/index.html` loads BIZ UDPGothic 400/700, Barlow Semi Condensed

@@ -5,6 +5,7 @@ import { serviceValueLabel } from "../utils/filterValueLabels";
 import type { OverviewServiceSplitDay } from "../api/types";
 import { ServiceName } from "./ServiceName";
 import { formatMinutes, formatShortDate } from "../utils/format";
+import { showsLabel } from "./analysis/axisLabels";
 
 type Props = {
   service_split: Record<string, number>;
@@ -341,9 +342,7 @@ function ServiceSplitDailyChart({
         </span>
       ))}
       {xs.map((x, i) => {
-        // Thinned to ~10 labels.
-        const step = Math.max(1, Math.ceil(xs.length / 10));
-        if (i % step !== 0 && i !== xs.length - 1) return null;
+        if (!showsLabel(i, xs.length, 10)) return null;
         return (
           <span
             key={`xt-${i}`}

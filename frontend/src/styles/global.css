@@ -525,11 +525,11 @@ table {
     radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--text-primary) 22%, transparent), transparent) right / 16px 100% no-repeat scroll;
 }
 
-/* The numeral face with tabular figures, on every figure the UI prints
-   outside a table — hero values, stat tiles, chart labels, counters — so a
+/* The numeral face with tabular figures, on every HTML figure the UI prints
+   outside a table — hero values, stat tiles, HTML chart labels, counters — so a
    value that counts up or updates in place keeps its width instead of
    jittering. A table's numeric cells get tabular figures from
-   tableStyles' td({ align: "right" }) instead, except ReportTable's delay
+   tableStyles' td({ align: "right" }) instead, except ReportTable's bar
    cells, which carry .num like the card headline they mirror. */
 .num {
   font-family: var(--font-num);
@@ -934,6 +934,7 @@ summary::-webkit-details-marker { display: none; }
   .focus-page { color: black; }
   .focus-page svg { break-inside: avoid; }
   /* A printed page cannot scroll, so a chart shrinks to it instead of
-     keeping its on-screen floor (focusedAnalysis.css) and being clipped. */
-  .focus-chart { min-width: 0; }
+     keeping its on-screen floor (focusedAnalysis.css) and being clipped.
+     svg.focus-chart outranks that lazily loaded rule, which comes later. */
+  svg.focus-chart { min-width: 0; }
 }

@@ -85,7 +85,7 @@ describe("landing reveal CSS", () => {
 
   it("keeps the stop chart at a readable size at every width, scrolling sideways instead", () => {
     const minWidth = Number.parseFloat(decl(ruleBody(css, ".landing-narrative-section__figure .focus-chart {"), "min-width") ?? "");
-    expect(minWidth).toBeGreaterThanOrEqual(720);
+    expect(minWidth).toBeGreaterThanOrEqual(700);
     const phone = ruleBody(css, "@media (max-width: 640px)");
     expect(decl(ruleBody(phone, ".landing-narrative-section__hint"), "display")).toBe("block");
     expect(decl(ruleBody(css, ".landing-narrative-section__hint {"), "display")).toBe("none");

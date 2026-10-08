@@ -30,6 +30,15 @@ describe("ServiceSplit modal chart tooltip", () => {
   });
 });
 
+describe("ServiceSplit modal chart labels", () => {
+  it("leaves out the every-Nth date label that would crowd the last day's", () => {
+    const daily = Array.from({ length: 29 }, (_, i) => ({ date: `2026-09-${String(1 + i).padStart(2, "0")}`, weekday: 2, weekend: 1 }));
+    renderWithProviders(<ServiceSplit variant="modal" service_split={{ 平日: 2.0, 土日祝: 1.0 }} daily={daily} />);
+    expect(screen.getByText("9/29")).toBeInTheDocument();
+    expect(screen.queryByText("9/28")).toBeNull();
+  });
+});
+
 describe("ServiceSplit modal chart", () => {
   it("labels the x axis with locale short dates", () => {
     renderWithProviders(

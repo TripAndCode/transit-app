@@ -210,7 +210,7 @@
 }
 .ov-peak-label--max { color: var(--trend-bad); font-weight: 600; }
 .ov-peak-label--flip { transform: translate(-100%, -50%); }
-.ov-peak-label--tick { bottom: 0; transform: translate(-50%, 0); }
+.ov-peak-label--tick { transform: translate(-50%, 0); line-height: 1; }
 /* Plain fallback first: an engine without color-mix() would otherwise
    resolve `fill` to its initial value (black), not transparent. */
 .ov-peak-spread { fill: rgba(180, 83, 9, 0.06); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }

@@ -10,11 +10,13 @@ import { describe, expect, it } from "vitest";
 // idiom are not motion and stay allowed.
 const root = path.resolve(process.cwd(), "src");
 
-/** `file:selector` literals that are deliberate, each with its reason. */
+/** `file:selector list` literals that are deliberate, each with its reason;
+ *  keyed on the whole list so another rule sharing a first selector is not
+ *  exempted with it. */
 const ALLOWED = new Set([
   // The short crossfade kept under reduced motion: the tokens are zeroed
   // there, and the blanket rule does not reach view-transition pseudos.
-  "styles/viewTransitions.css:::view-transition-group(.page-nav)",
+  "styles/viewTransitions.css:::view-transition-group(.page-nav), ::view-transition-old(.page-nav), ::view-transition-new(.page-nav)",
 ]);
 
 function walk(dir: string): string[] {
@@ -34,7 +36,7 @@ function offendersIn(file: string): string[] {
   if (file.endsWith(".css")) {
     const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      const sel = selector.trim().split(/\s*,\s*/)[0];
+      const sel = selector.trim().split(/\s*,\s*/).join(", ");
       for (const m of body.matchAll(/(?:^|[;\s])((?:transition|animation)(?:-[a-z-]+)?)\s*:\s*([^;]+)/g)) {
         if (LITERAL.test(m[2].replace(NOT_MOTION, "$1")) && !ALLOWED.has(`${rel}:${sel}`)) {
           out.push(`${rel}: ${sel} { ${m[1]}: ${m[2].trim().replace(/\s+/g, " ")} }`);
