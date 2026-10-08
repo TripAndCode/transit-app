@@ -34,9 +34,8 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
     setSelection(next);
     onStepChange?.();
   }
-  const selected = selection?.latestId === latest?.id
-    ? steps.find((step) => step.id === selection?.id) ?? latest
-    : latest;
+  const followsLatest = selection?.latestId === latest?.id;
+  const selected = followsLatest ? steps.find((step) => step.id === selection?.id) ?? latest : latest;
   if (!selected || !latest) return null;
   const isLatest = selected.id === latest.id;
   const focus = focusEdit?.stepId === selected.id ? focusEdit.focus : null;
