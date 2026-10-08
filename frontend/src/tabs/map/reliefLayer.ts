@@ -19,6 +19,13 @@ const RELIEF_HALF_SIDE_M = 20;
 
 const M_PER_DEG_LAT = 110_574;
 const M_PER_DEG_LON_AT_EQUATOR = 111_320;
+/** Narrowest half-width a column draws at, in screen pixels. Below street
+ *  zoom the footprint shrinks to a pixel or two and the vehicle dot standing
+ *  on it covers it whole. */
+const MIN_HALF_SIDE_PX = 4;
+const EARTH_CIRCUMFERENCE_M = 40_075_016.686;
+/** MapLibre's world is this many pixels wide at zoom 0. */
+const WORLD_PX_AT_ZOOM_0 = 512;
 
 export type ReliefPoint = { stop_id: string; lon: number; lat: number; delay_min: number };
 type ReliefProps = { stop_id: string; delay_min: number; h: number };
@@ -30,12 +37,22 @@ export function reliefHeight(delayMin: number): number {
   return Math.min(Math.max(delayMin, 0), RELIEF_CAP_MIN) * RELIEF_HEIGHT_M_PER_MIN + RELIEF_BASE_M;
 }
 
+/** How much to enlarge every column at `zoom`: 1 at street zoom, and below it
+ *  enough to keep a column `MIN_HALF_SIDE_PX` wide. Footprint and height grow
+ *  by the same factor, so a column keeps its shape and the heights keep their
+ *  ratios -- height still reads as delay, compared across the map. */
+export function reliefScale(zoom: number, lat: number): number {
+  const metresPerPx = (EARTH_CIRCUMFERENCE_M * Math.cos((lat * Math.PI) / 180)) / (WORLD_PX_AT_ZOOM_0 * 2 ** zoom);
+  return Math.max(1, (MIN_HALF_SIDE_PX * metresPerPx) / RELIEF_HALF_SIDE_M);
+}
+
 /** One square polygon per stop, sized in metres so it is the same footprint
  *  at every latitude, with the extrusion height precomputed as `h` -- the
  *  paint expression stays a plain `["get", "h"]` and the cap/ramp maths
- *  lives here, where it can be tested without a map. */
-export function reliefFeatures(points: ReliefPoint[]): ReliefCollection {
-  const halfSideM = RELIEF_HALF_SIDE_M;
+ *  lives here, where it can be tested without a map. `scale` enlarges both,
+ *  per `reliefScale`. */
+export function reliefFeatures(points: ReliefPoint[], scale = 1): ReliefCollection {
+  const halfSideM = RELIEF_HALF_SIDE_M * scale;
   const features: GeoJSON.Feature<GeoJSON.Polygon, ReliefProps>[] = [];
   for (const p of points) {
     if (!Number.isFinite(p.lon) || !Number.isFinite(p.lat)) continue;
@@ -43,7 +60,7 @@ export function reliefFeatures(points: ReliefPoint[]): ReliefCollection {
     const dLon = halfSideM / (M_PER_DEG_LON_AT_EQUATOR * Math.cos((p.lat * Math.PI) / 180));
     features.push({
       type: "Feature",
-      properties: { stop_id: p.stop_id, delay_min: p.delay_min, h: reliefHeight(p.delay_min) },
+      properties: { stop_id: p.stop_id, delay_min: p.delay_min, h: reliefHeight(p.delay_min) * scale },
       geometry: {
         type: "Polygon",
         coordinates: [[

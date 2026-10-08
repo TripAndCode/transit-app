@@ -9,6 +9,7 @@ import {
   RELIEF_SOURCE,
   reliefFeatures,
   reliefPaint,
+  reliefScale,
   sameReliefReading,
   tweenFeatures,
   type ReliefCollection,
@@ -73,12 +74,13 @@ export function useReliefLayer(
         if (map.getSource(RELIEF_SOURCE)) map.removeSource(RELIEF_SOURCE);
       });
     }
-    const next = reliefFeatures(points);
+    const featuresAtZoom = () => reliefFeatures(points, reliefScale(map.getZoom(), map.getCenter().lat));
+    const next = featuresAtZoom();
     // A new reading on an existing source eases from what is on screen. It
     // runs at once: the source belongs to the style loaded now, and waiting
     // for the whole style to read as loaded would hold it behind any other
     // source's reload (the playback dots').
-    const follow = (source: ReliefSource) => {
+    const follow = (source: ReliefSource, next: ReliefCollection) => {
       if (targetRef.current && sameReliefReading(targetRef.current, next)) return;
       cancelTween(rafRef);
       targetRef.current = next;
@@ -107,15 +109,22 @@ export function useReliefLayer(
       };
       rafRef.current = requestAnimationFrame(tick);
     };
+    // A camera move that lands on another zoom re-sizes the same reading.
+    const onZoomEnd = () => {
+      const source = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
+      if (source) follow(source, featuresAtZoom());
+    };
+    map.on("zoomend", onZoomEnd);
+    const stopZoom = () => map.off("zoomend", onZoomEnd);
     const existing = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
     if (existing) {
-      follow(existing);
-      return;
+      follow(existing, next);
+      return stopZoom;
     }
-    return whenStyleReady(map, () => {
+    const cancelReady = whenStyleReady(map, () => {
       const source = map.getSource(RELIEF_SOURCE) as ReliefSource | undefined;
       if (source) {
-        follow(source);
+        follow(source, next);
         return;
       }
       // First show, or a style reload wiped the layer: no on-screen reading
@@ -127,6 +136,10 @@ export function useReliefLayer(
       shownRef.current = next;
       targetRef.current = next;
     });
+    return () => {
+      stopZoom();
+      cancelReady();
+    };
   }, [crossFadeMs, mapRef, on, points, styleEpoch]);
 
   // Colour tokens are resolved when the paint is written, so a theme change

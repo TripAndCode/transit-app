@@ -2,7 +2,7 @@ import { renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { makeMockMap, type MockMap } from "../../test/mockMap";
-import { RELIEF_LAYER, RELIEF_SOURCE, reliefHeight, type ReliefPoint } from "./reliefLayer";
+import { RELIEF_LAYER, RELIEF_SOURCE, reliefHeight, reliefScale, type ReliefPoint } from "./reliefLayer";
 import { useReliefLayer } from "./useReliefLayer";
 import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
 import { TIMELINE_LAYER } from "./useTimelineLayers";
@@ -53,6 +53,25 @@ afterEach(() => {
 });
 
 describe("useReliefLayer", () => {
+  it("re-sizes the columns for the zoom a camera move lands on, and keeps them at street zoom", () => {
+    const map = liveMap();
+    mount(map, true, POINTS, 0);
+    expect(heightOf(source(map).data)).toBe(reliefHeight(2));
+    map.setZoom(11);
+    map.fire("zoomend");
+    expect(heightOf(source(map).data)).toBeCloseTo(reliefHeight(2) * reliefScale(11, map.getCenter().lat));
+    map.setZoom(15);
+    map.fire("zoomend");
+    expect(heightOf(source(map).data)).toBe(reliefHeight(2));
+  });
+
+  it("stops re-sizing once the relief is off", () => {
+    const map = liveMap();
+    const view = mount(map, true, POINTS, 0);
+    view.rerender({ o: false, p: POINTS, c: 0 });
+    expect(map._handlers.zoomend ?? []).toHaveLength(0);
+  });
+
   it("adds nothing while off", () => {
     const map = liveMap();
     mount(map, false);
