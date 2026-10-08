@@ -3,6 +3,11 @@ name = "transit-delay-app"
 version = "0.1.0"
 description = "Transit delay analysis platform for Japanese GTFS-JP agencies"
 authors = []
+# Poetry 2 records each locked package's environment markers; 1.x ignores
+# them and would install the Linux-only `+cpu` torch below on macOS. CI and
+# the Dockerfile pin an exact version inside this range
+# (tests/unit/test_poetry_pins.py keeps them in step).
+requires-poetry = ">=2.5,<3"
 packages = [
     {include = "pipeline"},
     {include = "api"},
@@ -46,6 +51,19 @@ optional = true
 # embedding_version`), so a major bump is a deliberate re-index, not a
 # resolver decision.
 sentence-transformers = "^6"
+# The embedder runs on CPU only. PyPI's Linux torch wheel pulls in the CUDA
+# runtime and triton (several GB) that no host here can use, so Linux resolves
+# torch from the CPU-only index. That index's Linux builds carry a `+cpu` local
+# version with no macOS wheel, so other platforms keep PyPI's build.
+torch = [
+    {version = "^2.14", source = "pytorch-cpu", markers = "sys_platform == 'linux'"},
+    {version = "^2.14", markers = "sys_platform != 'linux'"},
+]
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
 
 [build-system]
 requires = ["poetry-core"]
