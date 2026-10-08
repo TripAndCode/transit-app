@@ -184,8 +184,8 @@ export function Sidebar() {
   // sheet after a link is followed, mirroring ThreadSidebar's onSelect-
   // closes-drawer UX). The rail draws the destinations and Ask as a line
   // map. `inSheet` lists only the destinations the bottom tab bar leaves
-  // out, Ask included: repeating the bar's links here would put the same
-  // links twice on screen at once.
+  // out, and no Ask, which has a tab of its own there: repeating the bar's
+  // links here would put the same links twice on screen at once.
   function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void, inSheet = false) {
     return (
       <>

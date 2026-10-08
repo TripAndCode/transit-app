@@ -30,8 +30,8 @@ const FIELD_TRIGGER_STYLE: CSSProperties = {
   textAlign: "left",
 };
 
-/** A picker given a `className` is dressed by it: its trigger then carries
- *  none of the field's own chrome. */
+/** A picker given a `className` is dressed by it in every state, and its
+ *  trigger then carries none of the field's own chrome. */
 export function AgencyPicker({ className }: { className?: string } = {}) {
   const { t } = useTranslation();
   const { data: agencies, isLoading } = useAgencies();
@@ -55,16 +55,24 @@ export function AgencyPicker({ className }: { className?: string } = {}) {
   const filtered = filterAgencies(agencies, filter);
 
   if (isLoading) {
-    return <span style={{ color: "var(--text-tertiary)" }}>{t("common.loading_agencies")}</span>;
+    return (
+      <span className={className} style={{ color: "var(--text-tertiary)" }}>
+        {t("common.loading_agencies")}
+      </span>
+    );
   }
 
   if (!agencies || agencies.length === 0) {
-    return <span style={{ color: "var(--text-tertiary)" }}>{t("header.agency_picker_empty")}</span>;
+    return (
+      <span className={className} style={{ color: "var(--text-tertiary)" }}>
+        {t("header.agency_picker_empty")}
+      </span>
+    );
   }
 
   // Single agency: static label, no dropdown
   if (agencies.length === 1) {
-    return <strong>{agencies[0].agency_name}</strong>;
+    return <strong className={className}>{agencies[0].agency_name}</strong>;
   }
 
   function selectAgency(id: number) {
