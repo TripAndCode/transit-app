@@ -46,7 +46,7 @@ import { ServiceNote } from "../components/ServiceNote";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
 import { StillWorking } from "../components/StillWorking";
 import { DelayCertificateLookup } from "../components/analysis/DelayCertificateLookup";
-import { destHref, reportHref } from "../routes/destinations";
+import { destHref, pickReport, reportHref } from "../routes/destinations";
 import { RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 
 const RANKING_TYPES = new Set(["ranking", "ranking_best"]);
@@ -77,9 +77,7 @@ function rankingOptions(
 }
 
 /** One screen's reports: the list shows only `reportTypes`, and the open
- *  report is the `report` search param when it belongs to them, else
- *  `defaultReport` when it does, else the first one, so a stale link from
- *  another screen never opens a report this screen doesn't host. */
+ *  report is the one `pickReport` resolves from the `report` param. */
 export function AnalysisTab({
   reportTypes,
   defaultReport,
@@ -89,9 +87,7 @@ export function AnalysisTab({
 }) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const requested = searchParams.get("report");
-  const fallback = defaultReport != null && reportTypes.includes(defaultReport) ? defaultReport : (reportTypes[0] ?? null);
-  const reportType = requested != null && reportTypes.includes(requested) ? requested : fallback;
+  const reportType = pickReport(searchParams.get("report"), reportTypes, defaultReport);
   const id = useAgencyId();
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);

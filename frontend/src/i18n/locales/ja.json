@@ -22,7 +22,11 @@
     "compare": "比較",
     "reports": "レポート",
     "destinations_label": "画面",
-    "other": "そのほか"
+    "other": "そのほか",
+    "transfer": "乗換",
+    "ticket_agency": "事業者",
+    "ticket_period": "期間",
+    "stops_label": "{{screen}}の切り替え"
   },
   "compare": {
     "mode_periods": "平日と土日祝",

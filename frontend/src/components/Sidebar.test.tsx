@@ -51,7 +51,9 @@ describe("Sidebar", () => {
   it("renders the seven destinations in rail order, with the palette left to the top bar", () => {
     renderSidebar();
     const nav = screen.getByRole("navigation", { name: "Destinations" });
-    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(RAIL_ORDER);
+    const links = within(nav).getAllByRole("link");
+    expect(links).toHaveLength(RAIL_ORDER.length);
+    expect(RAIL_ORDER.map((name) => links.indexOf(within(nav).getByRole("link", { name })))).toEqual(RAIL_ORDER.map((_, i) => i));
     expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
   });
 
@@ -247,8 +249,78 @@ describe("Sidebar", () => {
       const aside = container.querySelector<HTMLElement>(".app-sidebar-desktop")!;
       expect(aside.style.transition).not.toMatch(/width/);
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-      expect(aside.style.width).toBe("64px");
+      expect(aside.style.width).toBe("76px");
       expect(aside.style.transition).not.toMatch(/width/);
+    });
+  });
+
+  describe("line map", () => {
+    beforeEach(() => localStorage.clear());
+
+    const stopNames = (group: HTMLElement) => within(group).getAllByRole("link").map((link) => link.textContent);
+
+    it("opens the current station's stops below it, and no other station's", () => {
+      renderSidebar("/agencies/8/routes");
+      const stops = screen.getByRole("group", { name: "Routes views" });
+      expect(stopNames(stops)).toEqual(["Delay ranking", "Lowest average delay", "On-time rate", "Delays over 5 min"]);
+      expect(screen.queryByRole("group", { name: "Time views" })).toBeNull();
+    });
+
+    it("opens no stops on a screen with a single view", () => {
+      renderSidebar("/agencies/8/why");
+      expect(screen.queryByRole("group", { name: /views$/ })).toBeNull();
+    });
+
+    it.each([
+      ["/agencies/8/routes?report=on_time", "Routes views", "On-time rate"],
+      ["/agencies/8/routes?sort=worst_5min", "Routes views", "Delays over 5 min"],
+      ["/agencies/8/time", "Time views", "Trend"],
+      ["/agencies/8/compare?by=agencies", "Compare views", "Agencies"],
+      ["/agencies/8/reports?doc=saved", "Reports views", "Saved analyses"],
+    ])("on %s marks the stop the page shows", (path, group, current) => {
+      renderSidebar(path);
+      const stops = within(screen.getByRole("group", { name: group })).getAllByRole("link");
+      expect(stops.filter((link) => link.getAttribute("aria-current") === "true").map((link) => link.textContent)).toEqual([current]);
+    });
+
+    it("marks no stop on a route dossier, which is none of Routes' reports", () => {
+      renderSidebar("/agencies/8/routes/50?routes=50");
+      const stops = within(screen.getByRole("group", { name: "Routes views" })).getAllByRole("link");
+      expect(stops.every((link) => link.getAttribute("aria-current") === "false")).toBe(true);
+    });
+
+    it("opens a stop with its screen's own filters", () => {
+      renderSidebar("/agencies/8/time?from=2026-06-01&to=2026-06-07&report=trend");
+      expect(screen.getByRole("link", { name: "Route forecast" })).toHaveAttribute(
+        "href",
+        "/agencies/8/time?from=2026-06-01&to=2026-06-07&report=route_forecast",
+      );
+    });
+
+    it("keeps the open station's stops as named links once collapsed", async () => {
+      const user = userEvent.setup();
+      renderSidebar("/agencies/8/compare");
+      await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+      const stops = within(screen.getByRole("group", { name: "Compare views" })).getAllByRole("link");
+      expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual(["Weekdays and weekends", "Agencies"]);
+    });
+
+    it("names Ask by its label alone, leaving the transfer mark to sight", () => {
+      renderSidebar();
+      expect(screen.getByRole("link", { name: "Ask" })).toBeTruthy();
+      expect(screen.getByText("Transfer")).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("shows the period of the screen on show beside the agency", () => {
+      renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07&dow=weekend");
+      expect(screen.getByText("Period")).toBeTruthy();
+      expect(screen.getByText("6/1 – 6/7")).toBeTruthy();
+      expect(screen.getByText("weekends")).toBeTruthy();
+    });
+
+    it("leaves the period off pages outside any agency", () => {
+      renderSidebar("/help");
+      expect(screen.queryByText("Period")).toBeNull();
     });
   });
 

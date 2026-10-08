@@ -9,11 +9,14 @@ import {
   WHY_REPORT_TYPES,
   agencySwitchHref,
   destHref,
+  compareMode,
   mergeSearch,
+  pickReport,
   reportDestination,
   reportHref,
   routeHref,
   routesHref,
+  reportsView,
   screenParams,
 } from "./destinations";
 
@@ -90,5 +93,31 @@ describe("destinations", () => {
 
   it("keeps only the params that pick a screen on an agency switch", () => {
     expect(screenParams("?by=periods&report=ranking&sort=avg&doc=council&routes=1")).toEqual({ by: "periods", doc: "council" });
+  });
+});
+
+describe("the view a screen opens", () => {
+  it("opens the requested report only where the screen hosts it", () => {
+    expect(pickReport("on_time", ROUTES_REPORT_TYPES)).toBe("on_time");
+    expect(pickReport("trend", ROUTES_REPORT_TYPES)).toBe("ranking");
+  });
+
+  it("falls back to a hosted default, else to the first report", () => {
+    expect(pickReport(null, ROUTES_REPORT_TYPES, "worst_5min")).toBe("worst_5min");
+    expect(pickReport(null, ROUTES_REPORT_TYPES, "trend")).toBe("ranking");
+    expect(pickReport(null, [])).toBeNull();
+  });
+
+  it("compares agencies only for by=agencies", () => {
+    expect(compareMode("agencies")).toBe("agencies");
+    expect(compareMode("periods")).toBe("periods");
+    expect(compareMode(null)).toBe("periods");
+  });
+
+  it("opens Reports' documents for an export document, saved analyses for doc=saved, else the summary", () => {
+    expect(reportsView(null, "delay_certificate")).toBe("reports");
+    expect(reportsView("council", null)).toBe("reports");
+    expect(reportsView("saved", null)).toBe("saved");
+    expect(reportsView(null, "ranking")).toBe("summary");
   });
 });

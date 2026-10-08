@@ -2,21 +2,18 @@ import { lazy } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/ui/PageHeader";
-import { COMPARE_REPORT_TYPES } from "../routes/destinations";
+import { COMPARE_MODES, COMPARE_REPORT_TYPES, compareMode, type CompareMode } from "../routes/destinations";
 import { loadAnalysisTab, loadNetworkTab } from "../routes/lazyTabs";
 
 const AnalysisTab = lazy(loadAnalysisTab);
 const NetworkTab = lazy(loadNetworkTab);
 
-type Mode = "periods" | "agencies";
-
-/** Compare: `by=agencies` is the agencies board; every other `by` shows the
- *  period comparison. */
+/** Compare: the board `compareMode` picks from `by`. */
 export function CompareTab() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const mode: Mode = params.get("by") === "agencies" ? "agencies" : "periods";
-  function setMode(next: Mode) {
+  const mode = compareMode(params.get("by"));
+  function setMode(next: CompareMode) {
     setParams((prev) => {
       const n = new URLSearchParams(prev);
       n.set("by", next);
@@ -42,7 +39,7 @@ export function CompareTab() {
           background: "var(--bg-surface)",
         }}
       >
-        {(["periods", "agencies"] as const).map((m) => (
+        {COMPARE_MODES.map(({ mode: m, labelKey }) => (
           <button
             key={m}
             type="button"
@@ -58,7 +55,7 @@ export function CompareTab() {
               fontWeight: mode === m ? 500 : 400,
             }}
           >
-            {t(m === "periods" ? "compare.mode_periods" : "compare.mode_agencies")}
+            {t(labelKey)}
           </button>
         ))}
       </div>
