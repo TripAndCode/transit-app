@@ -80,19 +80,25 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
 - The changed-file list is not a read boundary. Follow callers, consumers, tests, or
   configuration when the assigned dimension requires it, but stay in the named
   worktree.
-- Repository invariants a finding is measured against, from `CLAUDE.md`: React
+- Repository invariants a finding is measured against, from `AGENTS.md`: React
   Compiler is enabled, so never report a missing `useMemo`/`useCallback`/`React.memo`
   as a perf fix and never accept a ref written during render; prefer derived state to
   a synchronization effect; every visible string goes through `t()` with keys in both
-  `frontend/src/i18n/locales/{ja,en}.json`, and server-side strings in `_LOCALES`
+  `frontend/src/i18n/locales/{ja,en}.json` (intentional source-language exceptions
+  carry `i18n-ignore`), and server-side strings in `_LOCALES`
   update both languages and their exact-string tests together; new pages stay
   lazy-loaded and MapLibre stays out of the entry chunk.
-- Report only findings that affect correctness, security, performance, enforcement,
-  or the objective. No style nits.
+- Report findings that affect correctness, security, performance, enforcement, or
+  the objective, plus whatever an assigned dimension or brief names as its own
+  subject (a stale or non-durable comment, avoidable complexity, a simpler
+  alternative, a refactor opportunity). Omit pure style or naming preferences that
+  no assigned dimension covers.
 - Format each finding as `Major` or `Minor`, with its dimension, confidence, file and
   line, a `failure:` line, and a concrete fix. `failure:` names the input or state
   that produces a wrong output, a crash, or a missed gate, not the impact that would
-  follow; a finding whose failure cannot be stated concretely is speculation and does
+  follow; for a finding with no runtime failure it names the concrete mismatch
+  instead — what the comment claims versus what the code does, or the rule broken and
+  the line that breaks it. A finding that can state neither is speculation and does
   not qualify, except the unconfirmed-absence case below. Name the single dimension
   the finding belongs to even when several were assigned, because the caller
   deduplicates on file, line, and dimension together; under a brief instead of a named

@@ -11,11 +11,16 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
+from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.reports import compute_overview_summary
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["overview"])
+
+_SUMMARY_SCOPE = scope_applied(*ALL_SIX)
+# The breakdown takes its own hour/dow integers over an all-time aggregate.
+_BREAKDOWN_SCOPE = scope_applied()
 
 # Minimum observations behind a route's peak-hour figure before it is shown.
 _PEAK_HOUR_MIN_SAMPLES = 3
@@ -118,12 +123,13 @@ class TopDelayedRoute(BaseModel):
 
 
 class TopDelayed(BaseModel):
-    """Top-5 routes by absolute avg delay + a count of routes at/above the
-    2.0-min "not ok" threshold, both over the same window the headline
-    covers."""
+    """Top-5 routes by absolute avg delay + a count of routes averaging at
+    least ``delayed_threshold_min`` late, both over the same window the
+    headline covers."""
 
     routes: list[TopDelayedRoute]
     delayed_count: int
+    delayed_threshold_min: float
 
 
 class PeakHour(BaseModel):
@@ -160,6 +166,7 @@ class OverviewSummary(BaseModel):
     service_split: dict[str, float]
     service_split_daily: list[ServiceSplitDay] = []
     sparkline_points: list[float]
+    scope_applied: dict[str, bool]
 
 
 class RouteHourEntry(BaseModel):
@@ -173,10 +180,11 @@ class PeakHourBreakdown(BaseModel):
     hour: int
     dow: int | None
     routes: list[RouteHourEntry]
+    scope_applied: dict[str, bool]
 
 
 @router.get("/peak-hour-breakdown", response_model=PeakHourBreakdown)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def peak_hour_breakdown(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -209,11 +217,12 @@ async def peak_hour_breakdown(
             for r in rows
             if r["avg_min"] is not None
         ],
+        scope_applied=_BREAKDOWN_SCOPE,
     )
 
 
 @router.get("/overview/summary", response_model=OverviewSummary)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def overview_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -229,4 +238,4 @@ async def overview_summary(
     qualitative labels). See spec section "Architecture".
     """
     payload = await compute_overview_summary(agency_id, ctx, conn, locale, pool=request.app.state.pool, ch=ch)
-    return OverviewSummary(**payload)
+    return OverviewSummary(**payload, scope_applied=_SUMMARY_SCOPE)

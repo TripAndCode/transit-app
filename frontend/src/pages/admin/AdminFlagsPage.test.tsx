@@ -8,12 +8,34 @@ import i18n from "../../i18n";
 import { AdminFlagsPage } from "./AdminFlagsPage";
 
 const patchMutate = vi.fn();
+const clearMutate = vi.fn();
+const clearState = { mutate: clearMutate, isPending: false, error: null as Error | null };
 const useFeatureFlagsMock = vi.fn();
+/** What the next PATCH fails with; `null` lets it succeed. */
+let patchFailure: Error | null = null;
 
-vi.mock("../../api/admin", () => ({
-  useFeatureFlags: () => useFeatureFlagsMock(),
-  usePatchFeatureFlag: () => ({ mutate: patchMutate, isPending: false, error: null }),
-}));
+vi.mock("../../api/admin", async () => {
+  // The PATCH hook keeps its error in React state, as react-query's does,
+  // so a failed save re-renders the page the way the real one would.
+  const { useState } = await import("react");
+  return {
+    useFeatureFlags: () => useFeatureFlagsMock(),
+    usePatchFeatureFlag: () => {
+      const [error, setError] = useState<Error | null>(null);
+      return {
+        mutate: (vars: unknown, opts?: { onSuccess?: () => void }) => {
+          patchMutate(vars, opts);
+          if (patchFailure) setError(patchFailure);
+          else opts?.onSuccess?.();
+        },
+        reset: () => setError(null),
+        isPending: false,
+        error,
+      };
+    },
+    useClearFeatureFlag: () => clearState,
+  };
+});
 
 function twoFlags() {
   return {
@@ -58,15 +80,26 @@ function wrap() {
 }
 
 describe("AdminFlagsPage", () => {
+  it("routes a load failure through the shared error banner", () => {
+    useFeatureFlagsMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error("boom"), refetch: vi.fn() });
+    wrap();
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+    expect(screen.getByRole("button", { name: i18n.t("common.retry") })).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     useFeatureFlagsMock.mockReset();
     useFeatureFlagsMock.mockReturnValue(twoFlags());
     patchMutate.mockClear();
+    patchFailure = null;
+    clearMutate.mockClear();
+    clearState.isPending = false;
+    clearState.error = null;
   });
 
   it("renders one row per registered flag", () => {
     wrap();
-    const table = within(screen.getByRole("table"));
+    const table = within(screen.getByRole("grid"));
     expect(table.getAllByRole("row")).toHaveLength(3); // header + 2 flags
   });
 
@@ -79,7 +112,8 @@ describe("AdminFlagsPage", () => {
   it("shows an override-source pill plus the updated-by/reason provenance line", () => {
     wrap();
     const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
-    expect(within(row).getByText(/override/i)).toBeTruthy();
+    // Exact text: the same row now also carries a "Clear override" button.
+    expect(within(row).getByText("Override")).toBeTruthy();
     expect(within(row).getByText(/7/)).toBeTruthy();
     expect(within(row).getByText(/rollout for pilot agencies/)).toBeTruthy();
   });
@@ -126,6 +160,25 @@ describe("AdminFlagsPage", () => {
     );
   });
 
+  it("keeps the dialog open with a message when the save fails, and starts the next one clean", async () => {
+    patchFailure = new Error("nope");
+    const user = userEvent.setup();
+    wrap();
+    const row = screen.getByText("Ask: rules router").closest("tr")!;
+    await user.click(within(row).getByRole("switch"));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox"), "turning it off for a load test");
+    await user.click(within(dialog).getByRole("button", { name: /confirm|save/i }));
+
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(i18n.t("admin.flags.save_error"));
+    expect(within(dialog).getByRole("textbox")).toHaveValue("turning it off for a load test");
+
+    await user.click(within(dialog).getByRole("button", { name: /cancel/i }));
+    await user.click(within(row).getByRole("switch"));
+    expect(within(screen.getByRole("dialog")).queryByRole("alert")).toBeNull();
+  });
+
   it("closes the dialog without mutating on cancel", async () => {
     const user = userEvent.setup();
     wrap();
@@ -135,5 +188,46 @@ describe("AdminFlagsPage", () => {
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(patchMutate).not.toHaveBeenCalled();
+  });
+
+  it("offers a clear-override action only on rows that carry an override", () => {
+    wrap();
+    const overridden = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    const fromEnv = screen.getByText("Ask: rules router").closest("tr")!;
+
+    expect(within(overridden).getByRole("button", { name: /clear override/i })).toBeTruthy();
+    expect(within(fromEnv).queryByRole("button", { name: /clear override/i })).toBeNull();
+  });
+
+  it("clears the override for the row that was clicked", async () => {
+    const user = userEvent.setup();
+    wrap();
+    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /clear override/i }));
+
+    expect(clearMutate).toHaveBeenCalledWith({ key: "copilot_insight_enabled" });
+    expect(patchMutate).not.toHaveBeenCalled();
+  });
+
+  it("does not open the reason dialog when clearing", async () => {
+    const user = userEvent.setup();
+    wrap();
+    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /clear override/i }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("disables the clear action while one is in flight", () => {
+    clearState.isPending = true;
+    wrap();
+    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    expect(within(row).getByRole("button", { name: /clear override/i })).toBeDisabled();
+  });
+
+  it("surfaces a failed clear as an alert", () => {
+    clearState.error = new Error("nope");
+    wrap();
+    expect(screen.getByRole("alert").textContent).toMatch(/clear/i);
   });
 });

@@ -1,16 +1,18 @@
 import { useRef, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
-import { ctxToQueryString, useRangeContext } from "../api/rangeContext";
+import { scopeToQueryString, useScope } from "../api/scope";
 import { useNetworkSummary } from "../api/hooks";
 import { Skeleton } from "../components/Skeleton";
+import { StillWorking } from "../components/StillWorking";
 import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { PageHeader } from "../components/ui/PageHeader";
 import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
-import { formatNumber } from "../utils/format";
+import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "../components/charts/delayAxis";
+import { formatNumber, fmtPct, formatDateRange } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
 import { useUrlState } from "../api/useUrlState";
@@ -19,12 +21,6 @@ import "./NetworkTab.css";
 
 const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
 
-/** Every agency's bar is drawn against this fixed span, never against the
- *  current maximum: a bar whose axis moves with the data says nothing about
- *  how one agency compares to another, or to the same agency last week.
- *  A delay past the top of the axis fills it and keeps its exact figure in
- *  the value column beside it. */
-const AXIS_MAX_MIN = 6;
 /** The severity threshold the product treats as "late", marked on the axis so
  *  a bar can be read against it without a legend. */
 const AXIS_MARK_MIN = 5;
@@ -66,7 +62,7 @@ function AgencyDelayFigure({ avgDelayMin }: { avgDelayMin: number | null }) {
   const displayed = useCountUp(avgDelayMin ?? 0, { decimals: 1 });
   if (avgDelayMin == null) return <>—</>;
   return (
-    <span style={{ color: delayColor(avgDelayMin) }}>
+    <span>
       {avgDelayMin >= 0 ? "+" : ""}
       {displayed.toFixed(1)}
       <span className="network-row__unit">{t("network.delay_unit")}</span>
@@ -88,12 +84,11 @@ function AgencyRow({
   const { t } = useTranslation();
   const a = agency;
   const displayedOnTimePct = weightedView ? a.weighted_on_time_pct : a.on_time_pct;
-  const axisPct =
-    a.avg_delay_min == null ? 0 : Math.min(Math.max(a.avg_delay_min, 0) / AXIS_MAX_MIN, 1) * 100;
+  const axisPct = delayAxisShare(a.avg_delay_min) * 100;
   const coverage =
     a.data_to == null
       ? t("network.no_data_in_range")
-      : `${a.data_from} ${t("common.range_separator")} ${a.data_to}`;
+      : formatDateRange(a.data_from ?? a.data_to, a.data_to);
 
   return (
     <div
@@ -103,7 +98,7 @@ function AgencyRow({
     >
       <span className="network-row__name">
         <Tooltip label={t("network.view_agency", { name: a.agency_name })}>
-          <Link to={`/agencies/${a.agency_id}/operations${linkSuffix}`}>{a.agency_name}</Link>
+          <Link to={`/agencies/${a.agency_id}/live${linkSuffix}`}>{a.agency_name}</Link>
         </Tooltip>
         {isCurrent && (
           <span data-testid="you-badge" className="network-row__you">
@@ -130,7 +125,7 @@ function AgencyRow({
         />
         <span
           className="network-row__axis-mark"
-          style={{ left: `${(AXIS_MARK_MIN / AXIS_MAX_MIN) * 100}%` }}
+          style={{ left: `${delayAxisShare(AXIS_MARK_MIN) * 100}%` }}
         />
       </div>
 
@@ -155,15 +150,14 @@ function AgencyRow({
               : null
           }
         >
+          {/* The planned-trip fallback carries its own label: after the
+              vehicle-km label, a trip count would read as that percentage. */}
           <span>
-            {t("network.col_vehicle_km_delivered")}{" "}
-            {a.vehicle_km_delivered_pct != null
-              ? `${a.vehicle_km_delivered_pct.toFixed(1)}%`
-              : a.planned_trip_count != null
-                ? t("network.planned_trip_count_fallback", {
-                    count: formatNumber(a.planned_trip_count),
-                  })
-                : "—"}
+            {a.vehicle_km_delivered_pct == null && a.planned_trip_count != null
+              ? t("network.planned_trip_count_fallback", { count: formatNumber(a.planned_trip_count) })
+              : `${t("network.col_vehicle_km_delivered")} ${
+                  a.vehicle_km_delivered_pct != null ? `${a.vehicle_km_delivered_pct.toFixed(1)}%` : "—"
+                }`}
           </span>
         </ScheduleVersionTooltip>
         <span>
@@ -174,10 +168,20 @@ function AgencyRow({
             <span data-testid="clamp-dot" aria-hidden className="network-row__clamp-dot">
               ●
             </span>
-            {a.clamp_pct.toFixed(2)}%
+            {fmtPct(a.clamp_pct, t)}
           </span>
         )}
-        {a.is_stale && <span className="network-row__stale" title={t("network.help_freshness")}>{t("network.stale_badge")}</span>}
+        {a.is_stale && (
+          <Tooltip label={t("network.help_freshness")}>
+            <span
+              className="network-row__stale"
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain badge, not a control; keyboard-focusable only so the tooltip explaining staleness is reachable
+              tabIndex={0}
+            >
+              {t("network.stale_badge")}
+            </span>
+          </Tooltip>
+        )}
       </div>
     </div>
   );
@@ -187,7 +191,7 @@ export function NetworkTab() {
   const { t, i18n } = useTranslation();
   const { agencyId } = useParams();
   const currentAgencyId = agencyId ? Number(agencyId) : null;
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   const { data, isPending, error, refetch } = useNetworkSummary(ctx);
   const [ridershipWeightedParam, setRidershipWeightedParam] = useUrlState<"1" | "0">("ridership_weighted", "0");
   const showRidershipWeighted = ridershipWeightedParam === "1";
@@ -200,7 +204,7 @@ export function NetworkTab() {
 
   // Carry the full current range into each agency's Overview, matching how
   // Sidebar/AnalysisTab build agency links (proper encoding; "all" dims omitted).
-  const filterQS = ctxToQueryString(ctx);
+  const filterQS = scopeToQueryString(ctx);
   const suffix = filterQS ? `?${filterQS}` : "";
 
   const ordered = data ? [...data.agencies].sort(byDelayDescending) : [];
@@ -209,7 +213,9 @@ export function NetworkTab() {
   // changed nothing.
   const orderSignal = ordered.map((a) => a.agency_id).join(",");
   useFlipRows(rowsRef, orderSignal);
-  const cappedAgencies = useCappedList(ordered, 200, data?.agencies);
+  // The filters the summary was fetched for identify the list: a refetch
+  // under the same filters is the same list, however new its objects are.
+  const cappedAgencies = useCappedList(ordered, 200, filterQS);
 
   return (
     <div className="network-page">
@@ -257,15 +263,10 @@ export function NetworkTab() {
         )}
       </div>
 
-      {/* Behind a disclosure: the aggregation rules are what you check once a
-          comparison has raised a question, not what you read before making
-          one. */}
-      {data && (
-        <details className="network-definition" style={{ marginBottom: 12 }}>
-          <summary>{t("network.definition_disclosure")}</summary>
-          <DefinitionMetaBlock definition={data.definition} />
-        </details>
-      )}
+      {/* DefinitionMetaBlock is its own disclosure: the aggregation rules are
+          what you check once a comparison has raised a question, not what you
+          read before making one. */}
+      {data && <DefinitionMetaBlock definition={data.definition} />}
 
       <AsyncSection
         loading={isPending}
@@ -274,14 +275,19 @@ export function NetworkTab() {
         data={data}
         hasContent={(summary) => summary.agencies.length > 0}
         empty={<p style={{ color: "var(--text-secondary)" }}>{t("network.empty")}</p>}
-        skeleton={<Skeleton height={320} />}
+        skeleton={
+          <>
+            <Skeleton height={320} />
+            <StillWorking scope={ctx} update={update} />
+          </>
+        }
       >
         {() => (
           <div className="network-rows" data-testid="network-card-list" ref={rowsRef}>
             <div className="network-row network-row--head" aria-hidden="true">
               <span>{t("network.col_agency")}</span>
               <span style={{ textAlign: "right" }}>{t("network.col_avg_delay")}</span>
-              <span>{t("network.axis_caption", { max: AXIS_MAX_MIN })}</span>
+              <span>{t("network.axis_caption", { max: DELAY_AXIS_MAX_MIN })}</span>
               <span style={{ textAlign: "right" }}>{t("network.col_on_time")}</span>
             </div>
             {cappedAgencies.visible.map((a) => (

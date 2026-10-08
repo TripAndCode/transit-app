@@ -4,7 +4,9 @@ import { pill, groupLabel } from "./pillStyles";
 describe("pill", () => {
   it("uses the accent colors when active", () => {
     const style = pill(true);
-    expect(style.color).toBe("var(--accent)");
+    // --accent-strong, not --accent: this text sits directly on --accent-soft,
+    // where plain --accent falls short of WCAG AA (4.32:1 in light mode).
+    expect(style.color).toBe("var(--accent-strong)");
     expect(style.fontWeight).toBe(600);
   });
 

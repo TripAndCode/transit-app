@@ -13,6 +13,7 @@ import pytest
 
 from api.range import time_band_clause_ch_for
 from api.routers.map import (
+    MAX_ROUTE_TRIP_STOPS,
     MAX_ROUTE_TRIPS,
     ROUTE_TRIPS_DATE_WINDOW_DAYS,
     attach_headsigns,
@@ -222,4 +223,52 @@ def test_build_route_trips_bounds_the_payload_and_says_so():
 def test_build_route_trips_reports_no_truncation_when_it_fits(limit):
     rows = [_row(f"T{i}", 1, "08:00", i) for i in range(limit)]
     _, truncated = build_route_trips(rows, limit=limit)
+    assert truncated is False
+
+
+# --- total-stop budget -------------------------------------------------------
+
+
+def _trip_with_n_stops(trip_id: str, n: int, delay: int) -> list[tuple]:
+    return [_row(trip_id, seq, "08:00", delay, f"S{seq}") for seq in range(1, n + 1)]
+
+
+def test_build_route_trips_drops_trailing_trips_once_the_stop_budget_is_exceeded():
+    # Three trips of 3 stops each, worst-delayed first once sorted; a budget
+    # of 5 fits the worst trip (3 stops) plus part of the next, so the second
+    # trip must be dropped in full rather than sliced mid-polyline.
+    rows = _trip_with_n_stops("A", 3, 900) + _trip_with_n_stops("B", 3, 600) + _trip_with_n_stops("C", 3, 300)
+    trips, truncated = build_route_trips(rows, stop_budget=5)
+    assert [t.trip_id for t in trips] == ["A"]
+    assert truncated is True
+
+
+def test_build_route_trips_keeps_whole_trips_never_a_partial_polyline():
+    rows = _trip_with_n_stops("A", 4, 900) + _trip_with_n_stops("B", 4, 600)
+    trips, truncated = build_route_trips(rows, stop_budget=6)
+    assert [t.trip_id for t in trips] == ["A"]
+    assert all(len(t.stops) in (4,) for t in trips)
+    assert truncated is True
+
+
+def test_build_route_trips_reports_no_truncation_when_the_stop_total_fits():
+    rows = _trip_with_n_stops("A", 3, 900) + _trip_with_n_stops("B", 3, 600)
+    trips, truncated = build_route_trips(rows, stop_budget=6)
+    assert [t.trip_id for t in trips] == ["A", "B"]
+    assert truncated is False
+
+
+def test_build_route_trips_keeps_at_least_one_trip_even_over_budget_alone():
+    # A single trip whose own stop count already exceeds the budget is still
+    # returned rather than dropped to an empty response.
+    rows = _trip_with_n_stops("A", 10, 900)
+    trips, truncated = build_route_trips(rows, stop_budget=3)
+    assert [t.trip_id for t in trips] == ["A"]
+    assert truncated is False
+
+
+def test_build_route_trips_default_stop_budget_is_max_route_trip_stops():
+    rows = _trip_with_n_stops("A", MAX_ROUTE_TRIP_STOPS + 1, 900)
+    trips, truncated = build_route_trips(rows)
+    assert [t.trip_id for t in trips] == ["A"]
     assert truncated is False

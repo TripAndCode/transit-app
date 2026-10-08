@@ -1,8 +1,11 @@
-// frontend/src/components/ServiceSplit.tsx
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { serviceValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewServiceSplitDay } from "../api/types";
+import { ServiceName } from "./ServiceName";
+import { formatMinutes, formatShortDate } from "../utils/format";
+import { showsLabel } from "./analysis/axisLabels";
 
 type Props = {
   service_split: Record<string, number>;
@@ -118,16 +121,15 @@ export function ServiceSplit({
             <div className="ov-svc-row" key={k}>
               <div className="ov-svc-head">
                 <span className="ov-svc-label">
-                  {t(`overview.service_split_label.${k}`, { defaultValue: k })}
+                  <ServiceName value={k} />
                 </span>
-                <span className="ov-svc-num ov-anim-fade">
-                  {v.toFixed(1)}
-                  {t("overview.hero_unit_min")}
+                <span className="ov-svc-num num">
+                  {formatMinutes(v)}
                 </span>
               </div>
               <div className="ov-svc-track">
                 <div
-                  className="ov-svc-fill ov-anim-grow-x"
+                  className="ov-svc-fill"
                   style={{ width: `${pctOfMax}%` }}
                 />
               </div>
@@ -209,10 +211,7 @@ function ServiceSplitDailyChart({
       .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)},${p.y.toFixed(1)}`)
       .join(" ");
 
-  const dateLabels = daily.map((d) => {
-    const dt = new Date(d.date + "T00:00:00");
-    return `${dt.getMonth() + 1}/${dt.getDate()}`;
-  });
+  const dateLabels = daily.map((d) => formatShortDate(d.date));
   const xs = daily.map((_, i) => toX(i));
   const weekdayPath = buildPath(wd);
   const weekendPath = buildPath(we);
@@ -263,16 +262,17 @@ function ServiceSplitDailyChart({
             className="ov-svc-daily-legend-swatch"
             style={{ background: "var(--trend-neutral)" }}
           />
-          {t("overview.service_split.weekday_label")}
+          {serviceValueLabel(WEEKDAY_KEY, t)}
         </span>
         <span>
           <span
             className="ov-svc-daily-legend-swatch"
             style={{ background: "var(--text-tertiary)" }}
           />
-          {t("overview.service_split.weekend_label")}
+          {serviceValueLabel(WEEKEND_KEY, t)}
         </span>
       </div>
+      <div className="ov-chart-plot">
       <svg
         width="100%"
         viewBox={`0 0 ${DC_W} ${DC_H}`}
@@ -296,33 +296,7 @@ function ServiceSplitDailyChart({
                 strokeWidth="1"
                 strokeDasharray={i === 0 ? "0" : "2 4"}
               />
-              <text
-                x={DC_PAD_LEFT - 6}
-                y={y + 3}
-                fontSize="10"
-                style={{ fill: "var(--text-tertiary)" }}
-                textAnchor="end"
-              >
-                {v.toFixed(1)}
-              </text>
             </g>
-          );
-        })}
-        {/* X tick labels (thinned to ~10) */}
-        {xs.map((x, i) => {
-          const step = Math.max(1, Math.ceil(xs.length / 10));
-          if (i % step !== 0 && i !== xs.length - 1) return null;
-          return (
-            <text
-              key={`xt-${i}`}
-              x={x}
-              y={DC_H - DC_PAD_BOTTOM + 14}
-              fontSize="10"
-              style={{ fill: "var(--text-tertiary)" }}
-              textAnchor="middle"
-            >
-              {dateLabels[i]}
-            </text>
           );
         })}
         {/* Lines */}
@@ -354,6 +328,35 @@ function ServiceSplitDailyChart({
           />
         )}
       </svg>
+      {/* HTML axis labels (see .ov-chart-plot in overview.css). */}
+      {yTicks.map((v, i) => (
+        <span
+          key={`yt-${i}`}
+          className="ov-svc-daily-label ov-svc-daily-label--y num"
+          style={{
+            top: `${((DC_PAD_TOP + (1 - v / yMax) * innerH) / DC_H) * 100}%`,
+            left: `${((DC_PAD_LEFT - 6) / DC_W) * 100}%`,
+          }}
+        >
+          {v.toFixed(1)}
+        </span>
+      ))}
+      {xs.map((x, i) => {
+        if (!showsLabel(i, xs.length, 10)) return null;
+        return (
+          <span
+            key={`xt-${i}`}
+            className="ov-svc-daily-label ov-svc-daily-label--x num"
+            style={{
+              top: `${((DC_H - DC_PAD_BOTTOM + 14) / DC_H) * 100}%`,
+              left: `${(x / DC_W) * 100}%`,
+            }}
+          >
+            {dateLabels[i]}
+          </span>
+        );
+      })}
+      {/* Inside the plot box it is measured against. */}
       {hover.visible && (
         <div
           className="ov-tooltip"
@@ -361,13 +364,14 @@ function ServiceSplitDailyChart({
         >
           {hover.label} —{" "}
           {hover.weekday != null
-            ? `${t("overview.service_split.weekday_label")} ${hover.weekday.toFixed(1)}${t("overview.hero_unit_min")}`
+            ? `${serviceValueLabel(WEEKDAY_KEY, t)} ${formatMinutes(hover.weekday)}`
             : "—"}
           {hover.weekend != null
-            ? `, ${t("overview.service_split.weekend_label")} ${hover.weekend.toFixed(1)}${t("overview.hero_unit_min")}`
+            ? `, ${serviceValueLabel(WEEKEND_KEY, t)} ${formatMinutes(hover.weekend)}`
             : ""}
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { Link, Outlet, useNavigate, useSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -12,11 +12,15 @@ import {
 import { useSession } from "../../api/auth";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { useToast } from "../../components/ui/toastContext";
 import { Z_INDEX } from "../../styles/zIndex";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
+import { Modal } from "../../components/Modal";
 import { InviteDialog } from "./InviteDialog";
 import { pageItems } from "./pageItems";
+import { PENDING_APPROVAL_FILTER, usePendingApprovalCount } from "./pendingApprovals";
+import { isTypingTarget } from "../../utils/isTypingTarget";
 
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -45,14 +49,6 @@ const BULK_TOAST_KEY: Record<BulkAction, string> = {
   promote: "promoted",
   demote: "demoted",
 };
-
-/** True for an element that consumes plain-letter keystrokes as text input,
- * so the j/k/x/a// shortcuts below don't fire while the admin is typing. */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || target.isContentEditable;
-}
 
 /** The search box's own local-edit + debounce-commit state, extracted so the
  *  displayed value can track `q` for any reason it changes -- including a
@@ -111,11 +107,12 @@ function AdminUserSearchBox({
 }
 
 /** Admin: searchable, filterable, paginated user list with bulk selection (checkbox
- *  column, floating bulk-action bar, 8s undo), saved views, keyboard navigation
+ *  column, floating bulk-action bar, undo toast), saved views, keyboard navigation
  *  (j/k move focus, x toggles selection, a approves, / focuses search, Enter opens),
  *  and inline role / suspend / delete controls. */
 export function AdminUsersPage() {
   const { t } = useTranslation();
+  const toast = useToast();
   const [inviteOpen, setInviteOpen] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -131,11 +128,9 @@ export function AdminUsersPage() {
 
   const { data: me } = useSession();
 
-  // Badge count for the "awaiting approval" saved view — a separate,
-  // cheap (limit=1) query so the count stays accurate regardless of the
-  // currently-active filters/page.
-  const { data: pendingData } = useAdminUsers({ llmApproved: "false", limit: 1, offset: 0 });
-  const pendingCount = pendingData?.total ?? 0;
+  // Its own query rather than a count of this page's rows, so the Pending
+  // chip's number stays right whatever filter or page is showing.
+  const pendingCount = usePendingApprovalCount();
 
   const { data, isLoading, isPlaceholderData, error, refetch } = useAdminUsers({
     q,
@@ -179,18 +174,18 @@ export function AdminUsersPage() {
   const rowSetKey = `${q}|${role}|${suspended}|${llmApproved}|${page}`;
   const [priorRowSetKey, setPriorRowSetKey] = useState(rowSetKey);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [bulkDeleteIds, setBulkDeleteIds] = useState<number[] | null>(null);
+  /** The rows the last bulk delete could not remove, labelled as they were
+   *  when it was confirmed. */
+  const [bulkDeleteFailures, setBulkDeleteFailures] = useState<{ attempted: number; labels: string[] } | null>(
+    null,
+  );
   if (rowSetKey !== priorRowSetKey) {
     setPriorRowSetKey(rowSetKey);
     setSelected(new Set());
+    setBulkDeleteFailures(null);
   }
-
-  const [undo, setUndo] = useState<{ message: string; ids: number[]; inverse: UserPatchBody } | null>(null);
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    };
-  }, []);
+  const bulkDeleteTitleId = useId();
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -227,9 +222,10 @@ export function AdminUsersPage() {
   const bulkBusy = bulkPatch.isPending || del.isPending;
 
   function showUndo(message: string, ids: number[], inverse: UserPatchBody) {
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    setUndo({ message, ids, inverse });
-    undoTimerRef.current = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    toast.show(message, {
+      durationMs: UNDO_WINDOW_MS,
+      action: { label: t("admin.users.bulk.undo"), onClick: () => bulkPatch.mutate({ ids, patch: inverse }) },
+    });
   }
 
   function runBulkAction(action: BulkAction, ids: number[]) {
@@ -250,22 +246,47 @@ export function AdminUsersPage() {
     );
   }
 
-  function handleUndo() {
-    if (!undo) return;
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    bulkPatch.mutate({ ids: undo.ids, patch: undo.inverse });
-    setUndo(null);
+  // One dialog for the whole batch, naming every row it will anonymize. The
+  // per-row `confirm()` this replaces asked once per id, so deleting ten
+  // users meant answering ten identical prompts -- which trains an operator
+  // to dismiss the eleventh without reading it.
+  function requestBulkDelete(ids: number[]) {
+    const targets = ids.filter(isSelectable);
+    if (targets.length > 0) setBulkDeleteIds(targets);
   }
 
-  async function handleBulkDelete(ids: number[]) {
-    for (const uid of ids.filter(isSelectable)) {
-      const row = rows.find((u) => u.user_id === uid);
-      if (!row) continue;
-      if (!confirm(t("admin.users.confirm_delete", { email: row.email }))) continue;
-      patch.reset();
-      await del.mutateAsync(uid);
+  function rowLabel(uid: number): string {
+    return rows.find((u) => u.user_id === uid)?.email ?? String(uid);
+  }
+
+  async function confirmBulkDelete() {
+    const ids = bulkDeleteIds ?? [];
+    setBulkDeleteIds(null);
+    setBulkDeleteFailures(null);
+    patch.reset();
+    const deleted = new Set<number>();
+    const failed: number[] = [];
+    // One at a time, and every id attempted whatever the others do. Each
+    // delete locks every active admin's row for the last-admin guard, so
+    // sent together they would only queue in the database, each holding a
+    // pooled connection while it waits.
+    for (const uid of ids) {
+      try {
+        await del.mutateAsync(uid);
+        deleted.add(uid);
+      } catch {
+        failed.push(uid);
+      }
     }
-    setSelected(new Set());
+    // The batch reports its own outcome below; the hook's error describes
+    // only whichever id ran last.
+    del.reset();
+    // Deleted rows leave the selection and the ones that failed stay in it,
+    // ready to retry from the bulk bar. Filtering the current selection,
+    // rather than replacing it, keeps a page or filter change made while
+    // the batch ran from reviving ids that are no longer on screen.
+    setSelected((current) => new Set([...current].filter((uid) => !deleted.has(uid))));
+    if (failed.length > 0) setBulkDeleteFailures({ attempted: ids.length, labels: failed.map(rowLabel) });
   }
 
   function setFilter(key: "role" | "suspended", value: string) {
@@ -278,12 +299,14 @@ export function AdminUsersPage() {
 
   const VIEW_PARAMS: Record<SavedView, { role: string; suspended: string; llmApproved: string }> = {
     all: { role: "", suspended: "", llmApproved: "" },
-    pending: { role: "", suspended: "", llmApproved: "false" },
+    pending: { role: "", ...PENDING_APPROVAL_FILTER },
     admin: { role: "admin", suspended: "", llmApproved: "" },
     suspended: { role: "", suspended: "true", llmApproved: "" },
   };
+  const showsPending =
+    llmApproved === PENDING_APPROVAL_FILTER.llmApproved && suspended === PENDING_APPROVAL_FILTER.suspended;
   const activeView: SavedView =
-    suspended === "true" ? "suspended" : role === "admin" ? "admin" : llmApproved === "false" ? "pending" : "all";
+    suspended === "true" ? "suspended" : role === "admin" ? "admin" : showsPending ? "pending" : "all";
 
   function selectView(view: SavedView) {
     const target = VIEW_PARAMS[view];
@@ -501,6 +524,10 @@ export function AdminUsersPage() {
         onSelectionChange={(next) => setSelected(new Set([...next].map(Number)))}
         onOpen={(u) => navigate(`/admin/users/${u.user_id}`, { state: { listSearch: searchParams.toString() } })}
         onRowKeyDown={onRowKeyDown}
+        extraShortcuts={[
+          { keys: "a", description: t("admin.users.shortcut.approve") },
+          { keys: "/", description: t("admin.users.shortcut.search") },
+        ]}
         savedViews={savedViewChips}
         activeView={activeView}
         onSelectView={(id) => selectView(id as SavedView)}
@@ -508,6 +535,16 @@ export function AdminUsersPage() {
       />
       {(patch.error || del.error || bulkPatch.error) && (
         <ErrorBanner error={patch.error || del.error || bulkPatch.error} />
+      )}
+      {bulkDeleteFailures && (
+        <ErrorBanner
+          error={null}
+          message={t("admin.users.bulk.delete_failed", {
+            failed: bulkDeleteFailures.labels.length,
+            total: bulkDeleteFailures.attempted,
+            emails: bulkDeleteFailures.labels.join(", "),
+          })}
+        />
       )}
       <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
@@ -546,12 +583,12 @@ export function AdminUsersPage() {
             background: "var(--surface-1)",
             border: "1px solid var(--border-subtle)",
             borderRadius: 999,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+            boxShadow: "var(--el-2)",
             padding: "8px 8px 8px 16px",
             display: "flex",
             gap: 8,
             alignItems: "center",
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
             zIndex: Z_INDEX.sticky,
           }}
         >
@@ -587,7 +624,7 @@ export function AdminUsersPage() {
             <option value="admin">{t("account.role.admin")}</option>
             <option value="user">{t("account.role.user")}</option>
           </select>
-          <AdminButton variant="danger" disabled={bulkBusy} onClick={() => handleBulkDelete([...selected])}>
+          <AdminButton variant="danger" disabled={bulkBusy} onClick={() => requestBulkDelete([...selected])}>
             {t("admin.users.action.delete")}
           </AdminButton>
           <AdminButton variant="secondary" onClick={() => setSelected(new Set())}>
@@ -595,37 +632,38 @@ export function AdminUsersPage() {
           </AdminButton>
         </div>
       )}
-      {undo && (
-        <div
-          role="status"
-          style={{
-            position: "fixed",
-            left: 24,
-            bottom: 24,
-            background: "var(--text-primary)",
-            color: "var(--surface-1)",
-            borderRadius: 6,
-            padding: "8px 14px",
-            display: "flex",
-            gap: 12,
-            alignItems: "center",
-            fontSize: 13,
-            // Above the selection bar it shares a corner with: undoing is
-            // the one action still worth taking while both are on screen.
-            zIndex: Z_INDEX.toast,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.16)",
-          }}
-        >
-          <span>{undo.message}</span>
-          <button
-            type="button"
-            onClick={handleUndo}
-            style={{ color: "var(--accent)", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}
-          >
-            {t("admin.users.bulk.undo")}
-          </button>
+      <Modal
+        open={bulkDeleteIds !== null}
+        onClose={() => setBulkDeleteIds(null)}
+        labelledBy={bulkDeleteTitleId}
+        style={{
+          width: "min(460px, calc(100vw - 32px))",
+          padding: 20,
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "var(--radius)",
+          boxShadow: "var(--el-2)",
+        }}
+      >
+        <h2 id={bulkDeleteTitleId} style={{ margin: "0 0 8px", fontSize: 16 }}>
+          {t("admin.users.bulk.delete_title")}
+        </h2>
+        <p style={{ margin: "0 0 12px", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+          {t("admin.users.bulk.delete_body", { count: bulkDeleteIds?.length ?? 0 })}
+        </p>
+        <ul style={{ margin: "0 0 16px", paddingLeft: 18, fontSize: "var(--text-sm)", maxHeight: 200, overflowY: "auto" }}>
+          {(bulkDeleteIds ?? []).map((uid) => (
+            <li key={uid}>{rowLabel(uid)}</li>
+          ))}
+        </ul>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <AdminButton variant="secondary" onClick={() => setBulkDeleteIds(null)}>
+            {t("common.cancel")}
+          </AdminButton>
+          <AdminButton variant="danger" onClick={() => void confirmBulkDelete()}>
+            {t("admin.users.action.delete")}
+          </AdminButton>
         </div>
-      )}
+      </Modal>
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
       <Outlet />
     </div>

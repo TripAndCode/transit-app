@@ -21,13 +21,20 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 Row = dict[str, Any]
 Cursor = dict[str, Any]
 
 LOGIN_ACTION_BY_KIND: dict[str, str] = {"login": "login.ok", "login_failed": "login.fail"}
+
+#: A bare `YYYY-MM-DD` bound is the JST civil day an operator means (matching
+#: `api/admin_runs.py`'s day window), not a UTC one -- a UTC reading of "today"
+#: would clip up to nine hours off the JST day the operator is actually asking
+#: about.
+_JST = ZoneInfo("Asia/Tokyo")
 
 
 def normalize_admin_audit(row: Row) -> Row:
@@ -141,10 +148,16 @@ def decode_cursor(token: str) -> Cursor:
     base64 error escape to the caller."""
     try:
         payload = json.loads(base64.urlsafe_b64decode(token.encode()).decode())
+        id_ = payload["id"]
+        source = payload["source"]
+        if not isinstance(id_, int):
+            raise ValueError(f"cursor id must be an int, got {id_!r}")
+        if source not in ("audit", "login"):
+            raise ValueError(f"cursor source must be 'audit' or 'login', got {source!r}")
         return {
             "at": datetime.fromisoformat(payload["at"]),
-            "source": payload["source"],
-            "id": payload["id"],
+            "source": source,
+            "id": id_,
         }
     except Exception as exc:
         raise ValueError(f"invalid cursor: {token!r}") from exc
@@ -152,16 +165,23 @@ def decode_cursor(token: str) -> Cursor:
 
 def parse_bound(value: str | None, *, end: bool) -> datetime | None:
     """Parse a `from`/`to` query bound. Accepts a bare date (`YYYY-MM-DD`,
-    clamped to that day's start or end in UTC) or a full ISO datetime
-    (assumed UTC when it carries no offset). Raises `ValueError` on anything
-    else -- the router turns that into a 422."""
+    clamped to that JST civil day's start or end, expressed in UTC) or a full
+    ISO datetime (assumed UTC when it carries no offset). Raises `ValueError`
+    on anything else -- the router turns that into a 422."""
     if not value:
         return None
     try:
         if len(value) == 10:
             d = date.fromisoformat(value)
-            t = time.max if end else time.min
-            return datetime.combine(d, t, tzinfo=timezone.utc)
+            day_start = datetime.combine(d, time.min, tzinfo=_JST).astimezone(timezone.utc)
+            if not end:
+                return day_start
+            # Inclusive, because the query compares `at <= $bound`. One
+            # microsecond is the smallest step `timestamptz` resolves, so this
+            # is the last instant of the day and nothing in it is missed --
+            # but the two have to move together: against a `<` the final
+            # microsecond would silently drop out of the range.
+            return day_start + timedelta(days=1) - timedelta(microseconds=1)
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)

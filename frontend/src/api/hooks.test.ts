@@ -4,7 +4,8 @@ import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { useReport, useConversations, useConversation, useAppendMessage } from "./hooks";
-import type { RangeCtx } from "./rangeContext";
+import type { Scope } from "./scope";
+import { SCOPE_EXTRAS_NONE } from "./scope";
 import type { AnonThread, Conversation, DefinitionMeta, ReportResponse } from "./types";
 
 void i18n.changeLanguage("en");
@@ -55,8 +56,8 @@ function report(): ReportResponse {
   return { report_type: "trend", rendered_at: "x", text: "", rows: [], definition: DEFINITION };
 }
 
-function baseCtx(): RangeCtx {
-  return { from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all", service: "all", routes: [] };
+function baseCtx(): Scope {
+  return { ...SCOPE_EXTRAS_NONE, from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all", service: "all", routes: [] };
 }
 
 function withProviders(queryClient: QueryClient) {
@@ -100,6 +101,11 @@ describe("ctxKey (observed via useReport's cache identity)", () => {
     ["time_band", { ...baseCtx(), time_band: "morning" as const }],
     ["service", { ...baseCtx(), service: "平日" as const }],
     ["routes", { ...baseCtx(), routes: ["R1"] }],
+    ["hour", { ...baseCtx(), hour: [7, 7] as [number, number] }],
+    ["stop", { ...baseCtx(), stop: "S1" }],
+    ["dir", { ...baseCtx(), dir: 1 as const }],
+    ["late", { ...baseCtx(), late: 180 }],
+    ["early", { ...baseCtx(), early: 30 }],
   ])("treats a ctx differing only in %s as a distinct query", async (_dimension, variant) => {
     mockApiGet.mockResolvedValue(report());
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -110,6 +116,53 @@ describe("ctxKey (observed via useReport's cache identity)", () => {
     );
     await waitFor(() => expect(result.current.a.isSuccess && result.current.b.isSuccess).toBe(true));
     expect(mockApiGet).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("useReport's ranking options", () => {
+  afterEach(() => mockApiGet.mockReset());
+
+  it("asks for the default ranking unless told otherwise", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useReport(1, "ranking", baseCtx()), withProviders(queryClient));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const url = String(mockApiGet.mock.calls[0][0]);
+    expect(url).not.toContain("include_sparse");
+    expect(url).not.toContain("limit=");
+  });
+
+  it("asks for thinly observed groups and more rows as a separate query", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({
+        a: useReport(1, "ranking", baseCtx()),
+        b: useReport(1, "ranking", baseCtx(), { includeSparse: true, limit: 500 }),
+      }),
+      withProviders(queryClient),
+    );
+    await waitFor(() => expect(result.current.a.isSuccess && result.current.b.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    const url = String(mockApiGet.mock.calls[1][0]);
+    expect(url).toMatch(/[?&]include_sparse=1(&|$)/);
+    expect(url).toMatch(/[?&]limit=500(&|$)/);
+  });
+
+  it("asks the certificate for departures past a threshold, zero included, as a separate query", async () => {
+    mockApiGet.mockResolvedValue(report());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({
+        a: useReport(1, "delay_certificate", baseCtx()),
+        b: useReport(1, "delay_certificate", baseCtx(), { thresholdSec: 0 }),
+      }),
+      withProviders(queryClient),
+    );
+    await waitFor(() => expect(result.current.a.isSuccess && result.current.b.isSuccess).toBe(true));
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
+    expect(String(mockApiGet.mock.calls[0][0])).not.toContain("threshold_sec");
+    expect(String(mockApiGet.mock.calls[1][0])).toMatch(/[?&]threshold_sec=0(&|$)/);
   });
 });
 

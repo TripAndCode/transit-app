@@ -12,7 +12,8 @@ on instead of matching columns that don't exist.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+import asyncio
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 
 from api.admin_audit import record_admin_action
 from api.deps import get_conn
+from api.range import DEFAULT_RANGE_DAYS, jst_today
 from api.security import User, csrf_guard, require_admin
 from pipeline.query import intent_cache
 from pipeline.query.ask_ops import (
@@ -93,7 +95,10 @@ async def list_ask_queries(
 ) -> AskQueryLogPage:
     """List ask_query_log rows newest-first, with route/status/agency/date
     filters and id-keyset pagination (stable under concurrent inserts,
-    unlike offset paging)."""
+    unlike offset paging).
+
+    `question` is the caller's raw, unredacted Ask input. It is
+    Internal-classified and retained 90 days by `prune-query-log`."""
     limit = max(1, min(_MAX_LIMIT, limit))
 
     where: list[str] = []
@@ -185,7 +190,21 @@ async def ask_funnel(
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> AskFunnelOut:
     """Route funnel (rules -> nn -> rag, plus the no_history early exit)
-    with per-route success counts for the given window."""
+    with per-route success counts for the given window.
+
+    Defaults to the trailing `DEFAULT_RANGE_DAYS` JST days when both `from`
+    and `to` are omitted, the same default every other admin/report window
+    uses (see api.range.clamp_range_ctx) -- an unbounded funnel only gets
+    more expensive as ask_query_log grows, and its 90-day retention
+    (gtfs_pipeline.py prune_query_log) never claims a query fast enough on
+    its own to keep it cheap. Passing either boundary opts out of the
+    default entirely; the query then runs open-ended on the other side, same
+    as before.
+    """
+    if from_date is None and to_date is None:
+        to_date = jst_today()
+        from_date = to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1)
+
     where: list[str] = []
     args: list[Any] = []
     if agency_id is not None:
@@ -220,7 +239,6 @@ async def promote_query_log(
     body: PromoteRequest,
     request: Request,
     admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
 ) -> PromoteResponse:
     """Promote the cached intent behind one ask_query_log row into
     rag_chunks, reusing scripts/promote_intent_cache.py's core
@@ -231,17 +249,23 @@ async def promote_query_log(
     only offers the action there too.
     """
     csrf_guard(request)
+    pool = request.app.state.pool
 
-    log_row = await conn.fetchrow(
-        "SELECT agency_id, signature_hash FROM ask_query_log WHERE id=$1",
-        body.query_log_id,
-    )
+    async with pool.acquire() as conn:
+        log_row = await conn.fetchrow(
+            "SELECT agency_id, signature_hash FROM ask_query_log WHERE id=$1",
+            body.query_log_id,
+        )
     if log_row is None:
         raise HTTPException(404, "query log entry not found")
     if log_row["signature_hash"] is None:
         raise HTTPException(400, "this query has no cached intent to promote (not a Stage-3/rag row)")
 
-    embedder = get_embedder()
+    # get_embedder() constructs the ML embedder singleton on its first call
+    # (a blocking model load) -- off the event loop, and with no pool
+    # connection held, so one admin's promote click neither stalls other
+    # requests nor pins a connection for the load's duration.
+    embedder = await asyncio.to_thread(get_embedder)
     if not embedder.available:
         raise HTTPException(503, "embedder unavailable — cannot promote right now")
 
@@ -250,21 +274,23 @@ async def promote_query_log(
     # only half the cache/index pair written, is the state this must not
     # leave behind. It spans the embedding call, which is off the event loop
     # but still inside the transaction — bounded by one short question.
-    async with conn.transaction():
-        ok = await promote_signature(conn, log_row["signature_hash"], log_row["agency_id"], embedder)
-        if ok:
-            await record_admin_action(
-                conn,
-                actor_id=admin.user_id,
-                action="ask.promote_intent_cache",
-                target_type="intent_cache",
-                target_id=log_row["signature_hash"],
-                after={"agency_id": log_row["agency_id"], "query_log_id": body.query_log_id},
-            )
-    if not ok:
-        cache_row = await intent_cache.lookup(conn, log_row["signature_hash"], log_row["agency_id"])
-        reason = "already_promoted" if cache_row and cache_row["promoted_at"] is not None else "not_eligible"
-        return PromoteResponse(promoted=False, reason=reason)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            ok = await promote_signature(conn, log_row["signature_hash"], log_row["agency_id"], embedder)
+            if ok:
+                await record_admin_action(
+                    conn,
+                    actor_id=admin.user_id,
+                    action="ask.promote_intent_cache",
+                    target_type="intent_cache",
+                    target_id=log_row["signature_hash"],
+                    after={"agency_id": log_row["agency_id"], "query_log_id": body.query_log_id},
+                    ip=request.client.host if request.client else None,
+                )
+        if not ok:
+            cache_row = await intent_cache.lookup(conn, log_row["signature_hash"], log_row["agency_id"])
+            reason = "already_promoted" if cache_row and cache_row["promoted_at"] is not None else "not_eligible"
+            return PromoteResponse(promoted=False, reason=reason)
     return PromoteResponse(promoted=True, chunk_id=f"cache_{log_row['signature_hash']}")
 
 

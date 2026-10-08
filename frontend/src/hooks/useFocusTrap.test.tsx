@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useFocusTrap } from "./useFocusTrap";
+import { useFocusTrap, useTopmostEscape } from "./useFocusTrap";
 
 function Harness({ onEscape }: { onEscape: () => void }) {
   const [active, setActive] = useState(false);
@@ -47,6 +47,66 @@ describe("useFocusTrap", () => {
     expect(screen.getByText("first")).toHaveFocus();
     await user.tab({ shift: true });
     expect(screen.getByText("last")).toHaveFocus();
+  });
+
+  it("prefers an explicit initial-focus target over the first descendant", async () => {
+    function WithInitialFocus() {
+      const [active, setActive] = useState(false);
+      const containerRef = useRef<HTMLDivElement>(null);
+      const targetRef = useRef<HTMLButtonElement>(null);
+      useFocusTrap(active, containerRef, () => {}, targetRef);
+      return (
+        <div>
+          <button type="button" onClick={() => setActive(true)}>
+            outside trigger
+          </button>
+          {active && (
+            <div ref={containerRef} tabIndex={-1}>
+              <button type="button">first</button>
+              <button type="button" ref={targetRef}>
+                preferred
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+    const user = userEvent.setup();
+    render(<WithInitialFocus />);
+    await user.click(screen.getByText("outside trigger"));
+    expect(screen.getByText("preferred")).toHaveFocus();
+  });
+
+  it("pulls focus back in when Tab is pressed from outside the container", async () => {
+    // A trap that only wraps at its own edges is not a trap for focus that
+    // started outside it -- a click on the page behind, or a container still
+    // hidden when the trap activated. The two outside buttons straddle the
+    // container so an untrapped Tab/Shift+Tab would land on one of them
+    // rather than wrapping into it by accident.
+    function Straddled() {
+      const containerRef = useRef<HTMLDivElement>(null);
+      useFocusTrap(true, containerRef, () => {});
+      return (
+        <div>
+          <button type="button">before</button>
+          <div ref={containerRef} tabIndex={-1}>
+            <button type="button">inner first</button>
+            <button type="button">inner last</button>
+          </div>
+          <button type="button">after</button>
+        </div>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Straddled />);
+
+    screen.getByText("after").focus();
+    await user.tab();
+    expect(screen.getByText("inner first")).toHaveFocus();
+
+    screen.getByText("before").focus();
+    await user.tab({ shift: true });
+    expect(screen.getByText("inner last")).toHaveFocus();
   });
 
   it("invokes onEscape when Escape is pressed while active", async () => {
@@ -120,6 +180,36 @@ describe("useFocusTrap", () => {
 
     expect(onInner).toHaveBeenCalledTimes(1);
     expect(onOuter).not.toHaveBeenCalled();
+  });
+
+  it("keeps Tab inside the trap while an escape-only layer is open over it", async () => {
+    // A tooltip or popover inside a sheet joins the Escape stack on top of the
+    // sheet's trap. It owns the next Escape, but it traps nothing itself, so
+    // Tab containment has to stay with the trap beneath it.
+    function SheetWithLayer() {
+      const sheetRef = useRef<HTMLDivElement>(null);
+      const [layerOpen, setLayerOpen] = useState(false);
+      useFocusTrap(true, sheetRef, () => {});
+      useTopmostEscape(layerOpen, () => setLayerOpen(false));
+      return (
+        <div>
+          <div ref={sheetRef} tabIndex={-1}>
+            <button type="button">first</button>
+            <button type="button" onClick={() => setLayerOpen(true)}>
+              last
+            </button>
+          </div>
+          <button type="button">page behind</button>
+        </div>
+      );
+    }
+    const user = userEvent.setup();
+    render(<SheetWithLayer />);
+    await user.click(screen.getByText("last"));
+    await user.tab();
+    expect(screen.getByText("first")).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(screen.getByText("last")).toHaveFocus();
   });
 
   it("locks the page behind it from scrolling, and restores it on deactivation", async () => {

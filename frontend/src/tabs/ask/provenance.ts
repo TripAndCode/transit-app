@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import { dowValueLabel, serviceValueLabel, timeBandValueLabel } from "../../components/emptyStateRecoveries";
+import { dowValueLabel, serviceValueLabel, timeBandValueLabel } from "../../utils/filterValueLabels";
 
 type ProvenancePath = "sql" | "llm";
 

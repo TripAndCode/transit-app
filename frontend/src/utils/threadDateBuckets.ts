@@ -1,7 +1,7 @@
-import { isoDaysAgo, todayISO, toJstISO } from "../api/rangeContext";
+import { isoDaysAgo, todayISO, toJstISO } from "../api/scope";
 
 // Day-bucketing pins JST like every other date boundary in the app
-// (rangeContext.ts, RangeBadge.tsx) — comparing in the viewer's local
+// (scope.ts) — comparing in the viewer's local
 // timezone would put a conversation in the wrong day near midnight JST for
 // anyone not on a JST machine (e.g. Singapore-based staff).
 export function isToday(iso: string): boolean {

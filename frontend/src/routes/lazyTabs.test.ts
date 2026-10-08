@@ -1,18 +1,54 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import { ROUTE_CHUNK_LOADERS, prefetchRouteChunk } from "./lazyTabs";
-import { SIDEBAR_NAV_ITEMS } from "../components/sidebarNavItems";
+import { ROUTE_CHUNK_LOADERS, loadMapTab, loadOverviewTab, loadSavedExportTab, prefetchRouteChunk } from "./lazyTabs";
+import { DESTINATIONS } from "./destinations";
+import type { Destination } from "./destinations";
+
+vi.mock("../tabs/RoutesIndex", () => ({ RoutesIndex: () => null }));
+vi.mock("../tabs/AnalysisTab", () => ({ AnalysisTab: () => null }));
 
 const mainTsx = readFileSync(resolve(process.cwd(), "src/main.tsx"), "utf8");
 const appTsx = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
 
 describe("ROUTE_CHUNK_LOADERS", () => {
-  it("covers every destination the sidebar can navigate to", () => {
-    for (const item of SIDEBAR_NAV_ITEMS) {
-      expect(ROUTE_CHUNK_LOADERS[item.to]).toBeTypeOf("function");
+  it("covers every destination the rail can navigate to", () => {
+    for (const dest of DESTINATIONS) {
+      expect(ROUTE_CHUNK_LOADERS[dest]).toBeTypeOf("function");
     }
     expect(ROUTE_CHUNK_LOADERS.ask).toBeTypeOf("function");
+  });
+
+  it("is keyed by destination at compile time, so a new destination needs a loader", () => {
+    const _everyDestinationHasALoader: Record<Destination | "ask", unknown> = ROUTE_CHUNK_LOADERS;
+    void _everyDestinationHasALoader;
+    // A string-keyed map would satisfy the line above too; pin the key type
+    // itself so the loaders cannot drift back to accepting any segment.
+    const _keyedByDestination: [keyof typeof ROUTE_CHUNK_LOADERS] extends [Destination | "ask"] ? true : false = true;
+    void _keyedByDestination;
+  });
+
+  it("maps each destination to the chunk it renders, and nothing else", () => {
+    expect(Object.keys(ROUTE_CHUNK_LOADERS).sort()).toEqual([
+      "ask",
+      "compare",
+      "live",
+      "pulse",
+      "reports",
+      "routes",
+      "time",
+      "why",
+    ]);
+    expect(ROUTE_CHUNK_LOADERS.pulse).toBe(loadOverviewTab);
+    expect(ROUTE_CHUNK_LOADERS.live).toBe(loadMapTab);
+    expect(ROUTE_CHUNK_LOADERS.reports).toBe(loadSavedExportTab);
+  });
+
+  it("warms the report screen a thin destination hosts along with it", async () => {
+    const { RoutesIndex } = await import("../tabs/RoutesIndex");
+    const { AnalysisTab } = await import("../tabs/AnalysisTab");
+    const loaded = await ROUTE_CHUNK_LOADERS.routes();
+    expect(loaded).toEqual([{ default: RoutesIndex }, { default: AnalysisTab }]);
   });
 
   it("is the only place the routed tabs are dynamically imported", () => {
@@ -32,6 +68,11 @@ describe("prefetchRouteChunk", () => {
 
   it("is a no-op for a segment with no chunk of its own", () => {
     expect(() => prefetchRouteChunk("not-a-route")).not.toThrow();
+  });
+
+  it("is a no-op for a segment that names an inherited object property", () => {
+    expect(() => prefetchRouteChunk("toString")).not.toThrow();
+    expect(() => prefetchRouteChunk("constructor")).not.toThrow();
   });
 
   it("swallows a failed chunk fetch — a prefetch must never surface an error", async () => {

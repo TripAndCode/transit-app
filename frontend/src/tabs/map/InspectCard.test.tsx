@@ -146,4 +146,95 @@ describe("InspectCard", () => {
     expect(screen.getByText("+3.2")).toBeTruthy();
     expect(screen.queryByTestId("inspect-sparkline")).toBeNull();
   });
+
+  it("prints each hovered trip's own delay outright, never tweening between two trips", () => {
+    const { rerender } = render(
+      <InspectCard
+        trip={TRIP}
+        routeName="Kanazawa Port - Yuhidera"
+        vehicles={3}
+        pinned={false}
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
+        t={t}
+      />,
+    );
+    expect(screen.getByText("+3.2")).toBeTruthy();
+
+    rerender(
+      <InspectCard
+        trip={{ ...TRIP, trip_id: "trip-2", dep_delay: -90 }}
+        routeName="Kanazawa Port - Yuhidera"
+        vehicles={3}
+        pinned={false}
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
+        t={t}
+      />,
+    );
+    // Synchronously, with no frames advanced: a pointer sweeping across
+    // vehicles must not leave a number counting through values no trip has.
+    expect(screen.getByText("-1.5")).toBeTruthy();
+    expect(screen.queryByText("+3.2")).toBeNull();
+  });
+
+  it("crossfades by remounting the card body when the inspected trip changes", () => {
+    const { container, rerender } = render(
+      <InspectCard
+        trip={TRIP}
+        routeName="Kanazawa Port - Yuhidera"
+        vehicles={3}
+        pinned={false}
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
+        t={t}
+      />,
+    );
+    const first = container.querySelector(".ops-inspect__body");
+    expect(first).toBeTruthy();
+
+    rerender(
+      <InspectCard
+        trip={{ ...TRIP, trip_id: "trip-2" }}
+        routeName="Kanazawa Port - Yuhidera"
+        vehicles={3}
+        pinned={false}
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
+        t={t}
+      />,
+    );
+    expect(container.querySelector(".ops-inspect__body")).not.toBe(first);
+  });
+
+  it("keeps the same body node while one trip's own figures refresh", () => {
+    const { container, rerender } = render(
+      <InspectCard
+        trip={TRIP}
+        routeName="Kanazawa Port - Yuhidera"
+        vehicles={3}
+        pinned
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
+        t={t}
+      />,
+    );
+    const first = container.querySelector(".ops-inspect__body");
+
+    rerender(
+      <InspectCard
+        trip={{ ...TRIP, dep_delay: 260 }}
+        routeName="Kanazawa Port - Yuhidera"
+        vehicles={4}
+        pinned
+        onPin={vi.fn()}
+        onUnpin={vi.fn()}
+        t={t}
+      />,
+    );
+    // The thirty-second refetch is the same trip, not a new one -- replaying
+    // the entrance twice a minute is the flicker this card was built to end.
+    expect(container.querySelector(".ops-inspect__body")).toBe(first);
+    expect(screen.getByText("+4.3")).toBeTruthy();
+  });
 });

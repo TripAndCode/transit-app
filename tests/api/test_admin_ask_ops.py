@@ -201,6 +201,33 @@ async def test_funnel_aggregates_by_route_and_omits_providers(ask_ops_client):
 
 
 @pytest.mark.asyncio
+async def test_funnel_defaults_to_the_last_30_days_excluding_older_rows(ask_ops_client):
+    """With neither `from` nor `to` given, a row well outside the trailing
+    30-day window must not be counted -- an unbounded funnel only gets more
+    expensive as ask_query_log grows."""
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO ask_query_log (agency_id, question, router_stage, success, created_at)
+            VALUES ($1, 'old question', 'rules', true, now() - INTERVAL '90 days')
+            """,
+            agency_id,
+        )
+    await _insert_log(pool, agency_id, router_stage="rules", success=True)
+
+    resp = await c.get("/api/admin/ask/funnel", cookies={"sid": sid})
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+
+    # Passing an explicit range wide enough to cover the old row includes it.
+    wide_from = (datetime.now(timezone.utc) - timedelta(days=120)).date().isoformat()
+    resp = await c.get("/api/admin/ask/funnel", params={"from": wide_from}, cookies={"sid": sid})
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 2
+
+
+@pytest.mark.asyncio
 async def test_promote_requires_admin(ask_ops_client):
     c, *_ = ask_ops_client
     resp = await c.post("/api/admin/ask/promote", json={"query_log_id": 1})

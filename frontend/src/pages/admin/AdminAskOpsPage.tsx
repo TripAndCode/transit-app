@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
+import { ErrorBanner } from "../../components/ErrorBanner";
 import {
   useAdminAskEval,
   useAdminAskFunnel,
@@ -10,9 +11,9 @@ import {
   type AskQueryLogRow,
   type AskRoute,
 } from "../../api/admin";
-import { formatApiError } from "../../api/client";
 import { formatDateTime } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
+import { PageHeader } from "../../components/ui/PageHeader";
 
 const ROUTE_ORDER: readonly AskRoute[] = ["rules", "nn", "rag", "no_history"];
 const CACHE_OUTCOMES = new Set(["hit", "miss", "bypass"]);
@@ -66,14 +67,14 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
     cursor: cursorStack[pageIndex],
   });
   const promote = usePromoteAskQuery();
-  /** The row a promotion is in flight for. Only that row's button goes
+  /** The rows a promotion is in flight for. Only those rows' buttons go
    *  pending — one slow embedding must not disable every other row's. */
-  const [promotingId, setPromotingId] = useState<number | null>(null);
+  const [promotingIds, setPromotingIds] = useState<ReadonlySet<number>>(() => new Set());
   const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
 
   async function handlePromote(queryLogId: number) {
     setPromoteMessage(null);
-    setPromotingId(queryLogId);
+    setPromotingIds((ids) => new Set(ids).add(queryLogId));
     try {
       const result = await promote.mutateAsync(queryLogId);
       if (result.promoted) {
@@ -86,7 +87,11 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
     } catch {
       setPromoteMessage(t("admin.ask_ops.promote_error"));
     } finally {
-      setPromotingId(null);
+      setPromotingIds((ids) => {
+        const next = new Set(ids);
+        next.delete(queryLogId);
+        return next;
+      });
     }
   }
 
@@ -145,7 +150,7 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
         row.promotable ? (
           <AdminButton
             variant="secondary"
-            disabled={promotingId !== null}
+            disabled={promotingIds.has(row.id)}
             onClick={() => handlePromote(row.id)}
           >
             {t("admin.ask_ops.promote_action")}
@@ -163,7 +168,7 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
 
   return (
     <>
-      {error && <div style={{ color: "var(--text-tertiary)" }}>{formatApiError(error)}</div>}
+      {error != null && <ErrorBanner error={error} />}
       {isLoading && <div>{t("common.loading")}</div>}
       {promoteMessage && (
         <div role="status" style={{ marginBottom: 12, fontSize: 13, color: "var(--text-secondary)" }}>
@@ -220,7 +225,7 @@ export function AdminAskOpsPage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 1100 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 20 }}>{t("admin.ask_ops.title")}</h1>
+      <PageHeader title={t("admin.ask_ops.title")} />
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <select
@@ -273,10 +278,9 @@ export function AdminAskOpsPage() {
         <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 8 }}>
           {t("admin.ask_ops.funnel.total", { count: funnel?.total ?? 0 })}
         </div>
-        <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-tertiary)" }}>
-          <strong>{t("admin.ask_ops.funnel.providers_title")}:</strong>{" "}
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-tertiary)" }}>
           {t("admin.ask_ops.funnel.providers_not_tracked")}
-        </div>
+        </p>
       </section>
 
       <section

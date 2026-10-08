@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
-import { FirstRunTour } from "./FirstRunTour";
+import { MemoryRouter } from "react-router-dom";
+import { FirstRunTour, FirstRunTourOnLive } from "./FirstRunTour";
 import { readTourSeen, resetTourSeenMemoryForTests } from "../api/tourSeen";
 
 void i18n.changeLanguage("en");
@@ -51,6 +52,36 @@ describe("FirstRunTour", () => {
     expect(within(dialog).getByText("Step 1 of 3")).toBeTruthy();
   });
 
+  it("points at the filter dock itself when its marker draws no box", () => {
+    const rect = (top: number, left: number, width: number, height: number) =>
+      ({ top, left, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+    render(
+      <I18nextProvider i18n={i18n}>
+        <div data-tour="filter-bar" style={{ display: "contents" }}>
+          <div data-testid="dock">filter dock</div>
+        </div>
+        <FirstRunTour />
+      </I18nextProvider>,
+    );
+    const dock = screen.getByTestId("dock");
+    vi.spyOn(dock, "getBoundingClientRect").mockReturnValue(rect(300, 400, 200, 40));
+    // A resize re-places the tour on the next frame; run that frame now.
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((run) => {
+      run(0);
+      return 1;
+    });
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    const panel = document.querySelector<HTMLElement>(".first-run-tour")!;
+    expect(Number.parseFloat(panel.style.top)).toBeGreaterThanOrEqual(340);
+  });
+
+  it("describes the filters Live actually has", () => {
+    renderTourWithAnchors();
+    expect(within(screen.getByRole("dialog")).getByText(/Filter by route or service pattern/)).toBeTruthy();
+  });
+
   it("advances through all three steps and persists on the final 'Got it'", async () => {
     const user = userEvent.setup();
     renderTourWithAnchors();
@@ -59,7 +90,7 @@ describe("FirstRunTour", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText("Inspect what's running now")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText("Ask a question")).toBeTruthy();
+    expect(screen.getByText("Search and ask")).toBeTruthy();
 
     expect(readTourSeen()).toBe("unseen");
     await user.click(screen.getByRole("button", { name: "Got it" }));
@@ -103,6 +134,39 @@ describe("FirstRunTour", () => {
     outside.remove();
   });
 
+  it("closes on Escape the same way the x control does, and hands focus back", async () => {
+    const outside = document.createElement("button");
+    outside.textContent = "outside";
+    document.body.appendChild(outside);
+    outside.focus();
+
+    renderTourWithAnchors();
+    await screen.findByRole("dialog");
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(readTourSeen()).toBe("seen");
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it("keeps Tab inside the tour card", async () => {
+    // The card is portalled to the end of <body>: without a trap, Tab out of
+    // its last control lands on whatever the app shell renders first, with
+    // the tour still on screen.
+    const user = userEvent.setup();
+    renderTourWithAnchors();
+    const dialog = await screen.findByRole("dialog");
+
+    within(dialog).getByRole("button", { name: "Next" }).focus();
+    await user.tab();
+    expect(within(dialog).getByRole("button", { name: "Dismiss this tour" })).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(within(dialog).getByRole("button", { name: "Next" })).toHaveFocus();
+  });
+
   it("stays away when the store cannot remember a dismissal", () => {
     // Otherwise the tour reappears on every single mount, forever.
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
@@ -138,5 +202,158 @@ describe("FirstRunTour", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // A 250 ms poll that keeps forcing layout for the whole life of the tour
+  // is work nothing consumes: once the anchor is found, resize, scroll and
+  // the anchor's own ResizeObserver cover every way it can move.
+  it("starts no retry poll when the anchor is already on the page", () => {
+    const setInterval = vi.spyOn(window, "setInterval");
+    renderTourWithAnchors();
+    expect(setInterval.mock.calls.filter(([, delay]) => delay === 250)).toHaveLength(0);
+  });
+
+  it("stops the retry poll as soon as a late anchor is found", async () => {
+    vi.useFakeTimers();
+    try {
+      const setInterval = vi.spyOn(window, "setInterval");
+      const clearInterval = vi.spyOn(window, "clearInterval");
+      const { container } = render(
+        <I18nextProvider i18n={i18n}>
+          <FirstRunTour />
+        </I18nextProvider>,
+      );
+      const pollIndex = setInterval.mock.calls.findIndex(([, delay]) => delay === 250);
+      expect(pollIndex).toBeGreaterThanOrEqual(0);
+      const intervalId = setInterval.mock.results[pollIndex].value;
+
+      const anchor = document.createElement("div");
+      anchor.setAttribute("data-tour", "filter-bar");
+      container.appendChild(anchor);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+
+      expect(clearInterval).toHaveBeenCalledWith(intervalId);
+      const before = document.querySelectorAll('[data-tour="filter-bar"]').length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(document.querySelectorAll('[data-tour="filter-bar"]').length).toBe(before);
+      expect(document.querySelector<HTMLElement>(".first-run-tour")?.hidden).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("watches the anchor's own box so a reflow under it moves the panel", () => {
+    const observed: Element[] = [];
+    const disconnect = vi.fn();
+    class FakeResizeObserver {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        observed.push(target);
+      }
+      unobserve() {}
+      disconnect = disconnect;
+      fire() {
+        this.callback([], this as unknown as ResizeObserver);
+      }
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    try {
+      renderTourWithAnchors();
+      expect(observed).toEqual([document.querySelector('[data-tour="filter-bar"]')]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("resumes the search and watches the new node when the anchor unmounts and remounts", async () => {
+    vi.useFakeTimers();
+    const observed: Element[] = [];
+    class FakeResizeObserver {
+      observe(target: Element) {
+        observed.push(target);
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    try {
+      const { container } = render(
+        <I18nextProvider i18n={i18n}>
+          <FirstRunTour />
+        </I18nextProvider>,
+      );
+      const first = document.createElement("div");
+      first.setAttribute("data-tour", "filter-bar");
+      container.appendChild(first);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+      expect(observed).toEqual([first]);
+
+      first.remove();
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      await act(async () => {
+        vi.advanceTimersToNextFrame();
+      });
+      expect(document.querySelector<HTMLElement>(".first-run-tour")?.hidden).toBe(true);
+
+      const second = document.createElement("div");
+      second.setAttribute("data-tour", "filter-bar");
+      container.appendChild(second);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+      expect(observed).toEqual([first, second]);
+      expect(document.querySelector<HTMLElement>(".first-run-tour")?.hidden).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("coalesces scroll and resize into one frame of repositioning", () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    renderTourWithAnchors();
+    raf.mockClear();
+    for (let i = 0; i < 4; i++) fireEvent.scroll(window);
+    fireEvent(window, new Event("resize"));
+    expect(raf).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("FirstRunTourOnLive", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetTourSeenMemoryForTests();
+  });
+
+  function renderAt(path: string, anchors: boolean) {
+    return render(
+      <I18nextProvider i18n={i18n}>
+        <MemoryRouter initialEntries={[path]}>
+          <button type="button">page control</button>
+          {anchors && <div data-tour="filter-bar">filter dock</div>}
+          <FirstRunTourOnLive />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+  }
+
+  it("stays off a screen without the tour's anchors, leaving Tab to the page", async () => {
+    const user = userEvent.setup();
+    renderAt("/agencies/1/pulse", false);
+    expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "page control" })).toHaveFocus();
+  });
+
+  it("runs on Live, where its steps are anchored", () => {
+    renderAt("/agencies/1/live", true);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

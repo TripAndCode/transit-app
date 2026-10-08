@@ -22,14 +22,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import (
     RangeCtx,
     clamp_range_ctx,
     ctx_payload,
 )
 from api.security import User, csrf_guard
-from pipeline.flags import flag
+from pipeline.flags import aflag
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str, chat_with_tools
 from pipeline.query.embeddings import get_embedder
@@ -92,7 +92,6 @@ class PanelCtx(BaseModel):
 
 class AskRequest(BaseModel):
     question: str = Field(max_length=MAX_QUESTION_CHARS)
-    model: str | None = None
     ctx: AskCtx | None = None
     history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
     # Threaded through to chat_with_tools's system-prompt addendum only — never
@@ -141,7 +140,7 @@ def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
 
 
 @router.post("/ask", response_model=AskResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def ask(
     request: Request,
     body: AskRequest,
@@ -168,9 +167,9 @@ async def ask(
 
     ctx_dict = ctx_payload(ctx)
 
-    history_enabled = flag("ask_history_enabled", True)
-    log_enabled = flag("ask_query_log_enabled", True)
-    router_enabled = flag("ask_router_enabled", True)
+    history_enabled = await aflag("ask_history_enabled")
+    log_enabled = await aflag("ask_query_log_enabled")
+    router_enabled = await aflag("ask_router_enabled")
 
     # Follow-ups ("次の50件", "もっと") have no standalone tool mapping, so
     # they skip the stateless router and go straight to the LLM with the
@@ -296,7 +295,6 @@ async def ask(
             ctx,
             conn,
             agency_id,
-            model=body.model,
             locale=locale,
             rag_examples=examples,
             history=history,
@@ -372,7 +370,7 @@ _BUILD_TOOL_META: dict[str, dict[str, Any]] = {
                 "options": ["avg_delay", "on_time_rate", "worst_5min"],
             },
             {"key": "n", "type": "int", "min": 1, "max": 50, "default": 10},
-            {"key": "best_first", "type": "bool", "default": False},
+            {"key": "best_first", "type": "bool", "optional": True},
         ],
     },
     "time_series": {
@@ -505,12 +503,12 @@ def _log_suggest_failure(stage: str) -> None:
 
 
 @router.get("/ask/suggest", response_model=AskSuggestResponse)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def ask_suggest(
     request: Request,
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
-    q: str = Query(default=""),
+    q: str = Query(default="", max_length=MAX_QUESTION_CHARS),
     limit: int = Query(default=8),
 ) -> AskSuggestResponse:
     """Live autocomplete for the Ask input.
@@ -577,7 +575,7 @@ class EditActionRequest(BaseModel):
 
 
 @router.post("/ask/edit-action")
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def ask_edit_action(
     request: Request,
     body: EditActionRequest,

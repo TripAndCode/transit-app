@@ -46,19 +46,23 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
     The consequence while the table is empty, which is worth stating because
     it reads as a bug otherwise: *any* request carrying ``X-API-Key`` gets a
-    401, and ``PRO_LIMIT`` in ``api/middleware/ratelimit.py`` is unreachable.
+    401, and the pro bucket in ``api/middleware/ratelimit.py`` is unreachable.
     Both are correct for a deployment that has sold nothing.
+
+    A usable key also marks the request as authenticated for the login gate
+    and records its owner, the account usage is counted against.
     """
 
     async def dispatch(self, request: Request, call_next):
         key = request.headers.get("X-API-Key")
         if not key:
             request.state.tier = "free"
+            request.state.api_key_authenticated = False
             return await call_next(request)
         pool: asyncpg.Pool = request.app.state.pool
         row = await pool.fetchrow(
             """
-            SELECT k.tier, k.revoked_at, k.expires_at, u.suspended_at AS owner_suspended_at
+            SELECT k.tier, k.owner_user_id, k.revoked_at, k.expires_at, u.suspended_at AS owner_suspended_at
             FROM api_keys k
             LEFT JOIN users u ON u.user_id = k.owner_user_id
             WHERE k.key_hash = $1
@@ -72,4 +76,6 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if row is None or row["owner_suspended_at"] is not None or not _key_usable(row, datetime.now(timezone.utc)):
             return JSONResponse({"detail": "Invalid API key"}, status_code=401)
         request.state.tier = row["tier"]
+        request.state.api_key_authenticated = True
+        request.state.api_key_owner_id = row["owner_user_id"]
         return await call_next(request)

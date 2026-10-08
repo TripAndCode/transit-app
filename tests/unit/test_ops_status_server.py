@@ -1,5 +1,5 @@
 """Tests for scripts/ops_status_server.py: the authenticated HTTP front end serving the
-item-123 combined operations-status document as HTML / compact text / JSON, all gated
+combined operations-status document as HTML / compact text / JSON, all gated
 behind the same shared-secret (`OPS_STATUS_TOKEN`) HTTP Basic check.
 """
 
@@ -29,12 +29,12 @@ def _fake_document() -> dict:
         "components": [
             {
                 "schema_version": 1,
-                "component": "vps_loop",
+                "component": "github",
                 "state": "healthy",
                 "observed_at": "2026-09-12T12:00:00Z",
                 "last_success_at": "2026-09-12T11:55:00Z",
                 "age_seconds": 300,
-                "details": {"current_item": 123},
+                "details": {"open_pr_count": 2},
             }
         ],
         "reasons": {},
@@ -69,7 +69,7 @@ def test_status_json_200_with_correct_token_any_username(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["overall_state"] == "healthy"
-    assert body["components"][0]["component"] == "vps_loop"
+    assert body["components"][0]["component"] == "github"
 
 
 def test_status_text_200_and_plain_text_content_type(monkeypatch):
@@ -91,7 +91,7 @@ def test_status_page_html_200(monkeypatch):
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    assert "vps_loop" in response.text
+    assert "github" in response.text
 
 
 def test_root_requires_auth(monkeypatch):

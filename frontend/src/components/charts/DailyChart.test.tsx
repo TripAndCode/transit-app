@@ -5,6 +5,7 @@ import i18n from "../../i18n";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { DailyChart } from "./DailyChart";
 import { DELAY_THRESHOLDS } from "../../styles/tokens";
+import { formatMinutes } from "../../utils/format";
 import type { TrendDay } from "../../api/types";
 
 function day(overrides: Partial<TrendDay> & { date: string }): TrendDay {
@@ -95,6 +96,52 @@ describe("DailyChart", () => {
     expect(line.classList.contains("chart-draw-on")).toBe(true);
     expect(Number(line.style.getPropertyValue("--len"))).toBe(842);
     delete (SVGElement.prototype as unknown as { getTotalLength?: () => number }).getTotalLength;
+  });
+});
+
+describe("DailyChart tooltip", () => {
+  it("formats the tooltip's date and minutes for the locale", () => {
+    const { container } = renderChart(<DailyChart days={[day({ date: "2026-05-18", avg_min: 2.5, samples: 1234 })]} />);
+    fireEvent.mouseEnter(dayRects(container)[0]);
+    expect(screen.getByText(/May 18, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/2\.5 min/)).toBeInTheDocument();
+    expect(screen.getByText(/1,234/)).toBeInTheDocument();
+    expect(screen.queryByText(/2026-05-18/)).toBeNull();
+  });
+
+  it("writes the smoothed average and the worst routes with the shared minutes unit", () => {
+    const { container } = renderChart(
+      <DailyChart
+        days={[
+          day({
+            date: "2026-05-18",
+            avg_min: 2.5,
+            avg_min_smoothed: 1.25,
+            top_offenders: [{ route_code: "R1", service_type: "weekday", avg_min: 4.75, samples: 10 }],
+          }),
+        ]}
+      />,
+    );
+    fireEvent.mouseEnter(dayRects(container)[0]);
+    expect(screen.getByText("7-day avg 1.3 min")).toBeInTheDocument();
+    expect(screen.getByText(/Route R1 \(4\.8 min\)/)).toBeInTheDocument();
+  });
+});
+
+describe("DailyChart bars outside the stylesheet", () => {
+  it("keeps the bars' resting opacity as an attribute, for an exported SVG", () => {
+    renderChart(<DailyChart days={[day({ date: "2026-05-18", avg_min: 2.5, samples: 40 })]} />);
+    expect(screen.getByTestId("daily-bar").getAttribute("opacity")).toBe("0.7");
+  });
+});
+
+describe("DailyChart axis", () => {
+  it("labels its gridlines with round values", () => {
+    const { container } = renderChart(
+      <DailyChart days={[2.4, 2.79, 1.9].map((avg_min, i) => day({ date: WEEK_DAYS[i], avg_min }))} />,
+    );
+    const labels = Array.from(container.querySelectorAll("[data-testid='daily-grid-label']")).map((n) => n.textContent);
+    expect(labels).toEqual([1, 2, 3].map((min) => formatMinutes(min)));
   });
 });
 

@@ -3,8 +3,7 @@ feed list.
 
 The association (公益社団法人広島県バス協会, https://www.bus-kyo.or.jp/gtfs-open-data)
 lists 17 operators. This module holds that full list as data (fetched by a
-human session with network access -- an autonomous session here has none,
-see ``docs/refactor-log.md``) and ``pending_feeds()`` dynamically computes
+session with network access) and ``pending_feeds()`` dynamically computes
 which of them are both supported (see ``BusKyoFeed.supported``) and not yet
 present in ``agencies.csv`` (matched by ``feed_url``), so a future
 association update only needs a data-table edit here rather than hand-typing

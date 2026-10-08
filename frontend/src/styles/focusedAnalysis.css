@@ -32,8 +32,19 @@
    tabs doesn't tear down and recreate the MapLibre WebGL context each time. */
 .focus-tab-panel--hidden { display: none; }
 .focus-aside { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
-.focus-aside strong { font-size: 30px; color: var(--color-danger); }
-.focus-chart { width: 100%; height: 300px; min-height: 230px; }
+.focus-aside strong { font-size: 30px; color: var(--text-primary); }
+/* Never narrower than the width at which its 14-unit labels still clear the
+   12px floor (svgTextFloor.test.ts); past that the fixed height sets the
+   scale. A narrower screen scrolls the chart sideways inside
+   .focus-chart-scroll instead of shrinking its text. */
+.focus-chart { width: 100%; height: 300px; min-height: 230px; min-width: 700px; }
+.focus-chart-scroll { overflow-x: auto; }
+/* `components/tableStyles.ts` is where table and cell styling belongs, and
+   the tables on these pages read from it. `.focus-table` stays for the one
+   consumer that has not moved -- the Marey diagram's narrow-viewport data
+   table, which is markup rather than styled cells -- because a class kept
+   in the tree while something still names it is cheaper than the silent
+   unstyled table deleting it would leave behind. */
 .focus-table-wrap { overflow-x: auto; }
 .focus-table { border-collapse: collapse; width: 100%; font-size: 14px; }
 .focus-table th, .focus-table td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border-soft); }
@@ -43,13 +54,10 @@
 .focus-tabs button[aria-pressed="true"], .focus-tabs button[aria-selected="true"] { border-color: var(--accent); font-weight: 700; }
 .focus-saved { list-style: none; padding: 0; }
 .focus-saved li { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; gap: 20px; border-bottom: 1px solid var(--border-soft); }
-/* Closing footer so the report page never ends flush against the last
-   line of body text -- adds real breathing room plus one more concrete
-   next action (CSV / share link) instead of trailing off after the
-   definitions accordion. */
-.focus-report-footer { margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; padding-bottom: 28px; }
 /* BP.md */
-@media (max-width: 900px) { .focus-split { grid-template-columns: 1fr; } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
+/* minmax(0, ...): an auto minimum would let the chart's floor widen the
+   whole stacked page; only the chart scrolls sideways. */
+@media (max-width: 900px) { .focus-split { grid-template-columns: minmax(0, 1fr); } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
 /* Print rules for `.focus-page` and the app shell live in the shared print
    media block in styles/global.css, loaded on every page. */
 .marey__caption { margin: 0 0 6px; }
@@ -58,5 +66,39 @@
    can be picked up anywhere along its line rather than only on the 2px ink. */
 .marey-trip__hit { cursor: pointer; }
 .marey-trip { transition: opacity var(--dur-1) var(--ease-out); }
+/* While a scrub is set and no trip is pointed at, trips come up and recede
+   with the scrubbed second on the panel tier; a hover keeps the quick one. */
+.marey--scrubbing .marey-trip { transition: opacity var(--dur-2) var(--ease-out); }
+/* The trips crossing the scrubbed second: a hair heavier; the opacity
+   contrast is set inline by tripOpacity. A stroke-width change is paint, not
+   layout, in SVG. */
+.marey-trip--cross line { stroke-width: 2.4; }
+.marey-cursor { stroke: var(--accent); stroke-width: 1.5; pointer-events: none; }
+.marey-scrub { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; margin: 0 0 10px; }
+.marey-scrub__clock { font-size: var(--text-lg); font-weight: 600; min-width: 4.2ch; }
+/* The shared scrubber chrome leaves the track to its caller; this rail draws
+   a plain one so the slider's range is visible. */
+.marey-scrub .scrub-input::-webkit-slider-runnable-track { background: var(--border-soft); border-radius: 4px; }
+.marey-scrub .scrub-input::-moz-range-track { background: var(--border-soft); border-radius: 4px; }
+.stop-ribbon__pos { stroke: var(--bg-surface); stroke-width: 2; transition: transform var(--dur-2) var(--ease-out); }
+/* Each trip group is in the tab order, so the keyboard ring has to survive
+   the SVG's own default of no visible focus style. */
+.marey-trip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .marey__readout { margin: 4px 0 14px; min-height: 1.4em; }
+.marey__toggle { margin-bottom: 10px; }
+/* Visually hidden above the phone breakpoint: the drawing is the sighted
+   reading and this table is the same trips in text, for assistive tech and
+   for the narrow layout, where it is shown instead. */
+.marey__table--hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.marey__table caption { text-align: left; padding: 0 0 8px; color: var(--text-secondary); font-size: 13px; }
 .stop-ribbon { width: 100%; height: 20px; display: block; margin-bottom: 8px; }
+/* BP.sm — a 780-unit viewBox squeezed into a phone-width column renders the
+   11px axis labels at roughly half size, so below this width the diagram
+   scrolls at a legible width instead of scaling down to fit. */
+@media (max-width: 640px) {
+  .marey__scroll { overflow-x: auto; }
+  .marey__chart { min-width: 560px; }
+}
+.focus-breadcrumb { margin: 0 0 6px; font-size: var(--text-sm); color: var(--text-tertiary); }
+.focus-breadcrumb a { color: var(--text-secondary); }
+.focus-subtitle { margin: 4px 0 0; }

@@ -1,6 +1,6 @@
 """Pure-logic tests for pipeline.query.intent_promotion's rag_chunks upsert
 and single-signature promotion guard, faking asyncpg + the embedder so no DB
-is needed (CLAUDE.md's tests/unit convention). DB-backed coverage of the
+is needed (AGENTS.md's tests/unit convention). DB-backed coverage of the
 full promotion job (eligibility SQL, idempotency across real inserts) stays
 in tests/scripts/test_promote_intent_cache.py and tests/query/test_intent_cache.py.
 """
@@ -24,8 +24,9 @@ class _FakeConn:
     directly. ask_intent_cache access goes through pipeline.query.intent_cache,
     which tests monkeypatch instead of faking its SQL here."""
 
-    def __init__(self, existing_hash: str | None = None):
+    def __init__(self, existing_hash: str | None = None, existing_version: str | None = None):
         self.existing_hash = existing_hash
+        self.existing_version = existing_version
         self.insert_calls: list[tuple] = []
         self.update_calls: list[tuple] = []
 
@@ -33,7 +34,7 @@ class _FakeConn:
         assert "rag_chunks" in sql
         if self.existing_hash is None:
             return None
-        return {"content_hash": self.existing_hash}
+        return {"content_hash": self.existing_hash, "embedding_version": self.existing_version}
 
     async def execute(self, sql, *args):
         stripped = sql.strip()
@@ -49,7 +50,7 @@ class _FakeConn:
 def mark_promoted_calls(monkeypatch):
     calls: list[tuple[str, int]] = []
 
-    async def fake_mark_promoted(conn, signature_hash, agency_id):
+    async def fake_mark_promoted(conn, signature_hash, agency_id, embedding_version=None):
         calls.append((signature_hash, agency_id))
 
     monkeypatch.setattr(intent_promotion.intent_cache, "mark_promoted", fake_mark_promoted)

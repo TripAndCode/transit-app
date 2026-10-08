@@ -23,11 +23,12 @@ function round(n: number, decimals: number): number {
 
 /**
  * Animates a displayed number toward `value` with an ease-out rAF loop, for a
- * large standalone figure (a KPI hero value, a stat tile, a per-row delay
- * figure) whose target changes after mount -- an agency switch, a filter
- * change, a live refresh. The first render never animates: there is nothing
- * to count up *from* yet, so it returns `value` immediately. Later changes to
- * `value` animate from whatever is currently displayed.
+ * large figure (a KPI hero value, a stat tile, a per-row delay figure).
+ *
+ * The first paint prints `value` as it is: a route has exactly one entrance
+ * (the route fade), and a figure climbing from 0 inside it would be a second
+ * arrival stacked on the first. Later changes to `value` -- an agency switch,
+ * a filter change, a live refresh -- travel from whatever is on screen.
  *
  * Jumps straight to `value` (no rAF loop at all) under
  * `prefers-reduced-motion: reduce`, and whenever `duration` is 0.
@@ -42,18 +43,12 @@ export function useCountUp(value: number, { duration = 600, decimals = 1 }: UseC
   const immediate = duration <= 0 || reducedMotion;
 
   const [display, setDisplay] = useState(value);
-  // The last `value` `display` was synced to while in "immediate" mode.
-  // Comparing the incoming `value` against this (rather than against
-  // `display` itself, which drifts away from `value` mid-animation) is the
-  // standard adjust-state-when-a-prop-changes pattern: it lets the branch
-  // below re-sync during render, with no effect involved. A plain ref
-  // couldn't stand in for it -- a ref may only be written inside an effect
-  // or callback, never during render.
-  const [immediateTarget, setImmediateTarget] = useState(value);
   const fromRef = useRef(value);
 
-  if (immediate && value !== immediateTarget) {
-    setImmediateTarget(value);
+  // Re-sync during render: in immediate mode `display` must equal `value`, so
+  // comparing the two also catches motion being switched off mid-tween, which
+  // would otherwise strand the figure on its last frame.
+  if (immediate && display !== value) {
     setDisplay(value);
   }
 
@@ -64,23 +59,20 @@ export function useCountUp(value: number, { duration = 600, decimals = 1 }: UseC
     }
     const from = fromRef.current;
     const delta = value - from;
-    if (delta === 0) {
-      return;
-    }
+    if (delta === 0) return;
 
     let frameId = 0;
     let startTime: number | null = null;
 
     function tick(now: number) {
       if (startTime === null) startTime = now;
-      const elapsed = now - startTime;
-      const t = Math.min(1, elapsed / duration);
-      setDisplay(round(from + delta * easeOutCubic(t), decimals));
-      if (t < 1) {
-        frameId = requestAnimationFrame(tick);
-      } else {
-        fromRef.current = value;
-      }
+      const t = Math.min(1, (now - startTime) / duration);
+      // Written every frame, not only on arrival: a `value` that changes
+      // mid-tween cancels this loop, and the next one starts from wherever
+      // the figure actually is.
+      fromRef.current = round(from + delta * easeOutCubic(t), decimals);
+      setDisplay(fromRef.current);
+      if (t < 1) frameId = requestAnimationFrame(tick);
     }
 
     frameId = requestAnimationFrame(tick);

@@ -1,19 +1,17 @@
-"""Regression: chat_with_tools must never leak raw exception text (e.g. from
+"""chat_with_tools must never leak raw exception text (e.g. from
 clickhouse_connect, or any other backend failure) into the user-facing answer.
 
-Before this fix, every ``except Exception as exc:`` around a ``dispatch(...)``
-call in ``pipeline/query/chat.py`` rendered
-``_chat_str("tool_error", locale, name=name, exc=exc)`` — interpolating the
-raw exception text directly into the chat response. Since this branch ports
-``updates`` reads to ClickHouse, ``clickhouse_connect``'s error strings can
-include the failing SQL fragment, the server version, and the internal query
-endpoint URL — none of which should ever reach an unauthenticated ``/ask``
-client. This mirrors the fix already applied to ``api/routers/ask.py``'s
-Stage 1/2 dispatch (Fix-8f): ClickHouse-unavailable (HTTPException 503) and
-mid-query ClickHouse errors degrade to the existing ``service_unavailable``
-locale string (no interpolation); a non-503 HTTPException still propagates;
-any other exception falls back to the (now non-interpolating) ``tool_error``
-string. All cases must still log the full detail server-side.
+Every ``except`` around a ``dispatch(...)`` call in ``pipeline/query/chat.py``
+answers from a fixed locale string rather than interpolating the exception.
+``updates`` reads go to ClickHouse, and ``clickhouse_connect``'s error strings
+can include the failing SQL fragment, the server version, and the internal
+query endpoint URL — none of which should ever reach an unauthenticated
+``/ask`` client. The same contract holds for ``api/routers/ask.py``'s Stage
+1/2 dispatch: ClickHouse-unavailable (HTTPException 503) and mid-query
+ClickHouse errors degrade to the ``service_unavailable`` locale string (no
+interpolation); a non-503 HTTPException still propagates; any other exception
+falls back to the non-interpolating ``tool_error`` string. All cases must
+still log the full detail server-side.
 """
 
 import logging
@@ -162,9 +160,9 @@ async def test_undefined_table_error_propagates_flag_off_path(monkeypatch):
     """A missing agg_* table (migration/analyze behind) must propagate out of
     chat_with_tools untouched — not be swallowed into a generic 200 tool_error
     — so a caller's registered aggregate_not_ready_handler can turn it into
-    the machine-readable 503 the frontend reacts to (Fix-9i regression:
-    review found the generic ``except Exception`` clause was catching this
-    before it could reach that handler)."""
+    the machine-readable 503 the frontend reacts to. The generic ``except
+    Exception`` clause around dispatch must let it through to that
+    handler."""
 
     async def _raise_undefined_table(*a, **k):
         raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
@@ -179,9 +177,9 @@ async def test_undefined_table_error_propagates_flag_off_path(monkeypatch):
 # ─── Build-mode sentinel site (Site 1: `__build__ TOOL {json}`) ──────────────
 #
 # This is the zero-LLM determinism path the guided builder UI submits — live
-# in production, not gated behind any flag. Fix-9i's review found the initial
-# leakage-test suite only exercised the Stage-2/flag-off site; these pin the
-# same guarantees for build-mode's own try/except around dispatch(...).
+# in production, not gated behind any flag. It has its own try/except around
+# dispatch(...), separate from the Stage-2/flag-off site's, so these pin the
+# same guarantees for it.
 
 
 @pytest.mark.asyncio
@@ -215,7 +213,7 @@ async def test_build_mode_sentinel_hides_exception_text(monkeypatch, raiser, exp
 @pytest.mark.asyncio
 async def test_build_mode_sentinel_non_503_http_exception_propagates(monkeypatch):
     """A non-503 HTTPException from build-mode dispatch is a real error and
-    must propagate, matching the other four sites' behavior."""
+    must propagate, matching the other dispatch sites' behavior."""
 
     async def _raise_400(*a, **k):
         raise HTTPException(status_code=400, detail="bad request")
@@ -231,7 +229,7 @@ async def test_build_mode_sentinel_non_503_http_exception_propagates(monkeypatch
 @pytest.mark.asyncio
 async def test_build_mode_sentinel_undefined_table_error_propagates(monkeypatch):
     """A missing agg_* table during build-mode dispatch must also propagate,
-    not be swallowed — same guarantee as the other four sites."""
+    not be swallowed — same guarantee as the other dispatch sites."""
 
     async def _raise_undefined_table(*a, **k):
         raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
@@ -320,7 +318,7 @@ async def test_cache_pre_hit_hides_exception_text(monkeypatch, pool_with_agency,
 @pytest.mark.asyncio
 async def test_cache_pre_hit_undefined_table_error_propagates(monkeypatch, pool_with_agency):
     """A missing agg_* table during a cache-pre-hit dispatch must also
-    propagate, not be swallowed — same guarantee as the other four sites."""
+    propagate, not be swallowed — same guarantee as the other dispatch sites."""
     pool, agency_id = pool_with_agency
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
     question = "いつからのデータ？"
@@ -337,73 +335,64 @@ async def test_cache_pre_hit_undefined_table_error_propagates(monkeypatch, pool_
             await chat.chat_with_tools(question, _ctx(), conn, agency_id, locale="ja")
 
 
-# ─── Cache stage-2 sites (Site 3: JSON-mode parse failed -> tool_calls
-# fallback; Site 4: valid JSON intent signature -> main dispatch) ────────────
+# ─── Cache stage-2 (JSON-mode signature) ─────────────────────────────────────
 #
-# Neither site had a dedicated error-leakage characterization test before
-# this slice's refactor (unlike the flag-off, build-mode, and cache-pre-hit
-# sites above) — added here to pin current behavior prior to consolidating
-# all five dispatch-wrapping blocks into one shared helper.
+# The JSON-mode request carries no tools, so its only dispatch site is the
+# parsed intent signature (Site 3). Anything that is neither a signature nor a
+# text reply gets the fixed refusal string and is never dispatched.
 
 
 class _FakeJsonSigClient:
     """Emits a valid JSON intent-signature in message.content (no tool_calls)
-    — drives cache stage-2's main-dispatch site (Site 4)."""
+    — drives cache stage-2's main-dispatch site (Site 3)."""
 
     def chat_completions(self, **kwargs):
         content = '{"tool": "describe_data", "args": {}, "confidence": 0.9}'
         return SimpleNamespace(content=content, tool_calls=None), None
 
 
+class _FakeMessageClient:
+    def __init__(self, message):
+        self._message = message
+
+    def chat_completions(self, **kwargs):
+        return self._message, None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "raiser,expected_key",
+    "message",
     [
-        (lambda: HTTPException(status_code=503, detail=_SECRET), "service_unavailable"),
-        (lambda: clickhouse_connect.driver.exceptions.DatabaseError(_SECRET), "service_unavailable"),
-        (lambda: ValueError(_SECRET), "tool_error"),
+        _fake_message(),
+        SimpleNamespace(content=f"not json {_SECRET}", tool_calls=None),
+        SimpleNamespace(content='["describe_data"]', tool_calls=None),
+        SimpleNamespace(content=None, tool_calls=None),
     ],
-    ids=["http_503", "clickhouse_error", "generic_exception"],
+    ids=["tool_calls_only", "malformed_json", "non_object_json", "empty"],
 )
-async def test_cache_stage2_json_fallback_hides_exception_text(monkeypatch, pool_with_agency, raiser, expected_key):
-    """Site 3: ASK_INTENT_CACHE_ENABLED=true, no pre-hit, LLM emits a native
-    tool_calls response so JSON-mode parsing yields no signature and control
-    falls back to the tool_calls dispatch path — its except-block must also
-    degrade to the safe locale string, never the raw exception text."""
+async def test_cache_stage2_without_signature_returns_refusal(monkeypatch, pool_with_agency, message):
+    """No parseable signature in JSON mode → the fixed refusal string. Raw
+    model text never becomes the answer, and nothing is dispatched: the
+    request sent no tools, so a tool_calls entry is not an answer to it."""
     pool, agency_id = pool_with_agency
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
+    dispatched = []
 
-    async def _raise(*a, **k):
-        raise raiser()
+    async def _record(*a, **k):
+        dispatched.append(a)
 
-    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
-    monkeypatch.setattr(chat, "dispatch", _raise)
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeMessageClient(message))
+    monkeypatch.setattr(chat, "dispatch", _record)
 
     async with pool.acquire() as conn:
         out = await chat.chat_with_tools("新しい質問です", _ctx(), conn, agency_id, locale="ja")
 
     assert out["success"] is False
     assert _SECRET not in out["answer"]
-    assert out["answer"] == chat._chat_str(expected_key, "ja", name="describe_data")
+    assert out["answer"] == chat._chat_str("refusal_fallback", "ja")
+    assert out["tool_call"] is None
     assert out["cache_outcome"] is None
-
-
-@pytest.mark.asyncio
-async def test_cache_stage2_json_fallback_undefined_table_error_propagates(monkeypatch, pool_with_agency):
-    """A missing agg_* table during the Site 3 fallback dispatch must also
-    propagate, not be swallowed — same guarantee as the other sites."""
-    pool, agency_id = pool_with_agency
-    monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
-
-    async def _raise_undefined_table(*a, **k):
-        raise asyncpg.exceptions.UndefinedTableError('relation "agg_route_daily_dist" does not exist')
-
-    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
-    monkeypatch.setattr(chat, "dispatch", _raise_undefined_table)
-
-    async with pool.acquire() as conn:
-        with pytest.raises(asyncpg.exceptions.UndefinedTableError):
-            await chat.chat_with_tools("別の新しい質問", _ctx(), conn, agency_id, locale="ja")
+    assert dispatched == []
 
 
 @pytest.mark.asyncio
@@ -417,7 +406,7 @@ async def test_cache_stage2_json_fallback_undefined_table_error_propagates(monke
     ids=["http_503", "clickhouse_error", "generic_exception"],
 )
 async def test_cache_stage2_main_dispatch_hides_exception_text(monkeypatch, pool_with_agency, raiser, expected_key):
-    """Site 4: ASK_INTENT_CACHE_ENABLED=true, no pre-hit, LLM emits a valid
+    """Site 3: ASK_INTENT_CACHE_ENABLED=true, no pre-hit, LLM emits a valid
     JSON intent signature (cache miss) — the main dispatch except-block must
     also degrade to the safe locale string."""
     pool, agency_id = pool_with_agency
@@ -440,7 +429,7 @@ async def test_cache_stage2_main_dispatch_hides_exception_text(monkeypatch, pool
 
 @pytest.mark.asyncio
 async def test_cache_stage2_main_dispatch_undefined_table_error_propagates(monkeypatch, pool_with_agency):
-    """A missing agg_* table during the Site 4 main dispatch must also
+    """A missing agg_* table during the Site 3 main dispatch must also
     propagate, not be swallowed — same guarantee as the other sites."""
     pool, agency_id = pool_with_agency
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")

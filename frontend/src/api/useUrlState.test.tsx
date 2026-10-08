@@ -127,3 +127,53 @@ describe("useUrlPatch", () => {
     expect(search.get("b")).toBe("2");
   });
 });
+
+const SUB_TABS = ["trend", "marey", "map", "byStop"] as const;
+
+/** A key whose URL value is only meaningful inside a closed set, the shape
+ *  every sub-tab / style selector uses. */
+function AllowedProbe() {
+  const [value, setValue] = useUrlState<(typeof SUB_TABS)[number]>("sub_tab", "trend", SUB_TABS);
+  const [params] = useSearchParams();
+  return (
+    <div>
+      <span data-testid="value">{value}</span>
+      <span data-testid="search">{params.toString()}</span>
+      <button type="button" onClick={() => setValue("map")}>
+        to map
+      </button>
+    </div>
+  );
+}
+
+describe("useUrlState with an allow-list", () => {
+  function renderAllowed(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <AllowedProbe />
+      </MemoryRouter>,
+    );
+  }
+
+  it("reads a URL value that is on the list", () => {
+    renderAllowed("/agencies/1/route-analysis?sub_tab=byStop");
+    expect(screen.getByTestId("value").textContent).toBe("byStop");
+  });
+
+  it("falls back to the default for a value outside the list", () => {
+    renderAllowed("/agencies/1/route-analysis?sub_tab=garbage");
+    expect(screen.getByTestId("value").textContent).toBe("trend");
+  });
+
+  it("falls back to the default for an empty value", () => {
+    renderAllowed("/agencies/1/route-analysis?sub_tab=");
+    expect(screen.getByTestId("value").textContent).toBe("trend");
+  });
+
+  it("still writes an allowed non-default value into the query string", () => {
+    renderAllowed("/agencies/1/route-analysis?sub_tab=garbage");
+    fireEvent.click(screen.getByText("to map"));
+    expect(screen.getByTestId("value").textContent).toBe("map");
+    expect(screen.getByTestId("search").textContent).toBe("sub_tab=map");
+  });
+});

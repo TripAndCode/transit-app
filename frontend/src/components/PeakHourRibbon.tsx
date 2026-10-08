@@ -1,8 +1,12 @@
-// frontend/src/components/PeakHourRibbon.tsx
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { dowValueLabel } from "../utils/filterValueLabels";
 
 import type { OverviewPeakHour } from "../api/types";
+import { formatMinutes, formatHourRange } from "../utils/format";
+
+/** From this hour on, the peak label sits left of its callout. */
+const LATE_PEAK_HOUR = 18;
 
 type Props = {
   peak_hour: OverviewPeakHour | null;
@@ -72,6 +76,9 @@ function PeakHourChart({
   const peakIdx = peak_hour.peak_hour;
   const peakV = hourValues[peakIdx] ?? peak_hour.peak_avg_min;
   const peakBarX = PAD_LEFT + peakIdx * CELL_W;
+  // A late peak's callout and label go left, so the label stays on a narrow
+  // card instead of running past the chart's right edge.
+  const flip = peakIdx >= LATE_PEAK_HOUR;
   const peakBarY = toY(peakV);
 
   const avgY = toY(overallAvg);
@@ -117,7 +124,7 @@ function PeakHourChart({
       px: barX * scaleX,
       py: barY * scaleY,
       label: `${idx}:00`,
-      value: `${v.toFixed(1)}${t("overview.hero_unit_min")}`,
+      value: formatMinutes(v),
     });
   }
 
@@ -132,57 +139,57 @@ function PeakHourChart({
   }
 
   return (
-    <div
-      className="ov-peak-svg-wrap"
-      onMouseLeave={() => setHover((h) => ({ ...h, visible: false }))}
-      style={{ cursor: onHourClick ? "pointer" : "default" }}
-    >
-      <svg
-        width="100%"
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-        style={{ display: "block", overflow: "visible" }}
-        role="img"
-        aria-label={t("overview.section_peak_hour")}
-        onMouseMove={handleMove}
-        onClick={handleClick}
+    <>
+      <div
+        className="ov-peak-svg-wrap"
+        onMouseLeave={() => setHover((h) => ({ ...h, visible: false }))}
+        style={{ cursor: onHourClick ? "pointer" : "default" }}
       >
-        {spreadSegments.map((seg, i) => (
-          <rect
-            key={`spread-${i}`}
-            className="ov-peak-spread"
-            x={PAD_LEFT + seg.startHour * CELL_W}
-            y={PAD_TOP - 4}
-            width={(seg.endHour - seg.startHour) * CELL_W}
-            height={H - PAD_BOTTOM - (PAD_TOP - 4)}
-          />
-        ))}
-
-        {hourValues.map((v, h) => {
-          if (v == null) return null;
-          const x = PAD_LEFT + h * CELL_W + 1;
-          const y = clampY(toY(v));
-          const bar_h = Math.max(H - PAD_BOTTOM - y, 0);
-          const isPeak = h === peakIdx;
-          const fill = isPeak ? "var(--trend-bad)" : "var(--trend-neutral)";
-          const opacity = isPeak ? 0.95 : 0.3;
-          return (
+        <svg
+          width="100%"
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          style={{ display: "block", overflow: "visible" }}
+          role="img"
+          aria-label={t("overview.section_peak_hour")}
+          onMouseMove={handleMove}
+          onClick={handleClick}
+        >
+          {spreadSegments.map((seg, i) => (
             <rect
-              key={h}
-              x={x}
-              y={y}
-              width={CELL_W - 2}
-              height={bar_h}
-              style={{ fill }}
-              opacity={opacity}
-              rx={2}
-              ry={2}
+              key={`spread-${i}`}
+              className="ov-peak-spread"
+              x={PAD_LEFT + seg.startHour * CELL_W}
+              y={PAD_TOP - 4}
+              width={(seg.endHour - seg.startHour) * CELL_W}
+              height={H - PAD_BOTTOM - (PAD_TOP - 4)}
             />
-          );
-        })}
+          ))}
 
-        {overallAvg > 0 && (
-          <>
+          {hourValues.map((v, h) => {
+            if (v == null) return null;
+            const x = PAD_LEFT + h * CELL_W + 1;
+            const y = clampY(toY(v));
+            const bar_h = Math.max(H - PAD_BOTTOM - y, 0);
+            const isPeak = h === peakIdx;
+            const fill = isPeak ? "var(--trend-bad)" : "var(--trend-neutral)";
+            const opacity = isPeak ? 0.95 : 0.3;
+            return (
+              <rect
+                key={h}
+                x={x}
+                y={y}
+                width={CELL_W - 2}
+                height={bar_h}
+                style={{ fill }}
+                opacity={opacity}
+                rx={2}
+                ry={2}
+              />
+            );
+          })}
+
+          {overallAvg > 0 && (
             <line
               x1={PAD_LEFT}
               y1={avgY}
@@ -192,91 +199,89 @@ function PeakHourChart({
               strokeWidth="1"
               strokeDasharray="4 4"
             />
-            <text
-              x={W - PAD_RIGHT + 4}
-              y={avgY + 3}
-              fontSize="10"
-              style={{ fill: "var(--text-tertiary)" }}
-              textAnchor="start"
-            >
-              {t("overview.peak_hour.avg_label")}
-            </text>
-          </>
-        )}
+          )}
 
-        <g>
+          <g>
+            <line
+              x1={peakBarX + CELL_W / 2}
+              y1={peakBarY - 2}
+              x2={peakBarX + CELL_W / 2}
+              y2={peakBarY - 12}
+              style={{ stroke: "var(--trend-bad)" }}
+              strokeWidth="1"
+            />
+            <line
+              x1={peakBarX + CELL_W / 2}
+              y1={peakBarY - 12}
+              x2={peakBarX + CELL_W / 2 + (flip ? -4 : 4)}
+              y2={peakBarY - 12}
+              style={{ stroke: "var(--trend-bad)" }}
+              strokeWidth="1"
+            />
+          </g>
+
           <line
-            x1={peakBarX + CELL_W / 2}
-            y1={peakBarY - 2}
-            x2={peakBarX + CELL_W / 2}
-            y2={peakBarY - 12}
-            style={{ stroke: "var(--trend-bad)" }}
+            x1={PAD_LEFT}
+            y1={H - PAD_BOTTOM}
+            x2={W - PAD_RIGHT}
+            y2={H - PAD_BOTTOM}
+            style={{ stroke: "var(--border-subtle)" }}
             strokeWidth="1"
           />
-          <line
-            x1={peakBarX + CELL_W / 2}
-            y1={peakBarY - 12}
-            x2={peakBarX + CELL_W / 2 + 4}
-            y2={peakBarY - 12}
-            style={{ stroke: "var(--trend-bad)" }}
-            strokeWidth="1"
-          />
-          <text
-            x={peakBarX + CELL_W / 2 + 6}
-            y={peakBarY - 9}
-            fontSize="11"
-            fontWeight="600"
-            style={{ fill: "var(--trend-bad)" }}
-            textAnchor="start"
+
+          {hover.visible && (
+            <line
+              x1={hover.svgX}
+              y1={PAD_TOP - 2}
+              x2={hover.svgX}
+              y2={H - PAD_BOTTOM + 2}
+              style={{ stroke: "var(--trend-neutral)", strokeOpacity: 0.30 }}
+              strokeWidth="1"
+            />
+          )}
+        </svg>
+        {/* HTML labels (see .ov-chart-plot in overview.css). */}
+        {overallAvg > 0 && (
+          <span
+            className="ov-peak-label ov-peak-label--avg num"
+            style={{ top: `${(avgY / H) * 100}%`, left: `${((W - PAD_RIGHT + 4) / W) * 100}%` }}
           >
-            {t("overview.peak_hour.max_label", {
-              avg: peak_hour.peak_avg_min.toFixed(1),
-            })}
-          </text>
-        </g>
-
-        <line
-          x1={PAD_LEFT}
-          y1={H - PAD_BOTTOM}
-          x2={W - PAD_RIGHT}
-          y2={H - PAD_BOTTOM}
-          style={{ stroke: "var(--border-subtle)" }}
-          strokeWidth="1"
-        />
-
+            {t("overview.peak_hour.avg_label")}
+          </span>
+        )}
+        <span
+          className={`ov-peak-label ov-peak-label--max num${flip ? " ov-peak-label--flip" : ""}`}
+          style={{
+            top: `${((peakBarY - 9) / H) * 100}%`,
+            left: `${((peakBarX + CELL_W / 2 + (flip ? -6 : 6)) / W) * 100}%`,
+          }}
+        >
+          {t("overview.peak_hour.max_label", { avg: peak_hour.peak_avg_min.toFixed(1) })}
+        </span>
         {[0, 6, 12, 18].map((h) => (
-          <text
+          <span
             key={h}
-            x={PAD_LEFT + h * CELL_W + CELL_W / 2}
-            y={H - 6}
-            fontSize="10"
-            style={{ fill: "var(--text-tertiary)" }}
-            textAnchor="middle"
+            className="ov-peak-label ov-peak-label--tick num"
+            style={{
+              left: `${((PAD_LEFT + h * CELL_W + CELL_W / 2) / W) * 100}%`,
+              top: `${((H - PAD_BOTTOM + 2) / H) * 100}%`,
+            }}
           >
             {h}
-          </text>
+          </span>
         ))}
-
         {hover.visible && (
-          <line
-            x1={hover.svgX}
-            y1={PAD_TOP - 2}
-            x2={hover.svgX}
-            y2={H - PAD_BOTTOM + 2}
-            style={{ stroke: "var(--trend-neutral)", strokeOpacity: 0.30 }}
-            strokeWidth="1"
-          />
+          <div
+            className="ov-tooltip"
+            style={{ left: hover.px, top: hover.py }}
+          >
+            {hover.label} — {hover.value}
+          </div>
         )}
-      </svg>
-      {hover.visible && (
-        <div
-          className="ov-tooltip"
-          style={{ left: hover.px, top: hover.py }}
-        >
-          {hover.label} — {hover.value}
-        </div>
-      )}
-    </div>
+      </div>
+      {/* Outside the plot box: the labels above are placed in percent of it. */}
+      {spreadSegments.length > 0 && <p className="ov-peak-legend">{t("overview.peak_hour.spread_legend")}</p>}
+    </>
   );
 }
 
@@ -317,7 +322,7 @@ export function PeakHourRibbon({
         <div className="ov-peak-dow-stack">
           <div>
             <p className="ov-peak-dow-panel-title">
-              {t("overview.peak_hour.weekday_label")}
+              {dowValueLabel("weekday", t)}
             </p>
             {peak_hour_weekday ? (
               <PeakHourChart peak_hour={peak_hour_weekday} />
@@ -329,7 +334,7 @@ export function PeakHourRibbon({
           </div>
           <div>
             <p className="ov-peak-dow-panel-title">
-              {t("overview.peak_hour.weekend_label")}
+              {dowValueLabel("weekend", t)}
             </p>
             {peak_hour_weekend ? (
               <PeakHourChart peak_hour={peak_hour_weekend} />
@@ -350,8 +355,7 @@ export function PeakHourRibbon({
       <PeakHourChart peak_hour={peak_hour} onHourClick={onHourClick} />
       <p className="ov-pareto-rest" style={{ marginTop: 10 }}>
         {t("overview.peak_hour_callout", {
-          hour: peak_hour.peak_hour,
-          next_hour: peak_hour.peak_hour + 1,
+          range: formatHourRange(peak_hour.peak_hour),
           avg: peak_hour.peak_avg_min.toFixed(1),
         })}
       </p>

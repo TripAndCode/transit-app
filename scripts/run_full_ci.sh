@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Reproducible "full CI" run for one VPS worktree/job: builds and starts a
+# Reproducible "full CI" run for one worktree or job (the pre-push gate's
+# backend suite runs through it): builds and starts a
 # dedicated, uniquely-named/-ported Postgres + ClickHouse pair, applies
 # schema, runs the same lint/type/test gate as
 # .github/workflows/ci.yml's `test` job, then always tears both
@@ -11,8 +12,8 @@
 # literally, and this repo also keeps a long-lived pair of containers by
 # those exact names running for everyday local use. Two verification runs
 # against that same fixed pair -- e.g. an interactive session's own
-# verification and a concurrent `/vps-loop-run` worker's, in two different
-# worktrees on the same VPS -- don't just risk a `docker run` name
+# verification and a concurrent agent's, in two different worktrees on the
+# same host -- don't just risk a `docker run` name
 # collision: `tests/conftest.py`'s per-test Postgres reset and its
 # ClickHouse `DROP TABLE`/`CREATE TABLE` both race across the two
 # runs, producing spurious failures with no connection to either diff. This
@@ -29,11 +30,11 @@
 # nothing gates on the number and instrumenting every line the suite
 # executes is not free. Every other use of this script -- the pre-merge
 # check, the re-check after a review fix -- is a pass/fail gate that would
-# be paying for a report nobody reads, and on a VPS sharing CPU with a
+# be paying for a report nobody reads, and on a host sharing CPU with a
 # concurrent job that is minutes per run. Set COVERAGE=1 when the number
 # itself is the point.
 #
-# Requires: docker, poetry (with `poetry install` already run in this
+# Requires: docker, curl, poetry (with `poetry install` already run in this
 # worktree's own virtualenv -- this script does not install dependencies).
 set -euo pipefail
 case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
@@ -53,7 +54,7 @@ cleanup() {
   # `-v`: both images declare a VOLUME for their data directory, so a plain
   # `docker rm -f` without it would leave an anonymous volume orphaned on
   # disk after every single invocation (success or failure) -- this script
-  # is meant to run repeatedly/concurrently on one persistent VPS host, so
+  # is meant to run repeatedly/concurrently on one persistent host, so
   # that leak would otherwise accumulate without bound.
   docker rm -f -v "$pg_name" "$ch_name" >/dev/null 2>&1 || true
 }
@@ -129,10 +130,19 @@ if [ "$pg_ready" != "1" ]; then
   exit 1
 fi
 
+# Probed from the host through the published port -- the way the schema
+# step and the tests connect -- not with `docker exec`: the image's first run
+# answers /ping inside the container from a temporary init server while it
+# creates CLICKHOUSE_DB, then restarts into the real server. That init
+# server listens on the container's loopback only, so through the port it
+# is unreachable and the first answer here is the real server's. Naming
+# the database makes that answer also prove the credentials and database
+# the schema step connects with.
 echo "→ waiting for ClickHouse readiness"
 ch_ready=0
 for _ in $(seq 1 60); do
-  if docker exec "$ch_name" wget --spider -q http://localhost:8123/ping >/dev/null 2>&1; then
+  if curl -fs -o /dev/null --max-time 2 -u transit:transit \
+      "http://127.0.0.1:${ch_port}/?database=transit_test" --data-binary 'SELECT 1'; then
     ch_ready=1
     break
   fi

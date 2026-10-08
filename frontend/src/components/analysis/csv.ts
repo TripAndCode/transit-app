@@ -1,4 +1,4 @@
-import { ctxToQueryString, type RangeCtx } from "../../api/rangeContext";
+import { scopeToQueryString, type Scope } from "../../api/scope";
 
 export type CsvColumn<T> = { header: string; value: (row: T) => unknown };
 
@@ -6,14 +6,14 @@ export type CsvColumn<T> = { header: string; value: (row: T) => unknown };
  * Turns a row array + declarative column list into the header+body matrix
  * `downloadCsv` expects, replacing the hand-rolled `[header, ...rows.map(...)]`
  * that used to be duplicated at every export call site. When `ctx` is given, a
- * blank separator line plus one `["query", ctxToQueryString(ctx)]` row is
+ * blank separator line plus one `["query", scopeToQueryString(ctx)]` row is
  * appended, so the exported file records exactly the filters that produced it.
  */
-export function buildCsv<T>(rows: T[], columns: CsvColumn<T>[], ctx?: RangeCtx | null): unknown[][] {
+export function buildCsv<T>(rows: T[], columns: CsvColumn<T>[], ctx?: Scope | null): unknown[][] {
   const header = columns.map((c) => c.header);
   const body = rows.map((row) => columns.map((c) => c.value(row)));
   const matrix: unknown[][] = [header, ...body];
-  if (ctx) matrix.push([], ["query", ctxToQueryString(ctx)]);
+  if (ctx) matrix.push([], ["query", scopeToQueryString(ctx)]);
   return matrix;
 }
 

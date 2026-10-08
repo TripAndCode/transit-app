@@ -70,6 +70,7 @@ async def timeline_app(apply_schema, ch_async_client, ch_client):
         await conn.execute("TRUNCATE agencies, static_stops, static_stop_times CASCADE")
     await pool.close()
     ch_client.command("TRUNCATE TABLE IF EXISTS updates")
+    ch_client.command("TRUNCATE TABLE IF EXISTS updates_live")
 
 
 @pytest.fixture
@@ -79,7 +80,19 @@ async def timeline_client(timeline_app):
         yield client, agency_id, ch_client
 
 
-async def _seed_visit(pool_exec, ch_client, agency_id, *, trip_id, stop_sequence, stop_id, scheduled_sec, delays):
+async def _seed_visit(
+    pool_exec,
+    ch_client,
+    agency_id,
+    *,
+    trip_id,
+    stop_sequence,
+    stop_id,
+    scheduled_sec,
+    delays,
+    day=_DAY,
+    table="updates",
+):
     """One trip visit: the static mapping plus `delays` observations of it."""
     await pool_exec(
         "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
@@ -96,7 +109,7 @@ async def _seed_visit(pool_exec, ch_client, agency_id, *, trip_id, stop_sequence
             (
                 agency_id,
                 f"f/{trip_id}-{stop_sequence}-{i}.pb",
-                datetime(_DAY.year, _DAY.month, _DAY.day, 3, 0, i, tzinfo=timezone.utc),
+                datetime(day.year, day.month, day.day, 3, 0, i, tzinfo=timezone.utc),
                 trip_id,
                 "平日",
                 f"{scheduled_sec // 3600:02d}:{scheduled_sec % 3600 // 60:02d}:00",
@@ -106,7 +119,23 @@ async def _seed_visit(pool_exec, ch_client, agency_id, *, trip_id, stop_sequence
                 scheduled_sec,
             )
         )
-    ch_client.insert("updates", rows, column_names=_UPDATE_COLUMNS)
+    ch_client.insert(table, rows, column_names=_UPDATE_COLUMNS)
+
+
+async def _three_visits(pool, ch_client, agency_id, *, stop_id, prefix, day, table):
+    for n, sched in enumerate([8 * 3600, 8 * 3600 + 900, 8 * 3600 + 1800]):
+        await _seed_visit(
+            pool.execute,
+            ch_client,
+            agency_id,
+            trip_id=f"{prefix}{n}",
+            stop_sequence=1,
+            stop_id=stop_id,
+            scheduled_sec=sched,
+            delays=[120],
+            day=day,
+            table=table,
+        )
 
 
 @pytest.mark.asyncio
@@ -223,3 +252,26 @@ async def test_timeline_without_a_date_resolves_the_latest_observed_day(timeline
     resp = await client.get(f"/api/{agency_id}/delays/timeline")
     # captured_at is 03:00 UTC on _DAY, i.e. noon JST on the same civil day.
     assert resp.json()["date"] == _DAY.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_timeline_reads_today_from_updates_live_and_a_past_day_from_updates(timeline_client, timeline_app):
+    from datetime import timedelta
+
+    from api.range import jst_today
+
+    client, agency_id, ch_client = timeline_client
+    pool = timeline_app[0].state.pool
+    today = jst_today()
+    yday = today - timedelta(days=1)
+    await _three_visits(pool, ch_client, agency_id, stop_id="S1", prefix="LT", day=today, table="updates_live")
+    await _three_visits(pool, ch_client, agency_id, stop_id="S2", prefix="HT", day=today, table="updates")
+    await _three_visits(pool, ch_client, agency_id, stop_id="S1", prefix="LY", day=yday, table="updates_live")
+    await _three_visits(pool, ch_client, agency_id, stop_id="S2", prefix="HY", day=yday, table="updates")
+    label = bucket_label(bucket_of(8 * 3600, 60), 60)
+    now_resp = await client.get(f"/api/{agency_id}/delays/timeline?date={today.isoformat()}")
+    past_resp = await client.get(f"/api/{agency_id}/delays/timeline?date={yday.isoformat()}")
+    now_frames = {f["t"]: f for f in now_resp.json()["frames"]}
+    past_frames = {f["t"]: f for f in past_resp.json()["frames"]}
+    assert [p["stop_id"] for p in now_frames[label]["points"]] == ["S1"]
+    assert [p["stop_id"] for p in past_frames[label]["points"]] == ["S2"]

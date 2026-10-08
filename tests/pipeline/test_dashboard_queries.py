@@ -49,11 +49,11 @@ def _exact_sum_delay_sec(avg_min, samples):
 
 
 async def _seed_trend(pool, agency_id, rows):
-    """rows: (date_iso, route_code, service_type, avg_min, samples[, sum_delay_sec])."""
+    """rows: (date or ISO date string, route_code, service_type, avg_min, samples[, sum_delay_sec])."""
     expanded = []
     for d, rc, st, av, n, *rest in rows:
         sds = rest[0] if rest else _exact_sum_delay_sec(av, n)
-        expanded.append((d, rc, st, av, n, sds))
+        expanded.append((date.fromisoformat(d) if isinstance(d, str) else d, rc, st, av, n, sds))
     async with pool.acquire() as c:
         await c.executemany(
             "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples, "
@@ -301,7 +301,7 @@ async def test_delay_heatmap_cache_hit(movers_pool):
 
 
 async def test_heatmap_dow_pools_exact_sum_delay_sec_not_reweighted_avg(movers_pool):
-    """Both seeded Mondays share the same (wrong) avg_min=5.0, so the old
+    """Both seeded Mondays share the same (wrong) avg_min=5.0, so a
     SUM(avg_min*samples)/SUM(samples) reweighting would also report 5.0 --
     but sum_delay_sec backs true per-row averages of 6.0 and 2.0, so the
     exact pooled mean must be 3.0, proving the grid reads sum_delay_sec."""
@@ -383,8 +383,8 @@ async def test_anomalies_null_day_excluded_from_series_and_stats(movers_pool):
     """A date whose only row has samples but a NULL sum_delay_sec (not yet
     re-analyzed since migration 0028) must render avg_delay=None for that
     date, and must be excluded from the mean/std/z-score population --
-    previously it was coerced to 0.0, which biased the network mean down
-    and could flag the missing day as a false anomaly.
+    coercing it to 0.0 would bias the network mean down and could flag the
+    missing day as a false anomaly.
     """
     pool, agency_id = movers_pool
     await _seed_trend(
@@ -404,8 +404,8 @@ async def test_anomalies_null_day_excluded_from_series_and_stats(movers_pool):
     assert by_date["2026-04-04"] is None
     # With the NULL day correctly excluded, all 3 real days are identical
     # (avg 3.0 each), so std is exactly 0 and there are no anomalies at all
-    # -- not even the NULL day, which the old 0.0-coercion would have
-    # flagged as a >1.5-sigma outlier next to three 3.0-min days.
+    # -- not even the NULL day, which coercing NULL to 0.0 would flag as a
+    # >1.5-sigma outlier next to three 3.0-min days.
     assert res.std == 0.0
     assert res.mean == 3.0
     assert res.anomalies == []

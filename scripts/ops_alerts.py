@@ -2,8 +2,8 @@
 """Anomaly-only alerting on top of `scripts/ops_status_page.py`'s combined
 operations-status document.
 
-The combined document already tells you the current state of all four
-components on every call; polling it on a schedule and re-printing it every
+The combined document already tells you the current state of every
+component on every call; polling it on a schedule and re-printing it every
 time would either flood an operator with one message per poll (most of them
 "still fine" or "still the same known problem") or bury the one poll that
 actually matters. This module sits between the two: it keeps a small
@@ -50,9 +50,7 @@ bookkeeping is intentionally the only thing written on a quiet run --
 `main`'s exit code and stdout stay boring (0, one plain summary line) so
 routine polling traffic never looks like a notification. A poll that finds
 something worth surfacing instead prints an `ALERT`-prefixed block and
-exits 1, which is the same "a scheduled run's own failure is the
-notification" delivery mechanism `.github/workflows/vps-heartbeat-
-watchdog.yml` already uses.
+exits 1, so the scheduled run's own failure is the notification.
 
 `_deliver_ping` additionally forwards every poll's outcome to an optional
 external endpoint, reusing the same healthchecks.io-style convention
@@ -498,7 +496,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repo",
         type=Path,
         default=_env_path(REPO_ENV_VAR, Path.cwd()),
-        help="Local checkout for vps_loop/github facts",
+        help="Local checkout for github facts",
     )
     parser.add_argument(
         "--github-repo",

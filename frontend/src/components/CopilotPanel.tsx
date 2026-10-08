@@ -3,40 +3,35 @@ import { useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import { useCopilotEnabled, useCopilotInsight } from "../api/copilot";
-import { apiPost, isLlmNotApproved } from "../api/client";
+import { apiPost } from "../api/client";
 import { ErrorBanner } from "./ErrorBanner";
-import { useRangeContext } from "../api/rangeContext";
+import { useScope } from "../api/scope";
 import { useIsLlmApproved, useOverviewSummary } from "../api/hooks";
 import type { AskResponse } from "../api/types";
 import "./CopilotPanel.css";
 
-/** The route whose data this panel summarizes. It is the period-summary tab,
- *  not the realtime Operations map: the payload comes from
+/** The route whose data this panel summarizes. It is Pulse,
+ *  not the realtime Live map: the payload comes from
  *  `useOverviewSummary` and the follow-up carries `panel_ctx.tab = "overview"`.
  *  Must stay outside `FOCUSED_TAB_SEGMENTS` — App renders this panel only when
  *  the route is unfocused, so a focused route here means it can never appear.
  */
-export const COPILOT_INSIGHT_ROUTE = "/agencies/:agencyId/period-overview";
+export const COPILOT_INSIGHT_ROUTE = "/agencies/:agencyId/pulse";
 
 export function CopilotPanel() {
   const { t } = useTranslation();
   const overviewMatch = useMatch(COPILOT_INSIGHT_ROUTE);
-  const askMatch = useMatch("/agencies/:agencyId/ask");
-  const agencyId = overviewMatch
-    ? Number(overviewMatch.params.agencyId)
-    : askMatch
-      ? Number(askMatch.params.agencyId)
-      : null;
-  const [filters] = useRangeContext();
+  const agencyId = overviewMatch ? Number(overviewMatch.params.agencyId) : null;
+  const [filters] = useScope();
   // Anything but an explicit true is treated as off, so an unresolved or
-  // failed flag check never reaches the billed insight POST.
+  // failed flag check never reaches the insight POST.
   const enabled = useCopilotEnabled(agencyId).data?.enabled === true;
   const llmApproved = useIsLlmApproved();
   // Deliberately NOT gated on `enabled`: this is a free aggregate read that
-  // OverviewTab already issues under the same query key, and the billed
-  // insight is withheld by `tab` below. Gating it here would only stall the
+  // OverviewTab already issues under the same query key, and the insight
+  // POST is withheld by `tab` below. Gating it here would only stall the
   // insight behind the flag round trip on the enabled path.
-  const overviewQuery = useOverviewSummary(overviewMatch ? agencyId : null, filters);
+  const overviewQuery = useOverviewSummary(agencyId, filters);
   // Every hook below must run on every render regardless of which tab is
   // active — react-hooks/rules-of-hooks forbids branching before a hook
   // call, and this panel persists across tab navigation (it's mounted
@@ -44,39 +39,28 @@ export function CopilotPanel() {
   // this point would change the hook count between renders of the same
   // instance.
 
-  // `llmApproved` belongs in this condition, not just in the render branches
-  // below: the insight POST fires on its own from a pageview, with no user
-  // action, and the endpoint 403s an unapproved caller. Since the flag
-  // defaults to false for every new account, omitting it here would make the
-  // default experience one doomed request per Overview visit.
-  const tab = overviewMatch && enabled && llmApproved ? "overview" : null;
-  const { insight, loading, error } = useCopilotInsight(agencyId, tab, filters, overviewQuery.data ?? null);
+  const tab = overviewMatch && enabled ? "overview" : null;
+  // A view with no observations has nothing an insight could be drawn from,
+  // so none is asked for.
+  const hasObservations = (overviewQuery.data?.headline?.samples ?? 0) > 0;
+  const { insight, loading, error } = useCopilotInsight(agencyId, tab, hasObservations ? overviewQuery.data : null);
 
   // The kill switch removes the panel outright rather than showing an empty
   // shell — a disabled feature should be invisible, not broken-looking.
   if (!enabled) return null;
 
-  if (askMatch) {
-    return (
-      <aside className="copilot-panel" aria-label={t("copilot.title")}>
-        <p>{t("copilot.ask_step_back")}</p>
-      </aside>
-    );
-  }
-
-  // Every other route (Operations, Analysis, Network, Account, Admin, root
-  // redirect, ...) has nothing for this panel to show — it only ever has
-  // content on Period overview (the proactive insight) or Ask (handled
-  // above). Placed after every hook call above so the hook count stays
-  // identical across renders of this always-mounted instance.
+  // Every other route (Live, the other destinations, Reports, Account,
+  // Admin, root redirect, ...) has nothing for this panel to show — it only
+  // ever has content on Pulse (the proactive insight). Placed after every
+  // hook call above so the hook count stays identical across renders of this
+  // always-mounted instance.
   if (!overviewMatch) return null;
 
   return (
     <aside className="copilot-panel" aria-label={t("copilot.title")}>
       <h2>{t("copilot.title")}</h2>
       {loading && <p>{t("copilot.loading")}</p>}
-      {error != null &&
-        (isLlmNotApproved(error) ? <ErrorBanner error={error} /> : <p>{t("copilot.error")}</p>)}
+      {(error != null || overviewQuery.isError) && <p>{t("copilot.error")}</p>}
       {insight && (
         <div>
           <p>{insight.text}</p>
@@ -84,7 +68,14 @@ export function CopilotPanel() {
           {insight.lowConfidence && <p className="copilot-low-confidence">{t("copilot.low_confidence")}</p>}
         </div>
       )}
-      {agencyId != null && tab != null && <FollowupForm key={agencyId} agencyId={agencyId} tab={tab} />}
+      {/* With no observations to draw from (an agency with no data yet) the
+          panel says so rather than standing empty under its heading. */}
+      {overviewQuery.isSuccess && !hasObservations && <p className="copilot-empty">{t("copilot.no_insight")}</p>}
+      {/* The insight needs no approval; the follow-up goes to /ask, whose
+          free-text stage answers only an admin-approved caller. */}
+      {agencyId != null && tab != null && llmApproved && (
+        <FollowupForm key={agencyId} agencyId={agencyId} tab={tab} />
+      )}
     </aside>
   );
 }

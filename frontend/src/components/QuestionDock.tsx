@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { buildCardTemplates, type CardTemplate } from "./askCardTemplates";
 import { ParamStrip } from "./ParamStrip";
+import { CardTemplateIcon } from "./CardTemplateIcon";
 
 type QuestionDockProps = {
   agencyId: number;
@@ -45,7 +46,7 @@ export function QuestionDock({
   const { t } = useTranslation();
   // buildCardTemplates() returns static title_key/param specs (i18n-agnostic;
   // labels are translated later via t()), so it's cheap and safe to call
-  // directly on every render — no useMemo (see CLAUDE.md).
+  // directly on every render — no useMemo (see AGENTS.md).
   const templates = buildCardTemplates();
 
   const composing = templates.find((tpl) => tpl.id === composingId) ?? null;
@@ -87,7 +88,7 @@ export function QuestionDock({
           borderRadius: 12,
           padding: "10px 12px",
           boxShadow: composing ? "var(--el-1)" : "none",
-          transition: "box-shadow 120ms ease",
+          transition: "box-shadow var(--transition)",
         }}
       >
         {composing && (
@@ -130,11 +131,11 @@ export function QuestionDock({
                     fontSize: 13,
                     cursor: busy && !active ? "not-allowed" : "pointer",
                     opacity: busy && !active ? 0.6 : 1,
-                    transition: "background 120ms ease, color 120ms ease",
+                    transition: "background var(--transition), color var(--transition)",
                   }}
                   title={t(tpl.title_key)}
                 >
-                  {tpl.emoji} {t(tpl.title_key)}
+                  <CardTemplateIcon icon={tpl.icon} /> {t(tpl.title_key)}
                 </button>
               );
             })}

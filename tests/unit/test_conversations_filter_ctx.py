@@ -1,9 +1,10 @@
 """A conversation's stored ``filter_ctx`` is client-supplied state that was
 persisted verbatim, so it gets the same validation as a live request.
 
-It used to be fed straight into ``RangeCtx(...)``: ``date.fromisoformat``
-raised an unhandled ValueError (500) on a malformed date, and an arbitrary
-``dow``/``time_band``/``service`` string reached the SQL builders unchecked.
+Fed straight into ``RangeCtx(...)``, a malformed date would make
+``date.fromisoformat`` raise an unhandled ValueError (500), and an arbitrary
+``dow``/``time_band``/``service`` string would reach the SQL builders
+unchecked.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -31,8 +32,8 @@ def frozen_today(monkeypatch):
 
 def test_missing_filter_ctx_falls_back_to_the_default_window(frozen_today):
     ctx = _ctx_from_stored_filters(None)
-    assert ctx.to_date == frozen_today
-    assert ctx.from_date == frozen_today - timedelta(days=DEFAULT_RANGE_DAYS - 1)
+    assert ctx.to_date == frozen_today - timedelta(days=1)
+    assert ctx.from_date == ctx.to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1)
 
 
 def test_stored_filters_are_applied(frozen_today):

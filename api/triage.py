@@ -1,8 +1,7 @@
 """Pure baseline-relative triage classification for the 最新観測 tab.
 
 No DB, no I/O — just the decision rule, so it is fast to unit-test and the
-exact thresholds live in one place. See
-docs/superpowers/specs/2026-06-10-latest-obs-triage-design.md.
+exact thresholds live in one place.
 """
 
 from typing import Literal, Optional, Tuple

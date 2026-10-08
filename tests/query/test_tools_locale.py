@@ -11,6 +11,7 @@ integration tests in tests/test_tool_queries.py.
 """
 
 import asyncio
+import re
 
 import pytest
 
@@ -52,35 +53,40 @@ def test_summary_suggest_reason_anomaly_exact_strings():
     substring check (e.g. `"0%" in text`) would miss a wording regression
     or the ja/en templates drifting out of sync in content."""
     assert (
-        _summary("suggest_reason_anomaly", lang="ja", route="16012", avg_min="6.5")
-        == "路線16012の本日の平均遅延が普段より大幅に悪化しています（平均6.5分）。"
+        _summary("suggest_reason_anomaly", lang="ja", route="W54 沖舘・新田線", avg_min="6.5")
+        == "W54 沖舘・新田線の本日の平均遅延が普段より大幅に悪化しています（平均6.5分）。"
     )
     assert (
-        _summary("suggest_reason_anomaly", lang="en", route="16012", avg_min="6.5")
-        == "Route 16012's average delay today is much worse than usual (avg 6.5 min)."
+        _summary("suggest_reason_anomaly", lang="en", route="W54 沖舘・新田線", avg_min="6.5")
+        == "Average delay on W54 沖舘・新田線 today is much worse than usual (avg 6.5 min)."
     )
 
 
 def test_summary_suggest_reason_trend_shift_exact_strings():
     assert (
-        _summary("suggest_reason_trend_shift", lang="ja", route="R2", delta_min="+4.0")
+        _summary("suggest_reason_trend_shift", lang="ja", route="路線R2", delta_min="+4.0")
         == "路線R2の遅延が今週の途中から悪化しています（+4.0分の変化）。"
     )
     assert (
-        _summary("suggest_reason_trend_shift", lang="en", route="R2", delta_min="+4.0")
-        == "Route R2's delay pattern shifted partway through this week (+4.0 min change)."
+        _summary("suggest_reason_trend_shift", lang="en", route="Route R2", delta_min="+4.0")
+        == "The delay pattern on Route R2 shifted partway through this week (+4.0 min change)."
     )
 
 
 def test_summary_suggest_reason_on_time_fallback_exact_strings():
     assert (
-        _summary("suggest_reason_on_time_fallback", lang="ja", route="R4", pct="21")
+        _summary("suggest_reason_on_time_fallback", lang="ja", route="路線R4", pct="21")
         == "路線R4が今週最も定時率が低い路線です（定時率21%）。"
     )
     assert (
-        _summary("suggest_reason_on_time_fallback", lang="en", route="R4", pct="21")
+        _summary("suggest_reason_on_time_fallback", lang="en", route="Route R4", pct="21")
         == "Route R4 has the worst on-time rate this week (21% on time)."
     )
+
+
+def test_summary_route_code_fallback_exact_strings():
+    assert _summary("route_code_fallback", lang="ja", code="16012") == "路線16012"
+    assert _summary("route_code_fallback", lang="en", code="16012") == "Route 16012"
 
 
 def test_summary_schedule_realism_padding_exact_strings():
@@ -164,13 +170,23 @@ def test_every_tool_is_documented_in_system_prompt():
     assert not missing, f"tools missing from SYSTEM_PROMPT: {missing}"
 
 
+def test_system_prompt_tool_signatures_match_schemas():
+    """The JSON-mode request sends no TOOLS, so SYSTEM_PROMPT's listing is the
+    model's only view of each tool's parameters there."""
+    listed = dict(re.findall(r"^- (\w+)\(([^)]*)\)", SYSTEM_PROMPT, flags=re.M))
+    for t in TOOLS:
+        fn = t["function"]
+        schema = set(fn.get("parameters", {}).get("properties", {}))
+        prose = {p.strip().rstrip("?") for p in listed.get(fn["name"], "").split(",") if p.strip()}
+        assert prose == schema, fn["name"]
+
+
 def test_json_mode_addendum_is_not_baked_into_system_prompt():
     """JSON_MODE_ADDENDUM must stay a separate constant, appended to the
     prompt only for the JSON-mode (intent-cache) request in
     pipeline.query.chat — never unconditionally part of SYSTEM_PROMPT, which
-    is also used for the native tool_calls request. Reproduced
-    deterministically (temperature=0) that leaking this into the native
-    tool_calls prompt made the model echo the JSON-mode shape as plain
-    message content instead of issuing a real tool_calls entry, for some
-    tools. Regression guard for that specific fix."""
+    is also used for the native tool_calls request. Leaking this into the
+    native tool_calls prompt makes the model echo the JSON-mode shape as
+    plain message content instead of issuing a real tool_calls entry, for
+    some tools (reproducible deterministically at temperature=0)."""
     assert JSON_MODE_ADDENDUM not in SYSTEM_PROMPT

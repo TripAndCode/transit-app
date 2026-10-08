@@ -92,8 +92,8 @@ def _script_env(**overrides: str) -> dict[str, str]:
     PYTHON is always set: the script defaults to `poetry run python`, which
     resolves its virtualenv from the current directory and so picks a
     different, unprovisioned one when the suite runs from a git worktree.
-    Built once rather than per test — a hand-copied env dict is how one of
-    these call sites previously kept the default and passed for the wrong
+    Built once rather than per test: a hand-copied env dict can silently
+    keep the default, and a call site that does passes for the wrong
     reason, its assertions satisfied by the resulting crash rather than by
     the behaviour it names.
     """

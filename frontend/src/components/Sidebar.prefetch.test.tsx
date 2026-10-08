@@ -6,22 +6,25 @@ import { I18nextProvider } from "react-i18next";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { Sidebar } from "./Sidebar";
+import { ToastProvider } from "./ui/Toast";
 import { prefetchRouteChunk } from "../routes/lazyTabs";
 
 vi.mock("../routes/lazyTabs", () => ({ prefetchRouteChunk: vi.fn() }));
 
 const prefetch = vi.mocked(prefetchRouteChunk);
 
-function renderSidebar(path = "/agencies/1/overview") {
+function renderSidebar(path = "/agencies/1/live") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
-        <MemoryRouter initialEntries={[path]}>
-          <Routes>
-            <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
-          </Routes>
-        </MemoryRouter>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route path="/agencies/:agencyId/*" element={<Sidebar />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
       </I18nextProvider>
     </QueryClientProvider>,
   );
@@ -36,22 +39,22 @@ describe("Sidebar chunk prefetch", () => {
     const user = userEvent.setup();
     renderSidebar();
 
-    await user.hover(screen.getByRole("link", { name: /Reports/ }));
-    expect(prefetch).toHaveBeenCalledWith("reports");
+    await user.hover(screen.getByRole("link", { name: "Routes" }));
+    expect(prefetch).toHaveBeenCalledWith("routes");
   });
 
   it("warms the chunk on keyboard focus too, not just hover", async () => {
     renderSidebar();
 
-    screen.getByRole("link", { name: /Segment analysis/ }).focus();
-    expect(prefetch).toHaveBeenCalledWith("route-analysis");
+    screen.getByRole("link", { name: "Reports" }).focus();
+    expect(prefetch).toHaveBeenCalledWith("reports");
   });
 
-  it("warms the Ask chunk from its CTA", async () => {
+  it("warms the Ask chunk from its rail entry", async () => {
     const user = userEvent.setup();
     renderSidebar();
 
-    await user.hover(screen.getByRole("link", { name: /Ask/ }));
+    await user.hover(screen.getByRole("link", { name: "Ask" }));
     expect(prefetch).toHaveBeenCalledWith("ask");
   });
 

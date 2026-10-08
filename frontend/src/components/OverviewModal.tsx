@@ -1,4 +1,3 @@
-// frontend/src/components/OverviewModal.tsx
 import { useTranslation } from "react-i18next";
 // Self-sufficient styling: this shared modal is used outside OverviewTab
 // (e.g. RouteForecastSection), so it must carry its own `.ov-modal-*` rules

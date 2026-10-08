@@ -1,4 +1,4 @@
-"""API tests for GET /api/{agency_id}/performance_standards (item 104).
+"""API tests for GET /api/{agency_id}/performance_standards.
 
 Seeds `route_performance_standards` (migration 0041) directly via asyncpg,
 plus whichever underlying aggregate a row's `metric_type` reads from

@@ -51,23 +51,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Free disk space on the runner
-        if: runner.environment == 'github-hosted'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
-            /usr/local/share/chromium /usr/share/swift 2>/dev/null || true
-          df -h /
-
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install Poetry
         run: pip install poetry==1.8.5
 
+      # `--with embeddings`: that group is optional (pyproject.toml keeps torch
+      # et al out of the deploy image), and this job is the one that sets
+      # RUN_SLOW=1 and treats a skipped test_embeddings as a failure. Without
+      # it the embedder import raises ModuleNotFoundError, Embedder degrades to
+      # unavailable, and that test fails rather than skips — so the guard below
+      # cannot save a run that never had the dependency it demands. A
+      # persistent self-hosted runner can mask this by retaining the group from
+      # an earlier install; a rebuilt venv would not.
       - name: Install dependencies
-        run: poetry install
+        run: poetry install --with embeddings
+
+      # This persistent runner keeps every venv Poetry makes for the checkout,
+      # one per Python minor version, and Poetry never removes one when the
+      # pinned version moves on. Keep only the venv this job just installed;
+      # an empty answer stops the step rather than matching every venv.
+      - name: Remove this checkout's venvs for other Python versions
+        run: |
+          active="$(poetry env info --path)"
+          active="${active##*/}"
+          test -n "$active"
+          poetry env list | awk '{print $1}' | { grep -vxF "$active" || true; } | xargs -r -n1 poetry env remove
 
       # RUN_I18N_SCAN and RUN_DASHBOARD_E2E_SCAN drive a real Chromium
       # against the built SPA (see those tests' own module docstrings) —
@@ -76,7 +87,7 @@ jobs:
       # cannot tell apart from the suite being newly broken.
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -85,6 +96,15 @@ jobs:
         run: |
           npm ci
           npm run build
+
+      # `npm run build` writes frontend/dist; both gated tests open
+      # api/static/index.html. `make bake` is the one definition of that
+      # copy (it also strips the vite manifest), so this calls it rather
+      # than repeating a cp here and letting the two drift. Without this
+      # step the tests self-skip on a missing SPA and the guard below
+      # reports it as the suite being broken.
+      - name: Bake the SPA into api/static
+        run: make bake
 
       - name: Install Playwright's Chromium
         run: poetry run playwright install chromium
@@ -113,7 +133,10 @@ jobs:
 
       # -ra: a one-line reason for every non-passing test, including
       # skips — the input the fail-if-still-skipped step below greps.
+      # `shell: bash` selects `-o pipefail`, so pytest's exit status survives
+      # the pipe into tee instead of being replaced by tee's.
       - name: Run extended pytest suites
+        shell: bash
         run: poetry run pytest -ra | tee pytest-extended.log
         env:
           DATABASE_URL: postgresql://transit:transit@localhost:${{ steps.postgres.outputs.port }}/transit
@@ -147,3 +170,42 @@ jobs:
       - name: Stop and remove the Postgres container
         if: always()
         run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
+
+  # The push/PR-gated `ci.yml` deliberately skips the optional `embeddings`
+  # group (pyproject.toml: several GB of torch/transformers, unused until a RAG
+  # index exists, and `pipeline.query.embeddings.Embedder` tolerates it being
+  # absent by falling through to the LLM-only path). The python-extended job
+  # above installs it for the RUN_SLOW `test_embeddings` gate, but on a
+  # persistent runner whose venv may already hold the group from an earlier
+  # install. This job is the clean-runner check: a fresh `--with embeddings`
+  # install, then import and embed, with no database or API server. A silent
+  # break here would otherwise surface only as Stage 2 of the Ask router
+  # quietly falling through to the LLM every time, in production. Scheduled
+  # here rather than on every push because the install and model download are
+  # minutes of extra runner time not worth paying on every change.
+  embeddings-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.5
+
+      - name: Install dependencies (including the optional embeddings group)
+        run: poetry install --with embeddings
+
+      - name: Import pipeline.query.embeddings and embed one string
+        run: |
+          poetry run python -c "
+          from pipeline.query.embeddings import Embedder
+
+          e = Embedder()
+          assert e.available, 'Embedder unavailable after installing the embeddings group'
+          vec = e.embed('what routes are in the data?', mode='query')
+          assert len(vec) == e.dim, f'expected a {e.dim}-dim vector, got {len(vec)}'
+          "

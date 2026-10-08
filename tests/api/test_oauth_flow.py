@@ -8,7 +8,8 @@ database side effects (users, oauth_identities, sessions, login_events).
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -30,16 +31,15 @@ def _set_oauth_env(monkeypatch):
     directly instead (see test_admin_email_promotes) — cheaper and more
     explicit than reloading the whole module to re-freeze it.
 
-    Historical note: this fixture used to importlib.reload(api.routers.auth)
-    on every test. That's unnecessary (everything it "refreshed" either reads
-    env live already, per above, or — like the oauth-tx signer — is fine
-    staying frozen at whatever it was on first import, since every test
-    round-trips through the same frozen instance). Worse, the reload re-ran
-    auth.py's `@limiter.limit(...)` decorators each time, registering a
-    duplicate rate-limit rule against the shared slowapi Limiter singleton
-    per test — 12 tests here meant 12 accumulated duplicate rules for any
-    rate-limited auth route, which was silently starving that route's quota
-    in a DIFFERENT test file's tests whenever both ran in the same session.
+    Do not importlib.reload(api.routers.auth) here. Nothing needs it
+    (everything else either reads env live already, per above, or — like the
+    oauth-tx signer — is fine staying frozen at whatever it was on first
+    import, since every test round-trips through the same frozen instance),
+    and a reload re-runs auth.py's `@limiter.limit(...)` decorators,
+    registering a duplicate rate-limit rule against the shared slowapi
+    Limiter singleton each time. Those accumulate across tests and silently
+    starve a rate-limited auth route's quota in a DIFFERENT test file's tests
+    whenever both run in the same session.
     """
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "g")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "gs")
@@ -492,12 +492,12 @@ async def test_logout_deletes_session(auth_client, aconn):
 
 @pytest.mark.asyncio
 async def test_real_login_then_callback_does_not_raise_duplicate_code_verifier(auth_client, aconn, monkeypatch):
-    """Regression test for a real bug that broke every production login: the
-    callback passed ``code_verifier`` explicitly to ``authorize_access_token``,
-    but Authlib's own ``_format_state_params`` also injects ``code_verifier``
-    from the Starlette session state that ``authorize_redirect`` (in /login)
-    already stored there — passing both raised ``TypeError: got multiple
-    values for keyword argument 'code_verifier'`` on every real attempt.
+    """The callback must not pass ``code_verifier`` explicitly to
+    ``authorize_access_token``: Authlib's own ``_format_state_params``
+    already injects ``code_verifier`` from the Starlette session state that
+    ``authorize_redirect`` (in /login) stored there, and passing both raises
+    ``TypeError: got multiple values for keyword argument 'code_verifier'``
+    on every real login attempt.
 
     Unlike the other tests in this file, this one does NOT mock
     ``authorize_access_token`` itself (that would mock away the exact bug).
@@ -536,3 +536,54 @@ async def test_real_login_then_callback_does_not_raise_duplicate_code_verifier(a
     assert resp.status_code == 302
     assert resp.headers["location"] == "/"
     assert "error=" not in resp.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_a_github_error_body_fails_the_login_like_a_provider_outage(auth_client, aconn):
+    """A rejected GitHub token answers `user` and `user/emails` with an error
+    object. The callback sends the visitor back to /login and records the
+    failure, the same as a failed token exchange."""
+    from api.routers import auth as auth_mod
+
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": "/", "provider": "github"})
+    error_body = MagicMock()
+    error_body.json.return_value = {"message": "Bad credentials"}
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(return_value={"access_token": "t"})
+    client_mock.get = AsyncMock(return_value=error_body)
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/github/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith("/login?error=provider_down")
+    row = await aconn.fetchrow(
+        "SELECT provider, meta::text AS meta FROM login_events WHERE kind='login_failed' ORDER BY event_id DESC LIMIT 1"
+    )
+    assert row is not None
+    assert row["provider"] == "github"
+    assert '"provider_down"' in row["meta"]
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_keeps_next_for_the_retry(auth_client):
+    """A sign-in that fails at token exchange sends the visitor back to /login
+    with the page they were headed for, so their retry lands there."""
+    from api.routers import auth as auth_mod
+
+    destination = "/agencies/1/analysis?route=12"
+    payload = auth_mod._get_signer().dumps({"state": "s", "verifier": "v", "next": destination, "provider": "google"})
+    client_mock = AsyncMock()
+    client_mock.authorize_access_token = AsyncMock(side_effect=RuntimeError("provider down"))
+    with patch.object(auth_mod.oauth, "create_client", return_value=client_mock):
+        resp = await auth_client.get(
+            "/api/auth/google/callback?state=s&code=c",
+            cookies={"oauth_tx": payload},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 302
+    location = resp.headers["location"]
+    assert location.startswith("/login?error=provider_down&next=")
+    assert location.endswith(quote(destination, safe=""))

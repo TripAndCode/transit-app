@@ -1,7 +1,6 @@
-"""``api.routers.copilot.CopilotInsightRequest``: ``filters`` and
-``view_payload`` are arbitrary client-supplied dicts threaded into the
-proactive-insight template; each is rejected once its JSON serialization
-exceeds the size cap.
+"""``api.routers.copilot.CopilotInsightRequest``: ``view_payload`` is an
+arbitrary client-supplied dict threaded into the proactive-insight template,
+rejected once its JSON serialization exceeds the size cap.
 """
 
 import json
@@ -14,7 +13,12 @@ from api.routers.copilot import _MAX_PAYLOAD_BYTES, CopilotInsightRequest
 
 
 def test_copilot_insight_request_accepts_small_payloads():
-    CopilotInsightRequest(tab="overview", filters={"a": 1}, view_payload={"b": 2})
+    CopilotInsightRequest(tab="overview", view_payload={"b": 2})
+
+
+def test_a_client_that_still_sends_filters_is_accepted():
+    request = CopilotInsightRequest.model_validate({"tab": "overview", "filters": {"a": 1}, "view_payload": {"b": 2}})
+    assert "filters" not in request.model_dump()
 
 
 # Derived from the cap rather than written as a literal, so raising the cap
@@ -22,14 +26,9 @@ def test_copilot_insight_request_accepts_small_payloads():
 _OVERSIZE = "a" * (_MAX_PAYLOAD_BYTES + 1)
 
 
-def test_copilot_insight_request_rejects_oversized_filters():
-    with pytest.raises(ValidationError):
-        CopilotInsightRequest(tab="overview", filters={"x": _OVERSIZE}, view_payload={})
-
-
 def test_copilot_insight_request_rejects_oversized_view_payload():
     with pytest.raises(ValidationError):
-        CopilotInsightRequest(tab="overview", filters={}, view_payload={"x": _OVERSIZE})
+        CopilotInsightRequest(tab="overview", view_payload={"x": _OVERSIZE})
 
 
 def test_cap_admits_the_widest_payload_the_overview_tab_itself_posts():
@@ -56,4 +55,4 @@ def test_cap_admits_the_widest_payload_the_overview_tab_itself_posts():
     }
     assert len(json.dumps(view_payload).encode()) < _MAX_PAYLOAD_BYTES
 
-    CopilotInsightRequest(tab="overview", filters={}, view_payload=view_payload)
+    CopilotInsightRequest(tab="overview", view_payload=view_payload)

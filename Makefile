@@ -19,11 +19,21 @@ export
 DATABASE_URL ?=
 
 # Expanded per recipe, not at parse time, so targets that need no database
-# (lint, typecheck, frontend-*) still run without one.
+# (lint, typecheck, frontend-*, bake) still run without one.
+#
+# `unexport` is what makes that true, and it is not optional. The file-wide
+# `export` above hands every variable to each recipe's environment, and
+# building that environment expands them -- including this one, whose
+# expansion IS the error. Exported, a missing DATABASE_URL therefore stops
+# every target that has a recipe at all, echoing its command first so the
+# failure reads like the command's own. Recipes reference $(db_url)
+# explicitly where they need it, so nothing depends on it being in the
+# environment.
+unexport db_url
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build prune-pipeline-runs prune-admin-audit prune-personal-data
 
 # Default target — first-run setup.
 all: bootstrap
@@ -68,16 +78,19 @@ bake:
 # ── Sanity check ─────────────────────────────────────────────────────────────
 # Reports the state of env, DB container, port 8000, and SSO env without
 # starting anything. Exit code 0 always — informational.
+# The SSO and ClickHouse lines count `.env` assignments with `grep -c`, which
+# prints no count at all for a file it cannot open, so an empty count (no
+# readable `.env`) is read as zero.
 
 doctor:
 	@echo "── env ──"
 	@test -f .env && echo "  .env present" || echo "  .env MISSING (run \`cp .env.example .env\`)"
-	@grep -qE '^(GEMINI_API_KEY|OPENAI_API_KEY)=..+' .env 2>/dev/null && echo "  LLM provider key set" || echo "  GEMINI_API_KEY/OPENAI_API_KEY MISSING — Ask tab will 503"
-	@n=$$(grep -cE '^(SESSION_SIGNING_KEY|GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GITHUB_CLIENT_ID|GITHUB_CLIENT_SECRET)=..+' .env 2>/dev/null || true); \
+	@grep -qE '^(GEMINI_API_KEY|OPENAI_API_KEY)=..+' .env 2>/dev/null && echo "  LLM provider key set" || echo "  GEMINI_API_KEY/OPENAI_API_KEY MISSING — API startup will fail"
+	@n=$$(grep -cE '^(SESSION_SIGNING_KEY|GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GITHUB_CLIENT_ID|GITHUB_CLIENT_SECRET)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
 		if [ "$$n" = "5" ]; then echo "  SSO env: all 5 set (login enabled)"; \
 		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (anonymous-only)"; \
 		else echo "  SSO env: PARTIAL ($$n/5) — startup will fail"; fi
-	@n=$$(grep -cE '^(CLICKHOUSE_USER|CLICKHOUSE_PASSWORD|CLICKHOUSE_DATABASE)=..+' .env 2>/dev/null || true); \
+	@n=$$(grep -cE '^(CLICKHOUSE_USER|CLICKHOUSE_PASSWORD|CLICKHOUSE_DATABASE)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
 		if [ "$$n" = "3" ]; then echo "  CLICKHOUSE env: all 3 set"; \
 		else echo "  CLICKHOUSE env: PARTIAL ($$n/3) — \`make ch-bootstrap\` will fail"; fi
 	@echo "── db ──"
@@ -118,12 +131,15 @@ typecheck:
 check: fmt-check lint typecheck test
 
 # Post-merge local maintenance. Planning is the default; apply rechecks every
-# candidate immediately before removing local refs/worktrees.
+# candidate immediately before removing local refs/worktrees, then prunes the
+# poetry venvs no remaining worktree owns.
 git-cleanup:
 	python3 scripts/cleanup_git_state.py
+	python3 scripts/daily_git_hygiene.py --venvs-only
 
 git-cleanup-apply:
 	python3 scripts/cleanup_git_state.py --apply
+	python3 scripts/daily_git_hygiene.py --venvs-only --apply
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 # Runs against the throwaway :5544/:8124 stack via scripts/run_integration_tests.sh,
@@ -142,9 +158,9 @@ oracle-tests:
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
-# Keeps dev's `updates` fresh without an Oracle collector or a manual refresh
-# click: re-runs `ingest_live` (all configured agencies) on a fixed interval,
-# backgrounded alongside uvicorn and killed with it. Opt IN per-run with
+# Keeps dev's `updates_live` fresh without an Oracle collector or a manual
+# refresh click: re-runs `ingest_live` (all configured agencies) on a fixed
+# interval, backgrounded alongside uvicorn and killed with it. Opt IN per-run with
 # `LOCAL_RT_POLL=1 make serve` — default off, since `ingest_live` with no
 # `--agency-id` fetches every configured agency's real feed_url every
 # interval, and this is a plain dev convenience, not something that should
@@ -257,6 +273,9 @@ check-aggs:
 check-migrations:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py check_migrations
 
+check-hash-token-cleanup:
+	DATABASE_URL=$(db_url) poetry run python scripts/check_hash_token_cleanup.py
+
 digest:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py digest $(if $(DAY),--day $(DAY),) $(if $(LOCALE),--locale $(LOCALE),)
 
@@ -273,7 +292,10 @@ ingest-weather:
 seed-agencies:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py seed_agencies $(if $(CSV),$(CSV),agencies.csv)
 
-# Idempotent: re-runnable, upserts on content_hash uniqueness.
+# Idempotent: re-runnable, upserts on content_hash uniqueness. Also the
+# re-index step after an embedding model or sentence-transformers major
+# change -- rows stamped with the old embedding_version are excluded from
+# Stage-2 search until this rebuilds them.
 build-rag-index:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py build_rag_index --all-agencies
 
@@ -282,6 +304,15 @@ promote-intent-cache:
 
 prune-query-log:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune_query_log --days 90
+
+prune-pipeline-runs:
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune-pipeline-runs --days 90
+
+prune-admin-audit:
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune-admin-audit --days 400
+
+prune-personal-data:
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune-personal-data --months 25
 
 frontend-install:
 	cd frontend && npm install
@@ -322,15 +353,17 @@ verify-secrets-all-branches:
 # `make bootstrap`, which depends on it — if any step can't complete; a
 # workstation or VPS clone with no local hook has no secret-scanning gate
 # until the next push reaches CI. `git worktree`s share one .git/hooks
-# directory, so one run against a VPS's persistent checkout covers every
-# /vps-loop-run worker worktree cut from it too.
+# directory, so one run against a clone covers every worktree cut from it.
 hooks:
 	@bash scripts/setup_git_hooks.sh
 
-# ── Ask eval (CI gate) ────────────────────────────────────────────────────────
+# ── Ask eval (manual / local; not wired into CI) ─────────────────────────────
 # Verifies builder_coverage = 100% against the gold JSONL (the chip gate is
 # skipped — the chip catalog was removed). Regenerate the gold set after card
 # changes: poetry run python scripts/_gen_phase35_gold.py > tests/ask_eval/gold_questions.jsonl
+# No workflow calls this target -- the scheduled Ask eval CI gate is
+# .github/workflows/ask-eval-weekly.yml, which runs
+# tests/ask_eval/test_baseline.py directly instead.
 
 ask-eval:
 	DATABASE_URL=$(db_url) poetry run python scripts/ask_eval.py

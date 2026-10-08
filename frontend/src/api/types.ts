@@ -1,4 +1,4 @@
-import type { TimeBand } from "./rangeContext";
+import type { DowFilter, TimeBand } from "./scope";
 
 export type Agency = {
   agency_id: number;
@@ -136,6 +136,7 @@ type UnobservedStop = {
 };
 
 export type RouteShapeResponse = {
+  scope_applied?: ScopeApplied;
   route: string;
   /**
    * Real road geometry from GTFS shapes when loaded; null otherwise.
@@ -215,10 +216,12 @@ export type RouteTrip = {
 };
 
 export type RouteTripsResponse = {
+  scope_applied?: ScopeApplied;
   date: string | null;
   time_band: TimeBand;
-  /** True when the route ran more trips than the endpoint will return and the
-   *  least-delayed tail was dropped. */
+  /** True when the route ran more trips than the endpoint will return, or its
+   *  kept trips together carry more stops than its per-response stop budget,
+   *  and the least-delayed tail was dropped either way. */
   truncated: boolean;
   trips: RouteTrip[];
 };
@@ -384,13 +387,24 @@ export type TrendPayload = {
   revision_boundaries?: RevisionBoundaries;
 };
 
+/** Which scope fields the endpoint honoured, keyed by URL param name
+ *  (api/scope_applied.py): a condition set in the scope but false here was
+ *  not applied by this screen. */
+type ScopeApplied = Partial<Record<string, boolean>>;
+
 type ReportEnvelope<T extends ReportType, Row> = {
+  scope_applied?: ScopeApplied;
   report_type: T;
   rendered_at: string;
   text: string;
   rows: Row[];
   ctx?: ResponseCtx;
   definition: DefinitionMeta;
+  /** ranking/ranking_best only: how many groups qualified before `limit`
+   *  cut the list, and the observation count below which a group's average
+   *  is too thin to trust. */
+  rows_total?: number | null;
+  reliable_min_samples?: number | null;
 };
 
 /** Discriminated on `report_type`: each report's `rows` element type is
@@ -408,7 +422,7 @@ export type ReportResponse =
   | ReportEnvelope<"delay_certificate", DelayCertificateRow>;
 
 /** One high-frequency route's pooled Excess Waiting Time / coefficient of
- *  variation / long-gap rate over the request's range (item 94) -- see
+ *  variation / long-gap rate over the request's range -- see
  *  pipeline/reports/headway_quality.py's compute_headway_quality. A
  *  non-high-frequency route never appears in this list at all. */
 type HeadwayQualityRow = {
@@ -420,11 +434,12 @@ type HeadwayQualityRow = {
 };
 
 export type HeadwayQualityResponse = {
+  scope_applied?: ScopeApplied;
   rows: HeadwayQualityRow[];
   ctx: ResponseCtx;
 };
 
-/** One configured per-route "minimum performance standard" (item 104),
+/** One configured per-route "minimum performance standard",
  *  joined against the current actual value of its `metric_type` -- see
  *  pipeline/reports/performance_standard.py's compute_performance_standards
  *  for the achievement-rate / bonus-or-deduction formula. This is an
@@ -449,6 +464,7 @@ export type PerformanceStandardRow = {
 };
 
 export type PerformanceStandardsResponse = {
+  scope_applied?: ScopeApplied;
   rows: PerformanceStandardRow[];
   ctx: ResponseCtx;
   disclaimer: string;
@@ -487,7 +503,7 @@ export type WeatherDelayBucket = {
   avg_delay_sec: number | null;
 };
 
-/** Observed rainfall matched to service days (item 129) -- see
+/** Observed rainfall matched to service days -- see
  *  pipeline/reports/weather.py's compute_rain_delay. This is a historical
  *  observation, NOT a weather forecast and NOT a causal claim; `disclaimer`
  *  must be surfaced verbatim wherever these figures are rendered, and
@@ -503,6 +519,7 @@ export type WeatherDelayBucket = {
  *  backend started populating it, and may also be an empty array; treat
  *  both the same as "nothing to show". */
 export type WeatherDelayResponse = {
+  scope_applied?: ScopeApplied;
   available: boolean;
   station: WeatherStation | null;
   wet_day_threshold_mm: number;
@@ -609,7 +626,7 @@ export type AskResponse = {
 type CacheOutcome = "hit" | "miss" | "bypass";
 
 export type FilterCtx = {
-  dow?: "all" | "weekday" | "weekend";
+  dow?: DowFilter;
   time_band?: string;
   service?: string;
   from_date?: string;
@@ -692,6 +709,7 @@ export interface ForecastHeatmapCell {
 }
 
 export interface ForecastHeatmap {
+  scope_applied?: ScopeApplied;
   route: string;
   cells: ForecastHeatmapCell[]; // always 168 (7×24)
   disclaimer: string;
@@ -750,6 +768,7 @@ export interface ForecastOverviewRoute {
 }
 
 export interface ForecastOverview {
+  scope_applied?: ScopeApplied;
   grid: ForecastOverviewGridCell[]; // always 35 (7×5 bands)
   worst: ForecastOverviewWorst | null;
   routes: ForecastOverviewRoute[];
@@ -812,6 +831,8 @@ export type OverviewTopDelayedRoute = {
 type OverviewTopDelayed = {
   routes: OverviewTopDelayedRoute[];
   delayed_count: number;
+  /** The average delay (minutes) at or above which a route was counted. */
+  delayed_threshold_min: number;
 };
 
 export type OverviewPeakHour = {
@@ -827,6 +848,7 @@ export type OverviewServiceSplitDay = {
 };
 
 export type OverviewSummary = {
+  scope_applied?: ScopeApplied;
   headline: OverviewHeadline;
   movers: OverviewMovers;
   concentration: OverviewConcentration;
@@ -881,8 +903,25 @@ export type NetworkAgencyRow = {
 };
 
 export type NetworkSummary = {
+  scope_applied?: ScopeApplied;
   from: string;
   to: string;
   agencies: NetworkAgencyRow[];
   definition: DefinitionMeta;
+};
+
+/** GET /:agency/scope/summary: the data the scope controls draw. `days`
+ *  spans the last 90 days of data whatever the period; `weekdays` and
+ *  `routes` cover the period but ignore their own filter. */
+export type ScopeSummary = {
+  earliest: string | null;
+  latest: string | null;
+  /** The first day `days` covers. */
+  window_from: string | null;
+  days: { date: string; avg_min: number; samples: number }[];
+  weekdays: { dow: string; avg_min: number; samples: number }[];
+  routes: { route_code: string; avg_min: number; samples: number }[];
+  tolerance: { late_sec: number; on_time_pct: number }[];
+  ctx: ResponseCtx;
+  scope_applied?: ScopeApplied;
 };

@@ -1,6 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
-import { computeTooltipPosition, type TooltipPlacement } from "./tooltipPosition";
+import type { TooltipPlacement } from "./tooltipPosition";
+import { usePortalPlacement } from "./usePortalPlacement";
+import { useTopmostEscape } from "../hooks/useFocusTrap";
 
 /** Pointer dwell required before a tooltip appears. Short enough to feel
  *  immediate on a deliberate hover, long enough that a pointer crossing a
@@ -35,6 +37,15 @@ type Props = {
  * object handed to `cloneElement` reads as a render-time ref access to the
  * compiler).
  */
+/** Whether a focus event belongs to this tooltip rather than to one nested
+ *  inside it. React's focus events bubble, so an outer tooltip sees focus
+ *  land on an inner tooltip's trigger and would open alongside it, putting
+ *  two bubbles on screen and two `aria-describedby` targets on one path.
+ *  The innermost anchor owns the event; every ancestor ignores it. */
+function isOwnTrigger(anchor: HTMLElement | null, target: EventTarget | null): boolean {
+  return anchor !== null && target instanceof Element && target.closest(".tooltip-anchor") === anchor;
+}
+
 export function Tooltip({ label, placement = "top", children }: Props) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLSpanElement>(null);
@@ -51,14 +62,7 @@ export function Tooltip({ label, placement = "top", children }: Props) {
 
   // Escape dismisses even when the tooltip was opened by hover and nothing in
   // the subtree holds focus, so a bubble can never sit over what it covers.
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open]);
+  useTopmostEscape(open, () => setOpen(false));
 
   // `aria-describedby` belongs on the trigger itself: the anchor around it
   // renders no box, and a screen reader would never associate the two.
@@ -69,33 +73,7 @@ export function Tooltip({ label, placement = "top", children }: Props) {
     return () => trigger.removeAttribute("aria-describedby");
   }, [open, id]);
 
-  // Position is written straight to the node instead of held in state: the
-  // measurement only exists to place an element that is already mounted, and
-  // a state round-trip would re-render the trigger for it.
-  useLayoutEffect(() => {
-    if (!open) return;
-    function place() {
-      const trigger = anchorRef.current?.firstElementChild;
-      const tip = tipRef.current;
-      if (!trigger || !tip) return;
-      const pos = computeTooltipPosition(
-        trigger.getBoundingClientRect(),
-        tip.getBoundingClientRect(),
-        placement,
-        { width: window.innerWidth, height: window.innerHeight },
-      );
-      tip.style.left = `${pos.left}px`;
-      tip.style.top = `${pos.top}px`;
-      tip.dataset.placement = pos.placement;
-    }
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-    };
-  }, [open, placement, label]);
+  usePortalPlacement(open, () => anchorRef.current?.firstElementChild?.getBoundingClientRect(), tipRef, placement, label);
 
   function cancelPending() {
     if (timerRef.current !== null) {
@@ -118,11 +96,13 @@ export function Tooltip({ label, placement = "top", children }: Props) {
           setOpen(false);
         }}
         // Focus is already a deliberate act, so it skips the dwell delay.
-        onFocus={() => {
+        onFocus={(e) => {
+          if (!isOwnTrigger(anchorRef.current, e.target)) return;
           cancelPending();
           setOpen(true);
         }}
-        onBlur={() => {
+        onBlur={(e) => {
+          if (!isOwnTrigger(anchorRef.current, e.target)) return;
           cancelPending();
           setOpen(false);
         }}

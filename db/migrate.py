@@ -5,12 +5,35 @@ are applied in filename order inside a transaction (rollback on failure).
 Driven by `gtfs_pipeline.py migrate up|down`.
 """
 
+import functools
 import logging
 import pathlib
 
 logger = logging.getLogger(__name__)
 
 _MIGRATIONS_DIR = pathlib.Path(__file__).parent / "migrations"
+
+# A down migration declares itself destructive by giving one of its header
+# comment lines this prefix (see db/migrations/README.md). `migrate_down`
+# refuses to run such a migration unless force_destructive=True.
+_DESTRUCTIVE_MARKER = "-- DESTRUCTIVE"
+
+
+class DestructiveMigrationError(RuntimeError):
+    """Raised when a `-- DESTRUCTIVE`-marked down migration runs without
+    force_destructive=True."""
+
+
+def is_destructive_down(sql: str) -> bool:
+    """True if a down migration's text declares itself destructive.
+
+    Detects a comment line starting with the exact `-- DESTRUCTIVE` marker
+    (after stripping surrounding whitespace), not just the phrase appearing
+    somewhere mid-line, so a line that merely mentions the marker in passing
+    does not trip the gate.
+    """
+    return any(line.strip().startswith(_DESTRUCTIVE_MARKER) for line in sql.splitlines())
+
 
 _CREATE_TRACKING = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -20,9 +43,46 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 
+@functools.lru_cache(maxsize=4)
+def _versions_in(directory: pathlib.Path) -> tuple[str, ...]:
+    """Migration versions in *directory*, in order.
+
+    Keyed on the directory rather than cached globally. A single shared entry
+    would outlive a change to `_MIGRATIONS_DIR` -- which is how a test that
+    points it at a `tmp_path` leaves a later real run reading the temporary
+    directory's versions. That does not fail loudly: `migrate_up` computes an
+    empty pending set, returns without committing, and the connection sits
+    idle in a transaction until the next fixture's DDL blocks behind it and
+    the job burns its timeout. Keying on the path makes that impossible
+    rather than asking every test to remember a reset.
+
+    A tuple, not a list, because an lru_cache handing out a mutable value
+    lets one caller's edit reach every later one.
+    """
+    return tuple(f.name.split("_")[0] for f in sorted(directory.glob("*.up.sql")))
+
+
 def _versions_on_disk() -> list[str]:
-    files = sorted(_MIGRATIONS_DIR.glob("*.up.sql"))
-    return [f.name.split("_")[0] for f in files]
+    """On-disk migration versions, in order.
+
+    Cached via :func:`_versions_in`: the directory's contents are fixed for
+    the life of the process (nothing in it changes without a deploy), but this
+    is read on every board/ops poll (pipeline.health.migration_status) as well
+    as every `migrate up`/`pending_migrations` call, so an uncached glob turns
+    an O(1) health check into an O(migration count) directory scan on a hot
+    path.
+    """
+    return list(_versions_in(_MIGRATIONS_DIR))
+
+
+def reset_for_tests() -> None:
+    """Drop the cached migration lists.
+
+    Pointing `_MIGRATIONS_DIR` at another directory no longer needs this --
+    that is keyed. This is for the remaining case: files appearing in a
+    directory already read once, which only a test does.
+    """
+    _versions_in.cache_clear()
 
 
 def _applied_versions(conn) -> set[str]:
@@ -63,12 +123,35 @@ def _run_up(version: str, conn) -> None:
     logger.info(f"  Applied: {matches[0].name}")
 
 
-def _run_down(version: str, conn) -> None:
-    """Run one down-migration and delete its version row, atomically."""
+def _down_migration_path(version: str) -> pathlib.Path:
+    """The down-migration file for *version*.
+
+    Shared by the pre-flight scan and the runner so both resolve a version the
+    same way -- a scan that looked at a different file than the one that runs
+    would clear a rollback it never inspected.
+    """
     matches = sorted(_MIGRATIONS_DIR.glob(f"{version}_*.down.sql"))
     if not matches:
         raise FileNotFoundError(f"No down migration file for version {version}")
-    sql = matches[0].read_text()
+    return matches[0]
+
+
+def _destructive_versions(versions: list[str]) -> list[str]:
+    """Which of *versions* have a down migration marked `-- DESTRUCTIVE`."""
+    return [v for v in versions if is_destructive_down(_down_migration_path(v).read_text())]
+
+
+def _run_down(version: str, conn, *, force_destructive: bool) -> None:
+    """Run one down-migration and delete its version row, atomically."""
+    path = _down_migration_path(version)
+    sql = path.read_text()
+    # Also checked ahead of the loop in `migrate_down`; kept here so the
+    # invariant survives a direct call to this function.
+    if is_destructive_down(sql) and not force_destructive:
+        raise DestructiveMigrationError(
+            f"{path.name} is marked `-- DESTRUCTIVE` and will not run without "
+            "force_destructive=True (CLI: `migrate down --force-destructive`)."
+        )
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
@@ -77,7 +160,7 @@ def _run_down(version: str, conn) -> None:
     except Exception:
         conn.rollback()
         raise
-    logger.info(f"  Rolled back: {matches[0].name}")
+    logger.info(f"  Rolled back: {path.name}")
 
 
 def migrate_up(conn) -> None:
@@ -96,8 +179,20 @@ def migrate_up(conn) -> None:
     logger.info(f"Applied {len(pending)} migration(s).")
 
 
-def migrate_down(target: str | None, conn) -> None:
-    """Roll back the most recently applied migration (one step)."""
+def migrate_down(target: str | None, conn, *, force_destructive: bool = False) -> None:
+    """Roll back the most recently applied migration (one step).
+
+    Refuses (raises `DestructiveMigrationError`) if any migration it would
+    roll back is marked `-- DESTRUCTIVE`, unless force_destructive=True.
+
+    The whole range is scanned before anything runs, and the refusal names
+    every marked version it found. Each down migration commits on its own, so
+    checking them one at a time inside the loop would roll back everything
+    ahead of the first marked one and only then raise -- leaving the schema
+    somewhere the operator never asked for, reachable again only by going
+    forward. Refusing the request entire is the recoverable direction: the
+    operator can re-issue with a nearer `--target`.
+    """
     with conn.cursor() as cur:
         cur.execute(_CREATE_TRACKING)
     conn.commit()
@@ -113,6 +208,16 @@ def migrate_down(target: str | None, conn) -> None:
     if not to_roll:
         logger.info(f"Already at or before version {target}.")
         return
+    if not force_destructive:
+        marked = _destructive_versions(to_roll)
+        if marked:
+            raise DestructiveMigrationError(
+                "refusing to roll back: "
+                + ", ".join(_down_migration_path(v).name for v in marked)
+                + " is marked `-- DESTRUCTIVE`. Nothing has been rolled back. Re-run with "
+                "force_destructive=True (CLI: `migrate down --force-destructive`), or pass a "
+                "`--target` that stops short of it."
+            )
     for v in to_roll:
-        _run_down(v, conn)
+        _run_down(v, conn, force_destructive=force_destructive)
     logger.info(f"Rolled back {len(to_roll)} migration(s).")

@@ -76,9 +76,8 @@ def test_is_high_frequency_boundary_and_missing_data():
 
 
 # ---------------------------------------------------------------------------
-# Headway QUALITY metrics (item 94): Excess Waiting Time, coefficient of
-# variation, long-gap rate. Two synthetic fixtures per the item's own
-# verification criteria:
+# Headway QUALITY metrics: Excess Waiting Time, coefficient of variation,
+# long-gap rate. Two synthetic fixtures:
 #   - EVEN: perfectly regular 8-minute (480s) actual headways, identical to
 #     the scheduled headways -- EWT and CoV must both be (exactly) zero.
 #   - BUNCHED: two vehicles 60s apart followed by a compensating ~900s gap

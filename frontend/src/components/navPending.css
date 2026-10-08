@@ -1,0 +1,41 @@
+/* A thin bar across the top of the window while a screen loads; it slides
+   rather than fills, since how long the chunk takes is unknown. */
+.nav-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--z-toast);
+  height: 2px;
+  overflow: hidden;
+  background: var(--accent-soft);
+}
+
+.nav-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 30%;
+  background: var(--accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nav-progress::after {
+    animation: nav-progress-slide var(--dur-4) var(--ease-out) infinite;
+  }
+}
+
+@keyframes nav-progress-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+.nav-progress-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

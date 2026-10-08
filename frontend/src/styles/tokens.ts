@@ -31,7 +31,7 @@ const SEVERE_VAR = "var(--delay-severe)";
 // mirrored in the other by hand. tokens.test.ts holds them to it.
 const SEVERE_FALLBACK = "#A8391F";
 const SURFACE_FALLBACK = "#ffffff";
-const ACCENT_FALLBACK = "#187b80";
+const ACCENT_FALLBACK = "#2750C2";
 
 /** Resolve a CSS custom property to a concrete color for callers that need a
  *  real, parseable string -- MapLibre paint expressions, which can't consume
@@ -136,6 +136,33 @@ export function delayColor(minutes: number): string {
   return DELAY_RAMP[delayBand(minutes)];
 }
 
+const OK_TEXT_VAR = "var(--delay-text-ok)";
+const MILD_TEXT_VAR = "var(--delay-text-mild)";
+const MODERATE_TEXT_VAR = "var(--delay-text-moderate)";
+
+/** Text-safe counterpart to DELAY_RAMP. The plain ramp's ok/mild/moderate
+ *  fills work as backgrounds and marks but fall short of WCAG AA (4.5:1) as
+ *  text on --bg-surface (measured 2.6-3.8:1 in light mode); this ramp swaps
+ *  in per-theme CSS custom properties instead, following the same literal-
+ *  var()-for-DOM-consumers pattern as DELAY_RAMP.severe. Both themes' values
+ *  are tuned per tier to clear AA on the page, --accent-soft and current-row
+ *  surfaces; in dark mode only mild coincides with its fill. They are defined
+ *  in global.css and held to AA by tokens.test.ts. Use
+ *  `delayTextColor()`/`DELAY_RAMP_TEXT` (not `delayColor()`/`DELAY_RAMP`) for
+ *  any `color` (text); the plain ramp stays correct for fills and marks. */
+export const DELAY_RAMP_TEXT = {
+  ok: OK_TEXT_VAR,
+  mild: MILD_TEXT_VAR,
+  moderate: MODERATE_TEXT_VAR,
+  // Already per-theme and AA-passing as text -- see DELAY_RAMP.severe.
+  severe: SEVERE_VAR,
+} as const;
+
+/** Same threshold mapping as `delayColor()`, but text-safe -- see `DELAY_RAMP_TEXT`. */
+export function delayTextColor(minutes: number): string {
+  return DELAY_RAMP_TEXT[delayBand(minutes)];
+}
+
 // A dense grid of cells encodes one quantity, so it gets one hue that runs
 // light to dark: switching hue at each severity cutoff turns a continuous
 // magnitude into four unordered categories and makes a 2.9-minute cell look
@@ -157,13 +184,6 @@ export function heatOpacity(minutes: number): number {
   const t = Math.min(1, Math.max(0, minutes / HEAT_RAMP.maxMin));
   const opacity = HEAT_RAMP.minOpacity + t * (HEAT_RAMP.maxOpacity - HEAT_RAMP.minOpacity);
   return Math.round(opacity * 1000) / 1000;
-}
-
-/** The same ramp as a CSS colour, for grids that paint a `background`
- *  instead of setting an SVG opacity. `var(--accent)` is kept intact so the
- *  cascade recolors the whole ramp on a theme toggle. */
-export function accentRampColor(minutes: number): string {
-  return `color-mix(in srgb, var(--accent) ${Math.round(heatOpacity(minutes) * 100)}%, transparent)`;
 }
 
 /** Same ramp as `delayColor()`, but MapLibre-safe: the severe tier resolves
@@ -225,4 +245,15 @@ function rampColor(t: number): string {
 export function relativeDelayColor(value: number, min: number, max: number): string {
   if (max <= min) return rampColor(0.5);
   return rampColor((value - min) / (max - min));
+}
+
+/** The v2 delay ramp (`--d0`…`--d4` in global.css) for a mean delay in
+ *  minutes: magnitude, never alarm, with rust reserved for five minutes or
+ *  more. */
+export function delayRampVar(minutes: number): string {
+  if (minutes < 1.5) return "var(--d0)";
+  if (minutes < 2.5) return "var(--d1)";
+  if (minutes < 3.5) return "var(--d2)";
+  if (minutes < 5) return "var(--d3)";
+  return "var(--d4)";
 }

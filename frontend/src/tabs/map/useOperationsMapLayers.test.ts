@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { LiveTrip, LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
-import { makeMockMap, type MockLayer } from "../../test/mockMap";
+import { makeMockMap, type MockLayer, type MockMap } from "../../test/mockMap";
 import { delayColorResolved, readableInkOn, severityStepColors, surfaceColorResolved } from "../../styles/tokens";
 import { applyTheme } from "../../styles/theme";
 import {
@@ -128,6 +128,21 @@ describe("useOperationsMapLayers", () => {
     expect(routeLayer.paint?.["line-color"]).not.toContain("var(");
   });
 
+  it("draws a route chosen after the trail beneath the trail, so the trail and its highlight stay on top", () => {
+    const map = makeMockMap();
+    const { rerender } = renderHook(
+      ({ route }: { route: string | null }) => {
+        const mapRef = useRef(map as never);
+        useOperationsMapLayers(mapRef, LIVE, SHAPE, route, 420, 1, 0, "trip-1", PROGRESS, undefined, 0);
+      },
+      { initialProps: { route: null as string | null } },
+    );
+    rerender({ route: "12" });
+    const ids = map.layers.map((l) => l.id);
+    expect(ids.indexOf("active-route-casing")).toBeLessThan(ids.indexOf("trip-progress-line"));
+    expect(ids.indexOf("active-route-flow")).toBeLessThan(ids.indexOf("trip-progress-line"));
+  });
+
   it("clusters overlapping active trips and draws the selected trip report trail", () => {
     const map = makeMockMap();
     renderHook(() => {
@@ -141,6 +156,20 @@ describe("useOperationsMapLayers", () => {
     expect(map.getLayer("trip-progress-line")).toBeDefined();
     expect(map.getLayer("trip-progress-direction")).toBeDefined();
     expect(map.getLayer("trip-progress-stops")).toBeDefined();
+  });
+
+  it("a change of rest pitch alone (the relief toggling) does not re-feed the live layers", () => {
+    const map = makeMockMap();
+    const { rerender } = renderHook(
+      ({ pitch }: { pitch: number }) => {
+        const mapRef = useRef(map as never);
+        useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, null, undefined, undefined, pitch);
+      },
+      { initialProps: { pitch: 0 } },
+    );
+    const setData = vi.spyOn(map.getSource("live-trips") as unknown as { setData: (d: unknown) => void }, "setData");
+    rerender({ pitch: 35 });
+    expect(setData).not.toHaveBeenCalled();
   });
 
   it("removes the route overlay when all routes are selected", () => {
@@ -191,7 +220,7 @@ describe("operations-map mark paint (pure builders)", () => {
       10, CLUSTER_RADIUS.medium,
       50, CLUSTER_RADIUS.large,
     ]);
-    // Even the largest cluster stays well below the old flat 24px puck.
+    // Even the largest cluster stays below a flat 24px puck.
     expect(CLUSTER_RADIUS.large).toBeLessThan(24);
   });
 
@@ -229,12 +258,12 @@ describe("operations-map layers use resolved tokens, never literal hexes", () =>
       .toEqual(LIVE_TRIPS_CLUSTER_PROPERTIES);
     expect((map.getLayer(LIVE_TRIPS_CLUSTER_LAYER) as MockLayer).paint).toEqual(clusterCirclePaint());
     expect((map.getLayer(LIVE_TRIPS_LAYER) as MockLayer).paint).toEqual(vehicleCirclePaint());
-    // The heavy dark casing ring under every vehicle is gone: the thin
-    // surface-coloured stroke on the mark itself is what separates it now.
+    // No heavy dark casing ring under each vehicle: the thin
+    // surface-coloured stroke on the mark itself is what separates it.
     expect(map.getLayer("live-trip-casing")).toBeUndefined();
     expect((map.getLayer("trip-progress-line") as MockLayer).paint?.["line-color"]).not.toBe("#2bc5aa");
-    // The marker labels lost the dark casing that used to back them, so they
-    // take the theme's ink and halo instead of a fixed white.
+    // With no dark casing behind them, the marker labels take the theme's
+    // ink and halo instead of a fixed white.
     expect((map.getLayer(LIVE_TRIPS_LABEL_LAYER) as MockLayer).paint).toEqual(labelPaint());
     expect(labelPaint()["text-color"]).not.toBe(labelPaint()["text-halo-color"]);
   });
@@ -306,8 +335,8 @@ describe("flowDashArrayAtPhase (pure builder)", () => {
 });
 
 describe("active route line: gradient, casing and the calm flow overlay", () => {
-  const LIGHT_ACCENT = "#187b80";
-  const DARK_ACCENT = "#43c5ba";
+  const LIGHT_ACCENT = "#2750C2";
+  const DARK_ACCENT = "#86A2FF";
 
   afterEach(() => {
     document.documentElement.style.removeProperty("--accent");
@@ -413,7 +442,8 @@ describe("active route line: gradient, casing and the calm flow overlay", () => 
       useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
     });
 
-    vi.spyOn(performance, "now").mockReturnValue(500);
+    // The clock starts on the first frame, so 500 ms later the dash is 500 ms on.
+    tick(0);
     tick(500);
     expect(map.getPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray")).toEqual(flowDashArrayAtPhase(500));
   });
@@ -429,6 +459,7 @@ describe("active route line: gradient, casing and the calm flow overlay", () => 
       const mapRef = useRef(map as never);
       useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0);
     });
+    tick(0);
     painted.mockClear();
 
     tick(1000);
@@ -463,5 +494,80 @@ describe("active route line: gradient, casing and the calm flow overlay", () => 
     act(() => applyTheme("dark"));
 
     expect(map.getPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-color")).toBe(DARK_ACCENT);
+  });
+});
+
+describe("a theme toggle repaints layers whose source already exists", () => {
+  const LIGHT = { "--accent": "#2750C2", "--bg-surface": "#ffffff", "--delay-severe": "#A8391F" };
+  const DARK = { "--accent": "#86A2FF", "--bg-surface": "#131B26", "--delay-severe": "#F0837A" };
+
+  function paintTokens(tokens: typeof LIGHT) {
+    for (const [prop, value] of Object.entries(tokens)) document.documentElement.style.setProperty(prop, value);
+  }
+
+  afterEach(() => {
+    for (const prop of Object.keys(LIGHT)) document.documentElement.style.removeProperty(prop);
+    delete document.documentElement.dataset.theme;
+    vi.restoreAllMocks();
+  });
+
+  /** Mounts with a trip inspected under the light theme, then toggles to dark.
+   *  Every source exists by then, so the re-run takes the update branch. */
+  function mountThenToggleToDark(): MockMap {
+    setReducedMotion(true);
+    document.documentElement.dataset.theme = "light";
+    paintTokens(LIGHT);
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, "trip-1", PROGRESS);
+    });
+    paintTokens(DARK);
+    act(() => applyTheme("dark"));
+    return map;
+  }
+
+  function expectRepainted(map: MockMap, layerId: string, paint: Record<string, unknown>) {
+    for (const [property, value] of Object.entries(paint)) {
+      expect(map.getPaintProperty(layerId, property), `${layerId} ${property}`).toEqual(value);
+    }
+  }
+
+  it("recolours the inspected trip's trail, direction arrows and stop marks", () => {
+    const map = mountThenToggleToDark();
+
+    expect(map.getPaintProperty("trip-progress-line", "line-color")).toBe(DARK["--accent"]);
+    expect(map.getPaintProperty("trip-progress-direction", "text-color")).toBe(readableInkOn(DARK["--accent"]));
+    expect(map.getPaintProperty("trip-progress-direction", "text-halo-color")).toBe(DARK["--accent"]);
+    expect(map.getPaintProperty("trip-progress-stops", "circle-stroke-color")).toBe(DARK["--bg-surface"]);
+    expect(map.getPaintProperty("trip-progress-stops", "circle-color")).toEqual(
+      ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
+    );
+    expect(severityStepColors()).toContain(DARK["--delay-severe"]);
+  });
+
+  it("recolours the selected route's casing from the theme surface", () => {
+    const map = mountThenToggleToDark();
+
+    expect(map.getPaintProperty("active-route-casing", "line-color")).toBe(surfaceColorResolved());
+    expect(map.getPaintProperty("active-route-casing", "line-color")).toBe(DARK["--bg-surface"]);
+  });
+
+  it("paints the inspected trip's stop labels with the theme's label ink and repaints them on a toggle", () => {
+    const map = mountThenToggleToDark();
+
+    expectRepainted(map, "trip-progress-labels", labelPaint());
+    expect(map.getPaintProperty("trip-progress-labels", "text-halo-color")).toBe(DARK["--bg-surface"]);
+  });
+
+  it("recolours the live vehicle marks, clusters and labels", () => {
+    const map = mountThenToggleToDark();
+
+    expectRepainted(map, LIVE_TRIPS_CLUSTER_LAYER, clusterCirclePaint());
+    expectRepainted(map, "live-trip-cluster-count", clusterCountPaint());
+    expectRepainted(map, LIVE_TRIPS_LAYER, vehicleCirclePaint());
+    expectRepainted(map, LIVE_TRIPS_LABEL_LAYER, labelPaint());
+    expect(map.getPaintProperty(LIVE_TRIPS_LAYER, "circle-stroke-color")).toBe(DARK["--bg-surface"]);
+    expect(map.getPaintProperty(LIVE_TRIPS_LABEL_LAYER, "text-halo-color")).toBe(DARK["--bg-surface"]);
   });
 });

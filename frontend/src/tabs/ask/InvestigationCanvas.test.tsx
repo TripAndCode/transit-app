@@ -29,6 +29,15 @@ describe("investigation steps", () => {
 });
 
 describe("investigation canvas", () => {
+  it("counts its steps in the singular for one and the plural for more", () => {
+    const { unmount } = renderWithProviders(
+      <InvestigationCanvas agencyId={9} messages={messages.slice(0, 2)} formatRoute={formatRoute} />,
+    );
+    expect(screen.getByText("Investigation steps · 1 question")).toBeInTheDocument();
+    unmount();
+    renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute} />);
+    expect(screen.getByText("Investigation steps · 2 questions")).toBeInTheDocument();
+  });
   it("retains the exact source chart beside a grounded follow-up answer", () => {
     const source: ConvMessage = { ...messages[1], tool: "segment_hotspots",
       result: { kind: "table", columns: ["stop_sequence", "stop_name", "avg_min", "samples"],
@@ -71,5 +80,23 @@ describe("investigation canvas", () => {
     fireEvent.click(screen.getByRole("button", { name: "1. Morning?" }));
     rerender(<InvestigationCanvas agencyId={9} messages={[...messages, message(5, "user", "Weekends?")]} formatRoute={formatRoute} />);
     expect(screen.getByRole("button", { name: "3. Weekends?" })).toHaveAttribute("aria-current", "step");
+  });
+
+  it("replaces the native title on the heading and step nav with a keyboard-reachable Tooltip", () => {
+    renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute} />);
+    const heading = screen.getByRole("heading", { name: "Evening?" });
+    expect(heading).not.toHaveAttribute("title");
+    fireEvent.focusIn(heading);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Evening?");
+    fireEvent.focusOut(heading);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/Investigation steps ·/));
+    const step = screen.getByRole("button", { name: "1. Morning?" });
+    expect(step).not.toHaveAttribute("title");
+    fireEvent.focusIn(step);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Morning?");
+    fireEvent.focusOut(step);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 });

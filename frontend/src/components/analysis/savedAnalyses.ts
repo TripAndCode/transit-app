@@ -1,4 +1,5 @@
-import { ctxToQueryString, type RangeCtx } from "../../api/rangeContext";
+import { scopeToQueryString, type Scope } from "../../api/scope";
+import { uuid } from "../../utils/uuid";
 
 type SavedAnalysis = { id: string; agencyId: number; title: string; query: string; savedAt: string };
 const STORAGE_ID = "transit.savedAnalyses.v1";
@@ -9,16 +10,12 @@ export function readAnalyses(): SavedAnalysis[] {
     return value.filter((v): v is SavedAnalysis => v && typeof v.id === "string" && Number.isInteger(v.agencyId) && typeof v.title === "string" && typeof v.query === "string" && typeof v.savedAt === "string");
   } catch { return []; }
 }
-function uuid(): string {
-  // crypto.randomUUID requires a secure context; fall back where it's absent.
-  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-}
 
 /** Saves an analysis. Returns whether it was persisted -- `false` (rather
  *  than throwing) when localStorage is unavailable, e.g. private browsing
  *  or a full quota. */
-export function saveAnalysis(agencyId: number, title: string, ctx: RangeCtx, compare: boolean): boolean {
-  const params = new URLSearchParams(ctxToQueryString(ctx));
+export function saveAnalysis(agencyId: number, title: string, ctx: Scope, compare: boolean): boolean {
+  const params = new URLSearchParams(scopeToQueryString(ctx));
   if (compare) params.set("compare", "1");
   const query = params.toString();
   const rows = readAnalyses().filter((r) => r.agencyId !== agencyId || r.query !== query);

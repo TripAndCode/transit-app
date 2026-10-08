@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewTab } from "./OverviewTab";
@@ -11,7 +12,7 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
     headline: { avg_min: null, baseline_avg_min: null, delta_min: null, delta_pct: null, samples: 0, window_from: "2030-01-01", window_to: "2030-01-07" },
     movers: { worse: [], better: [] },
     concentration: { top_routes: [], rest_share_pct: 0 },
-    top_delayed: { routes: [], delayed_count: 0 },
+    top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2 },
     peak_hour: null,
     service_split: {},
     sparkline_points: [],
@@ -55,6 +56,20 @@ describe("OverviewTab", () => {
     expect(screen.getByText("No observations in this range. Try a wider window.")).toBeInTheDocument();
   });
 
+  it("titles the screen with one level-1 heading", () => {
+    renderOverview(summary());
+    expect(screen.getByRole("heading", { level: 1, name: "Pulse" })).toBeInTheDocument();
+  });
+
+  it("states its scope as a sentence, greying what the summary did not use", () => {
+    renderOverview(
+      { ...summary({}), scope_applied: { from: true, to: true, dow: false } } as OverviewSummary,
+      "/agencies/8/overview?from=2030-01-01&to=2030-01-07&dow=weekday",
+    );
+    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--off");
+  });
+
   it("shows real content when the headline has samples", () => {
     renderOverview(summary({ headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" } }));
     expect(screen.queryByText("No observations in this range. Try a wider window.")).not.toBeInTheDocument();
@@ -64,7 +79,7 @@ describe("OverviewTab", () => {
     renderOverview(
       summary({
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
-        top_delayed: { routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }], delayed_count: 1 },
+        top_delayed: { routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }], delayed_count: 1, delayed_threshold_min: 2 },
       }),
     );
     expect(screen.getByText("Routes to check now")).toBeInTheDocument();
@@ -131,5 +146,54 @@ describe("OverviewTab", () => {
     renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07");
     expect(screen.queryByRole("button", { name: "Clear the route filter" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reset service type to all" })).not.toBeInTheDocument();
+  });
+});
+
+describe("OverviewTab without a usable agency id", () => {
+  it("renders nothing when the route segment is not an agency id", () => {
+    renderOverview(summary(), "/agencies/not-an-id/overview?from=2030-01-01&to=2030-01-07");
+    expect(screen.queryByRole("region")).toBeNull();
+    expect(document.querySelector(".ov-page")).toBeNull();
+  });
+});
+
+describe("OverviewTab for an agency never collected", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("waits for the agency list before saying the range is empty", () => {
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: summary(), isPending: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: undefined, isPending: true } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/8/overview"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/overview" element={<OverviewTab />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("No observations in this range. Try a wider window.")).not.toBeInTheDocument();
+  });
+
+  it("says no data was ever collected and offers another agency", async () => {
+    localStorage.setItem("transit.lastAgency", "8");
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: summary(), isPending: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [{ agency_id: 8, agency_name: "Hiroden", feed_url: "", static_url: null, latest_data_date: null }],
+      isPending: false,
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/8/overview"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/overview" element={<OverviewTab />} />
+          <Route path="/" element={<p>picker-page</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("We haven't collected any data for Hiroden yet.")).toBeInTheDocument();
+    expect(screen.queryByText("No observations in this range. Try a wider window.")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Choose another agency" }));
+    expect(screen.getByText("picker-page")).toBeInTheDocument();
+    expect(localStorage.getItem("transit.lastAgency")).toBeNull();
   });
 });

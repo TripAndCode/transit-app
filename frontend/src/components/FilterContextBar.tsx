@@ -1,13 +1,16 @@
-import { useState, type CSSProperties } from "react";
+import { use, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
+import { CalendarDays } from "lucide-react";
 import type { FilterCtx } from "../api/types";
-import type { DowFilter } from "../api/rangeContext";
-import { DEFAULT_RANGE_DAYS, isoDaysAgo, todayISO } from "../api/rangeContext";
+import type { DowFilter } from "../api/scope";
+import { dowValueLabel } from "../utils/filterValueLabels";
+import { DataEndContext, defaultPeriod } from "../api/scope";
 import { rangeLabel } from "../utils/rangeLabel";
 import { RoutesPicker } from "./RoutesPicker";
 import { buildTimeBandOptions } from "./timeBandOptions";
 import { pill, groupLabel } from "./pillStyles";
 import { FILTER_SEPARATOR } from "../utils/format";
+import "./FilterContextBar.css";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -35,9 +38,10 @@ function filterSummary(
   parts.push(rangeLabel(fc, t) ?? t("filters.range.last_30d"));
 
   // Day-of-week
-  if (fc.dow && fc.dow !== "all") {
-    const dowKey = fc.dow === "weekday" ? "ask.filter_bar.dow_weekday" : "ask.filter_bar.dow_weekend";
-    parts.push(t(dowKey));
+  if (fc.dow === "weekday" || fc.dow === "weekend") {
+    parts.push(t(fc.dow === "weekday" ? "ask.filter_bar.dow_weekday" : "ask.filter_bar.dow_weekend"));
+  } else if (fc.dow && fc.dow !== "all") {
+    parts.push(dowValueLabel(fc.dow, t));
   }
 
   // Time band
@@ -104,8 +108,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
   const [editing, setEditing] = useState(false);
 
   // Draft uses explicit date defaults when value has no dates
-  const defaultFrom = isoDaysAgo(DEFAULT_RANGE_DAYS - 1);
-  const defaultTo = todayISO();
+  const { from: defaultFrom, to: defaultTo } = defaultPeriod(use(DataEndContext));
 
   const [draft, setDraft] = useState<FilterCtx>(() => ({
     ...value,
@@ -152,7 +155,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
   if (!editing) {
     return (
       <div style={pillRowStyle}>
-        <span aria-hidden style={{ fontSize: 14 }}>📅</span>
+        <CalendarDays size={14} strokeWidth={1.75} aria-hidden="true" style={{ flexShrink: 0 }} />
         <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{summary}</span>
         <span style={{ color: "var(--text-tertiary)" }}>・</span>{/* i18n-ignore: locale-neutral separator */}
         <span>{routes}</span>
@@ -274,7 +277,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
             cursor: pending ? "not-allowed" : "pointer",
           }}
         >
-          {t("ask.filter_bar.cancel")}
+          {t("common.cancel")}
         </button>
         <button
           type="button"
@@ -282,7 +285,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
           disabled={pending}
           style={{
             background: pending ? "var(--bg-soft)" : "var(--accent)",
-            color: pending ? "var(--text-tertiary)" : "#fff",
+            color: pending ? "var(--text-tertiary)" : "var(--on-accent)",
             border: "none",
             borderRadius: 4,
             padding: "6px 18px",

@@ -32,15 +32,14 @@ function SettingsDrawerBody({ onClose }: { onClose: () => void }) {
         right: 0,
         width: 360,
         padding: 24,
-        // Cast leftward, onto the page the drawer covers. The --el-*
-        // scale is downward-only, so an edge-anchored panel cannot use it
-        // without losing the direction that separates it from the content.
-        boxShadow: "-4px 0 16px rgba(0,0,0,0.06)",
+        // Cast leftward, onto the page the drawer covers -- --el-left, not
+        // --el-2/--el-3, which only cast downward.
+        boxShadow: "var(--el-left)",
       }}
     >
         <h3 style={{ marginTop: 0 }}>{t("header.settings_title")}</h3>
         <label style={{ display: "block", marginTop: 16 }}>
-          <div style={{ marginBottom: 4, color: "var(--text-secondary)", fontSize: 13 }}>
+          <div style={{ marginBottom: 4, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
             {t("header.settings_api_key_label")} <span style={{ color: "var(--text-tertiary)" }}>{t("common.optional_paren")}</span>
           </div>
           <input

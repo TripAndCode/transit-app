@@ -3,11 +3,10 @@ RangeCtx entry point goes through (the FastAPI query dependency, the Ask
 request body, the Ask-dashboard query params, and a conversation's stored
 ``filter_ctx``).
 
-Each rule pinned here used to exist in three hand-copied variants that had
-already drifted apart: one silently swallowed malformed dates, one skipped
-the route cap, one skipped enum validation entirely. Divergence is the bug
-class these tests guard against, so they assert the rules on the shared
-function rather than on any one caller.
+Hand-copied variants of these rules drift apart (one silently swallowing
+malformed dates, one skipping the route cap, one skipping enum validation
+entirely). Divergence is the bug class these tests guard against, so they
+assert the rules on the shared function rather than on any one caller.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -39,17 +38,17 @@ def _call(**over):
     return clamp_range_ctx(**kwargs)
 
 
-def test_defaults_to_trailing_window_ending_today(frozen_today):
+def test_defaults_to_trailing_window_ending_on_the_last_closed_day(frozen_today):
     ctx = _call()
-    assert ctx.to_date == frozen_today
-    assert ctx.from_date == frozen_today - timedelta(days=DEFAULT_RANGE_DAYS - 1)
+    assert ctx.to_date == frozen_today - timedelta(days=1)
+    assert ctx.from_date == ctx.to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1)
     assert ctx.days == DEFAULT_RANGE_DAYS
 
 
 def test_empty_strings_are_treated_as_absent(frozen_today):
     ctx = _call(from_="", to="")
-    assert ctx.to_date == frozen_today
-    assert ctx.from_date == frozen_today - timedelta(days=DEFAULT_RANGE_DAYS - 1)
+    assert ctx.to_date == frozen_today - timedelta(days=1)
+    assert ctx.from_date == ctx.to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1)
 
 
 def test_accepts_date_objects_as_well_as_iso_strings(frozen_today):
@@ -75,6 +74,23 @@ def test_future_from_date_is_clamped_to_today_and_not_swapped_back(frozen_today)
     assert ctx.from_date == frozen_today
 
 
+def test_a_start_alone_ends_on_the_last_closed_day_or_on_itself_if_later(frozen_today):
+    """Only a start: the end defaults to the last closed day unless the start
+    is later, so a start of today is never swapped into [yesterday, today]."""
+    ctx = _call(from_="2025-12-01")
+    assert (ctx.from_date, ctx.to_date) == (date(2025, 12, 1), frozen_today - timedelta(days=1))
+    for start in (frozen_today.isoformat(), "2099-01-01"):
+        ctx = _call(from_=start)
+        assert (ctx.from_date, ctx.to_date) == (frozen_today, frozen_today), start
+
+
+def test_tool_date_overrides_with_only_a_start_of_today_stay_on_today(frozen_today):
+    from pipeline.query.tools import _apply_date_overrides
+
+    ctx = _apply_date_overrides(_call(), {"from": frozen_today.isoformat()})
+    assert (ctx.from_date, ctx.to_date) == (frozen_today, frozen_today)
+
+
 def test_overwide_range_is_clamped_at_the_start(frozen_today):
     ctx = _call(from_="2000-01-01", to="2025-12-31")
     assert ctx.to_date == date(2025, 12, 31)
@@ -84,8 +100,9 @@ def test_overwide_range_is_clamped_at_the_start(frozen_today):
 
 @pytest.mark.parametrize("field", ["from_", "to"])
 def test_malformed_date_is_rejected_not_silently_defaulted(frozen_today, field):
-    """A non-empty but unparseable date used to fall through to the default
-    window, so a typo silently returned data for a different period."""
+    """A non-empty but unparseable date must be rejected: falling through to
+    the default window would let a typo silently return data for a different
+    period."""
     with pytest.raises(HTTPException) as exc:
         _call(**{field: "not-a-date"})
     assert exc.value.status_code == 422
@@ -117,8 +134,8 @@ def test_valid_service_passes_through(frozen_today, value):
     [("dow", "tuesday"), ("time_band", "brunch"), ("service", "祝日")],
 )
 def test_unknown_enum_value_is_rejected(frozen_today, field, value):
-    """Unknown enums used to be coerced to 'all', quietly answering a
-    different question than the one asked."""
+    """An unknown enum is rejected rather than coerced to 'all', which would
+    quietly answer a different question than the one asked."""
     with pytest.raises(HTTPException) as exc:
         _call(**{field: value})
     assert exc.value.status_code == 422
@@ -174,7 +191,7 @@ def test_tool_date_overrides_still_tolerate_an_unparseable_date():
 
     base = range_mod.clamp_range_ctx(from_=None, to=None)
     ctx = _apply_date_overrides(base, {"from": "not-a-date"})
-    assert ctx.to_date == range_mod.jst_today()
+    assert ctx.to_date == range_mod.last_closed_jst_day()
 
 
 @pytest.mark.parametrize(
@@ -205,3 +222,52 @@ def test_a_bare_string_is_not_treated_as_a_route_list():
     with pytest.raises(HTTPException) as exc:
         clamp_range_ctx(from_=None, to=None, routes="R1")
     assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "raw,expected", [("7", (7, 7)), ("0", (0, 0)), ("23", (23, 23)), ("7-9", (7, 9)), ("07-09", (7, 9))]
+)
+def test_hour_accepts_one_hour_or_an_inclusive_range(frozen_today, raw, expected):
+    assert _call(hour=raw).hour == expected
+
+
+@pytest.mark.parametrize("raw", ["24", "-1", "9-7", "7-", "a", "7-9-10", 7, "7.5", "²", "7-¹", "٣", "７"])
+def test_hour_rejects_anything_else_with_422(frozen_today, raw):
+    with pytest.raises(HTTPException) as exc:
+        _call(hour=raw)
+    assert exc.value.status_code == 422
+
+
+def test_hour_and_time_band_together_are_a_422(frozen_today):
+    with pytest.raises(HTTPException) as exc:
+        _call(hour="7", time_band="morning")
+    assert exc.value.status_code == 422
+
+
+def test_hour_with_time_band_all_is_fine(frozen_today):
+    assert _call(hour="7", time_band="all").hour == (7, 7)
+
+
+def test_stop_is_stripped_and_bounded(frozen_today):
+    assert _call(stop="  1234_01 ").stop == "1234_01"
+    assert _call(stop="").stop is None
+    with pytest.raises(HTTPException) as exc:
+        _call(stop="x" * 129)
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize("raw,expected", [("0", 0), ("1", 1), (None, None), ("", None)])
+def test_direction_accepts_zero_or_one(frozen_today, raw, expected):
+    assert _call(direction=raw).direction == expected
+
+
+@pytest.mark.parametrize("raw", ["2", "-1", "north", 1.5])
+def test_direction_rejects_anything_else_with_422(frozen_today, raw):
+    with pytest.raises(HTTPException) as exc:
+        _call(direction=raw)
+    assert exc.value.status_code == 422
+
+
+def test_legacy_callers_get_no_extras(frozen_today):
+    ctx = _call()
+    assert (ctx.hour, ctx.stop, ctx.direction) == (None, None, None)

@@ -160,15 +160,35 @@ class TestCursorEncodeDecode:
         with pytest.raises(ValueError):
             aa.decode_cursor(bad)
 
+    def test_decode_rejects_a_non_int_id(self):
+        import base64
+        import json
+
+        bad = base64.urlsafe_b64encode(
+            json.dumps({"at": T0.isoformat(), "source": "audit", "id": "42"}).encode()
+        ).decode()
+        with pytest.raises(ValueError):
+            aa.decode_cursor(bad)
+
+    def test_decode_rejects_an_unknown_source(self):
+        import base64
+        import json
+
+        bad = base64.urlsafe_b64encode(json.dumps({"at": T0.isoformat(), "source": "bogus", "id": 1}).encode()).decode()
+        with pytest.raises(ValueError):
+            aa.decode_cursor(bad)
+
 
 class TestParseBound:
-    def test_date_only_start_is_midnight_utc(self):
+    def test_date_only_start_is_midnight_jst_expressed_in_utc(self):
+        """JST is UTC+9 the whole year round, so the JST civil day opens at
+        15:00 UTC the day before -- matching `api.admin_runs.runs_day_bounds`."""
         dt = aa.parse_bound("2026-09-20", end=False)
-        assert dt == datetime(2026, 9, 20, 0, 0, 0, tzinfo=timezone.utc)
+        assert dt == datetime(2026, 9, 19, 15, 0, 0, tzinfo=timezone.utc)
 
-    def test_date_only_end_is_end_of_day_utc(self):
+    def test_date_only_end_is_the_last_instant_of_the_jst_day_expressed_in_utc(self):
         dt = aa.parse_bound("2026-09-20", end=True)
-        assert dt == datetime(2026, 9, 20, 23, 59, 59, 999999, tzinfo=timezone.utc)
+        assert dt == datetime(2026, 9, 20, 14, 59, 59, 999999, tzinfo=timezone.utc)
 
     def test_full_datetime_is_passed_through_with_utc_default(self):
         dt = aa.parse_bound("2026-09-20T15:30:00", end=False)

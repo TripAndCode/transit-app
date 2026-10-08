@@ -50,6 +50,11 @@ export const MAP_STYLES: MapStyleDef[] = [
   },
 ];
 
+/** Every id the catalog defines, for validating an id that arrives from
+ *  outside the app (a shared URL, a stored preference). Derived from the
+ *  catalog so a new style cannot be added without becoming accepted. */
+export const MAP_STYLE_IDS: readonly MapStyleId[] = MAP_STYLES.map((s) => s.id);
+
 /** Build a MapLibre raster style for the given catalog id. English-label
  *  tiles are used only when `lang` starts with "en" AND the style defines
  *  `tilesEn` (only `std` does — GSI publishes a single English style). */

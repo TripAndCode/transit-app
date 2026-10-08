@@ -1,8 +1,9 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { useRef } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { makeMockMap } from "../../test/mockMap";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeMockMap, type MockLayer } from "../../test/mockMap";
 import { severityStepColors, surfaceColorResolved } from "../../styles/tokens";
+import { applyTheme } from "../../styles/theme";
 import { CROSS_FADE_MS, GHOST_OPACITY } from "./playbackFrames";
 import { LIVE_TRIPS_CLUSTER_LAYER, LIVE_TRIPS_LABEL_LAYER, LIVE_TRIPS_LAYER } from "./useOperationsMapLayers";
 import {
@@ -12,6 +13,9 @@ import {
   useTimelineLayers,
 } from "./useTimelineLayers";
 import type { TimelineFrame } from "../../api/types";
+
+/** What MapLibre hands a camera-event listener when a person moved the map. */
+const GESTURE = { originalEvent: new MouseEvent("mousedown") };
 
 const FRAMES: TimelineFrame[] = [
   {
@@ -78,6 +82,21 @@ describe("useTimelineLayers", () => {
     expect(map.getLayer(TIMELINE_LAYER)).toBeTruthy();
   });
 
+  it("feeds the next frame at once even while another source's reload holds the style unloaded", () => {
+    const map = makeMockMap();
+    map.reloadsOnSetData = true;
+    const { rerender } = renderHook(({ index }) => {
+      const mapRef = useRef(map as never);
+      useTimelineLayers(mapRef, 0, FRAMES, index, true, false, vi.fn());
+    }, { initialProps: { index: 0 } });
+    map.addSource("relief", { type: "geojson" });
+    (map.getSource("relief") as { setData: (d: unknown) => void }).setData({});
+    expect(map.isStyleLoaded()).toBe(false);
+    rerender({ index: 1 });
+    const source = map.getSource(TIMELINE_SOURCE) as { data: GeoJSON.FeatureCollection };
+    expect(source.data.features.map((f) => f.properties!.age)).toEqual([1, 0]);
+  });
+
   it("hides the live layers while playing and shows them again on exit", () => {
     const map = makeMockMap([
       { id: LIVE_TRIPS_LAYER },
@@ -104,9 +123,20 @@ describe("useTimelineLayers", () => {
     const map = makeMockMap();
     const onInteract = vi.fn();
     mount(map, [0, FRAMES, 0, true, false, onInteract]);
-    map.fire("dragstart");
-    map.fire("zoomstart");
+    map.fire("dragstart", GESTURE);
+    map.fire("zoomstart", GESTURE);
     expect(onInteract).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps playing through a camera move the app made itself, such as the relief tilt", () => {
+    const map = makeMockMap();
+    const onInteract = vi.fn();
+    mount(map, [0, FRAMES, 0, true, false, onInteract]);
+    map.fire("pitchstart", {});
+    map.fire("zoomstart");
+    expect(onInteract).not.toHaveBeenCalled();
+    map.fire("pitchstart", GESTURE);
+    expect(onInteract).toHaveBeenCalledTimes(1);
   });
 
   it("stops listening for gestures once playback mode is left", () => {
@@ -120,7 +150,53 @@ describe("useTimelineLayers", () => {
       { initialProps: { active: true } },
     );
     rerender({ active: false });
-    map.fire("dragstart");
+    map.fire("dragstart", GESTURE);
     expect(onInteract).not.toHaveBeenCalled();
+  });
+});
+
+describe("useTimelineLayers repaints an existing playback layer", () => {
+  const LIGHT = { "--bg-surface": "#ffffff", "--delay-severe": "#A8391F" };
+  const DARK = { "--bg-surface": "#141726", "--delay-severe": "#F0837A" };
+
+  function paintTokens(tokens: typeof LIGHT) {
+    for (const [prop, value] of Object.entries(tokens)) document.documentElement.style.setProperty(prop, value);
+  }
+
+  afterEach(() => {
+    for (const prop of Object.keys(LIGHT)) document.documentElement.style.removeProperty(prop);
+    delete document.documentElement.dataset.theme;
+  });
+
+  it("re-resolves every theme colour when the theme toggles mid-playback", () => {
+    document.documentElement.dataset.theme = "light";
+    paintTokens(LIGHT);
+    const map = makeMockMap();
+    mount(map, [0, FRAMES, 0, true, false, vi.fn()]);
+
+    paintTokens(DARK);
+    act(() => applyTheme("dark"));
+
+    for (const [property, value] of Object.entries(timelineCirclePaint(CROSS_FADE_MS))) {
+      expect(map.getPaintProperty(TIMELINE_LAYER, property), property).toEqual(value);
+    }
+    expect(map.getPaintProperty(TIMELINE_LAYER, "circle-stroke-color")).toBe(DARK["--bg-surface"]);
+    expect(map.getPaintProperty(TIMELINE_LAYER, "circle-color")).toContain(DARK["--delay-severe"]);
+  });
+
+  it("drops the cross-fade once playback falls back to stepping", () => {
+    const map = makeMockMap();
+    const { rerender } = renderHook(
+      ({ steppingOnly }: { steppingOnly: boolean }) => {
+        const mapRef = useRef(map as never);
+        useTimelineLayers(mapRef, 0, FRAMES, 0, true, steppingOnly, vi.fn());
+      },
+      { initialProps: { steppingOnly: false } },
+    );
+    expect((map.getLayer(TIMELINE_LAYER) as MockLayer).paint?.["circle-opacity-transition"])
+      .toEqual({ duration: CROSS_FADE_MS, delay: 0 });
+
+    rerender({ steppingOnly: true });
+    expect(map.getPaintProperty(TIMELINE_LAYER, "circle-opacity-transition")).toEqual({ duration: 0, delay: 0 });
   });
 });

@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
+import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
+import { stubReducedMotion } from "../test/reducedMotion";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
 import { ApiError } from "../api/client";
@@ -41,7 +43,14 @@ function renderTab(agencyId = "1") {
 }
 
 describe("NetworkTab", () => {
-  beforeEach(async () => await i18n.changeLanguage("en"));
+  beforeEach(async () => {
+    stubReducedMotion();
+    await i18n.changeLanguage("en");
+  });
+  // One test below switches to Japanese to check the locale-aware separator;
+  // restore English so later test files in this run don't inherit "ja" as
+  // their starting locale.
+  afterAll(async () => await i18n.changeLanguage("en"));
 
   it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
@@ -61,14 +70,22 @@ describe("NetworkTab", () => {
     expect(screen.getAllByTestId("network-row")).toHaveLength(3);
     expect(screen.getByText(/\+10\.0/)).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument(); // Hiroden's on-time %
-    expect(screen.getByText("10.00%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
-    expect(screen.getByText("Behind")).toBeInTheDocument();
+    expect(screen.getByText("10.0%")).toBeInTheDocument(); // HiroBus's clamp % (secondary line, shown since 10% > 1% threshold)
+    const staleBadge = screen.getByText("Behind");
+    expect(staleBadge).toBeInTheDocument();
+    // Native title= was replaced by the shared, keyboard-reachable Tooltip.
+    expect(staleBadge).not.toHaveAttribute("title");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.focusIn(staleBadge);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(/haven't caught up yet/);
+    fireEvent.focusOut(staleBadge);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
     // clamp dot boundary: present only for HiroBus (10%), absent for
     // Hiroden (0.14 < 1) and Aomori (null) — no secondary line at all for
     // Hiroden since neither clamp nor stale triggers.
     expect(screen.getAllByTestId("clamp-dot")).toHaveLength(1);
-    expect(screen.getByText("2026-04-01 – 2026-04-02")).toBeInTheDocument();
+    expect(screen.getByText("Apr 1 – Apr 2, 2026")).toBeInTheDocument();
     expect(screen.getByText("no data in range")).toBeInTheDocument();
     expect(screen.getByText("How to read this")).toBeInTheDocument();
   });
@@ -87,8 +104,8 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    // The secondary figures now carry their own label in the row's meta
-    // line, so the value is no longer an element's whole text.
+    // The secondary figures carry their own label in the row's meta
+    // line, so the value is not an element's whole text.
     expect(screen.getByText(/96\.7%/)).toBeInTheDocument();
     const aomoriCard = screen.getByText("Aomori").closest(".network-row");
     expect(aomoriCard).toHaveTextContent("—");
@@ -125,7 +142,8 @@ describe("NetworkTab", () => {
     renderTab();
     expect(screen.getByText(/91\.2%/)).toBeInTheDocument();
     const hiroBusCard = screen.getByText("HiroBus").closest(".network-row");
-    expect(hiroBusCard).toHaveTextContent("150");
+    expect(hiroBusCard).toHaveTextContent("Planned trips 150 (vehicle-km not available)");
+    expect(hiroBusCard).not.toHaveTextContent("Vehicle-km delivered %");
     const aomoriCard2 = screen.getByText("Aomori").closest(".network-row");
     expect(aomoriCard2).toHaveTextContent("—");
   });
@@ -148,7 +166,7 @@ describe("NetworkTab", () => {
     const link = screen.getByRole("link", { name: "Hiroden" });
     expect(link).toHaveAttribute(
       "href",
-      "/agencies/7/operations?from=2026-04-01&to=2026-04-07",
+      "/agencies/7/live?from=2026-04-01&to=2026-04-07",
     );
     // The description moved off `title` and onto the Tooltip primitive, which
     // shows on focus as well as hover and is wired as aria-describedby.
@@ -157,7 +175,7 @@ describe("NetworkTab", () => {
       fireEvent.focus(link);
     });
     const tip = screen.getByRole("tooltip");
-    expect(tip).toHaveTextContent("View Hiroden overview");
+    expect(tip).toHaveTextContent("Open Hiroden in Live");
     expect(link.getAttribute("aria-describedby")).toBe(tip.id);
   });
 
@@ -177,6 +195,21 @@ describe("NetworkTab", () => {
     } as never);
     renderTab();
     expect(screen.queryByTestId("network-card-list")).not.toBeInTheDocument();
+  });
+
+  it("says a slow comparison is still working, and offers the period's last week", () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+        data: undefined, isPending: true, error: null, refetch: vi.fn(),
+      } as never);
+      renderTab();
+      act(() => vi.advanceTimersByTime(STILL_WORKING_AFTER_MS));
+      expect(screen.getByText("Still working: a long period takes longer to count.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Narrow to the last 7 days of the period" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the error banner with a retry on error", () => {
@@ -225,7 +258,7 @@ describe("NetworkTab", () => {
     expect(screen.queryByTestId("you-badge")).not.toBeInTheDocument();
   });
 
-  it("renders the coverage-range separator via the locale-aware key, not a hardcoded en-dash", async () => {
+  it("writes the coverage range in the language's date style", async () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
         from: "2026-04-01", to: "2026-04-07", definition,
@@ -235,7 +268,7 @@ describe("NetworkTab", () => {
     } as never);
     await i18n.changeLanguage("ja");
     renderTab();
-    expect(screen.getByText("2026-04-01 〜 2026-04-02")).toBeInTheDocument();
+    expect(screen.getByText("2026年4月1日〜4月2日")).toBeInTheDocument();
   });
 
   it("keeps the definition metadata behind the aggregation-conditions disclosure", () => {
@@ -247,15 +280,13 @@ describe("NetworkTab", () => {
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     renderTab();
-    // Behind "How these are calculated": still one click away, no longer
-    // competing with the comparison it annotates.
-    const disclosure = screen.getByText("How these are calculated").closest("details");
-    expect(disclosure).not.toBeNull();
-    expect(disclosure).not.toHaveAttribute("open");
+    // Behind one "How this is calculated": a click away, not competing
+    // with the comparison it annotates, and not nested in a second one.
     const block = screen.getByTestId("definition-meta");
-    expect(disclosure).toContainElement(block);
-    expect(block).toHaveTextContent("legacy_60s");
-    expect(block).toHaveTextContent("unbounded");
+    expect(block.tagName).toBe("DETAILS");
+    expect(block).not.toHaveAttribute("open");
+    expect(block.parentElement?.closest("details")).toBeNull();
+    expect(block).toHaveTextContent("On time = no more than 1 min late.");
   });
 
   it("hides the ridership-weighted toggle when no agency has configured weights", () => {
@@ -294,6 +325,16 @@ describe("NetworkTab", () => {
     expect(screen.getByText("88.0%")).toBeInTheDocument(); // HiroBus unchanged: not configured
   });
 
+
+  it("prints each agency's delay figure in the text colour", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: { from: "2026-04-01", to: "2026-04-07", definition, agencies: [row({ agency_id: 1, agency_name: "Worst", avg_delay_min: 6.4 })] },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const figure = screen.getByTestId("network-row").querySelector(".network-row__unit")!.parentElement as HTMLElement;
+    expect(figure.style.color).toBe("");
+  });
 
   it("sorts rows worst-delay-first regardless of the order the API returned, nulls last", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
@@ -376,4 +417,39 @@ describe("NetworkTab", () => {
     expect(inputs.length).toBe(2);
     inputs.forEach((el) => expect(el.getAttribute("lang")).toBe("en"));
   });
+
+  it("keeps a raised agency cap across a refetch of the same range and re-caps when the range changes", async () => {
+    const user = userEvent.setup();
+    // A fresh payload per call: every refetch hands back new objects even
+    // when nothing in them changed.
+    const summary = () => ({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition,
+        agencies: Array.from({ length: 250 }, (_, i) => row({ agency_id: i + 1, agency_name: `Agency ${i + 1}` })),
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    });
+    let current = summary();
+    vi.spyOn(hooks, "useNetworkSummary").mockImplementation(() => current as never);
+    const ui = () => (
+      <MemoryRouter initialEntries={["/agencies/1/network?from=2026-04-01&to=2026-04-07"]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/network" element={<NetworkTab />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const { rerender } = renderWithProviders(ui());
+    expect(screen.getAllByTestId("network-row")).toHaveLength(200);
+    await user.click(screen.getByRole("button", { name: "Show 50 more" }));
+    expect(screen.getAllByTestId("network-row")).toHaveLength(250);
+
+    current = summary();
+    rerender(ui());
+    expect(screen.getAllByTestId("network-row")).toHaveLength(250);
+
+    fireEvent.change(document.querySelector("input[type='date']")!, { target: { value: "2026-03-25" } });
+    expect(screen.getAllByTestId("network-row")).toHaveLength(200);
+    // The cap is 200 rows, so proving it renders a few hundred rows several
+    // times; on a loaded machine that alone outlasts the default timeout.
+  }, 45_000);
 });

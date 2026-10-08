@@ -1,16 +1,21 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
 import {
   DELAY_RAMP,
+  DELAY_RAMP_TEXT,
+  accentColorResolved,
+  delayRampVar,
   contrastRatio,
   delayColor,
   delayColorResolved,
+  delayTextColor,
   readableInkOn,
   severeColorResolved,
   severityStepColors,
   surfaceColorResolved,
 } from "./tokens";
+import { ruleBody, decl } from "../test/cssRules";
 
 // Two distinct severe-color surfaces:
 //  - `DELAY_RAMP.severe` / `delayColor(>10)` return the LITERAL string
@@ -90,6 +95,23 @@ describe("delayColorResolved() (MapLibre-safe delayColor)", () => {
   });
 });
 
+describe("DELAY_RAMP_TEXT / delayTextColor() (text-safe delay ramp)", () => {
+  it("ok/mild/moderate are the literal per-theme CSS vars, and severe reuses DELAY_RAMP.severe", () => {
+    expect(DELAY_RAMP_TEXT.ok).toBe("var(--delay-text-ok)");
+    expect(DELAY_RAMP_TEXT.mild).toBe("var(--delay-text-mild)");
+    expect(DELAY_RAMP_TEXT.moderate).toBe("var(--delay-text-moderate)");
+    expect(DELAY_RAMP_TEXT.severe).toBe(DELAY_RAMP.severe);
+  });
+
+  it("maps thresholds the same way delayColor() does, but through the text-safe ramp", () => {
+    expect(delayTextColor(0)).toBe(DELAY_RAMP_TEXT.ok);
+    expect(delayTextColor(-3)).toBe(DELAY_RAMP_TEXT.ok);
+    expect(delayTextColor(2)).toBe(DELAY_RAMP_TEXT.mild);
+    expect(delayTextColor(4)).toBe(DELAY_RAMP_TEXT.moderate);
+    expect(delayTextColor(15)).toBe(DELAY_RAMP_TEXT.severe);
+  });
+});
+
 describe("severityStepColors() (MapLibre step-expression stops)", () => {
   afterEach(() => {
     document.documentElement.style.removeProperty("--delay-severe");
@@ -121,29 +143,6 @@ describe("severityStepColors() (MapLibre step-expression stops)", () => {
 const globalCss = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "");
 
-/** Body of the first rule whose selector text starts at `selector`, with
- *  braces balanced so nested at-rules/rules are included. */
-function ruleBody(css: string, selector: string): string {
-  const at = css.indexOf(selector);
-  if (at === -1) throw new Error(`selector not found: ${selector}`);
-  const open = css.indexOf("{", at + selector.length - 1);
-  let depth = 0;
-  for (let i = open; i < css.length; i++) {
-    if (css[i] === "{") depth++;
-    else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
-  }
-  throw new Error(`unbalanced braces after: ${selector}`);
-}
-
-/** Last declared value of `prop` in `body` (later declaration wins, matching
- *  the cascade), with runs of whitespace collapsed. */
-function decl(body: string, prop: string): string | null {
-  const re = new RegExp(`(?:^|[;{\\s])${prop}\\s*:\\s*([^;]+);`, "g");
-  let last: string | null = null;
-  for (const m of body.matchAll(re)) last = m[1].replace(/\s+/g, " ").trim();
-  return last;
-}
-
 const rootBlock = ruleBody(globalCss, ":root {");
 const darkBlock = ruleBody(globalCss, ':root[data-theme="dark"] {');
 const reduceBlock = ruleBody(globalCss, "@media (prefers-reduced-motion: reduce)");
@@ -157,6 +156,17 @@ const ovPageBlock = ruleBody(overviewCss, ".ov-page {");
 const ovKpiValueBlock = ruleBody(overviewCss, ".ov-kpi-value {");
 
 const indexHtml = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
+
+const srcDir = resolve(process.cwd(), "src");
+
+function walk(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = resolve(dir, entry.name);
+    if (entry.isDirectory()) return walk(full);
+    if (!/\.(tsx?|css)$/.test(entry.name)) return [];
+    return [full];
+  });
+}
 
 describe("motion tokens", () => {
   it.each([
@@ -176,18 +186,55 @@ describe("motion tokens", () => {
 });
 
 describe("elevation tokens", () => {
-  it.each(["--el-1", "--el-2", "--el-3"])("%s is defined in both themes", (prop) => {
+  it.each(["--el-1", "--el-2", "--el-3", "--el-left"])("%s is defined in both themes", (prop) => {
     expect(decl(rootBlock, prop)).toBeTruthy();
     expect(decl(darkBlock, prop)).toBeTruthy();
   });
 
   it("the dark elevations are the hairline/inset treatment, not the light drop shadows", () => {
-    for (const prop of ["--el-1", "--el-2", "--el-3"]) {
+    for (const prop of ["--el-1", "--el-2", "--el-3", "--el-left"]) {
       const dark = decl(darkBlock, prop)!;
       expect(dark).toContain("inset");
       expect(dark).not.toBe(decl(rootBlock, prop));
     }
     expect(decl(darkBlock, "--el-3")).toMatch(/rgba\(0, ?0, ?0, ?0?\.[5-9]\d*\)/);
+  });
+
+  it("--el-left casts to the left (negative x-offset), not downward like --el-2/--el-3", () => {
+    // A right-anchored drawer's shadow has to fall onto the page it covers,
+    // not below itself, so the offset is on the x axis and negative.
+    for (const block of [rootBlock, darkBlock]) {
+      expect(decl(block, "--el-left")).toMatch(/-\d+px 0/);
+    }
+  });
+});
+
+// One wash behind every overlay. A scrim is a theme decision, not a
+// per-overlay one: two overlays that pick their own literal drift apart the
+// moment either theme is retuned, and the dark theme needs a deeper wash
+// than the light one to separate the panel from the page at all.
+describe("scrim token", () => {
+  it("is defined on the bare :root", () => {
+    expect(decl(rootBlock, "--scrim")).toBe("rgba(15, 17, 25, 0.32)");
+  });
+
+  it("deepens under the dark theme, where the light wash would not separate the panel", () => {
+    expect(decl(darkBlock, "--scrim")).toBe("rgba(0, 0, 0, 0.55)");
+  });
+
+  it("is what the shared overlay paints, so no overlay carries its own literal", () => {
+    const overlayBase = readFileSync(resolve(process.cwd(), "src/components/ui/OverlayBase.tsx"), "utf8");
+    expect(overlayBase).toContain("var(--scrim)");
+    for (const file of ["src/components/Modal.tsx", "src/components/Sidebar.tsx", "src/components/commandPalette.css"]) {
+      expect(
+        readFileSync(resolve(process.cwd(), file), "utf8"),
+        `${file} still hardcodes a scrim colour`,
+      ).not.toMatch(/background:\s*rgba\(/);
+    }
+  });
+
+  it("leaves no dead backdrop rule behind in overview.css", () => {
+    expect(overviewCss).not.toContain("ov-modal-backdrop");
   });
 });
 
@@ -229,9 +276,21 @@ describe("Japanese body typography", () => {
 });
 
 describe(".num — the single place tabular figures are turned on", () => {
-  it("applies tabular-nums", () => {
+  it("applies tabular-nums in the numeral face", () => {
     const numBlock = ruleBody(globalCss, ".num {");
     expect(decl(numBlock, "font-variant-numeric")).toBe("tabular-nums");
+    expect(decl(numBlock, "font-family")).toBe("var(--font-num)");
+  });
+});
+
+describe("the type families", () => {
+  it.each([
+    ["--font-body", '"BIZ UDPGothic"'],
+    ["--font-display", '"BIZ UDPGothic"'],
+    ["--font-num", '"Barlow Semi Condensed"'],
+    ["--font-mono", '"IBM Plex Mono"'],
+  ])("%s leads with %s", (prop, face) => {
+    expect(decl(rootBlock, prop)?.startsWith(face)).toBe(true);
   });
 });
 
@@ -242,6 +301,44 @@ describe("--font-display policy", () => {
     const preceding = rawGlobalCss.slice(Math.max(0, idx - 400), idx);
     expect(preceding).toMatch(/brand wordmark/);
     expect(preceding).toMatch(/welcome headline/i);
+  });
+
+  // A weight index.html does not request is synthesized by the browser, which
+  // smears kanji strokes. Only an explicitly declared weight can be checked
+  // statically; an inherited one is out of reach here.
+  it("is only set at a weight index.html loads for BIZ UDPGothic", () => {
+    const loaded = new Set(
+      indexHtml.match(/<link href="[^"]*BIZ\+UDPGothic:wght@([\d;]+)[^"]*" rel="stylesheet">/)?.[1].split(";"),
+    );
+    const keywordWeights: Record<string, string> = { normal: "400", bold: "700" };
+    const sites: { where: string; weight: string | null }[] = [];
+
+    for (const file of walk(srcDir)) {
+      if (/\.test\.tsx?$/.test(file)) continue;
+      const rel = relative(srcDir, file);
+      const raw = readFileSync(file, "utf8");
+      const text = file.endsWith(".css") ? raw.replace(/\/\*[\s\S]*?\*\//g, "") : raw;
+
+      for (const [, selector, body] of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (decl(body, "font-family")?.includes("var(--font-display)")) {
+          sites.push({ where: `${rel}: ${selector.trim().replace(/\s+/g, " ")}`, weight: decl(body, "font-weight") });
+        }
+      }
+
+      for (const m of text.matchAll(/fontFamily:\s*["']var\(--font-display\)["']/g)) {
+        const start = text.lastIndexOf("{", m.index);
+        const end = text.indexOf("}", m.index);
+        const weight = text.slice(start, end).match(/fontWeight:\s*["']?([\w-]+)/)?.[1] ?? null;
+        sites.push({ where: `${rel}:${text.slice(0, m.index).split("\n").length}`, weight });
+      }
+    }
+
+    expect(loaded.size).toBeGreaterThan(0);
+    expect(sites.length).toBeGreaterThan(0);
+    const offenders = sites
+      .filter(({ weight }) => weight !== null && !loaded.has(keywordWeights[weight] ?? weight))
+      .map(({ where, weight }) => `${where} (${weight})`);
+    expect(offenders).toEqual([]);
   });
 });
 
@@ -255,16 +352,16 @@ describe("period overview uses shared typography, not a page-local override", ()
   });
 });
 
-describe("hero KPI values use proportional figures, not tabular-nums", () => {
-  it("does not force tabular-nums on the large standalone hero number", () => {
+describe("hero KPI value takes its figures from .num, not a rule of its own", () => {
+  it("declares no font-variant-numeric of its own on the hero number", () => {
     expect(decl(ovKpiValueBlock, "font-variant-numeric")).toBeNull();
   });
 });
 
-describe("index.html Noto font loading", () => {
+describe("index.html font loading", () => {
   it("preloads the Google Fonts stylesheet", () => {
     expect(indexHtml).toMatch(
-      /<link rel="preload" as="style" href="https:\/\/fonts\.googleapis\.com\/css2\?family=Noto\+Sans\+JP[^"]*">/,
+      /<link rel="preload" as="style" href="https:\/\/fonts\.googleapis\.com\/css2\?family=BIZ\+UDPGothic[^"]*">/,
     );
   });
 
@@ -272,9 +369,11 @@ describe("index.html Noto font loading", () => {
     expect(indexHtml).toMatch(/<link rel="preconnect" href="https:\/\/fonts\.gstatic\.com" crossorigin>/);
   });
 
-  it("requests only the font weights actually used in the app", () => {
-    expect(indexHtml).toMatch(/Noto\+Sans\+JP:wght@400;500;600;700;800/);
-    expect(indexHtml).toMatch(/Noto\+Serif\+JP:wght@400;600/);
+  it("requests only the font weights the type scale uses", () => {
+    expect(indexHtml).toMatch(/BIZ\+UDPGothic:wght@400;700/);
+    expect(indexHtml).toMatch(/Barlow\+Semi\+Condensed:wght@500;600;700/);
+    expect(indexHtml).toMatch(/IBM\+Plex\+Mono:wght@400;500/);
+    expect(indexHtml).not.toMatch(/Noto\+S(ans|erif)\+JP/);
   });
 });
 
@@ -306,11 +405,11 @@ function rgb(hex: string): [number, number, number] {
 
 describe("one accent identity", () => {
   it.each([
-    [rootBlock, "--accent", "#187b80"],
-    [rootBlock, "--accent-soft", "#e1f1f1"],
-    [darkBlock, "--accent", "#43c5ba"],
-    [darkBlock, "--accent-soft", "#183b3d"],
-  ])("declares the teal accent", (block, prop, value) => {
+    [rootBlock, "--accent", "#2750C2"],
+    [rootBlock, "--accent-soft", "#E2E9FA"],
+    [darkBlock, "--accent", "#86A2FF"],
+    [darkBlock, "--accent-soft", "#1C2847"],
+  ])("declares the signage-blue accent", (block, prop, value) => {
     expect(decl(block, prop)).toBe(value);
   });
 
@@ -336,10 +435,10 @@ describe("one accent identity", () => {
     for (const block of [rootBlock, darkBlock]) {
       const [ar, ag, ab] = rgb(decl(block, "--accent")!);
       const [sr, sg, sb] = rgb(decl(block, "--accent-strong")!);
-      // Teal: green and blue both dominate red, in the accent and its
-      // deepened sibling alike.
-      expect(Math.min(ag, ab)).toBeGreaterThan(ar);
-      expect(Math.min(sg, sb)).toBeGreaterThan(sr);
+      // Blue dominates red and green, in the accent and its deepened
+      // sibling alike.
+      expect(ab).toBeGreaterThan(Math.max(ar, ag));
+      expect(sb).toBeGreaterThan(Math.max(sr, sg));
     }
   });
 
@@ -350,6 +449,51 @@ describe("one accent identity", () => {
           expect(contrastRatio(decl(block, prop)!, decl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
         }
       }
+    }
+  });
+
+  it("keeps --accent-strong readable as text directly on --accent-soft", () => {
+    // Plain --accent on --accent-soft is only 4.32:1 in light mode -- under
+    // AA -- which is why every "selected"/"active" state that tints its
+    // background with --accent-soft colors its own text --accent-strong
+    // instead (never --accent).
+    for (const block of [rootBlock, darkBlock]) {
+      expect(contrastRatio(decl(block, "--accent-strong")!, decl(block, "--accent-soft")!)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  });
+});
+
+describe("the text levels clear AA on every surface and the selected state, in both themes", () => {
+  it.each(
+    ["--text-primary", "--text-secondary", "--text-tertiary"].flatMap((prop) =>
+      ["--bg-surface", "--bg-soft", "--bg-page", "--accent-soft"].flatMap((surface) => [
+        ["light", prop, surface],
+        ["dark", prop, surface],
+      ]),
+    ),
+  )("%s %s on %s", (theme, prop, surface) => {
+    const block = theme === "light" ? rootBlock : darkBlock;
+    expect(contrastRatio(decl(block, prop)!, decl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("the delay ramp", () => {
+  it("fills magnitude in five steps on the light theme", () => {
+    expect(["--d0", "--d1", "--d2", "--d3", "--d4"].map((prop) => decl(rootBlock, prop))).toEqual([
+      "#D7EDE7",
+      "#A6D5C7",
+      "#F0CD7A",
+      "#E39556",
+      "#BC523A",
+    ]);
+  });
+
+  it("has a dark counterpart for every step, and a no-data fill in both themes", () => {
+    for (const prop of ["--d0", "--d1", "--d2", "--d3", "--d4", "--none"]) {
+      expect(decl(rootBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      expect(decl(darkBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
     }
   });
 });
@@ -395,6 +539,96 @@ describe("--delay-severe clears AA on its own theme's surface", () => {
   });
 });
 
+/** Every surface a delay-ramp text colour can sit on: a card, the page, the
+ *  soft fill and the current-row tint. Checking only `--bg-surface` would let
+ *  these tokens clear AA on a card while failing on the others. */
+const DELAY_TEXT_SURFACES = ["--bg-surface", "--bg-page", "--bg-soft", "--accent-soft"];
+const DELAY_TEXT_TOKENS = ["--delay-text-ok", "--delay-text-mild", "--delay-text-moderate"];
+
+describe("--delay-text-ok/mild/moderate clear AA on every surface they render on", () => {
+  it.each(DELAY_TEXT_TOKENS.flatMap((prop) => DELAY_TEXT_SURFACES.map((surface) => [prop, surface])))(
+    "%s clears 4.5:1 on light %s",
+    (prop, surface) => {
+      expect(contrastRatio(decl(rootBlock, prop)!, decl(rootBlock, surface)!)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  it.each(DELAY_TEXT_TOKENS.flatMap((prop) => DELAY_TEXT_SURFACES.map((surface) => [prop, surface])))(
+    "%s clears 4.5:1 on dark %s",
+    (prop, surface) => {
+      const onDark = decl(darkBlock, surface) ?? decl(rootBlock, surface)!;
+      expect(contrastRatio(decl(darkBlock, prop)!, onDark)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  it("is a distinct set from the plain ramp, which is for fills and fails as text", () => {
+    // The dark ramp reads as AA-passing against a card and is not against the
+    // page tints, so text needs its own values in both themes, not just light.
+    expect(decl(darkBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
+    expect(decl(rootBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
+  });
+});
+
+describe("--color-warning-text clears AA against --bg-surface and --bg-soft, in both themes", () => {
+  it("the light value clears 4.5:1 on both light surfaces", () => {
+    for (const surface of ["--bg-surface", "--bg-soft"]) {
+      expect(contrastRatio(decl(rootBlock, "--color-warning-text")!, decl(rootBlock, surface)!)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  });
+
+  it("the dark value clears 4.5:1 on both dark surfaces", () => {
+    for (const surface of ["--bg-surface", "--bg-soft"]) {
+      expect(contrastRatio(decl(darkBlock, "--color-warning-text")!, decl(darkBlock, surface)!)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  });
+
+  it("the dark value is identical to plain --color-warning (already AA-passing there)", () => {
+    // --color-warning has no dark-theme override, so the value that actually
+    // cascades in dark mode is the one declared on the bare :root.
+    expect(decl(darkBlock, "--color-warning-text")).toBe(decl(rootBlock, "--color-warning"));
+  });
+});
+
+describe("--color-danger is retired outside destructive-action buttons", () => {
+  it("is referenced only where a real destructive-action control uses it", () => {
+    // Alarm red is retired from every severity signal in favor of
+    // --delay-severe (calm, per-theme, AA-passing as text); --color-danger
+    // stays reserved for buttons that actually delete/remove something.
+    // Each entry strips exactly the sanctioned text, so any other mention in
+    // the same file still counts as an offender.
+    const allowed = new Map<string, RegExp[]>([
+      [
+        resolve(srcDir, "styles/global.css"),
+        [/^\s*--color-danger:[^;]*;/gm, /\.context-menu__item--danger\s*\{\s*color:\s*var\(--color-danger\);\s*\}/g],
+      ],
+      [resolve(srcDir, "pages/admin/adminControls.tsx"), [/\.admin-btn\.danger[^{]*\{[^}]*\}/g]],
+      [resolve(srcDir, "pages/AccountPage.css"), [/\.account-danger__button\s*\{[^}]*\}/g]],
+    ]);
+
+    const offenders = walk(srcDir).filter((file) => {
+      if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) return false;
+      const text = (allowed.get(file) ?? []).reduce((acc, re) => acc.replace(re, ""), readFileSync(file, "utf8"));
+      return text.includes("--color-danger");
+    });
+
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe("--delay-ok mirrors tokens.ts's DELAY_RAMP.ok", () => {
+  it("is defined on the bare :root", () => {
+    expect(decl(rootBlock, "--delay-ok")).toBeTruthy();
+  });
+
+  it("matches DELAY_RAMP.ok — the same relationship --delay-severe has with SEVERE_FALLBACK, without the per-theme split (nothing renders text on this token)", () => {
+    expect(decl(rootBlock, "--delay-ok")!.toUpperCase()).toBe(DELAY_RAMP.ok);
+  });
+});
+
 describe("contrastRatio()", () => {
   it("is 21:1 for black on white and 1:1 for a colour on itself", () => {
     expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 1);
@@ -435,23 +669,6 @@ describe("surfaceColorResolved()", () => {
   });
 });
 
-describe("route-enter animation", () => {
-  it("is declared once, inside a motion-allowed block, reusing the shared fade keyframes", () => {
-    // Nothing outside a no-preference block may define it: the class is
-    // applied unconditionally by RouteTransition, so the media query is the
-    // only thing standing between it and a reduced-motion user.
-    const allowed = [...globalCss.matchAll(/@media \(prefers-reduced-motion: no-preference\)/g)]
-      .map((m) => ruleBody(globalCss.slice(m.index), "@media (prefers-reduced-motion: no-preference)"))
-      .filter((block) => block.includes(".route-enter"));
-
-    expect(globalCss.match(/\.route-enter/g)).toHaveLength(1);
-    expect(allowed).toHaveLength(1);
-    expect(decl(ruleBody(allowed[0], ".route-enter"), "animation")).toBe(
-      "ov-fade-in var(--dur-2) var(--ease-out)",
-    );
-  });
-});
-
 describe("chart entrance motion (ChartEnter.tsx)", () => {
   function motionAllowedBlocksContaining(selector: string): string[] {
     return [...globalCss.matchAll(/@media \(prefers-reduced-motion: no-preference\)/g)]
@@ -476,7 +693,9 @@ describe("chart entrance motion (ChartEnter.tsx)", () => {
     expect(allowed).toHaveLength(1);
     const body = ruleBody(allowed[0], ".chart-cell-enter {");
     expect(decl(body, "opacity")).toBe("0");
-    expect(decl(body, "transition")).toBe("opacity var(--dur-3) var(--ease-out)");
+    // --dur-2, not --dur-3: staggerDelay()'s cap plus this fade is the whole
+    // grid's arrival, and that total has to fit the --dur-3 data budget.
+    expect(decl(body, "transition")).toBe("opacity var(--dur-2) var(--ease-out)");
     // The target opacity is per-cell, not a flat 1 -- HourlyHeatmap's cells
     // encode sample density as opacity, and the fade-in must land on that
     // value rather than overriding it.
@@ -506,6 +725,20 @@ describe("progressive reveal (RevealSection.tsx's useInView())", () => {
     const inBody = ruleBody(allowed[0], ".reveal.reveal--in {");
     expect(decl(inBody, "opacity")).toBeNull();
     expect(decl(inBody, "transform")).toBe("translateY(0)");
+  });
+
+  it("staggers the sections of one group off --stagger, so a tab enters once", () => {
+    const allowed = motionAllowedBlocksContaining(".reveal {");
+    const body = ruleBody(allowed[0], ".reveal {");
+    expect(decl(body, "transition-delay")).toBe("calc(var(--stagger, 0) * var(--dur-1))");
+  });
+
+  it("keeps no per-child entrance classes for sections that already enter with their parent", () => {
+    // A bar that grows and a number that fades inside a section that is
+    // itself revealing is the same entrance played twice.
+    expect(globalCss).not.toContain(".ov-anim-fade");
+    expect(globalCss).not.toContain(".ov-anim-grow-x");
+    expect(globalCss).not.toContain("ov-grow-x");
   });
 });
 
@@ -558,5 +791,31 @@ describe("bottom sheet peek height", () => {
     expect(fromCss, "the .ops-playback mobile offset rule was not found").toBeDefined();
 
     expect(fromCss).toBe(fromTs);
+  });
+});
+
+describe("accentColorResolved()", () => {
+  it("falls back to the light theme's --accent when it is unresolved (jsdom)", () => {
+    expect(accentColorResolved().toLowerCase()).toBe(decl(rootBlock, "--accent")!.toLowerCase());
+  });
+
+  it("falls back to the light theme's surface the same way", () => {
+    expect(surfaceColorResolved().toLowerCase()).toBe(decl(rootBlock, "--bg-surface")!.toLowerCase());
+  });
+});
+
+describe("delayRampVar()", () => {
+  it.each([
+    [0, "var(--d0)"],
+    [1.49, "var(--d0)"],
+    [1.5, "var(--d1)"],
+    [2.49, "var(--d1)"],
+    [2.5, "var(--d2)"],
+    [3.5, "var(--d3)"],
+    [4.99, "var(--d3)"],
+    [5, "var(--d4)"],
+    [12, "var(--d4)"],
+  ])("colours %s minutes as %s", (minutes, token) => {
+    expect(delayRampVar(minutes)).toBe(token);
   });
 });

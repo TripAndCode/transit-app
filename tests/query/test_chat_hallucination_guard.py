@@ -196,7 +196,7 @@ async def test_out_of_scope_reply_naming_a_route_code_passes_through(monkeypatch
     and its own worked example for an out-of-scope question suggests one.
     Treating every digit on this ungrounded path as a fabrication replaced
     that reply with the numeric fallback, which answers nothing."""
-    reply = "天気データはありません。代わりに『22171の平日と土日祝の比較』が答えられます"
+    reply = "このチャットでは天気との比較は扱えません。代わりに『22171の平日と土日祝の比較』が答えられます"
     monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient(_fake_text_message(reply)))
     out = await chat.chat_with_tools("雨天時の比較", _ctx(), conn=None, agency_id=1, locale="ja")
     assert out["answer"] == reply

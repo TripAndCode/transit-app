@@ -37,11 +37,12 @@ function mockReports(trend: ReportResponse, ranking: ReportResponse) {
   });
 }
 
-function renderTab() {
+function renderTab(path = "/agencies/1/reports") {
   renderWithProviders(
-    <MemoryRouter initialEntries={["/agencies/1/reports"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/agencies/:agencyId/reports" element={<ReportsHomeTab />} />
+        <Route path="/agencies/:agencyId/routes" element={<p>routes-page</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -52,11 +53,44 @@ describe("ReportsHomeTab", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the report heading and description", () => {
+  it("states its scope as a sentence, greying what the trend did not use", () => {
+    mockReports({ ...trendResponse(), scope_applied: { from: true, to: true, time_band: false } } as ReportResponse, rankingResponse());
+    renderTab("/agencies/1/reports?time_band=morning");
+    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
+  });
+
+  it("writes its period the way the rest of the page writes dates", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?from=2026-08-12&to=2026-09-10");
+    const title = screen.getByRole("heading", { level: 2, name: /Hiroden/ });
+    expect(title).toHaveTextContent("Aug 12 – Sep 10, 2026");
+    expect(title).not.toHaveTextContent("2026-08-12");
+    const definitions = screen.getByText("View filters and definitions").closest("details") as HTMLElement;
+    expect(definitions).toHaveTextContent("Aug 12 – Sep 10, 2026");
+    expect(definitions).not.toHaveTextContent("2026-08-12");
+  });
+
+  it("leaves the page heading to the Reports shell", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab();
-    expect(screen.getByRole("heading", { name: "Reports" })).toBeInTheDocument();
-    expect(screen.getByText("Summarize service performance in one page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("names the routes table's service column and shows its values and counts readably", () => {
+    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 12345] as unknown as RankingRow])); // i18n-ignore: GTFS service name
+    renderTab();
+    expect(screen.getByRole("columnheader", { name: "Service" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Weekday" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
+  });
+
+  it("shows how the figures are made as its own disclosure, not nested in another", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab();
+    const block = screen.getByTestId("definition-meta");
+    expect(block.tagName).toBe("DETAILS");
+    expect(block.parentElement?.closest("details")).toBeNull();
   });
 
   it("shows the empty state for both trend and ranking sections when there are no rows", () => {
@@ -65,13 +99,67 @@ describe("ReportsHomeTab", () => {
     expect(screen.getAllByText("No observations match these filters")).toHaveLength(2);
   });
 
-  it("switches to the saved-analyses view and shows its local-only note", async () => {
+  it("shows the saved-analyses view and its local-only note from the doc param", () => {
     mockReports(trendResponse(), rankingResponse());
-    renderTab();
-    await userEvent.click(screen.getByRole("button", { name: "Saved analyses" }));
+    renderTab("/agencies/1/reports?doc=saved");
     expect(
       screen.getByText("Filters saved in this browser. Opening them queries the latest available data."),
     ).toBeInTheDocument();
+  });
+
+  it("says the routes list leaves out routes observed too few times to trust", () => {
+    const ranking = { ...rankingResponse([["101", "平日", 2, 1, 3, 400] as unknown as RankingRow]), reliable_min_samples: 100 };
+    mockReports(trendResponse(), ranking);
+    renderTab();
+    expect(screen.getByText("Routes observed fewer than 100 times in the period are left out.")).toBeInTheDocument();
+  });
+
+  it("opens a ranking row in its route's dossier and the detailed reports on Time", () => {
+    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 4] as unknown as RankingRow]));
+    renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07");
+    const open = new URL(screen.getByRole("link", { name: "Open analysis →" }).getAttribute("href")!, "http://x");
+    expect(open.pathname).toBe("/agencies/1/routes/101");
+    expect(open.searchParams.has("routes")).toBe(false);
+    expect(open.searchParams.get("service")).toBe("平日");
+    const detailed = new URL(screen.getByRole("link", { name: "Detailed reports →" }).getAttribute("href")!, "http://x");
+    expect(detailed.pathname).toBe("/agencies/1/time");
+    expect(detailed.searchParams.get("report")).toBe("trend");
+    expect(detailed.searchParams.get("from")).toBe("2026-06-01");
+  });
+
+  it("points an empty saved view at the route pages, where analyses are saved", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?doc=saved");
+    expect(screen.getByText("Save filters on a route's page to see them here")).toBeInTheDocument();
+  });
+
+  it("takes an empty saved view straight to the route pages", async () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab("/agencies/1/reports?doc=saved");
+    await userEvent.click(screen.getByRole("button", { name: "Go to Routes" }));
+    expect(screen.getByText("routes-page")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["routes=50&from=2026-09-01", "/agencies/1/routes/50", "from=2026-09-01"],
+    ["routes=50,51", "/agencies/1/routes", "routes=50%2C51"],
+  ])("opens a saved analysis %s on its route's page", (query, pathname, search) => {
+    mockReports(trendResponse(), rankingResponse());
+    localStorage.setItem(
+      "transit.savedAnalyses.v1",
+      JSON.stringify([{ id: "a", agencyId: 1, title: "Saved one", query, savedAt: "2026-09-01T00:00:00Z" }]),
+    );
+    renderTab("/agencies/1/reports?doc=saved");
+    const link = new URL(screen.getByRole("link", { name: "Saved one" }).getAttribute("href")!, "http://x");
+    expect(link.pathname).toBe(pathname);
+    expect(link.searchParams.toString()).toBe(search);
+    localStorage.removeItem("transit.savedAnalyses.v1");
+  });
+
+  it("leaves switching documents to the Reports strip", () => {
+    mockReports(trendResponse(), rankingResponse());
+    renderTab();
+    expect(screen.queryByRole("button", { name: "Saved analyses" })).toBeNull();
   });
 });
 

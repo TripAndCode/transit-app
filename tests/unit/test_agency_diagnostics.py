@@ -76,6 +76,40 @@ def test_standard_upsert_targets_the_agency_route_metric_index():
     assert "ON CONFLICT (agency_id, route_code, metric_type)" in ad.UPSERT_STANDARD_SQL
 
 
+# ── batched editor statements (A10) ─────────────────────────────────────────
+
+
+def test_batch_delete_standard_sql_unnests_route_and_metric_arrays():
+    sql = ad.BATCH_DELETE_STANDARD_SQL
+    assert "DELETE FROM route_performance_standards" in sql
+    assert "unnest($2::text[], $3::text[])" in sql
+    assert "agency_id = $1" in sql
+
+
+def test_batch_upsert_standard_sql_unnests_all_four_columns():
+    sql = ad.BATCH_UPSERT_STANDARD_SQL
+    assert "INSERT INTO route_performance_standards" in sql
+    assert "unnest($2::text[], $3::text[], $4::double precision[], $5::double precision[])" in sql
+    assert "ON CONFLICT (agency_id, route_code, metric_type) DO UPDATE SET" in sql
+
+
+def test_batch_delete_weight_sql_unnests_route_codes_null_safely():
+    # route_code can be NULL (the agency default row); IS NOT DISTINCT FROM
+    # is required so the one delete statement also matches that row, since
+    # `route_code = NULL` is never true.
+    sql = ad.BATCH_DELETE_WEIGHT_SQL
+    assert "DELETE FROM ridership_weights" in sql
+    assert "unnest($2::text[])" in sql
+    assert "IS NOT DISTINCT FROM" in sql
+
+
+def test_batch_upsert_route_weight_sql_unnests_and_targets_the_route_index():
+    sql = ad.BATCH_UPSERT_ROUTE_WEIGHT_SQL
+    assert "INSERT INTO ridership_weights" in sql
+    assert "unnest($2::text[], $3::numeric[])" in sql
+    assert "ON CONFLICT (agency_id, route_code) WHERE route_code IS NOT NULL" in sql
+
+
 # ── freshness ────────────────────────────────────────────────────────────
 
 

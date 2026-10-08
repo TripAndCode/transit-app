@@ -14,7 +14,7 @@ export type RunBar = {
    *  which a solid bar of the same width would look exactly like. */
   dashed: boolean;
   rows: number | null;
-  lockWaitMs: number | null;
+  lockProbeMs: number | null;
   error: string | null;
 };
 
@@ -33,7 +33,7 @@ const MS_PER_HOUR = 3_600_000;
 
 /** Reading order down the chart: the order the pipeline actually runs in, so
  *  a morning sweep reads top to bottom as well as left to right. */
-const KIND_ORDER: readonly PipelineRun["kind"][] = ["ingest", "analyze", "weather", "static"];
+const KIND_ORDER: readonly PipelineRun["kind"][] = ["ingest", "promote", "analyze", "weather", "static"];
 
 function hoursFrom(dayStart: Date, iso: string | null, fallback: Date): number {
   const at = iso == null ? fallback : new Date(iso);
@@ -84,7 +84,7 @@ export function runsToBars(runs: readonly PipelineRun[], dayStart: Date, now: Da
       status: run.status,
       dashed: run.status === "skipped",
       rows: run.rows,
-      lockWaitMs: run.lock_wait_ms,
+      lockProbeMs: run.lock_probe_ms,
       error: run.error,
     });
     lanes.set(key, lane);

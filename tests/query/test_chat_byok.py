@@ -10,7 +10,6 @@ asserts on a raw key value beyond confirming it reached the one-off call —
 matching this module's "never log the raw key" rule.
 """
 
-import json
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -152,41 +151,6 @@ async def test_byok_rate_limit_error_degrades_to_the_shared_rate_limited_message
     result = await chat.chat_with_tools("hi", _ctx(), conn=None, agency_id=1, locale="en", user_id=42)
     assert result["success"] is False
     assert result["answer"] == chat._chat_str("llm_rate_limited", "en")
-
-
-@pytest.mark.asyncio
-async def test_generate_proactive_insight_uses_byok_key(monkeypatch):
-    """The Copilot proactive-insight path shares the same BYOK seam.
-
-    ``generate_proactive_insight`` takes an already-resolved ``user_key``
-    rather than a ``conn``/``user_id`` pair: the caller (the API router)
-    resolves the key with its own short-lived pooled connection, released
-    before this (multi-second) LLM call — never held across it.
-    """
-    from pipeline.query import copilot
-
-    used_key = {}
-
-    def fake_completion_with_key(provider, api_key, **kwargs):
-        used_key["provider"] = provider
-        used_key["api_key"] = api_key
-        func = SimpleNamespace(name="pick_template", arguments=json.dumps({"template_id": "no_signal", "params": {}}))
-        call = SimpleNamespace(function=func, id="call_1", type="function")
-        return SimpleNamespace(content=None, tool_calls=[call])
-
-    monkeypatch.setattr(copilot, "_completion_with_key", fake_completion_with_key)
-    monkeypatch.setattr(copilot, "_get_client", lambda: _must_not_be_called())
-
-    result = await copilot.generate_proactive_insight(
-        "overview",
-        {},
-        {"headline": {"samples": 1}},
-        locale="en",
-        user_key=_fake_user_key(),
-    )
-    assert used_key["provider"] == "gemini"
-    assert used_key["api_key"] == "gemini_user_key"
-    assert result["text"]
 
 
 def test_completion_with_key_omits_tool_choice_when_no_tools():

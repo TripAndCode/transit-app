@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { loginUrl } from "../api/auth";
 import { useConfig } from "../api/config";
 import { ApiError, apiPost } from "../api/client";
+import { LanguageToggle } from "../components/LanguageToggle";
 import { Card } from "../components/ui/Card";
+import { useDocumentLocale } from "../i18n/useDocumentLocale";
 import "./LoginPage.css";
 
 // `next` comes straight from the URL query string, so it's attacker-suppliable
@@ -46,6 +48,7 @@ const ERROR_KEYS: Record<string, string> = {
 
 export function LoginPage() {
   const { t } = useTranslation();
+  useDocumentLocale();
   const [params] = useSearchParams();
   const next = sanitizeNext(params.get("next"));
   const error = params.get("error");
@@ -89,7 +92,9 @@ export function LoginPage() {
         <div className="login-shell__grid" aria-hidden="true" />
         <Card as="main" padded={false} className="login-card">
           <div className="login-card__brand">
-            <span className="login-card__brand-title">{t("header.app_title")}</span>
+            <Link to="/welcome" className="login-card__brand-title">
+              {t("header.app_title")}
+            </Link>
             <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
           </div>
           <h1 className="login-card__h1">
@@ -120,13 +125,20 @@ export function LoginPage() {
     <div className="login-shell">
       <div className="login-shell__grid" aria-hidden="true" />
       <Card as="main" padded={false} className="login-card">
+        <LanguageToggle />
         <div className="login-card__brand">
-          <span className="login-card__brand-title">{t("header.app_title")}</span>
+          <Link to="/welcome" className="login-card__brand-title">
+            {t("header.app_title")}
+          </Link>
           <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
         </div>
 
         <h1 className="login-card__h1">{t("account.login.welcome_back")}</h1>
-        <p className="login-card__sub">{t("account.login.choose_provider")}</p>
+        <p className="login-card__sub">
+          {config?.local_admin_enabled && !config.auth_enabled
+            ? t("account.login.username_prompt")
+            : t("account.login.choose_provider")}
+        </p>
 
         {error && (
           <div className="login-card__error" role="alert">
@@ -207,20 +219,19 @@ export function LoginPage() {
           </form>
         )}
 
-        {/*
-          Terms paragraph: the inventory pre-split it into seven keys
-          (prefix / link / and / link / suffix). We assemble those keys
-          back into the sentence here so we don't need <Trans> for now.
-          When we tighten the copy in a follow-up, we can collapse to a
-          single `account.login.terms_paragraph` key with <terms> and
-          <privacy> placeholders.
-        */}
+        {/* One sentence per language, so each locale keeps its own word order
+            and spacing around the two links. */}
         <p className="login-card__footer">
-          {t("account.login.terms_prefix")}
-          <a href="/terms" target="_blank" rel="noreferrer">{t("account.login.terms_link")}</a>
-          {t("account.login.terms_and")}
-          <a href="/privacy" target="_blank" rel="noreferrer">{t("account.login.privacy_link")}</a>
-          {t("account.login.terms_suffix")}
+          <Trans
+            t={t}
+            i18nKey="account.login.terms_consent"
+            components={{
+              // eslint-disable-next-line jsx-a11y/anchor-has-content -- Trans fills the link text from the translation
+              terms: <a href="/terms" target="_blank" rel="noreferrer" />,
+              // eslint-disable-next-line jsx-a11y/anchor-has-content -- Trans fills the link text from the translation
+              privacy: <a href="/privacy" target="_blank" rel="noreferrer" />,
+            }}
+          />
         </p>
       </Card>
     </div>

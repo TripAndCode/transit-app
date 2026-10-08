@@ -17,6 +17,8 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
+from api.sso import sso_status
+
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P, _SCRYPT_DKLEN = 2**14, 8, 1, 32
 
 
@@ -116,6 +118,16 @@ def require_user(request: Request) -> User:
     return user
 
 
+def require_user_when_sign_in_exists(request: Request) -> User | None:
+    """``require_user`` while SSO is configured; otherwise the caller, if any.
+
+    In anonymous-only mode nobody can sign in, so a signed-in requirement
+    would refuse every caller for good instead of gating anyone.
+    """
+    enabled, _ = sso_status()
+    return require_user(request) if enabled else current_user(request)
+
+
 def require_admin(request: Request) -> User:
     """FastAPI dependency that 403s unless the caller has the ``admin`` role."""
     user = require_user(request)
@@ -129,7 +141,7 @@ def require_llm_approved(user: User | None) -> User:
     set. Anonymous callers (``user is None``) never have a row to check, so
     they 403 here too -- there is no separate 401-then-403 distinction for
     this gate, matching the single ``llm_not_approved`` contract every
-    LLM-only endpoint (``/followup``, ``/copilot/insight``) shares.
+    LLM-only endpoint (``/followup``) shares.
 
     Takes an already-resolved ``user`` rather than ``Request`` (and isn't
     itself wired up via ``Depends``) for two reasons: callers need to run

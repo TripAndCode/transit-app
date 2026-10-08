@@ -95,7 +95,7 @@ export function EmptyState({ title, hint, icon, reasons, recoveries, action }: P
             .empty-state-cta:hover {
               background: var(--accent-soft);
               border-color: var(--accent);
-              color: var(--accent);
+              color: var(--accent-strong);
             }
           `}</style>
           <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 18 }}>
@@ -113,7 +113,7 @@ export function EmptyState({ title, hint, icon, reasons, recoveries, action }: P
                   fontSize: 13,
                   color: "var(--text-secondary)",
                   cursor: "pointer",
-                  transition: "all var(--transition)",
+                  transition: "background var(--transition), color var(--transition), border-color var(--transition)",
                 }}
               >
                 {recovery.label}

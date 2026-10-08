@@ -94,8 +94,7 @@ def default_log_fetcher(repo: str) -> str:
 
     run_id = (list_proc.stdout or "").strip()
     # An empty result list makes the `-q` filter resolve to the literal
-    # string "null", matching vps-heartbeat-watchdog.yml's own documented
-    # handling of this exact `gh`/`jq` quirk.
+    # string "null" (a `gh`/`jq` quirk), not an empty string.
     if list_proc.returncode != 0 or not run_id or run_id == "null":
         raise R2StatusUnavailable(
             f"no {WORKFLOW_FILE} run found, or `gh run list` failed (exit {list_proc.returncode}): "

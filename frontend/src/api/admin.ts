@@ -253,7 +253,10 @@ export type BoardCollector = {
   label: string;
   status: "ok" | "warn" | "down" | "unknown";
   last_success_at: string | null;
+  /** The collector's own reason text, verbatim; shown only on request. */
   detail: string | null;
+  /** The status check itself failed, so the state is not known at all. */
+  check_failed: boolean;
   /** 24 hourly cells, oldest first: 1 where the collector was still known good. */
   history: number[];
 };
@@ -280,11 +283,12 @@ export type BoardAlert = {
   href: string | null;
 };
 
-/** One `pipeline_runs` row: an ingest, analyze, weather or static job, from
- *  the CLI or the cron path, including the ones the advisory lock displaced. */
+/** One `pipeline_runs` row: an ingest, promote, analyze, weather or static
+ *  job, from the CLI or the cron path, including the ones the advisory lock
+ *  displaced. */
 export type PipelineRun = {
   run_id: number;
-  kind: "ingest" | "analyze" | "weather" | "static";
+  kind: "ingest" | "promote" | "analyze" | "weather" | "static";
   /** Null for a fleet-wide job, and for one displaced before it resolved
    *  which agency it was for. */
   agency_id: number | null;
@@ -294,7 +298,9 @@ export type PipelineRun = {
   finished_at: string | null;
   status: "running" | "ok" | "skipped" | "error";
   rows: number | null;
-  lock_wait_ms: number | null;
+  /** What the non-blocking lock acquire cost, for a run displaced by it. A
+   *  probe round trip, not time queued -- there is no queue. */
+  lock_probe_ms: number | null;
   error: string | null;
   requested_by: number | null;
 };
@@ -312,8 +318,8 @@ export type AdminBoard = {
 type AdminRuns = { date: string; runs: PipelineRun[] };
 
 /** The `/admin` entry page's single snapshot. Polled rather than pushed: the
- *  underlying collectors are themselves cached snapshots, so a short poll is
- *  as fresh as the data can be. */
+ *  collectors and the staleness check behind it are cached snapshots on the
+ *  server, so a short poll is as fresh as the data can be. */
 export function useAdminBoard() {
   return useQuery({
     queryKey: ["adminBoard"],
@@ -492,6 +498,21 @@ export function useUserSessions(uid: number) {
   });
 }
 
+export type UserActivityTotal = {
+  route: string;
+  method: string;
+  agency_id: number | null;
+  requests: number;
+  errors: number;
+};
+
+export function useUserActivity(uid: number) {
+  return useQuery({
+    queryKey: ["adminUserActivity", uid],
+    queryFn: ({ signal }) => apiGet<UserActivityTotal[]>(`/api/admin/users/${uid}/activity?days=30`, { signal }),
+  });
+}
+
 /** Mutation: revoke one session by its prefix; refetches the session list. */
 export function useRevokeSession(uid: number) {
   const qc = useQueryClient();
@@ -503,7 +524,7 @@ export function useRevokeSession(uid: number) {
 
 // ── User drawer: API keys ─────────────────────────────────────────────────
 
-export type AdminApiKey = {
+type AdminApiKey = {
   id: number;
   owner_user_id: number | null;
   tier: string;
@@ -515,12 +536,16 @@ export type AdminApiKey = {
 
 export type AdminApiKeyIssued = AdminApiKey & { key: string };
 
+/** `truncated` is true when more admin-issued keys exist than the backend's
+ * per-request cap returned -- see MAX_API_KEYS_LISTED in api/routers/admin.py. */
+export type AdminApiKeyList = { keys: AdminApiKey[]; truncated: boolean };
+
 /** API keys issued (via the admin drawer) for one user. */
 export function useApiKeys(ownerUserId: number) {
   return useQuery({
     queryKey: ["adminApiKeys", ownerUserId],
     queryFn: ({ signal }) =>
-      apiGet<AdminApiKey[]>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
+      apiGet<AdminApiKeyList>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
   });
 }
 
@@ -664,6 +689,19 @@ export function usePatchFeatureFlag() {
   });
 }
 
+/** Mutation: DELETE one flag's override, returning it to its env value.
+ *  Takes no reason — there is nothing to justify beyond "stop overriding",
+ *  and the server records the clear in the admin audit trail regardless. */
+export function useClearFeatureFlag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key }: { key: string }) => apiDelete<FeatureFlag>(`/api/admin/flags/${key}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminFlags"] });
+    },
+  });
+}
+
 /** Mutation: ask the server to run the ingest+analyze sweep now.
  *
  *  The 202 carries the run row the server has already opened, so the caller
@@ -692,7 +730,7 @@ export function useTriggerRun() {
 //
 // "route" here is the Ask pipeline stage that answered a question (rules ->
 // nn (embedding nearest-neighbour) -> rag (Stage-3 LLM)), matching
-// CLAUDE.md's architecture naming, not a transit route/line. `no_history` is
+// AGENTS.md's architecture naming, not a transit route/line. `no_history` is
 // the router's own early-exit case (a follow-up with nothing to continue).
 // See api/routers/admin_ask.py's module docstring for why there is no
 // "user" field and why `providers` below is always null: ask_query_log

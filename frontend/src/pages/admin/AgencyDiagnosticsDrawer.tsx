@@ -12,14 +12,12 @@ import {
   type RtFieldCoverage,
 } from "../../api/admin";
 import { formatApiError } from "../../api/client";
-import { formatDateTime } from "../../utils/format";
+import { formatDateTime, EM_DASH } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
 import { ClampSparkline } from "./ClampSparkline";
 import { useRowDrafts } from "./useRowDrafts";
 
 const METRIC_TYPES = ["ewt_sec", "vehicle_km_delivered_pct"] as const;
-
-const EM_DASH = "—";
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
@@ -153,7 +151,7 @@ function EditorShell({
   return (
     <div style={{ display: "grid", gap: 8, fontSize: 12.5 }}>
       {children}
-      {!!error && <div style={{ color: "var(--color-warning)" }}>{formatApiError(error)}</div>}
+      {!!error && <div style={{ color: "var(--color-warning-text)" }}>{formatApiError(error)}</div>}
       <div style={{ display: "flex", gap: 8 }}>
         <AdminButton variant="primary" disabled={saveDisabled} onClick={onSave}>
           {t("admin.agency_diag.editor_save")}
@@ -413,14 +411,12 @@ export function AgencyDiagnosticsDrawer({
   onDisable,
   onRestore,
   disablePending = false,
-  staticReloadAvailable = false,
 }: {
   agency: AdminAgency;
   onClose: () => void;
   onDisable: (id: number) => void;
   onRestore: (id: number) => void;
   disablePending?: boolean;
-  staticReloadAvailable?: boolean;
 }) {
   const { t } = useTranslation();
   const { data, isLoading, error } = useAgencyDiagnostics(agency.agency_id);
@@ -442,7 +438,7 @@ export function AgencyDiagnosticsDrawer({
       </h4>
 
       {isLoading && <div style={{ color: "var(--text-tertiary)" }}>{t("common.loading")}</div>}
-      {!!error && <div style={{ color: "var(--color-warning)", fontSize: 13 }}>{formatApiError(error)}</div>}
+      {!!error && <div style={{ color: "var(--color-warning-text)", fontSize: 13 }}>{formatApiError(error)}</div>}
 
       {data && (
         <>
@@ -537,7 +533,7 @@ export function AgencyDiagnosticsDrawer({
                 <span>
                   {t("admin.agency_diag.weights_summary", {
                     withWeights: data.weights_coverage.routes_with_weights,
-                    total: data.weights_coverage.routes_total,
+                    count: data.weights_coverage.routes_total,
                   })}
                 </span>{" "}
                 <AdminButton
@@ -572,13 +568,6 @@ export function AgencyDiagnosticsDrawer({
         </AdminButton>
         <AdminButton
           variant="secondary"
-          disabled={!staticReloadAvailable}
-          title={staticReloadAvailable ? undefined : t("admin.agency_diag.action_reload_static_hint")}
-        >
-          {t("admin.agency_diag.action_reload_static")}
-        </AdminButton>
-        <AdminButton
-          variant="secondary"
           disabled={reanalyze.isPending || agency.deleted_at != null}
           title={agency.deleted_at == null ? undefined : t("admin.agency_diag.action_reanalyze_disabled_hint")}
           onClick={() => reanalyze.mutate(agency.agency_id)}
@@ -587,7 +576,7 @@ export function AgencyDiagnosticsDrawer({
         </AdminButton>
       </div>
       {!!probe.error && (
-        <div style={{ color: "var(--color-warning)", fontSize: 12.5 }}>{formatApiError(probe.error)}</div>
+        <div style={{ color: "var(--color-warning-text)", fontSize: 12.5 }}>{formatApiError(probe.error)}</div>
       )}
       {probe.data && (
         <div style={{ color: "var(--text-tertiary)", fontSize: 12.5 }}>
@@ -595,7 +584,7 @@ export function AgencyDiagnosticsDrawer({
         </div>
       )}
       {!!reanalyze.error && (
-        <div style={{ color: "var(--color-warning)", fontSize: 12.5 }}>{formatApiError(reanalyze.error)}</div>
+        <div style={{ color: "var(--color-warning-text)", fontSize: 12.5 }}>{formatApiError(reanalyze.error)}</div>
       )}
       {reanalyze.data && (
         <div style={{ color: "var(--text-tertiary)", fontSize: 12.5 }}>

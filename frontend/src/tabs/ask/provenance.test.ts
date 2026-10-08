@@ -85,11 +85,11 @@ describe("conditionsLabel", () => {
 
   it("joins the non-default dims", () => {
     expect(conditionsLabel({ dow: "weekend", time_band: "morning", service: "all" }, t)).toBe(
-      `${t("filters.dow.weekend")} · ${t("filters.time_band.morning")}`,
+      `${t("common.service_value.土日祝")} · ${t("filters.time_band.morning")}`,
     );
   });
 
   it("renders in the active locale", () => {
-    expect(conditionsLabel({ dow: "weekday", time_band: "all", service: "all" }, tJa)).toBe(tJa("filters.dow.weekday"));
+    expect(conditionsLabel({ dow: "weekday", time_band: "all", service: "all" }, tJa)).toBe(tJa("common.service_value.平日"));
   });
 });

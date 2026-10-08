@@ -9,7 +9,7 @@ autouse ``apply_schema`` fixture runs for every test collected under
 an unreachable Postgres made these ERROR at fixture setup while they lived
 under ``tests/ask_eval/``, not skip or pass. ``tests/unit/conftest.py``
 overrides that fixture specifically so tests here bypass it, matching
-CLAUDE.md's "Put pure logic tests under tests/unit/" convention.
+AGENTS.md's "Put pure logic tests under tests/unit/" convention.
 
 Proves the numeric check itself isn't vacuous — accepts a correct number,
 rejects a wrong number, rejects a wrong tool call — independent of whether
@@ -33,7 +33,7 @@ def test_assert_matches_ground_truth_accepts_correct_number():
 def test_assert_matches_ground_truth_rejects_wrong_number():
     """Deliberately corrupt the returned avg_min and confirm the check fails —
     guards against this test suite silently passing no matter what number
-    comes back (the exact failure mode item 23 exists to catch)."""
+    comes back (the exact failure mode the live-LLM numeric eval exists to catch)."""
     pattern = uniform_delays()
     correct = pattern.expected["agg_route_stats"]["avg_min"]
     wrong = (correct or 0.0) + 100.0

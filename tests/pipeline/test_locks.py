@@ -1,8 +1,8 @@
 """DB-backed tests for pipeline.locks -- the cross-process ingest/analyze
 advisory lock shared by api/routers/internal.py's cron endpoint and
 gtfs_pipeline.py's ingest/ingest_live/analyze/analyze_all CLI commands, plus
-the per-agency `updates` lock the collector push endpoint and analyze() both
-take."""
+the per-agency `updates` lock that promotion (pipeline/promote.py) and
+analyze() both take."""
 
 import os
 import time

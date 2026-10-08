@@ -2,13 +2,18 @@
 runner: nothing in the Makefile or CI invokes them, so a regression there is
 silent. `make oracle-tests` runs every suite with a pass/fail summary, and
 the nightly workflow wires it into CI so a broken suite is eventually caught.
+The same workflow's python-extended job is checked here too, for the setup
+steps its gated suites need to run rather than self-skip.
 """
 
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 ORACLE_TESTS_DIR = ROOT / "oracle_cloud" / "v3" / "tests"
@@ -108,3 +113,36 @@ def test_nightly_workflow_references_oracle_tests():
     assert "RUN_CH_INTEGRATION" in text
     assert "permissions:" in text and "contents: read" in text
     assert "timeout-minutes: 60" in text
+
+
+def _python_extended_step_tokens() -> list[list[str]]:
+    """Each python-extended step's `run` script, shell-tokenized, in step order."""
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "nightly-extended.yml").read_text())
+    return [shlex.split(step.get("run", "")) for step in workflow["jobs"]["python-extended"]["steps"]]
+
+
+def _contains(tokens: list[str], command: list[str]) -> bool:
+    return any(tokens[i : i + len(command)] == command for i in range(len(tokens) - len(command) + 1))
+
+
+def _first_step_running(command: list[str]) -> int:
+    for i, tokens in enumerate(_python_extended_step_tokens()):
+        if _contains(tokens, command):
+            return i
+    raise AssertionError(f"python-extended job never runs `{shlex.join(command)}`")
+
+
+def test_python_extended_job_installs_embeddings_group():
+    """RUN_SLOW makes test_embeddings a required non-skip; without the group
+    the embedder import fails and that test fails instead of skipping."""
+    step = _python_extended_step_tokens()[_first_step_running(["poetry", "install"])]
+    assert _contains(step, ["--with", "embeddings"]), "python-extended's `poetry install` lacks `--with embeddings`"
+
+
+def test_python_extended_job_bakes_spa_between_build_and_pytest():
+    """The gated browser suites open api/static/index.html, which only
+    `make bake` fills from the build output; without it they self-skip."""
+    build = _first_step_running(["npm", "run", "build"])
+    bake = _first_step_running(["make", "bake"])
+    pytest_run = _first_step_running(["poetry", "run", "pytest"])
+    assert build < bake < pytest_run, "python-extended must run `make bake` after the SPA build and before pytest"

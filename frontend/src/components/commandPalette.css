@@ -3,13 +3,10 @@
    having loaded first, the same reasoning OverviewModal's own import of
    overview.css documents. */
 
+/* Layout only: OverlayBase owns the scrim's colour, its full-bleed box and
+   its rung on the stacking ladder. This positions the panel inside it --
+   near the top of the viewport, where the eye already is when ⌘K is hit. */
 .cmdp-overlay {
-  position: fixed;
-  inset: 0;
-  /* Its own rung, above the context menu: ⌘K fires while one can still be
-     open, and a tie orders by mount position rather than by intent. */
-  z-index: var(--z-command-palette);
-  background: rgba(15, 17, 25, 0.35);
   display: flex;
   justify-content: center;
   align-items: flex-start;

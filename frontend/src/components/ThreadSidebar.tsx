@@ -9,12 +9,16 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useConversations, useUpdateConversation, useDeleteConversation } from "../api/hooks";
+import { useRouteNames } from "../api/useRouteNames";
 import type { Conversation, FilterCtx } from "../api/types";
 import { rangeLabel } from "../utils/rangeLabel";
 import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
 import { Z_INDEX } from "../styles/zIndex";
 import { FILTER_SEPARATOR } from "../utils/format";
+import { dowValueLabel } from "../utils/filterValueLabels";
+import { menuItems, nextMenuItem } from "./menuKeys";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -27,9 +31,10 @@ function isThisWeek(iso: string): boolean {
 
 function conversationScopeParts(
   conv: Conversation,
-  t: (key: string, opts?: Record<string, unknown>) => string
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  formatRoute: (code: string) => string,
 ): string[] {
-  return [...(conv.filter_ctx.routes ?? []), filterSummary(conv.filter_ctx, t)];
+  return [...(conv.filter_ctx.routes ?? []).map(formatRoute), filterSummary(conv.filter_ctx, t)];
 }
 
 function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -40,10 +45,7 @@ function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unk
   if (range) parts.push(range);
 
   // Day-of-week
-  if (fc.dow && fc.dow !== "all") {
-    const dowKey = fc.dow === "weekday" ? "filters.dow.weekday" : "filters.dow.weekend";
-    parts.push(t(dowKey));
-  }
+  if (fc.dow && fc.dow !== "all") parts.push(dowValueLabel(fc.dow, t));
 
   // Time band
   if (fc.time_band && fc.time_band !== "all") {
@@ -75,6 +77,7 @@ type Props = {
 export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Props) {
   const { t } = useTranslation();
   const { data: conversations = [], isLoading } = useConversations(agencyId);
+  const routeNames = useRouteNames(agencyId);
   const updateConv = useUpdateConversation(agencyId);
   const deleteConv = useDeleteConversation(agencyId);
 
@@ -83,28 +86,35 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  // The control the menu was opened from, so Escape can hand focus back to
+  // it instead of dropping the keyboard user at the top of the document.
+  const menuTriggerRef = useRef<HTMLElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menu) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenu(null);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [menu]);
+  /** Every way out of the menu goes through here. Choosing an item unmounts
+   *  the menuitem that had focus, so without this the keyboard user is left
+   *  on `<body>` -- Escape is not the only exit that has to put them back. */
+  function closeMenu() {
+    setMenu(null);
+    menuTriggerRef.current?.focus();
+  }
 
-  // Close menu on Escape.
+  // The menu renders only while its conversation still exists; a refetch that
+  // drops it must not leave an invisible layer answering the next Escape.
+  const activeConv = menu ? conversations.find((c) => c.conversation_id === menu.convId) : undefined;
+  usePopoverDismiss(
+    menu !== null && activeConv !== undefined,
+    menuRef,
+    (reason) => (reason === "escape" ? closeMenu() : setMenu(null)),
+    menuTriggerRef,
+  );
+
+  // Focus enters the menu as it opens: an operator who reached the kebab by
+  // keyboard must not have to Tab through the rest of the sidebar to get to
+  // the items it just put in front of them.
   useEffect(() => {
     if (!menu) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setMenu(null);
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    menuItems(menuRef.current)[0]?.focus();
   }, [menu]);
 
   // Clamp the menu to the viewport once its real size is known -- its
@@ -134,8 +144,22 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   function openMenu(e: ReactMouseEvent<HTMLElement>, convId: string) {
     e.preventDefault();
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const trigger = e.currentTarget as HTMLElement;
+    // Pressing the control that opened the menu closes it, as a toggle should.
+    if (menu?.convId === convId && menuTriggerRef.current === trigger) {
+      closeMenu();
+      return;
+    }
+    menuTriggerRef.current = trigger;
+    const rect = trigger.getBoundingClientRect();
     setMenu({ convId, x: rect.right, y: rect.top });
+  }
+
+  function onMenuKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const target = nextMenuItem(menuItems(menuRef.current), document.activeElement, e.key);
+    if (!target) return;
+    e.preventDefault();
+    target.focus();
   }
 
   function handleRename(conv: Conversation) {
@@ -154,12 +178,12 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   }
 
   function handleTogglePin(conv: Conversation) {
-    setMenu(null);
+    closeMenu();
     updateConv.mutate({ id: conv.conversation_id, patch: { pinned: !conv.pinned } });
   }
 
   function handleDelete(conv: Conversation) {
-    setMenu(null);
+    closeMenu();
     if (window.confirm(t("ask.sidebar.delete_confirm"))) {
       deleteConv.mutate(conv.conversation_id);
       if (activeId === conv.conversation_id) onSelect(null);
@@ -169,7 +193,8 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   // Filter by the search query, then group the surviving conversations
   const query = search.normalize("NFKC").trim().toLocaleLowerCase();
   const matching = conversations.filter((c) =>
-    [c.title, ...conversationScopeParts(c, t)]
+    // Codes stay searchable beside the labels shown.
+    [c.title, ...(c.filter_ctx.routes ?? []), ...conversationScopeParts(c, t, routeNames.format)]
       .join(" ").normalize("NFKC").toLocaleLowerCase().includes(query),
   );
   const pinned = matching.filter((c) => c.pinned);
@@ -192,7 +217,6 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
     { labelKey: "ask.sidebar.earlier", items: earlierList },
   ];
 
-  const activeConv = menu ? conversations.find((c) => c.conversation_id === menu.convId) : null;
 
   // ── sidebar content ──────────────────────────────────────────────────────
   const sidebarContent = (
@@ -213,7 +237,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
           style={{
             width: "100%",
             background: "var(--accent)",
-            color: "#fff",
+            color: "var(--on-accent)",
             border: "none",
             borderRadius: "var(--radius)",
             padding: "9px var(--space-3)",
@@ -281,7 +305,7 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
                   onRenameBlur={commitRename}
                   onSelect={() => onSelect(conv.conversation_id)}
                   onContextMenu={(e) => openMenu(e, conv.conversation_id)}
-                  filterSummaryText={conversationScopeParts(conv, t).filter(Boolean).join(FILTER_SEPARATOR)}
+                  filterSummaryText={conversationScopeParts(conv, t, routeNames.format).filter(Boolean).join(FILTER_SEPARATOR)}
                 />
               ))}
             </section>
@@ -295,6 +319,21 @@ export function ThreadSidebar({ agencyId, activeId, onSelect, onNewThread }: Pro
   const contextMenu = menu && activeConv && (
     <div
       ref={menuRef}
+      role="menu"
+      aria-label={t("ask.sidebar.more_options_aria")}
+      // Programmatically focusable only: the container is never a tab stop,
+      // but it owns the arrow-key handling for the items inside it.
+      tabIndex={-1}
+      onKeyDown={onMenuKeyDown}
+      // Tab past the last item and the menu is gone. Escape and an outside
+      // click already close it, but neither fires when focus simply walks off
+      // the end, leaving a mounted `role="menu"` behind the user.
+      // Focus moving to the kebab is a press on it, which its click toggles.
+      onBlur={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && (menuRef.current?.contains(next) || menuTriggerRef.current?.contains(next))) return;
+        setMenu(null);
+      }}
       style={{
         position: "fixed",
         top: menu.y,
@@ -444,13 +483,11 @@ function ConvItem({
           <span style={{ fontSize: 16, lineHeight: 1.5, flexShrink: 0 }}>💬</span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
+              className="clamp-2"
               style={{
                 fontSize: 13,
                 fontWeight: isActive ? 600 : 400,
                 color: "var(--text-primary)",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
                 lineHeight: 1.4,
               }}
             >
@@ -459,12 +496,10 @@ function ConvItem({
 
             {subLine && (
               <div
+                className="clamp-2"
                 style={{
                   fontSize: "var(--text-xs)",
                   color: "var(--text-tertiary)",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
                   marginTop: 2,
                   lineHeight: 1.3,
                 }}
@@ -506,29 +541,16 @@ type ContextMenuItemProps = {
   danger?: boolean;
 };
 
+/** Highlight comes from `:hover, :focus-visible` on the class, not from
+ *  writing `style.background` on the node: a mouse-only hover handler leaves
+ *  the keyboard-focused item looking identical to the rest of the menu. */
 function ContextMenuItem({ label, onClick, danger }: ContextMenuItemProps) {
   return (
     <button
       type="button"
+      role="menuitem"
+      className={danger ? "context-menu__item context-menu__item--danger" : "context-menu__item"}
       onClick={onClick}
-      style={{
-        display: "block",
-        width: "100%",
-        textAlign: "left",
-        background: "none",
-        border: "none",
-        padding: "7px var(--space-4)",
-        fontSize: 13,
-        cursor: "pointer",
-        color: danger ? "var(--color-danger)" : "var(--text-primary)",
-        transition: "background var(--transition)",
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-soft)";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "none";
-      }}
     >
       {label}
     </button>

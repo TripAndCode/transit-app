@@ -119,12 +119,11 @@ def test_inflight_exception_propagates_to_all_waiters_and_not_cached():
 
 
 def test_keyable_rejects_unhashable_args_instead_of_collapsing_them():
-    """_keyable() previously collapsed any unhashable arg (list, dict) to a
-    fixed token keyed only on its class name, discarding the actual value -
-    two different requests with different unhashable values of the same
-    type would silently collide on one cache entry. It must instead fail
-    loud, forcing a future caller to add explicit key handling rather than
-    risk cross-request cache collisions."""
+    """_keyable() must fail loud on an unhashable arg (list, dict) rather
+    than collapse it to a token keyed only on its class name: that would
+    discard the actual value, so two requests with different unhashable
+    values of the same type would silently collide on one cache entry.
+    Failing forces a future caller to add explicit key handling instead."""
     with pytest.raises(TypeError, match="not hashable"):
         cache._keyable(["a", "list", "is", "unhashable"])
     with pytest.raises(TypeError, match="not hashable"):

@@ -78,4 +78,69 @@ describe("ExportMenu", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
+
+  it("closes when focus leaves it entirely, as Tab off the last item does", () => {
+    // Escape and an outside click both fire; walking off the end fires
+    // neither, and leaves a mounted role="menu" with aria-expanded still
+    // true behind a user who has already moved on.
+    renderMenu("/agencies/1/reports");
+    openMenu();
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+
+    fireEvent.blur(screen.getByRole("menu"), { relatedTarget: outside });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /export/i })).toHaveAttribute("aria-expanded", "false");
+    outside.remove();
+  });
+
+  it("stays open while focus moves between its own items", () => {
+    renderMenu("/agencies/1/reports");
+    openMenu();
+    const items = screen.getAllByRole("menuitem");
+
+    fireEvent.blur(screen.getByRole("menu"), { relatedTarget: items[1] });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("moves focus onto the first item when the menu opens", () => {
+    renderMenu("/agencies/1/reports");
+    openMenu();
+    expect(screen.getAllByRole("menuitem")[0]).toHaveFocus();
+  });
+
+  it("walks the items with the arrow keys, wrapping at both ends", () => {
+    renderMenu("/agencies/1/reports");
+    openMenu();
+    const items = screen.getAllByRole("menuitem");
+    expect(items.length).toBeGreaterThan(1);
+
+    fireEvent.keyDown(items[0], { key: "ArrowDown" });
+    expect(items[1]).toHaveFocus();
+    fireEvent.keyDown(items[1], { key: "ArrowUp" });
+    expect(items[0]).toHaveFocus();
+    fireEvent.keyDown(items[0], { key: "ArrowUp" });
+    expect(items[items.length - 1]).toHaveFocus();
+    fireEvent.keyDown(items[items.length - 1], { key: "ArrowDown" });
+    expect(items[0]).toHaveFocus();
+  });
+
+  it("jumps to the first and last item with Home and End", () => {
+    renderMenu("/agencies/1/reports");
+    openMenu();
+    const items = screen.getAllByRole("menuitem");
+    fireEvent.keyDown(items[0], { key: "End" });
+    expect(items[items.length - 1]).toHaveFocus();
+    fireEvent.keyDown(items[items.length - 1], { key: "Home" });
+    expect(items[0]).toHaveFocus();
+  });
+
+  it("returns focus to the trigger when Escape closes the menu", () => {
+    renderMenu("/agencies/1/reports");
+    const trigger = screen.getByRole("button", { name: /export/i });
+    openMenu();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
 });

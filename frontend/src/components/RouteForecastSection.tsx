@@ -10,22 +10,27 @@
  * ctx.routes itself, no props needed beyond `aid`). Migrated from the former
  * ForecastTab.tsx; picking a route updates the shared ctx.routes filter, so
  * it also filters every other report type/tab — a deliberate, shared-filter
- * consequence, not a bug. There is no in-view "back" button: clearing the
- * route chip in the shared Filters bar is the way back, matching how every
- * other tab's focused-route mode already works.
+ * consequence, not a bug. The section's route picker is the way back to all
+ * routes, as is clearing the route chip in the shared Filters bar.
  */
-import { useState } from "react";
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useForecastHeatmap, useForecastOverview } from "../api/hooks";
-import { useRangeContext } from "../api/rangeContext";
+import { useScope } from "../api/scope";
+import { useRouteNames } from "../api/useRouteNames";
 import { InlineSparkline } from "./InlineSparkline";
+import { RouteLabel } from "./RouteLabel";
 import { OverviewModal } from "./OverviewModal";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
 import { BandGrid, Legend } from "./charts/DowBandGrid";
+import { Card } from "./ui/Card";
+import { Tooltip } from "./Tooltip";
+import { onActivateKey } from "../utils/a11y";
 import { delayColor, relativeDelayColor } from "../styles/tokens";
 import { Z_INDEX } from "../styles/zIndex";
-import { formatNumber } from "../utils/format";
+import { formatNumber, formatMinutes } from "../utils/format";
+import { avgDelayText } from "../utils/delayPhrase";
 import {
   BAND_ORDER,
   bandOf,
@@ -36,33 +41,34 @@ import {
   type ForecastOverviewRoute,
   type ForecastOverviewWorst,
 } from "../api/types";
-
-const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+import { WEEK } from "../utils/week";
+import "./RouteForecastSection.css";
 
 type Tip = { x: number; y: number; text: string } | null;
 type View = "dow" | "hr" | null;
 
+
 /** Clickable-card props matching the Overview card pattern (role=button + keyboard). */
 function clickable(onClick: () => void) {
   return {
-    role: "button",
+    role: "button" as const,
     tabIndex: 0,
     onClick,
-    onKeyDown: (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onClick();
-      }
-    },
+    onKeyDown: onActivateKey(() => onClick()),
   };
 }
 
-function Tooltip({ tip }: { tip: Tip }) {
+/** Cursor-following readout for BandGrid's dense day×band grid (`DowBandGrid.tsx`,
+ *  unaffected by this component's own move to the anchored `Tooltip`): BandGrid
+ *  scans many cells under a moving pointer, so its text has to track the cursor
+ *  rather than anchor to one cell the way `Tooltip` does. */
+function CrosshairTip({ tip }: { tip: Tip }) {
   if (!tip) return null;
   const x = Math.min(tip.x + 14, window.innerWidth - 170);
   const y = Math.min(tip.y + 14, window.innerHeight - 36);
   return (
     <div
+      role="tooltip"
       style={{
         position: "fixed",
         left: x,
@@ -87,11 +93,13 @@ function Tooltip({ tip }: { tip: Tip }) {
 /** Delay-ranked route list. Bar length encodes delay (not sample volume). */
 function RankedRoutes({
   routes,
+  names,
   axisMin,
   lowConfNote,
   onPick,
 }: {
   routes: ForecastOverviewRoute[];
+  names: ReturnType<typeof useRouteNames>;
   axisMin: string;
   lowConfNote: string;
   onPick: (code: string) => void;
@@ -108,8 +116,8 @@ function RankedRoutes({
           {...clickable(() => onPick(r.route_code))}
           style={{ display: "grid", gridTemplateColumns: "minmax(120px, 34%) 1fr 72px auto", gap: 10, alignItems: "center", cursor: "pointer", padding: "5px 8px", borderRadius: 6, opacity: r.low_confidence ? 0.6 : 1 }}
         >
-          <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {r.route_name}
+          <span className="clamp-2" style={{ fontSize: "var(--text-sm)" }}>
+            <RouteLabel code={r.route_code} names={names} fallbackName={r.route_name} />
             {r.low_confidence && <small style={{ color: "var(--text-tertiary)", marginLeft: 6 }}>· {lowConfNote}</small>}
           </span>
           <span style={{ display: "block", height: 14, background: "var(--bg-soft)", borderRadius: 3, overflow: "hidden" }}>
@@ -132,22 +140,85 @@ function RankedRoutes({
   );
 }
 
+/**
+ * Roving focus over a grid of read-only value cells: the widget is one tab
+ * stop and the arrow keys move inside it.
+ *
+ * A tab stop per cell is the obvious way to make a heatmap keyboard-reachable
+ * and the wrong one -- a day x hour grid then sits 168 Tab presses deep in
+ * front of everything after it on the page, which is its own barrier. This is
+ * the composite-widget pattern ARIA has for that.
+ *
+ * `slots` is row-major and may hold `null` where a position renders nothing
+ * focusable; navigation skips those rather than landing on them.
+ */
+function useRovingCells(slots: (string | null)[], columns: number) {
+  const firstFilled = slots.findIndex((slot) => slot !== null);
+  const [requested, setRequested] = useState(firstFilled);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Derived, not synchronised: the data can shrink under a held index, and an
+  // effect correcting it afterwards would render one frame with no tab stop.
+  const active = slots[requested] != null ? requested : firstFilled;
+
+  function step(from: number, delta: number): number | null {
+    if (Math.abs(delta) === 1) {
+      const row = Math.floor(from / columns);
+      for (let i = from + delta; i >= 0 && i < slots.length && Math.floor(i / columns) === row; i += delta) {
+        if (slots[i] !== null) return i;
+      }
+      return null;
+    }
+    const target = from + delta;
+    if (target < 0 || target >= slots.length || slots[target] === null) return null;
+    return target;
+  }
+
+  function edgeOfRow(from: number, side: "first" | "last"): number | null {
+    const row = Math.floor(from / columns);
+    const indices = [];
+    for (let i = row * columns; i < Math.min((row + 1) * columns, slots.length); i++) {
+      if (slots[i] !== null) indices.push(i);
+    }
+    return (side === "first" ? indices[0] : indices.at(-1)) ?? null;
+  }
+
+  function onKeyDown(event: ReactKeyboardEvent) {
+    const next =
+      event.key === "ArrowRight"
+        ? step(active, 1)
+        : event.key === "ArrowLeft"
+          ? step(active, -1)
+          : event.key === "ArrowDown"
+            ? step(active, columns)
+            : event.key === "ArrowUp"
+              ? step(active, -columns)
+              : event.key === "Home"
+                ? edgeOfRow(active, "first")
+                : event.key === "End"
+                  ? edgeOfRow(active, "last")
+                  : null;
+    if (next === null) return;
+    event.preventDefault();
+    setRequested(next);
+    // Focused straight from the handler rather than from an effect on
+    // `active`: an effect would also fire on first render and pull focus into
+    // the grid before anyone asked for it.
+    containerRef.current?.querySelector<HTMLElement>(`[data-cell="${next}"]`)?.focus();
+  }
+
+  return { containerRef, activeSlot: slots[active], onKeyDown, onCellFocus: setRequested };
+}
+
 function HeatmapGrid({
   cells,
   big,
-  axisMin,
   dayLabel,
   ariaLabel,
-  onTip,
-  onLeave,
 }: {
   cells: ForecastHeatmapCell[];
   big: boolean;
-  axisMin: string;
   dayLabel: (dow: number) => string;
-  ariaLabel?: string;
-  onTip: (e: React.MouseEvent, text: string) => void;
-  onLeave: () => void;
+  ariaLabel: string;
 }) {
   const { t } = useTranslation();
   const [hover, setHover] = useState<string | null>(null);
@@ -157,76 +228,125 @@ function HeatmapGrid({
   const gap = big ? 3 : 2;
   const cols = `${labelW}px repeat(24, 1fr)`;
 
+  const HOURS = 24;
+  const slots = Array.from({ length: 7 * HOURS }, (_, i) => `${Math.floor(i / HOURS) + 1}-${i % HOURS}`);
+  const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells(slots, HOURS);
+
+  /** Everything a cell says, in one string. It is the cell's accessible name
+   *  and the text of its tooltip; a screen reader reads a name once, where a
+   *  second live region carrying the same words reads it twice. */
+  function cellText(dow: number, hour: number): string {
+    const cell = byKey.get(`${dow}-${hour}`);
+    const value = cell?.expected_avg_min;
+    const head = `${dayLabel(dow)} ${hour}:00 · ${value == null ? "—" : formatMinutes(value)}`;
+    return cell?.low_confidence ? `${head} · ${t("forecast.lowSamples", { count: cell.samples })}` : head;
+  }
+
   return (
-    <div role={ariaLabel ? "img" : undefined} aria-label={ariaLabel} onMouseLeave={() => { setHover(null); onLeave(); }}>
+    <div
+      ref={containerRef}
+      role="grid"
+      aria-label={ariaLabel}
+      // The roving cell owns the tab stop; the container is focusable only
+      // programmatically, which is what the composite pattern asks for.
+      tabIndex={-1}
+      aria-rowcount={7}
+      aria-colcount={HOURS}
+      onKeyDown={onKeyDown}
+      onMouseLeave={() => setHover(null)}
+    >
       <div style={{ display: "grid", gridTemplateColumns: cols, gap, alignItems: "center" }}>
         {Array.from({ length: 7 }, (_, di) => {
           const dow = di + 1;
-          return [
-            <div key={`l${dow}`} style={{ fontSize: big ? 11 : 10, color: "var(--text-secondary)", textAlign: "right", paddingRight: 5 }}>
-              {dayLabel(dow)}
-            </div>,
-            ...Array.from({ length: 24 }, (_, h) => {
-              const c = byKey.get(`${dow}-${h}`);
-              const v = c?.expected_avg_min ?? null;
-              const key = `${dow}-${h}`;
-              if (v == null || !c) {
+          return (
+            // `display: contents` so the rows carry the grid semantics while
+            // the cells stay direct children of the CSS grid that lays them out.
+            <div key={`r${dow}`} role="row" style={{ display: "contents" }}>
+              <div
+                role="rowheader"
+                style={{ fontSize: big ? 11 : 10, color: "var(--text-secondary)", textAlign: "right", paddingRight: 5 }}
+              >
+                {dayLabel(dow)}
+              </div>
+              {Array.from({ length: HOURS }, (_, h) => {
+                const key = `${dow}-${h}`;
+                const index = di * HOURS + h;
+                const cell = byKey.get(key);
+                const value = cell?.expected_avg_min ?? null;
+                const text = cellText(dow, h);
+                const highlighted = hover === key;
+                const empty = value == null || !cell;
                 return (
-                  <div
-                    key={key}
-                    onMouseEnter={(e) => onTip(e, `${dayLabel(dow)} ${h}:00 · —`)}
-                    onMouseMove={(e) => onTip(e, `${dayLabel(dow)} ${h}:00 · —`)}
-                    style={{ height: cellH, borderRadius: 2, background: "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)" }}
-                  />
-                );
-              }
-              const active = hover === key;
-              const text = `${dayLabel(dow)} ${h}:00 · ${v.toFixed(1)}${axisMin}`;
-              return (
-                <div
-                  key={key}
-                  data-testid="hm-cell"
-                  onMouseEnter={(e) => { setHover(key); onTip(e, text); }}
-                  onMouseMove={(e) => onTip(e, text)}
-                  style={{
-                    position: "relative",
-                    height: cellH,
-                    borderRadius: 2,
-                    background: delayColor(v),
-                    opacity: c.low_confidence ? 0.5 : 1,
-                    outline: active ? "2px solid var(--accent)" : "none",
-                    outlineOffset: 1,
-                    boxShadow: active ? "0 0 0 3px var(--accent-soft)" : "none",
-                  }}
-                >
-                  {c.low_confidence && (
-                    <span
-                      data-testid="hm-cell-lowconf"
-                      title={t("forecast.lowSamples", { count: c.samples })}
-                      style={{
-                        position: "absolute",
-                        top: 1,
-                        right: 2,
-                        fontSize: "var(--text-xs)",
-                        fontWeight: 800,
-                        lineHeight: 1,
-                        color: "var(--color-warning)",
-                        pointerEvents: "none",
+                  <Tooltip key={key} label={text}>
+                    <div
+                      data-testid={empty ? undefined : "hm-cell"}
+                      data-cell={index}
+                      data-lowconf={cell?.low_confidence ? "" : undefined}
+                      role="gridcell"
+                      aria-label={text}
+                      tabIndex={activeSlot === key ? 0 : -1}
+                      onMouseEnter={() => setHover(key)}
+                      onFocus={() => {
+                        setHover(key);
+                        onCellFocus(index);
                       }}
+                      onMouseLeave={() => setHover(null)}
+                      onBlur={() => setHover(null)}
+                      style={
+                        empty
+                          ? {
+                              height: cellH,
+                              borderRadius: 2,
+                              background:
+                                "repeating-linear-gradient(45deg,var(--border-soft),var(--border-soft) 3px,var(--bg-soft) 3px,var(--bg-soft) 6px)",
+                              outline: highlighted ? "2px solid var(--accent)" : "none",
+                              outlineOffset: 1,
+                            }
+                          : {
+                              position: "relative",
+                              height: cellH,
+                              borderRadius: 2,
+                              background: delayColor(value),
+                              opacity: cell.low_confidence ? 0.5 : 1,
+                              outline: highlighted ? "2px solid var(--accent)" : "none",
+                              outlineOffset: 1,
+                              boxShadow: highlighted ? "0 0 0 3px var(--accent-soft)" : "none",
+                            }
+                      }
                     >
-                      !
-                    </span>
-                  )}
-                </div>
-              );
-            }),
-          ];
+                      {cell?.low_confidence && (
+                        // Decoration: the warning is already part of the
+                        // cell's own name, and a nested tooltip here would
+                        // open alongside the cell's on the way to it.
+                        <span
+                          data-testid="hm-cell-lowconf"
+                          aria-hidden="true"
+                          style={{
+                            position: "absolute",
+                            top: 1,
+                            right: 2,
+                            fontSize: "var(--text-xs)",
+                            fontWeight: 800,
+                            lineHeight: 1,
+                            color: "var(--color-warning)",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          !
+                        </span>
+                      )}
+                    </div>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          );
         })}
       </div>
       {big && (
-        <div style={{ display: "grid", gridTemplateColumns: cols, gap, marginTop: 5 }}>
+        <div style={{ display: "grid", gridTemplateColumns: cols, gap, marginTop: 5 }} aria-hidden="true">
           <span />
-          {Array.from({ length: 24 }, (_, h) => (
+          {Array.from({ length: HOURS }, (_, h) => (
             <span key={h} style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", textAlign: "center" }}>
               {h % 6 === 0 ? h : ""}
             </span>
@@ -243,38 +363,44 @@ function MarginBars({
   testid,
   big,
   sparse,
-  axisMin,
-  onTip,
-  onLeave,
+  ariaLabel,
 }: {
   values: (number | null)[];
   labels: string[];
   testid: string;
   big: boolean;
   sparse: boolean;
-  axisMin: string;
-  onTip: (e: React.MouseEvent, text: string) => void;
-  onLeave: () => void;
+  ariaLabel: string;
 }) {
   const max = Math.max(...values.filter((v): v is number => v != null), 1);
+  const slots = values.map((v, i) => (v == null ? null : String(i)));
+  const { containerRef, activeSlot, onKeyDown, onCellFocus } = useRovingCells(slots, values.length);
+
   return (
-    <div onMouseLeave={onLeave}>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: big ? 150 : 64, borderBottom: "1px solid var(--border-soft)" }}>
-        {values.map((v, i) =>
-          v == null ? (
-            <span key={i} style={{ flex: 1 }} />
-          ) : (
-            <i
-              key={i}
-              data-testid={testid}
-              onMouseEnter={(e) => onTip(e, `${labels[i]} · ${v.toFixed(1)}${axisMin}`)}
-              onMouseMove={(e) => onTip(e, `${labels[i]} · ${v.toFixed(1)}${axisMin}`)}
-              style={{ flex: 1, display: "block", height: `${Math.max((v / max) * 100, 1)}%`, background: delayColor(v), borderRadius: "3px 3px 0 0" }}
-            />
-          ),
-        )}
+    <div ref={containerRef} role="grid" aria-label={ariaLabel} tabIndex={-1} aria-rowcount={1} onKeyDown={onKeyDown}>
+      <div
+        role="row"
+        style={{ display: "flex", alignItems: "flex-end", gap: 4, height: big ? 150 : 64, borderBottom: "1px solid var(--border-soft)" }}
+      >
+        {values.map((v, i) => {
+          if (v == null) return <span key={i} style={{ flex: 1 }} />;
+          const text = `${labels[i]} · ${formatMinutes(v)}`;
+          return (
+            <Tooltip key={i} label={text}>
+              <i
+                data-testid={testid}
+                data-cell={i}
+                role="gridcell"
+                aria-label={text}
+                tabIndex={activeSlot === String(i) ? 0 : -1}
+                onFocus={() => onCellFocus(i)}
+                style={{ flex: 1, display: "block", height: `${Math.max((v / max) * 100, 1)}%`, background: delayColor(v), borderRadius: "3px 3px 0 0" }}
+              />
+            </Tooltip>
+          );
+        })}
       </div>
-      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+      <div style={{ display: "flex", gap: 4, marginTop: 4 }} aria-hidden="true">
         {labels.map((l, i) => (
           <span key={i} style={{ flex: 1, textAlign: "center", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
             {sparse ? (i % 6 === 0 ? i : "") : l}
@@ -291,14 +417,17 @@ function StatStrip({ stats }: { stats: { label: string; value: string }[] }) {
       {stats.map((s) => (
         <div key={s.label} style={{ flex: 1, minWidth: 110, background: "var(--bg-soft)", borderRadius: 8, padding: "9px 12px" }}>
           <b style={{ display: "block", fontSize: 16, fontVariantNumeric: "tabular-nums" }}>{s.value}</b>
-          <small style={{ fontSize: "var(--text-xs)", color: "var(--text-2, var(--text-secondary))" }}>{s.label}</small>
+          <small style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{s.label}</small>
         </div>
       ))}
     </div>
   );
 }
 
-function Card({ title, sublabel, action, testid, onOpen, children }: {
+/** Titled surface built on the shared `Card`; `onOpen` makes the whole card a
+ *  keyboard-operable control (see `clickable`), matching the Overview card
+ *  pattern this was migrated from. */
+function SectionCard({ title, sublabel, action, testid, onOpen, children }: {
   title: string;
   sublabel: string;
   action?: React.ReactNode;
@@ -306,16 +435,16 @@ function Card({ title, sublabel, action, testid, onOpen, children }: {
   onOpen?: () => void;
   children: React.ReactNode;
 }) {
-  const clickProps = onOpen ? clickable(onOpen) : {};
+  const activation = onOpen ? clickable(onOpen) : {};
   return (
-    <div className={onOpen ? "ov-card ov-clickable" : "ov-card"} data-testid={testid} aria-label={title} {...clickProps}>
+    <Card className={onOpen ? "ui-card--clickable" : undefined} data-testid={testid} aria-label={title} {...activation}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
         <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span>
         {action}
       </div>
       <p style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", margin: "0 0 10px" }}>{sublabel}</p>
       {children}
-    </div>
+    </Card>
   );
 }
 
@@ -359,8 +488,9 @@ function collapseToBands(cells: ForecastHeatmapCell[]): ForecastOverviewGridCell
 
 export function RouteForecastSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   const focusedRoute = ctx.routes.length === 1 ? ctx.routes[0] : null;
+  const names = useRouteNames(aid);
 
   const [tip, setTip] = useState<Tip>(null);
   const [view, setView] = useState<View>(null);
@@ -380,14 +510,17 @@ export function RouteForecastSection({ aid }: { aid: number }) {
   const dayLabel = (dow: number) => t(`forecast.dow_${WEEK[dow - 1]}`);
   const bandLabel = (b: Band) => t(`forecast.band_${b}`);
   const min1 = t("forecast.axis_min");
+  // Feeds BandGrid's own cursor-following tip only — see CrosshairTip.
   const onTip = (e: React.MouseEvent, text: string) => setTip({ x: e.clientX, y: e.clientY, text });
   const onLeave = () => setTip(null);
 
   return (
     <div>
+      <RoutePicker aid={aid} names={names} focusedRoute={focusedRoute} onPick={(code) => update({ routes: code ? [code] : null })} />
       {!focusedRoute && (
         <AgencyLanding
           aid={aid}
+          names={names}
           dayLabel={dayLabel}
           bandLabel={bandLabel}
           axisMin={min1}
@@ -399,7 +532,7 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           noData={t("forecast.overview_no_data")}
           lowConfNote={t("forecast.low_confidence_note")}
           legendUnit={t("forecast.legend_unit")}
-          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), min: w.expected_avg_min.toFixed(1) })}
+          worstPhrase={(w) => t("forecast.overview_worst_phrase", { day: dayLabel(w.dow), band: bandLabel(w.band), avg: avgDelayText(t, w.expected_avg_min) })}
           onPick={(code) => update({ routes: [code] })}
           onTip={onTip}
           onLeave={onLeave}
@@ -412,7 +545,6 @@ export function RouteForecastSection({ aid }: { aid: number }) {
           route={focusedRoute}
           dayLabel={dayLabel}
           bandLabel={bandLabel}
-          axisMin={min1}
           showGrid={showGrid}
           onToggleGrid={() => setShowGrid((v) => !v)}
           view={view}
@@ -422,14 +554,52 @@ export function RouteForecastSection({ aid }: { aid: number }) {
         />
       )}
 
-      <Tooltip tip={tip} />
+      <CrosshairTip tip={tip} />
     </div>
+  );
+}
+
+/** Which route the forecast is for: every route with a forecast, plus a
+ *  focused route without one, so the control always states what is shown. */
+function RoutePicker({
+  aid,
+  names,
+  focusedRoute,
+  onPick,
+}: {
+  aid: number;
+  names: ReturnType<typeof useRouteNames>;
+  focusedRoute: string | null;
+  onPick: (code: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const routes = useForecastOverview(aid).data?.routes ?? [];
+  // An option holds plain text, so RouteLabel's muted code becomes a
+  // parenthesis, added only where two routes would otherwise read the same.
+  const labelOf = (r: ForecastOverviewRoute) => names.data.get(r.route_code) ?? r.route_name;
+  const labelCount = new Map<string, number>();
+  for (const r of routes) labelCount.set(labelOf(r), (labelCount.get(labelOf(r)) ?? 0) + 1);
+  const listed = focusedRoute == null || routes.some((r) => r.route_code === focusedRoute);
+  return (
+    <label className="forecast-route-picker">
+      {t("forecast.route_picker_label")}
+      <select value={focusedRoute ?? ""} onChange={(e) => onPick(e.currentTarget.value || null)}>
+        <option value="">{t("forecast.route_picker_all")}</option>
+        {routes.map((r) => (
+          <option key={r.route_code} value={r.route_code}>
+            {(labelCount.get(labelOf(r)) ?? 0) > 1 ? `${labelOf(r)} (${r.route_code})` : labelOf(r)}
+          </option>
+        ))}
+        {!listed && <option value={focusedRoute}>{focusedRoute}</option>}
+      </select>
+    </label>
   );
 }
 
 /** Agency-wide landing: worst-window headline + day×band grid + delay-ranked routes. */
 function AgencyLanding({
   aid,
+  names,
   dayLabel,
   bandLabel,
   axisMin,
@@ -447,6 +617,7 @@ function AgencyLanding({
   onLeave,
 }: {
   aid: number;
+  names: ReturnType<typeof useRouteNames>;
   dayLabel: (dow: number) => string;
   bandLabel: (b: Band) => string;
   axisMin: string;
@@ -483,16 +654,16 @@ function AgencyLanding({
         </div>
       )}
 
-      <Card title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
-        <BandGrid grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} colorFor={colorFor} onTip={onTip} onLeave={onLeave} />
+      <SectionCard title={gridTitle} sublabel={gridCaption} testid="fc-overview-grid">
+        <BandGrid grid={data.grid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={colorFor} onTip={onTip} onLeave={onLeave} />
         {populated.length > 0 && <Legend min={min} max={max} unit={legendUnit} colorFor={colorFor} />}
-      </Card>
+      </SectionCard>
 
       {data.routes.length > 0 && (
         <div style={{ marginTop: 16 }}>
-          <Card title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
-            <RankedRoutes routes={data.routes.slice(0, 8)} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
-          </Card>
+          <SectionCard title={routesTitle} sublabel={routesCaption} testid="fc-overview-routes">
+            <RankedRoutes routes={data.routes.slice(0, 8)} names={names} axisMin={axisMin} lowConfNote={lowConfNote} onPick={onPick} />
+          </SectionCard>
         </div>
       )}
 
@@ -509,7 +680,6 @@ function RouteDetail({
   route,
   dayLabel,
   bandLabel,
-  axisMin,
   showGrid,
   onToggleGrid,
   view,
@@ -521,7 +691,6 @@ function RouteDetail({
   route: string;
   dayLabel: (dow: number) => string;
   bandLabel: (b: Band) => string;
-  axisMin: string;
   showGrid: boolean;
   onToggleGrid: () => void;
   view: View;
@@ -586,22 +755,22 @@ function RouteDetail({
           data-testid="detail-worst"
           style={{ background: "var(--bg-soft)", borderRadius: 10, padding: "14px 16px", marginBottom: 16, fontSize: 15, fontWeight: 600 }}
         >
-          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), min: (worstBand.expected_avg_min as number).toFixed(1) })}
+          {t("forecast.detail_worst_phrase", { day: dayLabel(worstBand.dow), band: bandLabel(worstBand.band), avg: avgDelayText(t, worstBand.expected_avg_min as number) })}
         </div>
       )}
 
-      <Card title={t("forecast.overview_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
-        <BandGrid grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} axisMin={axisMin} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
+      <SectionCard title={t("forecast.route_grid_title")} sublabel={t("forecast.heatmap_caption")} testid="fc-detail-bandgrid">
+        <BandGrid grid={bandGrid} bandLabel={bandLabel} dayLabel={dayLabel} colorFor={bandColorFor} onTip={onTip} onLeave={onLeave} />
         {bandPop.length > 0 && <Legend min={bandMin} max={bandMax} unit={t("forecast.legend_unit")} colorFor={bandColorFor} />}
-      </Card>
+      </SectionCard>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
-        <Card title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
-          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
-        </Card>
-        <Card title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
-          <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
-        </Card>
+        <SectionCard title={t("forecast.dow_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-dow" onOpen={() => setView("dow")}>
+          <MarginBars values={dowAvg} labels={dowLabels} testid="dow-bar" big={false} sparse={false} ariaLabel={t("forecast.dow_summary")} />
+        </SectionCard>
+        <SectionCard title={t("forecast.hour_summary")} sublabel={t("forecast.click_hint")} action={<span aria-hidden style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>{t("forecast.expand")} ⤢</span>} testid="fc-card-hr" onOpen={() => setView("hr")}>
+          <MarginBars values={hourAvg} labels={hourLabels} testid="hr-bar" big={false} sparse ariaLabel={t("forecast.hour_summary")} />
+        </SectionCard>
       </div>
 
       <button
@@ -613,7 +782,7 @@ function RouteDetail({
       </button>
       {showGrid && (
         <div style={{ marginTop: 14 }} data-testid="fc-detail-fullgrid">
-          <HeatmapGrid cells={cells} big axisMin={axisMin} dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} onTip={onTip} onLeave={onLeave} />
+          <HeatmapGrid cells={cells} big dayLabel={dayLabel} ariaLabel={t("forecast.heatmap_aria")} />
           {populated.length > 0 && <Legend min={min} max={max} unit={t("forecast.legend_unit")} />}
         </div>
       )}
@@ -633,13 +802,13 @@ function RouteDetail({
               <>
                 <StatStrip
                   stats={[
-                    { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${(vals[wi] as number).toFixed(1)}${axisMin}` : "—" },
-                    { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${(vals[ci] as number).toFixed(1)}${axisMin}` : "—" },
-                    { label: t("forecast.stat_mean"), value: `${mean.toFixed(1)}${axisMin}` },
+                    { label: t("forecast.stat_worst"), value: wi >= 0 ? `${labels[wi]} · ${formatMinutes(vals[wi] as number)}` : "—" },
+                    { label: t("forecast.stat_calmest"), value: ci >= 0 ? `${labels[ci]} · ${formatMinutes(vals[ci] as number)}` : "—" },
+                    { label: t("forecast.stat_mean"), value: formatMinutes(mean) },
                     { label: t("forecast.stat_samples"), value: formatNumber(totalN) },
                   ]}
                 />
-                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} axisMin={axisMin} onTip={onTip} onLeave={onLeave} />
+                <MarginBars values={vals} labels={labels} testid={view === "dow" ? "dow-bar-big" : "hr-bar-big"} big sparse={view === "hr"} ariaLabel={t(view === "dow" ? "forecast.dow_summary" : "forecast.hour_summary")} />
               </>
             );
           })()}

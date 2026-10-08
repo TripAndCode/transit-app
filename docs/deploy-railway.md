@@ -6,18 +6,16 @@ Lowest-effort path: Railway runs your **existing Docker images** — the app
 domain. No box to harden, no Caddy, no SSH.
 
 **Point every Railway service at the `production` branch, not `main`.**
-This repo runs an autonomous VPS loop (see CLAUDE.md "Autonomous VPS loop")
-that continuously opens PRs against `main`, and — since 2026-08-28 — both the
-loop and interactive sessions may squash-merge a PR themselves once the
-required `/review-branch` pass is clean and it's mergeable/clean, with no
-separate human go-ahead required. If Railway watched `main` directly, every
-one of those merges — reviewed but not yet soak-tested in a real deploy —
-would auto-deploy and run `preDeployCommand` migrations immediately, with no
+Sessions may squash-merge a PR themselves once the required
+`/review-branch` pass is clean, CI is green and it's mergeable/clean, with no
+separate human go-ahead required (see AGENTS.md "Git and pull requests"). If Railway watched `main` directly, every one of
+those merges — reviewed but not yet soak-tested in a real deploy — would
+auto-deploy and run `preDeployCommand` migrations immediately, with no
 remaining checkpoint before production traffic sees it. Instead, `main` is
 just the integration branch; `production` only ever moves when a human
 deliberately promotes a reviewed, merged commit to it (see step 6) — that
-promotion is now the *only* human checkpoint left before a deploy, and that
-is what actually triggers a Railway deploy. The `production` branch already
+promotion is the only human checkpoint left before a deploy, and that is
+what actually triggers a Railway deploy. The `production` branch already
 exists in this repo for exactly this purpose.
 
 Cost: ~$10–18/mo usage-based, in exchange for zero server ops and git-push
@@ -100,7 +98,7 @@ exists when you wire the app.
 
 ## 1b. Create the ClickHouse service
 
-Raw GTFS-RT `updates` lives in ClickHouse, not Postgres (see CLAUDE.md ▸
+Raw GTFS-RT `updates` lives in ClickHouse, not Postgres (see AGENTS.md ▸
 Architecture pointers) — `db` above only covers the OLTP/aggregate/pgvector
 side. Unlike `db`, ClickHouse needs no custom extensions, so this service
 deploys straight from the official image: no Dockerfile, no repo checkout.
@@ -155,7 +153,7 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
    CLICKHOUSE_DATABASE=transit
    CLICKHOUSE_SECURE=false                 # private network, no TLS needed internally
    GEMINI_API_KEY=...
-   CRON_SECRET=<openssl rand -hex 32>      # save this — it must match the GH secret (step 4)
+   CRON_SECRET=<openssl rand -hex 32>      # gates POST /internal/cron/ingest, required daily (step 4)
    CHAT_PROVIDERS=gemini                    # add ",openai" (and set OPENAI_API_KEY) for a paid fallback rung
    CORS_ORIGINS=                           # leave EMPTY — SPA + API are same-origin
    ```
@@ -167,13 +165,24 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
      is rejected at startup). Add the
      `https://<domain>/api/auth/{google,github}/callback` redirect URIs at
      the provider. See README ▸ Authentication.
+   - `DEFAULT_ADMIN_USERNAME`/`DEFAULT_ADMIN_PASSWORD` are an optional
+     break-glass local-admin login, independent of SSO — see README ▸
+     Configuration. Never set `DEFAULT_ADMIN_USERNAME` to a real SSO user's
+     email; rotate the password by editing the Railway variable and
+     redeploying.
+   - `OPS_STATUS_REPO` (see README ▸ Configuration) is not needed here
+     unless this service's own checkout path differs from the collectors'
+     default — leaving it unset just means the admin board's `github`
+     collector tile reads "unknown".
 5. `app` → **Settings → Networking → Generate Domain**. Railway issues
    `https://<something>.up.railway.app` with TLS. Copy it — that's
-   `APP_BASE_URL` for the cron and `PUBLIC_BASE_URL` for SSO.
+   `PUBLIC_BASE_URL` for SSO and the base of `COLLECTOR_INGEST_URL` (step 4).
 6. First deploy: promote `main` to `production` now (see the "Updates"
    section below) to actually trigger it. The pre-deploy `migrate up` runs
-   first; watch **Deploy Logs** for `applied migration 0001 … 0016`, then
-   the uvicorn boot line.
+   first; watch **Deploy Logs** for its `Applied N migration(s).` line (see
+   `db/migrations/README.md` for how migrations are numbered — the count
+   grows over time, so no specific range is quoted here), then the uvicorn
+   boot line.
 
 Smoke test:
 
@@ -202,14 +211,19 @@ Open the domain in a browser — SPA loads. Tabs are empty until data lands
 
 `migrate up` only creates the schema; the DB is empty until you ingest.
 
-**Production data path — Oracle archives via object storage.** The Oracle
-Cloud VM keeps collecting GTFS-RT (~every 30s) and rolls per-day, per-agency
-archive zips. Once a day it uploads those zips to S3-compatible object storage
+**Production data path — the live path, promoted daily.** The Oracle Cloud
+VM keeps collecting GTFS-RT (~every 30s) and streams polls to `app`, which
+stores them in `updates_live` (step 4, "Continuous freshness"). The cron poke
+(step 4) promotes each closed JST day into `updates` and runs `analyze`, so
+history holds the polls the collector pushes, one every
+`COLLECTOR_INGEST_INTERVAL_SEC`. Without streaming it holds only the one
+`ingest_live` sample each poke takes. Oracle also rolls per-day, per-agency
+archive zips and uploads them once a day to S3-compatible object storage
 (Cloudflare R2 or AWS S3). The **daily Railway scheduled job** (step 4) pulls
-the day's zips over HTTPS and runs `ingest → analyze_all → prune` into the
-private `db`. Oracle's dense 30-second archive is why production prefers this
-over a live sample — the DB is never exposed and Oracle never accepts inbound
-connections.
+them over HTTPS and runs `ingest → analyze_all → prune` into the private `db`,
+but only for days the live path never promoted, because a day in `updates`
+has one source: it is the backfill, such as this first load. The DB is never
+exposed and Oracle never accepts inbound connections.
 
 To kick the first load by hand (the same command the daily job runs), from
 your Mac through the app service so it executes on the private network:
@@ -221,18 +235,18 @@ railway run --service app python gtfs_pipeline.py analyze_all
 
 Or just let the daily job (next step) do the first tick.
 
-**Fallback — live fetch (no object storage).** `ingest_live` HTTP-GETs each
-agency's `feed_url`. Lower fidelity (it samples the live feed, not the dense
-30s archive) but needs no Oracle and no bucket — use it if object storage
-isn't wired yet:
+**Live fetch (no Oracle).** `ingest_live` HTTP-GETs each agency's `feed_url`
+into `updates_live`. It samples the live feed once per call, so it needs no
+Oracle and no bucket, but a day sampled this way is only as dense as the
+calls. A sample reaches history and `agg_*` only when the cron poke (step 4)
+promotes its day after JST midnight:
 
 ```bash
 railway run --service app python gtfs_pipeline.py ingest_live
-railway run --service app python gtfs_pipeline.py analyze_all
 ```
 
 Static GTFS (stop names, route polylines) rides along in the archive zips the
-job ingests. With the live fallback it isn't fetched — load a static zip once:
+job ingests. Without that job it isn't fetched — load a static zip once:
 
 ```bash
 railway run --service app python gtfs_pipeline.py load_static <zip-or-dir> --agency-id <id>
@@ -279,7 +293,9 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
    client; the image needs an S3 client + `postgresql-client` added to the
    Dockerfile for this service):
    ```bash
-   aws s3 sync "s3://$OBJECT_STORE_BUCKET/$(date -u +%F)" /tmp/zips --endpoint-url "$OBJECT_STORE_ENDPOINT"
+   for day in "$(date -u -d '2 days ago' +%F)" "$(date -u -d yesterday +%F)"; do
+     aws s3 sync "s3://$OBJECT_STORE_BUCKET/$day" /tmp/zips --endpoint-url "$OBJECT_STORE_ENDPOINT"
+   done
    for id in $AGENCY_IDS; do
      python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id"
    done
@@ -297,6 +313,17 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 6. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
    creds, and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
+
+> **This job writes closed JST days only, and never a day the live path
+> already promoted.** An archive is named for a UTC day, so it runs to 09:00
+> JST the next day. `ingest` skips any file whose rows would land on a JST
+> day that has not ended yet, and reads it on a later run once that day has
+> closed. An archive reaches the bucket only after its UTC day ends, so pull
+> the last two archived days, not just the newest one. A day in
+> `updates` also has one source: once the live-table promotion cron (below)
+> has copied a day's rows into `updates`, this job skips that day's archive
+> files rather than store them under a second source. Disable this job for
+> any range where the live path is the agency's history source.
 
 > **Lock contention in the sketch above is not free to ignore.** `ingest`
 > exits `EX_TEMPFAIL` (75) if another ingest/analyze process holds
@@ -324,10 +351,29 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > done
 > ```
 
-> **Fallback path.** If object storage isn't wired yet, the app also exposes
-> `POST /internal/cron/ingest` (gated by `CRON_SECRET`), which runs
-> `ingest_live` + `analyze` in a background task — poke it from any external
-> scheduler. It's the lower-fidelity live-sample path, not the primary one.
+> **Required: the live-table promotion cron.** `updates_live` (today's and
+> future observations) is never copied into `updates` (history, `agg_*`'s
+> source) except by `POST /internal/cron/ingest`, and ClickHouse's TTL drops
+> each day out of `updates_live` 3 days after capture. If nothing pokes this
+> endpoint, a day silently never becomes history. **Before deploying, confirm
+> an external scheduler actually calls it** — this is not configured by the
+> app itself. Poke it at least once daily after JST midnight, in addition to
+> whatever sampling cadence it already runs on (next note);
+> add a poke at 00:05 JST (`15:05` UTC) specifically to close the midnight
+> gap promptly rather than waiting for the next regularly scheduled one.
+> Each call is gated by `CRON_SECRET` via the `X-Cron-Secret` header and runs
+> `ingest_live` → `promote_closed_days` → `analyze` per agency:
+> ```bash
+> curl -X POST "https://<api-host>/internal/cron/ingest" \
+>   -H "X-Cron-Secret: $CRON_SECRET"
+> ```
+> Cron expression for the 00:05 JST poke: `5 15 * * *` (UTC).
+>
+> **Without collector streaming.** This same endpoint is then the only way RT
+> data reaches `updates_live`, so poke it on a shorter interval. Each poke
+> takes one `ingest_live` sample, and those samples are all the history a day
+> gets: promotion claims each day before its archive could be ingested. Stream
+> from the collector (next note) for dense history.
 
 > **Continuous freshness (optional, replaces the daily batch's RT lag).**
 > Everything above lands RT data once a day. If the Oracle collector VM is
@@ -337,9 +383,14 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > `COLLECTOR_INGEST_URL`/`COLLECTOR_INGEST_SECRET` wiring. Set
 > `COLLECTOR_INGEST_URL` to `app`'s public domain (step 2.5) plus
 > `/internal/collector`, generate a shared `COLLECTOR_INGEST_SECRET` on both
-> Oracle and `app`, and restart the Oracle poller units. This is additive —
-> the daily batch job above still runs as the durable, replayable archive
-> path even once streaming is on.
+> Oracle and `app`, and restart the Oracle poller units. Streaming changes
+> where history comes from: the cron poke (above) promotes each closed JST day
+> from what the collector pushed, so history holds the pushed polls, one every
+> `COLLECTOR_INGEST_INTERVAL_SEC` (default 300 s). Set it equal to the poll
+> interval to push, and keep, every poll. The daily batch job above then
+> writes nothing for a promoted day, because a day has one source. Disable it
+> for streaming agencies and keep R2 for backfilling a day the live path
+> never promoted.
 
 ---
 
@@ -379,6 +430,15 @@ git push origin origin/main:production
 the `git diff` step and review `main`'s full history, or `git log`, before
 tagging and promoting.)
 
+Before step 2, if the diff adds a migration that builds an index on a table
+that already holds production data, pre-build it: `migrate up` builds indexes
+inside a transaction that blocks writes to the table until the build
+finishes. Run `scripts/prebuild_indexes_concurrently.sql` with `psql -f`
+against the production database, over the same private route as step 7's
+backups; it builds them `CONCURRENTLY` and skips any whose migration is
+already applied. Check for invalid indexes afterwards as its header
+describes.
+
 Railway rebuilds from whatever `production` now points to, runs
 `migrate up` (pre-deploy), then swaps in the new release once `/health`
 passes. The `db` service only redeploys when `db/Dockerfile` itself
@@ -417,6 +477,7 @@ Skip entirely if it's only demo data.
 | App healthcheck failing | Deploy Logs — usually `DATABASE_URL` wrong (private host must resolve `${{db.RAILWAY_PRIVATE_DOMAIN}}`, port `5432`) or a missing provider key. |
 | `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of the private one. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
-| Cron returns 401 | `CRON_SECRET` mismatch between Railway Variables and the GH repo secret. |
+| `POST /internal/cron/ingest` returns 401 / 503 | 401: the caller's `X-Cron-Secret` header doesn't match `CRON_SECRET` in the `app` Variables. 503: `CRON_SECRET` is unset on `app`. |
 | Out of memory at boot | Not the embedder by default — it's excluded from this image (see the Image spec note above). If you've re-added the `embeddings` poetry group and a bake step yourself, that's the likely cause: the e5-small embedder (torch) is heavy (~1–2 GB resident once loaded). Bump the app service's memory, or drop the group back out. |
 | Slow first boot / `/health` timeout after a redeploy | Check the deploy's `PUBLISH_IMAGE`/`CREATE_CONTAINER` timing first — a large image takes real time to pull onto the runtime host before the process even starts, independent of anything the app itself does. |
+| Nobody can sign in (Google/GitHub OAuth down) | Sign in at `/login` with the break-glass `DEFAULT_ADMIN_USERNAME`/`DEFAULT_ADMIN_PASSWORD` account, turn `login_required` off on `/admin/flags`, and turn it back on once OAuth recovers. Keep those two variables set in production for exactly this: once any admin has set a `login_required` override, the `LOGIN_REQUIRED` env var alone cannot turn the gate off. |

@@ -6,11 +6,16 @@ import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { useSuggestion } from "../api/hooks";
 import { useAgencyId } from "../api/useAgencyId";
 import { delayColor } from "../styles/tokens";
+import { routeHref } from "../routes/destinations";
+import { isoDaysBefore } from "../api/scope";
+import { Skeleton } from "./Skeleton";
 
-// Map the backend's binary severity onto the existing delay warm ramp
-// (CLAUDE.md: "Severity uses the existing warm ramp") via representative
-// minute values landing in delayBand()'s "severe" vs "ok" tiers, rather
-// than inventing new colors just for this panel.
+/** Days of history a suggestion's route page opens on. */
+const ROUTE_WINDOW_DAYS = 14;
+
+// Map the backend's binary severity onto the existing delay warm ramp via
+// representative minute values landing in delayBand()'s "severe" vs "ok"
+// tiers, rather than inventing new colors just for this panel.
 function severityColor(severity: "notable" | "normal"): string {
   return delayColor(severity === "notable" ? 6 : 0);
 }
@@ -119,16 +124,12 @@ export function InsightPanel({ className }: { className?: string } = {}) {
     const key = `${data.report_type}:${data.route_code}`;
     addSeen(id, key);
     setSeen(readSeen(id));
-    // Pin from/to to the window this suggestion actually evaluated (rather
-    // than the user's ambient Analysis tab filter, e.g. useRangeContext's
-    // 30-day default) so the click-through lands exactly where the reason
-    // text's numbers are visible.
-    const qs = new URLSearchParams({
-      routes: data.route_code,
-      from: data.from_date,
-      to: data.to_date,
-    });
-    navigate(`/agencies/${id}/analysis/${data.report_type}?${qs.toString()}`);
+    // Every suggestion is about one route, so it opens that route's page:
+    // the same destination whichever rule fired. The window ends on the day
+    // the suggestion looked at, rather than the user's ambient filter, and
+    // runs two weeks back, since the window itself can be a single day.
+    const qs = new URLSearchParams({ from: isoDaysBefore(data.to_date, ROUTE_WINDOW_DAYS - 1), to: data.to_date });
+    navigate(routeHref(id, data.route_code, `?${qs.toString()}`));
   }
 
   return (
@@ -139,7 +140,6 @@ export function InsightPanel({ className }: { className?: string } = {}) {
         flexShrink: 0,
         borderLeft: "1px solid var(--border-subtle)",
         padding: collapsed ? "12px 8px" : "12px 16px",
-        transition: "width var(--transition)",
       }}
     >
       <button
@@ -165,6 +165,7 @@ export function InsightPanel({ className }: { className?: string } = {}) {
             <Sparkles size={14} strokeWidth={1.75} />
             {t("insight_panel.title")}
           </h4>
+          {suggestion.isPending && !suggestion.error && <Skeleton height={48} />}
           {suggestion.error ? (
             <p style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("insight_panel.load_error")}</p>
           ) : (

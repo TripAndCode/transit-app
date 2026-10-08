@@ -6,8 +6,9 @@
  * click, Escape, or option selection. Used by service, granularity, and metric
  * parameter kinds in {@link ParamStrip}.
  */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Z_INDEX } from "../../styles/zIndex";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 
 /** A single option entry for {@link SegmentedPill}. */
 type SegmentedOption = { value: string; label: string };
@@ -28,26 +29,12 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
   const triggerRef = useRef<HTMLButtonElement>(null);
   const current = options.find((o) => o.value === value) ?? options[0];
 
-  function close() {
+  function close(refocus = true) {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (refocus) triggerRef.current?.focus();
   }
 
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, ref, (reason) => close(reason === "escape"));
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
@@ -74,7 +61,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
           display: "inline-flex",
           alignItems: "center",
           gap: 4,
-          transition: "background 120ms ease",
+          transition: "background var(--transition)",
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -113,7 +100,7 @@ export function SegmentedPill({ label, value, options, onChange, disabled }: Seg
                 display: "block",
                 width: "100%",
                 background: opt.value === value ? "var(--accent-soft, rgba(74,138,170,0.12))" : "transparent",
-                color: opt.value === value ? "var(--accent)" : "var(--text-primary)",
+                color: opt.value === value ? "var(--accent-strong)" : "var(--text-primary)",
                 border: "none",
                 borderRadius: 4,
                 padding: "5px 10px",

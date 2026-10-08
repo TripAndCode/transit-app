@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
-from api.middleware.ratelimit import FREE_LIMIT, PRO_LIMIT, limiter
+from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, clamp_range_ctx
 from api.security import User, csrf_guard, require_llm_approved
 from pipeline.query import conversations as _conv
@@ -81,15 +81,37 @@ def _raise_for_followup_error(err: str | None) -> None:
         raise HTTPException(status_code=502, detail=f"llm_error:{err}")
 
 
+# Mirrors the preset range_ctx ceiling: the same filter state, arriving by a
+# different route. Bounded per thread so a 100-thread migration cannot carry
+# an unbounded jsonb payload into Postgres.
+_MAX_FILTER_CTX_BYTES = 64 * 1024
+
+
+def _bounded_filter_ctx(v: dict[str, Any]) -> dict[str, Any]:
+    if len(json.dumps(v).encode()) > _MAX_FILTER_CTX_BYTES:
+        raise ValueError(f"filter_ctx exceeds {_MAX_FILTER_CTX_BYTES} bytes serialized")
+    return v
+
+
 class CreateConversation(BaseModel):
     title: str = Field(..., max_length=200)
     filter_ctx: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("filter_ctx")
+    @classmethod
+    def _bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_filter_ctx(v)
 
 
 class UpdateConversation(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     pinned: bool | None = None
     filter_ctx: dict[str, Any] | None = None
+
+    @field_validator("filter_ctx")
+    @classmethod
+    def _bounded(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return None if v is None else _bounded_filter_ctx(v)
 
 
 class AppendMessage(BaseModel):
@@ -122,12 +144,6 @@ class AppendMessage(BaseModel):
             raise ValueError("One of chip_id or (tool + args) is required")
 
 
-# Mirrors the preset range_ctx ceiling: the same filter state, arriving by a
-# different route. Bounded per thread so a 100-thread migration cannot carry
-# an unbounded jsonb payload into Postgres.
-_MAX_FILTER_CTX_BYTES = 64 * 1024
-
-
 class AnonThread(BaseModel):
     client_id: str
     # The agency the thread belongs to; threads span agencies in localStorage,
@@ -139,9 +155,7 @@ class AnonThread(BaseModel):
     @field_validator("filter_ctx")
     @classmethod
     def _bounded_filter_ctx(cls, v: dict[str, Any]) -> dict[str, Any]:
-        if len(json.dumps(v).encode()) > _MAX_FILTER_CTX_BYTES:
-            raise ValueError(f"filter_ctx exceeds {_MAX_FILTER_CTX_BYTES} bytes serialized")
-        return v
+        return _bounded_filter_ctx(v)
 
     pinned: bool = False
     created_at: str
@@ -165,7 +179,7 @@ async def list_conversations(
 
 
 @router.post("/conversations", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def create_conversation(
     request: Request,
     body: CreateConversation,
@@ -196,7 +210,7 @@ async def get_conversation(
 
 
 @router.patch("/conversations/{conversation_id}", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def update_conversation(
     request: Request,
     conversation_id: str,
@@ -214,7 +228,7 @@ async def update_conversation(
 
 
 @router.delete("/conversations/{conversation_id}")
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def delete_conversation(
     request: Request,
     conversation_id: str,
@@ -240,7 +254,7 @@ async def list_messages(
 
 
 @router.post("/conversations/migrate-anon")
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def migrate_anon_endpoint(
     request: Request,
     body: MigrateAnon,
@@ -261,7 +275,7 @@ async def migrate_anon_endpoint(
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def append_message_endpoint(
     request: Request,
     conversation_id: str,
@@ -382,15 +396,12 @@ async def append_message_endpoint(
             # A missing agg_* table (migration/analyze behind) must propagate to
             # FastAPI's registered aggregate_not_ready_handler (api/main.py +
             # api/aggregate_errors.py) so the frontend gets the machine-readable
-            # {"code": "aggregate_not_ready"} 503 it reacts to — not a generic
-            # tool_error that masks it (mirrors api/routers/ask.py's Fix-8f
-            # convention). Re-raising immediately, before any further query runs
-            # on this `conn`, also avoids poisoning the still-open
-            # `conn.transaction()` above with a second failing statement (which
-            # would otherwise surface as an unhandled
-            # asyncpg.exceptions.InFailedSQLTransactionError instead of this
-            # error) — the transaction context manager rolls back cleanly once
-            # this propagates out of it.
+            # {"code": "aggregate_not_ready"} 503 it reacts to — not a persisted
+            # tool_error that masks it. Every Ask/chat dispatch path lets this
+            # error propagate the same way (api/routers/ask.py,
+            # pipeline/query/chat.py). Propagating out of the outer
+            # `conn.transaction()` also rolls back user_msg, so the exchange is
+            # not half-written.
             raise
         except Exception:
             # Never interpolate raw exception text into a persisted message —
@@ -455,7 +466,7 @@ class FollowupBody(BaseModel):
 
 
 @router.post("/conversations/{conversation_id}/followup", response_model=None)
-@limiter.limit(f"{FREE_LIMIT};{PRO_LIMIT}")
+@limiter.limit(tier_limit)
 async def followup_endpoint(
     request: Request,
     conversation_id: str,
@@ -478,7 +489,7 @@ async def followup_endpoint(
     """
     csrf_guard(request)
 
-    if not _followup.is_enabled():
+    if not await _followup.ais_enabled():
         # Short-circuit ahead of the approval gate: a disabled feature must
         # not 403 an unapproved caller before reporting itself as off.
         raise HTTPException(status_code=503, detail="followup_disabled")
@@ -561,6 +572,6 @@ async def followup_enabled_endpoint(
     Also exposes ``max_question_chars`` so the client's input cap can't drift
     from :data:`pipeline.query.followup.MAX_QUESTION_CHARS`."""
     return {
-        "enabled": _followup.is_enabled(),
+        "enabled": await _followup.ais_enabled(),
         "max_question_chars": _followup.MAX_QUESTION_CHARS,
     }

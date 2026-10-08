@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -66,7 +66,8 @@ const baseRow = {
 };
 
 beforeEach(() => {
-  promoteMutateAsync.mockClear();
+  promoteMutateAsync.mockReset();
+  promoteMutateAsync.mockResolvedValue({ promoted: true, reason: null, chunk_id: "cache_abc" });
   queriesReturn = {
     data: { rows: [baseRow], next_cursor: null },
     isLoading: false,
@@ -121,6 +122,38 @@ describe("AdminAskOpsPage", () => {
     expect(promoteMutateAsync).toHaveBeenCalledWith(1);
   });
 
+  it("marks only the row whose promotion is in flight as pending", async () => {
+    // One slow embedding must not hold every other row's promote hostage.
+    const inFlight = new Map<number, () => void>();
+    promoteMutateAsync.mockImplementation(
+      (id: number) =>
+        new Promise((resolve) => {
+          inFlight.set(id, () => resolve({ promoted: true, reason: null, chunk_id: `cache_${id}` }));
+        }),
+    );
+    queriesReturn = {
+      data: { rows: [baseRow, { ...baseRow, id: 2, question: "Second question" }], next_cursor: null },
+      isLoading: false,
+      error: null,
+    };
+    const user = userEvent.setup();
+    wrap(<AdminAskOpsPage />);
+    const promoteIn = (row: number) =>
+      within(screen.getAllByRole("row")[row]).getByRole("button", { name: /promote/i });
+
+    await user.click(promoteIn(1));
+    expect(promoteIn(1)).toBeDisabled();
+    expect(promoteIn(2)).toBeEnabled();
+
+    await user.click(promoteIn(2));
+    expect(promoteMutateAsync).toHaveBeenCalledWith(2);
+    await act(async () => inFlight.get(1)!());
+    expect(promoteIn(1)).toBeEnabled();
+    expect(promoteIn(2)).toBeDisabled();
+    await act(async () => inFlight.get(2)!());
+    expect(promoteIn(2)).toBeEnabled();
+  });
+
   it("renders the route funnel counts", () => {
     wrap(<AdminAskOpsPage />);
     expect(screen.getByText(/19/)).toBeTruthy();
@@ -129,6 +162,19 @@ describe("AdminAskOpsPage", () => {
   it("shows providers as not tracked rather than fabricating a breakdown", () => {
     wrap(<AdminAskOpsPage />);
     expect(screen.getByText(/recorded per query/i)).toBeTruthy();
+  });
+
+  it("states the provider gap as one muted caption, not a titled block", () => {
+    wrap(<AdminAskOpsPage />);
+    const caption = screen.getByText(/recorded per query/i);
+    expect(caption).toHaveTextContent(i18n.t("admin.ask_ops.funnel.providers_not_tracked"));
+    expect(caption.querySelector("strong")).toBeNull();
+  });
+
+  it("routes a query-log failure through the shared error banner", () => {
+    queriesReturn = { data: undefined, isLoading: false, error: new Error("boom") };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
   });
 
   it("shows the eval result as not-run when null", () => {

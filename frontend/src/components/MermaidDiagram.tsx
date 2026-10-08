@@ -13,7 +13,7 @@ async function loadMermaid() {
       .then((m) => {
         const mermaid = m.default;
         // `strict` sanitizes the rendered SVG's own markup (labels etc.) --
-        // relevant even though today's only callers are our own docs/CLAUDE.md
+        // relevant even though today's only callers are our own docs/AGENTS.md
         // content, not arbitrary user input.
         mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
         return m;

@@ -5,18 +5,19 @@ which FastAPI resolves to a :class:`RangeCtx` via the :func:`get_range_ctx`
 dependency. SQL helpers in this module turn the context into ``WHERE`` clause
 fragments + parameter lists ready to splice into asyncpg queries.
 
-Defaults: last 30 days inclusive, all DOW, all time bands. Every entry
-point — query params, request body, a conversation's stored filters — goes
-through :func:`clamp_range_ctx`, which clamps both boundaries to today and
-the window to 365 days to avoid runaway scans.
+Defaults: the last 30 closed JST days inclusive, all DOW, all time bands.
+Every entry point — query params, request body, a conversation's stored
+filters — goes through :func:`clamp_range_ctx`, which clamps both
+boundaries to today and the window to 365 days to avoid runaway scans.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, Literal, cast, get_args
+from typing import Annotated, Any, Literal, cast, get_args
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Query
@@ -36,7 +37,15 @@ def jst_today() -> date:
     return datetime.now(_JST).date()
 
 
-DowFilter = Literal["all", "weekday", "weekend"]
+def last_closed_jst_day() -> date:
+    """The newest JST day history can hold: yesterday.
+
+    `updates` and every aggregate receive a day only once it has closed
+    (pipeline/promote.py), so this, not today, ends the default report period.
+    """
+    return jst_today() - timedelta(days=1)
+
+
 TimeBand = Literal[
     "all",
     "morning",
@@ -48,6 +57,50 @@ TimeBand = Literal[
     "late_night",
 ]
 ServiceType = Literal["all", "平日", "土日祝"]
+
+WEEKDAY_NAMES: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+# ISO weekday sets (1=Monday..7=Sunday) of the legacy dow groups. A weekday
+# list that equals one of these is stored as the group's name, so every
+# reader that branches on "weekday"/"weekend" keeps working unchanged.
+_DOW_GROUPS: dict[str, frozenset[int]] = {
+    "weekday": frozenset(range(1, 6)),
+    "weekend": frozenset({6, 7}),
+    "all": frozenset(range(1, 8)),
+}
+
+_DOW_ERROR = "invalid dow: expected all, weekday, weekend, or a comma list of mon..sun"
+
+
+def canonical_dow(value: object) -> str:
+    """Validate a ``dow`` value into its one canonical spelling.
+
+    A comma list of weekday names is de-duplicated, put in Monday-first
+    order, and folded into ``weekday``/``weekend``/``all`` when it names
+    exactly that group. Anything else is a 422, like the other enums.
+    """
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=_DOW_ERROR)
+    if value in ("all", "weekday", "weekend"):
+        return value
+    names = value.split(",")
+    if any(name not in WEEKDAY_NAMES for name in names):
+        raise HTTPException(status_code=422, detail=_DOW_ERROR)
+    days = frozenset(WEEKDAY_NAMES.index(name) + 1 for name in names)
+    for group, members in _DOW_GROUPS.items():
+        if days == members:
+            return group
+    return ",".join(WEEKDAY_NAMES[day - 1] for day in sorted(days))
+
+
+def dow_isodays(dow: str) -> frozenset[int] | None:
+    """The ISO weekdays a canonical ``dow`` selects; ``None`` means every day."""
+    if dow == "all":
+        return None
+    if dow in _DOW_GROUPS:
+        return _DOW_GROUPS[dow]
+    return frozenset(WEEKDAY_NAMES.index(name) + 1 for name in dow.split(","))
+
 
 # (start_inclusive, end_exclusive) clock times as 'HH:MM' strings. Migration
 # 0011 made `scheduled_time` a TIME column, so `time_band_case_sql` casts both
@@ -73,6 +126,12 @@ MAX_RANGE_DAYS = 365
 # Bounds both the SQL predicate and the JSON envelope; the UI's own route
 # picker surfaces far fewer than this.
 MAX_ROUTE_FILTERS = 100
+# GTFS stop_id is free-form text; this bounds what the scope accepts and echoes.
+MAX_STOP_ID_LEN = 128
+# ASCII digits only: str.isdigit() also accepts superscripts and other
+# scripts' digits, which int() then rejects or reads as a different hour.
+_HOUR_RE = re.compile(r"(\d{1,2})(?:-(\d{1,2}))?", re.ASCII)
+_HOUR_ERROR = "invalid hour: expected 0-23 or an inclusive range a-b"
 
 
 @dataclass(frozen=True)
@@ -81,10 +140,16 @@ class RangeCtx:
 
     from_date: date
     to_date: date
-    dow: DowFilter = "all"
+    # Canonical per canonical_dow: a legacy group or a Monday-first weekday list.
+    dow: str = "all"
     time_band: TimeBand = "all"
     service: ServiceType = "all"
     routes: tuple[str, ...] = ()
+    # Inclusive hour range; mutually exclusive with a time_band other than "all".
+    hour: tuple[int, int] | None = None
+    stop: str | None = None
+    # GTFS direction_id; the URL name is `dir`.
+    direction: int | None = None
 
     @property
     def days(self) -> int:
@@ -103,6 +168,39 @@ def _coerce_enum(value: str, allowed: tuple[str, ...], field: str) -> str:
             detail=f"invalid {field}: expected one of {', '.join(allowed)}",
         )
     return value
+
+
+def _coerce_hour(value: object) -> tuple[int, int] | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=_HOUR_ERROR)
+    match = _HOUR_RE.fullmatch(value)
+    if match is None:
+        raise HTTPException(status_code=422, detail=_HOUR_ERROR)
+    start = int(match.group(1))
+    end = int(match.group(2)) if match.group(2) is not None else start
+    if start > 23 or end > 23 or start > end:
+        raise HTTPException(status_code=422, detail=_HOUR_ERROR)
+    return start, end
+
+
+def _coerce_stop(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value.strip()) > MAX_STOP_ID_LEN:
+        raise HTTPException(
+            status_code=422, detail=f"invalid stop: expected a stop_id of at most {MAX_STOP_ID_LEN} characters"
+        )
+    return value.strip() or None
+
+
+def _coerce_direction(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or value not in ("0", "1", 0, 1):
+        raise HTTPException(status_code=422, detail="invalid dir: expected 0 or 1")
+    return int(value)
 
 
 def _coerce_date(value: str | date | None, field: str) -> date | None:
@@ -140,6 +238,9 @@ def clamp_range_ctx(
     time_band: str = "all",
     service: str = "all",
     routes: Iterable[str] = (),
+    hour: object = None,
+    stop: object = None,
+    direction: object = None,
 ) -> RangeCtx:
     """Validate and clamp raw filter values into a :class:`RangeCtx`.
 
@@ -152,24 +253,36 @@ def clamp_range_ctx(
 
     Rules, in order:
 
-    * absent dates default to a trailing :data:`DEFAULT_RANGE_DAYS` window;
+    * absent dates default to a trailing :data:`DEFAULT_RANGE_DAYS` window
+      ending on :func:`last_closed_jst_day`; a start given alone ends there
+      too, or on itself when it is later, so it is never swapped into a
+      window it did not ask for;
       a malformed non-empty date is a 422;
-    * neither boundary may exceed :func:`jst_today` — no aggregate holds a
-      future date, so a future bound can only widen the scan. Both ends are
-      clamped *before* the reversed-range swap, so the swap can't reopen a
-      future ``to_date``;
+    * neither boundary may exceed :func:`jst_today` — nothing holds a future
+      date, so a future bound can only widen the scan. Today itself passes
+      through as asked, rather than being relabelled as the last closed day:
+      history and every aggregate hold closed days only, so a window through
+      today simply has no rows for it. Both ends are clamped *before* the
+      reversed-range swap, so the swap can't reopen a future ``to_date``;
     * a reversed range is swapped rather than rejected;
     * a window wider than :data:`MAX_RANGE_DAYS` is clamped at the *start*,
       preserving the most recent data;
-    * unknown ``dow``/``time_band``/``service`` values are a 422;
+    * unknown ``dow``/``time_band``/``service`` values are a 422; a weekday
+      list is canonicalised (see :func:`canonical_dow`);
+    * ``hour`` is 0-23 or an inclusive ``a-b`` range and cannot be combined
+      with a ``time_band`` other than ``all``; ``stop`` is a stripped stop_id
+      of at most :data:`MAX_STOP_ID_LEN` characters; ``direction`` is 0 or 1.
+      Each malformed value is a 422;
     * routes are stripped, de-duplicated preserving order, and capped at
       :data:`MAX_ROUTE_FILTERS` to bound the query and the JSON envelope.
     """
     today = jst_today()
 
-    to_date = _coerce_date(to, "to") or today
+    explicit_to = _coerce_date(to, "to")
+    explicit_from = _coerce_date(from_, "from")
+    to_date = explicit_to or max(last_closed_jst_day(), explicit_from or date.min)
     to_date = min(to_date, today)
-    from_date = _coerce_date(from_, "from") or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
+    from_date = explicit_from or (to_date - timedelta(days=DEFAULT_RANGE_DAYS - 1))
     from_date = min(from_date, today)
 
     if from_date > to_date:
@@ -194,13 +307,21 @@ def clamp_range_ctx(
         if len(cleaned) >= MAX_ROUTE_FILTERS:
             break
 
+    resolved_time_band = cast(TimeBand, _coerce_enum(time_band, get_args(TimeBand), "time_band"))
+    resolved_hour = _coerce_hour(hour)
+    if resolved_hour is not None and resolved_time_band != "all":
+        raise HTTPException(status_code=422, detail="hour and time_band are mutually exclusive")
+
     return RangeCtx(
         from_date=from_date,
         to_date=to_date,
-        dow=cast(DowFilter, _coerce_enum(dow, get_args(DowFilter), "dow")),
-        time_band=cast(TimeBand, _coerce_enum(time_band, get_args(TimeBand), "time_band")),
+        dow=canonical_dow(dow),
+        time_band=resolved_time_band,
         service=cast(ServiceType, _coerce_enum(service, get_args(ServiceType), "service")),
         routes=tuple(cleaned),
+        hour=resolved_hour,
+        stop=_coerce_stop(stop),
+        direction=_coerce_direction(direction),
     )
 
 
@@ -221,16 +342,31 @@ def ctx_payload(ctx: RangeCtx) -> dict[str, Any]:
         "time_band": ctx.time_band,
         "service": ctx.service,
         "routes": list(ctx.routes),
+        "hour": hour_param(ctx.hour),
+        "stop": ctx.stop,
+        "dir": ctx.direction,
     }
+
+
+def hour_param(hour: tuple[int, int] | None) -> str | None:
+    """The URL spelling of an hour range: ``"7"`` for one hour, ``"7-9"`` for a range."""
+    if hour is None:
+        return None
+    return str(hour[0]) if hour[0] == hour[1] else f"{hour[0]}-{hour[1]}"
 
 
 def get_range_ctx(
     from_: str | None = Query(default=None, alias="from"),
     to: str | None = Query(default=None),
-    dow: DowFilter = Query(default="all"),
+    dow: str = Query(default="all", description="all, weekday, weekend, or a comma list of mon..sun"),
     time_band: TimeBand = Query(default="all"),
     service: ServiceType = Query(default="all"),
     routes: str | None = Query(default=None, description="Comma-separated route_codes"),
+    # Annotated, so a direct Python call without these arguments gets None
+    # rather than the Query marker object.
+    hour: Annotated[str | None, Query(description="0-23 or an inclusive range a-b; excludes time_band")] = None,
+    stop: Annotated[str | None, Query(description="GTFS stop_id")] = None,
+    dir_: Annotated[str | None, Query(alias="dir", description="GTFS direction_id, 0 or 1")] = None,
 ) -> RangeCtx:
     """FastAPI dependency: parse query params into a :class:`RangeCtx`.
 
@@ -245,6 +381,9 @@ def get_range_ctx(
         time_band=time_band,
         service=service,
         routes=routes.split(",") if routes else (),
+        hour=hour,
+        stop=stop,
+        direction=dir_,
     )
 
 
@@ -268,35 +407,18 @@ def date_range_clause(
     column: str,
     ctx: RangeCtx,
     next_param: int,
-    *,
-    column_type: str = "timestamptz",
 ) -> tuple[str, list, int]:
-    """Date-range WHERE fragment for ``column``.
+    """Inclusive date-range WHERE fragment for an agg table's DATE ``column``.
 
-    ``column_type="timestamptz"`` (``updates.captured_at``): emits half-open
-    timestamptz bounds (midnight-to-midnight in the session timezone — JST,
-    set by api/main._init_connection) instead of the previous
-    ``column::date BETWEEN $a AND $b``. The cast on the *column* side defeated
-    ``idx_updates_agency_at`` and forced full seq scans of ``updates``; the
-    half-open form is index-sargable and date-equivalent under the same
-    session TZ (verified row-count-identical on live data; a 7-day window
-    scan went 340ms → 70ms).
-
-    ``column_type="text_date"`` (agg tables store ISO date strings): keeps the
-    ``column::date BETWEEN`` form — those tables are small aggregates with no
-    index at stake.
+    The column stays bare and the cast sits on the parameter side, so the
+    ``(agency_id, date, ...)`` index prefix every agg table carries can
+    serve the range scan; a cast on the column would discard it.
 
     The ``::text`` coercion keeps asyncpg sending the params as TEXT instead
     of trying (and failing) to infer a native type; ``str()`` normalizes the
     mixed caller types (ISO str from the API ctx, datetime.date from tests).
     """
-    if column_type == "text_date":
-        fragment = f"{column}::date BETWEEN (${next_param}::text)::date AND (${next_param + 1}::text)::date"
-    else:
-        fragment = (
-            f"({column} >= ((${next_param}::text)::date)::timestamptz "
-            f"AND {column} < (((${next_param + 1}::text)::date + 1))::timestamptz)"
-        )
+    fragment = f"{column} >= (${next_param}::text)::date AND {column} <= (${next_param + 1}::text)::date"
     return fragment, [str(ctx.from_date), str(ctx.to_date)], next_param + 2
 
 
@@ -306,20 +428,23 @@ def dow_clause(
     next_param: int,
 ) -> tuple[str, list, int]:
     """``column`` is a date/timestamp column from which to derive day-of-week."""
-    if ctx.dow == "all":
+    days = dow_isodays(ctx.dow)
+    if days is None:
         return "TRUE", [], next_param
     if ctx.dow == "weekday":
-        return f"EXTRACT(ISODOW FROM {column}::date) BETWEEN 1 AND 5", [], next_param
-    return f"EXTRACT(ISODOW FROM {column}::date) IN (6, 7)", [], next_param
+        return f"EXTRACT(ISODOW FROM {column}) BETWEEN 1 AND 5", [], next_param
+    # The day numbers come from canonical_dow's closed set, never raw input.
+    listed = ", ".join(str(day) for day in sorted(days))
+    return f"EXTRACT(ISODOW FROM {column}) IN ({listed})", [], next_param
 
 
 def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     """ClickHouse-dialect counterpart of :func:`date_range_clause` for the
     live `updates` table (ClickHouse's own ``captured_at`` column).
 
-    Buckets by the JST civil day, not UTC — every Postgres connection that
-    ever touched `updates` pinned ``SET TIME ZONE 'Asia/Tokyo'``, so
-    `date_range_clause`'s bounds have always meant the JST calendar day.
+    Buckets by the JST civil day, not UTC — analyze dates every agg_* row on
+    the JST calendar, so the same window must select the same days whether it
+    is served from an aggregate (`date_range_clause`) or from `updates`.
     ``toDate(captured_at, 'Asia/Tokyo')`` (never a bare ``toDate(captured_at)``)
     matches the same JST-not-UTC translation already proven in
     ``pipeline/db.py::build_dedup_ch_sql``.
@@ -338,12 +463,14 @@ def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     1=Monday..7=Sunday — the same ISODOW numbering Postgres's
     ``EXTRACT(ISODOW FROM ...)`` uses, so the weekday/weekend split matches.
     """
-    if ctx.dow == "all":
+    days = dow_isodays(ctx.dow)
+    if days is None:
         return "1", {}
     day_expr = "toDayOfWeek(toDate(captured_at, 'Asia/Tokyo'))"
     if ctx.dow == "weekday":
         return f"{day_expr} BETWEEN 1 AND 5", {}
-    return f"{day_expr} IN (6, 7)", {}
+    listed = ", ".join(str(day) for day in sorted(days))
+    return f"{day_expr} IN ({listed})", {}
 
 
 # ClickHouse expression normalizing `updates.scheduled_time` to a same-day,
@@ -473,7 +600,7 @@ def build_agg_stop_filter(ctx: RangeCtx, next_param: int) -> tuple[str, list, in
     params: list = []
     n = next_param
 
-    frag, p, n = date_range_clause("date", ctx, n, column_type="text_date")
+    frag, p, n = date_range_clause("date", ctx, n)
     parts.append(frag)
     params.extend(p)
 
@@ -501,7 +628,7 @@ def build_agg_daily_trend_filter(ctx: RangeCtx, next_param: int) -> tuple[str, l
     params: list = []
     n = next_param
 
-    frag, p, n = date_range_clause("date", ctx, n, column_type="text_date")
+    frag, p, n = date_range_clause("date", ctx, n)
     parts.append(frag)
     params.extend(p)
 

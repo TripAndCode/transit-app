@@ -38,10 +38,15 @@
    commitment, and the card visibly settles when the operator pins it. */
 .ops-inspect--preview { box-shadow: var(--el-1); }
 
+/* The fade rides the contents, not the card: the dock itself stays put while
+   the operator sweeps the pointer across vehicles, and each trip's figures
+   cross-fade in over the last one's. Opacity only -- a card that also jumps
+   4px every time the pointer crosses a marker is motion the operator did not
+   ask for. */
 @media (prefers-reduced-motion: no-preference) {
-  .ops-inspect { animation: ops-inspect-in var(--dur-2) var(--ease-out); }
+  .ops-inspect__body { animation: ops-inspect-in var(--dur-2) var(--ease-out); }
   @keyframes ops-inspect-in {
-    from { opacity: 0; transform: translateY(-4px); }
+    from { opacity: 0; }
   }
 }
 

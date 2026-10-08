@@ -82,17 +82,41 @@ async def test_anomaly_today_wins_when_present(suggest_agency, ch_client):
     assert result["report_type"] == "trend"
     assert result["route_code"] == "R1"
     assert result["severity"] == "notable"
+    # No static route for R1: the text names it the way the app does.
+    assert result["reason_text"].startswith("路線R1の")
+
+
+@pytest.mark.asyncio
+async def test_reason_text_names_the_route_rather_than_its_code(suggest_agency, ch_client):
+    pool, agency_id = suggest_agency
+    today = jst_today()
+    await _seed(pool, agency_id, "47011", (today - timedelta(days=3)).isoformat(), [60] * 30)
+    await _seed(pool, agency_id, "47011", today.isoformat(), [300] * 30)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES ($1, $2, $3)",
+            agency_id,
+            "沖舘・新田線(47011)",
+            "W54 沖舘・新田線",
+        )
+    _run_analyze(agency_id, ch_client)
+
+    async with pool.acquire() as conn:
+        result = await compute_suggestion(agency_id, conn, ch_client, locale="en")
+
+    assert result is not None and result["route_code"] == "47011"
+    assert result["reason_text"].startswith("Average delay on W54 沖舘・新田線 today")
+    assert "47011" not in result["reason_text"]
 
 
 @pytest.mark.asyncio
 async def test_anomaly_fires_when_wall_clock_today_has_zero_rows(suggest_agency, ch_client):
     """analyze() normally lags the wall clock by >= 1 day, so wall-clock
     "today" has zero agg rows at the moment the Insight Panel is viewed --
-    exactly the scenario that used to make rule 1 always fall through (see
-    the module's rewrite: anchoring on jst_today() instead of the latest
-    analyzed date). Seed data only through "yesterday" (nothing for
-    jst_today() itself) and confirm the anomaly rule still fires, anchored
-    on the latest analyzed date.
+    exactly the scenario in which anchoring on jst_today() instead of the
+    latest analyzed date would make rule 1 always fall through. Seed data
+    only through "yesterday" (nothing for jst_today() itself) and confirm the
+    anomaly rule still fires, anchored on the latest analyzed date.
     """
     pool, agency_id = suggest_agency
     today = jst_today()
@@ -214,10 +238,10 @@ async def test_exclude_exact_tuple_matching_fallback(suggest_agency, ch_client):
 
 @pytest.mark.asyncio
 async def test_on_time_fallback_pools_full_route_before_truncating(suggest_agency, ch_client, monkeypatch):
-    """Regression test for the truncate-then-pool ordering bug: compute_on_time's
-    fetch used to be sliced to ON_TIME_FALLBACK_FETCH_LIMIT *before*
-    _pool_on_time_by_route ran, so a route whose service-type rows straddled
-    the fetch boundary got pooled from a partial subset of its own rows.
+    """compute_on_time's fetch must be pooled by _pool_on_time_by_route
+    *before* it is sliced to ON_TIME_FALLBACK_FETCH_LIMIT: truncating first
+    would pool a route whose service-type rows straddle the fetch boundary
+    from a partial subset of its own rows.
 
     Three (route, service_type) rows this week, ascending by on_time_pct:
       RT/svcA    0%   (samples=30)
@@ -227,14 +251,14 @@ async def test_on_time_fallback_pools_full_route_before_truncating(suggest_agenc
     on-time than R_other's 30%, so R_other is genuinely this week's
     worst-on-time ROUTE, at 30%.
 
-    With a too-small fetch limit (2, monkeypatched below to reproduce the old
-    bug's mechanism at a scale that doesn't need 50+ real rows), the fetch
+    With a too-small fetch limit (2, monkeypatched below to reproduce the
+    truncation at a scale that doesn't need 50+ real rows), the fetch
     truncates to just [RT/svcA, R_other] before RT/svcB is ever pooled in:
     RT's pooled pct collapses to 0% (only svcA counted). The fallback then
     both picks the WRONG route (RT instead of R_other) and reports the WRONG
-    percentage for it (0% instead of 50%) -- exactly the failure mode seen on
-    real data with the old ``ON_TIME_FALLBACK_FETCH_LIMIT = 50`` once an
-    agency had more than 50 qualifying rows. A limit that comfortably covers
+    percentage for it (0% instead of 50%) -- exactly the failure mode an
+    ``ON_TIME_FALLBACK_FETCH_LIMIT`` of 50 produces on real data once an
+    agency has more than 50 qualifying rows. A limit that comfortably covers
     all 3 rows (the module's real, shipped value -- exercised unpatched
     below) must not reproduce that truncation, correctly reporting R_other
     at 30%. (The shipped constant's magnitude relative to real per-agency
@@ -256,9 +280,9 @@ async def test_on_time_fallback_pools_full_route_before_truncating(suggest_agenc
     week_ctx = RangeCtx(from_date=jst_today(), to_date=jst_today())
 
     async with pool.acquire() as conn:
-        # Reproduce the old bug's mechanism with a deliberately tiny fetch
-        # limit -- this is what ON_TIME_FALLBACK_FETCH_LIMIT = 50 did on real
-        # data once an agency had more than 50 qualifying rows.
+        # Reproduce the truncation with a deliberately tiny fetch limit --
+        # what any limit below an agency's qualifying-row count does on real
+        # data.
         with patch("pipeline.reports.suggest.ON_TIME_FALLBACK_FETCH_LIMIT", 2):
             truncated = await _on_time_fallback(agency_id, conn, ch_client, week_ctx, frozenset(), "ja")
         assert truncated is not None

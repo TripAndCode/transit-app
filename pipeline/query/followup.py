@@ -11,11 +11,12 @@ path up front).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 
-from pipeline.flags import flag
+from pipeline.flags import aflag, flag
 from pipeline.query.llm_client import get_client
 
 _log = logging.getLogger(__name__)
@@ -44,6 +45,12 @@ _SYS_PROMPT_EN = (
 def is_enabled() -> bool:
     """True iff the follow-up feature is turned on."""
     return flag("ask_followup_enabled", False)
+
+
+async def ais_enabled() -> bool:
+    """:func:`is_enabled` for a caller on the event loop -- see
+    `pipeline.query.copilot.ais_enabled` for why the distinction matters."""
+    return await aflag("ask_followup_enabled")
 
 
 def _allowed_providers() -> set[str]:
@@ -131,7 +138,8 @@ async def answer_followup(
     user = f"{context_block}\n\nQuestion: {q}"
 
     client = get_client()
-    msg, err = client.chat_completions(
+    msg, err = await asyncio.to_thread(
+        client.chat_completions,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},

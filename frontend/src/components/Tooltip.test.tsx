@@ -85,6 +85,18 @@ describe("Tooltip on hover", () => {
     unhover(trigger);
     expect(trigger).not.toHaveAttribute("aria-describedby");
   });
+
+  it("re-measures at most once per frame under a burst of scroll events", () => {
+    vi.useFakeTimers();
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const trigger = renderFitButton();
+    hover(trigger);
+    advance(PAST_HOVER_INTENT_MS);
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    raf.mockClear();
+    for (let i = 0; i < 5; i++) fireEvent.scroll(window);
+    expect(raf).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Tooltip on keyboard", () => {
@@ -140,6 +152,32 @@ describe("Tooltip and its trigger", () => {
     await user.click(screen.getByRole("button"));
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(onMouseEnter).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Tooltip nested inside another", () => {
+  it("opens only the innermost bubble when focus lands on the inner trigger", () => {
+    // React implements onFocus on the bubbling focusin event, so without a
+    // guard the outer tooltip reopens alongside the inner one and the reader
+    // gets two bubbles and two aria-describedby targets at once.
+    render(
+      <Tooltip label="outer text">
+        <div role="gridcell" tabIndex={0} data-testid="outer">
+          <Tooltip label="inner text">
+            <button type="button" data-testid="inner">
+              !
+            </button>
+          </Tooltip>
+        </div>
+      </Tooltip>,
+    );
+
+    fireEvent.focusIn(screen.getByTestId("inner"));
+    expect(screen.getAllByRole("tooltip").map((el) => el.textContent)).toEqual(["inner text"]);
+
+    fireEvent.focusOut(screen.getByTestId("inner"));
+    fireEvent.focusIn(screen.getByTestId("outer"));
+    expect(screen.getAllByRole("tooltip").map((el) => el.textContent)).toEqual(["outer text"]);
   });
 });
 

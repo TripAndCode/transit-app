@@ -23,6 +23,7 @@ from typing import Any
 
 from api.range import RangeCtx
 from pipeline.cache import async_lru_cache
+from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.reports.filters import _ch_rows, _dedup_cte_ch
 
 # The rail spans the service day, not the calendar day: 05:00 is the first
@@ -93,7 +94,7 @@ def bucket_of(scheduled_sec: int | None, step_minutes: int) -> int | None:
     return (scheduled_sec - PLAYBACK_START_SEC) // (step_minutes * 60)
 
 
-def build_timeline_ch_sql(ctx: RangeCtx, step_minutes: int) -> tuple[str, dict]:
+def build_timeline_ch_sql(ctx: RangeCtx, step_minutes: int, *, table: str = UPDATES_TABLE) -> tuple[str, dict]:
     """Render the ClickHouse query behind one service day of playback frames.
 
     Buckets on `scheduled_sec`, not `captured_at`: the rail is a timetable
@@ -114,7 +115,7 @@ def build_timeline_ch_sql(ctx: RangeCtx, step_minutes: int) -> tuple[str, dict]:
     if step_minutes not in ALLOWED_STEP_MINUTES:
         raise ValueError(f"step_minutes must be one of {ALLOWED_STEP_MINUTES}, got {step_minutes!r}")
 
-    cte_sql, params = _dedup_cte_ch(ctx, include_scheduled_sec=True)
+    cte_sql, params = _dedup_cte_ch(ctx, include_scheduled_sec=True, table=table)
     params = {
         **params,
         "tl_start_sec": PLAYBACK_START_SEC,
@@ -272,14 +273,16 @@ async def compute_delay_timeline(
     step_minutes: int,
     conn,
     ch,
+    *,
+    table: str = UPDATES_TABLE,
 ) -> list[dict[str, Any]]:
-    """Playback frames for one agency-day. Cached per (agency, day, step).
+    """Playback frames for one agency-day. Cached per (agency, day, step, table).
 
     A finished service day never changes, so the TTL only bounds how long a
     still-accumulating day (today) can be served stale.
     """
     ctx = RangeCtx(from_date=day, to_date=day)
-    sql, params = build_timeline_ch_sql(ctx, step_minutes)
+    sql, params = build_timeline_ch_sql(ctx, step_minutes, table=table)
     result = await ch.query(sql, parameters={**params, "agency_id": agency_id})
     rows = _ch_rows(result)
     if not rows:

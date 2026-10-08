@@ -24,7 +24,7 @@ from typing import Any, Literal, Protocol
 
 import asyncpg
 
-from pipeline.query import intent_cache
+from pipeline.query import embeddings, intent_cache
 from pipeline.query.rag_index import _format_vec
 
 _log = logging.getLogger(__name__)
@@ -75,34 +75,41 @@ async def _promote_one(
     # inside a request handler as well as in the batch job.
     vec = await asyncio.to_thread(embedder.embed, content, mode="passage")
     new_hash = _content_hash(content)
+    version = embeddings.embedding_version(getattr(embedder, "model_id", None))
 
     existing = await conn.fetchrow(
-        "SELECT content_hash FROM rag_chunks WHERE agency_id=$1 AND chunk_id=$2",
+        "SELECT content_hash, embedding_version FROM rag_chunks WHERE agency_id=$1 AND chunk_id=$2",
         agency_id,
         chunk_id,
     )
     if existing is None:
         await conn.execute(
-            "INSERT INTO rag_chunks (chunk_id, agency_id, content, embedding, content_hash) "
-            "VALUES ($1, $2, $3, $4::vector, $5)",
+            "INSERT INTO rag_chunks "
+            "(chunk_id, agency_id, content, embedding, content_hash, embedding_version) "
+            "VALUES ($1, $2, $3, $4::vector, $5, $6)",
             chunk_id,
             agency_id,
             content,
             _format_vec(vec),
             new_hash,
+            version,
         )
-    elif existing["content_hash"] != new_hash:
+    elif existing["content_hash"] != new_hash or existing["embedding_version"] != version:
+        # A stale stamp rewrites the row even on unchanged text: the Stage-2
+        # reader ignores rows from another embedder.
         await conn.execute(
-            "UPDATE rag_chunks SET content=$3, embedding=$4::vector, content_hash=$5, embedded_at=now() "
+            "UPDATE rag_chunks SET content=$3, embedding=$4::vector, content_hash=$5, "
+            "embedding_version=$6, embedded_at=now() "
             "WHERE agency_id=$1 AND chunk_id=$2",
             agency_id,
             chunk_id,
             content,
             _format_vec(vec),
             new_hash,
+            version,
         )
 
-    await intent_cache.mark_promoted(conn, candidate["signature_hash"], agency_id)
+    await intent_cache.mark_promoted(conn, candidate["signature_hash"], agency_id, embedding_version=version)
     _log.info(
         "promoted %s → %s(%s)",
         candidate["signature_hash"],

@@ -1,11 +1,14 @@
 import io
 import tarfile
+from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
 from clickhouse_connect.driver.exceptions import DataError, OperationalError
 
 from pipeline.clickhouse import insert_updates
 from pipeline.ingest import ingest, parse_trip_id
+from tests.fixtures.gtfs_rt import header_only_feed
 
 _FAKE_ROW = (
     "20260401/ok.pb",
@@ -78,6 +81,157 @@ def test_ingest_creates_rows(pg_conn, ch_client, agency_id, tmp_path):
     assert rows[0][0] == "44372"
     assert rows[0][1] == 120
     assert rows[0][2] == agency_id
+    assert ch_client.query("SELECT count() FROM updates_live").result_rows == [(0,)]
+
+
+def test_ingest_refuses_a_day_that_already_holds_promoted_rows(pg_conn, ch_client, agency_id, tmp_path):
+    """A day in `updates` has one source. Promotion already stored 2026-04-01
+    under the collector's names, so the archive's copy of that day is refused
+    while another day in the same folder is ingested."""
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            (
+                "oracle/20260401/TripUpdate_030000.pb",
+                datetime(2026, 4, 1, 3, 0, tzinfo=timezone.utc),
+                "T0",
+                "平日",
+                "12:00",
+                "44372",
+                1,
+                60,
+            )
+        ],
+    )
+    for day in ("20260401", "20260402"):
+        (tmp_path / day).mkdir()
+        (tmp_path / day / "TripUpdate_113700.pb").write_bytes(b"\x00")
+
+    def one_row(raw, ts, file_name, aid, conn):
+        return [(file_name, ts, "平日_11時37分_系統44372", "平日", "11:37", "44372", 1, 120)]
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=one_row):
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert count == 1
+    names = {
+        r[0]
+        for r in ch_client.query(
+            "SELECT file_name FROM updates WHERE agency_id = {a:UInt16}", parameters={"a": agency_id}
+        ).result_rows
+    }
+    assert names == {"oracle/20260401/TripUpdate_030000.pb", "20260402/TripUpdate_113700.pb"}
+
+
+def test_ingest_refuses_a_tarball_member_whose_header_lands_on_a_promoted_day(pg_conn, ch_client, agency_id, tmp_path):
+    """A member named for 2026-04-01 but whose feed header timestamp falls on
+    2026-04-02 JST is judged by the day its rows actually get (the header's
+    day), not the name's day: refused when 2026-04-02 already holds promoted
+    rows, ingested when only 2026-04-01 does."""
+    header_instant = datetime(2026, 4, 1, 23, 0, 0, tzinfo=timezone.utc)  # 2026-04-02 08:00 JST
+    pb_data = header_only_feed(int(header_instant.timestamp()))
+
+    def _make_tarball():
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo(name="20260401/TripUpdate_230000.pb")
+            info.size = len(pb_data)
+            tf.addfile(info, io.BytesIO(pb_data))
+        return buf.getvalue()
+
+    def one_row(raw, ts, file_name, aid, conn):
+        return [(file_name, ts, "平日_11時37分_系統44372", "平日", "11:37", "44372", 1, 120)]
+
+    # 2026-04-02 already holds a promoted (live-sourced) row: the member's
+    # header-derived day is refused even though its name says 2026-04-01.
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            (
+                "oracle/20260402/TripUpdate_000000.pb",
+                datetime(2026, 4, 1, 15, 0, tzinfo=timezone.utc),  # 2026-04-02 00:00 JST
+                "T0",
+                "平日",
+                "12:00",
+                "44372",
+                1,
+                60,
+            )
+        ],
+    )
+    (tmp_path / "20260401.tar.gz").write_bytes(_make_tarball())
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=one_row):
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+    assert count == 0
+    names = {
+        r[0]
+        for r in ch_client.query(
+            "SELECT file_name FROM updates WHERE agency_id = {a:UInt16}", parameters={"a": agency_id}
+        ).result_rows
+    }
+    assert names == {"oracle/20260402/TripUpdate_000000.pb"}
+
+    # Only 2026-04-01 holds promoted rows: the same member is ingested,
+    # because its rows land on 2026-04-02, not the refused day.
+    ch_client.command("TRUNCATE TABLE updates")
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            (
+                "oracle/20260401/TripUpdate_000000.pb",
+                datetime(2026, 4, 1, 3, 0, tzinfo=timezone.utc),  # 2026-04-01 12:00 JST
+                "T0",
+                "平日",
+                "12:00",
+                "44372",
+                1,
+                60,
+            )
+        ],
+    )
+    (tmp_path / "20260401.tar.gz").write_bytes(_make_tarball())
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=one_row):
+        count = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+    assert count == 1
+    names = {
+        r[0]
+        for r in ch_client.query(
+            "SELECT file_name FROM updates WHERE agency_id = {a:UInt16}", parameters={"a": agency_id}
+        ).result_rows
+    }
+    assert names == {"oracle/20260401/TripUpdate_000000.pb", "20260401/TripUpdate_230000.pb"}
+
+
+@pytest.mark.parametrize("layout", ["tarball", "loose"])
+def test_ingest_stamps_archived_feeds_with_their_header_instant(layout, pg_conn, ch_client, agency_id, tmp_path):
+    """The member is named by UTC wall clock (00:00:11 UTC on 2026-09-15), as
+    rt-poller.sh writes it; its captured_at must be that instant, not the
+    name read as JST nine hours earlier."""
+    instant = datetime(2026, 9, 15, 0, 0, 11, tzinfo=timezone.utc)
+    pb_data = header_only_feed(int(instant.timestamp()))
+    if layout == "tarball":
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo(name="20260915/TripUpdate_000011.pb")
+            info.size = len(pb_data)
+            tf.addfile(info, io.BytesIO(pb_data))
+        (tmp_path / "20260915.tar.gz").write_bytes(buf.getvalue())
+    else:
+        (tmp_path / "20260915").mkdir()
+        (tmp_path / "20260915" / "TripUpdate_000011.pb").write_bytes(pb_data)
+    stamps: list[str] = []
+
+    def fake_parse_feed(raw, ts, file_name, agency_id, conn):
+        stamps.append(ts)
+        return []
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=fake_parse_feed):
+        ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert [datetime.fromisoformat(ts).astimezone(timezone.utc) for ts in stamps] == [instant]
 
 
 def test_ingest_tarball_member_failure_does_not_wipe_an_earlier_good_members_insert(
@@ -213,6 +367,40 @@ def test_ingest_dedup_skips_seen_files(pg_conn, ch_client, agency_id, tmp_path):
     assert second == 0
 
 
+def test_ingest_dedup_skips_a_member_stamped_before_its_tarballs_own_date(pg_conn, ch_client, agency_id, tmp_path):
+    """The already-ingested skip-list is bounded by the dates the folder's
+    NAMES carry, but a tarball member's own YYYYMMDD directory overrides its
+    tarball's stem — so a member can be stamped before that bound. Left
+    unwidened, the bounded list cannot see such a member's earlier rows and
+    the second run re-inserts every one of them (`updates` has no unique
+    constraint to absorb that).
+    """
+    fake_row = (
+        "20260401/TripUpdate_113700.pb",
+        "2026-04-01T11:37:00",
+        "平日_11時37分_系統44372",
+        "平日",
+        "11:37",
+        "44372",
+        1,
+        120,
+    )
+    with patch("pipeline.strategies.aomori_regex.parse_feed", return_value=[fake_row]):
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo(name="20260401/TripUpdate_113700.pb")
+            info.size = 1
+            tf.addfile(info, io.BytesIO(b"\x00"))
+        # Named nine days after the day its one member is stamped with.
+        (tmp_path / "20260410.tar.gz").write_bytes(buf.getvalue())
+
+        first = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+        second = ingest(str(tmp_path), agency_id, pg_conn, ch_client)
+
+    assert first == 1
+    assert second == 0
+
+
 def test_ingest_agency_isolated(pg_conn, ch_client, tmp_path):
     """Two agencies ingesting same file_name don't interfere."""
     with pg_conn.cursor() as cur:
@@ -281,9 +469,9 @@ def test_ingest_agency_isolated(pg_conn, ch_client, tmp_path):
 
 
 def test_ingest_batches_clickhouse_inserts_across_files(pg_conn, ch_client, agency_id, tmp_path):
-    """Task 8.9: ingest() must not call insert_updates once per source file -
-    that fixed ~100ms-per-call overhead is what turned a real agency-1
-    backfill into 7h36m wall-clock for 15m of actual CPU work. With 10 loose
+    """ingest() must not call insert_updates once per source file - each
+    call carries a fixed round-trip overhead that, multiplied over a
+    backfill's many small files, dominates its wall-clock time. With 10 loose
     .pb files of 5 rows each (50 rows total, well under _BATCH_ROWS),
     insert_updates should be called once - at ingest()'s trailing flush -
     not 10 times, while every row still lands and the total inserted count
@@ -334,13 +522,13 @@ def test_ingest_does_not_double_process_same_file_key_within_one_run(pg_conn, ch
 
     `done` (the set of already-ingested file keys) is computed once at the
     top of ingest() from ClickHouse and is only updated inside _flush(),
-    which runs at most once per _BATCH_ROWS rows (Task 8.9). With only one
+    which runs at most once per _BATCH_ROWS rows. With only one
     row per file here, no mid-run flush is triggered, so `done` never gets
-    updated between the tarball loop and the loose-.pb loop. Before the fix
-    (an in-memory `seen` set updated at buffer-time, not flush-time), the
-    loose-.pb loop's dedup filter checked the still-stale `done` and did not
-    exclude the tarball's already-buffered file, so the shared key's row
-    landed twice."""
+    updated between the tarball loop and the loose-.pb loop. A loose-.pb
+    dedup filter that checked only that still-stale `done` would not exclude
+    the tarball's already-buffered file, and the shared key's row would land
+    twice; the in-memory `seen` set, updated at buffer time rather than
+    flush time, is what closes that gap."""
     day_dir = tmp_path / "20260401"
     day_dir.mkdir()
     # Loose .pb sharing the exact same "20260401/dup.pb" key as the tarball
@@ -510,7 +698,7 @@ def test_ingest_flush_non_dataerror_falls_back_to_whole_batch_discard_no_per_fil
     batch never reached the server, so retrying file-by-file could either
     hammer an already-struggling server with hundreds of doomed inserts, or
     duplicate rows that actually committed despite the client raising.
-    Confirm the old whole-batch-discard behavior: insert_updates is called
+    Confirm the whole-batch-discard behavior: insert_updates is called
     exactly ONCE (no per-file retry calls at all, even for files that would
     have succeeded), zero rows land, and every file - including the ones
     that were never actually bad - is retried on the next run."""
@@ -543,3 +731,40 @@ def test_ingest_flush_non_dataerror_falls_back_to_whole_batch_discard_no_per_fil
         ("20260401/q_ok2.pb", 3),
         ("20260401/z_ok3.pb", 1),
     ]
+
+
+@pytest.mark.parametrize("layout", ["tarball", "loose"])
+def test_ingest_leaves_a_member_on_an_unclosed_jst_day_for_a_later_run(pg_conn, ch_client, agency_id, tmp_path, layout):
+    """An archive named for a UTC day ends 09:00 JST the next day, so its last
+    members can land on a JST day that has not closed yet. Archive ingest
+    writes closed days only: such a member is skipped without being marked
+    done, and the same folder ingests it once its day has closed."""
+    header_instant = datetime(2026, 4, 1, 23, 0, 0, tzinfo=timezone.utc)  # 2026-04-02 08:00 JST
+    pb_data = header_only_feed(int(header_instant.timestamp()))
+    if layout == "tarball":
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo(name="20260401/TripUpdate_230000.pb")
+            info.size = len(pb_data)
+            tf.addfile(info, io.BytesIO(pb_data))
+        (tmp_path / "20260401.tar.gz").write_bytes(buf.getvalue())
+    else:
+        (tmp_path / "20260401").mkdir()
+        (tmp_path / "20260401" / "TripUpdate_230000.pb").write_bytes(pb_data)
+
+    def one_row(raw, ts, file_name, aid, conn):
+        return [(file_name, ts, "平日_11時37分_系統44372", "平日", "11:37", "44372", 1, 120)]
+
+    same_day = datetime(2026, 4, 2, 1, 0, tzinfo=timezone.utc)  # 2026-04-02 10:00 JST
+    next_day = datetime(2026, 4, 2, 15, 30, tzinfo=timezone.utc)  # 2026-04-03 00:30 JST
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=one_row):
+        assert ingest(str(tmp_path), agency_id, pg_conn, ch_client, now=same_day) == 0
+        assert _ch_route_codes(ch_client, agency_id) == []
+        assert ingest(str(tmp_path), agency_id, pg_conn, ch_client, now=next_day) == 1
+    names = {
+        r[0]
+        for r in ch_client.query(
+            "SELECT file_name FROM updates WHERE agency_id = {a:UInt16}", parameters={"a": agency_id}
+        ).result_rows
+    }
+    assert names == {"20260401/TripUpdate_230000.pb"}

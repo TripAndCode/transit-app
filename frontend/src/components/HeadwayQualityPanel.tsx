@@ -1,21 +1,23 @@
 /**
- * Second metric panel shown alongside the `on_time` report (item 94):
+ * Headway panel shown beside the `dwell_run` report on Why and the `on_time`
+ * report on Routes (see AnalysisTab.tsx):
  * Excess Waiting Time, spacing coefficient of variation, and long-gap rate
  * for this agency's routes classified high-frequency by
  * `agg_route_headway.is_high_frequency` (pipeline/headways.py). Renders
  * nothing extra for a non-high-frequency route -- such routes simply never
  * appear in `rows` (see pipeline/reports/headway_quality.py), and the
- * `on_time` table above this panel is completely unaffected either way.
+ * report above this panel is completely unaffected either way.
  */
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useHeadwayQuality } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
-import type { RangeCtx } from "../api/rangeContext";
+import { RouteLabel } from "./RouteLabel";
+import type { Scope } from "../api/scope";
 import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
-import { th, td } from "./tableStyles";
-import { formatNumber } from "../utils/format";
+import { SHARED_TABLE, th, td } from "./tableStyles";
+import { formatNumber, fmtRatioPct } from "../utils/format";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
   if (sec == null) return "—";
@@ -28,13 +30,9 @@ function fmtCov(v: number | null): string {
   return v == null ? "—" : v.toFixed(2);
 }
 
-function fmtPct(v: number | null): string {
-  return v == null ? "—" : `${(v * 100).toFixed(1)}%`;
-}
-
-export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }) {
+export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
-  const { format: formatRoute } = useRouteNames(aid);
+  const routeNames = useRouteNames(aid);
   const { data, isLoading, error, refetch } = useHeadwayQuality(aid, ctx, true);
 
   return (
@@ -48,10 +46,10 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }
       )}
       {data && data.rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={SHARED_TABLE}>
             <thead>
               <tr style={{ background: "var(--bg-soft)" }}>
-                <th style={th({ align: "left" })}>{t("reports.headway_quality.col.route")}</th>
+                <th style={th({ align: "left" })}>{t("common.route")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.ewt")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.cov")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.long_gap_rate")}</th>
@@ -61,11 +59,11 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: RangeCtx }
             <tbody>
               {data.rows.map((r) => (
                 <tr key={r.route_code} style={{ borderTop: "1px solid var(--border-soft)" }}>
-                  <td style={{ ...td(), fontWeight: 500 }}>{formatRoute(r.route_code)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtSignedMin(r.ewt_sec, t)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtCov(r.cov)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{fmtPct(r.long_gap_rate)}</td>
-                  <td style={{ ...td(), textAlign: "right" }}>{formatNumber(r.samples)}</td>
+                  <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} /></td>
+                  <td style={td({ align: "right" })}>{fmtSignedMin(r.ewt_sec, t)}</td>
+                  <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>
+                  <td style={td({ align: "right" })}>{fmtRatioPct(r.long_gap_rate)}</td>
+                  <td style={td({ align: "right" })}>{formatNumber(r.samples)}</td>
                 </tr>
               ))}
             </tbody>

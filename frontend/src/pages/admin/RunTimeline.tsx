@@ -22,7 +22,7 @@ const STATUS_FILL: Record<RunBar["status"], string> = {
   running: "var(--accent)",
   ok: "var(--accent)",
   skipped: "var(--color-warning, #C99A2E)",
-  error: "var(--color-danger, #c0392b)",
+  error: "var(--delay-severe)",
 };
 
 function hourX(hour: number): number {
@@ -54,7 +54,7 @@ function barTooltip(t: TFunction, lane: string, bar: RunBar): string {
     }),
   ];
   if (bar.rows != null) parts.push(t("admin.board.run_tooltip_rows", { count: bar.rows }));
-  if (bar.lockWaitMs != null) parts.push(t("admin.board.run_tooltip_lock"));
+  if (bar.lockProbeMs != null) parts.push(t("admin.board.run_tooltip_lock"));
   if (bar.error) parts.push(bar.error);
   return parts.join(" · ");
 }

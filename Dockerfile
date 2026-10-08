@@ -1,7 +1,7 @@
 # ── Stage 1: build the frontend ──────────────────────────────────────────────
-FROM node:22-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /fe
-COPY frontend/package.json frontend/package-lock.json* ./
+COPY frontend/package.json frontend/package-lock.json* frontend/.npmrc* ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
@@ -14,7 +14,7 @@ COPY scripts/strip_vite_manifest.sh /tmp/strip_vite_manifest.sh
 RUN sh /tmp/strip_vite_manifest.sh dist
 
 # ── Stage 2: Python API + bundled static ─────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.14-slim
 WORKDIR /app
 
 RUN pip install --no-cache-dir poetry==1.8.5

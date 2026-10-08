@@ -1,11 +1,12 @@
-// frontend/src/tabs/OverviewTab.tsx
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
-import { useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import { useAgencies, useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import { clearLastAgency } from "../api/lastAgency";
 import { useAgencyId } from "../api/useAgencyId";
-import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
-import { useRangeContext } from "../api/rangeContext";
+import { useJumpToLatestDataRange } from "../api/latestDataWindow";
+import { useScope } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
@@ -19,7 +20,8 @@ import { RevealSection } from "../components/overview/RevealSection";
 import { RoutesToCheckList } from "../components/RoutesToCheckList";
 import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
-import { TabFilterBar } from "../components/TabFilterBar";
+import { PageHeader } from "../components/ui/PageHeader";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
 
 import "../styles/overview.css";
 
@@ -28,8 +30,11 @@ type OpenCard = "concentration" | "peak_hour" | "service_split" | null;
 export function OverviewTab() {
   const { t } = useTranslation();
   const agencyId = useAgencyId();
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(agencyId);
+  const navigate = useNavigate();
+  const agencies = useAgencies();
+  const agency = agencies.data?.find((a) => a.agency_id === agencyId);
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
@@ -54,6 +59,10 @@ export function OverviewTab() {
     peakHourSel?.dow ?? null,
   );
 
+  // Nothing here is answerable without an agency, and every query above is
+  // already disabled for a null id.
+  if (agencyId == null) return null;
+
   // movers is intentionally excluded here: since the retired MoversList/
   // HeroSentence removal, movers no longer drives any main-view content
   // (it's only consumed inside ConcentrationBar). Checking it would let an
@@ -69,6 +78,37 @@ export function OverviewTab() {
     summary.concentration.top_routes.length > 0 ||
     Object.keys(summary.service_split).length > 0;
 
+  // Whether the agency was ever collected decides which empty state is true,
+  // so the generic "nothing in this range" waits for the agency list.
+  const emptyState = agencies.isPending ? (
+    <SkeletonTable rows={3} />
+  ) : agency && !agency.latest_data_date ? (
+    <EmptyState
+      title={t("overview.never_collected", { agency: agency.agency_name })}
+      recoveries={[
+        {
+          label: t("overview.choose_another_agency"),
+          onClick: () => {
+            clearLastAgency();
+            navigate("/");
+          },
+        },
+      ]}
+    />
+  ) : (
+    <EmptyState
+      title={t("overview.empty")}
+      reasons={buildFilterCtxReasons(ctx, t)}
+      recoveries={buildFilterCtxRecoveries({
+        ctx,
+        onClearRoutes: () => update({ routes: null }),
+        onResetService: () => update({ service: "all" }),
+        jumpToLatestData,
+        t,
+      })}
+    />
+  );
+
   const modalTitleKey: Record<Exclude<OpenCard, null>, string> = {
     concentration: "overview.modal.concentration",
     peak_hour: "overview.modal.peak_hour",
@@ -77,7 +117,8 @@ export function OverviewTab() {
 
   return (
     <>
-      <TabFilterBar />
+      <div className="ov-page-head"><PageHeader title={t("nav.pulse")} /></div>
+      <ScopeSentence applied={query.data?.scope_applied} />
       <div className="ov-page">
         <AsyncSection
           loading={isPending}
@@ -85,19 +126,7 @@ export function OverviewTab() {
           onRetry={() => refetch()}
           data={data}
           hasContent={hasAnyData}
-          empty={
-            <EmptyState
-              title={t("overview.empty")}
-              reasons={buildFilterCtxReasons(ctx, t)}
-              recoveries={buildFilterCtxRecoveries({
-                ctx,
-                onClearRoutes: () => update({ routes: null }),
-                onResetService: () => update({ service: "all" }),
-                jumpToLatestData,
-                t,
-              })}
-            />
-          }
+          empty={emptyState}
           skeleton={
             <>
               <SkeletonKpiRow />
@@ -110,38 +139,60 @@ export function OverviewTab() {
             <OverviewHeroRow
               headline={data.headline}
               delayedCount={data.top_delayed.delayed_count}
-              agencyId={agencyId!}
+              delayedThresholdMin={data.top_delayed.delayed_threshold_min}
+              agencyId={agencyId}
               sparklinePoints={data.sparkline_points}
               peakHour={data.peak_hour}
               concentration={data.concentration}
             />
             <RoutesToCheckList routes={data.top_delayed.routes} />
-            {data.concentration.top_routes.length > 0 && (
-              <RevealSection>
-                <ConcentrationBar
-                  concentration={data.concentration}
-                  movers={data.movers}
-                  onClick={() => setOpen("concentration")}
-                />
-              </RevealSection>
-            )}
-            {data.peak_hour != null && (
-              <RevealSection>
-                <PeakHourRibbon
-                  peak_hour={data.peak_hour}
-                  onClick={() => setOpen("peak_hour")}
-                  onHourClick={(hour) => setPeakHourSel({ hour, dow: null })}
-                />
-              </RevealSection>
-            )}
-            {Object.keys(data.service_split).length > 0 && (
-              <RevealSection>
-                <ServiceSplit
-                  service_split={data.service_split}
-                  onClick={() => setOpen("service_split")}
-                />
-              </RevealSection>
-            )}
+            {/* The stagger index counts the sections that actually render.
+                Any of these can be absent for an agency, and a fixed index
+                would hand whichever one appears first a delay with nothing
+                in front of it to follow. */}
+            {[
+              data.concentration.top_routes.length > 0
+                ? {
+                    key: "concentration",
+                    node: (
+                      <ConcentrationBar
+                        concentration={data.concentration}
+                        movers={data.movers}
+                        onClick={() => setOpen("concentration")}
+                      />
+                    ),
+                  }
+                : null,
+              data.peak_hour != null
+                ? {
+                    key: "peak_hour",
+                    node: (
+                      <PeakHourRibbon
+                        peak_hour={data.peak_hour}
+                        onClick={() => setOpen("peak_hour")}
+                        onHourClick={(hour) => setPeakHourSel({ hour, dow: null })}
+                      />
+                    ),
+                  }
+                : null,
+              Object.keys(data.service_split).length > 0
+                ? {
+                    key: "service_split",
+                    node: (
+                      <ServiceSplit
+                        service_split={data.service_split}
+                        onClick={() => setOpen("service_split")}
+                      />
+                    ),
+                  }
+                : null,
+            ]
+              .filter((section) => section !== null)
+              .map((section, index) => (
+                <RevealSection key={section.key} index={index}>
+                  {section.node}
+                </RevealSection>
+              ))}
           </>
           )}
         </AsyncSection>

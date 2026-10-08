@@ -30,12 +30,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Literal
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import clickhouse_connect
 
-from api.range import RangeCtx, ServiceType, clamp_range_ctx, jst_today
+from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day
 from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
@@ -60,9 +60,6 @@ from pipeline.reports import (
 )
 from pipeline.reports.rankings import _weighted_avg_min
 from pipeline.stats import annotate_on_time_pct_confidence
-
-TopNMetric = Literal["avg_delay", "on_time_rate", "worst_5min"]
-
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -115,12 +112,12 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("label_ranking_delay", "en"): "Delay",
     ("label_ranking_ontime_rate", "ja"): "定時率",
     ("label_ranking_ontime_rate", "en"): "On-time rate",
-    ("label_ranking_late5", "ja"): "5分以上遅延件数",
-    ("label_ranking_late5", "en"): "5+ minute delay count",
+    ("label_ranking_late5", "ja"): "5分超の遅延件数",
+    ("label_ranking_late5", "en"): "Count of delays over 5 min",
     ("compare_no_data", "ja"): "比較に必要なデータがありません。",
     ("compare_no_data", "en"): "Not enough data to compare.",
-    ("compare_summary_dow", "ja"): "平日 vs 土日祝 遅延比較",
-    ("compare_summary_dow", "en"): "Weekday vs weekend/holiday delay comparison",
+    ("compare_summary_dow", "ja"): "平日 vs 土日 遅延比較",
+    ("compare_summary_dow", "en"): "Weekday vs weekend delay comparison",
     ("compare_service_needs_route", "ja"): "dimension=service_type の場合は route が必要です。",
     ("compare_service_needs_route", "en"): "dimension=service_type requires a route argument.",
     ("compare_route_no_data", "ja"): "路線{route} の比較データなし。",
@@ -179,8 +176,8 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("meta_label_first", "en"): "First departure",
     ("meta_label_last", "ja"): "最終",
     ("meta_label_last", "en"): "Last departure",
-    ("meta_label_trips", "ja"): "運行便数",
-    ("meta_label_trips", "en"): "Daily trips",
+    ("meta_label_trips", "ja"): "時刻表上の便数",
+    ("meta_label_trips", "en"): "Scheduled trips",
     ("meta_stops_value", "ja"): "{n}駅",
     ("meta_stops_value", "en"): "{n}",
     ("meta_trips_value", "ja"): "{n}便",
@@ -264,16 +261,17 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("mt_metrics_summary", "en"): "available metrics",
     ("mt_capabilities_summary", "ja"): "答えられる質問の例（カテゴリ別）",
     ("mt_capabilities_summary", "en"): "example questions I can answer (by category)",
-    ("suggest_reason_anomaly", "ja"): "路線{route}の本日の平均遅延が普段より大幅に悪化しています（平均{avg_min}分）。",
-    ("suggest_reason_anomaly", "en"): (
-        "Route {route}'s average delay today is much worse than usual (avg {avg_min} min)."
-    ),
-    ("suggest_reason_trend_shift", "ja"): "路線{route}の遅延が今週の途中から悪化しています（{delta_min}分の変化）。",
+    # {route} is the route's display name, or route_code_fallback below.
+    ("suggest_reason_anomaly", "ja"): "{route}の本日の平均遅延が普段より大幅に悪化しています（平均{avg_min}分）。",
+    ("suggest_reason_anomaly", "en"): ("Average delay on {route} today is much worse than usual (avg {avg_min} min)."),
+    ("suggest_reason_trend_shift", "ja"): "{route}の遅延が今週の途中から悪化しています（{delta_min}分の変化）。",
     ("suggest_reason_trend_shift", "en"): (
-        "Route {route}'s delay pattern shifted partway through this week ({delta_min} min change)."
+        "The delay pattern on {route} shifted partway through this week ({delta_min} min change)."
     ),
-    ("suggest_reason_on_time_fallback", "ja"): "路線{route}が今週最も定時率が低い路線です（定時率{pct}%）。",
-    ("suggest_reason_on_time_fallback", "en"): "Route {route} has the worst on-time rate this week ({pct}% on time).",
+    ("suggest_reason_on_time_fallback", "ja"): "{route}が今週最も定時率が低い路線です（定時率{pct}%）。",
+    ("suggest_reason_on_time_fallback", "en"): "{route} has the worst on-time rate this week ({pct}% on time).",
+    ("route_code_fallback", "ja"): "路線{code}",
+    ("route_code_fallback", "en"): "Route {code}",
     # Shown in place of an LLM-authored free-text answer whose numeric claims
     # don't trace back to the grounding data it was given (see
     # pipeline.query.hallucination_guard.verify_numeric_claims).
@@ -293,8 +291,8 @@ _LOCALES: dict[tuple[str, str], str] = {
         "Across all routes the average is {avg} min this week, {direction} {delta}% "
         "from the {baseline} min baseline ({delayed_count} routes currently delayed)."
     ),
-    ("copilot_overview_top_delay_cite", "ja"): "概況 · サンプル {samples} 件 · top_delayed[0]",
-    ("copilot_overview_top_delay_cite", "en"): "Overview · {samples} samples · top_delayed[0]",
+    ("copilot_overview_top_delay_cite", "ja"): "{samples}件の観測に基づく · 概況の集計",
+    ("copilot_overview_top_delay_cite", "en"): "Based on {samples} departures · Pulse summary",
     ("copilot_delta_up", "ja"): "増加",
     ("copilot_delta_up", "en"): "up",
     ("copilot_delta_down", "ja"): "減少",
@@ -333,10 +331,39 @@ _DATE_OVERRIDE_PROPS = {
         "type": "integer",
         "minimum": 1,
         "maximum": 365,
-        "description": "Override window: from = today - days_back + 1, to = today.",
+        "description": (
+            "Use the last N closed days ending yesterday (JST), the newest day history holds: "
+            "from = yesterday - days_back + 1, to = yesterday. Ignored when from or to is given."
+        ),
     },
-    "from": {"type": "string", "format": "date", "description": "ISO YYYY-MM-DD start (override)."},
-    "to": {"type": "string", "format": "date", "description": "ISO YYYY-MM-DD end (override)."},
+    "from": {
+        "type": "string",
+        "format": "date",
+        "description": (
+            "Start date, ISO YYYY-MM-DD; takes precedence over days_back. Without to, the window ends "
+            "yesterday (JST), the last closed day, or on from if that is later. Future dates clamp to "
+            "today, a reversed range is swapped, windows over 365 days keep the latest 365, and an "
+            "unparseable date counts as a missing bound. Only the date range changes; UI day-of-week, "
+            "time-band and service filters still apply."
+        ),
+    },
+    "to": {
+        "type": "string",
+        "format": "date",
+        "description": (
+            "End date, ISO YYYY-MM-DD; takes precedence over days_back. Without from, the window is the "
+            "30 days ending on this date."
+        ),
+    },
+}
+
+_ROUTE_PROP = {
+    "type": "string",
+    "description": (
+        "route_code (4-5 digits, e.g. '16071'), or the alias / Japanese route name "
+        "the user wrote ('路線5', '中央大橋線'); dispatch resolves aliases to a route_code "
+        "and answers with candidates when the name is ambiguous."
+    ),
 }
 
 
@@ -348,13 +375,13 @@ TOOLS: list[dict] = [
             "description": (
                 "Aggregate delay statistics for ONE specific route over the request "
                 "window. Use when the user asks about how a particular bus route is "
-                "doing (e.g. '路線5の遅延', '44372はどう?'). Always returns "
-                "per-service-type rows."
+                "doing (e.g. '路線5の遅延', '44372はどう?'). Returns one row per "
+                "service type and day of week (average delay minutes + sample count)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string", "description": "route_code, digits only e.g. '16071'"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -366,10 +393,14 @@ TOOLS: list[dict] = [
         "function": {
             "name": "top_n",
             "description": (
-                "Sorted ranking across all routes. Use for 'worst N', 'best N', "
-                "'most 5-minute delays'. The metric param controls which dimension "
-                "is ranked: avg_delay (default, longest avg first), on_time_rate "
-                "(highest on-time % first), worst_5min (most >5min incidents first)."
+                "Ranking of routes, one row per route and service type, over the request window "
+                "and UI filters. The metric param controls what is ranked: avg_delay (default; "
+                "longest average delay first, with p50/p90 minutes), on_time_rate (highest on-time "
+                "% first, always at the fixed 60-second on-time threshold), worst_5min (most "
+                "departures more than 5 minutes late first). avg_delay and on_time_rate leave out "
+                "route-service groups with 20 or fewer samples. For an on-time ranking at another "
+                "threshold use on_time_rate, which lists highest first only. Use for 'worst N', "
+                "'best N', 'most 5-minute delays'."
             ),
             "parameters": {
                 "type": "object",
@@ -378,12 +409,22 @@ TOOLS: list[dict] = [
                         "type": "string",
                         "enum": ["avg_delay", "on_time_rate", "worst_5min"],
                     },
-                    "n": {"type": "integer", "minimum": 3, "maximum": 100},
+                    "n": {
+                        "type": "integer",
+                        "minimum": 3,
+                        "maximum": 100,
+                        "description": (
+                            "Rows to return (default 10). There is no offset: for a 'show more' "
+                            "follow-up, re-call with a larger n."
+                        ),
+                    },
                     "best_first": {
                         "type": "boolean",
                         "description": (
-                            "When true, sort ascending (best first). Defaults to false "
-                            "for avg_delay/worst_5min, true for on_time_rate."
+                            "When true, list the best routes first. Honored for avg_delay "
+                            "(default false: longest delay first) and on_time_rate (default "
+                            "true: highest on-time % first); ignored for worst_5min, which "
+                            "always lists the most >5min incidents first."
                         ),
                     },
                     **_DATE_OVERRIDE_PROPS,
@@ -397,14 +438,29 @@ TOOLS: list[dict] = [
         "function": {
             "name": "compare_segments",
             "description": (
-                "Side-by-side delay comparison for one route, splitting on weekday "
-                "vs weekend (dimension=dow) or service_type. Use for '平日と土日祝の比較'."
+                "Weekday vs weekend delay comparison over the request window. dimension=dow splits "
+                "by calendar day of week (Mon–Fri vs Sat–Sun; a public holiday falling on a weekday "
+                "counts as a weekday) and ignores the UI day-of-week and service-type filters: omit "
+                "route to rank up to 50 routes by the absolute weekday/weekend gap, or set route to "
+                "compare that one route. Returns weekday and weekend average delay (minutes), the "
+                "absolute gap, and signed_delta = weekend minus weekday. dimension=service_type "
+                "requires route and returns that route's average delay and sample count per GTFS "
+                "service type (typically 平日 and 土日祝, where public holidays fall under 土日祝). "
+                "Use for '平日と土日祝の比較'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
-                    "dimension": {"type": "string", "enum": ["dow", "service_type"]},
+                    "route": _ROUTE_PROP,
+                    "dimension": {
+                        "type": "string",
+                        "enum": ["dow", "service_type"],
+                        "description": (
+                            "dow = calendar Mon–Fri vs Sat–Sun (all routes, or one route); "
+                            "service_type = one route split by GTFS service type, holidays included "
+                            "in 土日祝 (requires route)."
+                        ),
+                    },
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["dimension"],
@@ -422,7 +478,10 @@ TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string", "description": "Optional — if set, filter to this route_code."},
+                    "route": {
+                        **_ROUTE_PROP,
+                        "description": "Optional; narrows the series to one route. " + _ROUTE_PROP["description"],
+                    },
                     **_DATE_OVERRIDE_PROPS,
                 },
             },
@@ -433,14 +492,32 @@ TOOLS: list[dict] = [
         "function": {
             "name": "on_time_rate",
             "description": (
-                "On-time percentage per route. Default threshold is 60 seconds; "
-                "set threshold_min=5 to compute '5分以内定時率' instead."
+                "On-time percentage per route and service type over the request window and UI "
+                "filters, highest first (n rows, default 20); route-service groups with 20 or fewer "
+                "samples are left out. A departure counts as on time when it is at most "
+                "threshold_min minutes late (default 1 = 60 seconds); early departures always count "
+                "as on time. Set threshold_min=5 for '5分以内定時率'. It cannot list the lowest first: "
+                "for the least punctual routes use top_n(metric='on_time_rate', best_first=false), "
+                "which is fixed at the 60-second threshold."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "threshold_min": {"type": "integer", "minimum": 0, "maximum": 30},
-                    "n": {"type": "integer", "minimum": 3, "maximum": 100},
+                    "threshold_min": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 30,
+                        "description": "Minutes late still counted as on time (default 1).",
+                    },
+                    "n": {
+                        "type": "integer",
+                        "minimum": 3,
+                        "maximum": 100,
+                        "description": (
+                            "Rows to return (default 20). There is no offset: for a 'show more' "
+                            "follow-up, re-call with a larger n."
+                        ),
+                    },
                     **_DATE_OVERRIDE_PROPS,
                 },
             },
@@ -451,13 +528,17 @@ TOOLS: list[dict] = [
         "function": {
             "name": "route_meta",
             "description": (
-                "Static metadata for a route: name, stop count, first/last departure, "
-                "trips per day. Use for '路線情報', 'について教えて'."
+                "Static timetable metadata for one route from the agency's GTFS feed: route name, "
+                "number of distinct stops served, earliest and latest scheduled departure, and the "
+                "total number of distinct scheduled trips. All figures pool every service calendar "
+                "in the feed (weekday, weekend and holiday trips together), so the trip count is not "
+                "a per-day figure. Contains no delay data and ignores the date window and UI filters. "
+                "Use for '路線情報', 'について教えて'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                 },
                 "required": ["route"],
             },
@@ -468,14 +549,17 @@ TOOLS: list[dict] = [
         "function": {
             "name": "segment_hotspots",
             "description": (
-                "Returns the worst stop_sequences by average delay for a route — "
-                "WHERE along the route delay accumulates most. Use for "
-                "'どこで遅延が発生している', 'どの停留所が悪い'."
+                "Up to 5 stops (stop_sequence and stop name) on one route with the highest average "
+                "delay over the request window and UI filters, counting only stops with more than 5 "
+                "samples. This is the absolute delay level at each stop, which includes delay "
+                "carried from upstream, so it shows where delay is largest rather than where it is "
+                "added; for the stop-to-stop segments that themselves add delay, use "
+                "schedule_realism. Use for 'どこで遅延が発生している', 'どの停留所が悪い'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -487,14 +571,15 @@ TOOLS: list[dict] = [
         "function": {
             "name": "time_pattern",
             "description": (
-                "WHEN (which hour and day-of-week) a route is worst, pooled "
-                "across all observed history — a seasonal pattern, not scoped "
-                "to the request's date window. Use for 'いつ一番遅れる', "
+                "The 3 worst hour × day-of-week combinations for one route by average delay, pooled "
+                "across service types and across all observed history (combinations with more than "
+                "5 samples). Not scoped to the request's date window, and ignores the UI "
+                "day-of-week, time-band and service filters. Use for 'いつ一番遅れる', "
                 "'何曜日/何時が悪い'."
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"route": {"type": "string"}},
+                "properties": {"route": _ROUTE_PROP},
                 "required": ["route"],
             },
         },
@@ -504,15 +589,23 @@ TOOLS: list[dict] = [
         "function": {
             "name": "schedule_realism",
             "description": (
-                "Flags stop-to-stop segments on a route that systematically ADD "
-                "delay (not just have high absolute delay) — whether the "
-                "SCHEDULE itself is unrealistic. Use for '時刻表がおかしい', "
+                "Whether a route's timetable allows realistic running times, segment by segment, "
+                "over the request window and UI filters. Unlike segment_hotspots, which ranks the "
+                "absolute delay level at each stop (including delay carried from upstream), this "
+                "looks at each stop-to-stop segment on its own. For agencies whose feed reports "
+                "arrival times, returns every segment × scheduled hour with the scheduled running "
+                "time, observed median and 85th-percentile running time, padding_min (scheduled "
+                "minus observed median: positive = slack, negative = too tight) and the share of "
+                "on-time-or-early arrivals then held more than 60 s beyond the scheduled dwell, plus "
+                "the route's rate of trips reaching the terminus early. For other agencies it falls "
+                "back to the up to 5 segments where delay grows the most between consecutive stops "
+                "(avg_added_min, segments with more than 5 samples). Use for '時刻表がおかしい', "
                 "'余裕時間が足りない'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -524,14 +617,19 @@ TOOLS: list[dict] = [
         "function": {
             "name": "trend_shift",
             "description": (
-                "Whether a route's delay is a chronic, longstanding pattern or "
-                "a recent regime shift (something changed partway through the "
-                "window). Use for '最近悪化した?', 'ずっとこうなの?', 'いつから遅れてる'."
+                "Compares a route's delay in the first half of the request window with the second "
+                "half: returns the sample-weighted average delay (minutes) of each half, delta_min = "
+                "second half minus first half, and the number of observed days (observed days are "
+                "split in half by count). A large delta suggests something changed partway through "
+                "the window; a small one suggests a consistent pattern across the window. It gives "
+                "no verdict and no change date, and says nothing about the period before the "
+                "window; for when a change started, use time_series. Returns nothing when the route "
+                "has fewer than 2 observed days. Use for '最近悪化した?', 'ずっとこうなの?'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "route": {"type": "string"},
+                    "route": _ROUTE_PROP,
                     **_DATE_OVERRIDE_PROPS,
                 },
                 "required": ["route"],
@@ -552,14 +650,14 @@ TOOLS.extend(META_TOOLS)
 
 
 SYSTEM_PROMPT = """\
-あなたは青森市バスの遅延分析アシスタントです。利用可能なツールを使って質問に答えます。
+あなたは公共交通の遅延分析アシスタントです。利用可能なツールを使って質問に答えます。
 
 == 重要なルール ==
 1. ツールが質問に合うなら必ずツールを呼び出す。前置きや説明文は不要。
 2. **route 引数は実際のシステム route_code(4〜5桁の数字、例: '16071', '22171')を渡す。**
    ユーザーが '路線5' のような短い別名や 'A1'・'中央大橋線' のような日本語名で route を
    指定してきた場合も、そのまま route に渡してよい。dispatch 層の schema_linker が別名を
-   解決する。それでも解決できない曖昧な入力(例: '雨天')の場合は、route 引数を埋めて
+   解決する。それでも解決できない曖昧な入力(例: 'いつもの路線')の場合は、route 引数を埋めて
    ツールを呼ぶのではなく、データ可用性を確かめるなら `describe_data`、
    答えられる質問例を見せるなら `capabilities` を呼ぶ。
 3. データの提供範囲外の質問(天気、運賃、事故、車両情報、および「あなたは誰?」
@@ -576,27 +674,35 @@ SYSTEM_PROMPT = """\
 6. **ツールに合わない質問・データ可用性の質問** → まず `describe_data`
    (データ範囲・路線・停留所など) または `capabilities`(答えられる質問の例) を呼ぶ。
    自然文での拒否は本当にデータ範囲外(天気・運賃・事故など) の場合のみ。
-7. **リスト表示の後に「もっと」「次の50件」などと聞かれたら、同じツールを `offset` を
-   `limit` 分増やして再呼び出しする（例: 停留所一覧の続き → describe_data(kind=stops, offset=50)）。
+7. リスト表示の後に「もっと」「次の50件」などと聞かれたら、同じツールを再呼び出しする。
+   `offset` 引数があるツールは `offset` を `limit` 分増やす
+   （例: 停留所一覧の続き → describe_data(kind=stops, offset=50)）。
+   `offset` がないランキング系ツールは `n` を増やす(上限100)。
 
 == 利用可能なツール ==
 - route_stats(route, days_back?, from?, to?): 1 路線の遅延統計
 - top_n(metric, n?, best_first?, days_back?, from?, to?): 全路線ランキング
-- compare_segments(route?, dimension, days_back?, from?, to?): 平日 vs 土日祝などの比較
+- compare_segments(route?, dimension, days_back?, from?, to?): 平日 vs 週末の比較
+  (dimension=dow: 暦の月〜金 vs 土日。route 省略で全路線の差ランキング /
+   dimension=service_type: 1路線の運行種別(平日・土日祝)別。route 必須)
 - time_series(route?, days_back?, from?, to?): 日次トレンド
 - on_time_rate(threshold_min?, n?, days_back?, from?, to?): 定時率ランキング
 - route_meta(route): 路線の路線情報
-- segment_hotspots(route, days_back?, from?, to?): 路線の遅延ホットスポット(どの区間で遅延が発生・蓄積しているか)
-- time_pattern(route): 路線の時間帯・曜日別パターン(いつ一番悪化するか。全期間集計で期間指定は効かない)
+- segment_hotspots(route, days_back?, from?, to?): 路線の遅延ホットスポット
+  (遅延が最も大きい停留所 上位5件。上流からの持ち越しを含む)
+- time_pattern(route): 路線の時間帯・曜日別パターン
+  (いつ一番悪化するか。上位3件。全期間集計で期間指定もUIの曜日・時間帯フィルタも効かない)
 - schedule_realism(route, days_back?, from?, to?): 時刻表の妥当性
   (区間・時間帯ごとに時刻表上の所要時間と実績を比較し余裕時間の有無を判定。対応エージェンシーでは終点早着率・調整停車も表示)
-- trend_shift(route, days_back?, from?, to?): 慢性的な遅延か、期間内で最近悪化したか(トレンドの変化)の判定
-- describe_data(kind, limit?, filter_substring?): データセットそのものの問い合わせ
+- trend_shift(route, days_back?, from?, to?): 期間の前半と後半の平均遅延を比較し、
+  慢性的か期間内で最近悪化したかの判断材料を返す(変化日は返さない)
+- describe_data(kind, limit?, offset?, filter_substring?, order?): データセットそのものの問い合わせ
   (kind ∈ routes/stops/date_range/agencies/sample_counts/overview/metrics)
   例:「どんな路線がある?」→ kind=routes /「いつからのデータ?」→ kind=date_range /
-     「サンプル数の多い路線」→ kind=sample_counts /「全体感」→ kind=overview
+     「サンプル数の多い路線」→ kind=sample_counts /「少ない路線」→ kind=sample_counts, order=asc /
+     「全体感」→ kind=overview
 - capabilities(category?): 答えられる質問例(カテゴリ別)を返す。
-  ユーザーの質問が漠然としていたり範囲外の時に使う。
+  ユーザーの質問が漠然としている時や、何ができるかを聞かれた時に使う。
   例:「やばい路線」「いつものやつ」「何ができる?」
 
 == 例 ==
@@ -611,14 +717,13 @@ SYSTEM_PROMPT = """\
 - "22171は何時頃・何曜日が一番悪い?" → time_pattern(route='22171')
 - "22171の時刻表は妥当?余裕時間は足りてる?" → schedule_realism(route='22171')
 - "22171の遅延は最近悪化した?それとも前からずっとこう?" → trend_shift(route='22171')
-- "雨天時の比較" → ツール呼ばず、「天気データはありません。
+- "雨天時の比較" → ツール呼ばず、「このチャットでは天気との比較は扱えません。
   代わりに『22171の平日と土日祝の比較』が答えられます」と返す
 - "どんな路線がある?" → describe_data(kind='routes')
 - "いつからのデータ?" → describe_data(kind='date_range')
 - "サンプル数の多い路線は?" → describe_data(kind='sample_counts')
 - "データセット全体の概要" → describe_data(kind='overview')
 - "何ができる?" / "やばい路線" → capabilities()
-- "事故情報を見たい" → capabilities() を呼んで答えられる質問例を返す
 """
 
 
@@ -633,11 +738,13 @@ SYSTEM_PROMPT = """\
 # this split (see pipeline/query/chat.py's ``use_cache`` branch for where
 # this is conditionally appended).
 JSON_MODE_ADDENDUM = """\
-== Output format (when asked for JSON) ==
-When the request specifies JSON output, return ONLY a JSON object of this shape:
+== Output format ==
+Return only a JSON object of this shape:
 {"tool": "<one of the tools>", "args": {<tool args>}, "confidence": <0..1>, "rationale": "<short reason>"}
 No prose, no markdown fences. `confidence` should reflect how sure you are about the tool + args
 choice; use lower values when the user's wording is ambiguous.
+When the rules above call for answering without a tool (rule 3), return
+{"tool": null, "reply": "<that answer>"} instead.
 """
 
 # Appended alongside JSON_MODE_ADDENDUM only for a recognized follow-up that
@@ -650,12 +757,6 @@ This question is a recognized continuation of your own previous tool call
 (with "args" adjusted, e.g. an incremented offset) — it must NOT be null
 or omitted.
 """
-
-
-# Human-readable name of each locale, for the "Reply in ..." system addendum
-# (see :mod:`pipeline.query.chat`). Kept here so the LLM-related strings live
-# alongside their translation table.
-LOCALE_LANGUAGE_NAME = {"ja": "日本語", "en": "English"}
 
 
 # ---------------------------------------------------------------------------
@@ -677,7 +778,7 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
     if days_back is None and not raw_from and not raw_to:
         return ctx
 
-    today = jst_today()
+    end = last_closed_jst_day()
 
     def _parse(s: Any) -> date | None:
         if not isinstance(s, str):
@@ -688,8 +789,10 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
             return None
 
     if raw_from or raw_to:
-        new_to = _parse(raw_to) or today
-        new_from = _parse(raw_from) or new_to - timedelta(days=29)
+        # A missing end is left to clamp_range_ctx, which ends a lone start on
+        # the last closed day or on the start itself when that is later.
+        new_to = _parse(raw_to)
+        new_from = _parse(raw_from) or (new_to or end) - timedelta(days=29)
     else:
         # Reaching this branch implies days_back is set: the early return
         # above already handled (days_back is None and no raw dates).
@@ -698,8 +801,8 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
             n = max(1, int(days_back))
         except (TypeError, ValueError):
             return ctx
-        new_to = today
-        new_from = today - timedelta(days=n - 1)
+        new_to = end
+        new_from = end - timedelta(days=n - 1)
 
     # Hand back to the shared clamp rather than re-deriving its rules here.
     # Parsing stays local and lenient on purpose -- an unparseable date from a
@@ -714,6 +817,9 @@ def _apply_date_overrides(ctx: RangeCtx, args: dict) -> RangeCtx:
         time_band=ctx.time_band,
         service=ctx.service,
         routes=ctx.routes,
+        hour=hour_param(ctx.hour),
+        stop=ctx.stop,
+        direction=ctx.direction,
     )
 
 
@@ -1207,6 +1313,8 @@ _HANDLERS = {
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
+    # Guided-card only (``__build__``); deliberately absent from TOOLS so the
+    # LLM never selects it on its own.
     "route_stop_patterns": _tool_route_stop_patterns,
     "time_pattern": _tool_time_pattern,
     "schedule_realism": _tool_schedule_realism,

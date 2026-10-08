@@ -9,6 +9,8 @@ endpoint, and the LLM tool helpers can't drift apart on the definition of
 
 import psycopg2
 
+from pipeline.clickhouse import UPDATES_TABLE, checked_table
+
 # ISODOW (Mon=1..Sun=7). Aligns with api/range.dow_clause and
 # agg_route_hour_dow.dow (SMALLINT).
 _DOW_JP_TO_ISO = {"月": 1, "火": 2, "水": 3, "木": 4, "金": 5, "土": 6, "日": 7}
@@ -29,10 +31,13 @@ _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 # Clamping here, in the ONE shared dedup builder, protects every averaged surface
 # (reports, overview, route-summary, and the live Ask/report queries) — not just
 # the heatmap. Raw `updates` is left intact, so feed-health forensics still work
-# and the ceiling is re-tunable by re-analyze. `delays/live` reads raw `updates`
-# directly and is intentionally NOT clamped: it's a current-state snapshot, not an
-# average. The ceiling sits well above any plausible real delay, so a genuinely
-# very-late bus still counts.
+# and the ceiling is re-tunable by re-analyze. Every other hand-rolled dedup on
+# the Map tab (api.routers.map's live/route/stop-profile queries,
+# pipeline.reports.map's shape-vote/stats queries) applies this same clamp
+# directly in its own WHERE, even where it computes no average: a frozen feed
+# can report the same implausible reading as a single current value, not just
+# skew a mean. The ceiling sits well above any plausible real delay, so a
+# genuinely very-late bus still counts everywhere.
 MAX_PLAUSIBLE_DELAY_SEC = 7200
 
 # Outside the +/-MAX_PLAUSIBLE_DELAY_SEC window every non-NULL arr_delay reaching
@@ -50,8 +55,12 @@ def build_dedup_ch_sql(
     include_captured_at: bool = False,
     include_arr_delay: bool = False,
     include_scheduled_sec: bool = False,
+    table: str = UPDATES_TABLE,
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
+
+    `table` is `updates` for a closed day or `updates_live` for today
+    (`pipeline.clickhouse.live_table_for`); both carry the same columns.
 
     GTFS-RT feeds publish refining `dep_delay` estimates as the trip nears
     each stop. The latest observation is what passengers actually
@@ -191,7 +200,7 @@ def build_dedup_ch_sql(
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         "toDate(u.captured_at, 'Asia/Tokyo') AS date, u.stop_sequence, "
         f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{arr} "
-        "FROM updates AS u "
+        f"FROM {checked_table(table)} AS u "
         "WHERE u.dep_delay IS NOT NULL AND u.agency_id = {agency_id:UInt16} "
         f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "

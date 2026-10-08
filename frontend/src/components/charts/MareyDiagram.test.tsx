@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
-import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import "../../i18n";
 import { MareyDiagram } from "./MareyDiagram";
 import { MUTED_OPACITY, formatClock, type MareyStop } from "./mareyLayout";
@@ -39,6 +39,25 @@ function show(props: Partial<ComponentProps<typeof MareyDiagram>> = {}) {
   return render(<MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" {...props} />);
 }
 
+/** Force the phone/desktop branch `useMediaQuery` reads, so the narrow layout
+ *  can be asserted in jsdom (which reports no viewport width of its own). */
+function mockViewport(narrow: boolean) {
+  vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+    matches: narrow,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }) as unknown as MediaQueryList);
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("MareyDiagram", () => {
   it("draws one polyline per trip", () => {
     const { container } = show();
@@ -58,8 +77,11 @@ describe("MareyDiagram", () => {
   });
 
   it("labels every stop on the y axis", () => {
-    show();
-    for (const stop of AXIS) expect(screen.getByText(stop.stop_name)).toBeInTheDocument();
+    // Scoped to the drawing: the same stop names also appear in the tabular
+    // reading of the chart that follows it.
+    const { container } = show();
+    const labels = [...container.querySelectorAll("svg.marey__chart text")].map((node) => node.textContent);
+    for (const stop of AXIS) expect(labels).toContain(stop.stop_name);
   });
 
   it("fades the other trips while one is hovered", () => {
@@ -113,5 +135,184 @@ describe("MareyDiagram", () => {
   it("stays silent about capping when nothing was dropped", () => {
     show();
     expect(screen.queryByTestId("marey-truncated")).toBeNull();
+  });
+});
+
+describe("MareyDiagram keyboard and screen-reader access", () => {
+  it("puts every trip in the tab order with a label naming its route of travel and times", () => {
+    const { container } = show();
+    const groups = [...container.querySelectorAll("[data-trip-id]")];
+    expect(groups.every((g) => g.getAttribute("tabindex") === "0")).toBe(true);
+    const label = groups[2].getAttribute("aria-label") ?? "";
+    expect(label).toContain("08:00");
+    expect(label).toContain("Station");
+    expect(label).toContain("Terminus");
+    expect(label).toContain("15.0");
+  });
+
+  it("reads out the focused trip and mirrors the hover fade", () => {
+    const { container } = show();
+    const groups = [...container.querySelectorAll("[data-trip-id]")];
+
+    fireEvent.focus(groups[2]);
+    expect(screen.getByTestId("marey-readout")).toHaveTextContent("08:00");
+    expect(groups[0].getAttribute("opacity")).toBe(String(MUTED_OPACITY));
+
+    fireEvent.blur(groups[2]);
+    expect(groups.every((g) => g.getAttribute("opacity") === "1")).toBe(true);
+  });
+
+  it("leaves a still-hovered trip highlighted after a different trip is blurred", () => {
+    const { container } = show();
+    const groups = [...container.querySelectorAll("[data-trip-id]")];
+
+    fireEvent.mouseEnter(groups[1].querySelector(".marey-trip__hit")!);
+    fireEvent.focus(groups[2]);
+    // Tabbing away raises no `mouseleave`, so the pointer is still on group 1.
+    fireEvent.blur(groups[2]);
+
+    expect(groups[1].getAttribute("opacity")).toBe("1");
+    expect(groups[0].getAttribute("opacity")).toBe(String(MUTED_OPACITY));
+  });
+
+  it("announces the readout politely so a change on focus is spoken", () => {
+    show();
+    expect(screen.getByTestId("marey-readout")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("gives the chart an image role and a summary label", () => {
+    const { container } = show();
+    const svg = container.querySelector("svg.marey__chart")!;
+    expect(svg.getAttribute("role")).toBe("img");
+    expect(svg.getAttribute("aria-label")).toContain("3");
+  });
+
+  it("follows the chart with one table row per drawn trip", () => {
+    show();
+    const table = screen.getByTestId("marey-table");
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(3);
+    expect(within(rows[2]).getByText("08:00")).toBeInTheDocument();
+    expect(within(rows[2]).getByText("15.0")).toBeInTheDocument();
+  });
+});
+
+describe("MareyDiagram on a narrow viewport", () => {
+  it("shows the table instead of the chart, behind a toggle", async () => {
+    mockViewport(true);
+    const { container } = show();
+    expect(container.querySelector("svg.marey__chart")).toBeNull();
+    expect(screen.getByTestId("marey-table")).toBeVisible();
+
+    const toggle = screen.getByRole("button", { name: "Show diagram" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+
+    expect(container.querySelector("svg.marey__chart")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Hide diagram" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps the chart and the hidden table on a wide viewport", () => {
+    mockViewport(false);
+    const { container } = show();
+    expect(container.querySelector("svg.marey__chart")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Show diagram" })).toBeNull();
+    expect(screen.getByTestId("marey-table").className).toContain("marey__table--hidden");
+  });
+});
+
+describe("MareyDiagram scrubber", () => {
+  // T1 is under way 07:00-07:12 (observed), T2 from 07:32, T3 from 08:01.
+  const AT_T1 = 25_500;
+
+  it("renders a scrub rail bounded by the view window and reports the chosen second", () => {
+    const onScrub = vi.fn();
+    show({ scrubSec: AT_T1, onScrub });
+    const slider = screen.getByRole("slider", { name: "Scrub the clock" });
+    expect(slider).toHaveAttribute("min", "21600");
+    expect(slider).toHaveAttribute("max", "36000");
+    expect(slider).toHaveAttribute("step", "60");
+    expect(slider).toHaveAttribute("value", String(AT_T1));
+    fireEvent.change(slider, { target: { value: "25560" } });
+    expect(onScrub).toHaveBeenCalledWith(25_560);
+  });
+
+  it("offers no rail without a scrub handler", () => {
+    show();
+    expect(screen.queryByRole("slider")).toBeNull();
+  });
+
+  it("brightens the trips crossing the second and mutes the rest, with a cursor", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    expect(container.querySelector('[data-trip-id="T1"]')!.classList.contains("marey-trip--cross")).toBe(true);
+    expect(container.querySelector('[data-trip-id="T1"]')!.getAttribute("opacity")).toBe("1");
+    expect(container.querySelector('[data-trip-id="T2"]')!.classList.contains("marey-trip--cross")).toBe(false);
+    expect(container.querySelector('[data-trip-id="T2"]')!.getAttribute("opacity")).toBe(String(MUTED_OPACITY));
+    expect(container.querySelector(".marey-cursor")).not.toBeNull();
+    expect(screen.getByTestId("marey-readout").textContent).toContain("1 trip under way");
+  });
+
+  it("a trip stepped to by keyboard is read out and lit even while a scrub is set", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    fireEvent.focus(container.querySelector('[data-trip-id="T2"]')!);
+    expect(screen.getByTestId("marey-readout").textContent).toContain("Departure 07:30");
+    expect(container.querySelector('[data-trip-id="T2"]')!.getAttribute("opacity")).toBe("1");
+    expect(container.querySelector('[data-trip-id="T1"]')!.getAttribute("opacity")).toBe(String(MUTED_OPACITY));
+  });
+
+  it("puts a position marker on the ribbon for each crossing trip", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    expect(container.querySelectorAll(".stop-ribbon__pos")).toHaveLength(1);
+  });
+
+  it("clears the scrub from the rail and hands focus back to the slider", () => {
+    const onScrub = vi.fn();
+    show({ scrubSec: AT_T1, onScrub });
+    fireEvent.click(screen.getByRole("button", { name: "Clear scrub" }));
+    expect(onScrub).toHaveBeenCalledWith(null);
+    expect(document.activeElement).toBe(screen.getByRole("slider", { name: "Scrub the clock" }));
+  });
+
+  it("marks the diagram as scrubbing only while a scrub is set", () => {
+    const { container, rerender } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(true);
+    rerender(<MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" onScrub={vi.fn()} />);
+    expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(false);
+  });
+
+  it("a trip pointed at during a scrub fades the rest on the quick tier, not the scrub's", () => {
+    const { container } = show({ scrubSec: AT_T1, onScrub: vi.fn() });
+    fireEvent.focus(container.querySelector('[data-trip-id="T2"]')!);
+    expect(container.querySelector(".marey")!.classList.contains("marey--scrubbing")).toBe(false);
+  });
+
+  it("pressing the slider where it rests starts a scrub at that minute", () => {
+    const onScrub = vi.fn();
+    show({ onScrub });
+    const slider = screen.getByRole("slider", { name: "Scrub the clock" });
+    fireEvent.pointerDown(slider);
+    expect(onScrub).toHaveBeenCalledWith(Number(slider.getAttribute("value")));
+  });
+
+  it("gives each diagram's rail its own id, so each clock reads its own slider", () => {
+    render(
+      <>
+        <MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" onScrub={vi.fn()} />
+        <MareyDiagram trips={THREE_TRIPS} axis={AXIS} band="all" onScrub={vi.fn()} />
+      </>,
+    );
+    const ids = screen.getAllByRole("slider").map((s) => s.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("keeps the clear control in place, disabled, before any scrub, so the rail does not resize mid-drag", () => {
+    show({ onScrub: vi.fn() });
+    expect(screen.getByRole("button", { name: "Clear scrub" })).toBeDisabled();
+  });
+
+  it("without a scrub second, no cursor is drawn", () => {
+    const { container } = show({ onScrub: vi.fn() });
+    expect(container.querySelector(".marey-cursor")).toBeNull();
+    expect(container.querySelectorAll(".stop-ribbon__pos")).toHaveLength(0);
   });
 });

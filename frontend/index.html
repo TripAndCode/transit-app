@@ -20,15 +20,51 @@
         }
       })();
     </script>
+    <script>
+      // Names the page and its language, and starts downloading the active
+      // language's strings alongside the entry chunk instead of after it
+      // runs. Mirrors the language resolution in src/i18n/index.ts (stored
+      // choice, then navigator, else ja); the "index.html locale preload"
+      // tests in src/i18n/localeLoading.test.tsx keep the languages, titles
+      // and resolution in agreement. The build replaces the placeholder with
+      // each language's chunk URL.
+      (function (chunks) {
+        var TITLES = { ja: "遅延ダッシュボード", en: "Delay Dashboard" };
+        function has(map, code) {
+          return Object.prototype.hasOwnProperty.call(map, code);
+        }
+        var codes = [];
+        try {
+          var stored = localStorage.getItem("app.locale");
+          if (stored) codes.push(stored);
+        } catch (e) {}
+        var nav = navigator.languages || [];
+        for (var i = 0; i < nav.length; i++) codes.push(nav[i]);
+        if (navigator.language) codes.push(navigator.language);
+        var lng;
+        for (i = 0; i < codes.length && !lng; i++) if (has(TITLES, codes[i])) lng = codes[i];
+        for (i = 0; i < codes.length && !lng; i++) if (has(TITLES, codes[i].split("-")[0])) lng = codes[i].split("-")[0];
+        lng = lng || "ja";
+        document.documentElement.lang = lng;
+        document.title = TITLES[lng];
+        if (!has(chunks, lng)) return;
+        var link = document.createElement("link");
+        link.rel = "modulepreload";
+        link.crossOrigin = "";
+        link.href = chunks[lng];
+        document.head.appendChild(link);
+      })(/*__LOCALE_CHUNKS__*/ {});
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Weights match what the app actually sets (grep font-weight/fontWeight):
-         Noto Sans JP 400/500/600/700/800 for body text, Noto Serif JP 400/600
-         for --font-display's identity-moments-only headings. -->
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800&family=Noto+Serif+JP:wght@400;600&display=swap">
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800&family=Noto+Serif+JP:wght@400;600&display=swap" rel="stylesheet">
+    <!-- BIZ UDPGothic ships 400 and 700 only; the browser maps 500 to 400 and
+         600 to 700 without synthesizing. Barlow Semi Condensed carries the
+         numeral columns (--font-num), IBM Plex Mono the codes and clock
+         times (--font-mono). -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>遅延ダッシュボード</title>
   </head>

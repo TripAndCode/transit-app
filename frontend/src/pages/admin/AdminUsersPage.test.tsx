@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useNavigate } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { AdminUsersPage } from "./AdminUsersPage";
+import { AdminLayout } from "./AdminLayout";
+import { PENDING_APPROVAL_FILTER } from "./pendingApprovals";
+import { ToastProvider } from "../../components/ui/Toast";
 import { ApiError } from "../../api/client";
 
 const patchMutate = vi.fn();
@@ -78,7 +81,9 @@ function wrap(initialEntries = ["/admin/users"]) {
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={qc}>
         <MemoryRouter initialEntries={initialEntries}>
-          <AdminUsersPage />
+          <ToastProvider>
+            <AdminUsersPage />
+          </ToastProvider>
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>
@@ -90,10 +95,10 @@ function wrapWithExternalNav(initialEntries: string[]) {
   function Harness() {
     const navigate = useNavigate();
     return (
-      <>
+      <ToastProvider>
         <button onClick={() => navigate("/admin/users?q=bar")}>go-bar</button>
         <AdminUsersPage />
-      </>
+      </ToastProvider>
     );
   }
   return render(
@@ -124,28 +129,31 @@ describe("AdminUsersPage", () => {
     useSessionMock.mockReturnValue({ data: { user_id: 999, role: "admin" } });
     patchMutate.mockClear();
     patchReset.mockClear();
-    delMutate.mockClear();
+    delMutate.mockReset();
+    delMutate.mockResolvedValue(undefined);
     delReset.mockClear();
     bulkMutate.mockClear();
   });
 
   it("shows a colored Active chip for a user with no suspended_at", () => {
     wrap();
-    const chip = within(screen.getByRole("table")).getByText("Active");
-    expect(chip.style.color).toBe("var(--accent)");
+    const chip = within(screen.getByRole("grid")).getByText("Active");
+    // The deepened --accent-strong, not --accent: this text sits directly on
+    // --accent-soft, where plain --accent falls short of WCAG AA (4.32:1).
+    expect(chip.style.color).toBe("var(--accent-strong)");
     expect(chip.style.background).toBe("var(--accent-soft)");
   });
 
   it("shows a colored Suspended chip for a user with suspended_at set", () => {
     wrap();
-    const chip = within(screen.getByRole("table")).getByText("Suspended");
-    expect(chip.style.color).toBe("var(--color-warning, #C99A2E)");
+    const chip = within(screen.getByRole("grid")).getByText("Suspended");
+    expect(chip.style.color).toBe("var(--color-warning-text, #89691F)");
     expect(chip.style.background).toBe("var(--surface-2)");
   });
 
   it("renders every row with exactly one status chip (no bare em-dash for active users)", () => {
     wrap();
-    const table = within(screen.getByRole("table"));
+    const table = within(screen.getByRole("grid"));
     expect(table.queryByText("—")).toBeNull();
     expect(table.getAllByText("Active")).toHaveLength(1);
     expect(table.getAllByText("Suspended")).toHaveLength(1);
@@ -376,26 +384,73 @@ describe("AdminUsersPage", () => {
       );
     });
 
-    it("routes bulk delete through the existing per-user confirm flow for each selected id", async () => {
-      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    it("confirms a bulk delete once, in a dialog naming every selected row", async () => {
+      const confirmSpy = vi.spyOn(window, "confirm");
       const user = userEvent.setup();
       wrap();
       await user.click(screen.getByRole("checkbox", { name: "Select all" }));
       await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Delete" }));
+
+      const dialog = screen.getByRole("dialog", { name: "Delete the selected users?" });
+      expect(within(dialog).getByText("2 users will be anonymized. This cannot be undone.")).toBeTruthy();
+      expect(within(dialog).getByText("active@example.com")).toBeTruthy();
+      expect(within(dialog).getByText("suspended@example.com")).toBeTruthy();
+      expect(confirmSpy).not.toHaveBeenCalled();
+
+      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
       await vi.waitFor(() => expect(delMutate).toHaveBeenCalledTimes(2));
       expect(delMutate).toHaveBeenCalledWith(1);
       expect(delMutate).toHaveBeenCalledWith(2);
+      expect(screen.queryByRole("dialog")).toBeNull();
+      await vi.waitFor(() => expect(screen.queryByTestId("admin-users-bulk-bar")).toBeNull());
       confirmSpy.mockRestore();
     });
 
-    it("skips a selected id when its delete confirm is declined", async () => {
-      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    it("attempts every id of a bulk delete, names the ones that failed, and keeps only those selected", async () => {
+      // One failure must not strand the rest of the batch unattempted, and
+      // the operator has to learn which rows are still there to retry.
+      delMutate.mockImplementation((uid: number) =>
+        uid === 1 ? Promise.reject(new ApiError(400, JSON.stringify({ detail: "would leave no admins" }))) : Promise.resolve(),
+      );
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+      await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Delete" }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+
+      await vi.waitFor(() => expect(delMutate).toHaveBeenCalledTimes(2));
+      expect(delMutate).toHaveBeenCalledWith(1);
+      expect(delMutate).toHaveBeenCalledWith(2);
+      const notice = await screen.findByRole("alert");
+      expect(notice).toHaveTextContent(
+        i18n.t("admin.users.bulk.delete_failed", { failed: 1, total: 2, emails: "active@example.com" }),
+      );
+      expect(notice).not.toHaveTextContent("suspended@example.com");
+      expect(screen.getByRole("checkbox", { name: "Select active@example.com" })).toHaveProperty("checked", true);
+      expect(screen.getByRole("checkbox", { name: "Select suspended@example.com" })).toHaveProperty("checked", false);
+      expect(screen.getByText("1 selected")).toBeTruthy();
+    });
+
+    it("deletes nothing when the bulk delete dialog is cancelled", async () => {
       const user = userEvent.setup();
       wrap();
       await user.click(screen.getByRole("checkbox", { name: "Select active@example.com" }));
       await user.click(within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Delete" }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
       expect(delMutate).not.toHaveBeenCalled();
-      confirmSpy.mockRestore();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("announces the undo message without pulling the Undo button into the live region", async () => {
+      const user = userEvent.setup();
+      wrap();
+      await user.click(screen.getByRole("checkbox", { name: "Select active@example.com" }));
+      await user.click(
+        within(screen.getByTestId("admin-users-bulk-bar")).getByRole("button", { name: "Approve AI access" }),
+      );
+      const message = await screen.findByText("Approved AI access for 1");
+      expect(message).toHaveAttribute("role", "status");
+      expect(screen.getByRole("button", { name: "Undo" }).closest('[role="status"]')).toBeNull();
     });
   });
 
@@ -408,14 +463,64 @@ describe("AdminUsersPage", () => {
       expect(screen.getByText("2")).toBeTruthy();
     });
 
-    it("selecting the pending-approval view sets llm_approved=false and clears role/suspended", async () => {
+    it("selecting the pending-approval view applies the shared pending filter and clears role", async () => {
       const user = userEvent.setup();
       wrap(["/admin/users?role=admin&suspended=true"]);
       useAdminUsersMock.mockClear();
-      await user.click(screen.getByRole("button", { name: /Pending approval/ }));
+      await user.click(screen.getByRole("button", { name: /Awaiting AI access/ }));
       expect(useAdminUsersMock).toHaveBeenLastCalledWith(
-        expect.objectContaining({ role: "", suspended: "", llmApproved: "false" }),
+        expect.objectContaining({ role: "", ...PENDING_APPROVAL_FILTER }),
       );
+      expect(screen.getByRole("button", { name: /Awaiting AI access/ })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("counts the same users in the nav badge, the Pending chip, and the Pending view's rows", async () => {
+      // A suspended user -- every soft-deleted one included -- is not
+      // waiting on an approval decision, so it must be in none of the three.
+      const people = [
+        { ...twoUsers().data.users[0], user_id: 1, email: "waiting@example.com", role: "user" as const },
+        { ...twoUsers().data.users[1], user_id: 2, email: "deleted-2@local" },
+        { ...twoUsers().data.users[0], user_id: 3, email: "approved@example.com", role: "user" as const, llm_approved: true },
+      ];
+      useAdminUsersMock.mockImplementation(
+        (params: { role?: string; suspended?: string; llmApproved?: string; limit?: number }) => {
+          const matched = people.filter(
+            (u) =>
+              (!params.role || u.role === params.role) &&
+              (!params.suspended || (u.suspended_at !== null) === (params.suspended === "true")) &&
+              (!params.llmApproved || u.llm_approved === (params.llmApproved === "true")),
+          );
+          return {
+            data: { users: matched.slice(0, params.limit ?? 50), total: matched.length },
+            isLoading: false,
+            error: null,
+          };
+        },
+      );
+      const user = userEvent.setup();
+      render(
+        <I18nextProvider i18n={i18n}>
+          <QueryClientProvider client={new QueryClient()}>
+            <MemoryRouter initialEntries={["/admin/users"]}>
+              <ToastProvider>
+                <Routes>
+                  <Route path="/admin" element={<AdminLayout />}>
+                    <Route path="users" element={<AdminUsersPage />} />
+                  </Route>
+                </Routes>
+              </ToastProvider>
+            </MemoryRouter>
+          </QueryClientProvider>
+        </I18nextProvider>,
+      );
+      const chip = screen.getByRole("button", { name: /Awaiting AI access/ });
+      await user.click(chip);
+
+      const badge = screen.getByTestId("nav-badge").textContent;
+      expect(badge).toBe("1");
+      expect(within(chip).getByText(badge!)).toBeTruthy();
+      expect(dataRows()).toHaveLength(Number(badge));
+      expect(within(screen.getByRole("grid")).getByText("waiting@example.com")).toBeTruthy();
     });
 
     it("marks the admins view active from the role=admin URL param", () => {
@@ -428,7 +533,7 @@ describe("AdminUsersPage", () => {
     // The caption is the table's accessible name; key parity between
     // locales cannot catch a key that exists in neither.
     wrap();
-    expect(screen.getByRole("table", { name: "Users" })).toBeTruthy();
+    expect(screen.getByRole("grid", { name: "Users" })).toBeTruthy();
   });
 
   it("navigates once when the email link is clicked, so Back returns to the list", async () => {
@@ -528,26 +633,26 @@ describe("AdminUsersPage", () => {
 
   it("updates the displayed search value when the URL's q changes externally (e.g. browser back/forward)", () => {
     wrapWithExternalNav(["/admin/users?q=foo"]);
-    expect(screen.getByPlaceholderText("Search by email / name")).toHaveValue("foo");
+    expect(screen.getByPlaceholderText("Email or name")).toHaveValue("foo");
     fireEvent.click(screen.getByText("go-bar"));
     // A URL change that didn't come from this component's own debounce
     // commit must still be reflected in the input -- otherwise the box shows
     // a query that no longer matches the results underneath it.
-    expect(screen.getByPlaceholderText("Search by email / name")).toHaveValue("bar");
+    expect(screen.getByPlaceholderText("Email or name")).toHaveValue("bar");
   });
 
   it("keeps focus on the search input once its own debounce commits the typed value", async () => {
     vi.useFakeTimers();
     try {
       wrap();
-      const input = screen.getByPlaceholderText("Search by email / name") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Email or name") as HTMLInputElement;
       input.focus();
       fireEvent.change(input, { target: { value: "foo" } });
       await vi.advanceTimersByTimeAsync(500); // > SEARCH_DEBOUNCE_MS (300ms, not exported)
       // A fix that resyncs the input to the URL by remounting it (e.g.
       // `key={q}`) would recreate the DOM node here and drop focus the
       // moment its own debounce commits -- not just on external navigation.
-      expect(document.activeElement).toBe(screen.getByPlaceholderText("Search by email / name"));
+      expect(document.activeElement).toBe(screen.getByPlaceholderText("Email or name"));
     } finally {
       vi.useRealTimers();
     }
@@ -556,8 +661,8 @@ describe("AdminUsersPage", () => {
   it("shows an ErrorBanner instead of a raw error string when the user list fails to load", () => {
     useAdminUsersMock.mockReturnValue({ data: undefined, isLoading: false, error: new Error("network down"), refetch: vi.fn() });
     wrap();
-    // ErrorBanner's generic-network branch renders role="alert"; the old
-    // raw formatApiError(error) text node had no such role.
+    // ErrorBanner's generic-network branch renders role="alert"; a raw
+    // formatApiError(error) text node has no such role.
     expect(screen.getByRole("alert")).toBeTruthy();
   });
 
@@ -565,7 +670,7 @@ describe("AdminUsersPage", () => {
     patchMutationError = new ApiError(403, JSON.stringify({ detail: "llm_not_approved" }));
     wrap();
     // ErrorBanner's admin-approval-required branch renders role="status" with
-    // its own calm copy -- the old raw formatApiError(error) rendering had no
+    // its own calm copy -- a raw formatApiError(error) rendering has no
     // such special-casing, just the generic status-code text in a plain div.
     expect(screen.getByRole("status")).toBeTruthy();
   });

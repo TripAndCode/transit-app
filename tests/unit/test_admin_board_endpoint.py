@@ -9,6 +9,7 @@ pool, database, or collector subprocess — the same pattern as
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
@@ -16,20 +17,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import pipeline.health as health_mod
 from api.admin_board import BOARD_WINDOW_DAYS, COLLECTOR_ORDER
-from api.deps import get_conn
+from api.deps import get_ch, get_conn
 from api.routers import admin as admin_router
-from api.security import User, require_admin
+from api.security import require_admin
+from pipeline.health import AgencyFreshness
+from tests.fixtures.users import admin_user
 
-_ADMIN = User(
-    user_id=1,
-    email="admin@example.com",
-    name="Admin",
-    avatar_url=None,
-    role="admin",
-    suspended_at=None,
-    llm_approved=True,
-)
+_ADMIN = admin_user()
 
 _NOW = datetime.now(timezone.utc)
 _YESTERDAY = (_NOW - timedelta(days=1)).date()
@@ -71,6 +67,7 @@ class _Conn:
         self.join_error = join_error
         self.agency_error = agency_error
         self.fetchval_error = fetchval_error
+        self.freshness_args: tuple = ()
 
     async def fetch(self, sql, *args):
         if "schema_migrations" in sql:
@@ -78,6 +75,7 @@ class _Conn:
         if "pipeline_runs" in sql:
             return _RUN_ROWS
         if "agg_feed_health" in sql:
+            self.freshness_args = args
             if self.join_error is not None:
                 raise self.join_error
             return _JOIN_ROWS
@@ -96,6 +94,7 @@ def _client(conn: _Conn) -> TestClient:
     app.include_router(admin_router.router)
     app.dependency_overrides[require_admin] = lambda: _ADMIN
     app.dependency_overrides[get_conn] = lambda: conn
+    app.dependency_overrides[get_ch] = lambda: None
     return TestClient(app)
 
 
@@ -116,6 +115,64 @@ _REAL_COLLECT_DOCUMENTS = admin_router._collect_documents
 def _no_real_collectors(monkeypatch):
     """A unit test must never shell out to the real collectors."""
     monkeypatch.setattr(admin_router, "_collect_documents", _stub_documents([]))
+
+
+def _stub_freshness(result):
+    async def _freshness(conn, ch):
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    return _freshness
+
+
+def _lagging(name: str, days: int) -> AgencyFreshness:
+    return AgencyFreshness(
+        agency_id=1,
+        agency_name=name,
+        last_analyzed_at=_NOW,
+        analyze_age_hours=1.0,
+        agg_fresh=False,
+        agg_behind_days=days,
+        is_stale=True,
+        data_to=_YESTERDAY.isoformat(),
+        clamp_pct=None,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_freshness_check(monkeypatch):
+    """The Ops freshness check reads ClickHouse; a unit test answers for it,
+    and starts with no answer cached from another test."""
+    monkeypatch.setattr(health_mod, "aggregate_freshness", _stub_freshness([]))
+    monkeypatch.setattr(admin_router, "_board_freshness_cache", None)
+
+
+def _counting_freshness(result):
+    calls: list[int] = []
+
+    async def _freshness(conn, ch):
+        calls.append(1)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    return _freshness, calls
+
+
+@pytest.fixture(autouse=True)
+def reaped(monkeypatch) -> list[str | None]:
+    """Capture the board's abandoned-run sweep rather than opening a
+    connection to whatever `DATABASE_URL` happens to name."""
+    calls: list[str | None] = []
+    monkeypatch.setattr(admin_router, "_last_reap_at", None, raising=False)
+    monkeypatch.setattr(
+        admin_router,
+        "reap_abandoned_runs_best_effort",
+        lambda db_url: calls.append(db_url) or 0,
+        raising=False,
+    )
+    return calls
 
 
 def test_board_returns_every_section():
@@ -184,30 +241,96 @@ def test_pending_approvals_surface_as_an_info_alert():
     assert alerts["llm_approvals_pending"]["params"]["count"] == 2
 
 
+def test_staleness_alerts_come_from_the_check_ops_reads(monkeypatch):
+    monkeypatch.setattr(health_mod, "aggregate_freshness", _stub_freshness([_lagging("Hokuriku", 2)]))
+    alerts = {a["code"]: a for a in _client(_Conn()).get("/api/admin/board").json()["alerts"]}
+    assert alerts["agency_stale"]["params"] == {"agency": "Hokuriku", "days": 2}
+
+
+def test_a_failing_freshness_check_raises_no_staleness_alert(monkeypatch):
+    monkeypatch.setattr(health_mod, "aggregate_freshness", _stub_freshness(RuntimeError("clickhouse down")))
+    response = _client(_Conn()).get("/api/admin/board")
+    assert response.status_code == 200
+    assert not {"agency_stale", "agencies_stale", "agencies_never_analyzed"} & {
+        a["code"] for a in response.json()["alerts"]
+    }
+
+
+@pytest.mark.parametrize("result", [[], RuntimeError("clickhouse down")])
+def test_a_polled_board_reuses_one_freshness_answer(monkeypatch, result):
+    """Staleness compares whole days; the board polls every few seconds."""
+    freshness, calls = _counting_freshness(result)
+    monkeypatch.setattr(health_mod, "aggregate_freshness", freshness)
+    client = _client(_Conn())
+    client.get("/api/admin/board")
+    client.get("/api/admin/board")
+    assert len(calls) == 1
+
+
+async def test_polls_that_arrive_together_share_one_freshness_check(monkeypatch):
+    release = asyncio.Event()
+    calls: list[int] = []
+
+    async def _slow_freshness(conn, ch):
+        calls.append(1)
+        await release.wait()
+        return []
+
+    monkeypatch.setattr(health_mod, "aggregate_freshness", _slow_freshness)
+    first = asyncio.create_task(admin_router._board_agency_freshness(None, None))
+    await asyncio.sleep(0)
+    try:
+        # A second probe would wait on `release` too, so a short timeout is the
+        # failure signal rather than a hang.
+        second = await asyncio.wait_for(admin_router._board_agency_freshness(None, None), timeout=1.0)
+    finally:
+        release.set()
+    assert await first == []
+    assert second is None
+    assert len(calls) == 1
+
+
+def test_an_expired_freshness_answer_is_checked_again(monkeypatch):
+    freshness, calls = _counting_freshness([])
+    monkeypatch.setattr(health_mod, "aggregate_freshness", freshness)
+    monkeypatch.setattr(admin_router, "_BOARD_FRESHNESS_TTL_SEC", 0.0)
+    client = _client(_Conn())
+    client.get("/api/admin/board")
+    client.get("/api/admin/board")
+    assert len(calls) == 2
+
+
 def test_clamped_samples_above_the_threshold_surface_as_a_warn_alert():
     alerts = {a["code"]: a for a in _client(_Conn()).get("/api/admin/board").json()["alerts"]}
     assert alerts["clamp_high"]["level"] == "warn"
 
 
+#: How long a poll may take before the test calls it hung. Only a
+#: regression -- a poll that waits out the wedged collector -- ever runs into
+#: it; a passing poll gives up on its own much shorter budget.
+_HANG_GUARD_SECONDS = 10.0
+
+
 async def test_collectors_are_abandoned_once_the_budget_expires(monkeypatch):
     """A wedged collector costs the endpoint its budget, not the request."""
-    import time
+    release = threading.Event()
 
-    def _hang():
-        # Long relative to the 0.05s budget below, short enough that the
-        # abandoned thread does not hold up interpreter shutdown.
-        time.sleep(2)
+    def _wedged():
+        release.wait()
         return ["never"]
 
     monkeypatch.setattr(admin_router, "_COLLECTOR_BUDGET_SECONDS", 0.05)
-    monkeypatch.setattr(admin_router, "_collect_all", _hang)
+    monkeypatch.setattr(admin_router, "_collect_all", _wedged)
     admin_router._collector_task = None
     try:
-        loop = asyncio.get_running_loop()
-        started = loop.time()
-        assert await _REAL_COLLECT_DOCUMENTS() == []
-        assert loop.time() - started < 5
+        assert await asyncio.wait_for(_REAL_COLLECT_DOCUMENTS(), _HANG_GUARD_SECONDS) == []
+        abandoned = admin_router._collector_task
+        assert abandoned is not None
+        assert not abandoned.done()  # given up on, not finished
     finally:
+        release.set()
+        if admin_router._collector_task is not None:
+            await asyncio.wait([admin_router._collector_task])
         admin_router._collector_task = None
 
 
@@ -215,31 +338,36 @@ async def test_only_one_collection_runs_however_many_polls_arrive(monkeypatch):
     """The default executor is shared with the embedder and the LLM calls
     and holds only a handful of threads, so a board left open in several
     tabs must not spend them all on abandoned collections."""
-    import threading
-    import time
-
     started = 0
     lock = threading.Lock()
+    release = threading.Event()
 
-    def _slow():
+    def _wedged():
         nonlocal started
         with lock:
             started += 1
-        time.sleep(0.4)
+        release.wait()
         return []
 
     monkeypatch.setattr(admin_router, "_COLLECTOR_BUDGET_SECONDS", 0.05)
-    monkeypatch.setattr(admin_router, "_collect_all", _slow)
+    monkeypatch.setattr(admin_router, "_collect_all", _wedged)
     admin_router._collector_task = None
     try:
-        results = await asyncio.gather(*(_REAL_COLLECT_DOCUMENTS() for _ in range(6)))
+        polls = asyncio.gather(*(_REAL_COLLECT_DOCUMENTS() for _ in range(6)))
+        results = await asyncio.wait_for(polls, _HANG_GUARD_SECONDS)
         assert results == [[]] * 6  # every poll gave up on its own budget
 
         shared = admin_router._collector_task
         assert shared is not None
-        await shared  # the abandoned collection is still the only one running
+        assert not shared.done()  # the abandoned collection is still the one running
+        release.set()
+        # Waits for every collection thread, not just the shared one, so a
+        # second collection -- had one been started -- is certain to be counted.
+        await asyncio.get_running_loop().shutdown_default_executor()
+        await shared
         assert started == 1
     finally:
+        release.set()
         admin_router._collector_task = None
 
 
@@ -265,3 +393,37 @@ def test_the_collectors_read_the_repo_the_environment_points_at(monkeypatch, tmp
     monkeypatch.delenv(admin_router._OPS_STATUS_REPO_ENV)
     admin_router._collect_all()
     assert "local_repo" not in seen
+
+
+def test_the_freshness_join_is_bounded_at_both_ends_of_the_window():
+    """Unbounded at the top, the join drags in every future-dated feed-health
+    row — days the heatmap never draws — on every poll."""
+    conn = _Conn()
+    _client(conn).get("/api/admin/board")
+    window_start, window_end = conn.freshness_args
+    assert window_end - window_start == timedelta(days=BOARD_WINDOW_DAYS)
+    assert "h.date >= $1" in admin_router._BOARD_FRESHNESS_SQL
+    assert "h.date < $2" in admin_router._BOARD_FRESHNESS_SQL
+
+
+def test_the_board_reaps_runs_nothing_will_ever_close(reaped):
+    _client(_Conn()).get("/api/admin/board")
+    assert len(reaped) == 1
+
+
+def test_a_polled_board_does_not_pay_for_the_reap_on_every_request(reaped):
+    """Operators poll this page every few seconds; a run only becomes
+    reapable after hours."""
+    client = _client(_Conn())
+    client.get("/api/admin/board")
+    client.get("/api/admin/board")
+    client.get("/api/admin/board")
+    assert len(reaped) == 1
+
+
+def test_a_failing_reap_never_costs_the_board_its_answer(monkeypatch, reaped):
+    def _boom(_db_url):
+        raise RuntimeError("pipeline_runs is unreadable")
+
+    monkeypatch.setattr(admin_router, "reap_abandoned_runs_best_effort", _boom)
+    assert _client(_Conn()).get("/api/admin/board").status_code == 200

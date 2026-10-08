@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -24,6 +24,7 @@ const BOARD: AdminBoard = {
       status: "ok",
       last_success_at: "2026-09-20T08:10:00Z",
       detail: null,
+      check_failed: false,
       history: Array(24).fill(1),
     },
     {
@@ -32,10 +33,18 @@ const BOARD: AdminBoard = {
       status: "warn",
       last_success_at: "2026-09-20T04:10:00Z",
       detail: "disk usage is degraded",
+      check_failed: false,
       history: [...Array(20).fill(1), 0, 0, 0, 0],
     },
-    { key: "vps_loop", label: "VPS loop", status: "down", last_success_at: null, detail: null, history: Array(24).fill(0) },
-    { key: "github", label: "CI (GitHub)", status: "unknown", last_success_at: null, detail: null, history: Array(24).fill(0) },
+    {
+      key: "github",
+      label: "CI (GitHub)",
+      status: "unknown",
+      last_success_at: null,
+      detail: "collector could not run: OracleStatusUnavailable: no oracle-heartbeat-listener.yml run found, or `gh run list` failed (exit 0):",
+      check_failed: true,
+      history: Array(24).fill(0),
+    },
   ],
   freshness: [
     { agency_id: 1, agency_name: "Hokuriku", days: days(Array(14).fill("fresh")) },
@@ -56,7 +65,7 @@ const BOARD: AdminBoard = {
       finished_at: "2026-09-20T19:20:00Z",
       status: "ok",
       rows: 1200,
-      lock_wait_ms: null,
+      lock_probe_ms: null,
       error: null,
       requested_by: null,
     },
@@ -69,7 +78,7 @@ const BOARD: AdminBoard = {
       finished_at: null,
       status: "skipped",
       rows: null,
-      lock_wait_ms: 3,
+      lock_probe_ms: 3,
       error: null,
       requested_by: null,
     },
@@ -92,7 +101,7 @@ const BOARD: AdminBoard = {
   ],
 };
 
-let mockQuery: { data?: AdminBoard; error: unknown; isPending: boolean };
+let mockQuery: { data?: AdminBoard; error: unknown; isPending: boolean; refetch: () => void };
 let mockTrigger: { mutate: ReturnType<typeof vi.fn>; isPending: boolean; isSuccess: boolean; error: unknown };
 
 vi.mock("../../api/admin", async (importOriginal) => ({
@@ -114,7 +123,7 @@ function wrap(ui: React.ReactElement) {
 
 describe("AdminBoardPage", () => {
   beforeEach(() => {
-    mockQuery = { data: BOARD, error: null, isPending: false };
+    mockQuery = { data: BOARD, error: null, isPending: false, refetch: vi.fn() };
     mockTrigger = { mutate: vi.fn(), isPending: false, isSuccess: false, error: null };
     // The timeline is anchored to the current JST day, so the fixture's runs
     // only land on the axis with the clock pinned inside that day.
@@ -128,10 +137,58 @@ describe("AdminBoardPage", () => {
     vi.useRealTimers();
   });
 
+  it("words a stale agency's lag with its own plural, from the alert's days", () => {
+    wrap(<AdminBoardPage />);
+    expect(screen.getByText("Toyama Bayline: aggregates 3 days behind")).toBeInTheDocument();
+  });
+
+  it("says in words when a collector's status could not be checked, and keeps the raw reason behind Details", () => {
+    wrap(<AdminBoardPage />);
+    const tile = screen.getAllByTestId("collector-tile")[2];
+    expect(within(tile).getByText("Couldn't check its status")).toBeInTheDocument();
+    const details = within(tile).getByText("Details").closest("details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details).toHaveTextContent("OracleStatusUnavailable");
+  });
+
+  it("keeps a healthy-but-behind collector's own reason behind Details too", () => {
+    wrap(<AdminBoardPage />);
+    const tile = screen.getAllByTestId("collector-tile")[1];
+    expect(within(tile).queryByText("Couldn't check its status")).toBeNull();
+    expect(within(tile).getByText("Details").closest("details")).toHaveTextContent("disk usage is degraded");
+  });
+
+  it("colours each legend swatch the way the heatmap colours its cells", () => {
+    wrap(<AdminBoardPage />);
+    const legend = screen.getByTestId("freshness-legend");
+    const fresh = within(legend).getByTestId("legend-swatch-fresh");
+    const stale = within(legend).getByTestId("legend-swatch-stale");
+    const cells = screen.getAllByTestId("freshness-cell");
+    expect(fresh.style.background).toBe(cells.find((c) => c.dataset.state === "fresh")!.style.background);
+    expect(stale.style.background).toBe(cells.find((c) => c.dataset.state === "stale")!.style.background);
+    expect(fresh.style.background).not.toBe(stale.style.background);
+  });
+
+  it("words the grouped alerts", () => {
+    mockQuery = {
+      ...mockQuery,
+      data: {
+        ...BOARD,
+        alerts: [
+          { level: "warn", code: "agencies_stale", params: { count: 5, days: 4 }, text: "", href: "/admin/ops" },
+          { level: "info", code: "agencies_never_analyzed", params: { count: 13 }, text: "", href: "/admin/agencies" },
+        ],
+      },
+    };
+    wrap(<AdminBoardPage />);
+    expect(screen.getByText("5 agencies' aggregates are behind")).toBeInTheDocument();
+    expect(screen.getByText("13 agencies have never been analyzed")).toBeInTheDocument();
+  });
+
   it("renders one tile per collector with its status and last success", () => {
     wrap(<AdminBoardPage />);
     const tiles = screen.getAllByTestId("collector-tile");
-    expect(tiles).toHaveLength(4);
+    expect(tiles).toHaveLength(3);
     expect(within(tiles[0]).getByText(i18n.t("admin.board.collector.oracle_crawler"))).toBeInTheDocument();
     expect(within(tiles[0]).getByText(i18n.t("admin.board.status.ok"))).toBeInTheDocument();
     expect(within(tiles[2]).getByText(i18n.t("admin.board.never"))).toBeInTheDocument();
@@ -183,13 +240,14 @@ describe("AdminBoardPage", () => {
       },
       error: null,
       isPending: false,
+      refetch: vi.fn(),
     };
     wrap(<AdminBoardPage />);
     expect(screen.getByText("Something new happened")).toBeInTheDocument();
   });
 
   it("says so when there is nothing to act on", () => {
-    mockQuery = { data: { ...BOARD, alerts: [] }, error: null, isPending: false };
+    mockQuery = { data: { ...BOARD, alerts: [] }, error: null, isPending: false, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
     expect(screen.getByText(i18n.t("admin.board.alerts_none"))).toBeInTheDocument();
   });
@@ -224,7 +282,7 @@ describe("AdminBoardPage", () => {
   });
 
   it("says so when nothing has run today instead of drawing an empty chart", () => {
-    mockQuery = { data: { ...BOARD, runs: [] }, error: null, isPending: false };
+    mockQuery = { data: { ...BOARD, runs: [] }, error: null, isPending: false, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
     expect(screen.getByText(i18n.t("admin.board.runs_empty"))).toBeInTheDocument();
     expect(screen.queryByTestId("run-timeline")).not.toBeInTheDocument();
@@ -254,22 +312,88 @@ describe("AdminBoardPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("asks inside a modal dialog Escape can close, handing focus back to the trigger", async () => {
+    // Re-aggregating is irreversible from here; the confirm has to behave
+    // like every other dialog in the app (trapped, labelled, Escape-able)
+    // rather than as a block of page content the operator can tab past.
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    wrap(<AdminBoardPage />);
+    const trigger = screen.getByRole("button", { name: i18n.t("admin.board.reanalyze") });
+    await user.click(trigger);
+
+    const dialog = screen.getByRole("dialog", { name: i18n.t("admin.board.reanalyze_confirm_title") });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(within(dialog).getByRole("button", { name: i18n.t("admin.board.reanalyze_confirm") })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockTrigger.mutate).not.toHaveBeenCalled();
+    expect(trigger).toHaveFocus();
+  });
+
   it("reports a rejected trigger instead of leaving the operator guessing", () => {
     mockTrigger = { mutate: vi.fn(), isPending: false, isSuccess: false, error: new Error("nope") };
     wrap(<AdminBoardPage />);
     expect(screen.getByText(i18n.t("admin.board.reanalyze_error"))).toBeInTheDocument();
   });
 
-  it("surfaces a load failure without blanking the page", () => {
-    mockQuery = { data: undefined, error: new Error("boom"), isPending: false };
+  it("surfaces a load failure through the shared error banner without blanking the page", () => {
+    mockQuery = { data: undefined, error: new Error("boom"), isPending: false, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
-    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("admin.board.load_error"));
+    expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("errors.network"));
+    expect(screen.getByRole("button", { name: i18n.t("common.retry") })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: i18n.t("admin.board.title") })).toBeInTheDocument();
   });
 
   it("does not claim an empty heatmap while the first fetch is still in flight", () => {
-    mockQuery = { data: undefined, error: null, isPending: true };
+    mockQuery = { data: undefined, error: null, isPending: true, refetch: vi.fn() };
     wrap(<AdminBoardPage />);
     expect(screen.queryByText(i18n.t("admin.board.freshness_empty"))).not.toBeInTheDocument();
+  });
+
+  it("holds the board's own shape with skeletons while the first fetch is in flight", () => {
+    mockQuery = { data: undefined, error: null, isPending: true, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    expect(screen.getByTestId("admin-board")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getAllByTestId("skeleton-kpi-tile").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("skeleton-table-row").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("collector-tile")).not.toBeInTheDocument();
+  });
+
+  it("drops the busy flag and the skeletons once the board has loaded", () => {
+    wrap(<AdminBoardPage />);
+    expect(screen.getByTestId("admin-board")).toHaveAttribute("aria-busy", "false");
+    expect(screen.queryByTestId("skeleton-kpi-tile")).not.toBeInTheDocument();
+  });
+
+  it("says why re-aggregating is unavailable while no runs have loaded", () => {
+    mockQuery = { data: undefined, error: null, isPending: true, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    const button = screen.getByRole("button", { name: i18n.t("admin.board.reanalyze") });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+
+    act(() => {
+      button.focus();
+    });
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveTextContent(i18n.t("admin.board.reanalyze_unavailable_reason"));
+    expect(button.getAttribute("aria-describedby")).toBe(tip.id);
+  });
+
+  it("does not trigger a run from the unavailable re-aggregate control", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockQuery = { data: undefined, error: null, isPending: true, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    await user.click(screen.getByRole("button", { name: i18n.t("admin.board.reanalyze") }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockTrigger.mutate).not.toHaveBeenCalled();
+  });
+
+  it("uses the shared empty state, not a bare paragraph, when nothing needs acting on", () => {
+    mockQuery = { data: { ...BOARD, alerts: [] }, error: null, isPending: false, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    const empty = screen.getByText(i18n.t("admin.board.alerts_none"));
+    expect(empty.tagName).not.toBe("P");
   });
 });

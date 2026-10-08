@@ -4,7 +4,11 @@ import type { ConvMessage } from "../../api/types";
 import { conditionsLabel, provenancePath, toolLabel } from "./provenance";
 import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
+import { Tooltip } from "../../components/Tooltip";
 import { formatNumber } from "../../utils/format";
+import { useTopmostEscape } from "../../hooks/useFocusTrap";
+import { niceAxis } from "../../components/charts/niceAxis";
+import { coalesceToFrame } from "../../utils/frameCoalesce";
 import "./stopEvidence.css";
 
 export function StopEvidenceChart({ messageId, points, onFocus, complete = false, message }: {
@@ -30,6 +34,11 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [sequence, setSequence] = useState<number | null>(null);
   const [detailLeft, setDetailLeft] = useState(0);
+  useTopmostEscape(sequence !== null, () => {
+    setSequence(null);
+    onFocus?.(null);
+    selectedButtonRef.current?.focus();
+  });
   useEffect(() => {
     if (sequence === null) return;
     const container = scrollRef.current;
@@ -51,19 +60,13 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
       }
     }
     updateDetailLeft();
-    container?.addEventListener("scroll", updateDetailLeft);
-    function dismiss(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setSequence(null);
-      onFocus?.(null);
-      selectedButtonRef.current?.focus();
-    }
-    document.addEventListener("keydown", dismiss);
+    const frame = coalesceToFrame(updateDetailLeft);
+    container?.addEventListener("scroll", frame.schedule);
     return () => {
-      document.removeEventListener("keydown", dismiss);
-      container?.removeEventListener("scroll", updateDetailLeft);
+      frame.cancel();
+      container?.removeEventListener("scroll", frame.schedule);
     };
-  }, [sequence, onFocus]);
+  }, [sequence]);
   const [windowSize, setWindowSize] = useState(Math.min(8, points.length));
   const [windowStart, setWindowStart] = useState(0);
   const size = complete ? Math.min(windowSize, points.length) : points.length;
@@ -72,13 +75,8 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   const selected = points.find((point) => point.sequence === sequence);
   const rawLow = Math.min(0, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
   const rawHigh = Math.max(1, ...points.flatMap((point) => point.minutes === null ? [] : [point.minutes]));
-  const roughStep = (rawHigh - rawLow) / 3;
-  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
-  const step = ([1, 2, 5, 10].find((value) => value * magnitude >= roughStep) ?? 10) * magnitude;
-  const low = Math.floor(rawLow / step) * step;
-  const high = Math.ceil(rawHigh / step) * step;
+  const { low, high, ticks } = niceAxis(rawLow, rawHigh, 3);
   const span = high - low;
-  const ticks = Array.from({ length: Math.round(span / step) + 1 }, (_, index) => low + index * step);
   function select(point: StopEvidence | null) {
     setSequence(point?.sequence ?? null);
     onFocus?.(point ? { messageId, sequence: point.sequence, name: point.name,
@@ -121,25 +119,26 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
             style={{ bottom: `${(tick - low) / span * 100}%` }}><i>{Number(tick.toPrecision(8))}</i></span>)}</div>
           <div className={`stop-evidence-bars${size > 16 ? " stop-evidence-overview" : ""}`} role="group" aria-label={t("ask.evidence.select")}>
             {visiblePoints.map((point) => (
-              <button key={point.sequence} className="stop-evidence-column" type="button"
-                aria-pressed={selected?.sequence === point.sequence}
-                aria-controls={selected?.sequence === point.sequence ? detailId : undefined}
-                title={`${point.name} · #${point.sequence}`}
-                aria-label={t(point.minutes === null ? "ask.evidence.missing_label" : "ask.evidence.bar_label", { name: point.name, sequence: point.sequence, minutes: point.minutes, count: point.samples })}
-                onClick={(event) => { selectedButtonRef.current = event.currentTarget; select(point); }}>
-                <span className="stop-evidence-plot">
-                  <span className="stop-evidence-zero" style={{ bottom: `${-low / span * 100}%` }} />
-                  {point.minutes === null ? <span className="stop-evidence-missing">—<br />{t("ask.evidence.missing")}</span> : <>
-                  <span className="stop-evidence-bar" style={{
-                    bottom: `${(Math.min(0, point.minutes) - low) / span * 100}%`,
-                    height: `${Math.abs(point.minutes) / span * 100}%`,
-                  }} />
-                  <span className="stop-evidence-value" style={{ bottom: `${(Math.max(0, point.minutes) - low) / span * 100}%` }}>{formatNumber(point.minutes)}</span>
-                  </>}
-                </span>
-                <span className="stop-evidence-name">{point.name}</span>
-                <span className="investigation-caption">#{point.sequence}</span>
-              </button>
+              <Tooltip key={point.sequence} label={`${point.name} · #${point.sequence}`}>
+                <button className="stop-evidence-column" type="button"
+                  aria-pressed={selected?.sequence === point.sequence}
+                  aria-controls={selected?.sequence === point.sequence ? detailId : undefined}
+                  aria-label={t(point.minutes === null ? "ask.evidence.missing_label" : "ask.evidence.bar_label", { name: point.name, sequence: point.sequence, minutes: point.minutes, count: point.samples })}
+                  onClick={(event) => { selectedButtonRef.current = event.currentTarget; select(point); }}>
+                  <span className="stop-evidence-plot">
+                    <span className="stop-evidence-zero" style={{ bottom: `${-low / span * 100}%` }} />
+                    {point.minutes === null ? <span className="stop-evidence-missing">—<br />{t("ask.evidence.missing")}</span> : <>
+                    <span className="stop-evidence-bar" style={{
+                      bottom: `${(Math.min(0, point.minutes) - low) / span * 100}%`,
+                      height: `${Math.abs(point.minutes) / span * 100}%`,
+                    }} />
+                    <span className="stop-evidence-value" style={{ bottom: `${(Math.max(0, point.minutes) - low) / span * 100}%` }}>{formatNumber(point.minutes)}</span>
+                    </>}
+                  </span>
+                  <span className="stop-evidence-name">{point.name}</span>
+                  <span className="investigation-caption">#{point.sequence}</span>
+                </button>
+              </Tooltip>
             ))}
           </div>
           <p className="investigation-caption">{t("ask.evidence.unit")}</p>

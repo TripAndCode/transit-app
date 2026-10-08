@@ -1,7 +1,7 @@
 """Structural (text-assertion) safety checks for `Makefile` and `.env.example`.
 
 Pure-logic, no DB: these parse the tracked files as text and assert on their
-content, so they belong under `tests/unit/` per CLAUDE.md's DB-fixture-bypass
+content, so they belong under `tests/unit/` per AGENTS.md's DB-fixture-bypass
 convention. They exist because a Makefile has no type system of its own --
 these invariants (a destructive target requires explicit confirmation, quality
 gates never silently reformat instead of checking, the test target never
@@ -75,6 +75,25 @@ def test_export_is_file_wide():
     """
     lines = [line.strip() for line in MAKEFILE.read_text().splitlines()]
     assert "export" in lines, "`.env` no longer reaches recipes; see this test's docstring"
+
+
+def test_db_url_is_unexported():
+    """The other half of the file-wide `export`, and not optional.
+
+    `export` hands every variable to each recipe's environment, and Make
+    expands them to build it -- including `db_url`, whose expansion IS the
+    missing-DATABASE_URL error. Exported, that error therefore fires for every
+    target with a recipe, not just the database ones: `lint`, `typecheck`,
+    `frontend-*` and `bake` all die in any checkout without `.env`, which is
+    every git worktree and every CI checkout. Recipes name `$(db_url)`
+    themselves where they need it, so nothing wants it in the environment.
+
+    Asserted rather than left to the comment because `make -n` cannot observe
+    it -- a dry run never builds a recipe environment, so it never expands the
+    guard and reports these targets as fine.
+    """
+    lines = [line.strip() for line in MAKEFILE.read_text().splitlines()]
+    assert "unexport db_url" in lines, "every target with a recipe now fails without .env; see this test's docstring"
 
 
 def test_test_target_never_defaults_to_dev_database():

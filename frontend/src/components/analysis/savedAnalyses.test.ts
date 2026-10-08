@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readAnalyses, saveAnalysis, deleteAnalysis } from "./savedAnalyses";
-import type { RangeCtx } from "../../api/rangeContext";
+import type { Scope } from "../../api/scope";
+import { SCOPE_EXTRAS_NONE } from "../../api/scope";
 
-const ctx: RangeCtx = { from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all", service: "all", routes: [] };
+const ctx: Scope = { ...SCOPE_EXTRAS_NONE, from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all", service: "all", routes: [] };
 
 describe("savedAnalyses (localStorage)", () => {
   beforeEach(() => localStorage.clear());

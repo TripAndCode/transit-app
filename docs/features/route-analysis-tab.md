@@ -6,21 +6,46 @@ saved-analysis bookmarks — scoped to exactly one selected route.
 
 ## How a user reaches it
 
-- Route: `/agencies/:agencyId/route-analysis`, registered in
-  `frontend/src/main.tsx` (`React.lazy`-loaded).
-- Sidebar nav link: `frontend/src/components/Sidebar.tsx`'s
-  `SIDEBAR_NAV_ITEMS` (`route-analysis` entry, labeled from the `design`
-  i18n namespace's `analysis` key — "Segment analysis" / "区間分析").
+- Route: the route dossier, `/agencies/:agencyId/routes/:routeCode`,
+  rendered by `frontend/src/tabs/RouteDossier.tsx` (`React.lazy`-loaded),
+  which renders `RouteAnalysisTab`. The path's route reaches the screen
+  through `ScopeRouteContext` (`frontend/src/api/scope.ts`): with no
+  `routes` param, `useScope()` inside the dossier scopes to that route, so
+  opening a dossier never writes a route filter that the rail, the palette
+  or another screen would then carry. A `routes` param is a route picker's
+  request: one different route moves the dossier to that route's path
+  (the screen stays mounted, so its sub-tab and map survive), and several
+  hand the selection to the Routes list (`/agencies/:agencyId/routes`).
+- `/agencies/:agencyId/route-analysis` and `/agencies/:agencyId/analysis/where`
+  redirect here when their `routes` names exactly one route, to
+  `routes/<route_code>?tab=stops` with `routes` dropped and the rest of the
+  query (`sub_tab`, `compare`, the filter) kept; any other selection goes to
+  the Routes list. `tab` names a dossier tab (`RouteTab` in
+  `destinations.ts`) for links; the dossier has one view, so nothing reads
+  it, and `sub_tab` alone picks the panel.
+- Reached from the rail's Routes entry (`nav.routes`) and then the list's
+  route opener (`routesIndex.open_route`, a `<select>` plus an Open button
+  in `frontend/src/tabs/RoutesIndex.tsx`; it leaves only on Open, so the
+  keyboard can browse the list), or from links that open a route
+  directly, all built by `routeHref`/`routesHref` in
+  `frontend/src/routes/destinations.ts`: the command palette's route items
+  (with the active scope), the Live trip panel
+  (`routes/<route_code>?tab=stops`), and Reports' routes-to-check rows and
+  saved analyses.
 - Top-level component: `frontend/src/tabs/RouteAnalysisTab.tsx` — owns the
   compare-with-previous-week toggle (`?compare=1` search param), the
-  selected stop, and which of the three sub-tabs (trend / map / by-stop) is
-  active.
+  selected stop, which of the four sub-tabs (trend / marey / map /
+  by-stop) is active, and the Marey scrub second.
 
 What the user sees/does:
 
 - **Route/keito filter** — `frontend/src/components/analysis/AnalysisFilters.tsx`.
-  With no single route selected (`ctx.routes.length !== 1`) the tab shows an
-  `EmptyState` prompting the user to choose one instead of rendering data.
+  Inside the dossier the scope always holds the path's one route (see
+  `ScopeRouteContext` above), and the empty state offers no "clear the
+  route filter" recovery there, since the route is the page rather than a
+  filter. `RouteAnalysisTab` itself shows an
+  `EmptyState` prompting the user to choose one route whenever
+  `ctx.routes.length !== 1`, instead of rendering data.
 - **Header actions** — a CSV download button (disabled while loading, on
   error, or while a requested comparison is still fetching) and a "Save this
   analysis" button that writes a browser-local bookmark
@@ -30,11 +55,23 @@ What the user sees/does:
   (`isoDaysBefore(ctx.from/to, 7)`) and overlays it on the chart; matching is
   by stop id and sequence, so a stop missing from either window is a gap, not
   an interpolated value.
-- **Three sub-tabs**: Trend (`frontend/src/components/analysis/StopChart.tsx`
-  — current vs. previous-week series, selectable points), Map
+- **Four sub-tabs**: Trend (`frontend/src/components/analysis/StopChart.tsx`
+  — current vs. previous-week series, selectable points), Marey
+  (`frontend/src/components/charts/MareyDiagram.tsx` — a time-distance
+  diagram: each trip on the route's latest observed day is one polyline
+  across stop sequence (y) vs. time (x); when compare is on, the same day one
+  week earlier draws behind it at reduced opacity as ghost context, not a
+  second reading; a one-minute scrubber over the diagram's window keeps the
+  trips under way at that second bright, recedes the rest, and marks each
+  one's position on the stop ribbon), Map
   (`frontend/src/components/analysis/AnalysisMap.tsx`, mounted only after
-  first visited, hidden rather than unmounted afterward), and By stop (a
-  plain stop/mean/samples table).
+  first visited, hidden rather than unmounted afterward; while a scrub is
+  set it draws the same trips' positions, interpolated between stops and
+  coloured by delay),
+  and By stop (a plain stop/mean/samples table). The Marey tab reads for the
+  route's own latest observed day regardless of the shared date-range filter
+  — the filter's end date is routinely a day the route did not run, and a
+  diagram of nothing teaches nothing.
 - **Selected-stop aside** — a `<select>` of every stop plus the selected
   stop's mean delay and sample count.
 - A caveat line states these are per-stop means for the representative
@@ -46,6 +83,7 @@ What the user sees/does:
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
 | `useRouteShape(agencyId, route, ctx)` (current window; a second call with `ctx` shifted 7 days earlier fires only when the compare checkbox is on) | `GET /api/{agency_id}/route-shape?route=...` (`api/routers/map.py: route_shape`) | `pipeline/reports/map.py: compute_route_shape()` — a cheap Postgres `agg_route_daily` existence precheck, then a live ClickHouse dedup scan of `updates` to vote the route's most-frequent `shape_id` and compute per-stop mean departure delay, joined to Postgres `static_stops`/`static_shapes` for geometry and stop labels. No precomputed-aggregate fast path exists for this endpoint — every request scans ClickHouse live. |
+| `useRouteTrips(agencyId, route, { timeBand })` (current day; a second call for the same day one week earlier fires only when compare is on, once the current day's date is known) | `GET /api/{agency_id}/today/route/{route}/trips` (`api/routers/map.py: route_trips`) | Per-trip, per-stop delay for one route on one JST day, feeding the Marey diagram's polylines. Read-only ClickHouse dedup query, capped at `MAX_ROUTE_TRIPS`; date defaults to the route's own latest observed day, independent of the shared filter's date range. |
 
 ## Key files
 
@@ -53,20 +91,26 @@ What the user sees/does:
 
 | File | Role |
 |---|---|
-| `frontend/src/tabs/RouteAnalysisTab.tsx` | Tab shell: compare toggle, stop selection, sub-tab state |
+| `frontend/src/tabs/RouteDossier.tsx` | Dossier route: provides the path's route through `ScopeRouteContext`, follows a different single route, hands several to the Routes list |
+| `frontend/src/tabs/RouteAnalysisTab.tsx` | Tab shell: compare toggle, stop selection, sub-tab state, scrub second |
 | `frontend/src/components/analysis/AnalysisFilters.tsx` | Route/keito filter UI |
 | `frontend/src/components/analysis/StopChart.tsx` | Per-stop delay chart (current + optional previous-week overlay) |
-| `frontend/src/components/analysis/AnalysisMap.tsx` | Small map view of the selected route's stops |
+| `frontend/src/components/charts/MareyDiagram.tsx` | Time-distance diagram of one day's trips, with optional previous-week ghost trips |
+| `frontend/src/components/charts/mareyLayout.ts` | Pure layout/geometry math (axes, time windows, trip polylines) behind the Marey diagram |
+| `frontend/src/components/charts/StopRibbon.tsx` | Stop-axis labels alongside the Marey diagram, with the scrubbed trips' position markers |
+| `frontend/src/components/charts/mareyScrub.ts` | Pure scrub math: which trips are under way at a second, where each is on the stop axis and on the map |
+| `frontend/src/styles/scrubber.css` | Slider chrome shared by the Marey scrubber and Live's day-playback rail |
+| `frontend/src/components/analysis/AnalysisMap.tsx` | Small map view of the selected route's stops, and the scrubbed trips' positions |
 | `frontend/src/components/analysis/stopSeries.ts` | `orderedStops()` / `matchedPrevious()` — stop ordering and week-over-week matching |
 | `frontend/src/components/analysis/savedAnalyses.ts` | Browser-local saved-analysis read/write/delete |
 | `frontend/src/components/analysis/csv.ts` | `downloadCsv()` shared by every analysis/report screen |
-| `frontend/src/api/hooks.ts` | `useRouteShape` |
+| `frontend/src/api/hooks.ts` | `useRouteShape`, `useRouteTrips` |
 
 **Backend**
 
 | File | Role |
 |---|---|
-| `api/routers/map.py` | `GET /route-shape` |
+| `api/routers/map.py` | `GET /route-shape`, `GET /today/route/{route_code}/trips` |
 | `pipeline/reports/map.py` | `compute_route_shape()`, `route_exists()` |
 
 ## How to verify manually
@@ -75,8 +119,18 @@ What the user sees/does:
 
 - Frontend: `frontend/src/components/analysis/workflows.test.tsx` (renders
   `RouteAnalysisTab` and `ReportsHomeTab` together on their real routes),
-  `frontend/src/components/analysis/StopChart.test.ts`.
-- Backend: `tests/api/test_api_map.py`, `tests/unit/test_range_updates_filter_ch.py`,
+  `frontend/src/tabs/RouteDossier.test.tsx` (the path's route without a
+  `routes` param, following a picked route without remounting, and the
+  hand-off to the Routes list), `frontend/src/tabs/RoutesIndex.test.tsx`
+  (the route opener),
+  `frontend/src/routes/legacyRedirects.test.tsx` (the `route-analysis` and
+  `analysis/where` redirects),
+  `frontend/src/components/analysis/StopChart.test.ts`,
+  `frontend/src/components/charts/MareyDiagram.test.tsx`,
+  `frontend/src/components/charts/mareyLayout.test.ts`,
+  `frontend/src/components/charts/mareyScrub.test.ts`,
+  `frontend/src/styles/focusedAnalysis.css.test.ts`.
+- Backend: `tests/api/test_api_map.py`, `tests/clickhouse/test_range_updates_filter_ch.py`,
   `tests/unit/test_response_schema_ratchet.py` (all exercise `/route-shape`
   alongside the Map tab's other endpoints in `api/routers/map.py`).
 
@@ -85,17 +139,20 @@ What the user sees/does:
 1. `make bootstrap && make serve` (+ `make frontend-dev`). Load and analyze
    data first: `make fetch-ingest` (or `ingest_live` + `make load_static`),
    then `make analyze` for the agency.
-2. Click "Segment analysis" in the sidebar → URL
-   `/agencies/:agencyId/route-analysis`; expect the "choose a route" empty
-   state until exactly one route is selected in the filter.
-3. Select one route — expect the stop chart, map, and by-stop table to
-   populate; switch between the three sub-tabs.
+2. Click "Routes" in the rail → URL `/agencies/:agencyId/routes`; choose a
+   route in "Open a route" → URL `/agencies/:agencyId/routes/<route_code>`.
+3. Expect the stop chart, Marey diagram, map, and by-stop table to
+   populate; switch between the four sub-tabs. Pick one different route in
+   the filter — expect the path to move to that route; pick several —
+   expect the Routes list.
 4. Toggle "Compare with one week earlier" — expect a second series on the
-   chart, or a "no comparison data" message if the prior week has none.
+   trend chart and ghost trips behind the Marey diagram, or a "no comparison
+   data" message where the prior week has none.
 5. Click a stop in the chart or the aside's dropdown — expect the selection
    to sync across the chart and the aside's delay/sample readout.
-6. Click "Save this analysis" — expect a saved-confirmation notice; reload
-   `ReportsHomeTab`'s saved-analyses view to find the bookmark listed.
+6. Click "Save this analysis" — expect a saved-confirmation notice; open
+   Reports' "Saved analyses" view (`/agencies/:agencyId/reports?doc=saved`)
+   to find the bookmark listed.
 7. Click the CSV download button — expect a file with per-stop rows plus a
    comparison-window footer when compare is on.
 

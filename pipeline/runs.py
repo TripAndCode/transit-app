@@ -1,6 +1,6 @@
 """One row per pipeline job, so the control board can show what actually ran.
 
-``pipeline_runs`` records ingest, analyze, weather and static-load jobs from
+``pipeline_runs`` records ingest, promotion, analyze, weather and static-load jobs from
 both entry points -- the CLI (``gtfs_pipeline.py``) and the cron fallback
 endpoint -- including the jobs that never did any work because another
 process held the ingest/analyze advisory lock. A run that was skipped is the
@@ -33,14 +33,17 @@ import logging
 import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Iterator
+
+from pipeline.url_guard import redact_urls_in_text
 
 logger = logging.getLogger(__name__)
 
 #: Mirrors the ``kind`` CHECK constraint. Validated before the statement is
 #: built so a typo fails here, where the caller's stack still says which job
 #: it was, rather than as a constraint violation swallowed by the guard below.
-RUN_KINDS: tuple[str, ...] = ("ingest", "analyze", "weather", "static")
+RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static")
 
 #: Mirrors the ``status`` CHECK constraint.
 RUN_STATUSES: tuple[str, ...] = ("running", "ok", "skipped", "error")
@@ -61,6 +64,20 @@ _FINISH_RUN_SQL = """
     SET status = %s, finished_at = now(), rows = %s, error = %s
     WHERE run_id = %s
 """
+
+#: Closes rows whose process died before it could. ``finished_at`` is the
+#: reap moment rather than the cutoff: the row records when the run was given
+#: up on, and the cutoff only decides which rows qualify.
+_REAP_ABANDONED_SQL = """
+    UPDATE pipeline_runs
+    SET status = 'error', error = 'abandoned', finished_at = %s
+    WHERE status = 'running' AND finished_at IS NULL AND started_at < %s
+"""
+
+#: How long a ``running`` row is left alone before it is treated as
+#: abandoned. Comfortably longer than the slowest real sweep, since reaping a
+#: run that is still working would replace a true bar with a false error.
+DEFAULT_REAP_AGE = timedelta(hours=2)
 
 
 @dataclass
@@ -166,7 +183,64 @@ def record_run(
     finish_run(conn, handle.run_id, "ok", rows=handle.rows)
 
 
+def reap_abandoned_runs(conn, *, older_than: timedelta = DEFAULT_REAP_AGE, now: datetime | None = None) -> int:
+    """Close rows no process is left to close, and return how many.
+
+    A worker killed mid-job (SIGKILL, OOM, a redeploy) never reaches
+    :func:`finish_run`, so its row stays ``running`` with a NULL
+    ``finished_at`` forever. The board draws that as a bar with no end, which
+    is indistinguishable from work genuinely still in flight -- the one thing
+    an operator reads this timeline to tell apart.
+
+    Like every other write here, a failure costs the sweep and nothing else:
+    an environment whose schema predates the table reports zero reaped.
+    """
+    now = now or datetime.now(timezone.utc)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_REAP_ABANDONED_SQL, (now, now - older_than))
+            reaped = cur.rowcount
+        conn.commit()
+        if reaped:
+            logger.warning("pipeline_runs: closed %d run(s) left open by a process that died", reaped)
+        return reaped or 0
+    except Exception:
+        logger.warning("pipeline_runs: could not reap abandoned runs", exc_info=True)
+        _rollback(conn)
+        return 0
+
+
+def reap_abandoned_runs_best_effort(db_url: str | None, *, older_than: timedelta = DEFAULT_REAP_AGE) -> int:
+    """:func:`reap_abandoned_runs` on a connection of its own, never raising.
+
+    The callers that want this -- API startup and the control board -- hold
+    an asyncpg connection, not a psycopg2 one, and run it off the request
+    path. A short dedicated connection keeps the statement in one place
+    instead of growing a second dialect of it.
+    """
+    if not db_url:
+        logger.warning("pipeline_runs: no database URL; skipping the abandoned-run sweep")
+        return 0
+    import psycopg2
+
+    try:
+        conn = psycopg2.connect(db_url)
+    except Exception:
+        logger.warning("pipeline_runs: could not connect to reap abandoned runs", exc_info=True)
+        return 0
+    try:
+        return reap_abandoned_runs(conn, older_than=older_than)
+    finally:
+        conn.close()
+
+
 def _describe(exc: BaseException) -> str:
     """The exception's type and message -- the one line a timeline bar can
-    show. The traceback stays with the caller's own logging."""
-    return "".join(traceback.format_exception_only(type(exc), exc)).strip()
+    show. The traceback stays with the caller's own logging.
+
+    Redacted first: a feed fetch's failure quotes the URL it was given, and
+    that URL routinely carries an API key. The row is read by every operator
+    with the board open and outlives the job, so the credential must not
+    reach it.
+    """
+    return redact_urls_in_text("".join(traceback.format_exception_only(type(exc), exc)).strip())

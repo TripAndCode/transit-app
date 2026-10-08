@@ -1,31 +1,63 @@
-import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Suspense, lazy, use, useRef, useState, type KeyboardEvent } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { RouteTitleTransition } from "../components/RouteTitleTransition";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
-import { useJumpToLatestDataRange } from "../api/defaultRangeAnchor";
-import { useRangeContext, isoDaysBefore } from "../api/rangeContext";
+import { useJumpToLatestDataRange } from "../api/latestDataWindow";
+import { ScopeRouteContext, useScope, isoDaysBefore } from "../api/scope";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
+import { useScreenQuery, withQuery } from "../api/screenScope";
 import type { RouteShapeStop } from "../api/types";
 import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
-import { AnalysisMap } from "../components/analysis/AnalysisMap";
 import { MareyDiagram } from "../components/charts/MareyDiagram";
+import { scrubMapPositions, type ScrubMapPosition } from "../components/charts/mareyScrub";
+import { timeWindowForBand } from "../components/charts/mareyLayout";
 import { SkeletonChart } from "../components/Skeleton";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
+import { scopeTitle } from "../components/scope/scopePhrases";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
+import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
+import { formatDateRange, formatNumber } from "../utils/format";
+
+// Dynamic, not a static import: MapLibre would otherwise ride into this tab's
+// chunk, which the sidebar warms on hover, downloading a map nobody has asked
+// to see yet.
+const AnalysisMap = lazy(() =>
+  import("../components/analysis/AnalysisMap").then((m) => ({ default: m.AnalysisMap })),
+);
+
+/** Sub-tabs in the order they are rendered — also the order the arrow keys
+ *  walk, and the closed set `sub_tab` may hold. */
+const SUB_TABS = ["trend", "marey", "map", "byStop"] as const;
+const NO_MAP_POSITIONS: ScrubMapPosition[] = [];
+type SubTab = (typeof SUB_TABS)[number];
+
+const SUB_TAB_LABEL_KEYS: Record<SubTab, string> = {
+  trend: "tabTrend",
+  marey: "tabMarey",
+  map: "tabMap",
+  byStop: "tabByStop",
+};
+
+const tabId = (sub: SubTab) => `route-analysis-tab-${sub}`;
+const panelId = (sub: SubTab) => `route-analysis-panel-${sub}`;
 
 export function RouteAnalysisTab() {
   const id = useAgencyId();
   const { t } = useTranslation("design");
-  const [ctx, update] = useRangeContext();
+  const screenQuery = useScreenQuery();
+  const [ctx, update] = useScope();
+  // On a route's own page the route is the page, not a filter to clear.
+  const pageRoute = use(ScopeRouteContext);
   const jumpToLatestData = useJumpToLatestDataRange(id);
   const [params, setParams] = useSearchParams();
   const compare = params.get("compare") === "1";
@@ -47,8 +79,29 @@ export function RouteAnalysisTab() {
     patchUrl({ stop_route: next.route, stop_seq: String(next.sequence) });
   }
   const [notice, setNotice] = useState("");
-  const [activeTab, setActiveTab] = useUrlState<"map" | "trend" | "marey" | "byStop">("sub_tab", "trend");
-  const [mapVisited, setMapVisited] = useState(false);
+  const [scrubSec, setScrubSec] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useUrlState<SubTab>("sub_tab", "trend", SUB_TABS);
+  // Seeded from the URL so `?sub_tab=map` restores the map, and sticky
+  // afterwards so leaving the sub-tab doesn't tear down the WebGL context.
+  const [mapVisited, setMapVisited] = useState(activeTab === "map");
+  const tabRefs = useRef<Partial<Record<SubTab, HTMLButtonElement | null>>>({});
+  function selectTab(next: SubTab) {
+    setActiveTab(next);
+    if (next === "map") setMapVisited(true);
+  }
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, sub: SubTab) {
+    const index = SUB_TABS.indexOf(sub);
+    const next =
+      event.key === "ArrowRight" ? SUB_TABS[(index + 1) % SUB_TABS.length]
+      : event.key === "ArrowLeft" ? SUB_TABS[(index - 1 + SUB_TABS.length) % SUB_TABS.length]
+      : event.key === "Home" ? SUB_TABS[0]
+      : event.key === "End" ? SUB_TABS[SUB_TABS.length - 1]
+      : null;
+    if (!next) return;
+    event.preventDefault();
+    selectTab(next);
+    tabRefs.current[next]?.focus();
+  }
   // No `date`: the server answers for the route's own latest observed day.
   // The range filter's end date is routinely a day this route did not run, and
   // a diagram of nothing teaches nothing.
@@ -60,7 +113,22 @@ export function RouteAnalysisTab() {
     date: ghostDate,
     timeBand: ctx.time_band,
   });
+  // Nothing on this page is answerable without an agency, and every query
+  // above is already disabled for a null id.
+  if (id == null) return null;
+  // A scrub outside the chosen band's window means nothing to the diagram,
+  // so it is ignored (derived, not reset) until a band whose window holds it
+  // is chosen again.
+  const bandWindow = timeWindowForBand(ctx.time_band);
+  const effectiveScrub = scrubSec != null && scrubSec >= bandWindow.startSec && scrubSec <= bandWindow.endSec ? scrubSec : null;
+  // Only the map tab shows positions, and the scrub cannot move while it is on
+  // screen, so they are derived there alone rather than on every scrub step.
+  const mapPositions =
+    activeTab === "map" && effectiveScrub != null && trips.data && query.data
+      ? scrubMapPositions(trips.data.trips, query.data, bandWindow, effectiveScrub)
+      : NO_MAP_POSITIONS;
   const stops = query.data ? orderedStops(query.data) : [];
+  const axis = stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }));
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? stops.find((s) => s.avg_min != null) ?? stops[0];
   const stopColumns: CsvColumn<RouteShapeStop>[] = [
@@ -73,19 +141,35 @@ export function RouteAnalysisTab() {
     { header: "comparison_mean_minutes", value: (s) => matchedPrevious(s, prevStops) },
   ];
   return <div className="focus-page">
-    <header className="focus-header"><h1>{t("investigate")}</h1><div className="focus-actions">
+    {route && <nav className="focus-breadcrumb" aria-label={t("breadcrumb")}>
+      <Link to={withQuery(`/agencies/${id}/routes`, screenQuery(String(id), "routes"))}>{t("routesCrumb")}</Link>
+      <span aria-hidden="true"> / </span>
+      <span aria-current="page">{names.format(route)}</span>
+    </nav>}
+    <header className="focus-header"><div>
+      {/* A route's page is named by its route; the question it answers sits
+          beneath. Without a route the question is all there is to say. */}
+      {route ? (
+        <RouteTitleTransition>
+          <h1>{names.format(route)}</h1>
+        </RouteTitleTransition>
+      ) : (
+        <h1>{t("investigate")}</h1>
+      )}
+      {route && <p className="focus-muted focus-subtitle">{t("investigate")}</p>}
+    </div><div className="focus-actions">
       <button className="btn-ghost" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
         ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
-      <button disabled={!id || !query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id!, `${names.format(route)} · ${ctx.from} – ${ctx.to}`, ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
+      <button disabled={!query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id, scopeTitle(ctx, { t, agencyName: "", routeLabel: names.format }), ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
     </div></header>
     {notice && <span role="status">{notice}</span>}
     <AnalysisFilters agencyId={id} />
     {!route ? <EmptyState title={t("choose")} hint={t("filterNote")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
       reasons={buildFilterCtxReasons(ctx, t)}
       recoveries={buildFilterCtxRecoveries({
-        ctx,
+        ctx: pageRoute == null ? ctx : { ...ctx, routes: [] },
         onClearRoutes: () => update({ routes: null }),
         onResetService: () => update({ service: "all" }),
         jumpToLatestData,
@@ -93,43 +177,56 @@ export function RouteAnalysisTab() {
       })}
     />}>
       {() => <>
-        <div className="focus-header"><div><h2>{t("stopDelay")}</h2><span className="focus-muted">{names.format(route)} · {t("mean")}</span></div>
+        <div className="focus-header"><div><h2>{t("stopDelay")}</h2><span className="focus-muted">{t("mean")}</span></div>
           <label><input type="checkbox" checked={compare} onChange={(e) => setParams((old) => { const next = new URLSearchParams(old); if (e.target.checked) next.set("compare", "1"); else next.delete("compare"); return next; })} /> {t("compare")}</label>
         </div>
         {compare && previous.error && <ErrorBanner error={previous.error} onRetry={() => void previous.refetch()} />}
         {compare && previous.isPending && <p className="focus-muted" role="status">{t("previous")} …</p>}
         {compare && !previous.isPending && !previous.error && !prevStops.length && <p>{t("compareUnavailable")}</p>}
         <div className="focus-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={activeTab === "trend"} onClick={() => setActiveTab("trend")}>{t("tabTrend")}</button>
-          <button type="button" role="tab" aria-selected={activeTab === "marey"} onClick={() => setActiveTab("marey")}>{t("tabMarey")}</button>
-          <button type="button" role="tab" aria-selected={activeTab === "map"} onClick={() => { setActiveTab("map"); setMapVisited(true); }}>{t("tabMap")}</button>
-          <button type="button" role="tab" aria-selected={activeTab === "byStop"} onClick={() => setActiveTab("byStop")}>{t("tabByStop")}</button>
+          {/* Roving tabindex: only the selected tab is in the tab order, and
+              the arrow keys move between them -- so Tab leaves the tablist
+              for the panel rather than stepping through every sub-tab. */}
+          {SUB_TABS.map((sub) => <button
+            key={sub}
+            type="button"
+            role="tab"
+            id={tabId(sub)}
+            aria-controls={panelId(sub)}
+            aria-selected={activeTab === sub}
+            tabIndex={activeTab === sub ? 0 : -1}
+            ref={(el) => { tabRefs.current[sub] = el; }}
+            onKeyDown={(e) => onTabKeyDown(e, sub)}
+            onClick={() => selectTab(sub)}
+          >{t(SUB_TAB_LABEL_KEYS[sub])}</button>)}
         </div>
         <div className="focus-split">
           <div>
-            {activeTab === "trend" && <div className="focus-tab-panel">
+            {activeTab === "trend" && <div className="focus-tab-panel" role="tabpanel" id={panelId("trend")} aria-labelledby={tabId("trend")}>
               <div className="focus-actions focus-muted"><span style={{ color: "var(--accent)" }}>● {t("selected")}</span>{compare && <span>┄ {t("previous")}</span>}<span>○ {t("missing")}</span></div>
-              <StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} />
-              <p className="focus-muted">{t("selected")} {ctx.from} – {ctx.to}{compare && ` · ${t("previous")} ${prevCtx.from} – ${prevCtx.to}`}</p>
+              <div className="focus-chart-scroll"><StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} /></div>
+              <p className="focus-muted">{t("selected")} {formatDateRange(ctx.from, ctx.to)}{compare && ` · ${t("previous")} ${formatDateRange(prevCtx.from, prevCtx.to)}`}</p>
             </div>}
-            {activeTab === "marey" && <div className="focus-tab-panel">
+            {activeTab === "marey" && <div className="focus-tab-panel" role="tabpanel" id={panelId("marey")} aria-labelledby={tabId("marey")}>
               <AsyncSection loading={trips.isPending} error={trips.error} onRetry={() => void trips.refetch()} data={trips.data} hasContent={(d) => d.trips.length > 0} empty={<EmptyState title={t("empty")} />} skeleton={<SkeletonChart height={320} />}>
-                {(d) => <MareyDiagram trips={d.trips} previousTrips={previousTrips.data?.trips ?? []} axis={stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }))} band={ctx.time_band} truncated={d.truncated} date={d.date} />}
+                {(d) => <MareyDiagram trips={d.trips} previousTrips={previousTrips.data?.trips ?? []} axis={axis} band={ctx.time_band} truncated={d.truncated} date={d.date} scrubSec={effectiveScrub} onScrub={setScrubSec} />}
               </AsyncSection>
             </div>}
-            {mapVisited && <div className={`focus-tab-panel${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`}>
-              <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} />
+            {mapVisited && <div className={`focus-tab-panel${activeTab === "map" ? "" : " focus-tab-panel--hidden"}`} role="tabpanel" id={panelId("map")} aria-labelledby={tabId("map")}>
+              <Suspense fallback={<SkeletonChart height={420} />}>
+                <AnalysisMap data={query.data!} selected={selected} height={420} visible={activeTab === "map"} positions={mapPositions} />
+              </Suspense>
             </div>}
-            {activeTab === "byStop" && <div className="focus-tab-panel">
-              <div className="focus-table-wrap"><table className="focus-table"><thead><tr><th>{t("stop")}</th><th>{t("mean")}</th><th>{t("samples")}</th></tr></thead><tbody>
-                {stops.map((s) => <tr key={s.stop_sequence}><td>{s.stop_name}</td><td>{s.avg_min ?? t("missing")}</td><td>{s.samples}</td></tr>)}
+            {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>
+              <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("stop")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th></tr></thead><tbody>
+                {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min ?? t("missing")}</td><td style={td()}>{formatNumber(s.samples)}</td></tr>)}
               </tbody></table></div>
             </div>}
             <p className="focus-muted">{t("caveat")}</p>
           </div>
           <aside className="focus-aside"><label>{t("selectedStop")}<select style={{ width: "100%", margin: "12px 0" }} value={selected?.stop_sequence ?? ""} onChange={(e) => setSelection({ route, sequence: Number(e.target.value) })}>
             {stops.map((s) => <option key={s.stop_sequence} value={s.stop_sequence}>{s.stop_name}</option>)}
-          </select></label><p><strong>{selected?.avg_min == null ? "—" : selected.avg_min.toFixed(1)}</strong> {t("minutes")}</p><p>{t("samples")} {selected?.samples ?? 0}</p></aside>
+          </select></label><p><strong className="num">{selected?.avg_min == null ? "—" : selected.avg_min.toFixed(1)}</strong> {t("minutes")}</p><p>{t("samples")} {formatNumber(selected?.samples ?? 0)}</p></aside>
         </div>
       </>}
     </AsyncSection>}

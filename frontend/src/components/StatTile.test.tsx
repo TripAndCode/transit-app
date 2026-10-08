@@ -1,8 +1,17 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StatTile } from "./StatTile";
+import { stubReducedMotion } from "../test/reducedMotion";
 
 describe("StatTile", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders the label and value", () => {
     render(<StatTile label="観測便" value="3" />);
     expect(screen.getByText("観測便")).toBeInTheDocument();
@@ -14,6 +23,13 @@ describe("StatTile", () => {
     expect(container.querySelector(".stat-tile__value--flagged")).toBeNull();
     rerender(<StatTile label="遅延" value="2" flagged />);
     expect(container.querySelector(".stat-tile__value--flagged")).not.toBeNull();
+  });
+
+  it("sets the value in the numeral face, flagged or not", () => {
+    const { container, rerender } = render(<StatTile label="遅延" value={2} />);
+    expect(container.querySelector(".stat-tile__value")).toHaveClass("num");
+    rerender(<StatTile label="遅延" value={2} flagged />);
+    expect(container.querySelector(".stat-tile__value")).toHaveClass("num");
   });
 
   it("formats a numeric value via useCountUp and appends the suffix", () => {

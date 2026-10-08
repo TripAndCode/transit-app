@@ -180,16 +180,16 @@ describe("AgencyDiagnosticsDrawer", () => {
 
   it("summarises standards, weights coverage and the weather station", () => {
     renderDrawer();
-    expect(screen.getByText("Set on 1 route(s)")).toBeTruthy();
-    expect(screen.getByText("1/12 route(s)")).toBeTruthy();
+    expect(screen.getByText("Set on 1 route")).toBeTruthy();
+    expect(screen.getByText("1/12 routes")).toBeTruthy();
     expect(screen.getByText("Kanazawa (47605)")).toBeTruthy();
   });
 
-  it("offers the three feed actions, with static reload disabled until its endpoint exists", () => {
+  it("offers only the feed actions that have an endpoint behind them", () => {
     renderDrawer();
     expect(screen.getByRole("button", { name: /check the feed now/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /reload static data/i })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: /re-aggregate this agency only/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /reload static/i })).toBeNull();
   });
 
   it("triggers a probe and a re-aggregate for this agency", async () => {

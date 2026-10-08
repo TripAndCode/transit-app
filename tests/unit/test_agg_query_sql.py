@@ -111,3 +111,7 @@ def test_route_hour_dow_pattern_counts_only_the_averaged_population():
     assert "SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL)::int AS samples" in src
     assert "HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) > 5" in src
     assert "SUM(samples)::int AS samples" not in src
+
+
+def test_heatmap_cluster_projection_still_groups_by_name_key_and_cluster_id():
+    assert "GROUP BY name_key, cluster_id" in _HEATMAP_CLUSTER_PROJECTION_SQL

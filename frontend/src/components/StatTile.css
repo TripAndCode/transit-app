@@ -13,10 +13,10 @@
   color: var(--text-secondary);
 }
 .stat-tile__value {
-  font-size: 16px;
+  font-size: var(--text-md);
   font-weight: 700;
   color: var(--accent-strong);
 }
 .stat-tile__value--flagged {
-  color: var(--delay-flag);
+  color: var(--color-warning-text);
 }

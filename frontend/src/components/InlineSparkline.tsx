@@ -1,4 +1,3 @@
-// frontend/src/components/InlineSparkline.tsx
 import { useRef, type CSSProperties } from "react";
 import { useDrawOn } from "./charts/ChartEnter";
 
@@ -12,12 +11,23 @@ type Props = {
   showEndDot?: boolean;
   showLabels?: boolean;
   style?: CSSProperties;
+  /** Draws a dashed horizontal reference line at this value, in the series'
+   *  own units. The y-scale spans the series min..max, which on its own says
+   *  nothing about how large the swing actually is -- a reference the reader
+   *  already understands (the period mean, a target, zero) is what turns the
+   *  shape back into a reading. No SVG text comes with it: callers stretch
+   *  this chart with `preserveAspectRatio="none"`, which would distort any
+   *  glyph, so the label belongs in the caller's own HTML. */
+  baseline?: number;
   /** Passed straight to the `<svg>`. Set to `"none"` when the element is
    *  stretched via CSS (e.g. `position: absolute; inset: 0`) to fill a box
    *  whose aspect ratio doesn't match `width`/`height` -- a full-bleed
    *  background sparkline -- so it fills edge-to-edge instead of
    *  letterboxing under the default `xMidYMid meet`. */
   preserveAspectRatio?: string;
+  /** Draw the line on when its data first arrives. Pass false inside a
+   *  RevealSection, whose own transform is the entrance. */
+  drawOn?: boolean;
 };
 
 export function InlineSparkline({
@@ -29,12 +39,14 @@ export function InlineSparkline({
   showEndDot = true,
   showLabels = true,
   style,
+  baseline,
   preserveAspectRatio,
+  drawOn = true,
 }: Props) {
   // Called unconditionally, ahead of the early return below -- hooks can't
   // themselves be conditional on `points.length`.
   const lineRef = useRef<SVGPolylineElement | null>(null);
-  useDrawOn(lineRef);
+  useDrawOn(lineRef, drawOn && !!points && points.length >= 2);
 
   if (!points || points.length < 2) {
     return null;
@@ -78,6 +90,8 @@ export function InlineSparkline({
       .join(" ") +
     ` L ${lastX.toFixed(1)},${height} L 0,${height} Z`;
 
+  const baselineY = baseline == null ? null : toY(baseline);
+
   return (
     <svg
       width={width}
@@ -89,6 +103,18 @@ export function InlineSparkline({
       aria-hidden
     >
       <path d={area_path} style={{ fill: stroke, fillOpacity: 0.12 }} stroke="none" />
+      {baselineY != null && (
+        <line
+          data-testid="sparkline-baseline"
+          x1={0}
+          x2={width}
+          y1={baselineY}
+          y2={baselineY}
+          strokeWidth="1"
+          strokeDasharray="3 3"
+          style={{ stroke: "var(--text-tertiary)", opacity: 0.6 }}
+        />
+      )}
       <polyline
         ref={lineRef}
         fill="none"

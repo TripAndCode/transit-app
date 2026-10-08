@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRoutes } from "../../api/hooks";
-import { useRangeContext, type TimeBand, type DowFilter } from "../../api/rangeContext";
+import { useScope, type TimeBand, type DowFilter } from "../../api/scope";
 import { ErrorBanner } from "../ErrorBanner";
 import { routeGroups, selectedGroup } from "./routeGroups";
+import { sameCodes } from "../../utils/sameCodes";
 
 export function PatternFilters({ agencyId, codes, onChange }: {
   agencyId: number | null; codes: string[]; onChange: (codes: string[]) => void;
@@ -12,11 +13,14 @@ export function PatternFilters({ agencyId, codes, onChange }: {
   const query = useRoutes(agencyId);
   const routes = query.data ?? [];
   const groups = routeGroups(routes);
+  const routesByGroup = new Map(groups);
+  // Both `selectedGroup` and the line select name groups from this same list,
+  // so a lookup misses only for "": no line selected, or "All lines" chosen.
   const group = selectedGroup(routes, codes);
-  const options = group ? (groups.find(([name]) => name === group)?.[1] ?? routes) : routes;
+  const options = routesByGroup.get(group) ?? routes;
   return <>
     <label>{t("line")}<select value={group} disabled={query.isPending} onChange={(e) => {
-      onChange(e.target.value ? [...new Set((groups.find(([name]) => name === e.target.value)?.[1] ?? routes).flatMap((r) => r.route_code ? [r.route_code] : []))] : []);
+      onChange([...new Set((routesByGroup.get(e.target.value) ?? []).flatMap((r) => r.route_code ? [r.route_code] : []))]);
     }}><option value="">{t("allLines")}</option>{groups.map(([name]) => <option key={name} value={name}>{name}</option>)}</select></label>
     <label>{t("pattern")}<select value={codes.length === 1 ? codes[0] : ""} disabled={query.isPending} onChange={(e) => {
       onChange(e.target.value ? [e.target.value] : group ? options.flatMap((r) => r.route_code ? [r.route_code] : []) : []);
@@ -42,12 +46,11 @@ type Draft = { routes: string[]; from: string; to: string; dow: DowFilter; time_
  *
  * Draft state is seeded from the live context and re-seeded whenever the
  * context changes underneath — a preset, a drilldown link, a browser Back —
- * using the render-adjust pattern rather than an effect, matching
- * `TabFilterBar`.
+ * using the render-adjust pattern rather than an effect.
  */
 export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
   const { t } = useTranslation("design");
-  const [ctx, update] = useRangeContext();
+  const [ctx, update] = useScope();
 
   const live: Draft = {
     routes: ctx.routes, from: ctx.from, to: ctx.to, dow: ctx.dow, time_band: ctx.time_band,
@@ -104,10 +107,4 @@ export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
       )}
     </form>
   );
-}
-
-function sameCodes(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const seen = new Set(b);
-  return a.every((code) => seen.has(code));
 }

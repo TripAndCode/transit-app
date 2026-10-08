@@ -1,8 +1,9 @@
-// frontend/src/components/ConcentrationBar.tsx
+import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { OverviewConcentration, OverviewMovers } from "../api/types";
 import { InlineSparkline } from "./InlineSparkline";
+import { CONCENTRATION_TOP_N } from "./overview/concentrationTopN";
 
 type Props = {
   concentration: OverviewConcentration;
@@ -23,7 +24,7 @@ const RANK_OPACITY = [1, 0.8, 0.6, 0.45, 0.35];
 export function ConcentrationBar({
   concentration,
   movers,
-  limit = 5,
+  limit = CONCENTRATION_TOP_N,
   variant = "card",
   onClick,
 }: Props) {
@@ -32,6 +33,10 @@ export function ConcentrationBar({
 
   const visibleRoutes = concentration.top_routes.slice(0, limit);
   const totalTop = visibleRoutes.reduce((s, r) => s + r.share_pct, 0);
+  // Bars scale to the largest share shown, not to 100%: shares of a few
+  // percent would otherwise draw as dots. The figure beside each bar keeps
+  // the absolute share.
+  const maxShare = Math.max(0, ...visibleRoutes.map((r) => r.share_pct));
   // When the slice doesn't cover all top routes, fold the unsliced
   // remainder into rest_share_pct + rest_route_count for an honest
   // "the remaining N routes carry M%" line.
@@ -94,6 +99,7 @@ export function ConcentrationBar({
               forceAccent
               showLabels={false}
               showEndDot
+              drawOn={false}
             />
           </div>
         )}
@@ -124,22 +130,22 @@ export function ConcentrationBar({
         const opacity = RANK_OPACITY[Math.min(idx, RANK_OPACITY.length - 1)];
         return (
           <div className="ov-pareto-row" key={r.route_code}>
-            <div className="ov-pareto-label">
+            <div className="ov-pareto-label clamp-2">
               {r.route_short_name
                 ? `${r.route_short_name} (${r.route_code})`
                 : r.route_code}
             </div>
             <div className="ov-pareto-track">
               <div
-                className="ov-pareto-fill ov-anim-grow-x"
+                className="ov-pareto-fill"
                 style={{
-                  width: `${r.share_pct}%`,
+                  width: `${maxShare > 0 ? (r.share_pct / maxShare) * 100 : 0}%`,
                   background: "var(--trend-bad)",
-                  opacity,
-                }}
+                  "--rank-opacity": opacity,
+                } as CSSProperties}
               />
             </div>
-            <div className="ov-pareto-pct">{r.share_pct.toFixed(1)}%</div>
+            <div className="ov-pareto-pct num">{r.share_pct.toFixed(1)}%</div>
           </div>
         );
       })}
@@ -258,6 +264,7 @@ function LorenzCurve({
   const diagonal = `M ${LZ_PAD_LEFT},${LZ_PAD_TOP + innerH} L ${LZ_PAD_LEFT + innerW},${LZ_PAD_TOP}`;
   return (
     <div className="ov-lorenz-wrap">
+      <div className="ov-chart-plot">
       <svg
         width="100%"
         viewBox={`0 0 ${LZ_W} ${LZ_H}`}
@@ -307,33 +314,33 @@ function LorenzCurve({
             <circle cx={ticks20.x} cy={ticks20.y} r="3" style={{ fill: "var(--trend-bad)" }} />
           </g>
         )}
-        {/* X tick labels */}
-        {[0, 50, 100].map((p) => (
-          <text
-            key={`xt-${p}`}
-            x={LZ_PAD_LEFT + (p / 100) * innerW}
-            y={LZ_PAD_TOP + innerH + 14}
-            fontSize="10"
-            style={{ fill: "var(--text-tertiary)" }}
-            textAnchor="middle"
-          >
-            {p}%
-          </text>
-        ))}
-        {/* Y tick labels */}
-        {[0, 50, 100].map((p) => (
-          <text
-            key={`yt-${p}`}
-            x={LZ_PAD_LEFT - 6}
-            y={LZ_PAD_TOP + innerH - (p / 100) * innerH + 3}
-            fontSize="10"
-            style={{ fill: "var(--text-tertiary)" }}
-            textAnchor="end"
-          >
-            {p}%
-          </text>
-        ))}
       </svg>
+      {/* HTML axis labels (see .ov-chart-plot in overview.css). */}
+      {[0, 50, 100].map((p) => (
+        <span
+          key={`xt-${p}`}
+          className="ov-lorenz-label ov-lorenz-label--x num"
+          style={{
+            top: `${((LZ_PAD_TOP + innerH + 14) / LZ_H) * 100}%`,
+            left: `${((LZ_PAD_LEFT + (p / 100) * innerW) / LZ_W) * 100}%`,
+          }}
+        >
+          {p}%
+        </span>
+      ))}
+      {[0, 50, 100].map((p) => (
+        <span
+          key={`yt-${p}`}
+          className="ov-lorenz-label ov-lorenz-label--y num"
+          style={{
+            top: `${((LZ_PAD_TOP + innerH - (p / 100) * innerH) / LZ_H) * 100}%`,
+            left: `${((LZ_PAD_LEFT - 6) / LZ_W) * 100}%`,
+          }}
+        >
+          {p}%
+        </span>
+      ))}
+      </div>
       <p className="ov-lorenz-caption">
         {t("overview.concentration.lorenz_caption", {
           pct: share20Pct.toFixed(0),

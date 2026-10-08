@@ -22,18 +22,11 @@ from fastapi.testclient import TestClient
 
 from api.deps import get_conn
 from api.routers import admin as admin_router
-from api.security import User, require_admin
+from api.security import require_admin
 from pipeline.query import admin_audit as aa
+from tests.fixtures.users import admin_user
 
-_ADMIN = User(
-    user_id=1,
-    email="admin@example.com",
-    name="Admin",
-    avatar_url=None,
-    role="admin",
-    suspended_at=None,
-    llm_approved=True,
-)
+_ADMIN = admin_user()
 
 T0 = datetime(2026, 9, 20, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -142,6 +135,21 @@ def test_invalid_to_date_is_422():
 def test_invalid_cursor_is_422():
     conn = _FakeConn()
     resp = _client(conn).get("/api/admin/audit", params={"cursor": "garbage!!"})
+    assert resp.status_code == 422
+
+
+def test_cursor_with_a_string_id_is_422():
+    """A well-formed but wrong-typed cursor must not reach the SQL bind,
+    where `id` is compared against an integer column."""
+    conn = _FakeConn()
+    cursor = aa.encode_cursor({"at": T0, "source": "audit", "id": 1})
+    import base64
+    import json
+
+    payload = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+    payload["id"] = "1"
+    tampered = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    resp = _client(conn).get("/api/admin/audit", params={"cursor": tampered})
     assert resp.status_code == 422
 
 

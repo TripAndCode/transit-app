@@ -10,7 +10,7 @@
  *
  * Message rendering lives in ./ask/ (MessageList, RichResult, FollowupChipsRow).
  */
-import { useState, useRef, useEffect } from "react";
+import { use, useState, useRef, useEffect, useEffectEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -24,7 +24,7 @@ import {
   useFollowup,
   useFollowupEnabled,
 } from "../api/hooks";
-import { isoDaysBefore, useRangeContext } from "../api/rangeContext";
+import { DataEndContext, isoDaysBefore, useScope } from "../api/scope";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { conversationsAnon } from "../api/conversationsAnon";
@@ -35,6 +35,7 @@ import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { Spinner } from "../components/Spinner";
 import { Skeleton } from "../components/Skeleton";
+import { PageHeader } from "../components/ui/PageHeader";
 import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
 import { InvestigationCanvas } from "./ask/InvestigationCanvas";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
@@ -46,7 +47,7 @@ export function AskTab() {
   const { t } = useTranslation();
   const id = useAgencyId();
   const navigate = useNavigate();
-  const [rangeCtx] = useRangeContext();
+  const [rangeCtx] = useScope();
   const routeNames = useRouteNames(id);
 
   // ── Thread state ──────────────────────────────────────────────────────────
@@ -64,7 +65,7 @@ export function AskTab() {
   const [followupDraft, setFollowupDraft] = useState("");
   // buildCardTemplates() returns static title_key/param specs (i18n-agnostic;
   // labels are translated later via t()), so it's cheap and safe to call
-  // directly on every render — no useMemo (see CLAUDE.md).
+  // directly on every render — no useMemo (see AGENTS.md).
   const templates = buildCardTemplates();
 
   // ── Hooks ─────────────────────────────────────────────────────────────────
@@ -76,12 +77,15 @@ export function AskTab() {
   // Anon → authed migration: fire once when an authenticated user actually has
   // local threads to import. Gating on the local count (not just a ref) means a
   // remount on agency switch can't re-fire it once localStorage has been cleared.
-  useEffect(() => {
-    if (authed && !migratedRef.current && id != null && conversationsAnon.exportAll().length > 0) {
+  const migrateIfNeeded = useEffectEvent(() => {
+    if (!migratedRef.current && id != null && conversationsAnon.exportAll().length > 0) {
       migratedRef.current = true;
       migrateAnon.mutate();
     }
-  }, [authed, id]); // eslint-disable-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    if (authed && id != null) migrateIfNeeded();
+  }, [authed, id]);
 
   const convQuery = useConversation(id ?? 0, activeId);
   const createConv = useCreateConversation(id ?? 0);
@@ -102,11 +106,12 @@ export function AskTab() {
   //   3. the URL range context (no active thread / conversation still loading).
   const [filterEdit, setFilterEdit] = useState<{ key: string | null; fc: FilterCtx } | null>(null);
   const storedFc = convQuery.data?.conversation?.filter_ctx;
+  const dataEnd = use(DataEndContext);
   const filterCtx: FilterCtx =
     filterEdit && filterEdit.key === activeId
       ? filterEdit.fc
       : activeId && storedFc
-        ? resolvedFilterCtx(storedFc)
+        ? resolvedFilterCtx(storedFc, dataEnd)
         : rangeCtxToFilterCtx(rangeCtx);
 
   // User-initiated filter edit. When an active thread exists, persist the new
@@ -224,7 +229,7 @@ export function AskTab() {
       return;
     }
     if (action.kind === "map") {
-      if (id != null) navigate(`/agencies/${id}/map?routes=${encodeURIComponent(action.route)}`);
+      if (id != null) navigate(`/agencies/${id}/live?routes=${encodeURIComponent(action.route)}`);
       return;
     }
     if (action.kind === "compare_previous") {
@@ -261,7 +266,7 @@ export function AskTab() {
   // cards to find it.
   const dock = (
     <details className="ask-tool-menu" open={!hasMessages || composingId !== null}>
-      <summary>{t("ask.workspace.new_analysis")}</summary>
+      <summary>{t(hasMessages ? "ask.workspace.new_analysis" : "ask.workspace.new_analysis_first")}</summary>
       {id != null && !unavailable && !(activeId && convQuery.isPending) && (
         <QuestionDock
           agencyId={id}
@@ -289,8 +294,8 @@ export function AskTab() {
         minHeight: 0,
       }}
     >
+      <PageHeader title={t("nav.ask")} className="ask-page-header" />
       <header className="ask-workspace-bar">
-        <span>{t("nav.ask")}</span>
       {id != null && (
         <details ref={historyRef} className="ask-thread-menu">
           <summary>{t("ask.workspace.investigations")}</summary>
@@ -411,12 +416,15 @@ export function AskTab() {
               </>}
             </InvestigationCanvas>
           ) : (
-            <AskLandingCards
-              templates={templates}
-              onInstantSubmit={handleInstantSubmit}
-              onOpenChip={handleChipTap}
-              busy={busy}
-            />
+            <>
+              {activeId !== null && <p className="ask-no-questions">{t("ask.workspace.no_questions")}</p>}
+              <AskLandingCards
+                templates={templates}
+                onInstantSubmit={handleInstantSubmit}
+                onOpenChip={handleChipTap}
+                busy={busy}
+              />
+            </>
           )}
         </div>
 

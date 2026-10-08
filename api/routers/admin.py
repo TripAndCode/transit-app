@@ -33,16 +33,17 @@ import logging
 import os
 import re
 import secrets
+import time
 from collections.abc import Iterator
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.admin_audit import record_admin_action
 from api.admin_board import board_alerts, board_freshness, board_window, collector_tiles
@@ -56,6 +57,7 @@ from api.admin_runs import (
     today_jst,
 )
 from api.deps import get_ch, get_conn
+from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin, token_hash
 from api.sqlutil import escape_like
@@ -63,6 +65,10 @@ from pipeline.admin_users import session_id_prefix, unique_prefix_match
 from pipeline.audit import record_event
 from pipeline.query import admin_audit as _admin_audit
 from pipeline.query import agencies as _agencies
+from pipeline.runs import reap_abandoned_runs_best_effort
+
+if TYPE_CHECKING:
+    from pipeline.health import AgencyFreshness
 
 _log = logging.getLogger(__name__)
 
@@ -383,6 +389,7 @@ async def bulk_patch_users(
                 }
                 for r in out_rows
             ],
+            ip=request.client.host if request.client else None,
         )
     return [UserRow(**dict(r)) for r in out_rows]
 
@@ -495,6 +502,7 @@ async def patch_user(
                 target_id=str(uid),
                 before={k: before_fields[k] for k in changed},
                 after={k: after_fields[k] for k in changed},
+                ip=request.client.host if request.client else None,
             )
 
         out = await conn.fetchrow(
@@ -554,6 +562,7 @@ async def delete_user(
                 "llm_approved": row["llm_approved"],
             },
             after={"email": f"deleted-{uid}@local"},
+            ip=request.client.host if request.client else None,
         )
     return Response(status_code=204)
 
@@ -598,6 +607,38 @@ async def list_user_sessions(
     ]
 
 
+class ActivityTotal(BaseModel):
+    """One user's requests to one route and agency over the window, summed across days."""
+
+    route: str
+    method: str
+    agency_id: int | None
+    requests: int
+    errors: int
+
+
+@router.get("/users/{uid}/activity", response_model=list[ActivityTotal])
+async def user_activity(
+    uid: int,
+    days: int = Query(30, ge=1, le=365),
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> list[ActivityTotal]:
+    since = today_jst(datetime.now(timezone.utc)) - timedelta(days=days)
+    rows = await conn.fetch(
+        """
+        SELECT route, method, agency_id, SUM(requests)::int AS requests, SUM(errors)::int AS errors
+        FROM user_activity_daily
+        WHERE user_id = $1 AND day > $2
+        GROUP BY route, method, agency_id
+        ORDER BY requests DESC, route, method, agency_id NULLS FIRST
+        """,
+        uid,
+        since,
+    )
+    return [ActivityTotal(**dict(r)) for r in rows]
+
+
 @router.delete("/users/{uid}/sessions/{sid_prefix}", status_code=204)
 async def revoke_user_session(
     uid: int,
@@ -631,6 +672,7 @@ async def revoke_user_session(
             action="user.session_revoked",
             target_type="user",
             target_id=str(uid),
+            ip=request.client.host if request.client else None,
         )
     return Response(status_code=204)
 
@@ -657,26 +699,48 @@ class ApiKeyIssued(ApiKeyOut):
     key: str
 
 
+_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 class ApiKeyCreate(BaseModel):
     owner_user_id: int
-    tier: str = "pro"
-    label: str | None = None
-    expires_at: Any = None
+    # The only tier `_key_func` grants anything to; the column default agrees.
+    tier: Literal["pro"] = "pro"
+    label: str | None = Field(default=None, max_length=120)
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def _utc_when_naive(cls, v: datetime | None) -> datetime | None:
+        # asyncpg reads a naive value for a timestamptz column in the server's local zone.
+        return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
 
 
-@router.get("/api-keys", response_model=list[ApiKeyOut])
+class ApiKeyListOut(BaseModel):
+    """The bounded API-key listing plus whether the cap actually cut rows.
+
+    Without ``truncated``, a caller at exactly ``MAX_API_KEYS_LISTED`` rows
+    is indistinguishable from one with thousands more never shown.
+    """
+
+    keys: list[ApiKeyOut]
+    truncated: bool
+
+
+@router.get("/api-keys", response_model=ApiKeyListOut)
 async def list_api_keys(
     owner_user_id: int | None = None,
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
-) -> list[ApiKeyOut]:
+) -> ApiKeyListOut:
     """List admin-issued API keys (rows with an ``owner_user_id``) -- excludes
     legacy operator-inserted rows that predate this table's ownership/label
     columns. ``key_hash`` no longer distinguishes the two: it is backfilled
     for every row, admin-issued or legacy.
 
-    Bounded: unscoped, this returns every admin-issued key in the system, and
-    that set only grows."""
+    Bounded: unscoped, this returns at most ``MAX_API_KEYS_LISTED`` of every
+    admin-issued key in the system, and that set only grows; ``truncated``
+    tells the caller whether the cap actually cut anything."""
     rows = await conn.fetch(
         """
         SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at
@@ -686,9 +750,11 @@ async def list_api_keys(
         LIMIT $2
         """,
         owner_user_id,
-        MAX_API_KEYS_LISTED,
+        MAX_API_KEYS_LISTED + 1,
     )
-    return [ApiKeyOut(**dict(r)) for r in rows]
+    truncated = len(rows) > MAX_API_KEYS_LISTED
+    page = rows[:MAX_API_KEYS_LISTED]
+    return ApiKeyListOut(keys=[ApiKeyOut(**dict(r)) for r in page], truncated=truncated)
 
 
 @router.post("/api-keys", response_model=ApiKeyIssued, status_code=201)
@@ -731,6 +797,7 @@ async def issue_api_key(
             target_type="user",
             target_id=str(body.owner_user_id),
             after={"label": body.label, "tier": body.tier},
+            ip=request.client.host if request.client else None,
         )
     return ApiKeyIssued(**dict(row), key=raw_key)
 
@@ -759,6 +826,7 @@ async def revoke_api_key(
             action="api_key.revoked",
             target_type="api_key",
             target_id=str(key_id),
+            ip=request.client.host if request.client else None,
         )
     return Response(status_code=204)
 
@@ -767,9 +835,17 @@ async def revoke_api_key(
 
 
 class InviteCreate(BaseModel):
-    email: str
+    email: str = Field(max_length=254)
     role: str = "user"
     llm_approved: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def _well_formed(cls, v: str) -> str:
+        v = v.strip()
+        if not _EMAIL_SHAPE.fullmatch(v):
+            raise ValueError("email must look like name@domain.tld")
+        return v
 
 
 class InviteOut(BaseModel):
@@ -820,6 +896,7 @@ async def create_invite(
             target_type="invite",
             target_id=str(row["invite_id"]),
             after={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
+            ip=request.client.host if request.client else None,
         )
     return InviteOut(**dict(row))
 
@@ -1069,12 +1146,12 @@ async def list_admin_audit(
 
 # ── Architecture docs (developer/internal) endpoints ─────────────────────
 #
-# Backs `/admin/architecture` (item 25): a developer-only page rendering
-# CLAUDE.md's "Architecture pointers" as a Mermaid diagram plus a
+# Backs `/admin/architecture`: a developer-only page rendering
+# AGENTS.md's "Architecture pointers" as a Mermaid diagram plus a
 # sidebar-navigable index of `docs/features/*.md`. Filesystem-only (no DB
 # connection needed) -- gated on `require_admin` the same way every other
-# `/api/admin/*` route is, per the item's explicit decision to reuse the
-# existing `admin` role rather than add a new "internal/developer" flag.
+# `/api/admin/*` route is; developer pages reuse the `admin` role rather
+# than a separate "internal/developer" flag.
 _FEATURE_DOCS_DIR = Path(__file__).resolve().parents[2] / "docs" / "features"
 
 _DOC_H1_RE = re.compile(r"^#\s+(.+?)\s*$")
@@ -1118,8 +1195,7 @@ def _iter_feature_docs() -> Iterator[tuple[Path, str]]:
     """Yield ``(path, content)`` for every `docs/features/*.md` file with real
     content, sorted by filename for a stable, deterministic sidebar order.
     Never cached at import time -- a doc file added while the server is
-    already running (this directory grows over time; see docs/refactor-log.md
-    item 26) shows up on the next request with no restart needed. Reads each
+    already running shows up on the next request with no restart needed. Reads each
     file's content exactly once, so callers should consume this instead of
     re-reading a path returned by ``_list_feature_docs``."""
     if not _FEATURE_DOCS_DIR.is_dir():
@@ -1193,7 +1269,7 @@ _BOARD_FRESHNESS_SQL = """
     SELECT a.agency_id, a.agency_name, m.analyzed_at, h.date, h.raw_samples, h.clamp_count
     FROM agencies a
     LEFT JOIN agg_meta m ON m.agency_id = a.agency_id
-    LEFT JOIN agg_feed_health h ON h.agency_id = a.agency_id AND h.date >= $1
+    LEFT JOIN agg_feed_health h ON h.agency_id = a.agency_id AND h.date >= $1 AND h.date < $2
     WHERE a.deleted_at IS NULL
     ORDER BY a.agency_id, h.date
 """
@@ -1209,6 +1285,7 @@ class CollectorTileOut(BaseModel):
     status: str  # ok | warn | down | unknown
     last_success_at: str | None
     detail: str | None
+    check_failed: bool
     history: list[int]
 
 
@@ -1236,7 +1313,7 @@ class BoardAlertOut(BaseModel):
 
 class PipelineRunOut(BaseModel):
     run_id: int
-    kind: str  # ingest | analyze | weather | static
+    kind: str  # ingest | promote | analyze | weather | static
     agency_id: int | None
     #: None for a fleet-wide run, and for one displaced before it resolved
     #: which agency it was for.
@@ -1246,7 +1323,9 @@ class PipelineRunOut(BaseModel):
     finished_at: str | None
     status: str  # running | ok | skipped | error
     rows: int | None
-    lock_wait_ms: int | None
+    #: What the non-blocking lock acquire cost, for a run displaced by it.
+    #: A probe round trip, not time queued -- there is no queue.
+    lock_probe_ms: int | None
     error: str | None
     requested_by: int | None
 
@@ -1273,7 +1352,7 @@ class AdminBoard(BaseModel):
 
 
 def _collect_all() -> list[dict[str, Any]]:
-    """The four ops collectors, imported lazily.
+    """The three ops collectors, imported lazily.
 
     `scripts/` is not part of the installed package set, and the collectors
     reach for `gh`/`aws` and the filesystem, so importing them at module scope
@@ -1342,11 +1421,16 @@ async def _collect_documents() -> list[dict[str, Any]]:
 _collector_task: asyncio.Task[list[dict[str, Any]]] | None = None
 
 
-async def _freshness_rows(conn: asyncpg.Connection, window_start: date) -> list[Any]:
+async def _freshness_rows(conn: asyncpg.Connection, window_start: date, window_end: date) -> list[Any]:
     """Agency x day feed-health rows, falling back to the bare agency list
     when the aggregate tables are absent (a freshly migrated environment), so
-    the heatmap still shows who exists with every day missing."""
-    for sql, args in ((_BOARD_FRESHNESS_SQL, (window_start,)), (_BOARD_AGENCIES_SQL, ())):
+    the heatmap still shows who exists with every day missing.
+
+    ``window_end`` is exclusive and bounds the join at the top as well as the
+    bottom: the heatmap draws completed days only, so a future-dated
+    feed-health row is fetched on every poll and then discarded.
+    """
+    for sql, args in ((_BOARD_FRESHNESS_SQL, (window_start, window_end)), (_BOARD_AGENCIES_SQL, ())):
         try:
             return list(await conn.fetch(sql, *args))
         except Exception:
@@ -1362,6 +1446,7 @@ async def _runs_for_day(conn: asyncpg.Connection, day: date) -> list[dict[str, A
     try:
         rows = await conn.fetch(RUNS_FOR_DAY_SQL, start, end)
     except Exception:
+        _log.warning("admin runs: pipeline_runs query failed for day %s", day, exc_info=True)
         return []
     return [shape_run(row) for row in rows]
 
@@ -1391,7 +1476,13 @@ async def list_runs(
 
 
 class RunRequest(BaseModel):
-    """What the board's "re-aggregate now" button sends."""
+    """What the board's "re-aggregate now" button sends.
+
+    A run triggered here never fetches weather, whatever its scope: observed
+    weather is per station on a fleet-wide schedule, so one operator's
+    re-aggregation has no reason to re-drive a third-party fetch for
+    everyone.
+    """
 
     kind: str = "ingest"
     #: Restrict the sweep to one agency; omitted, it covers every live agency.
@@ -1399,6 +1490,7 @@ class RunRequest(BaseModel):
 
 
 @router.post("/runs", response_model=AdminRuns, status_code=202)
+@limiter.limit(ADMIN_ACTION_LIMIT)
 async def trigger_run(
     body: RunRequest,
     request: Request,
@@ -1421,24 +1513,27 @@ async def trigger_run(
     if body.agency_id is not None and await conn.fetchval(LIVE_AGENCY_SQL, body.agency_id) is None:
         raise HTTPException(404, "agency not found")
 
-    row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, body.kind, body.agency_id, admin.user_id)
-    if row is None:
-        raise HTTPException(503, "pipeline runs are not recordable in this environment")
-    run = shape_run(row)
+    async with conn.transaction():
+        row = await conn.fetchrow(INSERT_MANUAL_RUN_SQL, body.kind, body.agency_id, admin.user_id)
+        if row is None:
+            raise HTTPException(503, "pipeline runs are not recordable in this environment")
+        run = shape_run(row)
 
-    await record_admin_action(
-        conn,
-        actor_id=admin.user_id,
-        action="pipeline.run",
-        target_type="agency" if body.agency_id is not None else "system",
-        target_id=str(body.agency_id) if body.agency_id is not None else None,
-        after={"kind": body.kind, "run_id": run["run_id"]},
-    )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="pipeline.run",
+            target_type="agency" if body.agency_id is not None else "system",
+            target_id=str(body.agency_id) if body.agency_id is not None else None,
+            after={"kind": body.kind, "run_id": run["run_id"]},
+            ip=request.client.host if request.client else None,
+        )
     _start_manual_run(
         background_tasks=background_tasks,
         kind=body.kind,
         agency_ids=[body.agency_id] if body.agency_id is not None else None,
         requested_by=admin.user_id,
+        run_weather=False,
         run_id=run["run_id"],
     )
     return AdminRuns(date=today_jst(datetime.now(timezone.utc)).isoformat(), runs=[PipelineRunOut(**run)])
@@ -1450,6 +1545,7 @@ def _start_manual_run(
     kind: str,
     agency_ids: list[int] | None,
     requested_by: int,
+    run_weather: bool,
     run_id: int,
 ) -> None:
     """Queue the cron sweep behind the response.
@@ -1466,17 +1562,86 @@ def _start_manual_run(
         kind=kind,
         agency_ids=agency_ids,
         requested_by=requested_by,
+        run_weather=run_weather,
         run_id=run_id,
     )
+
+
+#: How often at most a board poll pays for the abandoned-run sweep. Every
+#: operator with the page open polls it every few seconds, and a run only
+#: becomes reapable after hours, so anything finer is pure cost.
+_REAP_INTERVAL_SEC = 600.0
+
+#: Monotonic stamp of this process's last sweep. Module-level because the
+#: throttle is per process, not per request.
+_last_reap_at: float | None = None
+
+
+async def _maybe_reap_abandoned_runs() -> None:
+    """Close runs whose process died, at most once per interval.
+
+    Startup alone is not enough: this process is long-lived, and the worker
+    that dies mid-sweep is usually a background task inside it. Never allowed
+    to cost the board its answer -- an unreapable table is a missing tidy-up,
+    not a broken page.
+    """
+    global _last_reap_at
+    stamped = time.monotonic()
+    if _last_reap_at is not None and stamped - _last_reap_at < _REAP_INTERVAL_SEC:
+        return
+    # Stamped before the sweep, not after: two concurrent polls must not both
+    # decide they are the one that runs it.
+    _last_reap_at = stamped
+    try:
+        await asyncio.to_thread(reap_abandoned_runs_best_effort, os.environ.get("DATABASE_URL"))
+    except Exception:
+        _log.warning("board: abandoned-run sweep failed", exc_info=True)
+
+
+#: How long one aggregate-freshness answer serves the board. Staleness
+#: compares whole JST days, while the board polls every few seconds, so a fresh
+#: answer per poll would re-run the Postgres reads and a ClickHouse probe per
+#: agency for nothing. A failed check is held as long, so an outage does not
+#: cost every poll a probe that times out. Ops reads the check live.
+_BOARD_FRESHNESS_TTL_SEC = 300.0
+
+#: Monotonic stamp and answer (``None`` when the check failed) of this
+#: process's last aggregate-freshness check for the board.
+_board_freshness_cache: "tuple[float, list[AgencyFreshness] | None] | None" = None
+
+
+async def _board_agency_freshness(conn: asyncpg.Connection, ch: AsyncClient) -> "list[AgencyFreshness] | None":
+    """``pipeline.health.aggregate_freshness`` for the board, cached per process."""
+    from pipeline.health import aggregate_freshness
+
+    global _board_freshness_cache
+    stamped = time.monotonic()
+    if _board_freshness_cache is not None and stamped - _board_freshness_cache[0] < _BOARD_FRESHNESS_TTL_SEC:
+        return _board_freshness_cache[1]
+    # Stamped before the check, not after, holding the previous answer: polls
+    # that arrive while it runs reuse that answer instead of each starting
+    # their own probe.
+    _board_freshness_cache = (stamped, _board_freshness_cache[1] if _board_freshness_cache else None)
+    answer: list[AgencyFreshness] | None
+    try:
+        answer = await aggregate_freshness(conn, ch)
+    except Exception:
+        _log.warning("board: aggregate freshness unavailable", exc_info=True)  # no staleness alerts
+        answer = None
+    _board_freshness_cache = (stamped, answer)
+    return answer
 
 
 @router.get("/board", response_model=AdminBoard)
 async def admin_board(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
 ) -> AdminBoard:
     """The admin entry page's one snapshot: collectors, freshness, alerts."""
     from pipeline.health import migration_status
+
+    await _maybe_reap_abandoned_runs()
 
     now = datetime.now(timezone.utc)
     today = now.astimezone(ZoneInfo("Asia/Tokyo")).date()
@@ -1484,7 +1649,10 @@ async def admin_board(
     documents = await _collect_documents()
     collectors = collector_tiles(documents, now, reasons=_collector_reasons(documents))
 
-    freshness = board_freshness(await _freshness_rows(conn, board_window(today)[0]), today)
+    # The window's exclusive end is `today`: the heatmap draws completed days
+    # only, so the join has nothing to gain from today's partial row or any
+    # future-dated one.
+    freshness = board_freshness(await _freshness_rows(conn, board_window(today)[0], today), today)
 
     mig: MigrationStatusOut | None = None
     migrations = None
@@ -1500,7 +1668,12 @@ async def admin_board(
         _log.warning("board: pending-approvals count failed", exc_info=True)
         pending_llm_approvals = 0
 
-    alerts = board_alerts(freshness=freshness, migrations=migrations, pending_llm_approvals=pending_llm_approvals)
+    alerts = board_alerts(
+        freshness=freshness,
+        agency_freshness=await _board_agency_freshness(conn, ch),
+        migrations=migrations,
+        pending_llm_approvals=pending_llm_approvals,
+    )
     return AdminBoard(
         collectors=[CollectorTileOut(**tile) for tile in collectors],
         freshness=[AgencyFreshnessRowOut(**row) for row in freshness],

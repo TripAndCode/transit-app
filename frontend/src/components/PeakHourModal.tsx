@@ -1,10 +1,8 @@
-// frontend/src/components/PeakHourModal.tsx
 import { useTranslation } from "react-i18next";
 import type { PeakHourBreakdown } from "../api/types";
 import { Spinner } from "./Spinner";
 import { Modal } from "./Modal";
-
-const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+import { WEEK } from "../utils/week";
 
 export function PeakHourModal({
   data,

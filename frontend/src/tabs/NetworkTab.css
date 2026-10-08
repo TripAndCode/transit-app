@@ -4,15 +4,12 @@
 
 .network-page { padding: 24px; max-width: 900px; margin: 0 auto; }
 
-.network-help { max-width: 640px; color: var(--text-secondary); font-size: var(--text-base); line-height: 1.65; }
-
 .network-howto { max-width: 680px; color: var(--text-secondary); font-size: var(--text-xs); line-height: 1.5; }
 .network-howto summary { display: inline-flex; padding: 4px 0; font-size: var(--text-sm); font-weight: 600; cursor: pointer; color: var(--accent); }
 .network-howto-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
 .network-howto-list li { min-width: 0; padding: 9px 10px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); }
 .network-howto-list strong { display: block; margin-bottom: 2px; color: var(--text-primary); font-size: var(--text-xs); }
 
-.network-definition summary { display: inline-flex; padding: 4px 0; font-size: var(--text-sm); font-weight: 600; cursor: pointer; color: var(--accent); }
 
 .network-controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; font-size: var(--text-sm); color: var(--text-secondary); }
 .network-controls label { display: inline-flex; align-items: center; gap: 6px; }
@@ -46,6 +43,9 @@
 .network-row__name { min-width: 0; font-size: var(--text-sm); font-weight: 600; }
 .network-row__name a { color: var(--accent); text-decoration: none; }
 .network-row__name a:hover { text-decoration: underline; }
+/* --accent only clears AA on the plain row background; a current row's link
+   sits on --accent-soft instead, so it needs the deepened text-safe variant. */
+.network-row--current .network-row__name a { color: var(--accent-strong); }
 .network-row__sub { display: block; margin-top: 2px; font-weight: 400; font-size: var(--text-xs); color: var(--text-tertiary); }
 
 .network-row__value { text-align: right; font-size: var(--text-md); font-weight: 700; line-height: 1.1; white-space: nowrap; }

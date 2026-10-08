@@ -15,10 +15,10 @@ class _FakeChClient:
     `make ch-test` while the freshness-specific tests further down use the
     real `ch_client` fixture.
 
-    `_run_ingest_and_analyze` now feeds this same stub to BOTH
+    `_run_ingest_and_analyze` feeds this same stub to BOTH
     `check_agg_freshness` (a `maxOrNull(captured_at)` scalar query, one row
-    shaped `(None,)`) and `analyze()`'s dedup materialization (Task 6's
-    `build_dedup_ch_sql`, an 8-column row-set query) since both go through
+    shaped `(None,)`) and `analyze()`'s dedup materialization
+    (`build_dedup_ch_sql`, an 8-column row-set query) since both go through
     one `ch_client`. Returning `[(None,)]` unconditionally would make
     analyze()'s bulk-load try to insert a 1-column row into an 8-column temp
     table and crash, so dispatch on the SQL text: the scalar query gets its
@@ -34,17 +34,15 @@ class _FakeChClient:
 
     def close(self) -> None:
         """No-op: mirrors the real (sync) ClickHouse client's close(), which
-        _run_ingest_and_analyze now calls in its `finally` block alongside
+        _run_ingest_and_analyze calls in its `finally` block alongside
         `conn.close()` (see api/routers/internal.py) to avoid leaking a
         client + HTTP pool per cron invocation."""
 
 
 def _seed_two_days(pg_conn, agency_id):
     """Insert mid-day rows across two completed civil days (well before today)
-    into Postgres `updates` — still needed alongside `_seed_two_days_ch`
-    because analyze()'s agg_feed_health/agg_stop_routes/agg_meta builders
-    (see pipeline/analyze.py) read raw Postgres `updates` directly and were
-    not touched by the Task 6 dedup-materialization migration.
+    into Postgres `updates` — the Postgres twin of `_seed_two_days_ch`, which
+    seeds the ClickHouse copy that analyze() and check_agg_freshness read.
 
     Mid-day (11:37) keeps the JST/UTC civil date identical so the test is
     independent of the test connection's session timezone.
@@ -73,7 +71,7 @@ def _seed_two_days(pg_conn, agency_id):
 
 def _seed_two_days_ch(ch_client, agency_id):
     """Insert the same two completed civil days into ClickHouse `updates` —
-    the source check_agg_freshness now reads for the live-side max.
+    the source check_agg_freshness reads for the live-side max.
 
     02:37 UTC == 11:37 JST on the same calendar day, so this lands on the
     same civil dates _seed_two_days uses for the Postgres/analyze() side.
@@ -168,7 +166,7 @@ def test_multi_agency_only_stale_returned(pg_conn, ch_client, agency_id):
 def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agency_id):
     """Direct regression coverage for the JST/UTC boundary in
     check_agg_freshness's live-side cutoff (same bug class as
-    tests/unit/test_db_dedup_ch.py::test_dedup_ch_buckets_by_jst_day_not_utc_day
+    tests/clickhouse/test_db_dedup_ch.py::test_dedup_ch_buckets_by_jst_day_not_utc_day
     proved for the dedup query - and the same class of bug project memory
     "analyze conn must pin JST" hit for real: a UTC-pinned connection
     mis-bucketed ~20% of rows relative to the JST-pinned API).
@@ -206,20 +204,20 @@ def test_check_agg_freshness_uses_jst_date_not_utc_date(pg_conn, ch_client, agen
 
 
 def test_check_agg_freshness_falls_back_to_latest_completed_day_when_today_has_rows(pg_conn, ch_client, agency_id):
-    """Regression: an agency ingesting continuously (a completed day from
-    several days ago PLUS a row from right now, no agg_route_daily seeded
-    at all) must be flagged stale — not silently reported fresh just because
-    the unconditional max lands on today (the normal, healthy,
+    """An agency ingesting continuously (a completed day from several days
+    ago PLUS a row from right now, no agg_route_daily seeded at all) must be
+    flagged stale — not silently reported fresh just because the
+    unconditional max lands on today (the normal, healthy,
     continuously-ingesting case in production, not an edge case).
 
-    A prior version called `pipeline.clickhouse.max_captured_at` (the
-    unconditional "absolute latest, today included" helper) and only
-    accepted the result in Python if it was already before today's JST
-    midnight — so it never fell back to the latest prior completed day when
-    today also had rows, defeating staleness detection under normal
-    conditions. `is_stale`'s own docstring says an agency with a completed
-    day but no matching agg row must be stale ("Aggs empty ... but a
-    completed day exists: stale."), so this is not a hypothetical.
+    Calling `pipeline.clickhouse.max_captured_at` (the unconditional
+    "absolute latest, today included" helper) and accepting the result only
+    if it is already before today's JST midnight would never fall back to
+    the latest prior completed day when today also has rows, defeating
+    staleness detection under normal conditions. `is_stale`'s own docstring
+    says an agency with a completed day but no matching agg row must be
+    stale ("Aggs empty ... but a completed day exists: stale."), so this is
+    not a hypothetical.
     """
     from datetime import datetime, timezone
 
@@ -245,8 +243,8 @@ def test_check_agg_freshness_falls_back_to_latest_completed_day_when_today_has_r
 
 
 def test_analyze_writes_agg_meta(pg_conn, agency_id, ch_client):
-    """agg_meta's max_updates_captured_at now comes from ClickHouse (Task 6
-    Step 5's ch_max_captured_at swap), so this needs the ClickHouse seed too —
+    """agg_meta's max_updates_captured_at comes from ClickHouse
+    (`ch_max_captured_at`), so this needs the ClickHouse seed too —
     _seed_two_days alone (Postgres-only) would leave it NULL."""
     _seed_two_days(pg_conn, agency_id)
     _seed_two_days_ch(ch_client, agency_id)

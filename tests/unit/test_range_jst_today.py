@@ -35,13 +35,13 @@ def test_get_range_ctx_default_window_uses_jst_today(monkeypatch):
 
     monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
     ctx = range_mod.get_range_ctx(from_=None, to=None, dow="all", time_band="all", service="all", routes=None)
-    assert ctx.to_date == date(2026, 1, 2)
+    assert ctx.to_date == date(2026, 1, 1)
 
 
 def test_apply_date_overrides_default_window_uses_jst_today(monkeypatch):
     """pipeline/query/tools.py's _apply_date_overrides is a sibling of
-    get_range_ctx's default-window logic (same today-29d..today pattern) and
-    must anchor to the same JST civil calendar, not the server's local time."""
+    get_range_ctx's default-window logic (the same window ending on the last
+    closed day) and must anchor to the same JST civil calendar, not the server's local time."""
     from pipeline.query.tools import _apply_date_overrides
 
     fixed_utc = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)
@@ -53,8 +53,39 @@ def test_apply_date_overrides_default_window_uses_jst_today(monkeypatch):
 
     monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
     ctx = range_mod.RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 31))
-    derived = _apply_date_overrides(ctx, {"from_date": "2026-01-01"})  # from set, to omitted -> defaults to today
-    assert derived.to_date == date(2026, 1, 2)
+    derived = _apply_date_overrides(ctx, {"from_date": "2026-01-01"})  # to omitted -> the last closed JST day
+    assert derived.to_date == date(2026, 1, 1)
+
+
+def test_last_closed_day_turns_over_at_jst_midnight(monkeypatch):
+    for fixed_utc, expected in [
+        (datetime(2026, 1, 1, 14, 59, 59, tzinfo=timezone.utc), date(2025, 12, 31)),  # 23:59:59 JST 01-01
+        (datetime(2026, 1, 1, 15, 0, 0, tzinfo=timezone.utc), date(2026, 1, 1)),  # 00:00 JST 01-02
+    ]:
+
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None, _at=fixed_utc):
+                return _at.astimezone(tz) if tz else _at
+
+        monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
+        assert range_mod.last_closed_jst_day() == expected
+
+
+def test_days_back_counts_closed_days(monkeypatch):
+    from pipeline.query.tools import _apply_date_overrides
+
+    fixed_utc = datetime(2026, 1, 1, 20, 0, tzinfo=timezone.utc)  # 2026-01-02 JST
+
+    class FakeDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_utc.astimezone(tz) if tz else fixed_utc
+
+    monkeypatch.setattr(range_mod, "datetime", FakeDateTime)
+    ctx = range_mod.RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 31))
+    derived = _apply_date_overrides(ctx, {"days_back": 7})
+    assert (derived.from_date, derived.to_date) == (date(2025, 12, 26), date(2026, 1, 1))
 
 
 def test_get_range_ctx_clamps_future_to_date_to_jst_today(monkeypatch):
@@ -96,8 +127,9 @@ def test_get_range_ctx_future_to_date_with_earlier_from_clamps_and_keeps_order(m
 
 
 def test_get_range_ctx_rejects_a_malformed_date_instead_of_defaulting():
-    """A typo'd `from` used to fall through to the default 30-day window and
-    return a confident answer for a period the caller never asked for."""
+    """A typo'd `from` must be rejected rather than fall through to the
+    default 30-day window and return a confident answer for a period the
+    caller never asked for."""
     import pytest
     from fastapi import HTTPException
 

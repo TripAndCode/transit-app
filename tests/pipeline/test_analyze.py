@@ -9,12 +9,12 @@ from tests.conftest import mirror_updates_to_ch
 
 def _analyze(agency_id, pg_conn, ch_client):
     """Mirror this agency's Postgres `updates` rows into ClickHouse (the
-    dedup materialization's source as of Task 6) and run analyze().
+    dedup materialization's source) and run analyze().
 
-    Every fixture in this file seeds Postgres `updates` directly (pre-dating
-    the ClickHouse migration); mirroring right before analyze() lets those
-    seeds keep driving the ClickHouse-sourced aggregates without duplicating
-    each one. See tests.conftest.mirror_updates_to_ch.
+    Every fixture in this file seeds Postgres `updates` directly; mirroring
+    right before analyze() lets those seeds keep driving the
+    ClickHouse-sourced aggregates without duplicating each one. See
+    tests.conftest.mirror_updates_to_ch.
     """
     mirror_updates_to_ch(ch_client, agency_id)
     analyze(agency_id, pg_conn, ch_client)
@@ -191,7 +191,7 @@ def test_analyze_sum_delay_sec_pools_exactly_unlike_reweighted_avg_min(pg_conn, 
     0.69 min). Day 2: 7 observations at 100s each -> sum=700s, avg=100s
     (rounds to 1.67 min). The true combined mean is 824s / 10 / 60 = 1.3733
     min, which rounds to 1.37 -- but re-weighting the two ALREADY-ROUNDED
-    per-day avg_min values instead (the pre-fix pattern) gives
+    per-day avg_min values instead gives
     (0.69*3 + 1.67*7) / 10 = 1.376, which rounds to 1.38: a different, wrong
     answer that exists purely because of the intermediate rounding.
     """
@@ -241,7 +241,7 @@ def test_analyze_sum_delay_sec_pools_exactly_unlike_reweighted_avg_min(pg_conn, 
         )
         fixed_avg = float(cur.fetchone()[0])
 
-        # The bug this migration fixes: re-weighting each row's own
+        # The biased alternative: re-weighting each row's own
         # already-rounded avg_min instead of the raw sum.
         cur.execute(
             "SELECT ROUND((SUM(avg_min * samples) / SUM(samples))::numeric, 2) "
@@ -274,10 +274,9 @@ def test_analyze_sum_late_sec_is_clamped_per_observation_not_clamped_average(pg_
 
     5 observations at +600s (10 min) and 5 at -480s (-8 min): the day's
     signed average is (5*600 + 5*(-480)) / 10 / 60 = 1.0 min. Clamping THAT
-    average (the bug this column fixes) would score the day as
-    ``1.0 * 10 = 10`` late-minutes. The true per-observation clamped sum is
-    ``5 * 600 = 3000`` seconds = 50 minutes -- the -480s trips contribute 0,
-    never a negative offset.
+    average would score the day as ``1.0 * 10 = 10`` late-minutes. The true
+    per-observation clamped sum is ``5 * 600 = 3000`` seconds = 50 minutes --
+    the -480s trips contribute 0, never a negative offset.
     """
     with pg_conn.cursor() as cur:
         i = 0
@@ -543,7 +542,7 @@ def _seed_route_group(pg_conn, agency_id, route_code, service_type, n=25):
 
     Varies trip_id + day so each row survives the dedup DISTINCT ON. Pass
     ``service_type=None`` to simulate the rows that miss the static_join and
-    land with a NULL service_type (the agency-9 case).
+    land with a NULL service_type.
     """
     with pg_conn.cursor() as cur:
         for i in range(n):
@@ -569,10 +568,9 @@ def _seed_route_group(pg_conn, agency_id, route_code, service_type, n=25):
 def test_analyze_skips_null_service_type_without_crashing(pg_conn, agency_id, ch_client):
     """Rows with a NULL service_type (failed static_join) must not abort analyze.
 
-    Regression for the agency-9 case: a NULL service_type group violated the
-    NOT NULL constraint on agg_route_stats.service_type and rolled back the
-    whole run, leaving aggregates stale. analyze must drop those rows and
-    materialise the rest.
+    A NULL service_type group would violate the NOT NULL constraint on
+    agg_route_stats.service_type and roll back the whole run, leaving
+    aggregates stale. analyze must drop those rows and materialise the rest.
     """
     _seed_route_group(pg_conn, agency_id, "R1", "平日")
     _seed_route_group(pg_conn, agency_id, "R1", None)
@@ -678,13 +676,12 @@ def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(p
     table is about which routes serve a stop, independent of whether any
     observation happened to carry a numeric delay.
 
-    Regression: agg_stop_routes was derived from _analyze_deduped for one
-    perf-motivated commit, which pre-filters `dep_delay IS NOT NULL` — that
-    silently dropped this exact case (a real, non-trivial share of keys,
-    enough to lose stops' entire route coverage in practice). Restored to
-    the ClickHouse-sourced
+    So agg_stop_routes must come from the ClickHouse-sourced
     _analyze_raw_keys path, which reads route_code/trip_id/stop_sequence
-    only and never touches dep_delay."""
+    only and never touches dep_delay — not from _analyze_deduped, whose
+    `dep_delay IS NOT NULL` pre-filter silently drops this exact case (a
+    real, non-trivial share of keys, enough to lose stops' entire route
+    coverage in practice)."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
@@ -710,8 +707,41 @@ def test_analyze_agg_stop_routes_keeps_route_with_only_null_delay_observations(p
     assert row[0] == "R_NULL_DELAY"
 
 
+def test_delayless_rows_arriving_on_a_built_date_update_stop_route_coverage(pg_conn, agency_id, ch_client):
+    """A stop whose route coverage comes only from NULL-delay observations gains
+    it on the run after those rows land, because total_rows sees them.
+
+    The static stop_time is seeded before the first run so the static
+    fingerprint stays put: otherwise the second run would rebuild every date
+    on the fingerprint alone and never exercise the ledger.
+    """
+    _seed_for_stop_agg(pg_conn, agency_id)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES (%s, 'T_NULL', 1, 's1')",
+            (agency_id,),
+        )
+    pg_conn.commit()
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT max(captured_at) FROM updates WHERE agency_id = %s", (agency_id,))
+        when = cur.fetchone()[0]
+    insert_updates(
+        ch_client,
+        agency_id,
+        [("nulldelay.pb", when, "T_NULL", "平日", "08:10:00", "R_NULLONLY", 1, None)],
+    )
+    from pipeline.analyze import _dates_needing_rebuild
+
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == [when.date()]
+    analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT route_codes FROM agg_stop_routes WHERE agency_id = %s AND stop_id = 's1'", (agency_id,))
+        assert "R_NULLONLY" in cur.fetchone()[0].split(",")
+
+
 def test_agg_stop_daily_keeps_null_service_type_as_sentinel(pg_conn, agency_id, ch_client):
-    """NULL service_type rows (agency-9 case) must not abort the agg build,
+    """NULL service_type rows (a missed static_join) must not abort the agg build,
     and — matching agg_route_stop_daily's '' sentinel treatment — must not be
     silently dropped either: a stop whose traffic is entirely NULL-service
     would otherwise read as zero activity on the default (no route filter)
@@ -768,8 +798,8 @@ def test_analyze_builds_agg_route_stop_daily(pg_conn, agency_id, ch_client):
 
 def test_heatmap_aggs_clamp_implausible_delays(pg_conn, agency_id, ch_client):
     """A frozen-feed spike (|delay| > MAX_PLAUSIBLE_DELAY_SEC) is excluded from
-    BOTH heatmap aggregates, so it can't hijack the per-stop mean. Regression for
-    the 2026-06-07 馬木料金所前 72-min false reading."""
+    BOTH heatmap aggregates, so it can't hijack the per-stop mean (see
+    pipeline/db.py's MAX_PLAUSIBLE_DELAY_SEC comment)."""
     from datetime import time
 
     from pipeline.analyze import MAX_PLAUSIBLE_DELAY_SEC
@@ -819,12 +849,34 @@ def test_analyze_builds_agg_feed_health(pg_conn, agency_id, ch_client):
     _analyze(agency_id, pg_conn, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT date, raw_samples, clamp_count FROM agg_feed_health WHERE agency_id=%s ORDER BY date",
+            "SELECT date, raw_samples, clamp_count, total_rows FROM agg_feed_health WHERE agency_id=%s ORDER BY date",
             (agency_id,),
         )
-        by_date = {str(d): (raw, clamp) for d, raw, clamp in cur.fetchall()}
-    assert by_date["2026-06-09"] == (3, 1)  # 3 raw observations, 1 implausible
-    assert by_date["2026-06-10"] == (1, 0)
+        by_date = {str(d): (raw, clamp, total) for d, raw, clamp, total in cur.fetchall()}
+    assert by_date["2026-06-09"] == (3, 1, 3)  # 3 raw observations, 1 implausible
+    assert by_date["2026-06-10"] == (1, 0, 1)
+
+
+def test_agg_feed_health_counts_delayless_rows_in_total_rows_only(pg_conn, agency_id, ch_client):
+    """total_rows is the ledger's view of every row; raw_samples stays the
+    delay-carrying count, so a date with no delay at all still gets a row."""
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            ("a.pb", datetime(2026, 6, 9, 2, 0, tzinfo=timezone.utc), "T1", "平日", "11:00:00", "R1", 1, 60),
+            ("b.pb", datetime(2026, 6, 9, 2, 0, tzinfo=timezone.utc), "T2", "平日", "11:00:00", "R1", 1, None),
+            ("c.pb", datetime(2026, 6, 10, 2, 0, tzinfo=timezone.utc), "T3", "平日", "11:00:00", "R1", 1, None),
+        ],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, raw_samples, clamp_count, total_rows FROM agg_feed_health WHERE agency_id=%s ORDER BY date",
+            (agency_id,),
+        )
+        by_date = {str(d): (raw, clamp, total) for d, raw, clamp, total in cur.fetchall()}
+    assert by_date == {"2026-06-09": (1, 0, 2), "2026-06-10": (0, 0, 1)}
 
 
 def _set_ingest_strategy(pg_conn, agency_id, strategy):
@@ -907,7 +959,7 @@ def test_analyze_skips_agg_service_delivered_daily_for_non_static_join_agency(pg
 
 
 def test_analyze_service_delivered_daily_latest_stop_observation_wins_over_stale_skip(pg_conn, agency_id, ch_client):
-    """Regression: a stop flagged SKIPPED on an early poll, corrected back to
+    """A stop flagged SKIPPED on an early poll, corrected back to
     normal on a later poll (higher captured_at), must not count as
     non-executed -- the stop-level subquery's raw WHERE must not filter
     `schedule_relationship_stop IS NOT NULL` before argMax runs, or the
@@ -940,6 +992,46 @@ def test_analyze_service_delivered_daily_latest_stop_observation_wins_over_stale
         row = cur.fetchone()
     assert row is not None
     assert row[0] == 1  # only T2; T1's correction must not resurrect the stale SKIPPED flag
+
+
+def test_service_delivered_rebuilds_only_the_changed_day(pg_conn, agency_id, ch_client):
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day1 = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    day2 = datetime(2026, 4, 2, 2, 0, tzinfo=timezone.utc)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            _ch_service_delivered_row("T1", day1, file_name="t1.pb", schedule_relationship_trip=3),
+            _ch_service_delivered_row("T2", day2, file_name="t2.pb", schedule_relationship_trip=3),
+        ],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    # Values no build would produce. day1's survives only if the next run
+    # leaves that day alone; day2's is replaced by 2 only if the rebuild reads
+    # the whole day (T2 and T3), not just the new row (which would give 1).
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_service_delivered_daily SET non_executed_trips = "
+            "CASE WHEN date = %s THEN 99 ELSE 77 END WHERE agency_id = %s",
+            (day1.date(), agency_id),
+        )
+    pg_conn.commit()
+    # A new cancellation lands on day2 only. day2 is 11:00 JST, so the UTC
+    # value's .date() is already the JST service date.
+    insert_updates(
+        ch_client, agency_id, [_ch_service_delivered_row("T3", day2, file_name="t3.pb", schedule_relationship_trip=3)]
+    )
+    from pipeline.analyze import _dates_needing_rebuild
+
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == [day2.date()]
+    analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s ORDER BY date",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 99, "2026-04-02": 2}
 
 
 def _seed_route_headway_schedule(pg_conn, agency_id, route_id, service_id, stop_id, departure_times):
@@ -1006,7 +1098,7 @@ def test_analyze_classifies_high_frequency_route_from_static_schedule(pg_conn, a
     freq_median, freq_hf, freq_wait = by_route["R_FREQ"]
     assert abs(freq_median - 480) < 1  # hand-computed: 480s (8 min) between every pair
     assert freq_hf is True
-    # Perfectly regular headway -> mean wait reduces to headway/2 (item 94's
+    # Perfectly regular headway -> mean wait reduces to headway/2 (the
     # E[H^2]/(2E[H]) formula, see pipeline.headways.mean_wait_from_moments).
     assert abs(freq_wait - 240) < 1
 
@@ -1106,7 +1198,7 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     median_sec, samples, sum_sec, sumsq_sec2, long_gap_count = row
     assert samples == 2  # 3 events -> 2 consecutive gaps
     assert abs(median_sec - 480) <= 3
-    # Both gaps land exactly on 480s -- sum/sumsq are the item 94 sufficient
+    # Both gaps land exactly on 480s -- sum/sumsq are the sufficient
     # statistics behind that same median, additive across days (see
     # pipeline.headways module docstring).
     assert abs(sum_sec - 960) <= 6
@@ -1297,6 +1389,31 @@ def test_analyze_builds_agg_route_daily_dwell_run_for_static_join_agency(pg_conn
     assert hist_run_len == 32
 
 
+def test_analyze_dwell_run_drops_a_no_route_visit_but_keeps_it_as_the_next_anchor(pg_conn, agency_id, ch_client):
+    """Stop 2's poll carries no route_code. Its own dwell and running cannot
+    enter the NOT NULL route key, but its departure still anchors stop 3's
+    running time: 36610 - 36410 = 200s. Filtering it out before `LAG()` would
+    pair stop 3 with stop 1's departure instead (580s)."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_dwell_run_row("T1", day, 1, 30, None),
+        _ch_dwell_run_row("T1", day, 2, 50, 20, route_code=None),
+        _ch_dwell_run_row("T1", day, 3, 10, 10),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT route_code, dwell_samples, dwell_sum_sec, run_samples, run_sum_sec "
+            "FROM agg_route_daily_dwell_run WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert cur.fetchall() == [("R1", 1, 0, 1, 200)]
+
+
 def test_analyze_skips_agg_route_daily_dwell_run_for_non_static_join_agency(pg_conn, agency_id, ch_client):
     """An agency whose ingest_strategy isn't static_join must get zero rows
     in agg_route_daily_dwell_run regardless of static schedule -- the read
@@ -1335,16 +1452,15 @@ def test_analyze_skips_agg_route_daily_dwell_run_without_static_schedule(pg_conn
 
 
 def test_analyze_dwell_run_latest_poll_wins_when_arr_delay_goes_null(pg_conn, agency_id, ch_client):
-    """Regression: a stop event whose LATEST poll has `arr_delay = NULL`
+    """A stop event whose LATEST poll has `arr_delay = NULL`
     (feed stopped sending an arrival estimate for that stop) must be treated
     as unavailable for that stop-visit, not silently resurrect an EARLIER
     poll's non-NULL `arr_delay` -- ClickHouse's `argMax(arg, val)` silently
     SKIPS a row whose `arg` is NULL when picking the row with the maximal
     `val`, so a naive `argMax(u.arr_delay, (captured_at, file_name))` would
     return the earlier, stale value instead of NULL. `build_dedup_ch_sql`
-    guards against this with a `coalesce`/`NULLIF` sentinel wrap (mirroring
-    the same fix already applied to `schedule_relationship_trip`/
-    `schedule_relationship_stop`)."""
+    guards against this with a `coalesce`/`NULLIF` sentinel wrap (the same
+    wrap `schedule_relationship_trip`/`schedule_relationship_stop` use)."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
     _seed_dwell_run_schedule(pg_conn, agency_id, "T1")
     early = datetime(2026, 4, 1, 1, 0, tzinfo=timezone.utc)
@@ -1383,7 +1499,7 @@ def test_analyze_dwell_run_latest_poll_wins_when_arr_delay_goes_null(pg_conn, ag
 def test_analyze_dwell_run_missing_schedule_at_interior_stop_does_not_inflate_next_running(
     pg_conn, agency_id, ch_client
 ):
-    """Regression: a stop lacking a static schedule row (arrival_time/
+    """A stop lacking a static schedule row (arrival_time/
     departure_time optional for non-timepoint intermediate stops in real
     GTFS feeds) must yield None for its own dwell/running AND make the
     FOLLOWING stop's running time None too -- not silently pair the
@@ -1430,9 +1546,9 @@ def test_analyze_dwell_run_missing_schedule_at_interior_stop_does_not_inflate_ne
     dwell_samples, dwell_sum_sec, run_samples, run_sum_sec = row
     # Stop 3's own dwell (0) is unaffected -- it doesn't depend on stop 2.
     # Stop 3's running time DOES depend on stop 2's actual departure, which
-    # is None (no schedule) -- run_samples must be 0, not 1 (which the bug
-    # would produce by pairing stop 3 with stop 1's departure instead:
-    # actual_arr_sec(3) - actual_dep_sec(1) = 36610 - 36030 = 580).
+    # is None (no schedule) -- run_samples must be 0, not 1 (which skipping
+    # past the missing stop would produce by pairing stop 3 with stop 1's
+    # departure instead: actual_arr_sec(3) - actual_dep_sec(1) = 36610 - 36030 = 580).
     assert dwell_samples == 1
     assert dwell_sum_sec == 0
     assert run_samples == 0
@@ -1595,9 +1711,44 @@ def test_analyze_builds_agg_schedule_revision_daily_dominant_version_per_day(pg_
     assert by_date == {"2026-05-01": "v1", "2026-05-02": "v2"}
 
 
+def test_schedule_revision_rebuilds_only_the_changed_day(pg_conn, agency_id, ch_client):
+    """A changed day is recomputed from all of that day's rows — old and new —
+    while an unchanged day is left exactly as it stands."""
+    day1 = datetime(2026, 5, 1, 2, 0, tzinfo=timezone.utc)
+    day2 = datetime(2026, 5, 2, 2, 0, tzinfo=timezone.utc)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            _ch_schedule_revision_row("T1", day1, "v1", file_name="d1t1.pb"),
+            _ch_schedule_revision_row("T2", day2, "v1", file_name="d2t1.pb"),
+            _ch_schedule_revision_row("T3", day2, "v1", file_name="d2t2.pb"),
+        ],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_schedule_revision_daily SET static_version_id = 'sentinel' WHERE agency_id = %s",
+            (agency_id,),
+        )
+    pg_conn.commit()
+    # One new v2 row on day2: reading only the new rows would give v2, and
+    # skipping day2 would leave the sentinel. The whole day's mode is v1.
+    insert_updates(ch_client, agency_id, [_ch_schedule_revision_row("T4", day2, "v2", file_name="d2t3.pb")])
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, static_version_id FROM agg_schedule_revision_daily WHERE agency_id = %s ORDER BY date",
+            (agency_id,),
+        )
+        by_date = {str(d): v for d, v in cur.fetchall()}
+    assert by_date == {"2026-05-01": "sentinel", "2026-05-02": "v1"}
+
+
 def test_analyze_skips_agg_schedule_revision_daily_when_static_version_id_always_null(pg_conn, agency_id, ch_client):
     """An ingest strategy that never sets static_version_id (e.g.
-    aomori_regex) -- or any day predating item 88's rollout -- must get NO
+    aomori_regex) -- or any day whose rows all carry a NULL one -- must get NO
     row here, never a NULL-version row a boundary could be misdrawn against."""
     day1 = datetime(2026, 5, 1, 2, 0, tzinfo=timezone.utc)
     rows = [_ch_schedule_revision_row("T1", day1, None, file_name="d1t1.pb")]
@@ -1674,7 +1825,10 @@ def _fingerprint(pg_conn, agency_id):
     """
     from pipeline.analyze import _static_fingerprint, _static_loaded
 
-    return _static_fingerprint(agency_id, pg_conn, _static_loaded(pg_conn, agency_id))
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        (strategy,) = cur.fetchone()
+    return _static_fingerprint(agency_id, pg_conn, _static_loaded(pg_conn, agency_id), strategy)
 
 
 def _feed_health(pg_conn, agency_id):
@@ -1715,10 +1869,31 @@ def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_clie
     assert _dates_needing_rebuild(agency_id, pg_conn, ch_client, _fingerprint(pg_conn, agency_id)) == [moved]
 
 
+class _RecordingCH:
+    """Wraps the real client so a test can see which scans a run issued."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.queries: list[str] = []
+        self.streams: list[str] = []
+
+    def query(self, sql, parameters=None):
+        self.queries.append(sql)
+        return self._inner.query(sql, parameters=parameters)
+
+    def query_row_block_stream(self, sql, parameters=None):
+        self.streams.append(sql)
+        return self._inner.query_row_block_stream(sql, parameters=parameters)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch_client):
     """Rebuilding only the changed dates must reach the same state as rebuilding
     all of them — otherwise the optimisation silently corrupts history."""
-    _seed_updates(pg_conn, agency_id)
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    _seed_for_stop_agg(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
     first = _agg_snapshot(pg_conn, agency_id)
 
@@ -1726,10 +1901,18 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     # Postgres seed into ClickHouse each time, which really does change the row
     # counts and so is a different scenario from re-running against unchanged
     # data.
-    analyze(agency_id, pg_conn, ch_client)
+    recording = _RecordingCH(ch_client)
+    analyze(agency_id, pg_conn, recording)
 
     assert _agg_snapshot(pg_conn, agency_id) == first
-    assert any(rows for rows in first.values()), "fixture produced no rows, so this would pass vacuously"
+    assert first["agg_stop_routes"], "fixture built no agg_stop_routes, so its skip would pass vacuously"
+    # The no-change run reads `updates` once, for the ledger. Anything else it
+    # sends is an index-served single-row probe, never a scan.
+    assert recording.streams == []
+    ledger = [s for s in recording.queries if "raw_samples" in s and "clamp_count" not in s]
+    assert len(ledger) == 1
+    others = [s for s in recording.queries if s not in ledger]
+    assert all(s.rstrip().endswith("LIMIT 1") for s in others), others
 
 
 def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, ch_client):
@@ -1748,8 +1931,9 @@ def test_a_date_whose_rows_vanish_loses_its_aggregate_rows(pg_conn, agency_id, c
     # A ledger entry for a date ClickHouse never had.
     with pg_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count) VALUES (%s, %s, %s, %s)",
-            (agency_id, date(2099, 1, 1), 42, 0),
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count, total_rows) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (agency_id, date(2099, 1, 1), 42, 0, 42),
         )
     pg_conn.commit()
 
@@ -1919,26 +2103,134 @@ def test_the_static_fingerprint_notices_a_recalendared_trip(pg_conn, agency_id):
     assert _fingerprint(pg_conn, agency_id) != before
 
 
-def test_the_text_dated_aggregate_stores_iso_dates(pg_conn, agency_id, ch_client):
-    """agg_daily_trend stores its service date as text, and text has a format.
+def test_the_trend_aggregate_stores_dates_and_purges_by_them(pg_conn, agency_id, ch_client):
+    """agg_daily_trend's service date is a DATE, the type the per-date purge binds.
 
-    The per-date purge matches this column against an ISO string, and every
-    reader parses it as one, so the format is a contract rather than an
-    incidental rendering. Nothing else in the suite would notice it drifting:
-    the column is text, so a differently-formatted value stores and reads
-    back perfectly happily, and only the purge quietly stops matching.
+    The purge compares the column against the rebuild list's dates as-is; a
+    column of any other type would need a cast on one side, and a cast on the
+    column side costs it the primary-key prefix the purge narrows by. A purge
+    that matched nothing would surface on the reinsert as a primary-key
+    collision.
     """
     _seed_updates(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
+    before = _agg_snapshot(pg_conn, agency_id)
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT DISTINCT date FROM agg_daily_trend WHERE agency_id = %s", (agency_id,))
         stored = [r[0] for r in cur.fetchall()]
     assert stored, "fixture produced no rows, so this would pass vacuously"
-    for value in stored:
-        date.fromisoformat(value)
+    assert all(type(value) is date for value in stored), stored
 
-    # A second run purges by that string and reinserts the same primary
-    # keys, which is where a mismatch would surface as a collision.
+    # Moving one date's ledger count makes the next run purge and rebuild
+    # exactly that date (see test_dates_needing_rebuild_names_only_what_moved).
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_feed_health SET raw_samples = raw_samples + 1 WHERE agency_id = %s AND date = %s",
+            (agency_id, max(stored)),
+        )
+        assert cur.rowcount == 1
+    pg_conn.commit()
     analyze(agency_id, pg_conn, ch_client)
-    assert _agg_snapshot(pg_conn, agency_id)["agg_daily_trend"]
+    assert _agg_snapshot(pg_conn, agency_id) == before
+
+
+def _seed_null_key_rows(pg_conn, agency_id):
+    """Rows a missed static_join leaves behind: a typed observation with no
+    route_code, one with no scheduled_time, and one with neither route nor
+    service -- the last reaches the UNTYPED builders where only the route
+    filter stands between it and a NOT NULL key."""
+    rows = [
+        ("noroute.pb", "2026-04-03T08:10:00", "trip_noroute", "平日", time(8, 10), None, 90),
+        ("notime.pb", "2026-04-04T08:10:00", "trip_notime", "平日", None, "R1", 120),
+        ("nothing.pb", "2026-04-05T08:10:00", "trip_nothing", None, time(8, 10), None, 150),
+    ]
+    with pg_conn.cursor() as cur:
+        for file_name, captured_at, trip_id, service_type, scheduled_time, route_code, dep_delay in rows:
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) VALUES (%s,%s,%s,%s,%s,%s,%s,1,%s)",
+                (agency_id, file_name, captured_at, trip_id, service_type, scheduled_time, route_code, dep_delay),
+            )
+    pg_conn.commit()
+
+
+def test_analyze_keeps_null_route_code_rows_out_of_route_keyed_aggregates(pg_conn, agency_id, ch_client):
+    """A NULL route_code (or NULL scheduled_time for agg_route_hour) must be
+    skipped by every route-keyed builder, not abort the run; the rows that do
+    carry a key keep their counts."""
+    _seed_route_group(pg_conn, agency_id, "R1", "平日")  # 25 typed R1 rows, one per April day
+    _seed_null_key_rows(pg_conn, agency_id)
+
+    _analyze(agency_id, pg_conn, ch_client)  # must not raise NotNullViolation
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT samples FROM agg_route_stats WHERE agency_id=%s AND route_code='R1'", (agency_id,))
+        # 25 + the no-time row (route_stats has no scheduled_time key); the two no-route rows are gone.
+        assert cur.fetchone()[0] == 26
+        cur.execute("SELECT COUNT(*) FROM agg_route_stats WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 1
+
+        cur.execute("SELECT SUM(samples) FROM agg_route_hour WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 25  # the no-time row has no hour key
+        cur.execute("SELECT SUM(samples) FROM agg_route_hour_dow WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 25
+
+        for table in ("agg_daily_trend", "agg_route_daily", "agg_route_daily_dist"):
+            cur.execute(
+                f"SELECT SUM(samples), COUNT(DISTINCT route_code) FROM {table} WHERE agency_id=%s", (agency_id,)
+            )
+            total, routes = cur.fetchone()
+            assert (total, routes) == (26, 1), f"{table}: {total} samples over {routes} route(s)"
+
+
+def test_stop_aggregates_keep_a_null_route_code_row_that_route_keyed_ones_drop(pg_conn, agency_id, ch_client):
+    """agg_stop_daily is keyed by stop, not route, and must keep counting a
+    stop's traffic when the route is unknown; agg_route_stop_daily cannot."""
+    _seed_for_stop_agg(pg_conn, agency_id)  # trip T, route R1, stop s1, 2026-06-09 (3 polls of one event)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'noroute.pb','2026-06-10T08:10:00','T','平日',%s,NULL,1,240)",
+            (agency_id, time(8, 10)),
+        )
+    pg_conn.commit()
+
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COALESCE(SUM(samples), 0) FROM agg_stop_daily WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 2  # 06-09 (R1) and 06-10 (no route) both count for stop s1
+        cur.execute("SELECT COALESCE(SUM(samples), 0) FROM agg_route_stop_daily WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchone()[0] == 1  # only the keyed event
+
+
+def test_agg_stop_routes_skips_a_stop_served_only_by_no_route_keys(pg_conn, agency_id, ch_client):
+    """A stop whose every observed key lacks a route_code has no route to list;
+    it must get no agg_stop_routes row rather than a NULL route_codes that
+    aborts the agency's analyze."""
+    _seed_for_stop_agg(pg_conn, agency_id)  # stop s1 served by R1
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, geom) "
+            "VALUES (%s,'s3','無路線停留所',ST_SetSRID(ST_MakePoint(140.76,40.84),4326))",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id) VALUES (%s,'TN',1,'s3')",
+            (agency_id,),
+        )
+        cur.execute(
+            "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+            "scheduled_time, route_code, stop_sequence, dep_delay) "
+            "VALUES (%s,'tn.pb','2026-06-09T08:10:00','TN','平日',%s,NULL,1,60)",
+            (agency_id, time(8, 10)),
+        )
+    pg_conn.commit()
+
+    _analyze(agency_id, pg_conn, ch_client)  # must not raise NotNullViolation
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT stop_id, route_codes FROM agg_stop_routes WHERE agency_id=%s", (agency_id,))
+        assert cur.fetchall() == [("s1", "R1")]

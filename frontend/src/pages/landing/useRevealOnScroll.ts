@@ -7,23 +7,21 @@ const VISIBLE_THRESHOLD = 0.15;
 
 /**
  * True once the returned ref's element has scrolled into view. The caller's
- * own stylesheet is what actually makes a "not yet revealed" section hidden
- * (scoped to `prefers-reduced-motion: no-preference`), so a reduced-motion
- * viewer never sees a section start hidden regardless of what this hook
- * reports -- no reduced-motion check is needed here.
+ * stylesheet offsets a "not yet revealed" section downward and nothing more
+ * -- it is never `opacity: 0`, so the content reads at full strength before
+ * the observer's first callback, and a reduced-motion viewer (the offset is
+ * scoped to `prefers-reduced-motion: no-preference`) never sees it move at
+ * all. No reduced-motion check is needed here.
  *
- * Falls open (reveals on the next animation frame) in an environment with no
- * `IntersectionObserver` rather than leaving the section permanently hidden.
+ * Starts (and stays) true where there is no `IntersectionObserver`: with
+ * nothing to clear the pending offset, the section must never enter it.
  */
 export function useRevealOnScroll<T extends HTMLElement>(): [RefObject<T | null>, boolean] {
   const ref = useRef<T | null>(null);
-  const [revealed, setRevealed] = useState(false);
+  const [revealed, setRevealed] = useState(() => typeof IntersectionObserver === "undefined");
 
   useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") {
-      const raf = requestAnimationFrame(() => setRevealed(true));
-      return () => cancelAnimationFrame(raf);
-    }
+    if (typeof IntersectionObserver === "undefined") return;
     const el = ref.current;
     if (!el) return;
     const observer = new IntersectionObserver(

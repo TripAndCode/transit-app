@@ -31,7 +31,7 @@ export function isAggregateNotReady(err: unknown): boolean {
   }
 }
 
-/** Detail string the API returns (403) on /copilot/insight and /followup when
+/** Detail string the API returns (403) on /followup when
  * the caller isn't an admin-approved signed-in user — anonymous callers 403
  * here too. Mirrors api/security.py::require_llm_approved. */
 const LLM_NOT_APPROVED_DETAIL = "llm_not_approved";
@@ -67,8 +67,8 @@ export async function apiGetOrNull<T>(path: string, opts?: { signal?: AbortSigna
  * `/admin/users/:uid` PATCH) don't have to narrow — callers of
  * 204-only endpoints should type T as `void`. Accepts an optional `signal`
  * (mirroring `apiGet`) so a react-query `queryFn` can abort a superseded,
- * still-in-flight POST instead of letting it run to completion unseen — this
- * matters for side-effecting/quota-consuming POSTs like Copilot insight. */
+ * still-in-flight POST instead of letting it run to completion unseen, as the
+ * Copilot insight query does. */
 export async function apiPost<T>(path: string, body: unknown, opts?: { signal?: AbortSignal }): Promise<T> {
   return requestMaybeEmpty<T>(path, {
     method: "POST",
@@ -96,9 +96,17 @@ export async function apiPut<T>(path: string, body: unknown, opts?: { signal?: A
   }) as Promise<T>;
 }
 
-/** DELETE — handles 204 No Content (returns undefined when no JSON body). */
-export async function apiDelete<T = void>(path: string, opts?: { signal?: AbortSignal }): Promise<T | undefined> {
-  return requestMaybeEmpty<T>(path, { method: "DELETE", signal: opts?.signal });
+/** DELETE — handles 204 No Content (returns undefined when no JSON body). ``body``,
+ *  when given, is sent as JSON (e.g. a typed confirmation). */
+export async function apiDelete<T = void>(
+  path: string,
+  opts?: { signal?: AbortSignal; body?: unknown },
+): Promise<T | undefined> {
+  return requestMaybeEmpty<T>(path, {
+    method: "DELETE",
+    body: opts?.body === undefined ? undefined : JSON.stringify(opts.body),
+    signal: opts?.signal,
+  });
 }
 
 /** Parsed `detail` field of an `ApiError`'s JSON body, e.g. FastAPI's

@@ -380,3 +380,34 @@ async def test_title_truncated_to_200(pool_with_users):
     async with pool.acquire() as c:
         conv = await create_conversation(c, user_id=u1, agency_id=agency, title=long, filter_ctx={})
     assert len(conv["title"]) == 200
+
+
+@pytest.mark.asyncio
+async def test_append_message_stores_database_numbers_and_dates_as_json(pool_with_users):
+    """A tool's result carries values straight from asyncpg (NUMERIC as
+    Decimal, DATE as date); storing the answer must not fail on them, and they
+    come back as JSON numbers and ISO strings."""
+    from datetime import date
+    from decimal import Decimal
+
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        msg = await append_message(
+            c,
+            conv["conversation_id"],
+            role="assistant",
+            chip_id="rank-delay-top",
+            tool="top_n",
+            args={"n": Decimal("10")},
+            signature_hash="abcdef0123456789",
+            result={"rows": [["R1", Decimal("2.35"), date(2026, 9, 28)]]},
+            rendered_summary="遅延ランキング",
+            conditions={"from": date(2026, 9, 1)},
+        )
+        msgs = await list_messages(c, conv["conversation_id"], user_id=u1, agency_id=agency)
+    assert msg["result"] == {"rows": [["R1", 2.35, "2026-09-28"]]}
+    assert msgs[0]["result"] == {"rows": [["R1", 2.35, "2026-09-28"]]}
+    assert msgs[0]["args"] == {"n": 10}
+    assert type(msgs[0]["args"]["n"]) is int  # no fractional digits: an int, as FastAPI encodes it
+    assert msgs[0]["conditions"] == {"from": "2026-09-01"}

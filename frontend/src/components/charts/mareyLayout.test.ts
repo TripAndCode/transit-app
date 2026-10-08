@@ -122,24 +122,24 @@ describe("trip summaries", () => {
 });
 
 describe("tripsInWindow", () => {
-  const window = { startSec: 6 * 3600, endSec: 10 * 3600 };
+  const viewWindow = { startSec: 6 * 3600, endSec: 10 * 3600 };
 
   it("keeps a trip departing inside the window", () => {
-    expect(tripsInWindow([trip("A", 7 * 3600, [0])], window).map((t) => t.trip_id)).toEqual(["A"]);
+    expect(tripsInWindow([trip("A", 7 * 3600, [0])], viewWindow).map((t) => t.trip_id)).toEqual(["A"]);
   });
 
   it("drops a trip departing outside the window", () => {
-    expect(tripsInWindow([trip("A", 13 * 3600, [0])], window)).toEqual([]);
+    expect(tripsInWindow([trip("A", 13 * 3600, [0])], viewWindow)).toEqual([]);
   });
 
   it("drops a trip with no placeable departure", () => {
     const bare: RouteTrip = { ...trip("A", 0, [0]), stops: [] };
-    expect(tripsInWindow([bare], window)).toEqual([]);
+    expect(tripsInWindow([bare], viewWindow)).toEqual([]);
   });
 });
 
 describe("peakWindow", () => {
-  const window = { startSec: 6 * 3600, endSec: 10 * 3600 };
+  const viewWindow = { startSec: 6 * 3600, endSec: 10 * 3600 };
 
   it("picks the hour whose trips lost the most time", () => {
     const trips = [
@@ -148,12 +148,12 @@ describe("peakWindow", () => {
       trip("C", 8 * 3600 + 1800, [540, 600, 600]),
       trip("D", 9 * 3600, [60, 60, 60]),
     ];
-    expect(peakWindow(trips, window)).toEqual({ startSec: 8 * 3600, endSec: 9 * 3600 });
+    expect(peakWindow(trips, viewWindow)).toEqual({ startSec: 8 * 3600, endSec: 9 * 3600 });
   });
 
   it("returns null when no hour has enough observations to call a peak", () => {
-    expect(peakWindow([], window)).toBeNull();
-    expect(peakWindow([trip("A", 7 * 3600, [60])], window)).toBeNull();
+    expect(peakWindow([], viewWindow)).toBeNull();
+    expect(peakWindow([trip("A", 7 * 3600, [60])], viewWindow)).toBeNull();
   });
 
   it("ignores trips outside the drawn window", () => {
@@ -161,16 +161,16 @@ describe("peakWindow", () => {
       trip("A", 7 * 3600, [60, 60, 60]),
       trip("LATE", 22 * 3600, [900, 900, 900]),
     ];
-    expect(peakWindow(trips, window)).toEqual({ startSec: 7 * 3600, endSec: 8 * 3600 });
+    expect(peakWindow(trips, viewWindow)).toEqual({ startSec: 7 * 3600, endSec: 8 * 3600 });
   });
 });
 
 describe("ribbonSegments", () => {
-  const window = { startSec: 8 * 3600, endSec: 9 * 3600 };
+  const viewWindow = { startSec: 8 * 3600, endSec: 9 * 3600 };
 
   it("averages each stop's delay across the trips in the window", () => {
     const trips = [trip("A", 8 * 3600, [0, 120, 600]), trip("B", 8 * 3600 + 600, [60, 180, 660])];
-    expect(ribbonSegments(trips, AXIS, window)).toEqual([
+    expect(ribbonSegments(trips, AXIS, viewWindow)).toEqual([
       { stop_sequence: 1, stop_name: "駅前", delay_sec: 30, samples: 2 },
       { stop_sequence: 2, stop_name: "中央", delay_sec: 150, samples: 2 },
       { stop_sequence: 3, stop_name: "終点", delay_sec: 630, samples: 2 },
@@ -182,7 +182,7 @@ describe("ribbonSegments", () => {
     // not silently shorten the line.
     const partial: RouteTrip = { ...trip("A", 8 * 3600, [0, 120, 600]) };
     partial.stops = partial.stops.slice(0, 2);
-    expect(ribbonSegments([partial], AXIS, window)[2]).toEqual({
+    expect(ribbonSegments([partial], AXIS, viewWindow)[2]).toEqual({
       stop_sequence: 3,
       stop_name: "終点",
       delay_sec: null,
@@ -191,7 +191,7 @@ describe("ribbonSegments", () => {
   });
 
   it("is all gaps when nothing ran in the window", () => {
-    expect(ribbonSegments([], AXIS, window).every((s) => s.delay_sec === null)).toBe(true);
+    expect(ribbonSegments([], AXIS, viewWindow).every((s) => s.delay_sec === null)).toBe(true);
   });
 });
 

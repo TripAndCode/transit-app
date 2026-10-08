@@ -1,30 +1,38 @@
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { apiGet, apiPost, formatApiError } from "../api/client";
-import type { RangeCtx } from "../api/rangeContext";
-import { Z_INDEX } from "../styles/zIndex";
+import type { Scope } from "../api/scope";
+import { Modal } from "./Modal";
+import { Skeleton } from "./Skeleton";
+import { Tooltip } from "./Tooltip";
+import { ScopePopover } from "./scope/ScopePopover";
 
-type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: RangeCtx };
+type Preset = { preset_id: number; agency_id: number; name: string; range_ctx: Scope };
 
-/** Dropdown + save dialog for filter presets; renders a hint when anonymous. */
+/** Saved views: one pill opening the list and "Save this view…", which names
+ *  the current scope in a dialog. Signed-out visitors get a hint instead. */
 export function PresetMenu({
   agencyId,
   currentRangeCtx,
   onSelect,
 }: {
   agencyId: number;
-  currentRangeCtx: RangeCtx;
-  onSelect: (rangeCtx: RangeCtx) => void;
+  currentRangeCtx: Scope;
+  onSelect: (rangeCtx: Scope) => void;
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { data: session } = useSession();
-  const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const nameId = useId();
 
-  const { data: presets } = useQuery({
+  const { data: presets, isError: presetsFailed } = useQuery({
     queryKey: ["presets", agencyId],
     queryFn: ({ signal }) => apiGet<Preset[]>(`/api/me/presets?agency_id=${agencyId}`, { signal }),
     enabled: !!session,
@@ -34,7 +42,7 @@ export function PresetMenu({
     mutationFn: (n: string) =>
       apiPost<Preset>("/api/me/presets", { agency_id: agencyId, name: n, range_ctx: currentRangeCtx }),
     onSuccess: () => {
-      setOpen(false);
+      setNaming(false);
       setName("");
       qc.invalidateQueries({ queryKey: ["presets", agencyId] });
     },
@@ -42,92 +50,113 @@ export function PresetMenu({
 
   if (!session) {
     return (
-      <span title={t("presets.login_to_save_tooltip")} style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
-        {t("presets.label")}
-      </span>
+      <Tooltip label={t("presets.login_to_save_tooltip")}>
+        <span
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain label, not a control; keyboard-focusable only so the tooltip explaining why saving is disabled is reachable
+          tabIndex={0}
+          style={{ color: "var(--text-tertiary)", fontSize: 12 }}
+        >
+          {t("presets.label")}
+        </span>
+      </Tooltip>
     );
   }
 
   const saveDisabled = !name.trim() || create.isPending;
 
+  function startNaming() {
+    setMenuOpen(false);
+    setName("");
+    create.reset();
+    setNaming(true);
+  }
+
   return (
-    <div style={{ position: "relative", display: "inline-block" }}>
-      <select
-        onChange={(e) => {
-          const p = presets?.find((x) => String(x.preset_id) === e.target.value);
-          if (p) onSelect(p.range_ctx);
-        }}
-        defaultValue=""
-        style={{ marginRight: 8 }}
-      >
-        <option value="" disabled>{t("presets.option_placeholder")}</option>
-        {presets?.map((p) => <option key={p.preset_id} value={p.preset_id}>{p.name}</option>)}
-      </select>
+    <span className="scope-token-wrap">
       <button
-        onClick={() => setOpen(true)}
+        ref={triggerRef}
+        type="button"
+        className="scope-pill"
+        aria-haspopup="dialog"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((v) => !v)}
+      >
+        {t("presets.label")}
+        <span aria-hidden="true"> ▾</span>
+      </button>
+      {menuOpen && (
+        <ScopePopover label={t("presets.label")} onClose={() => setMenuOpen(false)} returnFocusTo={triggerRef}>
+          {presetsFailed ? (
+            <p className="scope-note">{t("presets.load_error")}</p>
+          ) : presets == null ? (
+            <Skeleton height={28} />
+          ) : presets.length > 0 ? (
+            <ul className="preset-list">
+              {presets.map((p) => (
+                <li key={p.preset_id}>
+                  <button
+                    type="button"
+                    className="scope-pill"
+                    onClick={() => {
+                      onSelect(p.range_ctx);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    {p.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="scope-note">{t("presets.empty")}</p>
+          )}
+          <button type="button" className="scope-pill" onClick={startNaming}>
+            {t("presets.save_current")}
+          </button>
+        </ScopePopover>
+      )}
+      <Modal
+        open={naming}
+        onClose={() => {
+          if (!create.isPending) setNaming(false);
+        }}
+        labelledBy={titleId}
         style={{
-          background: "var(--bg-surface)",
-          color: "var(--text-primary)",
+          width: "min(400px, calc(100vw - 32px))",
+          padding: 20,
           border: "1px solid var(--border-subtle)",
-          borderRadius: 4,
-          fontSize: 12,
-          padding: "5px 10px",
-          cursor: "pointer",
+          borderRadius: "var(--radius)",
+          boxShadow: "var(--el-2)",
         }}
       >
-        {t("presets.save_current")}
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "100%", left: 0, padding: 12,
-                       background: "var(--surface-1)", border: "1px solid var(--surface-2)",
-                       borderRadius: 4, zIndex: Z_INDEX.dropdown }}>
-          <input
-            // eslint-disable-next-line jsx-a11y/no-autofocus -- name field of a just-opened "save preset" popover; focusing it is the expected UX
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t("presets.name_placeholder")}
-            style={{ display: "block", marginBottom: 8, padding: 4, width: 200 }}
-          />
-          <button
-            disabled={saveDisabled}
-            onClick={() => create.mutate(name.trim())}
-            style={{
-              background: saveDisabled ? "var(--bg-soft)" : "var(--accent)",
-              color: saveDisabled ? "var(--text-tertiary)" : "#fff",
-              border: "none",
-              borderRadius: 4,
-              fontSize: 13,
-              fontWeight: 500,
-              padding: "6px 18px",
-              cursor: saveDisabled ? "not-allowed" : "pointer",
-              boxShadow: saveDisabled ? "none" : "var(--el-1)",
-            }}
-          >
-            {t("common.save")}
-          </button>
-          <button
-            onClick={() => setOpen(false)}
-            style={{
-              marginLeft: 8,
-              background: "transparent",
-              color: "var(--text-secondary)",
-              border: "1px solid var(--border-soft)",
-              borderRadius: 4,
-              fontSize: 13,
-              padding: "6px 14px",
-              cursor: "pointer",
-            }}
-          >
-            {t("common.cancel")}
-          </button>
+        <h2 id={titleId} style={{ margin: "0 0 12px", fontSize: 16 }}>
+          {t("presets.save_title")}
+        </h2>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!saveDisabled) create.mutate(name.trim());
+          }}
+        >
+          <label htmlFor={nameId} style={{ display: "block", marginBottom: 4, fontSize: "var(--text-sm)" }}>
+            {t("presets.name_label")}
+          </label>
+          <input id={nameId} value={name} onChange={(e) => setName(e.target.value)} style={{ display: "block", width: "100%", marginBottom: 12 }} />
           {create.error && (
-            <div style={{ color: "var(--text-tertiary)", fontSize: 12, marginTop: 4 }}>
+            <p role="alert" style={{ margin: "0 0 12px", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
               {formatApiError(create.error)}
-            </div>
+            </p>
           )}
-        </div>
-      )}
-    </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button type="button" onClick={() => setNaming(false)} disabled={create.isPending}>
+              {t("common.cancel")}
+            </button>
+            <button type="submit" disabled={saveDisabled}>
+              {t("common.save")}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </span>
   );
 }

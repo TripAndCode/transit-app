@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import maplibregl, { type LayerSpecification, type Map as MLMap } from "maplibre-gl";
 import type { LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
 import {
@@ -13,6 +13,8 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useThemeSignal } from "../../styles/theme";
 import { revealAgency } from "./cameraChoreography";
 import { whenStyleReady } from "./styleReady";
+import { repaintLayer } from "./repaintLayer";
+import { useFlowTick } from "./useFlowTick";
 import { hhmm } from "./format";
 
 export const LIVE_TRIPS_SOURCE = "live-trips";
@@ -26,8 +28,10 @@ const ACTIVE_ROUTE_LAYER = "active-route-line";
 export const ACTIVE_ROUTE_FLOW_LAYER = "active-route-flow";
 const TRIP_PROGRESS_SOURCE = "trip-progress";
 const TRIP_PROGRESS_LINE_LAYER = "trip-progress-line";
+/** The reported trail's width, which anything laid on it stays within. */
+export const TRIP_PROGRESS_LINE_WIDTH = 6;
 const TRIP_PROGRESS_DIRECTION_LAYER = "trip-progress-direction";
-const TRIP_PROGRESS_STOPS_LAYER = "trip-progress-stops";
+export const TRIP_PROGRESS_STOPS_LAYER = "trip-progress-stops";
 const TRIP_PROGRESS_LABELS_LAYER = "trip-progress-labels";
 
 type CirclePaint = NonNullable<Extract<LayerSpecification, { type: "circle" }>["paint"]>;
@@ -119,6 +123,24 @@ export function labelPaint(): SymbolPaint {
   };
 }
 
+function tripProgressLinePaint(): LinePaint {
+  return { "line-color": accentColorResolved(), "line-width": TRIP_PROGRESS_LINE_WIDTH, "line-opacity": 0.9 };
+}
+
+function tripProgressDirectionPaint(): SymbolPaint {
+  const accent = accentColorResolved();
+  return { "text-color": readableInkOn(accent), "text-halo-color": accent, "text-halo-width": 1 };
+}
+
+function tripProgressStopsPaint(): CirclePaint {
+  return {
+    "circle-radius": ["case", ["boolean", ["get", "latest"], false], 10, 6],
+    "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
+    "circle-stroke-color": surfaceColorResolved(),
+    "circle-stroke-width": ["case", ["boolean", ["get", "latest"], false], 3, 2],
+  };
+}
+
 // Not `signedMin` (used elsewhere for the same +/-minutes shape): this
 // label feeds a MapLibre GeoJSON feature property rendered by a style
 // expression, which can't call `t()`, so it can't go through the
@@ -206,9 +228,13 @@ export function useOperationsMapLayers(
   selectedTripId: string | null = null,
   progress?: LiveTripProgressResponse,
   stopProfile?: RouteStopProfileRow[],
+  restPitch = 0,
 ): void {
   const fittedAgencyRef = useRef<number | null>(null);
   const theme = useThemeSignal();
+  // Read at reveal time, not a dependency: the relief toggling the rest pitch
+  // must not re-run the effect that feeds the live layers.
+  const reveal = useEffectEvent((map: MLMap, bounds: maplibregl.LngLatBounds) => revealAgency(map, bounds, restPitch));
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
 
   useEffect(() => {
@@ -236,6 +262,10 @@ export function useOperationsMapLayers(
       const existing = map.getSource(LIVE_TRIPS_SOURCE) as maplibregl.GeoJSONSource | undefined;
       if (existing) {
         existing.setData(collection);
+        repaintLayer(map, LIVE_TRIPS_CLUSTER_LAYER, clusterCirclePaint());
+        repaintLayer(map, LIVE_TRIPS_CLUSTER_COUNT_LAYER, clusterCountPaint());
+        repaintLayer(map, LIVE_TRIPS_LAYER, vehicleCirclePaint());
+        repaintLayer(map, LIVE_TRIPS_LABEL_LAYER, labelPaint());
       } else {
         map.addSource(LIVE_TRIPS_SOURCE, {
           type: "geojson",
@@ -292,7 +322,7 @@ export function useOperationsMapLayers(
       if (agencyId != null && fittedAgencyRef.current !== agencyId && features.length > 0) {
         const bounds = new maplibregl.LngLatBounds();
         for (const feature of features) bounds.extend(feature.geometry.coordinates as [number, number]);
-        revealAgency(map, bounds);
+        reveal(map, bounds);
         fittedAgencyRef.current = agencyId;
       }
     });
@@ -331,19 +361,24 @@ export function useOperationsMapLayers(
         // colour tokens, but a selected route takes this branch instead of
         // re-adding the layers -- every resolved colour in the stack has to
         // be refreshed here or it stays pinned to the theme that created it.
+        map.setPaintProperty(ACTIVE_ROUTE_CASING_LAYER, "line-color", surfaceColorResolved());
         if (map.getLayer(ACTIVE_ROUTE_FLOW_LAYER)) {
           map.setPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-color", accentColorResolved());
         }
         return;
       }
       map.addSource(ACTIVE_ROUTE_SOURCE, { type: "geojson", data, lineMetrics: true });
-      const beforeId = map.getLayer(LIVE_TRIPS_LAYER) ? LIVE_TRIPS_LAYER : undefined;
+      // Beneath the trip trail when one is drawn, so the trail and its
+      // highlight stay on top whichever was added first.
+      const beforeId = [TRIP_PROGRESS_LINE_LAYER, LIVE_TRIPS_LAYER].find((id) => map.getLayer(id));
       map.addLayer({
         id: ACTIVE_ROUTE_CASING_LAYER,
         type: "line",
         source: ACTIVE_ROUTE_SOURCE,
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "rgba(255,255,255,0.94)", "line-width": 10 },
+        // The casing separates the route from the basemap, so it is the
+        // theme's surface: light on the light map, dark on the dark one.
+        paint: { "line-color": surfaceColorResolved(), "line-width": 10 },
       }, beforeId);
       map.addLayer({
         id: ACTIVE_ROUTE_LAYER,
@@ -353,7 +388,7 @@ export function useOperationsMapLayers(
         paint: { ...linePaint, "line-width": 5 },
       }, beforeId);
       // The calm flow overlay: same source, on top of the gradient/casing
-      // stack, animated by a separate rAF effect below (skipped entirely
+      // stack, animated by the useFlowTick loop below (skipped entirely
       // under reduced motion). The static dasharray here is exactly its
       // phase-0 frame, so a reduced-motion viewer still sees a (motionless)
       // dashed line rather than nothing.
@@ -372,32 +407,15 @@ export function useOperationsMapLayers(
     });
   }, [mapRef, selectedDelaySec, selectedRoute, shape, stopProfile, styleEpoch, theme]);
 
-  useEffect(() => {
-    const maybeMap = mapRef.current;
-    if (!maybeMap || !selectedRoute || !shape?.geometry || reducedMotion) return;
-    // Rebound to a definitely-non-null const: narrowing from the guard above
-    // doesn't extend into the `tick` function declaration below, which could
-    // in principle run after further reassignment of `maybeMap`.
-    const map: MLMap = maybeMap;
-
-    let frameId = 0;
-    const start = performance.now();
-    // This loop runs for as long as a route stays selected, unlike every
-    // other animation here, which is a bounded one-shot. Repainting on every
-    // vsync would rewrite the dasharray ~60 times a second to advance a
-    // cycle lasting FLOW_CYCLE_MS, so writes are throttled to a step that is
-    // still far finer than the eye resolves against that cycle.
-    let lastPaint = -Infinity;
-    function tick(now: number) {
-      frameId = requestAnimationFrame(tick);
-      if (now - lastPaint < FLOW_PAINT_INTERVAL_MS) return;
-      if (!map.getLayer(ACTIVE_ROUTE_FLOW_LAYER)) return;
-      lastPaint = now;
-      map.setPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray", flowDashArrayAtPhase(now - start));
-    }
-    frameId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frameId);
-  }, [mapRef, reducedMotion, selectedRoute, shape, styleEpoch]);
+  // Runs for as long as a route stays selected, unlike every other animation
+  // here, which is a bounded one-shot; see useFlowTick for the throttle. The
+  // layer is re-checked on every tick, so one a style reload re-adds is
+  // picked up by the next tick without restarting the clock.
+  useFlowTick(Boolean(selectedRoute && shape?.geometry) && !reducedMotion, FLOW_PAINT_INTERVAL_MS, (elapsed) => {
+    const map = mapRef.current;
+    if (!map?.getLayer(ACTIVE_ROUTE_FLOW_LAYER)) return;
+    map.setPaintProperty(ACTIVE_ROUTE_FLOW_LAYER, "line-dasharray", flowDashArrayAtPhase(elapsed));
+  });
 
   useEffect(() => {
     const map = mapRef.current;
@@ -425,6 +443,10 @@ export function useOperationsMapLayers(
       const existing = map.getSource(TRIP_PROGRESS_SOURCE) as maplibregl.GeoJSONSource | undefined;
       if (existing) {
         existing.setData(collection);
+        repaintLayer(map, TRIP_PROGRESS_LINE_LAYER, tripProgressLinePaint());
+        repaintLayer(map, TRIP_PROGRESS_DIRECTION_LAYER, tripProgressDirectionPaint());
+        repaintLayer(map, TRIP_PROGRESS_STOPS_LAYER, tripProgressStopsPaint());
+        repaintLayer(map, TRIP_PROGRESS_LABELS_LAYER, labelPaint());
         return;
       }
       map.addSource(TRIP_PROGRESS_SOURCE, { type: "geojson", data: collection });
@@ -435,7 +457,7 @@ export function useOperationsMapLayers(
         source: TRIP_PROGRESS_SOURCE,
         filter: ["==", ["geometry-type"], "LineString"],
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": accentColorResolved(), "line-width": 6, "line-opacity": 0.9 },
+        paint: tripProgressLinePaint(),
       }, beforeId);
       map.addLayer({
         id: TRIP_PROGRESS_DIRECTION_LAYER,
@@ -451,23 +473,14 @@ export function useOperationsMapLayers(
           "text-keep-upright": false,
           "text-rotation-alignment": "map",
         },
-        paint: {
-          "text-color": readableInkOn(accentColorResolved()),
-          "text-halo-color": accentColorResolved(),
-          "text-halo-width": 1,
-        },
+        paint: tripProgressDirectionPaint(),
       }, beforeId);
       map.addLayer({
         id: TRIP_PROGRESS_STOPS_LAYER,
         type: "circle",
         source: TRIP_PROGRESS_SOURCE,
         filter: ["==", ["geometry-type"], "Point"],
-        paint: {
-          "circle-radius": ["case", ["boolean", ["get", "latest"], false], 10, 6],
-          "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
-          "circle-stroke-color": surfaceColorResolved(),
-          "circle-stroke-width": ["case", ["boolean", ["get", "latest"], false], 3, 2],
-        },
+        paint: tripProgressStopsPaint(),
       }, beforeId);
       map.addLayer({
         id: TRIP_PROGRESS_LABELS_LAYER,
@@ -482,7 +495,7 @@ export function useOperationsMapLayers(
           "text-anchor": "top",
           "text-optional": true,
         },
-        paint: { "text-color": "#f8fbff", "text-halo-color": "rgba(12,18,31,.9)", "text-halo-width": 2 },
+        paint: labelPaint(),
       });
     });
   }, [mapRef, progress, styleEpoch, theme]);

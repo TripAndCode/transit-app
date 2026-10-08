@@ -1,12 +1,13 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../../styles/tokens";
-import { formatNumber } from "../../utils/format";
-import { useRangeContext } from "../../api/rangeContext";
+import { formatDate, formatNumber, formatMinutes, formatShortDate } from "../../utils/format";
+import { niceAxis } from "./niceAxis";
+import { useScope } from "../../api/scope";
 import { useDrawOn } from "./ChartEnter";
 import { ShadedDays, ThresholdBand, VerticalMarker } from "./annotations";
 import { brushIndices, brushRange } from "./brush";
-import { DIM_OPACITY, isFocusDimmed, isoDow, useTrendFocus } from "./trendFocus";
+import { isoDow, useTrendFocus } from "./trendFocus";
 import type { RevisionBoundaries, TrendDay } from "../../api/types";
 
 type Props = {
@@ -28,10 +29,10 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
   const [rawHover, setHover] = useState<number | null>(null);
   const [rawDrag, setDrag] = useState<Drag | null>(null);
   const [brushed, setBrushed] = useState(false);
-  const [, updateRange] = useRangeContext();
-  const { focus, setFocus } = useTrendFocus();
+  const [, updateRange] = useScope();
+  const { setFocus } = useTrendFocus();
   const lineRef = useRef<SVGPolylineElement | null>(null);
-  useDrawOn(lineRef);
+  useDrawOn(lineRef, days.length > 0);
 
   // If the data shrinks (filter narrowed), a stale hover index would
   // dereference out-of-bounds — clamp during render instead of an effect.
@@ -52,8 +53,9 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
 
   const avgs = days.map((d) => d.avg_min ?? 0);
   const samples = days.map((d) => d.samples ?? 0);
+  const axis = niceAxis(0, Math.max(1, ...avgs), 4);
   const stats = {
-    maxAvg: Math.max(1, ...avgs),
+    maxAvg: axis.high,
     maxSamples: Math.max(1, ...samples),
   };
 
@@ -162,7 +164,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
   const cursor = drag ? drag.head : hover;
 
   return (
-    <div style={{ position: "relative", width: "100%" }}>
+    <div data-focus-viewer="daily" style={{ position: "relative", width: "100%" }}>
       {brushable && (
         <div
           style={{
@@ -226,13 +228,13 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
       >
         <svg width={W} height={H} role="img" aria-label={t("reports.daily.svg_aria")} style={{ display: "block" }}>
           {/* Y axis grid */}
-          {[0.25, 0.5, 0.75].map((f) => {
-            const y = padT + innerH * 0.35 + (1 - f) * innerH * 0.65;
+          {axis.ticks.slice(1).map((value) => {
+            const y = toY(value);
             return (
-              <g key={f}>
+              <g key={value}>
                 <line x1={padL} x2={W - padR} y1={y} y2={y} stroke="var(--border-soft)" strokeDasharray="2 4" />
-                <text x={6} y={y + 4} fontSize="10" fill="var(--text-tertiary)">
-                  {(stats.maxAvg * f).toFixed(1)}m
+                <text data-testid="daily-grid-label" x={6} y={y + 4} fontSize="10" fill="var(--text-tertiary)">
+                  {formatMinutes(value)}
                 </text>
               </g>
             );
@@ -254,19 +256,23 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
             const w = Math.max(2, stepX * 0.8);
             const h = ((d.samples ?? 0) / stats.maxSamples) * innerH * 0.3;
             const y = padT + innerH - h;
-            const dimmed = isFocusDimmed(focus, { date: d.date, dow: isoDow(d.date) }, "daily");
             return (
               <rect
                 key={`bar-${i}`}
                 data-testid="daily-bar"
                 data-index={i}
-                className="chart-focus-dimmable"
+                data-mark-date={d.date}
+                data-mark-dow={isoDow(d.date)}
+                className="chart-focus-dimmable focus-dim-opacity"
                 x={x}
                 y={y}
                 width={w}
                 height={h}
                 fill="var(--accent-soft)"
-                opacity={dimmed ? DIM_OPACITY : 0.7}
+                // The attribute is what an exported SVG, which carries no
+                // stylesheet, falls back to; in the page the class wins.
+                opacity={0.7}
+                style={{ "--mark-opacity": 0.7 } as CSSProperties}
               />
             );
           })}
@@ -314,7 +320,6 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
           {days.map((d, i) => {
             const [x, y] = linePts[i];
             const c = delayColor(d.avg_min ?? 0);
-            const dimmed = isFocusDimmed(focus, { date: d.date, dow: isoDow(d.date) }, "daily");
             return (
               <g key={`pt-${i}`}>
                 {/* `fill` goes in `style`, not the SVG presentation attribute:
@@ -323,11 +328,12 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
                 <circle
                   data-testid="daily-dot"
                   data-index={i}
-                  className="chart-focus-dimmable"
+                  data-mark-date={d.date}
+                  data-mark-dow={isoDow(d.date)}
+                  className="chart-focus-dimmable focus-dim-opacity"
                   cx={x}
                   cy={y}
                   r={cursor === i ? 5 : 3}
-                  opacity={dimmed ? DIM_OPACITY : 1}
                   style={{ fill: c, stroke: "var(--bg-surface)" }}
                   strokeWidth="1.5"
                 />
@@ -370,7 +376,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
                 fill="var(--text-tertiary)"
                 textAnchor="middle"
               >
-                {d.date.slice(5)}
+                {formatShortDate(d.date)}
               </text>
             );
           })}
@@ -409,15 +415,15 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
           }}
         >
           <div>
-            <strong>{days[cursor].date}</strong>:{" "}
+            <strong>{formatDate(days[cursor].date)}</strong>:{" "}
             {t("reports.daily.tooltip_metrics", {
-              min: (days[cursor].avg_min ?? 0).toFixed(2),
+              min: formatMinutes(days[cursor].avg_min ?? 0),
               count: formatNumber(days[cursor].samples ?? 0),
             })}
           </div>
           {days[cursor].avg_min_smoothed != null && (
             <div style={{ color: "var(--text-secondary)" }}>
-              {t("reports.daily.smoothed_tooltip", { min: days[cursor].avg_min_smoothed!.toFixed(2) })}
+              {t("reports.daily.smoothed_tooltip", { min: formatMinutes(days[cursor].avg_min_smoothed!) })}
             </div>
           )}
           {days[cursor].top_offenders?.length > 0 && (
@@ -425,7 +431,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
               {t("reports.daily.worst_label")}{" "}
               {days[cursor].top_offenders
                 .slice(0, 3)
-                .map((o) => t("reports.daily.offender", { code: o.route_code, min: o.avg_min.toFixed(1) }))
+                .map((o) => t("reports.daily.offender", { code: o.route_code, min: formatMinutes(o.avg_min) }))
                 .join(", ")}
             </div>
           )}

@@ -74,3 +74,26 @@ describe("RoutePickerPill popover direction", () => {
     expect(screen.getByRole("listbox")).toHaveClass("rp-pop-up");
   });
 });
+
+describe("RoutePickerPill options", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("names a route and shows its code beside it", async () => {
+    mockRoutes();
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Route" }));
+    const option = screen.getByRole("option", { name: /中筒井線/ });
+    expect(option.querySelector(".rp-opt-code")).toHaveTextContent("J20");
+  });
+
+  it("shows the code once for an unnamed route, whose label already carries it", async () => {
+    vi.spyOn(hooks, "useRoutes").mockReturnValue({
+      data: [{ route_id: "沖舘・新田線(47011)", route_code: "47011", route_short_name: "", route_long_name: "", trip_headsigns: [] }],
+      isLoading: false,
+    } as never);
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Route" }));
+    const option = screen.getByRole("option", { name: /沖舘・新田線/ });
+    expect(option.querySelector(".rp-opt-code")).toBeNull();
+  });
+});

@@ -278,8 +278,8 @@ def test_fails_when_a_wrong_version_gitleaks_shadows_the_install_dir_on_path(tmp
 
 
 def test_check_reports_installed_when_everything_is_correct(tmp_path):
-    """`--check` is the single source of truth `make doctor` and
-    deploy/vps/claude-loop.sh rely on -- it must report success once the
+    """`--check` is the single source of truth `make doctor` relies
+    on -- it must report success once the
     hook file is genuinely installed AND unqualified `gitleaks` resolves to
     the pinned version, with no side effects of its own."""
 
@@ -308,7 +308,7 @@ def test_check_fails_when_a_wrong_version_gitleaks_shadows_the_install_dir_on_pa
     different-version `gitleaks` starts shadowing the install dir on PATH
     sometime after install (a later `brew install gitleaks`, a stray
     package, a PATH-order change on a long-lived VPS clone), `--check` --
-    and therefore `make doctor` and claude-loop.sh's per-tick check -- must
+    and therefore `make doctor` -- must
     detect that drift instead of only checking the hook file itself and
     reporting success regardless of what unqualified `gitleaks` now
     resolves to."""

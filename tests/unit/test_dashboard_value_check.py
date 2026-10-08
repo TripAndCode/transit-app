@@ -1,12 +1,11 @@
-"""Fast, offline, always-run tests for `tests/fixtures/dashboard_value_check.py`
-(item 22).
+"""Fast, offline, always-run tests for `tests/fixtures/dashboard_value_check.py`.
 
 No DB, no browser, no network — this directory bypasses the DB fixtures per
-CLAUDE.md's "pure logic tests under tests/unit/" convention (see
-`tests/unit/conftest.py`). These exist so item 22's "verify a deliberately
-wrong number makes the test fail, confirming it actually checks displayed
-values and isn't a vacuous pass" requirement has a fast, always-runnable
-proof, the same way item 23's `tests/unit/test_ask_eval_numeric_helper.py`
+AGENTS.md's "pure logic tests under tests/unit/" convention (see
+`tests/unit/conftest.py`). These give the dashboard display check's
+"a deliberately wrong number makes the test fail, confirming it actually
+checks displayed values and isn't a vacuous pass" property a fast,
+always-runnable proof, the same way `tests/unit/test_ask_eval_numeric_helper.py`
 proves its own ground-truth comparison helper isn't vacuous without needing
 a live LLM. The real end-to-end check
 (`tests/dashboard_synthetic_display_test.py`) additionally needs a real
@@ -49,7 +48,7 @@ def test_assert_avg_min_matches_passes_for_correct_value():
 
 
 def test_assert_avg_min_matches_fails_for_corrupted_expected_value():
-    """The core anti-vacuous-pass check item 22 asks for: swapping in a wrong
+    """The core anti-vacuous-pass check: swapping in a wrong
     expected value must make the assertion fail, not silently pass."""
     with pytest.raises(AssertionError):
         assert_avg_min_matches("0.9分", 5.0, label="outlier_spike")

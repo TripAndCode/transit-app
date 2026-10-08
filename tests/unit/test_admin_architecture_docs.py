@@ -1,7 +1,7 @@
-"""Pure-logic tests for `api.routers.admin`'s feature-doc helpers (item 25):
+"""Pure-logic tests for `api.routers.admin`'s feature-doc helpers:
 `_feature_doc_title` (title derivation, no filesystem/DB) and
 `_list_feature_docs` (real filesystem glob against this repo's own
-`docs/features/`, still no DB). Lives under `tests/unit/` per CLAUDE.md's
+`docs/features/`, still no DB). Lives under `tests/unit/` per AGENTS.md's
 "pure logic tests bypass DB fixtures" convention -- `tests/unit/conftest.py`
 overrides the session-scoped `apply_schema` autouse fixture so these don't
 need a reachable Postgres at all.
