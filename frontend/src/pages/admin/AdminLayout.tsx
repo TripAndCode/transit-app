@@ -128,8 +128,7 @@ export function AdminLayout() {
           </div>
         ))}
       </nav>
-      {/* Positioned so a page's Drawer can pin itself to this area's right edge. */}
-      <main style={{ flex: 1, minWidth: 0, position: "relative", display: "flex", flexDirection: "column" }}>
+      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <header
           style={{
             display: "flex",
@@ -142,6 +141,7 @@ export function AdminLayout() {
         >
           <AlertCenter />
         </header>
+        {/* Positioned so a page's Drawer can pin itself to this area's right edge. */}
         <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
           <Outlet />
         </div>

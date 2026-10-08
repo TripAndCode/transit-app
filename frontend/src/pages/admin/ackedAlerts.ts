@@ -56,10 +56,51 @@ function writeRawMap(map: AckedMap): void {
 }
 
 /** Hashes still inside their 7-day acknowledgement window, as of `now`.
- *  Expired and malformed entries are pruned as a side effect of reading, so
- *  a browser's stored state self-heals instead of growing forever. */
+ *  Expired and malformed entries are skipped here and dropped from storage
+ *  on the next acknowledgement. */
 export function readAckedAlerts(now: number): Set<string> {
   return new Set(Object.keys(pruneAcked(readRawMap(), now)));
+}
+
+/** The stored acknowledgements as written, for useSyncExternalStore: a
+ *  string stays equal while the store is unchanged. */
+export function ackedSnapshot(): string {
+  try {
+    return localStorage.getItem(STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** The hashes in `snapshot` still inside their window as of `now`. */
+export function ackedFromSnapshot(snapshot: string, now: number): Set<string> {
+  if (!snapshot) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(snapshot);
+    if (typeof parsed !== "object" || parsed === null) return new Set();
+    const map: AckedMap = {};
+    for (const [hash, expiresAt] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof expiresAt === "number") map[hash] = expiresAt;
+    }
+    return new Set(Object.keys(pruneAcked(map, now)));
+  } catch {
+    return new Set();
+  }
+}
+
+const listeners = new Set<() => void>();
+
+/** Calls `onChange` when acknowledgements change in this tab or another. */
+export function subscribeAcked(onChange: () => void): () => void {
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === STORAGE_KEY || e.key === null) onChange();
+  };
+  listeners.add(onChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    listeners.delete(onChange);
+    window.removeEventListener("storage", onStorage);
+  };
 }
 
 /** Marks `hash` acknowledged for 7 days from `now`. Server-side
@@ -69,4 +110,6 @@ export function ackAlert(hash: string, now: number): void {
   const pruned = pruneAcked(readRawMap(), now);
   pruned[hash] = now + TTL_MS;
   writeRawMap(pruned);
+  // A tab hears its own writes from here; other tabs from the storage event.
+  for (const listener of listeners) listener();
 }

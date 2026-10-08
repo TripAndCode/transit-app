@@ -1593,7 +1593,7 @@
       },
       "cell_tooltip": "{{agency}} · {{date}} · {{state}}",
       "cell_tooltip_clamp": "{{agency}} · {{date}} · {{state}} · 異常値 {{pct}}%",
-      "alerts_title": "警告",
+      "alerts_title": "アラート",
       "alerts_none": "対応が必要な項目はありません。",
       "alert_open": "開く",
       "alert": {
@@ -1616,7 +1616,6 @@
       "bell_label": "アラート",
       "bell_label_unread": "アラート、未確認 {{count}} 件",
       "title": "アラート",
-      "empty": "対応が必要な項目はありません。",
       "group": {
         "warn": "警告",
         "info": "情報"

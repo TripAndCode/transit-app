@@ -1616,7 +1616,6 @@
       "bell_label": "Alerts",
       "bell_label_unread": "Alerts, {{count}} unread",
       "title": "Alerts",
-      "empty": "Nothing needs attention.",
       "group": {
         "warn": "Warnings",
         "info": "Info"

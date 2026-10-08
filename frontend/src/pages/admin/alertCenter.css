@@ -24,15 +24,15 @@
   position: absolute;
   top: 2px;
   right: 2px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
   border-radius: 999px;
   background: var(--surface-2);
-  color: var(--delay-severe);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
   font-weight: 700;
-  line-height: 15px;
+  line-height: 18px;
   text-align: center;
 }
 
@@ -41,6 +41,12 @@
    disappearing outright. */
 .alert-center-badge--muted {
   color: var(--text-secondary);
+}
+
+/* An unread warning, in the board's warning tone; an info-only list keeps
+   the plain colour below, not an alarm. */
+.alert-center-badge--warn {
+  color: var(--color-warning-text);
 }
 
 .alert-center-panel {
@@ -52,7 +58,6 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--el-2);
   padding: 10px;
-  z-index: var(--z-popover);
 }
 
 .alert-center-header {

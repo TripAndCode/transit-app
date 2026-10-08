@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import type { AdminBoard } from "../../api/admin";
 import { AlertCenter } from "./AlertCenter";
+import { hashAlertKey } from "./ackedAlerts";
 
 const WARN_ALERT = {
   level: "warn" as const,
@@ -24,20 +25,34 @@ const INFO_ALERT = {
   href: "/admin/users",
 };
 
-let mockBoard: { data?: AdminBoard };
+let mockBoard: { data?: AdminBoard; isPending?: boolean; error?: Error | null; dataUpdatedAt?: number };
+const boardOptions: unknown[] = [];
 
 vi.mock("../../api/admin", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api/admin")>()),
-  useAdminBoard: () => mockBoard,
+  useAdminBoard: (options: unknown) => {
+    boardOptions.push(options);
+    return mockBoard;
+  },
 }));
 
-function wrap() {
+function GoTo({ to }: { to: string }) {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(to)}>
+      go
+    </button>
+  );
+}
+
+function wrap(path = "/admin/users") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={qc}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[path]}>
           <AlertCenter />
+          <GoTo to="/admin/audit" />
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -64,10 +79,75 @@ async function openPopover() {
 
 beforeEach(() => {
   localStorage.clear();
+  boardOptions.length = 0;
 });
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("AlertCenter polling", () => {
+  it("adds no poll of its own on the board page, which already polls, and polls slowly elsewhere", () => {
+    mockBoard = board([]);
+    const onBoard = wrap("/admin");
+    expect(boardOptions.at(-1)).toEqual({ refetchInterval: false });
+    onBoard.unmount();
+    wrap("/admin/users");
+    expect(boardOptions.at(-1)).toEqual({ refetchInterval: 60_000 });
+  });
+});
+
+describe("AlertCenter states and closing", () => {
+  it("does not claim all-clear while the board is loading or failed", async () => {
+    mockBoard = { data: undefined, isPending: true, error: null };
+    const loading = wrap();
+    await openPopover();
+    expect(screen.getByText(i18n.t("common.loading"))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t("admin.board.alerts_none"))).toBeNull();
+    loading.unmount();
+    mockBoard = { data: undefined, isPending: false, error: new Error("boom") };
+    wrap();
+    await openPopover();
+    expect(screen.getByText(i18n.t("admin.board.check_failed"))).toBeInTheDocument();
+  });
+
+  it("closes when the admin navigates elsewhere", async () => {
+    mockBoard = board([WARN_ALERT]);
+    wrap();
+    const user = await openPopover();
+    await user.click(screen.getByRole("button", { name: "go" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closes on a click outside the panel", async () => {
+    mockBoard = board([WARN_ALERT]);
+    wrap();
+    const user = await openPopover();
+    await user.click(document.querySelector(".ui-overlay-scrim")!);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("tones the badge as a warning only while a warning is unread", () => {
+    mockBoard = board([INFO_ALERT]);
+    const infoOnly = wrap();
+    expect(screen.getByTestId("alert-count-badge")).not.toHaveClass("alert-center-badge--warn");
+    infoOnly.unmount();
+    mockBoard = board([WARN_ALERT]);
+    wrap();
+    expect(screen.getByTestId("alert-count-badge")).toHaveClass("alert-center-badge--warn");
+  });
+
+  it("follows an acknowledgement made in another tab", () => {
+    mockBoard = board([WARN_ALERT]);
+    wrap();
+    expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("1");
+    const hash = hashAlertKey(WARN_ALERT.level, WARN_ALERT.text, WARN_ALERT.href);
+    act(() => {
+      localStorage.setItem("transit.admin.ackedAlerts", JSON.stringify({ [hash]: Date.now() + 60_000 }));
+      window.dispatchEvent(new StorageEvent("storage", { key: "transit.admin.ackedAlerts" }));
+    });
+    expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("0");
+  });
 });
 
 describe("AlertCenter bell", () => {
@@ -142,7 +222,7 @@ describe("AlertCenter popover", () => {
     mockBoard = board([]);
     wrap();
     await openPopover();
-    expect(screen.getByText(i18n.t("admin.alert_center.empty"))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("admin.board.alerts_none"))).toBeInTheDocument();
   });
 
   it("closes on Escape and restores focus to the bell", async () => {
@@ -187,12 +267,13 @@ describe("AlertCenter acknowledgement persistence", () => {
     await user.click(screen.getByRole("button", { name: i18n.t("admin.alert_center.ack") }));
     first.unmount();
 
-    vi.setSystemTime(new Date("2026-09-08T00:00:01Z")); // just past the 7-day window
+    // Well past the 7-day window: the exact edge is pinned in ackedAlerts.test.ts.
+    vi.setSystemTime(new Date("2026-09-08T01:00:00Z"));
     wrap();
     expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("1");
   });
 
-  it("does not acknowledge across browsers/tabs when localStorage is unavailable", async () => {
+  it("leaves the alert unread when the browser cannot store the acknowledgement", async () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("blocked");
     });
