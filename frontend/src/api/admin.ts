@@ -319,12 +319,14 @@ type AdminRuns = { date: string; runs: PipelineRun[] };
 
 /** The `/admin` entry page's single snapshot. Polled rather than pushed: the
  *  collectors and the staleness check behind it are cached snapshots on the
- *  server, so a short poll is as fresh as the data can be. */
-export function useAdminBoard() {
+ *  server, so a short poll is as fresh as the data can be. Each subscriber
+ *  with an interval runs its own timer, so a second reader of the same
+ *  snapshot (the header's alert center) names its own, or none. */
+export function useAdminBoard({ refetchInterval = 10_000 }: { refetchInterval?: number | false } = {}) {
   return useQuery({
     queryKey: ["adminBoard"],
     queryFn: ({ signal }) => apiGet<AdminBoard>("/api/admin/board", { signal }),
-    refetchInterval: 10_000,
+    refetchInterval,
   });
 }
 

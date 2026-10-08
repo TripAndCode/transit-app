@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { usePendingApprovalCount } from "./pendingApprovals";
+import { AlertCenter } from "./AlertCenter";
 
 type NavItem = { to: string; end?: boolean; labelKey: string; Icon: LucideIcon; badge?: "approvals" };
 
@@ -127,9 +128,23 @@ export function AdminLayout() {
           </div>
         ))}
       </nav>
-      {/* Positioned so a page's Drawer can pin itself to this area's right edge. */}
-      <main style={{ flex: 1, minWidth: 0, position: "relative" }}>
-        <Outlet />
+      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            padding: "8px 20px",
+            borderBottom: "1px solid var(--border-soft)",
+            flexShrink: 0,
+          }}
+        >
+          <AlertCenter />
+        </header>
+        {/* Positioned so a page's Drawer can pin itself to this area's right edge. */}
+        <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+          <Outlet />
+        </div>
       </main>
     </div>
   );

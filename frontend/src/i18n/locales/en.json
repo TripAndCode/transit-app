@@ -1612,6 +1612,19 @@
       "check_failed": "Couldn't check its status",
       "details": "Details"
     },
+    "alert_center": {
+      "bell_label": "Alerts",
+      "bell_label_unread": "Alerts, {{count}} unread",
+      "title": "Alerts",
+      "group": {
+        "warn": "Warnings",
+        "info": "Info"
+      },
+      "ack": "Acknowledge",
+      "acked": "Acknowledged",
+      "load_failed": "Couldn't load the alerts.",
+      "refresh_failed": "Couldn't refresh; these are the alerts last read."
+    },
     "ask_ops": {
       "title": "Ask ops",
       "filter": {

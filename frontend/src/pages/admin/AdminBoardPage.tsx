@@ -6,7 +6,6 @@ import { formatDateTime } from "../../utils/format";
 import {
   useAdminBoard,
   useTriggerRun,
-  type BoardAlert,
   type BoardCollector,
   type BoardFreshnessDay,
 } from "../../api/admin";
@@ -17,6 +16,7 @@ import { Tooltip } from "../../components/Tooltip";
 import { Modal } from "../../components/Modal";
 import { RunTimeline } from "./RunTimeline";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { alertText } from "./alertText";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
 
@@ -51,13 +51,6 @@ const JST_OFFSET_MS = 9 * 3_600_000;
 
 function collectorLabel(t: TFunction, collector: BoardCollector): string {
   return t(`admin.board.collector.${collector.key}`, { defaultValue: collector.label });
-}
-
-function alertText(t: TFunction, alert: BoardAlert): string {
-  // Plural forms are picked by `count`; a stale-agency alert carries its
-  // lag as `days`.
-  const { params } = alert;
-  return t(`admin.board.alert.${alert.code}`, { ...params, count: params.count ?? params.days, defaultValue: alert.text });
 }
 
 function Sparkline({ history }: { history: number[] }) {
