@@ -91,7 +91,6 @@ export function BandGrid({
                   <div
                     key={b}
                     data-testid="ov-band-cell"
-                    data-dow={dow}
                     className={cellClass}
                     onMouseEnter={showTip}
                     onMouseMove={showTip}
@@ -108,7 +107,6 @@ export function BandGrid({
                 <div
                   key={b}
                   data-testid="ov-band-cell"
-                  data-dow={dow}
                   className={cellClass}
                   onMouseEnter={showTip}
                   onMouseMove={showTip}
