@@ -21,12 +21,18 @@ export function routedPage(matches: readonly UIMatch[]): string {
  *  page the reader has already started on. */
 const RESTORE_WINDOW_MS = 3000;
 
+/** Positions kept, newest first. A browser's back/forward list holds on the
+ *  order of fifty entries, so an older position can never be stepped back to. */
+export const MAX_POSITIONS = 100;
+
 /** Any of these on the pane means the reader has taken over the scroll. */
 const READER_SCROLL_EVENTS = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
 
-/** Re-applies `top` each time the pane's content changes, until the content is
- *  tall enough to hold it, the reader scrolls, or the window runs out. Returns
- *  a function that gives up early. */
+/** Re-applies `top` each time nodes are added to or removed from the pane,
+ *  which is how a page's data arrives, until the content is tall enough to hold
+ *  it, the reader scrolls, or the window runs out. The routed content overflows
+ *  a wrapper sized to the pane, so no element's box grows with it for a
+ *  ResizeObserver to report. Returns a function that gives up early. */
 function settleScroll(pane: HTMLElement, top: number, onDone: () => void): () => void {
   const observer = new MutationObserver(() => {
     pane.scrollTop = top;
@@ -39,7 +45,7 @@ function settleScroll(pane: HTMLElement, top: number, onDone: () => void): () =>
     for (const type of READER_SCROLL_EVENTS) pane.removeEventListener(type, stop);
     onDone();
   }
-  observer.observe(pane, { childList: true, subtree: true, attributes: true, characterData: true });
+  observer.observe(pane, { childList: true, subtree: true });
   for (const type of READER_SCROLL_EVENTS) pane.addEventListener(type, stop, { passive: true });
   return stop;
 }
@@ -62,6 +68,12 @@ export function useRoutedPaneScroll(paneRef: RefObject<HTMLElement | null>, page
   const { key } = useLocation();
   const navigationType = useNavigationType();
   const positions = useRef(new Map<string, number>());
+  function file(entryKey: string, top: number) {
+    const map = positions.current;
+    map.delete(entryKey);
+    map.set(entryKey, top);
+    if (map.size > MAX_POSITIONS) map.delete(map.keys().next().value!);
+  }
   const entry = useRef<{ key: string; page: string } | null>(null);
   const cancelRestore = useRef<(() => void) | null>(null);
 
@@ -84,7 +96,7 @@ export function useRoutedPaneScroll(paneRef: RefObject<HTMLElement | null>, page
     } else if (previous?.page !== page) {
       pane.scrollTop = 0;
     }
-    positions.current.set(key, pane.scrollTop);
+    file(key, pane.scrollTop);
   }, [paneRef, key, page, navigationType]);
 
   useEffect(() => {
@@ -93,7 +105,7 @@ export function useRoutedPaneScroll(paneRef: RefObject<HTMLElement | null>, page
     // A restore still settling owns the offset; the clamped values it passes
     // through are not where the reader left this entry.
     const remember = () => {
-      if (entry.current && !cancelRestore.current) positions.current.set(entry.current.key, pane.scrollTop);
+      if (entry.current && !cancelRestore.current) file(entry.current.key, pane.scrollTop);
     };
     pane.addEventListener("scroll", remember, { passive: true });
     return () => {

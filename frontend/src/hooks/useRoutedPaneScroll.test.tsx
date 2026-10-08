@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { useRef } from "react";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider, useMatches } from "react-router-dom";
-import { routedPage, useRoutedPaneScroll } from "./useRoutedPaneScroll";
+import { MAX_POSITIONS, routedPage, useRoutedPaneScroll } from "./useRoutedPaneScroll";
 
 function Pane() {
   const ref = useRef<HTMLDivElement>(null);
@@ -22,6 +22,7 @@ const routes = [
       { path: "a" },
       { path: "b" },
       { path: "c" },
+      { path: "p/:n" },
       { path: "users", element: <Outlet />, children: [{ path: ":uid", handle: { overlay: true } }] },
     ],
   },
@@ -145,6 +146,14 @@ describe("useRoutedPaneScroll", () => {
     await go("/c");
     grow(pane, content, 1000);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pane.scrollTop).toBe(0);
+  });
+
+  it("forgets positions older than back and forward can reach", async () => {
+    const { pane, go } = renderPane("/p/0");
+    scrollTo(pane, 300);
+    for (let n = 1; n <= MAX_POSITIONS; n++) await go(`/p/${n}`);
+    await go(-MAX_POSITIONS);
     expect(pane.scrollTop).toBe(0);
   });
 
