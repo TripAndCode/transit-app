@@ -20,7 +20,9 @@
 # scripts/run_full_ci.sh, which starts a Postgres + ClickHouse pair of its own
 # on free ports, so concurrent pushes from several sessions never share a
 # database. Not covered locally: CI's frontend coverage thresholds (this gate
-# runs `npm run test`, not `test:coverage`) and the Docker image build.
+# runs `npm run test`, not `test:coverage`), the React Compiler check
+# (`check:react-compiler` compiles every source file, which the frontend steps'
+# time budget has no room for), and the Docker image build.
 #
 # Reads the tool input JSON on stdin; exit 2 = block the tool call.
 set -uo pipefail
