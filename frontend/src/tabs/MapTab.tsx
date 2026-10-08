@@ -475,7 +475,7 @@ export function MapTab() {
     // The map knows its own pitch: a rebuilt map is flat, a tilt in flight
     // is not yet at rest, and either way only a mismatch moves the camera.
     if (!map || map.getPitch() === restPitch) return;
-    reliefPitch(map, reliefOn);
+    return reliefPitch(map, reliefOn);
   }, [reliefOn, restPitch]);
 
   /** Focus a row's route and select that row's own run in one write. */

@@ -53,6 +53,10 @@ export class MockMap {
   getPitch() {
     return this.pitch;
   }
+  // Every move settles at once (see easeTo), so none is ever in flight.
+  isMoving() {
+    return false;
+  }
   // jsdom has no projection, so there is no meaningful camera to compute.
   // Returning undefined matches what MapLibre itself does for bounds it
   // cannot fit, and is the branch revealAgency() already handles.

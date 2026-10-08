@@ -14,13 +14,28 @@ import {
 const BOUNDS: [[number, number], [number, number]] = [[140.6, 40.7], [140.9, 40.9]];
 
 function fakeMap(camera?: { center: [number, number]; zoom: number }) {
+  const moveEnd = new Set<() => void>();
   return {
     jumpTo: vi.fn(),
     flyTo: vi.fn(),
     easeTo: vi.fn(),
     fitBounds: vi.fn(),
     getZoom: vi.fn(() => 11),
+    getPitch: vi.fn(() => 0),
+    isMoving: vi.fn(() => false),
     cameraForBounds: vi.fn(() => camera),
+    once: vi.fn((type: string, listener: () => void) => {
+      if (type === "moveend") moveEnd.add(listener);
+    }),
+    off: vi.fn((type: string, listener: () => void) => {
+      if (type === "moveend") moveEnd.delete(listener);
+    }),
+    /** Lands the move in flight. */
+    endMove() {
+      const listeners = [...moveEnd];
+      moveEnd.clear();
+      for (const listener of listeners) listener();
+    },
   };
 }
 
@@ -194,6 +209,31 @@ describe("reliefPitch", () => {
     reliefPitch(asMap(map), false);
     expect(map.easeTo).toHaveBeenLastCalledWith(expect.objectContaining({ pitch: 0, duration: MOTION.move }));
     expect(RELIEF_PITCH).toBeLessThanOrEqual(35);
+  });
+  it("lets a move in flight land before tilting, so the move is not stopped partway", () => {
+    const map = fakeMap();
+    map.isMoving.mockReturnValue(true);
+    reliefPitch(asMap(map), true);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    map.isMoving.mockReturnValue(false);
+    map.endMove();
+    expect(map.easeTo).toHaveBeenCalledWith(expect.objectContaining({ pitch: RELIEF_PITCH }));
+  });
+  it("skips the tilt when the move it waited for already landed at the relief's pitch", () => {
+    const map = fakeMap();
+    map.isMoving.mockReturnValue(true);
+    reliefPitch(asMap(map), true);
+    map.getPitch.mockReturnValue(RELIEF_PITCH);
+    map.endMove();
+    expect(map.easeTo).not.toHaveBeenCalled();
+  });
+  it("drops a waiting tilt once it is cancelled, as when the relief is toggled again", () => {
+    const map = fakeMap();
+    map.isMoving.mockReturnValue(true);
+    const cancel = reliefPitch(asMap(map), true);
+    cancel();
+    map.endMove();
+    expect(map.easeTo).not.toHaveBeenCalled();
   });
   it("cuts under reduced motion", () => {
     setReducedMotion(true);

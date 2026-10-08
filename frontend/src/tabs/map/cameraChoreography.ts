@@ -129,7 +129,21 @@ export function inspectTrip(map: MLMap, lngLat: LngLatLike, { zoom, pitch }: { z
 }
 
 /** Tilts for the relief layer, or lays the map flat again when it is turned
- *  off. The only way the relief may move the camera. */
-export function reliefPitch(map: MLMap, on: boolean): void {
-  map.easeTo({ pitch: on ? RELIEF_PITCH : 0, ...timing(MOTION.move) });
+ *  off. The only way the relief may move the camera.
+ *
+ *  `easeTo` stops whatever camera move is in flight, so a toggle during a
+ *  framing move or a drag would leave the camera partway. The tilt waits for
+ *  that move to land instead, and is skipped if the move landed at the target
+ *  pitch anyway. Returns a function that drops a tilt still waiting. */
+export function reliefPitch(map: MLMap, on: boolean): () => void {
+  const pitch = on ? RELIEF_PITCH : 0;
+  const tilt = () => {
+    if (map.getPitch() !== pitch) map.easeTo({ pitch, ...timing(MOTION.move) });
+  };
+  if (!map.isMoving()) {
+    map.easeTo({ pitch, ...timing(MOTION.move) });
+    return () => {};
+  }
+  map.once("moveend", tilt);
+  return () => map.off("moveend", tilt);
 }
