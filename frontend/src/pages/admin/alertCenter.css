@@ -1,0 +1,173 @@
+.alert-center-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.alert-center-trigger:hover {
+  background: var(--surface-2);
+}
+
+.alert-center-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* All alerts acknowledged: the badge stays visible (there is a history) but
+   drops to the same neutral tone as the rest of the trigger, rather than
+   disappearing outright. */
+.alert-center-badge--muted {
+  color: var(--text-tertiary);
+}
+
+/* An unread warning, in the board's warning tone; an info-only list keeps
+   the base badge colour, not an alarm. */
+.alert-center-badge--warn {
+  color: var(--color-warning-text);
+}
+
+.alert-center-panel {
+  width: min(360px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--el-2);
+  padding: 10px;
+}
+
+.alert-center-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.alert-center-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.alert-center-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius);
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.alert-center-close:hover {
+  background: var(--surface-2);
+}
+
+.alert-center-stale {
+  margin: 0 0 8px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.alert-center-empty {
+  margin: 8px 2px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.alert-center-group + .alert-center-group {
+  margin-top: 8px;
+}
+
+.alert-center-group-label {
+  margin: 0 0 4px;
+  padding: 0 2px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.alert-center-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.alert-center-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  padding: 7px 2px;
+  border-top: 1px solid var(--surface-2);
+  font-size: var(--text-sm);
+}
+
+.alert-center-item[data-acked="true"] {
+  opacity: 0.62;
+}
+
+.alert-center-item-text {
+  flex: 1 1 160px;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.alert-center-link {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+
+.alert-center-link:hover {
+  text-decoration: underline;
+}
+
+.alert-center-ack {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.alert-center-ack:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.alert-center-ack:disabled {
+  cursor: default;
+  color: var(--text-tertiary);
+  border-color: transparent;
+}
