@@ -9,18 +9,26 @@ import { describe, it, expect } from "vitest";
 // labels as HTML over the plot instead; fixed-height charts keep a minimum
 // width so the only remaining scale is the height ratio.
 const src = (p: string) => readFileSync(path.resolve(process.cwd(), "src", p), "utf8");
-/** Every SVG `fontSize` in a file, as written and as a number. A size named by
- *  a constant resolves through that file's `const NAME = <number>`; a size the
- *  guard cannot read is NaN, which fails every floor below. */
+/** Every SVG `fontSize` attribute in a file, as written and as a number. A
+ *  size named by a constant resolves through that file's `const NAME =
+ *  <number>`; any other expression is NaN, which fails every floor below. */
 function fontSizes(code: string): Array<readonly [string, number]> {
   const constants = new Map([...code.matchAll(/const (\w+) = (\d+(?:\.\d+)?);/g)].map((m) => [m[1], Number(m[2])]));
-  return [...code.matchAll(/fontSize=(?:"(\d+(?:\.\d+)?)"|\{(\d+(?:\.\d+)?)\}|\{(\w+)\})/g)].map((m) => {
-    const size = m[1] ?? m[2];
-    return [m[0], size != null ? Number(size) : (constants.get(m[3]) ?? NaN)] as const;
+  return [...code.matchAll(/fontSize=(?:"([^"]*)"|\{([^}]*)\})/g)].map((m) => {
+    const value = (m[1] ?? m[2]).trim();
+    if (/^\d+(?:\.\d+)?$/.test(value)) return [m[0], Number(value)] as const;
+    return [m[0], constants.get(value) ?? NaN] as const;
   });
 }
 
 describe("SVG text floor", () => {
+  it("reads every fontSize form, and fails one it cannot resolve rather than skipping it", () => {
+    const code = 'const SIZE = 13;\n<text fontSize="12" /><text fontSize={14} /><text fontSize={SIZE} /><text fontSize={wide ? 10 : 12} /><text fontSize={tokens.small} />';
+    const sizes = fontSizes(code).map(([, size]) => size);
+    expect(sizes.slice(0, 3)).toEqual([12, 14, 13]);
+    expect(sizes.slice(3)).toEqual([NaN, NaN]);
+  });
+
   it("stretched charts draw their labels in HTML, never as SVG text", () => {
     for (const f of ["components/PeakHourRibbon.tsx", "components/ServiceSplit.tsx", "components/ConcentrationBar.tsx"]) {
       expect(src(f), f).not.toMatch(/<text[\s>]/);
