@@ -20,10 +20,7 @@
 # scripts/run_full_ci.sh, which starts a Postgres + ClickHouse pair of its own
 # on free ports, so concurrent pushes from several sessions never share a
 # database. Not covered locally: CI's frontend coverage thresholds (this gate
-# runs `npm run test`, not `test:coverage`), the React Compiler scan
-# (`check:react-compiler` compiles every source file, which the frontend steps'
-# time budget has no room for; its checker's own tests do run here), and the
-# Docker image build.
+# runs `npm run test`, not `test:coverage`) and the Docker image build.
 #
 # Reads the tool input JSON on stdin; exit 2 = block the tool call.
 set -uo pipefail
@@ -771,6 +768,8 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
       "${IN_DIR[@]}" "$FE_DIR" npm run test:check-css-tokens || FAIL=1
     run_step 30 "npm run test:check-react-compiler (fixture-based positive/negative controls for the checker itself)" \
       "${IN_DIR[@]}" "$FE_DIR" npm run test:check-react-compiler || FAIL=1
+    run_step 120 "npm run check:react-compiler (the React Compiler compiles every component and hook)" \
+      "${IN_DIR[@]}" "$FE_DIR" npm run check:react-compiler || FAIL=1
     run_step 30 "npm run check:css-tokens (static scan: var(--x) refs resolve, z-index uses the shared ladder)" \
       "${IN_DIR[@]}" "$FE_DIR" npm run check:css-tokens || FAIL=1
     if [ "${PUSH_GATE_SKIP_BUILD:-0}" = "1" ]; then

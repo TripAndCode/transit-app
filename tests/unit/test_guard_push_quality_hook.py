@@ -177,21 +177,23 @@ def _frontend_gate_block() -> str:
     return text[start:end]
 
 
-#: npm scripts CI's frontend job runs that this gate deliberately does not,
-#: each with the hook header's reason; the header names them.
-_CI_ONLY_SCRIPTS = {
-    "test:coverage": "the gate runs `npm run test`, without the coverage thresholds",
-    "check:react-compiler": "a full compile of every source file, beyond the frontend steps' time budget",
-}
+#: npm scripts CI's frontend job runs that this gate deliberately does not.
+#: The hook header names each, with its reason.
+_CI_ONLY_SCRIPTS = {"test:coverage"}
 
 
 def _ci_frontend_scripts() -> set[str]:
-    """Every `npm run <script>` in CI's frontend job, read from ci.yml."""
-    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    start = text.index("\n  frontend:\n")
-    following = re.search(r"\n  [a-z][a-z-]*:\n", text[start + 1 :])
-    job = text[start : start + 1 + following.start()] if following else text[start:]
-    return set(re.findall(r"npm run ([\w:-]+)", job))
+    """Every `npm run <script>` a step of CI's frontend job runs."""
+    from tests.unit.test_ci_workflow_gates import _workflow_yaml
+
+    steps = _workflow_yaml()["jobs"]["frontend"]["steps"]
+    runs = "\n".join(step["run"] for step in steps if "run" in step)
+    return set(re.findall(r"npm run ([\w:-]+)", runs))
+
+
+def _runs(block: str, script: str) -> bool:
+    """Whether `block` runs exactly `script`: `lint` is not `lint:i18n`."""
+    return re.search(rf"npm run {re.escape(script)}(?![\w:-])", block) is not None
 
 
 def test_frontend_gate_runs_every_check_ci_runs():
@@ -202,11 +204,17 @@ def test_frontend_gate_runs_every_check_ci_runs():
     block = _frontend_gate_block()
     scripts = _ci_frontend_scripts()
     assert {"typecheck", "lint", "deadcode", "check:css-tokens"} <= scripts, "ci.yml's frontend job was not read"
-    for script in sorted(scripts - set(_CI_ONLY_SCRIPTS)):
-        assert f"npm run {script}" in block, f"npm run {script} missing from the RUN_FRONTEND gate block"
+    for script in sorted(scripts - _CI_ONLY_SCRIPTS):
+        assert _runs(block, script), f"npm run {script} missing from the RUN_FRONTEND gate block"
     header = HOOK_PATH.read_text().split("\n\n", 1)[0]
     for script in _CI_ONLY_SCRIPTS:
         assert script in header, f"{script} runs in CI only, but the hook header does not say so"
+
+
+def test_a_script_counts_as_run_only_under_its_exact_name():
+    assert _runs('run_step 30 "npm run lint:i18n" x npm run lint:i18n', "lint:i18n")
+    assert not _runs('run_step 30 "npm run lint:i18n" x npm run lint:i18n', "lint")
+    assert not _runs("npm run lint:i18n-strings", "lint:i18n")
 
 
 def _deadcode_classifier() -> str:
