@@ -8,7 +8,7 @@ import { StillWorking } from "../components/StillWorking";
 import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
-import { PageHeader } from "../components/ui/PageHeader";
+import { Section } from "../components/ui/Section";
 import { delayColor } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { DELAY_AXIS_MAX_MIN, delayAxisShare } from "../components/charts/delayAxis";
@@ -219,10 +219,10 @@ export function NetworkTab() {
 
   return (
     <div className="network-page">
-      <PageHeader
+      <Section
         eyebrow={t("network.eyebrow", { from: ctx.from, to: ctx.to })}
         title={t("network.title")}
-        subtitle={t("network.help")}
+        description={t("network.help")}
       />
       <details className="network-howto" style={{ marginBottom: 16 }}>
         <summary>{t("network.howto_title")}</summary>
