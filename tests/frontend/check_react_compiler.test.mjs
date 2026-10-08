@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { compilerErrors, skippedFunction, sourceFiles } from "../../frontend/scripts/check-react-compiler.mjs";
@@ -62,4 +64,11 @@ test("counts a compiler crash as a skipped function, and a success or a skip of 
   assert.deepEqual(crash, { line: 9, reason: "compiler crashed: TypeError: boom" });
   assert.equal(skippedFunction({ kind: "CompileSuccess" }), null);
   assert.equal(skippedFunction({ kind: "CompileSkip" }), null);
+});
+
+test("the build and the tests pass the compiler no options, the ones this check compiles with", () => {
+  for (const config of ["vite.config.ts", "vitest.config.ts"]) {
+    const calls = readFileSync(join(FRONTEND, config), "utf8").match(/reactCompilerPreset\([^)]*\)/g) ?? [];
+    assert.deepEqual(calls, ["reactCompilerPreset()"], `${config}: options added here must be added to check-react-compiler.mjs too`);
+  }
 });

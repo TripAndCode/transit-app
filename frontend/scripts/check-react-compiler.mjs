@@ -6,8 +6,9 @@
 // lint rule. The skipped function then runs uncompiled, silently, with none
 // of the memoization the rest of the app relies on. ESLint's react-hooks
 // rules report only some of these, so this runs the compiler itself, with
-// the options the build uses (reactCompilerPreset passes none), over every
-// non-test source file.
+// the options the build uses, over every non-test source file. Those are
+// none: vite.config.ts and vitest.config.ts call reactCompilerPreset() bare,
+// which tests/frontend/check_react_compiler.test.mjs pins.
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { relative, resolve } from "node:path";
