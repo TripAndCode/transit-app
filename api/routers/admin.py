@@ -1642,7 +1642,10 @@ _ALERT_KEY_RE = re.compile(r"[0-9a-f]{16}")
 
 
 async def _acked_alert_keys(conn: asyncpg.Connection, keys: list[str]) -> set[str]:
-    """The keys in ``keys`` some admin acknowledged within ``ALERT_ACK_TTL``."""
+    """The keys in ``keys`` some admin acknowledged within ``ALERT_ACK_TTL``.
+    A board with no alerts, the usual state, reads nothing."""
+    if not keys:
+        return set()
     rows = await conn.fetch(
         "SELECT alert_key FROM admin_alert_acks WHERE alert_key = ANY($1::text[]) AND expires_at > now()",
         keys,

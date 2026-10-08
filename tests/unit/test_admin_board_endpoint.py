@@ -263,6 +263,14 @@ def test_every_alert_carries_its_key_and_whether_an_operator_acknowledged_it():
     assert again["llm_approvals_pending"]["acked"] is True
 
 
+def test_no_alerts_need_no_acknowledgement_query():
+    class _NoQuery:
+        async def fetch(self, sql, *args):
+            raise AssertionError("queried acknowledgements with no alerts to look up")
+
+    assert asyncio.run(admin_router._acked_alert_keys(_NoQuery(), [])) == set()
+
+
 def test_an_unreadable_acknowledgement_table_leaves_every_alert_unacknowledged():
     body = _client(_Conn(approvals=2, acks_error=RuntimeError("no table"))).get("/api/admin/board").json()
     assert body["alerts"]
