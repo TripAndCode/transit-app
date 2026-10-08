@@ -46,6 +46,9 @@ function GoTo({ to }: { to: string }) {
       <button type="button" onClick={() => navigate(-1)}>
         back
       </button>
+      <button type="button" onClick={() => navigate("?q=1", { replace: true })}>
+        filter
+      </button>
     </>
   );
 }
@@ -140,6 +143,24 @@ describe("AlertCenter states and closing", () => {
     await openPopover();
     expect(screen.getByText(i18n.t("admin.alert_center.refresh_failed"))).toBeInTheDocument();
     expect(screen.getAllByTestId("alert-center-item")).toHaveLength(1);
+  });
+
+  it("stays open when the page only rewrites its own query string", async () => {
+    mockBoard = board([WARN_ALERT]);
+    wrap();
+    const user = await openPopover();
+    await user.click(screen.getByRole("button", { name: "filter" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("stays open when an alert's link is opened in a new tab", async () => {
+    mockBoard = board([WARN_ALERT]);
+    wrap();
+    const user = await openPopover();
+    await user.keyboard("{Control>}");
+    await user.click(screen.getByRole("link", { name: i18n.t("admin.board.alert_open") }));
+    await user.keyboard("{/Control}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("closes on a click outside the panel", async () => {

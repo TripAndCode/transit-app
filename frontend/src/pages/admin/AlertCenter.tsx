@@ -1,6 +1,6 @@
 import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigationType } from "react-router-dom";
 import { Bell, X } from "lucide-react";
 import { OverlayBase } from "../../components/ui/OverlayBase";
 import { Z_INDEX } from "../../styles/zIndex";
@@ -26,16 +26,18 @@ const BELL_POLL_MS = 60_000;
 export function AlertCenter() {
   const { t } = useTranslation();
   const location = useLocation();
+  const navigationType = useNavigationType();
   const onBoard = location.pathname === "/admin" || location.pathname === "/admin/";
   const board = useAdminBoard({ refetchInterval: onBoard ? false : BELL_POLL_MS });
   const alerts = board.data?.alerts ?? [];
   const [open, setOpen] = useState(false);
-  // Any navigation, history steps included, closes it: reset during render
+  // A navigation closes it, history steps included; a page rewriting its own
+  // query string in place (a debounced search) does not. Reset during render
   // from the location it last saw rather than synchronised in an effect.
-  const [seenKey, setSeenKey] = useState(location.key);
-  if (seenKey !== location.key) {
-    setSeenKey(location.key);
-    setOpen(false);
+  const [seen, setSeen] = useState({ key: location.key, pathname: location.pathname });
+  if (seen.key !== location.key) {
+    setSeen({ key: location.key, pathname: location.pathname });
+    if (location.pathname !== seen.pathname || navigationType !== "REPLACE") setOpen(false);
   }
   const [anchor, setAnchor] = useState({ top: 0, right: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -129,7 +131,7 @@ export function AlertCenter() {
                       <li key={hash} className="alert-center-item" data-testid="alert-center-item" data-acked={isAcked}>
                         <span className="alert-center-item-text">{alertText(t, alert)}</span>
                         {alert.href && (
-                          <Link to={alert.href} className="alert-center-link" onClick={close}>
+                          <Link to={alert.href} className="alert-center-link">
                             {t("admin.board.alert_open")}
                           </Link>
                         )}

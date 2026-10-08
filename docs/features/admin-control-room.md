@@ -36,7 +36,8 @@ grouped by level. On `/admin` it adds no poll of its own (the board page
 polls); elsewhere it polls the endpoint every minute. Acknowledging an alert
 is browser-only: a 7-day entry in localStorage (`transit.admin.ackedAlerts`,
 keyed by a hash of level, text and link), shared by the browser's tabs;
-other operators and devices do not see it.
+other operators and devices do not see it. An alert whose figure changes
+(a lag that grows by a day, a count that moves) reads as a new alert.
 
 ## Agencies health + diagnostics drawer
 
