@@ -88,7 +88,7 @@ describe("AlertCenter bell", () => {
     wrap();
     const user = await openPopover();
     const items = screen.getAllByTestId("alert-center-item");
-    const warnItem = items.find((li) => within(li).queryByText(WARN_ALERT.text));
+    const warnItem = items.find((li) => within(li).queryByText("Toyama Bayline: aggregates 3 days behind"));
     await user.click(within(warnItem!).getByRole("button", { name: i18n.t("admin.alert_center.ack") }));
 
     expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("1");
@@ -115,8 +115,11 @@ describe("AlertCenter popover", () => {
     const dialog = screen.getByRole("dialog", { name: i18n.t("admin.alert_center.title") });
     expect(within(dialog).getByText(i18n.t("admin.alert_center.group.warn"))).toBeInTheDocument();
     expect(within(dialog).getByText(i18n.t("admin.alert_center.group.info"))).toBeInTheDocument();
-    expect(within(dialog).getByText(WARN_ALERT.text)).toBeInTheDocument();
-    expect(within(dialog).getByText(INFO_ALERT.text)).toBeInTheDocument();
+    // Localised as the board does: a stale agency's lag is its plural count.
+    expect(within(dialog).getByText("Toyama Bayline: aggregates 3 days behind")).toBeInTheDocument();
+    expect(within(dialog).getByText("2 users awaiting AI access approval")).toBeInTheDocument();
+    // The group heading names the level once; the items do not repeat it.
+    expect(within(dialog).getAllByText(i18n.t("admin.alert_center.group.info"))).toHaveLength(1);
   });
 
   it("renders each alert's deep link", async () => {

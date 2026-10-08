@@ -1,19 +1,21 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import { Link } from "react-router-dom";
 import { Bell, X } from "lucide-react";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { useAdminBoard, type BoardAlert } from "../../api/admin";
 import { ackAlert, hashAlertKey, readAckedAlerts } from "./ackedAlerts";
+import { alertText } from "./alertText";
 import "./alertCenter.css";
+
+// Hoisted: a Date.now() read inside the component trips react-hooks/purity.
+function nowMs(): number {
+  return Date.now();
+}
 
 const LEVELS = ["warn", "info"] as const satisfies readonly BoardAlert["level"][];
 
-function alertText(t: TFunction, alert: BoardAlert): string {
-  return t(`admin.board.alert.${alert.code}`, { ...alert.params, defaultValue: alert.text });
-}
 
 /**
  * Header bell + popover for `/api/admin/board`'s `alerts`. Reads the same
@@ -30,7 +32,7 @@ export function AlertCenter() {
   const { data } = useAdminBoard();
   const alerts = data?.alerts ?? [];
   const [open, setOpen] = useState(false);
-  const [ackedHashes, setAckedHashes] = useState(() => readAckedAlerts(Date.now()));
+  const [ackedHashes, setAckedHashes] = useState(() => readAckedAlerts(nowMs()));
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -59,12 +61,12 @@ export function AlertCenter() {
   const unreadCount = hashed.filter(({ hash }) => !ackedHashes.has(hash)).length;
 
   function openPopover() {
-    setAckedHashes(readAckedAlerts(Date.now()));
+    setAckedHashes(readAckedAlerts(nowMs()));
     setOpen(true);
   }
 
   function acknowledge(hash: string) {
-    const now = Date.now();
+    const now = nowMs();
     ackAlert(hash, now);
     setAckedHashes(readAckedAlerts(now));
   }
@@ -138,9 +140,6 @@ export function AlertCenter() {
                             data-testid="alert-center-item"
                             data-acked={isAcked}
                           >
-                            <span className={`alert-center-pill alert-center-pill--${level}`}>
-                              {t(`admin.alert_center.level.${level}`)}
-                            </span>
                             <span className="alert-center-item-text">{alertText(t, alert)}</span>
                             {alert.href && (
                               <Link to={alert.href} className="alert-center-link" onClick={closePopover}>

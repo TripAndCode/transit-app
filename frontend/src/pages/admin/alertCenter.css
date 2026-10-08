@@ -127,25 +127,8 @@
   opacity: 0.62;
 }
 
-.alert-center-pill {
-  flex-shrink: 0;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-}
 
-/* --color-warning as a soft fill only -- never full-strength, never the pill
-   text color -- so this reads as "worth noting" rather than an alarm. */
-.alert-center-pill--warn {
-  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
-  color: var(--delay-severe);
-}
 
-.alert-center-pill--info {
-  background: var(--surface-2);
-  color: var(--text-secondary);
-}
 
 .alert-center-item-text {
   flex: 1 1 160px;

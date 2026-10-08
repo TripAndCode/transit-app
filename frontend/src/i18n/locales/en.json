@@ -1621,10 +1621,6 @@
         "warn": "Warnings",
         "info": "Info"
       },
-      "level": {
-        "warn": "Warning",
-        "info": "Info"
-      },
       "ack": "Acknowledge",
       "acked": "Acknowledged"
     },
