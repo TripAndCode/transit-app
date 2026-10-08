@@ -162,8 +162,9 @@ const router = createBrowserRouter([
             // Nested rather than a sibling route: AdminUsersPage renders the
             // list plus an <Outlet/>, so navigating to users/:uid overlays
             // the drawer on top of the still-mounted list instead of
-            // replacing it with a standalone detail page.
-            children: [{ path: ":uid", element: <AdminUserDetailPage /> }],
+            // replacing it with a standalone detail page. `overlay` tells the
+            // routed pane's scroll handling that the list is still the page.
+            children: [{ path: ":uid", element: <AdminUserDetailPage />, handle: { overlay: true } }],
           },
           { path: "ops", element: <AdminOpsPage /> },
           { path: "ask", element: <AdminAskOpsPage /> },
