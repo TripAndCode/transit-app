@@ -123,11 +123,22 @@ describe("TopBar", () => {
       expect(panel).not.toHaveTextContent("No readings received yet");
     });
 
-    it("closes when the reader clicks elsewhere", async () => {
+    it("closes when the reader clicks elsewhere, leaving focus where the click put it", async () => {
       renderBar();
-      await userEvent.click(screen.getByRole("button", { name: /Analyzed through/ }));
+      const chip = screen.getByRole("button", { name: /Analyzed through/ });
+      await userEvent.click(chip);
       await userEvent.click(document.body);
       expect(screen.queryByRole("region", { name: "How fresh the data is" })).toBeNull();
+      expect(chip).not.toHaveFocus();
+    });
+
+    it("closes from its own chip as a toggle", async () => {
+      renderBar();
+      const chip = screen.getByRole("button", { name: /Analyzed through/ });
+      await userEvent.click(chip);
+      await userEvent.click(chip);
+      expect(screen.queryByRole("region", { name: "How fresh the data is" })).toBeNull();
+      expect(chip).toHaveAttribute("aria-expanded", "false");
     });
 
     it("states nothing about freshness while the agency has no data yet", () => {

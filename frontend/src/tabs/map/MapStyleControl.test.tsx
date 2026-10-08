@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import i18n from "../../i18n";
@@ -91,6 +91,36 @@ describe("MapStyleControl", () => {
     expect(chip).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(chip);
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on Escape and returns focus to the entry button", async () => {
+    renderControl();
+    const entry = screen.getByRole("button", { name: /Map style|Layers/ });
+    await userEvent.click(entry);
+    screen.getByRole("slider", { name: /dim/i }).focus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "Satellite" })).toBeNull();
+    expect(entry).toHaveAttribute("aria-expanded", "false");
+    expect(entry).toHaveFocus();
+  });
+
+  it("stays open through a press on the map behind it", async () => {
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /Map style|Layers/ }));
+    await userEvent.click(document.body);
+    expect(screen.getByRole("button", { name: "Satellite" })).toBeInTheDocument();
+  });
+
+  it("leaves an Escape to the tooltip open above it", async () => {
+    renderControl({ layers: [{ id: "relief", label: "Relief", hint: "Column height = average delay", on: false, onToggle: vi.fn(), icon: <span /> }] });
+    await userEvent.click(screen.getByRole("button", { name: /Map style|Layers/ }));
+    act(() => screen.getByRole("button", { name: /Relief/ }).focus());
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Column height = average delay");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(screen.getByRole("button", { name: "Satellite" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "Satellite" })).toBeNull();
   });
 });
 
