@@ -42,3 +42,16 @@ describe("PeriodChart draw-on", () => {
     expect(line.style.getPropertyValue("--len")).not.toBe(before);
   });
 });
+
+describe("PeriodChart date labels", () => {
+  it("leaves out the every-Nth label that would crowd the last day's", () => {
+    const days = Array.from({ length: 32 }, (_, i) => {
+      const d = new Date(Date.UTC(2026, 4, 1 + i));
+      return { date: d.toISOString().slice(0, 10), avg_min: 2, samples: 10, top_offenders: [] };
+    });
+    const { container } = renderWithProviders(<PeriodChart days={days} />);
+    const labels = [...container.querySelectorAll("text")].map((t) => t.textContent).filter((l) => /^\d\d-\d\d$/.test(l ?? ""));
+    expect(labels.at(-2)).toBe("05-26");
+    expect(labels.at(-1)).toBe("06-01");
+  });
+});

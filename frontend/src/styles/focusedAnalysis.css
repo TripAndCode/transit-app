@@ -55,7 +55,9 @@
 .focus-saved { list-style: none; padding: 0; }
 .focus-saved li { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; gap: 20px; border-bottom: 1px solid var(--border-soft); }
 /* BP.md */
-@media (max-width: 900px) { .focus-split { grid-template-columns: 1fr; } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
+/* minmax(0, ...): an auto minimum would let the chart's floor widen the
+   whole stacked page; only the chart scrolls sideways. */
+@media (max-width: 900px) { .focus-split { grid-template-columns: minmax(0, 1fr); } .focus-aside { border-left: 0; border-top: 1px solid var(--border-subtle); padding: 16px 0; } }
 /* Print rules for `.focus-page` and the app shell live in the shared print
    media block in styles/global.css, loaded on every page. */
 .marey__caption { margin: 0 0 6px; }

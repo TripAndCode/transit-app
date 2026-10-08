@@ -359,7 +359,7 @@ function ServiceSplitDailyChart({
           </span>
         );
       })}
-      </div>
+      {/* Inside the plot box it is measured against. */}
       {hover.visible && (
         <div
           className="ov-tooltip"
@@ -374,6 +374,7 @@ function ServiceSplitDailyChart({
             : ""}
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -528,8 +528,8 @@ table {
 /* The numeral face with tabular figures, on every figure the UI prints
    outside a table — hero values, stat tiles, chart labels, counters — so a
    value that counts up or updates in place keeps its width instead of
-   jittering. A table's numeric cells get them from tableStyles'
-   td({ align: "right" }). */
+   jittering. A table's numeric cells get tabular figures from
+   tableStyles' td({ align: "right" }) instead. */
 .num {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
@@ -932,4 +932,7 @@ summary::-webkit-details-marker { display: none; }
   main { overflow: visible !important; }
   .focus-page { color: black; }
   .focus-page svg { break-inside: avoid; }
+  /* A printed page cannot scroll, so a chart shrinks to it instead of
+     keeping its on-screen floor (focusedAnalysis.css) and being clipped. */
+  .focus-chart { min-width: 0; }
 }

@@ -24,6 +24,14 @@ describe("PeakHourRibbon", () => {
     expect(ticks).toHaveLength(4);
     expect(Array.from(ticks, (n) => n.textContent)).toEqual(["0", "6", "12", "18"]);
     expect(container.querySelector(".ov-peak-label--max")).not.toBeNull();
+  });
+
+  it("puts a late peak's label on the left of its callout, so it stays on the card", () => {
+    const by_hour = Array.from({ length: 24 }, (_, h) => (h === 22 ? 6 : 1));
+    const { container } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 22, peak_avg_min: 6 }} />);
+    expect(container.querySelector(".ov-peak-label--max")).toHaveClass("ov-peak-label--flip");
+    const early = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 8, peak_avg_min: 6 }} />);
+    expect(early.container.querySelector(".ov-peak-label--max")).not.toHaveClass("ov-peak-label--flip");
     expect(container.querySelector(".ov-peak-label--avg")).not.toBeNull();
     for (const label of container.querySelectorAll(".ov-peak-label")) expect(label).toHaveClass("num");
   });

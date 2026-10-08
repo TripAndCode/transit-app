@@ -3,10 +3,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Every duration goes through a --dur-* token (or --transition), because the
-// tokens are what prefers-reduced-motion zeroes: a literal `200ms` keeps
-// moving for a viewer who asked for no motion. `0s`/`0ms` and the `.01ms`
-// reduced-motion idiom are not motion and stay allowed.
+// Every duration goes through a --dur-* token (or --transition): the tokens
+// are the one motion scale, and the reduced-motion zeroing of them is the
+// only thing that reaches places the blanket `*` rule does not, such as
+// view-transition pseudo-elements. `0s`/`0ms` and the `.01ms` reduced-motion
+// idiom are not motion and stay allowed.
 const root = path.resolve(process.cwd(), "src");
 
 /** `file:selector` literals that are deliberate, each with its reason. */

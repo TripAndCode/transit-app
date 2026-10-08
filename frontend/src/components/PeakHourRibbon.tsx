@@ -5,6 +5,9 @@ import { dowValueLabel } from "../utils/filterValueLabels";
 import type { OverviewPeakHour } from "../api/types";
 import { formatMinutes, formatHourRange } from "../utils/format";
 
+/** From this hour on, the peak label sits left of its callout. */
+const LATE_PEAK_HOUR = 18;
+
 type Props = {
   peak_hour: OverviewPeakHour | null;
   /** Weekday-only profile, used by the modal split view. */
@@ -247,9 +250,14 @@ function PeakHourChart({
             {t("overview.peak_hour.avg_label")}
           </span>
         )}
+        {/* A late peak's label goes left of its callout, so it stays on a
+            narrow card instead of running past the chart's right edge. */}
         <span
-          className="ov-peak-label ov-peak-label--max num"
-          style={{ top: `${((peakBarY - 9) / H) * 100}%`, left: `${((peakBarX + CELL_W / 2 + 6) / W) * 100}%` }}
+          className={`ov-peak-label ov-peak-label--max num${peakIdx >= LATE_PEAK_HOUR ? " ov-peak-label--flip" : ""}`}
+          style={{
+            top: `${((peakBarY - 9) / H) * 100}%`,
+            left: `${((peakBarX + CELL_W / 2 + (peakIdx >= LATE_PEAK_HOUR ? -6 : 6)) / W) * 100}%`,
+          }}
         >
           {t("overview.peak_hour.max_label", { avg: peak_hour.peak_avg_min.toFixed(1) })}
         </span>

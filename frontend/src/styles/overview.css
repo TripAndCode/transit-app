@@ -224,6 +224,7 @@
   white-space: nowrap;
 }
 .ov-peak-label--max { color: var(--trend-bad); font-weight: 600; }
+.ov-peak-label--flip { transform: translateX(-100%); }
 .ov-peak-label--tick { bottom: 0; transform: translate(-50%, 0); }
 /* Plain fallback first: an engine without color-mix() would otherwise
    resolve `fill` to its initial value (black), not transparent. */
