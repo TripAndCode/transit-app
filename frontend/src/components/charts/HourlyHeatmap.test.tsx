@@ -85,3 +85,14 @@ describe("HourlyHeatmap ramp", () => {
     expect((cellAt(container, "2026-06-01", 8) as SVGElement).style.fill).toBe("var(--accent)");
   });
 });
+
+describe("HourlyHeatmap hour labels", () => {
+  it("gives each hour a row at least as tall as its 12px label, so the 24 labels never overlap", () => {
+    const { container } = renderHeatmap([{ date: "2026-05-18", hour: 8, avg_min: 2, samples: 100 }]);
+    const ys = Array.from({ length: 24 }, (_, h) => {
+      const label = [...container.querySelectorAll("svg text")].find((n) => n.textContent === String(h) && n.getAttribute("text-anchor") === "end");
+      return Number(label!.getAttribute("y"));
+    });
+    for (let h = 1; h < 24; h++) expect(ys[h] - ys[h - 1]).toBeGreaterThanOrEqual(12);
+  });
+});

@@ -263,7 +263,7 @@ export function MareyDiagram({
                       x={timeToX(sec, viewWindow, PLOT)}
                       y={PLOT.top + PLOT.height + 18}
                       textAnchor="middle"
-                      fontSize={11}
+                      fontSize={12}
                       fill="var(--text-secondary)"
                     >
                       {formatClock(sec)}
@@ -276,7 +276,7 @@ export function MareyDiagram({
                     <g key={stop.stop_sequence}>
                       <line x1={PLOT.left} y1={y} x2={PLOT.left + PLOT.width} y2={y} stroke="var(--border-soft)" />
                       {(index % labelStep === 0 || index === axis.length - 1) && (
-                        <text x={PLOT.left - 10} y={y + 4} textAnchor="end" fontSize={11} fill="var(--text-secondary)">
+                        <text x={PLOT.left - 10} y={y + 4} textAnchor="end" fontSize={12} fill="var(--text-secondary)">
                           {stop.stop_name}
                         </text>
                       )}

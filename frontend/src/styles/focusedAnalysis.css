@@ -61,7 +61,10 @@
 /* Print rules for `.focus-page` and the app shell live in the shared print
    media block in styles/global.css, loaded on every page. */
 .marey__caption { margin: 0 0 6px; }
-.marey__chart { width: 100%; height: 340px; min-height: 260px; }
+/* The 780-unit viewBox never draws narrower than 780px, so its 12-unit labels
+   stay at 12px or more; a narrower column scrolls the diagram instead. */
+.marey__scroll { overflow-x: auto; }
+.marey__chart { width: 100%; min-width: 780px; height: 340px; min-height: 260px; }
 /* The hit target is a fat invisible stroke over the visible legs, so a trip
    can be picked up anywhere along its line rather than only on the 2px ink. */
 .marey-trip__hit { cursor: pointer; }
@@ -92,13 +95,6 @@
 .marey__table--hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .marey__table caption { text-align: left; padding: 0 0 8px; color: var(--text-secondary); font-size: 13px; }
 .stop-ribbon { width: 100%; height: 20px; display: block; margin-bottom: 8px; }
-/* BP.sm — a 780-unit viewBox squeezed into a phone-width column renders the
-   11px axis labels at roughly half size, so below this width the diagram
-   scrolls at a legible width instead of scaling down to fit. */
-@media (max-width: 640px) {
-  .marey__scroll { overflow-x: auto; }
-  .marey__chart { min-width: 560px; }
-}
 .focus-breadcrumb { margin: 0 0 6px; font-size: var(--text-sm); color: var(--text-tertiary); }
 .focus-breadcrumb a { color: var(--text-secondary); }
 .focus-subtitle { margin: 4px 0 0; }

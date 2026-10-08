@@ -97,7 +97,6 @@ export function ConcentrationBar({
               height={48}
               accent="var(--trend-neutral)"
               forceAccent
-              showLabels={false}
               showEndDot
               drawOn={false}
             />

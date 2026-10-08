@@ -126,7 +126,6 @@ export function InspectCard({ trip, routeName, vehicles, progress, pinned, onPin
               height={46}
               accent="var(--accent)"
               forceAccent
-              showLabels={false}
               style={{ display: "block", width: "100%", verticalAlign: "baseline" }}
             />
             <small>{t("operations.inspect.hourly_trend")}</small>

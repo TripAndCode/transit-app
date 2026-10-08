@@ -16,6 +16,9 @@ export type HourlyCell = {
 
 type Props = { cells: HourlyCell[]; height?: number };
 
+/** The hour and date labels' size, which is also each hour row's minimum height. */
+const HOUR_LABEL_PX = 12;
+
 // Hour ranges that map a clicked row to a time-band filter value.
 const HOUR_TO_BAND: { hours: [number, number]; band: TimeBand }[] = [
   { hours: [0, 4], band: "late_night" },
@@ -78,8 +81,9 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
   const padL = 38;
   const padT = 12;
   const padB = 28;
-  const innerH = height - padT - padB;
-  const cellH = innerH / 24;
+  // Each hour's row is at least as tall as its label, so the 24 never overlap.
+  const cellH = Math.max(HOUR_LABEL_PX, (height - padT - padB) / 24);
+  const chartHeight = padT + padB + 24 * cellH;
   const innerW = Math.max(360, dates.length * 14);
   const cellW = innerW / dates.length;
 
@@ -157,13 +161,13 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
         )}
       </div>
       <div style={{ overflowX: "auto" }}>
-      <svg width={padL + innerW + 8} height={height} role="img" aria-label={t("reports.heatmap.svg_aria")}>
+      <svg width={padL + innerW + 8} height={chartHeight} role="img" aria-label={t("reports.heatmap.svg_aria")}>
         {Array.from({ length: 24 }, (_, h) => (
           <text
             key={`h-${h}`}
             x={padL - 6}
             y={padT + h * cellH + cellH / 2 + 4}
-            fontSize="10"
+            fontSize={HOUR_LABEL_PX}
             fill="var(--text-tertiary)"
             textAnchor="end"
             style={{ cursor: bandFor(h) ? "pointer" : "default" }}
@@ -182,8 +186,8 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
             <text
               key={`d-${d}`}
               x={padL + i * cellW + cellW / 2}
-              y={height - 8}
-              fontSize="10"
+              y={chartHeight - 8}
+              fontSize={HOUR_LABEL_PX}
               fill="var(--text-tertiary)"
               textAnchor="middle"
               style={{ cursor: "pointer" }}
