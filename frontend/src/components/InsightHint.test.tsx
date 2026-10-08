@@ -35,6 +35,23 @@ describe("InsightHint", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("closes from its own button as a toggle, without reopening on the same press", async () => {
+    renderHint();
+    const trigger = screen.getByRole("button", { name: "Hint" });
+    await userEvent.click(trigger);
+    await userEvent.click(trigger);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("leaves focus where an outside click put it", async () => {
+    renderHint();
+    await userEvent.click(screen.getByRole("button", { name: "Hint" }));
+    const elsewhere = screen.getByRole("button", { name: "elsewhere" });
+    await userEvent.click(elsewhere);
+    expect(elsewhere).toHaveFocus();
+  });
+
   it("closes on Escape and hands focus back to its button", async () => {
     renderHint();
     const trigger = screen.getByRole("button", { name: "Hint" });

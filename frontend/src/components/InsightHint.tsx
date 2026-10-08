@@ -1,8 +1,8 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useTopmostEscape } from "../hooks/useFocusTrap";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 import { Z_INDEX } from "../styles/zIndex";
 import { usePortalPlacement } from "./usePortalPlacement";
 
@@ -28,21 +28,15 @@ export function InsightHint({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  useTopmostEscape(open, () => {
-    setOpen(false);
-    triggerRef.current?.focus();
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    function onDoc(e: MouseEvent) {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+  usePopoverDismiss(
+    open,
+    popoverRef,
+    (reason) => {
       setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+      if (reason === "escape") triggerRef.current?.focus();
+    },
+    triggerRef,
+  );
 
   usePortalPlacement(open, () => triggerRef.current?.getBoundingClientRect(), popoverRef, "bottom");
 
