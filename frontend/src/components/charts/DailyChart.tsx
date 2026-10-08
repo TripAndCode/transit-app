@@ -44,7 +44,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
     rawDrag != null && rawDrag.anchor < days.length && rawDrag.head < days.length ? rawDrag : null;
   const W = 760;
   const H = height;
-  const padL = 56;
+  const padL = 64;
   const padR = 12;
   const padT = 12;
   const padB = 28;
@@ -233,7 +233,7 @@ export function DailyChart({ days, height = 240, revisionBoundaries = [], brusha
             return (
               <g key={value}>
                 <line x1={padL} x2={W - padR} y1={y} y2={y} stroke="var(--border-soft)" strokeDasharray="2 4" />
-                <text data-testid="daily-grid-label" x={6} y={y + 4} fontSize="12" fill="var(--text-tertiary)">
+                <text data-testid="daily-grid-label" x={padL - 6} y={y + 4} textAnchor="end" fontSize="12" fill="var(--text-tertiary)">
                   {formatMinutes(value)}
                 </text>
               </g>
