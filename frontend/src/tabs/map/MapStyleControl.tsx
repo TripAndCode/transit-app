@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type { Map as MLMap } from "maplibre-gl";
 import { buildThumbnailUrl, DEFAULT_THUMBNAIL_VIEW, MAP_STYLES, MAX_DIM_AMOUNT, type MapStyleId } from "../../styles/mapStyle";
 import { Tooltip } from "../../components/Tooltip";
+import { useTopmostEscape } from "../../hooks/useFocusTrap";
 
 const THUMB_PX = 44;
 
@@ -60,6 +61,7 @@ export function MapStyleControl({
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(DEFAULT_THUMBNAIL_VIEW);
+  const entryRef = useRef<HTMLButtonElement>(null);
   const current = MAP_STYLES.find((s) => s.id === value) ?? MAP_STYLES[0];
 
   // Reads the map's current view (an imperative MapLibre instance, not React
@@ -80,6 +82,13 @@ export function MapStyleControl({
     setOpen(next);
   }
 
+  // Escape only: the panel is non-modal over a map that stays draggable, so
+  // a press on the map leaves it open.
+  useTopmostEscape(open, () => {
+    setOpenSamplingView(false);
+    entryRef.current?.focus();
+  });
+
   const dimPercent = Math.round(dimAmount * 100);
   const maxDimPercent = Math.round(MAX_DIM_AMOUNT * 100);
 
@@ -87,6 +96,7 @@ export function MapStyleControl({
     <div className="ops-style-control">
       {/* Entry button: current-style thumbnail + "Layers" — Google-style affordance. */}
       <button
+        ref={entryRef}
         type="button"
         className="ops-style-control__entry map-chrome"
         aria-label={t("map.style.label")}

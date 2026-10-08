@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTodayRouteSummary } from "../api/hooks";
-import { useTopmostEscape } from "../hooks/useFocusTrap";
+import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 import { EM_DASH, FILTER_SEPARATOR, formatDate, formatDateTime, formatNumber, formatReportTime } from "../utils/format";
 import { isToday } from "../utils/threadDateBuckets";
 
@@ -17,19 +17,10 @@ export function DataFreshness({ agencyId, through }: { agencyId: number; through
   const { data } = useTodayRouteSummary(agencyId, { autoRefresh: false });
   const lastReading = data?.latest_captured_at ?? null;
 
-  useTopmostEscape(open, () => {
+  usePopoverDismiss(open, wrapper, (reason) => {
     setOpen(false);
-    chip.current?.focus();
+    if (reason === "escape") chip.current?.focus();
   });
-
-  useEffect(() => {
-    if (!open) return;
-    function onMouseDown(e: MouseEvent) {
-      if (!wrapper.current?.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onMouseDown);
-    return () => document.removeEventListener("mousedown", onMouseDown);
-  }, [open]);
 
   const analyzed = t("topbar.analyzed_through", { date: formatDate(through, { year: false, weekday: true }) });
   const live =
