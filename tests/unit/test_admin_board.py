@@ -13,6 +13,7 @@ from api.admin_board import (
     CLAMP_ALERT_PCT,
     COLLECTOR_ORDER,
     GROUPED_ALERT_MIN,
+    alert_key,
     board_alerts,
     board_freshness,
     board_window,
@@ -309,3 +310,20 @@ def test_unparseable_last_success_degrades_to_an_empty_history():
     tiles = {t["key"]: t for t in collector_tiles(docs, NOW)}
     assert tiles["github"]["history"] == [0] * 24
     assert tiles["github"]["status"] == "ok"
+
+
+def _alert(**overrides):
+    alert = {"level": "warn", "code": "agency_stale", "params": {"agency": "Hokuriku", "days": 2}, "href": "/admin/ops"}
+    return {**alert, **overrides}
+
+
+def test_an_alert_key_is_the_same_for_the_same_alert_and_reads_as_16_hex():
+    key = alert_key(_alert())
+    assert key == alert_key(_alert(params={"days": 2, "agency": "Hokuriku"}))
+    assert len(key) == 16 and int(key, 16) >= 0
+
+
+def test_an_alert_whose_figure_changes_gets_a_new_key():
+    assert alert_key(_alert()) != alert_key(_alert(params={"agency": "Hokuriku", "days": 3}))
+    assert alert_key(_alert()) != alert_key(_alert(level="info"))
+    assert alert_key(_alert()) != alert_key(_alert(href=None))

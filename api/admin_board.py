@@ -19,6 +19,8 @@ Two invariants the helpers encode:
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 from zoneinfo import ZoneInfo
@@ -118,6 +120,20 @@ def board_freshness(rows: Iterable[Mapping[str, Any]], today: date) -> list[dict
             days.append({"date": day.isoformat(), "state": state, "clamp_pct": round(clamp * 100 / raw, 2)})
         out.append({"agency_id": aid, "agency_name": entry["agency_name"], "days": days})
     return out
+
+
+def alert_key(alert: Mapping[str, Any]) -> str:
+    """The identity an operator acknowledges: 16 hex digits over the alert's
+    level, code, params and link, independent of any reader's language. An
+    alert whose figure changes gets a new key, so it reads as new again."""
+    identity = json.dumps(
+        [alert["level"], alert["code"], alert["params"], alert["href"]],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
+    return hashlib.sha256(identity.encode()).hexdigest()[:16]
 
 
 def board_alerts(
