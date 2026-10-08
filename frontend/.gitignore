@@ -1,5 +1,7 @@
 node_modules
 dist
+# vitest's raw coverage data, left behind when a run is interrupted
+/coverage/
 *.log
 .vite
 *.tsbuildinfo
