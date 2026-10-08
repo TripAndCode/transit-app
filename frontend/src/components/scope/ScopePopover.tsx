@@ -1,5 +1,5 @@
-import { useEffect, useEffectEvent, useRef, type ReactNode, type RefObject } from "react";
-import { useTopmostEscape } from "../../hooks/useFocusTrap";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import { popoverLeft } from "./popoverPosition";
 
 /** A condition's popover. Focus moves in on open. Escape closes it and hands
@@ -21,12 +21,16 @@ export function ScopePopover({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const close = useEffectEvent(onClose);
 
-  useTopmostEscape(true, () => {
-    onClose();
-    returnFocusTo.current?.focus();
-  });
+  usePopoverDismiss(
+    true,
+    ref,
+    (reason) => {
+      onClose();
+      if (reason === "escape") returnFocusTo.current?.focus();
+    },
+    returnFocusTo,
+  );
 
   useEffect(() => {
     const node = ref.current;
@@ -39,13 +43,6 @@ export function ScopePopover({
       node.style.left = `${popoverLeft(a.left - b.left, node.offsetWidth, b.width)}px`;
     }
     node?.querySelector<HTMLElement>("button, input, select, textarea")?.focus();
-    function onMouseDown(e: MouseEvent) {
-      const target = e.target as Node;
-      if (ref.current?.contains(target) || returnFocusTo.current?.contains(target)) return;
-      close();
-    }
-    document.addEventListener("mousedown", onMouseDown);
-    return () => document.removeEventListener("mousedown", onMouseDown);
   }, [returnFocusTo]);
 
   return (
