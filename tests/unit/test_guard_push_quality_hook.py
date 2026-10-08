@@ -177,15 +177,36 @@ def _frontend_gate_block() -> str:
     return text[start:end]
 
 
+#: npm scripts CI's frontend job runs that this gate deliberately does not,
+#: each with the hook header's reason; the header names them.
+_CI_ONLY_SCRIPTS = {
+    "test:coverage": "the gate runs `npm run test`, without the coverage thresholds",
+    "check:react-compiler": "a full compile of every source file, beyond the frontend steps' time budget",
+}
+
+
+def _ci_frontend_scripts() -> set[str]:
+    """Every `npm run <script>` in CI's frontend job, read from ci.yml."""
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    start = text.index("\n  frontend:\n")
+    following = re.search(r"\n  [a-z][a-z-]*:\n", text[start + 1 :])
+    job = text[start : start + 1 + following.start()] if following else text[start:]
+    return set(re.findall(r"npm run ([\w:-]+)", job))
+
+
 def test_frontend_gate_runs_every_check_ci_runs():
-    """The local push gate must not silently omit a check CI enforces --
-    CI added deadcode, the CSS-tokens checker's own unit tests, and the
-    CSS-tokens static scan (frontend/.github/workflows/ci.yml), and this
-    gate is the only local signal for a push made from a worktree (see the
-    module docstring in the hook itself)."""
+    """The local push gate must not silently omit a check CI enforces: it is
+    the only local signal for a push made from a worktree (see the module
+    docstring in the hook itself). The list is CI's own, so a new CI step
+    fails here until the gate runs it or the header says why it does not."""
     block = _frontend_gate_block()
-    for script in ("npm run deadcode", "npm run test:check-css-tokens", "npm run check:css-tokens"):
-        assert script in block, f"{script} missing from the RUN_FRONTEND gate block"
+    scripts = _ci_frontend_scripts()
+    assert {"typecheck", "lint", "deadcode", "check:css-tokens"} <= scripts, "ci.yml's frontend job was not read"
+    for script in sorted(scripts - set(_CI_ONLY_SCRIPTS)):
+        assert f"npm run {script}" in block, f"npm run {script} missing from the RUN_FRONTEND gate block"
+    header = HOOK_PATH.read_text().split("\n\n", 1)[0]
+    for script in _CI_ONLY_SCRIPTS:
+        assert script in header, f"{script} runs in CI only, but the hook header does not say so"
 
 
 def _deadcode_classifier() -> str:
