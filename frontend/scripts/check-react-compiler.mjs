@@ -18,16 +18,27 @@ const require = createRequire(import.meta.url);
 const babel = require("@babel/core");
 const compilerPlugin = require.resolve("babel-plugin-react-compiler");
 
-/** The compiler's errors for one file's source, as `{ line, reason }`. */
+/** A logger event that means a function was skipped, as `{ line, reason }`,
+ *  or null. `CompileError` is the compiler's own diagnosis; `PipelineError`
+ *  is an exception it did not anticipate, which skips the function as well. */
+export function skippedFunction(event) {
+  if (event.kind === "PipelineError") {
+    return { line: event.fnLoc?.start?.line ?? null, reason: `compiler crashed: ${String(event.data ?? "unknown")}` };
+  }
+  if (event.kind !== "CompileError") return null;
+  const detail = event.detail ?? {};
+  const options = detail.options ?? {};
+  const loc = detail.loc ?? options.loc ?? event.fnLoc;
+  return { line: loc?.start?.line ?? null, reason: detail.reason ?? options.reason ?? "unknown" };
+}
+
+/** The functions the compiler skips in one file's source, as `{ line, reason }`. */
 export function compilerErrors(code, filename) {
   const errors = [];
   const logger = {
     logEvent(_file, event) {
-      if (event.kind !== "CompileError") return;
-      const detail = event.detail ?? {};
-      const options = detail.options ?? {};
-      const loc = detail.loc ?? options.loc ?? event.fnLoc;
-      errors.push({ line: loc?.start?.line ?? null, reason: detail.reason ?? options.reason ?? "unknown" });
+      const skipped = skippedFunction(event);
+      if (skipped) errors.push(skipped);
     },
   };
   babel.transformSync(code, {

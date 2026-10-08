@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { compilerErrors, sourceFiles } from "../../frontend/scripts/check-react-compiler.mjs";
+import { compilerErrors, skippedFunction, sourceFiles } from "../../frontend/scripts/check-react-compiler.mjs";
 
 const FRONTEND = fileURLToPath(new URL("../../frontend", import.meta.url));
 
@@ -55,4 +55,11 @@ test("scans the files directly under src as well as nested ones, and no tests", 
   assert.ok(files.includes("src/main.tsx"));
   assert.ok(files.includes("src/components/ExportMenu.tsx"));
   assert.ok(!files.some((f) => /\.test\.tsx?$|\.d\.ts$/.test(f)));
+});
+
+test("counts a compiler crash as a skipped function, and a success or a skip of a non-component as none", () => {
+  const crash = skippedFunction({ kind: "PipelineError", fnLoc: { start: { line: 9 } }, data: "TypeError: boom" });
+  assert.deepEqual(crash, { line: 9, reason: "compiler crashed: TypeError: boom" });
+  assert.equal(skippedFunction({ kind: "CompileSuccess" }), null);
+  assert.equal(skippedFunction({ kind: "CompileSkip" }), null);
 });
