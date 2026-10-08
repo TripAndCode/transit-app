@@ -10,7 +10,8 @@ aggregates, and application data live in Postgres/PostGIS.
 ### Requirements
 
 - Python 3.11+ (CI and the production image run the same minor version; see `Dockerfile`)
-- [Poetry](https://python-poetry.org/)
+- [Poetry](https://python-poetry.org/) 2.5+ (`requires-poetry` in `pyproject.toml`;
+  `poetry self update` upgrades an older install)
 - Docker Desktop
 - An LLM provider API key (Gemini by default; see `CHAT_PROVIDERS`). The API
   refuses to start without one; any non-empty value boots it, but LLM-backed

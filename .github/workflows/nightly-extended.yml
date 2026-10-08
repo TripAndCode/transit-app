@@ -56,7 +56,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install Poetry
-        run: pip install poetry==1.8.5
+        run: pip install poetry==2.5.1
 
       # `--with embeddings`: that group is optional (pyproject.toml keeps torch
       # et al out of the deploy image), and this job is the one that sets
@@ -194,7 +194,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install Poetry
-        run: pip install poetry==1.8.5
+        run: pip install poetry==2.5.1
 
       - name: Install dependencies (including the optional embeddings group)
         run: poetry install --with embeddings
