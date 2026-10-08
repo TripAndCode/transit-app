@@ -8,13 +8,13 @@ import { TimeTab } from "./TimeTab";
 import { WhyTab } from "./WhyTab";
 
 vi.mock("../routes/lazyTabs", () => ({
-  // NetworkTab titles itself; the stand-in keeps that heading so the count
-  // of level-1 headings on Compare by agencies is the real one.
+  // NetworkTab titles its board with a level-2 heading (NetworkTab.test
+  // pins that); the stand-in keeps it so the heading counts here are real.
   loadNetworkTab: () =>
     Promise.resolve({
       default: () => (
         <div>
-          <h1>Compare agencies</h1>network-tab
+          <h2>Compare agencies</h2>network-tab
         </div>
       ),
     }),
@@ -53,7 +53,7 @@ describe("destination screens", () => {
 
   it.each([
     ["?by=periods", /^analysis-tab/, "Compare"],
-    ["?by=agencies", /network-tab/, "Compare agencies"],
+    ["?by=agencies", /network-tab/, "Compare"],
   ])("has exactly one level-1 heading on Compare%s", async (search, content, title) => {
     open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
     await screen.findByText(content);
@@ -62,12 +62,15 @@ describe("destination screens", () => {
     expect(headings[0]).toHaveTextContent(title);
   });
 
-  it("keeps the Compare title above the mode toggle", async () => {
-    open("/agencies/9/compare", "agencies/:agencyId/compare", <CompareTab />);
-    await screen.findByText(/^analysis-tab/);
+  it.each([
+    ["?by=periods", /^analysis-tab/],
+    ["?by=agencies", /network-tab/],
+  ])("keeps the same title directly above the mode toggle on Compare%s, so switching modes does not move it", async (search, content) => {
+    open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
+    await screen.findByText(content);
     const heading = screen.getByRole("heading", { level: 1, name: "Compare" });
     const toggle = screen.getByRole("group", { name: "Compare" });
-    expect(heading.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(heading.closest("header")?.nextElementSibling).toBe(toggle);
   });
 
   it("shows the agencies board on Compare by agencies and switches back to periods", async () => {

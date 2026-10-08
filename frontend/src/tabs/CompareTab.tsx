@@ -25,9 +25,9 @@ export function CompareTab() {
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* NetworkTab carries its own h1 on the agencies board, so the screen
-          title is rendered for the period comparison only: one h1 either way. */}
-      {mode === "periods" && <PageHeader title={t("nav.compare")} />}
+      {/* One header for both modes, so the toggle under it stays put when the
+          mode switches. The agencies board titles itself as a section. */}
+      <PageHeader title={t("nav.compare")} />
       <div
         role="group"
         aria-label={t("nav.compare")}

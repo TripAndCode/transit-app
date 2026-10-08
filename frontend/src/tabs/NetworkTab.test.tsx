@@ -52,6 +52,16 @@ describe("NetworkTab", () => {
   // their starting locale.
   afterAll(async () => await i18n.changeLanguage("en"));
 
+  it("titles the agencies board as a section of the Compare page, which owns the level-1 heading", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: { from: "2026-04-01", to: "2026-04-07", definition, agencies: [row({ agency_id: 1, agency_name: "Hiroden" })] },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "Compare agencies" })).toBeInTheDocument();
+  });
+
   it("renders one row per agency with stale badge, no-data dash, clamp % dot", () => {
     vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
       data: {
