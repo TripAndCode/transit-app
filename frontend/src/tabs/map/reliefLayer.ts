@@ -23,6 +23,11 @@ const M_PER_DEG_LON_AT_EQUATOR = 111_320;
  *  zoom the footprint shrinks to a pixel or two and the vehicle dot standing
  *  on it covers it whole. */
 const MIN_HALF_SIDE_PX = 4;
+/** Below this zoom a column stops growing and shrinks with the map. Further
+ *  out, a region's stops crowd within a few pixels of each other, where
+ *  growing columns would only merge into one block and stand kilometres
+ *  tall in the scene. */
+const RELIEF_SCALE_MIN_ZOOM = 10;
 const EARTH_CIRCUMFERENCE_M = 40_075_016.686;
 /** MapLibre's world is this many pixels wide at zoom 0. */
 const WORLD_PX_AT_ZOOM_0 = 512;
@@ -38,11 +43,13 @@ export function reliefHeight(delayMin: number): number {
 }
 
 /** How much to enlarge every column at `zoom`: 1 at street zoom, and below it
- *  enough to keep a column `MIN_HALF_SIDE_PX` wide. Footprint and height grow
- *  by the same factor, so a column keeps its shape and the heights keep their
- *  ratios -- height still reads as delay, compared across the map. */
+ *  enough to keep a column `MIN_HALF_SIDE_PX` wide, down to
+ *  `RELIEF_SCALE_MIN_ZOOM`. Footprint and height grow by the same factor, so a
+ *  column keeps its shape and the heights keep their ratios -- height still
+ *  reads as delay, compared across the map. */
 export function reliefScale(zoom: number, lat: number): number {
-  const metresPerPx = (EARTH_CIRCUMFERENCE_M * Math.cos((lat * Math.PI) / 180)) / (WORLD_PX_AT_ZOOM_0 * 2 ** zoom);
+  const z = Math.max(zoom, RELIEF_SCALE_MIN_ZOOM);
+  const metresPerPx = (EARTH_CIRCUMFERENCE_M * Math.cos((lat * Math.PI) / 180)) / (WORLD_PX_AT_ZOOM_0 * 2 ** z);
   return Math.max(1, (MIN_HALF_SIDE_PX * metresPerPx) / RELIEF_HALF_SIDE_M);
 }
 

@@ -56,6 +56,12 @@ describe("reliefScale", () => {
     }
   });
 
+  it("stops growing below the zoom where a region's stops crowd together, so a column never stands kilometres tall", () => {
+    expect(reliefScale(8, 35.7)).toBe(reliefScale(10, 35.7));
+    expect(reliefScale(2, 35.7)).toBe(reliefScale(10, 35.7));
+    expect(reliefScale(10, 35.7)).toBeGreaterThan(reliefScale(11, 35.7));
+  });
+
   it("scales height with the footprint, so one column's height against another's still reads as their delays", () => {
     const points = [
       { stop_id: "A", lon: 139.7, lat: 35.7, delay_min: 1 },
