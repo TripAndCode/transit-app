@@ -46,7 +46,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from pydantic import BaseModel, Field, field_validator
 
 from api.admin_audit import record_admin_action
-from api.admin_board import board_alerts, board_freshness, board_window, collector_tiles
+from api.admin_board import alert_key, board_alerts, board_freshness, board_window, collector_tiles
 from api.admin_runs import (
     INSERT_MANUAL_RUN_SQL,
     LIVE_AGENCY_SQL,
@@ -1309,6 +1309,10 @@ class BoardAlertOut(BaseModel):
     params: dict[str, Any]
     text: str
     href: str | None
+    #: `api.admin_board.alert_key`: what an acknowledgement is stored under.
+    key: str
+    #: Whether any admin acknowledged this alert within the last week.
+    acked: bool
 
 
 class PipelineRunOut(BaseModel):
@@ -1632,6 +1636,68 @@ async def _board_agency_freshness(conn: asyncpg.Connection, ch: AsyncClient) -> 
     return answer
 
 
+#: How long an acknowledgement keeps an alert out of the unread count.
+ALERT_ACK_TTL = timedelta(days=7)
+_ALERT_KEY_RE = re.compile(r"[0-9a-f]{16}")
+
+
+async def _acked_alert_keys(conn: asyncpg.Connection, keys: list[str]) -> set[str]:
+    """The keys in ``keys`` some admin acknowledged within ``ALERT_ACK_TTL``.
+    A board with no alerts, the usual state, reads nothing."""
+    if not keys:
+        return set()
+    rows = await conn.fetch(
+        "SELECT alert_key FROM admin_alert_acks WHERE alert_key = ANY($1::text[]) AND expires_at > now()",
+        keys,
+    )
+    return {row["alert_key"] for row in rows}
+
+
+@router.post("/board/alerts/{key}/ack", status_code=204)
+async def ack_board_alert(
+    key: str,
+    request: Request,
+    admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> Response:
+    """Acknowledge one board alert for every admin, for ``ALERT_ACK_TTL``.
+
+    Keyed by ``alert_key``, not by a row id: the board derives its alerts on
+    each read, so the key is the only identity an alert has. Acknowledging
+    again renews the window. Expired rows are dropped on each write, so the
+    table holds about a week of acknowledgements at most.
+    """
+    csrf_guard(request)
+    if not _ALERT_KEY_RE.fullmatch(key):
+        raise HTTPException(status_code=422, detail="not an alert key")
+    async with conn.transaction():
+        await conn.execute("DELETE FROM admin_alert_acks WHERE expires_at <= now()")
+        expires_at = await conn.fetchval(
+            """
+            INSERT INTO admin_alert_acks (alert_key, acked_by, acked_at, expires_at)
+            VALUES ($1, $2, now(), now() + $3::interval)
+            ON CONFLICT (alert_key) DO UPDATE
+            SET acked_by = EXCLUDED.acked_by,
+                acked_at = EXCLUDED.acked_at,
+                expires_at = EXCLUDED.expires_at
+            RETURNING expires_at
+            """,
+            key,
+            admin.user_id,
+            ALERT_ACK_TTL,
+        )
+        await record_admin_action(
+            conn,
+            actor_id=admin.user_id,
+            action="board_alert.ack",
+            target_type="board_alert",
+            target_id=key,
+            after={"expires_at": expires_at.isoformat()},
+            ip=request.client.host if request.client else None,
+        )
+    return Response(status_code=204)
+
+
 @router.get("/board", response_model=AdminBoard)
 async def admin_board(
     _admin: User = Depends(require_admin),
@@ -1674,10 +1740,16 @@ async def admin_board(
         migrations=migrations,
         pending_llm_approvals=pending_llm_approvals,
     )
+    keys = [alert_key(alert) for alert in alerts]
+    try:
+        acked = await _acked_alert_keys(conn, keys)
+    except Exception:
+        _log.warning("board: alert acknowledgements unavailable", exc_info=True)
+        acked = set()
     return AdminBoard(
         collectors=[CollectorTileOut(**tile) for tile in collectors],
         freshness=[AgencyFreshnessRowOut(**row) for row in freshness],
         migrations=mig,
-        alerts=[BoardAlertOut(**alert) for alert in alerts],
+        alerts=[BoardAlertOut(**alert, key=key, acked=key in acked) for alert, key in zip(alerts, keys, strict=True)],
         runs=[PipelineRunOut(**run) for run in await _runs_for_day(conn, today)],
     )

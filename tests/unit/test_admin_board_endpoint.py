@@ -62,14 +62,22 @@ _RUN_ROWS = [
 class _Conn:
     """Fake asyncpg connection answering each of the board's queries by shape."""
 
-    def __init__(self, *, approvals=0, join_error=None, agency_error=None, fetchval_error=None):
+    def __init__(
+        self, *, approvals=0, join_error=None, agency_error=None, fetchval_error=None, acks=(), acks_error=None
+    ):
         self.approvals = approvals
+        self.acks = list(acks)
+        self.acks_error = acks_error
         self.join_error = join_error
         self.agency_error = agency_error
         self.fetchval_error = fetchval_error
         self.freshness_args: tuple = ()
 
     async def fetch(self, sql, *args):
+        if "admin_alert_acks" in sql:
+            if self.acks_error is not None:
+                raise self.acks_error
+            return [{"alert_key": key} for key in self.acks if key in args[0]]
         if "schema_migrations" in sql:
             return [{"version": "0001"}]
         if "pipeline_runs" in sql:
@@ -239,6 +247,34 @@ def test_pending_approvals_surface_as_an_info_alert():
     alerts = {a["code"]: a for a in _client(_Conn(approvals=2)).get("/api/admin/board").json()["alerts"]}
     assert alerts["llm_approvals_pending"]["level"] == "info"
     assert alerts["llm_approvals_pending"]["params"]["count"] == 2
+
+
+def test_every_alert_carries_its_key_and_whether_an_operator_acknowledged_it():
+    from api.admin_board import alert_key
+
+    first = {a["code"]: a for a in _client(_Conn(approvals=2)).get("/api/admin/board").json()["alerts"]}
+    pending = first["llm_approvals_pending"]
+    assert pending["key"] == alert_key(pending)
+    assert pending["acked"] is False
+    again = {
+        a["code"]: a
+        for a in _client(_Conn(approvals=2, acks=[pending["key"]])).get("/api/admin/board").json()["alerts"]
+    }
+    assert again["llm_approvals_pending"]["acked"] is True
+
+
+def test_no_alerts_need_no_acknowledgement_query():
+    class _NoQuery:
+        async def fetch(self, sql, *args):
+            raise AssertionError("queried acknowledgements with no alerts to look up")
+
+    assert asyncio.run(admin_router._acked_alert_keys(_NoQuery(), [])) == set()
+
+
+def test_an_unreadable_acknowledgement_table_leaves_every_alert_unacknowledged():
+    body = _client(_Conn(approvals=2, acks_error=RuntimeError("no table"))).get("/api/admin/board").json()
+    assert body["alerts"]
+    assert all(a["acked"] is False for a in body["alerts"])
 
 
 def test_staleness_alerts_come_from_the_check_ops_reads(monkeypatch):

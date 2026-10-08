@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -7,7 +7,6 @@ import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import type { AdminBoard } from "../../api/admin";
 import { AlertCenter } from "./AlertCenter";
-import { hashAlertKey } from "./ackedAlerts";
 
 const WARN_ALERT = {
   level: "warn" as const,
@@ -15,6 +14,8 @@ const WARN_ALERT = {
   params: { agency: "Toyama Bayline", days: 3 },
   text: "Toyama Bayline: aggregates 3 day(s) behind",
   href: "/admin/ops",
+  key: "warnkey000000001",
+  acked: false,
 };
 
 const INFO_ALERT = {
@@ -23,10 +24,13 @@ const INFO_ALERT = {
   params: { count: 2 },
   text: "2 user(s) awaiting AI access approval",
   href: "/admin/users",
+  key: "infokey000000002",
+  acked: false,
 };
 
 let mockBoard: { data?: AdminBoard; isPending?: boolean; error?: Error | null; dataUpdatedAt?: number };
 const boardOptions: unknown[] = [];
+const ackAlert = vi.fn<(key: string) => Promise<void>>();
 
 vi.mock("../../api/admin", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api/admin")>()),
@@ -34,6 +38,7 @@ vi.mock("../../api/admin", async (importOriginal) => ({
     boardOptions.push(options);
     return mockBoard;
   },
+  useAckBoardAlert: () => ({ mutateAsync: ackAlert }),
 }));
 
 function GoTo({ to }: { to: string }) {
@@ -87,8 +92,9 @@ async function openPopover() {
 }
 
 beforeEach(() => {
-  localStorage.clear();
   boardOptions.length = 0;
+  ackAlert.mockReset();
+  ackAlert.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -180,18 +186,6 @@ describe("AlertCenter states and closing", () => {
     wrap();
     expect(screen.getByTestId("alert-count-badge")).toHaveClass("alert-center-badge--warn");
   });
-
-  it("follows an acknowledgement made in another tab", () => {
-    mockBoard = board([WARN_ALERT]);
-    wrap();
-    expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("1");
-    const hash = hashAlertKey(WARN_ALERT.level, WARN_ALERT.text, WARN_ALERT.href);
-    act(() => {
-      localStorage.setItem("transit.admin.ackedAlerts", JSON.stringify({ [hash]: Date.now() + 60_000 }));
-      window.dispatchEvent(new StorageEvent("storage", { key: "transit.admin.ackedAlerts" }));
-    });
-    expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("0");
-  });
 });
 
 describe("AlertCenter bell", () => {
@@ -207,23 +201,15 @@ describe("AlertCenter bell", () => {
     expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("2");
   });
 
-  it("excludes an already-acknowledged alert from the unread count", async () => {
-    mockBoard = board([WARN_ALERT, INFO_ALERT]);
+  it("excludes an alert some operator acknowledged from the unread count", () => {
+    mockBoard = board([{ ...WARN_ALERT, acked: true }, INFO_ALERT]);
     wrap();
-    const user = await openPopover();
-    const items = screen.getAllByTestId("alert-center-item");
-    const warnItem = items.find((li) => within(li).queryByText("Toyama Bayline: aggregates 3 days behind"));
-    await user.click(within(warnItem!).getByRole("button", { name: i18n.t("admin.alert_center.ack") }));
-
     expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("1");
   });
 
-  it("mutes the badge once every alert is acknowledged", async () => {
-    mockBoard = board([WARN_ALERT]);
+  it("mutes the badge once every alert is acknowledged", () => {
+    mockBoard = board([{ ...WARN_ALERT, acked: true }]);
     wrap();
-    const user = await openPopover();
-    await user.click(screen.getByRole("button", { name: i18n.t("admin.alert_center.ack") }));
-
     const badge = screen.getByTestId("alert-count-badge");
     expect(badge).toHaveTextContent("0");
     expect(badge.className).toContain("alert-center-badge--muted");
@@ -290,44 +276,67 @@ describe("AlertCenter popover", () => {
   });
 });
 
-describe("AlertCenter acknowledgement persistence", () => {
-  it("keeps an acknowledgement across remounts within the 7-day window", async () => {
-    mockBoard = board([WARN_ALERT]);
-    const first = wrap();
-    const user = await openPopover();
-    await user.click(screen.getByRole("button", { name: i18n.t("admin.alert_center.ack") }));
-    first.unmount();
+/** A promise the test settles by hand, for an acknowledgement still on the way. */
+function deferred() {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
+function ackButton(text: string) {
+  const item = screen.getAllByTestId("alert-center-item").find((li) => within(li).queryByText(text))!;
+  return within(item).getByRole("button", { name: /acknowledg/i });
+}
+
+const WARN_TEXT = "Toyama Bayline: aggregates 3 days behind";
+const INFO_TEXT = "2 users awaiting AI access approval";
+
+describe("AlertCenter acknowledgement", () => {
+  it("acknowledges an alert for every operator through the server, by its key", async () => {
+    mockBoard = board([WARN_ALERT, INFO_ALERT]);
     wrap();
-    expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("0");
+    const user = await openPopover();
+    await user.click(ackButton(WARN_TEXT));
+    expect(ackAlert).toHaveBeenCalledWith(WARN_ALERT.key);
   });
 
-  it("expires an acknowledgement after 7 days, making the alert unread again", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.setSystemTime(new Date("2026-09-01T00:00:00Z"));
-    mockBoard = board([WARN_ALERT]);
-    const first = wrap();
-    const user = await openPopover();
-    await user.click(screen.getByRole("button", { name: i18n.t("admin.alert_center.ack") }));
-    first.unmount();
-
-    // Well past the 7-day window: the exact edge is pinned in ackedAlerts.test.ts.
-    vi.setSystemTime(new Date("2026-09-08T01:00:00Z"));
-    mockBoard = board([WARN_ALERT]);
+  it("shows an acknowledged alert as acknowledged, with nothing left to press", async () => {
+    mockBoard = board([{ ...WARN_ALERT, acked: true }]);
     wrap();
-    expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("1");
+    await openPopover();
+    expect(screen.getByRole("button", { name: i18n.t("admin.alert_center.acked") })).toBeDisabled();
   });
 
-  it("leaves the alert unread when the browser cannot store the acknowledgement", async () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new DOMException("blocked");
-    });
-    mockBoard = board([WARN_ALERT]);
+  it("holds each alert's button while its own acknowledgement is on the way, whatever else is acknowledged meanwhile", async () => {
+    const warn = deferred();
+    ackAlert.mockImplementation((key) => (key === WARN_ALERT.key ? warn.promise : Promise.resolve()));
+    mockBoard = board([WARN_ALERT, INFO_ALERT]);
     wrap();
     const user = await openPopover();
-    await user.click(screen.getByRole("button", { name: i18n.t("admin.alert_center.ack") }));
+    await user.click(ackButton(WARN_TEXT));
+    expect(ackButton(WARN_TEXT)).toBeDisabled();
+    expect(ackButton(INFO_TEXT)).toBeEnabled();
+    await user.click(ackButton(INFO_TEXT));
+    expect(ackButton(WARN_TEXT)).toBeDisabled();
+  });
 
-    expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("1");
-    vi.restoreAllMocks();
+  it("says so when an acknowledgement failed, even after another alert was acknowledged meanwhile", async () => {
+    const warn = deferred();
+    ackAlert.mockImplementation((key) => (key === WARN_ALERT.key ? warn.promise : Promise.resolve()));
+    mockBoard = board([WARN_ALERT, INFO_ALERT]);
+    wrap();
+    const user = await openPopover();
+    await user.click(ackButton(WARN_TEXT));
+    await user.click(ackButton(INFO_TEXT));
+    warn.reject(new Error("503"));
+    expect(await screen.findByText(i18n.t("admin.alert_center.ack_failed"))).toBeInTheDocument();
+    const warnItem = screen.getAllByTestId("alert-center-item").find((li) => within(li).queryByText(WARN_TEXT))!;
+    expect(within(warnItem).getByText(i18n.t("admin.alert_center.ack_failed"))).toBeInTheDocument();
+    expect(ackButton(WARN_TEXT)).toBeEnabled();
+    expect(screen.getByTestId("alert-count-badge")).toHaveTextContent("2");
   });
 });

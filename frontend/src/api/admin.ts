@@ -281,6 +281,10 @@ export type BoardAlert = {
   params: Record<string, unknown>;
   text: string;
   href: string | null;
+  /** What an acknowledgement is stored under on the server. */
+  key: string;
+  /** Whether any admin acknowledged this alert within the last week. */
+  acked: boolean;
 };
 
 /** One `pipeline_runs` row: an ingest, promote, analyze, weather or static
@@ -327,6 +331,22 @@ export function useAdminBoard({ refetchInterval = 10_000 }: { refetchInterval?: 
     queryKey: ["adminBoard"],
     queryFn: ({ signal }) => apiGet<AdminBoard>("/api/admin/board", { signal }),
     refetchInterval,
+  });
+}
+
+/** Acknowledges a board alert for every admin, by its key. The cached board
+ *  marks it at once, so the bell's count drops without waiting for the next
+ *  poll; the refetch that follows confirms it. */
+export function useAckBoardAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => apiPost<void>(`/api/admin/board/alerts/${key}/ack`, {}),
+    onSuccess: (_data, key) => {
+      qc.setQueryData<AdminBoard>(["adminBoard"], (board) =>
+        board && { ...board, alerts: board.alerts.map((alert) => (alert.key === key ? { ...alert, acked: true } : alert)) },
+      );
+      qc.invalidateQueries({ queryKey: ["adminBoard"] });
+    },
   });
 }
 

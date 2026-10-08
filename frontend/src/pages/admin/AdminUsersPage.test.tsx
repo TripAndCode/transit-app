@@ -37,6 +37,7 @@ vi.mock("../../api/admin", () => ({
   useBulkPatchUsers: () => ({ mutate: bulkMutate, error: null, isPending: bulkPending, variables: bulkVariables }),
   // The layout's alert bell reads the board; nothing here needs alerts.
   useAdminBoard: () => ({ data: undefined }),
+  useAckBoardAlert: () => ({ mutateAsync: () => Promise.resolve() }),
 }));
 
 // A signed-in admin who is not one of the two rendered users (user_id 999),

@@ -1626,6 +1626,7 @@
       },
       "ack": "Acknowledge",
       "acked": "Acknowledged",
+      "ack_failed": "Couldn't acknowledge it. Try again.",
       "load_failed": "Couldn't load the alerts.",
       "refresh_failed": "Couldn't refresh; these are the alerts last read."
     },
