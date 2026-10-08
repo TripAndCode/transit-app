@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { useRef } from "react";
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider, useMatches } from "react-router-dom";
 import { routedPage, useRoutedPaneScroll } from "./useRoutedPaneScroll";
 
@@ -43,6 +43,28 @@ function scrollTo(pane: HTMLElement, top: number) {
   fireEvent.scroll(pane);
 }
 
+/** jsdom does not lay out, so it never clamps an offset to the content. This
+ *  pane does, the way a browser would: 100px tall over `content.height`. */
+function clampLikeABrowser(pane: HTMLElement, content: { height: number }) {
+  let top = 0;
+  Object.defineProperty(pane, "clientHeight", { configurable: true, get: () => 100 });
+  Object.defineProperty(pane, "scrollHeight", { configurable: true, get: () => content.height });
+  Object.defineProperty(pane, "scrollTop", {
+    configurable: true,
+    get: () => top,
+    set: (value: number) => {
+      top = Math.max(0, Math.min(value, content.height - 100));
+    },
+  });
+}
+
+/** The page's content growing, as when its data arrives after the route
+ *  has already committed. */
+function grow(pane: HTMLElement, content: { height: number }, height: number) {
+  content.height = height;
+  pane.append(document.createElement("div"));
+}
+
 describe("useRoutedPaneScroll", () => {
   it("opens a new page at the top", async () => {
     const { pane, go } = renderPane();
@@ -70,6 +92,60 @@ describe("useRoutedPaneScroll", () => {
     await go("/b");
     await go(-1);
     expect(pane.scrollTop).toBe(300);
+  });
+
+  it("returns to each entry's own place on a step back within one page", async () => {
+    const { pane, go } = renderPane("/a?page=1");
+    scrollTo(pane, 300);
+    await go("/a?page=2");
+    expect(pane.scrollTop).toBe(300);
+    scrollTo(pane, 50);
+    await go(-1);
+    expect(pane.scrollTop).toBe(300);
+    await go(1);
+    expect(pane.scrollTop).toBe(50);
+  });
+
+  it("finishes a step back once the page's content has grown tall enough to hold the place", async () => {
+    const { pane, go } = renderPane();
+    const content = { height: 1000 };
+    clampLikeABrowser(pane, content);
+    scrollTo(pane, 600);
+    await go("/b");
+    content.height = 120;
+    await go(-1);
+    expect(pane.scrollTop).toBe(20);
+    grow(pane, content, 1000);
+    await waitFor(() => expect(pane.scrollTop).toBe(600));
+  });
+
+  it("gives up a pending step back once the reader scrolls", async () => {
+    const { pane, go } = renderPane();
+    const content = { height: 1000 };
+    clampLikeABrowser(pane, content);
+    scrollTo(pane, 600);
+    await go("/b");
+    content.height = 120;
+    await go(-1);
+    fireEvent.wheel(pane);
+    scrollTo(pane, 10);
+    grow(pane, content, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pane.scrollTop).toBe(10);
+  });
+
+  it("gives up a pending step back once another page opens", async () => {
+    const { pane, go } = renderPane();
+    const content = { height: 1000 };
+    clampLikeABrowser(pane, content);
+    scrollTo(pane, 600);
+    await go("/b");
+    content.height = 120;
+    await go(-1);
+    await go("/c");
+    grow(pane, content, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pane.scrollTop).toBe(0);
   });
 
   it("opens a page reached by a redirect at the top", async () => {
