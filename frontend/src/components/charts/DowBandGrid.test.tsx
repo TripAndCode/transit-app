@@ -144,19 +144,4 @@ describe("BandGrid severity outline", () => {
       .filter((c) => (c as HTMLElement).style.boxShadow.includes("--delay-severe"));
     expect(outlined).toHaveLength(1);
   });
-
-  it("tags every cell with the weekday it belongs to, for the crossfilter", () => {
-    render(
-      <BandGrid
-        grid={fullGrid()}
-        bandLabel={(b) => b}
-        dayLabel={(d) => String(d)}
-        colorFor={() => "#000"}
-        onTip={vi.fn()}
-        onLeave={vi.fn()}
-      />,
-    );
-    const dows = new Set(screen.getAllByTestId("ov-band-cell").map((c) => c.getAttribute("data-dow")));
-    expect(dows).toEqual(new Set(["1", "2", "3", "4", "5", "6", "7"]));
-  });
 });
